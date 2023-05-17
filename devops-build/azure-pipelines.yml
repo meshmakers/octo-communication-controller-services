@@ -63,6 +63,7 @@ stages:
              ContainerRegistry: 'dockerhub@ianitor'
              Repository: meshmakers/octo-mesh-device-management-services
              Dockerfile: src/DeviceManagementServices/Dockerfile
+             IsRelease: ${{ variables.isRelease }}
          - task: CopyFiles@2
            displayName: 'Copy Files from $(Build.SourcesDirectory)/bin/$(BuildConfiguration)/**/*.nupkg to $(build.artifactstagingdirectory)'
            inputs:
