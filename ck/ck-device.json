@@ -1,0 +1,55 @@
+{
+  "attributes": [
+    {
+      "id": "Meshmakers.Device.Type",
+      "valueType": "String"
+    },
+    {
+      "id": "Meshmakers.Device.LastSeen",
+      "valueType": "DateTime"
+    },
+    {
+      "id": "Meshmakers.Device.State",
+      "valueType": "Int",
+      "selectionValues": [
+        {
+          "key": 1,
+          "name": "Unknown"
+        },
+        {
+          "key": 2,
+          "name": "Offline"
+        },
+        {
+          "key": 3,
+          "name": "Online"
+        }
+      ]
+    }
+  ],
+  "entities": [
+    {
+      "ckId": "Meshmakers.Device",
+      "ckDerivedId": "System.Entity",
+      "isFinal": true,
+      "isAbstract": false,
+      "attributes": [
+        {
+          "id": "Meshmakers.Device.LastSeen",
+          "name": "LastSeen"
+        },
+        {
+          "id": "Meshmakers.Device.State",
+          "name": "State"
+        },
+        {
+          "id": "Meshmakers.Device.Type",
+          "name": "Type"
+        }
+      ],
+      "associations": [
+
+      ]
+    }
+  ]
+}

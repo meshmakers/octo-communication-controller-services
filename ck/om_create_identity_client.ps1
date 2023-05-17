@@ -1,0 +1,1 @@
+octo-cli -c AddClientCredentialsClient --clientId "smc-backend" --name "Social Meta Club Backend" --secret "l8L@w5iEv*Ym"
