@@ -2,15 +2,17 @@ name: $(MajorVersion).$(MinorVersion).$(date:yyMM).$(DayOfMonth)$(rev:rrr)
 
 trigger:
   batch: true
-  branches:
+  tags:
     include:
-      - main
-      - releases/2.0
-  
+      - 'r*'
+  branches:
+    exclude:
+      - dev
+
 variables:
   buildConfiguration: 'Release'
   buildPlatform: 'any cpu'
-  solutionFile: "Octo.TimeSeries.sln"
+  solutionFile: "Octo.DeviceManagement.sln"
   Company: "meshmakers GmbH"
   Copyright: "(c) 2022-2023 meshmakers GmbH"
 
@@ -25,6 +27,25 @@ stages:
          - checkout: self
            clean: true
            submodules: true
+         - task: PowerShell@2
+           inputs:
+             targetType: 'inline'
+             script: |
+               Write-Host "Source Branch $(Build.SourceBranch)"
+               Write-Host "Source Branch Name $(Build.SourceBranchName)"
+               $branch = '$(Build.SourceBranch)'
+               $branchName = '$(Build.SourceBranchName)'
+               if ($branch.StartsWith("refs/tags/r")) {
+                 $major = [int]$branchName.Split(".")[0].substring(1)
+                 $minor = [int]$branchName.Split(".")[1]
+                 $revision = [int]$branchName.Split(".")[2]
+                 $buildNumber = "$major.$minor.$revision.0"
+                 Write-Host "##vso[task.setvariable variable=MajorVersion;]$major"
+                 Write-Host "##vso[task.setvariable variable=MinorVersion;]$minor"
+                 Write-Host "Setting build number to $buildNumber"
+                 Write-Host "##vso[build.updatebuildnumber]$buildNumber"
+               }
+           displayName: 'Set build number'
          - template: setversion.yml
          - task: DotNetCoreCLI@2
            displayName: 'Test'
@@ -37,8 +58,8 @@ stages:
          - template: buildAndPushDockerImage.yml
            parameters:
              ContainerRegistry: 'dockerhub@ianitor'
-             Repository: meshmakers/octo-mesh-historian-rep-services
-             Dockerfile: src/HistorianRepositoryServices/Dockerfile
+             Repository: meshmakers/octo-mesh-device-management-services
+             Dockerfile: src/DeviceManagementServices/Dockerfile
          - task: CopyFiles@2
            displayName: 'Copy Files from $(Build.SourcesDirectory)/bin/$(BuildConfiguration)/**/*.nupkg to $(build.artifactstagingdirectory)'
            inputs:
