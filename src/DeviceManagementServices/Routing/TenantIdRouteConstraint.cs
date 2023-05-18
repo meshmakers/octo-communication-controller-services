@@ -1,3 +1,4 @@
+
 namespace Meshmakers.Octo.Backend.DeviceManagementServices.Routing;
 
 /// <summary>
@@ -9,10 +10,10 @@ internal class TenantIdRouteConstraint : IRouteConstraint
         RouteDirection routeDirection)
     {
         // check nulls
-        var isMatch = values.TryGetValue(routeKey, out var value) && value != null;
+        var isMatch = values.TryGetValue(routeKey, out var tenantId) && tenantId != null;
         if (isMatch)
         {
-            httpContext?.Items.Add("d", value);
+            httpContext?.Items.Add(Statics.TenantId, tenantId);
         }
 
         return isMatch;
