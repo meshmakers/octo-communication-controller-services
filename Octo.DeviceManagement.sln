@@ -18,11 +18,13 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Swagger", "src\octo-common-
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Infrastructure", "src\octo-common-services\src\Infrastructure\Infrastructure.csproj", "{B7B2AF08-5308-4CC1-82BD-9810E350E2B7}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Contracts", "src\octo-core\src\DeviceManagement\Contracts\Contracts.csproj", "{9891D556-C2F1-482A-8C88-7F6F894A1069}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DeviceManagementServices", "src\DeviceManagementServices\DeviceManagementServices.csproj", "{C53C52A5-C4B8-4ADE-BF40-4BCBA361C9E6}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DeviceManagementServices.Resources", "src\DeviceManagementServices.Resources\DeviceManagementServices.Resources.csproj", "{5869AE60-EA46-47AF-8883-9B2BDE1F394C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Communication.Plugs.Contracts", "src\octo-core\src\Common\Communication.Plugs.Contracts\Communication.Plugs.Contracts.csproj", "{ECC855E6-2039-4828-B3BE-6985805031F3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Communication.Contracts", "src\octo-core\src\Common\Communication.Contracts\Communication.Contracts.csproj", "{DAF5BC42-0068-4926-8E0A-A7653C2179B6}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -58,10 +60,6 @@ Global
 		{B7B2AF08-5308-4CC1-82BD-9810E350E2B7}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B7B2AF08-5308-4CC1-82BD-9810E350E2B7}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B7B2AF08-5308-4CC1-82BD-9810E350E2B7}.Release|Any CPU.Build.0 = Release|Any CPU
-		{9891D556-C2F1-482A-8C88-7F6F894A1069}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{9891D556-C2F1-482A-8C88-7F6F894A1069}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{9891D556-C2F1-482A-8C88-7F6F894A1069}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{9891D556-C2F1-482A-8C88-7F6F894A1069}.Release|Any CPU.Build.0 = Release|Any CPU
 		{C53C52A5-C4B8-4ADE-BF40-4BCBA361C9E6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{C53C52A5-C4B8-4ADE-BF40-4BCBA361C9E6}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C53C52A5-C4B8-4ADE-BF40-4BCBA361C9E6}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -70,6 +68,14 @@ Global
 		{5869AE60-EA46-47AF-8883-9B2BDE1F394C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5869AE60-EA46-47AF-8883-9B2BDE1F394C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5869AE60-EA46-47AF-8883-9B2BDE1F394C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{ECC855E6-2039-4828-B3BE-6985805031F3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{ECC855E6-2039-4828-B3BE-6985805031F3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{ECC855E6-2039-4828-B3BE-6985805031F3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{ECC855E6-2039-4828-B3BE-6985805031F3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DAF5BC42-0068-4926-8E0A-A7653C2179B6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DAF5BC42-0068-4926-8E0A-A7653C2179B6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DAF5BC42-0068-4926-8E0A-A7653C2179B6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DAF5BC42-0068-4926-8E0A-A7653C2179B6}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{81F09ECC-E5E9-4356-87BD-A7902064B37D} = {A28575DB-337A-494E-A432-E0C678233190}
@@ -79,5 +85,7 @@ Global
 		{1286F7A6-9D0C-4217-B79B-500D933F1A1C} = {8C020542-E097-49CB-8E6C-C80A4E14027E}
 		{3CC01DE2-F054-4006-B47C-3C5E67540CEF} = {A28575DB-337A-494E-A432-E0C678233190}
 		{B7B2AF08-5308-4CC1-82BD-9810E350E2B7} = {A28575DB-337A-494E-A432-E0C678233190}
+		{ECC855E6-2039-4828-B3BE-6985805031F3} = {8C020542-E097-49CB-8E6C-C80A4E14027E}
+		{DAF5BC42-0068-4926-8E0A-A7653C2179B6} = {8C020542-E097-49CB-8E6C-C80A4E14027E}
 	EndGlobalSection
 EndGlobal

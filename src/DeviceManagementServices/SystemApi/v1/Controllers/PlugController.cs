@@ -23,14 +23,20 @@ public class PlugController : ControllerBase
     }
 
     [HttpGet()]
-    public IEnumerable<WeatherForecast> Get()
+    public async Task<IActionResult> Get()
     {
-        return Enumerable.Range(1, 5).Select(index => new WeatherForecast
-            {
-                Date = DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-                TemperatureC = Random.Shared.Next(-20, 55),
-                Summary = Summaries[Random.Shared.Next(Summaries.Length)]
-            })
-            .ToArray();
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound("TenantId is null or empty");
+        }
+
+        using var systemSession = await _systemContext.StartSystemSessionAsync();
+        systemSession.StartTransaction();
+        var result = await _systemContext.IsTenantExistingAsync(systemSession, tenantId);
+
+        await systemSession.CommitTransactionAsync();
+
+        return Ok(result);
     }
 }
