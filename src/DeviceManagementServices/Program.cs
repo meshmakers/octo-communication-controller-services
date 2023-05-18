@@ -1,4 +1,6 @@
+using MassTransit;
 using Meshmakers.Octo.Backend.DeviceManagementServices.Configuration;
+using Meshmakers.Octo.Backend.DeviceManagementServices.DataSink;
 using Meshmakers.Octo.Backend.DeviceManagementServices.Hubs;
 using Meshmakers.Octo.Backend.DeviceManagementServices.Routing;
 using Meshmakers.Octo.Backend.DeviceManagementServices.Services;
@@ -41,6 +43,22 @@ try
     builder.Services.AddControllers();
     // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
     builder.Services.AddSignalR();
+    
+    builder.Services.AddMassTransit(x =>
+    {
+        x.AddConsumer<MessageConsumer>();
+        
+        // elided...
+        x.UsingRabbitMq((context,cfg) =>
+        {
+            cfg.Host("localhost", "/", h => {
+                h.Username("guest");
+                h.Password("guest");
+            });
+            cfg.ConfigureEndpoints(context);
+        });
+    });
+    
     
     builder.Services.ConfigureOptions<ConfigureDistributeCacheWithPubSubOptions>();
     builder.Services.AddDistributedPubSubCache();

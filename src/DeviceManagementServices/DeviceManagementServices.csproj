@@ -28,6 +28,7 @@
     </PropertyGroup>
     
     <ItemGroup>
+        <PackageReference Include="MassTransit.RabbitMQ" Version="8.0.15" />
         <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="7.0.2" />
         <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="7.0.5" />
         <PackageReference Include="NLog.Web.AspNetCore" Version="5.2.3" />
