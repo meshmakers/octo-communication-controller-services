@@ -5,9 +5,9 @@ trigger:
   tags:
     include:
       - 'r*'
-  branches:
-    exclude:
-      - dev
+#  branches:
+#    exclude:
+#      - dev
 
 variables:
   buildConfiguration: 'Release'
