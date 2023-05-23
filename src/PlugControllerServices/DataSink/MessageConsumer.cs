@@ -2,15 +2,14 @@ using MassTransit;
 using Meshmakers.Octo.Backend.PlugControllerServices.CkModelEntities;
 using Meshmakers.Octo.Backend.PlugControllerServices.Services;
 using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Communication.Plugs.Contracts.Data;
+using Meshmakers.Octo.Communication.Plugs.Contracts.MessageObjects;
 using Meshmakers.Octo.SystematizedData.Persistence;
 using Meshmakers.Octo.SystematizedData.Persistence.DataAccess;
-using Meshmakers.Octo.SystematizedData.Persistence.DatabaseEntities;
 
 namespace Meshmakers.Octo.Backend.PlugControllerServices.DataSink;
 
 public class MessageConsumer :
-    IConsumer<UpdatedValueMessage>
+    IConsumer<UpdatedValueMessageDto>
 {
     readonly ILogger<MessageConsumer> _logger;
     private readonly ISystemContext _systemContext;
@@ -23,7 +22,7 @@ public class MessageConsumer :
         _plugManagementService = plugManagementService;
     }
 
-    public async Task Consume(ConsumeContext<UpdatedValueMessage> context)
+    public async Task Consume(ConsumeContext<UpdatedValueMessageDto> context)
     {
         _logger.LogInformation("[{TenantId}] Received Input: PlugId '{PlugId}', Name '{MappingId}', Value '{Value}'",
             context.Message.TenantId, context.Message.PlugId, context.Message.MappingId, context.Message.Value);

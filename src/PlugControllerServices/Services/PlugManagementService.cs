@@ -1,7 +1,7 @@
 using Meshmakers.Octo.Backend.PlugControllerServices.CkModelEntities;
 using Meshmakers.Octo.Backend.PlugControllerServices.Models;
 using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Communication.Plugs.Contracts.Configuration;
+using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
 using Meshmakers.Octo.SystematizedData.Persistence;
 using Meshmakers.Octo.SystematizedData.Persistence.DataAccess;
 using Meshmakers.Octo.SystematizedData.Persistence.DatabaseEntities;
@@ -21,7 +21,7 @@ internal class PlugManagementService : IPlugManagementService
         _systemContext = systemContext;
     }
 
-    public async Task<PlugConfiguration> RegisterPlug(string tenantId, OctoObjectId plugObjectId, string connectionId)
+    public async Task<PlugConfigurationDto> RegisterPlug(string tenantId, OctoObjectId plugObjectId, string connectionId)
     {
         Logger.Info("[{TenantId}] Plug '{PlugId}' registered with connection id '{ConnectionId}'",
             tenantId, plugObjectId, connectionId);
@@ -96,7 +96,7 @@ internal class PlugManagementService : IPlugManagementService
     }
 
 
-    public async Task<PlugConfiguration> GetPlugConfiguration(string tenantId, OctoObjectId plugObjectId)
+    public async Task<PlugConfigurationDto> GetPlugConfiguration(string tenantId, OctoObjectId plugObjectId)
     {
 
         try
@@ -113,10 +113,10 @@ internal class PlugManagementService : IPlugManagementService
             var plugGroups = await tenantContext.Repository.GetRtAssociationTargetsAsync<RtPlug, RtPlugGroup>(session,
                 new[] { plugEntity.RtId }, Statics.RoleIdParentChild, GraphDirections.Inbound, null, new DataQueryOperation());
 
-            var plugGroupConfigurations = new List<GroupConfiguration>();
+            var plugGroupConfigurations = new List<GroupConfigurationDto>();
             foreach (var plugGroup in plugGroups[plugEntity.RtId].Result)
             {
-                var groupConfiguration = new GroupConfiguration
+                var groupConfiguration = new GroupConfigurationDto
                 {
                     Id = plugGroup.RtId.ToOctoObjectId(),
                     Name = plugGroup.Designation!
@@ -128,12 +128,12 @@ internal class PlugManagementService : IPlugManagementService
 
                 if (plugMappings.Any())
                 {
-                    var mappings = new List<MappingConfiguration>();
+                    var mappings = new List<MappingConfigurationDto>();
                     foreach (var mapping in plugMappings[plugGroup.RtId].Result)
                     {
                         if (!string.IsNullOrWhiteSpace(mapping.Designation) && !string.IsNullOrWhiteSpace(mapping.Configuration))
                         {
-                            mappings.Add(new MappingConfiguration
+                            mappings.Add(new MappingConfigurationDto
                             {
                                 Name = mapping.Designation,
                                 Id = mapping.RtId.ToOctoObjectId(),
@@ -148,12 +148,12 @@ internal class PlugManagementService : IPlugManagementService
 
             await session.CommitTransactionAsync();
 
-            var plugConfiguration = new PlugConfiguration
+            var plugConfiguration = new PlugConfigurationDto
             {
                 PlugId = plugObjectId,
                 ServerConfigurations = new[]
                 {
-                    new ServerConfiguration
+                    new ServerConfigurationDto
                     {
                         Server = persistentServerSettings.Server,
                         Groups = plugGroupConfigurations

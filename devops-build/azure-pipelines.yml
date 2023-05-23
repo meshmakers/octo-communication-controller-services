@@ -12,7 +12,7 @@ trigger:
 variables:
   buildConfiguration: 'Release'
   buildPlatform: 'any cpu'
-  solutionFile: "Octo.DeviceManagement.sln"
+  solutionFile: "Octo.PlugController.sln"
   Company: "meshmakers GmbH"
   Copyright: "(c) 2022-2023 meshmakers GmbH"
   isRelease: ${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
@@ -61,8 +61,8 @@ stages:
          - template: buildAndPushDockerImage.yml
            parameters:
              ContainerRegistry: 'dockerhub@ianitor'
-             Repository: meshmakers/octo-mesh-device-management-services
-             Dockerfile: src/DeviceManagementServices/Dockerfile
+             Repository: meshmakers/octo-mesh-plug-controller-services
+             Dockerfile: src/PlugControllerServices/Dockerfile
              IsRelease: ${{ variables.isRelease }}
          - task: CopyFiles@2
            displayName: 'Copy Files from $(Build.SourcesDirectory)/bin/$(BuildConfiguration)/**/*.nupkg to $(build.artifactstagingdirectory)'
