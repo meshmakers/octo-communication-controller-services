@@ -1,6 +1,6 @@
 using Meshmakers.Octo.Backend.PlugControllerServices.Services;
 using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Communication.Plugs.Contracts.Configuration;
+using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Meshmakers.Octo.Backend.PlugControllerServices.Hubs;
@@ -43,7 +43,7 @@ internal class PlugHub : Hub
         await base.OnDisconnectedAsync(exception);
     }
     
-    public async Task<PlugConfiguration> RegisterPlug(OctoObjectId plugObjectId)
+    public async Task<PlugConfigurationDto> RegisterPlug(OctoObjectId plugObjectId)
     {
         var tenantId = Context.GetHttpContext()?.GetTenantId();
         if (tenantId == null)

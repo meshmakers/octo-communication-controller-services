@@ -1,3 +1,5 @@
+using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
+
 namespace Meshmakers.Octo.Backend.PlugControllerServices.Models;
 
 public class UpdatedPlugConfigurationEventArgs : EventArgs
