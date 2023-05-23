@@ -1,0 +1,71 @@
+{
+  "entities": [
+    {
+      "ckId": "Meshmakers.Equipment.Model",
+      "ckDerivedId": "System.Entity",
+      "isFinal": false,
+      "isAbstract": false,
+      "attributes": [
+        {
+          "id": "Meshmakers.Designation",
+          "name": "Designation"
+        },
+        {
+          "id": "Meshmakers.Description",
+          "name": "Description"
+        }
+      ],
+      "associations": [
+
+      ]
+    },
+    {
+      "ckId": "Meshmakers.Equipment.Group",
+      "ckDerivedId": "System.Entity",
+      "isFinal": false,
+      "isAbstract": false,
+      "attributes": [
+        {
+          "id": "Meshmakers.Designation",
+          "name": "Designation"
+        },
+        {
+          "id": "Meshmakers.Description",
+          "name": "Description"
+        }
+      ],
+      "associations": [
+        {
+          "roleId": "System.ParentChild",
+          "targetCkId": "Meshmakers.Equipment.Model",
+          "inboundMultiplicity": "N",
+          "outboundMultiplicity": "ZeroOrOne"
+        }
+      ]
+    },
+    {
+      "ckId": "Meshmakers.Equipment",
+      "ckDerivedId": "System.Entity",
+      "isFinal": false,
+      "isAbstract": false,
+      "attributes": [
+        {
+          "id": "Meshmakers.Designation",
+          "name": "Designation"
+        },
+        {
+          "id": "Meshmakers.Description",
+          "name": "Description"
+        }
+      ],
+      "associations": [
+        {
+          "roleId": "System.ParentChild",
+          "targetCkId": "Meshmakers.Equipment.Group",
+          "inboundMultiplicity": "N",
+          "outboundMultiplicity": "ZeroOrOne"
+        }
+      ]
+    }
+  ]
+}

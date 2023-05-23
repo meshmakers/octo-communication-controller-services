@@ -1,0 +1,62 @@
+{
+  "entities": [
+    {
+      "ckId": "Meshmakers.Asset",
+      "ckDerivedId": "System.Entity",
+      "isFinal": true,
+      "isAbstract": false,
+      "attributes": [
+        {
+          "id": "Meshmakers.Designation",
+          "name": "Designation"
+        },
+        {
+          "id": "Meshmakers.Description",
+          "name": "Description"
+        }
+      ],
+      "associations": [
+        {
+          "roleId": "System.ParentChild",
+          "targetCkId": "Meshmakers.Equipment",
+          "inboundMultiplicity": "N",
+          "outboundMultiplicity": "ZeroOrOne"
+        }
+      ]
+    },
+    {
+      "ckId": "Meshmakers.Asset.Part",
+      "ckDerivedId": "System.Entity",
+      "isFinal": true,
+      "isAbstract": false,
+      "attributes": [
+
+      ],
+      "associations": [
+        {
+          "roleId": "System.ParentChild",
+          "targetCkId": "Meshmakers.Asset",
+          "inboundMultiplicity": "N",
+          "outboundMultiplicity": "ZeroOrOne"
+        }
+      ]
+    },
+    {
+      "ckId": "Meshmakers.Asset.Component",
+      "ckDerivedId": "System.Entity",
+      "isFinal": true,
+      "isAbstract": false,
+      "attributes": [
+
+      ],
+      "associations": [
+        {
+          "roleId": "System.ParentChild",
+          "targetCkId": "Meshmakers.Asset.Part",
+          "inboundMultiplicity": "N",
+          "outboundMultiplicity": "ZeroOrOne"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "attributes": [
+    {
+      "id": "Meshmakers.TechDesc.Identification.Manufacturer",
+      "reference": "0173-1#02-AAO677#002",
+      "valueType": "String"
+    },
+    {
+      "id": "Meshmakers.TechDesc.Identification.ModelNumber",
+      "reference": "0173-1#02-AAO674#004",
+      "valueType": "String"
+    },
+    {
+      "id": "Meshmakers.TechDesc.Identification.SerialNumber",
+      "reference": "0173-1#02-AAM556#002",
+      "valueType": "String"
+    },
+    {
+      "id": "Meshmakers.TechDesc.Pv.AmountOfPvModules",
+      "reference": "0173-1#02-AAI309#001",
+      "valueType": "String"
+    },
+    {
+      "id": "Meshmakers.TechDesc.Pv.MaximumPower",
+      "reference": "0173-1#02-AAI149#003",
+      "valueType": "Double"
+    },
+    {
+      "id": "Meshmakers.TechDesc.Pv.BatteryCapacity",
+      "reference": "0173-1#02-BAA564#007",
+      "valueType": "Double"
+    },
+    {
+      "id": "Meshmakers.TechDesc.Pv.BatteryStateOfCharge",
+      "valueType": "Int"
+    },
+    {
+      "id": "Meshmakers.TechDesc.Pv.BatteryPower",
+      "valueType": "Double"
+    },
+    {
+      "id": "Meshmakers.TechDesc.Pv.ProductionPower",
+      "valueType": "Double"
+    }
+  ]
+}

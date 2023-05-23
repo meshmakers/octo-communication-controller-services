@@ -1,0 +1,58 @@
+{
+  "attributes": [
+    {
+      "id": "Meshmakers.Designation",
+      "valueType": "String"
+    },
+    {
+      "id": "Meshmakers.Description",
+      "valueType": "String"
+    },
+    {
+      "id": "Meshmakers.Plug.Type",
+      "valueType": "String"
+    },
+    {
+      "id": "Meshmakers.Plug.LastSeen",
+      "valueType": "DateTime"
+    },
+    {
+      "id": "Meshmakers.Plug.Mapping.Configuration",
+      "valueType": "String"
+    },
+    {
+      "id": "Meshmakers.Plug.Mapping.Reference.Id",
+      "valueType": "String"
+    },
+    {
+      "id": "Meshmakers.Plug.Mapping.Reference.CkId",
+      "valueType": "String"
+    },
+    {
+      "id": "Meshmakers.Plug.Mapping.Reference.AttributeId",
+      "valueType": "String"
+    },
+    {
+      "id": "Meshmakers.Plug.State",
+      "valueType": "Int",
+      "selectionValues": [
+        {
+          "key": 1,
+          "name": "Not deployed"
+        },
+        {
+          "key": 2,
+          "name": "Deployed"
+        },
+        {
+          "key": 3,
+          "name": "Offline"
+        },
+        {
+          "key": 4,
+          "name": "Online"
+        }
+      ]
+    }
+  ]
+}
