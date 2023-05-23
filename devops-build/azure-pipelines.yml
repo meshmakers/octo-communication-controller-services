@@ -5,9 +5,10 @@ trigger:
   tags:
     include:
       - 'r*'
-#  branches:
-#    exclude:
-#      - dev
+  branches:
+    include:
+      - dev/*
+      - main
 
 variables:
   buildConfiguration: 'Release'
