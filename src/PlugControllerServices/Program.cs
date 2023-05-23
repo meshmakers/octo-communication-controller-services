@@ -104,6 +104,7 @@ try
     app.UseOctoPersistence();
 
     app.MapHub<PlugHub>("/{tenantId:tenantId}/plugHub");
+    app.MapHub<AgentHub>("/{tenantId:tenantId}/agentHub");
     app.MapControllerRoute(name: "default",
         pattern: "{tenantId:tenantId}/system/v{version:apiVersion}/{controller}/{action}/{id?}");
 
