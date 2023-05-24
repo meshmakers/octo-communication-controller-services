@@ -3,11 +3,13 @@ using Meshmakers.Octo.Backend.DistributedCache;
 using Meshmakers.Octo.Backend.PlugControllerServices.Configuration;
 using Meshmakers.Octo.Backend.PlugControllerServices.DataSink;
 using Meshmakers.Octo.Backend.PlugControllerServices.Hubs;
+using Meshmakers.Octo.Backend.PlugControllerServices.Options;
 using Meshmakers.Octo.Backend.PlugControllerServices.Routing;
 using Meshmakers.Octo.Backend.PlugControllerServices.Services;
 using Meshmakers.Octo.Backend.Swagger.Configuration;
 using Meshmakers.Octo.SystematizedData.Persistence;
 using Meshmakers.Octo.SystematizedData.Persistence.Configuration;
+using Microsoft.Extensions.Options;
 using NLog;
 using NLog.Web;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
@@ -22,11 +24,10 @@ try
 
     var builder = WebApplication.CreateBuilder(args);
 
-
+    builder.Services.Configure<OctoSystemConfiguration>(options => builder.Configuration.GetSection("System").Bind(options));
     builder.Services.Configure<RouteOptions>(options =>
         options.ConstraintMap.Add("tenantId", typeof(TenantIdRouteConstraint)));
     builder.Services.ConfigureOptions<ConfigureOctoSwaggerOptions>();
-    builder.Services.Configure<OctoSystemConfiguration>(options => builder.Configuration.GetSection("System").Bind(options));
 
     // NLog: Setup NLog for Dependency injection
     builder.Logging.ClearProviders();
@@ -48,13 +49,17 @@ try
     {
         x.AddConsumer<MessageConsumer>();
         
-        // elided...
         x.UsingRabbitMq((context,cfg) =>
         {
-            cfg.Host("localhost", "/", h => {
-                h.Username("guest");
-                h.Password("guest");
+            var plugOptions = context.GetService<IOptions<PlugControllerOptions>>();
+            if (plugOptions == null)
+                throw new InvalidOperationException("PlugOptions not configured");
+                    
+            cfg.Host(plugOptions.Value.BrokerHost, plugOptions.Value.BrokerVirtualHost, h => {
+                h.Username(plugOptions.Value.BrokerUsername);
+                h.Password(plugOptions.Value.BrokerPassword);
             });
+            
             cfg.ConfigureEndpoints(context);
         });
     });

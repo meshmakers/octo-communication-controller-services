@@ -7,9 +7,9 @@ namespace Meshmakers.Octo.Backend.PlugControllerServices.Configuration;
 // ReSharper disable once ClassNeverInstantiated.Global
 internal class ConfigureDistributeCacheWithPubSubOptions : IConfigureNamedOptions<DistributeCacheWithPubSubOptions>
 {
-    private readonly IOptions<OctoPlugControllerOptions> _octoPlugControllerOptions;
+    private readonly IOptions<PlugControllerOptions> _octoPlugControllerOptions;
 
-    public ConfigureDistributeCacheWithPubSubOptions(IOptions<OctoPlugControllerOptions> octoPlugControllerOptions)
+    public ConfigureDistributeCacheWithPubSubOptions(IOptions<PlugControllerOptions> octoPlugControllerOptions)
     {
         _octoPlugControllerOptions = octoPlugControllerOptions;
     }

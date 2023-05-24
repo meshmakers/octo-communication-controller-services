@@ -1,5 +1,5 @@
 
-octo-cli -c Config -asu "https://assets.high-value-skills.com/" -isu "https://connect.high-value-skills.com/" -bsu "https://bots.high-value-skills.com/" -tid "smcstaging"
+octo-cli -c Config -asu "https://assets.staging.meshmakers.cloud/" -isu "https://connect.staging.meshmakers.cloud" -bsu "https://bots.staging.meshmakers.cloud/" -tid "meshstaging"
 octo-cli -c Login -i
 
 

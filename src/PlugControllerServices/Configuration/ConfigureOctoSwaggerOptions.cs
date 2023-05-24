@@ -8,9 +8,9 @@ namespace Meshmakers.Octo.Backend.PlugControllerServices.Configuration;
 // ReSharper disable once ClassNeverInstantiated.Global
 internal class ConfigureOctoSwaggerOptions : IConfigureNamedOptions<OctoSwaggerOptions>
 {
-    private readonly IOptions<OctoPlugControllerOptions> _octoOptions;
+    private readonly IOptions<PlugControllerOptions> _octoOptions;
 
-    public ConfigureOctoSwaggerOptions(IOptions<OctoPlugControllerOptions> octoOptions)
+    public ConfigureOctoSwaggerOptions(IOptions<PlugControllerOptions> octoOptions)
     {
         _octoOptions = octoOptions;
     }
