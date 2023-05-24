@@ -25,6 +25,7 @@ try
     var builder = WebApplication.CreateBuilder(args);
 
     builder.Services.Configure<OctoSystemConfiguration>(options => builder.Configuration.GetSection("System").Bind(options));
+    builder.Services.Configure<PlugControllerOptions>(options => builder.Configuration.GetSection("PlugController").Bind(options));
     builder.Services.Configure<RouteOptions>(options =>
         options.ConstraintMap.Add("tenantId", typeof(TenantIdRouteConstraint)));
     builder.Services.ConfigureOptions<ConfigureOctoSwaggerOptions>();
