@@ -1,9 +1,12 @@
 using MassTransit;
 using Meshmakers.Octo.Backend.DistributedCache;
+using Meshmakers.Octo.Backend.PlugControllerServices.BackgroundServices;
 using Meshmakers.Octo.Backend.PlugControllerServices.Configuration;
 using Meshmakers.Octo.Backend.PlugControllerServices.DataSink;
 using Meshmakers.Octo.Backend.PlugControllerServices.Hubs;
+using Meshmakers.Octo.Backend.PlugControllerServices.Models;
 using Meshmakers.Octo.Backend.PlugControllerServices.Options;
+using Meshmakers.Octo.Backend.PlugControllerServices.Repository;
 using Meshmakers.Octo.Backend.PlugControllerServices.Routing;
 using Meshmakers.Octo.Backend.PlugControllerServices.Services;
 using Meshmakers.Octo.Backend.Swagger.Configuration;
@@ -93,7 +96,11 @@ try
     });
 
     builder.Services.AddSingleton<IConfigurationService, ConfigurationService>();
-    builder.Services.AddSingleton<IPlugManagementService, PlugManagementService>();
+    builder.Services.AddSingleton<IPlugService, PlugService>();
+    builder.Services.AddSingleton<IPlugPoolService, PlugPoolService>();
+    builder.Services.AddSingleton<IPlugRepository, PlugRepository>();
+    builder.Services.AddSingleton<IPlugHubContext, PlugHubContext>();
+    builder.Services.AddHostedService<PlugControllerBackgroundService>();
 
     var app = builder.Build();
 
@@ -110,7 +117,7 @@ try
     app.UseOctoPersistence();
 
     app.MapHub<PlugHub>("/{tenantId:tenantId}/plugHub");
-    app.MapHub<AgentHub>("/{tenantId:tenantId}/agentHub");
+    app.MapHub<PlugPoolHub>("/{tenantId:tenantId}/plugPoolHub");
     app.MapControllerRoute(name: "default",
         pattern: "{tenantId:tenantId}/system/v{version:apiVersion}/{controller}/{action}/{id?}");
 

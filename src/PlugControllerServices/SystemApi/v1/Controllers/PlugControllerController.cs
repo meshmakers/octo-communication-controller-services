@@ -22,7 +22,7 @@ public class PlugControllerController: ControllerBase
     /// </summary>
     /// <param name="logger"></param>
     /// <param name="configurationService"></param>
-    public PlugControllerController(ILogger<PlugControllerController> logger, IConfigurationService configurationService)
+    internal PlugControllerController(ILogger<PlugControllerController> logger, IConfigurationService configurationService)
     {
         _logger = logger;
         _configurationService = configurationService;

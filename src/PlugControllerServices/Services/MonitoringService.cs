@@ -3,7 +3,7 @@ using Meshmakers.Octo.SystematizedData.Persistence;
 
 namespace Meshmakers.Octo.Backend.PlugControllerServices.Services;
 
-public class MonitoringService: BackgroundService
+internal class MonitoringService: BackgroundService
 {
     private readonly IConfigurationService _configurationService;
     private readonly ISystemContext _systemContext;
