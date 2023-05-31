@@ -13,26 +13,26 @@ public class MessageConsumer :
 {
     readonly ILogger<MessageConsumer> _logger;
     private readonly ISystemContext _systemContext;
-    private readonly IPlugManagementService _plugManagementService;
+    private readonly IPlugService _plugService;
 
-    public MessageConsumer(ILogger<MessageConsumer> logger, ISystemContext systemContext, IPlugManagementService plugManagementService)
+    public MessageConsumer(ILogger<MessageConsumer> logger, ISystemContext systemContext, IPlugService plugService)
     {
         _logger = logger;
         _systemContext = systemContext;
-        _plugManagementService = plugManagementService;
+        _plugService = plugService;
     }
 
     public async Task Consume(ConsumeContext<UpdatedValueMessageDto> context)
     {
-        _logger.LogInformation("[{TenantId}] Received Input: PlugId '{PlugId}', Name '{MappingId}', Value '{Value}'",
+        _logger.LogInformation("[{TenantId}] Received Input: PlugRtId '{PlugRtId}', Name '{MappingId}', Value '{Value}'",
             context.Message.TenantId, context.Message.PlugId, context.Message.MappingId, context.Message.Value);
 
         var message = context.Message;
-        var config = await _plugManagementService.GetPlugConfiguration(message.TenantId, message.PlugId);
+        var config = await _plugService.GetPlugConfiguration(message.TenantId, message.PlugId);
         
         if (config == null)
         {
-            _logger.LogWarning("[{TenantId}] Plug '{PlugId}' not found", message.TenantId, message.PlugId);
+            _logger.LogWarning("[{TenantId}] Plug '{PlugRtId}' not found", message.TenantId, message.PlugId);
             return;
         }
         

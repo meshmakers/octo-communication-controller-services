@@ -4,7 +4,7 @@ using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
 
 namespace Meshmakers.Octo.Backend.PlugControllerServices.Services;
 
-public interface IPlugManagementService
+public interface IPlugService
 {
     Task<PlugConfigurationDto> RegisterPlug(string tenantId, OctoObjectId plugObjectId, string connectionId);
     Task PlugUnRegistered(string tenantId, OctoObjectId plugObjectId, string connectionId);

@@ -1,6 +1,21 @@
 {
   "entities": [
     {
+      "rtId": "5fc8fc3d8b2fc75f925e21af",
+      "ckId": "Meshmakers.PlugPool",
+      "attributes": [
+        {
+          "id": "Meshmakers.PlugPool.State",
+          "value": 1
+        },
+        {
+          "id": "Meshmakers.PlugPool.Name",
+          "value": "octo-mesh-test-pool"
+        }
+      ],
+      "associations": []
+    },
+    {
       "rtId": "5fc8fc3d8b2fc75f925e21ba",
       "ckId": "Meshmakers.Plug",
       "attributes": [
@@ -15,9 +30,19 @@
         {
           "id": "Meshmakers.Plug.Mapping.Configuration",
           "value": "{ \"server\": \"192.168.13.31\" }"
+        },
+        {
+          "id": "Meshmakers.Plug.Deployment.ImageName",
+          "value": "meshmakers/octo-communication-plug-modbus"
+        },
+        {
+          "id": "Meshmakers.Plug.Deployment.ImageVersion",
+          "value": "0.0.2305.25002"
         }
       ],
-      "associations": []
+      "associations": [
+        { "roleId": "System.ParentChild", "targetRtId": "5fc8fc3d8b2fc75f925e21af", "targetCkId": "Meshmakers.PlugPool" }
+      ]
     },
     {
       "rtId": "5fc8fc3d8b2fc75f925e21bb",
@@ -168,9 +193,19 @@
         {
           "id": "Meshmakers.Plug.Mapping.Configuration",
           "value": "{ \"server\": \"192.168.13.30\" }"
+        },
+        {
+          "id": "Meshmakers.Plug.Deployment.ImageName",
+          "value": "meshmakers/octo-communication-plug-modbus"
+        },
+        {
+          "id": "Meshmakers.Plug.Deployment.ImageVersion",
+          "value": "0.0.2305.25002"
         }
       ],
-      "associations": []
+      "associations": [
+        { "roleId": "System.ParentChild", "targetRtId": "5fc8fc3d8b2fc75f925e21af", "targetCkId": "Meshmakers.PlugPool" }
+      ]
     },
     {
       "rtId": "5fc8fc3d8b2fc75f925e21c2",

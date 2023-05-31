@@ -9,21 +9,21 @@ using NLog;
 
 namespace Meshmakers.Octo.Backend.PlugControllerServices.Services;
 
-internal class PlugManagementService : IPlugManagementService
+internal class PlugService : IPlugService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
     private readonly ISystemContext _systemContext;
     private readonly Dictionary<string, OctoObjectId> _plugConnections = new();
 
-    public PlugManagementService(ISystemContext systemContext)
+    public PlugService(ISystemContext systemContext)
     {
         _systemContext = systemContext;
     }
 
     public async Task<PlugConfigurationDto> RegisterPlug(string tenantId, OctoObjectId plugObjectId, string connectionId)
     {
-        Logger.Info("[{TenantId}] Plug '{PlugId}' registered with connection id '{ConnectionId}'",
+        Logger.Info("[{TenantId}] Plug '{PlugRtId}' registered with connection id '{ConnectionId}'",
             tenantId, plugObjectId, connectionId);
 
         _plugConnections[connectionId] = plugObjectId;
@@ -34,7 +34,7 @@ internal class PlugManagementService : IPlugManagementService
 
     public async Task PlugUnRegistered(string tenantId, OctoObjectId plugObjectId, string connectionId)
     {
-        Logger.Info("[{TenantId}] Plug '{PlugId}' unregistered with connection id '{ConnectionId}'",
+        Logger.Info("[{TenantId}] Plug '{PlugRtId}' unregistered with connection id '{ConnectionId}'",
             tenantId, plugObjectId, connectionId);
 
         _plugConnections.Remove(connectionId);
@@ -91,7 +91,7 @@ internal class PlugManagementService : IPlugManagementService
         {
             Logger.Error(e, "[{TenantId}] Error setting state of plug '{PlugObjectId}' to '{PlugState}'",
                 tenantId, plugObjectId, plugState);
-            throw new PlugInManagementException($"[{tenantId}] Error setting state of plug '{plugObjectId}' to '{plugState}'", e);
+            throw new PlugServiceException($"[{tenantId}] Error setting state of plug '{plugObjectId}' to '{plugState}'", e);
         }
     }
 
@@ -164,7 +164,7 @@ internal class PlugManagementService : IPlugManagementService
         }
         catch (Exception e)
         {
-            throw new PlugInManagementException("Error during loading of plug configuration", e);
+            throw new PlugServiceException("Error during loading of plug configuration", e);
         }
     }
 

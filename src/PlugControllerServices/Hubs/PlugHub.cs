@@ -1,17 +1,18 @@
 using Meshmakers.Octo.Backend.PlugControllerServices.Services;
 using Meshmakers.Octo.Common.Shared;
 using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Plugs.Contracts.Hubs;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Meshmakers.Octo.Backend.PlugControllerServices.Hubs;
 
-internal class PlugHub : Hub
+internal class PlugHub : Hub, IPlugHub
 {
-    private readonly IPlugManagementService _plugManagementService;
+    private readonly IPlugService _plugService;
 
-    public PlugHub(IPlugManagementService plugManagementService)
+    public PlugHub(IPlugService plugService)
     {
-        _plugManagementService = plugManagementService;
+        _plugService = plugService;
     }
 
     public override async Task OnConnectedAsync()
@@ -19,7 +20,7 @@ internal class PlugHub : Hub
         var tenantId = Context.GetHttpContext()?.GetTenantId();
         if (tenantId != null)
         {
-            // await _plugManagementService.PlugOnline(tenantId, Context.ConnectionId);
+            // await _plugService.PlugOnline(tenantId, Context.ConnectionId);
         }
         else
         {
@@ -34,7 +35,7 @@ internal class PlugHub : Hub
         var tenantId = Context.GetHttpContext()?.GetTenantId();
         if (tenantId != null)
         {
-            // await _plugManagementService.PlugOffline(tenantId, Context.ConnectionId);
+            // await _plugService.PlugOffline(tenantId, Context.ConnectionId);
         }
         else
         {
@@ -51,6 +52,6 @@ internal class PlugHub : Hub
             Context.Abort();
             throw new InvalidOperationException("TenantId is null");
         }
-        return await _plugManagementService.RegisterPlug(tenantId, plugObjectId, Context.ConnectionId);
+        return await _plugService.RegisterPlug(tenantId, plugObjectId, Context.ConnectionId);
     }
 }

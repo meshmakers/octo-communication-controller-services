@@ -14,17 +14,17 @@ namespace Meshmakers.Octo.Backend.PlugControllerServices.TenantApi.v1.Controller
 public class PlugController : ControllerBase
 {
     private readonly ILogger<PlugController> _logger;
-    private readonly IPlugManagementService _plugManagementService;
+    private readonly IPlugService _plugService;
 
     /// <summary>
     /// Constructor
     /// </summary>
     /// <param name="logger">Logging object</param>
-    /// <param name="plugManagementService">Plug-In Management service instance</param>
-    public PlugController(ILogger<PlugController> logger, IPlugManagementService plugManagementService)
+    /// <param name="plugService">Plug-In Management service instance</param>
+    public PlugController(ILogger<PlugController> logger, IPlugService plugService)
     {
         _logger = logger;
-        _plugManagementService = plugManagementService;
+        _plugService = plugService;
     }
     
     /// <summary>
@@ -40,7 +40,7 @@ public class PlugController : ControllerBase
             return NotFound("TenantId is null or empty");
         }
 
-        var config = await _plugManagementService.GetPlugs(tenantId);
+        var config = await _plugService.GetPlugs(tenantId);
 
         return Ok(config);
     }
@@ -59,7 +59,7 @@ public class PlugController : ControllerBase
             return NotFound("TenantId is null or empty");
         }
 
-        var config = await _plugManagementService.GetPlugConfiguration(tenantId, plugId);
+        var config = await _plugService.GetPlugConfiguration(tenantId, plugId);
 
         return Ok(config);
     }

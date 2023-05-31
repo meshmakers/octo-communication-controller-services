@@ -40,4 +40,20 @@ public class RtPlug : RtEntity
         get => GetAttributeStringValueOrDefault(nameof(Configuration));
         set => SetAttributeValue(nameof(Configuration), AttributeValueTypes.String, value);
     }
+    
+    [JsonIgnore]
+    [BsonIgnore]
+    public string? ImageName
+    {
+        get => GetAttributeStringValueOrDefault(nameof(ImageName));
+        set => SetAttributeValue(nameof(ImageName), AttributeValueTypes.String, value);
+    }
+    
+    [JsonIgnore]
+    [BsonIgnore]
+    public string? ImageVersion
+    {
+        get => GetAttributeStringValueOrDefault(nameof(ImageVersion));
+        set => SetAttributeValue(nameof(ImageVersion), AttributeValueTypes.String, value);
+    }
 }

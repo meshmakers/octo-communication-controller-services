@@ -9,11 +9,13 @@ internal class ConfigurationService : IConfigurationService
 {
     private readonly ISystemContext _systemContext;
     private readonly IDistributedWithPubSubCache _distributedCache;
+    private readonly Dictionary<string, TenantDescription> _tenantDescriptions = new();
 
     public ConfigurationService(ISystemContext systemContext, IDistributedWithPubSubCache distributedCache)
     {
         _systemContext = systemContext;
         _distributedCache = distributedCache;
+        
     }
 
     public async Task<IEnumerable<PlugControllerStatusDto>> ReadConfig()
@@ -40,5 +42,16 @@ internal class ConfigurationService : IConfigurationService
         await systemSession.CommitTransactionAsync();
         
         await _distributedCache.PublishAsync(CacheCommon.KeyPlugControllerUpdate, tenantId);
+    }
+
+    public TenantDescription GetOrAddTenant(string tenantId)
+    {
+        if (!_tenantDescriptions.TryGetValue(tenantId, out var tenantDescription))
+        {
+            tenantDescription = new TenantDescription(tenantId);
+            _tenantDescriptions.Add(tenantId, tenantDescription);
+        }
+
+        return tenantDescription;
     }
 }
