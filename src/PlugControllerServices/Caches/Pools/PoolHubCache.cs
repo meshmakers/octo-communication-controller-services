@@ -1,21 +1,17 @@
 using System.Collections.Concurrent;
 using Meshmakers.Octo.Backend.DistributedCache;
+using Meshmakers.Octo.Backend.PlugControllerServices.Caches.Pools.Descriptions;
 using Meshmakers.Octo.Common.Shared;
 
-namespace Meshmakers.Octo.Backend.PlugControllerServices.Models;
+namespace Meshmakers.Octo.Backend.PlugControllerServices.Caches.Pools;
 
-public interface IPlugHubContextPublish
-{
-    public void PublishConfiguration();
-}
-
-internal class PlugHubContext : IPlugHubContextPublish, IPlugHubContext
+internal class PoolHubCache : IPoolCachePublish, IPoolCache
 {
     private readonly IDistributedWithPubSubCache _distributedWithPubSubCache;
-    private readonly ConcurrentDictionary<string, PlugHubTenant> _tenantDescriptions = new();
+    private readonly ConcurrentDictionary<string, PoolTenant> _tenantDescriptions = new();
     private IChannel<string>? _channel;
 
-    public PlugHubContext(IDistributedWithPubSubCache distributedWithPubSubCache)
+    public PoolHubCache(IDistributedWithPubSubCache distributedWithPubSubCache)
     {
         _distributedWithPubSubCache = distributedWithPubSubCache;
     }
@@ -25,7 +21,7 @@ internal class PlugHubContext : IPlugHubContextPublish, IPlugHubContext
         if (_channel == null)
         {
             _channel = SubscribeToPlugHubConfigurationUpdates();
-            var configuration = await _distributedWithPubSubCache.GetLastMessageAsStringAsync(CacheCommon.KeyPlugControllerUpdate);
+            var configuration = await _distributedWithPubSubCache.GetLastMessageAsStringAsync(CacheCommon.KeyPlugControllerPoolUpdate);
             if (!string.IsNullOrWhiteSpace(configuration))
             {
                 ReloadConfiguration(configuration);
@@ -33,13 +29,15 @@ internal class PlugHubContext : IPlugHubContextPublish, IPlugHubContext
         }
     }
 
-    public PlugHubTenant AddOrUpdateTenant(string tenantId)
+    public PoolTenant AddOrUpdateTenant(string tenantId)
     {
         if (!_tenantDescriptions.TryGetValue(tenantId, out var tenantDescription))
         {
-            var plugHubTenant = new PlugHubTenant(this, tenantId);
+            var plugHubTenant = new PoolTenant(this, tenantId);
             tenantDescription = _tenantDescriptions.AddOrUpdate(tenantId, _ => plugHubTenant,
                 (_, _) => plugHubTenant);
+            
+            PublishConfiguration();
         }
         return tenantDescription;
     }
@@ -47,17 +45,23 @@ internal class PlugHubContext : IPlugHubContextPublish, IPlugHubContext
     public void RemoveTenant(string tenantId)
     {
         _tenantDescriptions.TryRemove(tenantId, out _);
+        
+        PublishConfiguration();
     }
 
-    public PlugHubTenant? TryGetTenant(string tenantId)
+    public bool TryGetTenant(string tenantId, out PoolTenant? poolTenant)
     {
-        _tenantDescriptions.TryGetValue(tenantId, out var tenantDescription);
-        return tenantDescription;
+        return _tenantDescriptions.TryGetValue(tenantId, out poolTenant);
     }
-    
+
+    public bool HasTenant(string tenantId)
+    {
+        return _tenantDescriptions.ContainsKey(tenantId);
+    }
+
     private IChannel<string> SubscribeToPlugHubConfigurationUpdates()
     {
-        var channel = _distributedWithPubSubCache.Subscribe<string>(CacheCommon.KeyPlugControllerUpdate);
+        var channel = _distributedWithPubSubCache.Subscribe<string>(CacheCommon.KeyPlugControllerPoolUpdate);
         channel.OnMessage(message =>
         {
             if (!string.IsNullOrWhiteSpace(message.Message))
@@ -72,13 +76,14 @@ internal class PlugHubContext : IPlugHubContextPublish, IPlugHubContext
 
     private void ReloadConfiguration(string configuration)
     {
-        var values = configuration.Deserialize<IEnumerable<PlugHubTenantDescription>>();
+        var values = configuration.Deserialize<IEnumerable<PoolTenantDescription>>();
         
         _tenantDescriptions.Clear();
-        foreach (var tenantDescription in values)
+        foreach (var poolTenantDescription in values)
         {
-            var plugHubTenant = new PlugHubTenant(this, tenantDescription.TenantId, tenantDescription.Pools.ToList());
-            _tenantDescriptions.AddOrUpdate(tenantDescription.TenantId, _ => plugHubTenant, (_, _) => plugHubTenant);
+            var plugHubTenant = new PoolTenant(this, poolTenantDescription.TenantId, 
+                poolTenantDescription.Pools.ToList(), poolTenantDescription.Plugs.ToList());
+            _tenantDescriptions.AddOrUpdate(poolTenantDescription.TenantId, _ => plugHubTenant, (_, _) => plugHubTenant);
         }
     }
 
@@ -87,7 +92,7 @@ internal class PlugHubContext : IPlugHubContextPublish, IPlugHubContext
         var tenantDescriptions= 
             _tenantDescriptions.Select(x => x.Value.GetTenantDescription());
         
-        _distributedWithPubSubCache.PublishAsync(CacheCommon.KeyPlugControllerUpdate, tenantDescriptions.Serialize());
+        _distributedWithPubSubCache.PublishAsync(CacheCommon.KeyPlugControllerPoolUpdate, tenantDescriptions.Serialize());
     }
 
 }

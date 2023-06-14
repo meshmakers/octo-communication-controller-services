@@ -3,12 +3,14 @@ using Meshmakers.Octo.Common.Shared;
 using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Plugs.Contracts.Hubs;
 using Microsoft.AspNetCore.SignalR;
+using NLog;
 
 namespace Meshmakers.Octo.Backend.PlugControllerServices.Hubs;
 
-internal class PlugHub : Hub, IPlugHub
+public class PlugHub : Hub, IPlugHub
 {
     private readonly IPlugService _plugService;
+    private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
     public PlugHub(IPlugService plugService)
     {
@@ -17,34 +19,42 @@ internal class PlugHub : Hub, IPlugHub
 
     public override async Task OnConnectedAsync()
     {
-        var tenantId = Context.GetHttpContext()?.GetTenantId();
-        if (tenantId != null)
-        {
-            // await _plugService.PlugOnline(tenantId, Context.ConnectionId);
-        }
-        else
-        {
-            Context.Abort();
-        }
+        var tenantId = GetTenantId();
+
+        await _plugService.SetPlugOnlineAsync(tenantId, Context.ConnectionId);
 
         await base.OnConnectedAsync();
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
-        var tenantId = Context.GetHttpContext()?.GetTenantId();
-        if (tenantId != null)
-        {
-            // await _plugService.PlugOffline(tenantId, Context.ConnectionId);
-        }
-        else
-        {
-            Context.Abort();
-        }
+        var tenantId = GetTenantId();
+
+        await _plugService.SetPlugOfflineAsync(tenantId, Context.ConnectionId);
+
         await base.OnDisconnectedAsync(exception);
     }
-    
-    public async Task<PlugConfigurationDto> RegisterPlug(OctoObjectId plugObjectId)
+
+    public async Task<PlugConfigurationDto> RegisterPlugAsync(OctoObjectId plugRtId)
+    {
+        var tenantId = GetTenantId();
+        
+        try
+        {
+            var configurationDto = await _plugService.RegisterPlugAsync(tenantId, plugRtId, Context.ConnectionId);
+
+            await _plugService.SetPlugOnlineAsync(tenantId, plugRtId);
+
+            return configurationDto;
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e, "Cannot register plug");
+            throw;
+        }
+    }
+
+    public async Task UnRegisterPlugAsync(OctoObjectId plugRtId)
     {
         var tenantId = Context.GetHttpContext()?.GetTenantId();
         if (tenantId == null)
@@ -52,6 +62,19 @@ internal class PlugHub : Hub, IPlugHub
             Context.Abort();
             throw new InvalidOperationException("TenantId is null");
         }
-        return await _plugService.RegisterPlug(tenantId, plugObjectId, Context.ConnectionId);
+
+        await _plugService.PlugUnRegisteredAsync(tenantId, plugRtId, Context.ConnectionId);
+    }
+    
+    private string GetTenantId()
+    {
+        var tenantId = Context.GetHttpContext()?.GetTenantId();
+        if (tenantId == null)
+        {
+            Context.Abort();
+            throw new InvalidOperationException("TenantId is null");
+        }
+
+        return tenantId;
     }
 }

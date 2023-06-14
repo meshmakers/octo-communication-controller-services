@@ -28,7 +28,7 @@ public class MessageConsumer :
             context.Message.TenantId, context.Message.PlugId, context.Message.MappingId, context.Message.Value);
 
         var message = context.Message;
-        var config = await _plugService.GetPlugConfiguration(message.TenantId, message.PlugId);
+        var config = await _plugService.GetPlugConfigurationAsync(message.TenantId, message.PlugId);
         
         if (config == null)
         {
@@ -79,7 +79,7 @@ public class MessageConsumer :
         OctoObjectId mappingObjectId)
     {
         var plugMapping =
-            await tenantContext.Repository.GetRtEntityAsync<RtPlugMapping>(systemSession, new RtEntityId(Statics.CkIdPlugMapping, mappingObjectId));
+            await tenantContext.Repository.GetRtEntityAsync<RtPlugMapping>(systemSession, mappingObjectId);
         if (plugMapping == null)
         {
             throw new Exception($"Plug mapping {mappingObjectId} not found");

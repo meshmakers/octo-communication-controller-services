@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Meshmakers.Octo.Backend.PlugControllerServices.Repository;
 using Meshmakers.Octo.Backend.PlugControllerServices.Services;
 using Meshmakers.Octo.Common.Shared;
 using Microsoft.AspNetCore.Mvc;
@@ -14,16 +15,19 @@ namespace Meshmakers.Octo.Backend.PlugControllerServices.TenantApi.v1.Controller
 public class PlugController : ControllerBase
 {
     private readonly ILogger<PlugController> _logger;
+    private readonly IPlugRepository _plugRepository;
     private readonly IPlugService _plugService;
 
     /// <summary>
     /// Constructor
     /// </summary>
     /// <param name="logger">Logging object</param>
+    /// <param name="plugRepository"></param>
     /// <param name="plugService">Plug-In Management service instance</param>
-    public PlugController(ILogger<PlugController> logger, IPlugService plugService)
+    public PlugController(ILogger<PlugController> logger, IPlugRepository plugRepository, IPlugService plugService)
     {
         _logger = logger;
+        _plugRepository = plugRepository;
         _plugService = plugService;
     }
     
@@ -40,7 +44,7 @@ public class PlugController : ControllerBase
             return NotFound("TenantId is null or empty");
         }
 
-        var config = await _plugService.GetPlugs(tenantId);
+        var config = await _plugRepository.GetPlugsAsync(tenantId);
 
         return Ok(config);
     }
@@ -59,7 +63,7 @@ public class PlugController : ControllerBase
             return NotFound("TenantId is null or empty");
         }
 
-        var config = await _plugService.GetPlugConfiguration(tenantId, plugId);
+        var config = await _plugService.GetPlugConfigurationAsync(tenantId, plugId);
 
         return Ok(config);
     }

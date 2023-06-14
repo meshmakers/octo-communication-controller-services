@@ -28,6 +28,7 @@
       "ckDerivedId": "System.Entity",
       "isFinal": true,
       "isAbstract": false,
+      "enableChangeStreamPreAndPostImages": true,
       "attributes": [
         {
           "id": "Meshmakers.Plug.LastSeen",
