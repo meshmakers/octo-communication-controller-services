@@ -1,5 +1,6 @@
 using Meshmakers.Octo.Backend.PlugControllerServices.CkModelEntities;
 using Meshmakers.Octo.Common.Shared;
+using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
 using Meshmakers.Octo.SystematizedData.Persistence;
 using Meshmakers.Octo.SystematizedData.Persistence.DataAccess;
 
@@ -49,7 +50,56 @@ public class PlugRepository : IPlugRepository
         }
         catch (Exception e)
         {
-            throw new PlugRepositoryException("Failed to get plugs from plug pool", e);
+            throw PlugRepositoryException.CommonFailedGettingPlugs(tenantId, plugPoolId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<RtPlug> GetPlugAsync(string tenantId, OctoObjectId plugRtId)
+    {
+        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+
+        var session = await tenantContext.Repository.StartSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var rtPlug = await tenantContext.Repository.GetRtEntityAsync<RtPlug>(session, plugRtId);
+
+            if (rtPlug == null)
+            {
+                throw PlugRepositoryException.PlugNotFound(tenantId, plugRtId);
+            }
+
+            await session.CommitTransactionAsync();
+
+            return rtPlug;
+        }
+        catch (Exception e)
+        {
+            throw PlugRepositoryException.CommonFailedGettingPlug(tenantId, plugRtId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyCollection<RtPlug>> GetPlugsAsync(string tenantId)
+    {
+        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+        
+        var session = await tenantContext.Repository.StartSessionAsync();
+        try
+        {
+            session.StartTransaction();
+        
+            var resultSet = await tenantContext.Repository.GetRtEntitiesByTypeAsync<RtPlug>(session, new DataQueryOperation());
+
+            await session.CommitTransactionAsync();
+
+            return resultSet.Result.ToList();
+        }
+        catch (Exception e)
+        {
+            throw PlugRepositoryException.CommonFailedGettingPlugs(tenantId, e);
         }
     }
 
@@ -73,7 +123,7 @@ public class PlugRepository : IPlugRepository
         }
         catch (Exception e)
         {
-            throw new PlugRepositoryException("Failed to get plug pools by name", e);
+            throw PlugRepositoryException.CommonFailedGettingPlugPoolByName(tenantId, plugPoolName, e);
         }
     }
 
@@ -81,7 +131,7 @@ public class PlugRepository : IPlugRepository
     public async Task CreatePlugPoolAsync(string tenantId, string poolName)
     {
         var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
-        
+
         var session = await tenantContext.Repository.StartSessionAsync();
         try
         {
@@ -104,7 +154,7 @@ public class PlugRepository : IPlugRepository
         }
         catch (Exception e)
         {
-            throw new PlugRepositoryException("Failed to create a plug pool", e);
+            throw PlugRepositoryException.CommonFailedCreatePlugPool(tenantId, poolName, e);
         }
     }
 
@@ -135,7 +185,38 @@ public class PlugRepository : IPlugRepository
         }
         catch (Exception e)
         {
-            throw new PlugRepositoryException("Failed to set state of plug pool", e);
+            throw PlugRepositoryException.CommonFailedSetPlugPoolState(tenantId, plugPoolId, state, e);
+        }
+    }
+    
+    /// <inheritdoc />
+    public async Task SetPlugStateAsync(string tenantId, OctoObjectId plugRtId, PlugStates state)
+    {
+        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+
+        var session = await tenantContext.Repository.StartSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var rtPlugEntity = new RtPlug
+            {
+                RtId = plugRtId.ToObjectId(),
+                State = state
+            };
+
+            var entityUpdateInfoList = new List<EntityUpdateInfo>
+            {
+                new(rtPlugEntity, EntityModOptions.Update)
+            };
+
+            await tenantContext.Repository.ApplyChanges(session, entityUpdateInfoList);
+
+            await session.CommitTransactionAsync();
+        }
+        catch (Exception e)
+        {
+            throw PlugRepositoryException.CommonFailedSetPlugState(tenantId, plugRtId, state, e);
         }
     }
 
@@ -150,7 +231,7 @@ public class PlugRepository : IPlugRepository
             session.StartTransaction();
 
             var plugPoolResultSet = await tenantContext.Repository.GetRtAssociationTargetsAsync<RtPlug, RtPlugPool>(session,
-                new []{plugRtId.ToObjectId()}, Statics.RoleIdParentChild, GraphDirections.Inbound, null, new DataQueryOperation());
+                new[] { plugRtId.ToObjectId() }, Statics.RoleIdParentChild, GraphDirections.Inbound, null, new DataQueryOperation());
 
             await session.CommitTransactionAsync();
 
@@ -164,11 +245,139 @@ public class PlugRepository : IPlugRepository
 
                 throw PlugRepositoryException.PlugNotAssociatedToPlugPool(tenantId, plugRtId);
             }
+
             throw PlugRepositoryException.PlugNotFound(tenantId, plugRtId);
         }
         catch (Exception e)
         {
             throw PlugRepositoryException.CommonGettingPlugPoolOfPlug(tenantId, plugRtId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<RtPlug> GetPlugByMappingAsync(string tenantId, OctoObjectId plugMappingRtId)
+    {
+        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+
+        var session = await tenantContext.Repository.StartSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var poolResultSet = await tenantContext.Repository.GetIndirectRtAssociationTargetsAsync<RtPlugMapping, RtPlug>(session,
+                plugMappingRtId.ToObjectId(), Statics.RoleIdParentChild, GraphDirections.Inbound);
+
+            await session.CommitTransactionAsync();
+
+            if (poolResultSet != null)
+            {
+                if (poolResultSet.Result.Any())
+                {
+                    return poolResultSet.Result.First();
+                }
+
+                throw PlugRepositoryException.PlugMappingNotAssociatedToPlug(tenantId, plugMappingRtId);
+            }
+
+            throw PlugRepositoryException.PlugMappingNotFound(tenantId, plugMappingRtId);
+        }
+        catch (Exception e)
+        {
+            throw PlugRepositoryException.CommonGettingPlugByMapping(tenantId, plugMappingRtId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyCollection<GroupConfigurationDto>> GetPlugGroupConfigurationAsync(string tenantId, OctoObjectId plugRtId)
+    {
+        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+
+        var session = await tenantContext.Repository.StartSessionAsync();
+        try
+        {
+            session.StartTransaction();
+            
+            var plugGroupResultSet = await tenantContext.Repository.GetRtAssociationTargetsAsync<RtPlug, RtPlugGroup>(session,
+                new[] { plugRtId.ToObjectId() }, Statics.RoleIdParentChild, GraphDirections.Inbound, null, new DataQueryOperation());
+
+            if (!plugGroupResultSet.ContainsKey(plugRtId.ToObjectId()))
+            {
+                throw PlugRepositoryException.PlugNotFound(tenantId, plugRtId);
+            }
+
+            var plugGroups = plugGroupResultSet[plugRtId.ToObjectId()];
+            
+            var groupResultSet = await tenantContext.Repository.GetRtAssociationTargetsAsync<RtPlugGroup, RtPlugMapping>(session,
+                plugGroups.Result.Select(x=> x.RtId), Statics.RoleIdParentChild, GraphDirections.Inbound, null, new DataQueryOperation());
+            
+            var plugGroupConfigurations = new List<GroupConfigurationDto>();
+            foreach (var plugGroup in plugGroups.Result)
+            {
+                var groupConfiguration = new GroupConfigurationDto
+                {
+                    Id = plugGroup.RtId.ToOctoObjectId(),
+                    Name = plugGroup.Designation!
+                };
+                plugGroupConfigurations.Add(groupConfiguration);
+                
+                if (groupResultSet.TryGetValue(plugGroup.RtId, out var mappingSet))
+                {
+                    var mappings = new List<MappingConfigurationDto>();
+                    foreach (var mapping in mappingSet.Result)
+                    {
+                        if (!string.IsNullOrWhiteSpace(mapping.Designation) && !string.IsNullOrWhiteSpace(mapping.Configuration))
+                        {
+                            mappings.Add(new MappingConfigurationDto
+                            {
+                                Name = mapping.Designation,
+                                Id = mapping.RtId.ToOctoObjectId(),
+                                Configuration = mapping.Configuration
+                            });
+                        }
+                    }
+
+                    groupConfiguration.Mappings = mappings;
+                }
+            }
+
+            return plugGroupConfigurations;
+        }
+        catch (Exception e)
+        {
+            throw PlugRepositoryException.CommonGettingPlugGroupsOfPlug(tenantId, plugRtId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<RtPlug> GetPlugByGroupAsync(string tenantId, OctoObjectId plugGroupRtId)
+    {
+        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+
+        var session = await tenantContext.Repository.StartSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var poolResultSet = await tenantContext.Repository.GetIndirectRtAssociationTargetsAsync<RtPlugGroup, RtPlug>(session,
+                plugGroupRtId.ToObjectId(), Statics.RoleIdParentChild, GraphDirections.Inbound);
+
+            await session.CommitTransactionAsync();
+
+            if (poolResultSet != null)
+            {
+                if (poolResultSet.Result.Any())
+                {
+                    return poolResultSet.Result.First();
+                }
+
+                throw PlugRepositoryException.PlugGroupNotAssociatedToPlug(tenantId, plugGroupRtId);
+            }
+
+            throw PlugRepositoryException.PlugGroupNotFound(tenantId, plugGroupRtId);
+        }
+        catch (Exception e)
+        {
+            throw PlugRepositoryException.CommonGettingPlugByGroup(tenantId, plugGroupRtId, e);
         }
     }
 }

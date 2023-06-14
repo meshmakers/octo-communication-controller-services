@@ -1,6 +1,8 @@
 using MassTransit;
 using Meshmakers.Octo.Backend.DistributedCache;
 using Meshmakers.Octo.Backend.PlugControllerServices.BackgroundServices;
+using Meshmakers.Octo.Backend.PlugControllerServices.Caches.Plugs;
+using Meshmakers.Octo.Backend.PlugControllerServices.Caches.Pools;
 using Meshmakers.Octo.Backend.PlugControllerServices.Configuration;
 using Meshmakers.Octo.Backend.PlugControllerServices.DataSink;
 using Meshmakers.Octo.Backend.PlugControllerServices.Hubs;
@@ -10,6 +12,7 @@ using Meshmakers.Octo.Backend.PlugControllerServices.Repository;
 using Meshmakers.Octo.Backend.PlugControllerServices.Routing;
 using Meshmakers.Octo.Backend.PlugControllerServices.Services;
 using Meshmakers.Octo.Backend.Swagger.Configuration;
+using Meshmakers.Octo.Communication.Plugs.Contracts.Hubs;
 using Meshmakers.Octo.SystematizedData.Persistence;
 using Meshmakers.Octo.SystematizedData.Persistence.Configuration;
 using Microsoft.Extensions.Options;
@@ -97,9 +100,12 @@ try
 
     builder.Services.AddSingleton<IConfigurationService, ConfigurationService>();
     builder.Services.AddSingleton<IPlugService, PlugService>();
-    builder.Services.AddSingleton<IPlugPoolService, PlugPoolService>();
+    builder.Services.AddSingleton<IPoolService, PoolService>();
     builder.Services.AddSingleton<IPlugRepository, PlugRepository>();
-    builder.Services.AddSingleton<IPlugHubContext, PlugHubContext>();
+    builder.Services.AddSingleton<IPoolCache, PoolHubCache>();
+    builder.Services.AddSingleton<IPlugCache, PlugCache>();
+    builder.Services.AddSingleton<IPoolHubCallbacks, PoolHubCallbacks>();
+    builder.Services.AddSingleton<IPlugHubCallbacks, PlugHubCallbacks>();
     builder.Services.AddHostedService<PlugControllerBackgroundService>();
 
     var app = builder.Build();
@@ -117,7 +123,7 @@ try
     app.UseOctoPersistence();
 
     app.MapHub<PlugHub>("/{tenantId:tenantId}/plugHub");
-    app.MapHub<PlugPoolHub>("/{tenantId:tenantId}/plugPoolHub");
+    app.MapHub<PoolHub>("/{tenantId:tenantId}/plugPoolHub");
     app.MapControllerRoute(name: "default",
         pattern: "{tenantId:tenantId}/system/v{version:apiVersion}/{controller}/{action}/{id?}");
 

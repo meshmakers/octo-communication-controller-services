@@ -26,6 +26,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Communication.Plugs.Contrac
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Communication.Contracts", "src\octo-core\src\Common\Communication.Contracts\Communication.Contracts.csproj", "{DAF5BC42-0068-4926-8E0A-A7653C2179B6}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Persistence.SystemTests", "src\octo-core\tests\Persistence.SystemTests\Persistence.SystemTests.csproj", "{EFB7C4BF-6968-4140-BF1C-4BBFBE8D0BF0}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -76,6 +78,10 @@ Global
 		{DAF5BC42-0068-4926-8E0A-A7653C2179B6}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{DAF5BC42-0068-4926-8E0A-A7653C2179B6}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{DAF5BC42-0068-4926-8E0A-A7653C2179B6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EFB7C4BF-6968-4140-BF1C-4BBFBE8D0BF0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EFB7C4BF-6968-4140-BF1C-4BBFBE8D0BF0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EFB7C4BF-6968-4140-BF1C-4BBFBE8D0BF0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EFB7C4BF-6968-4140-BF1C-4BBFBE8D0BF0}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{81F09ECC-E5E9-4356-87BD-A7902064B37D} = {A28575DB-337A-494E-A432-E0C678233190}
@@ -87,5 +93,6 @@ Global
 		{B7B2AF08-5308-4CC1-82BD-9810E350E2B7} = {A28575DB-337A-494E-A432-E0C678233190}
 		{ECC855E6-2039-4828-B3BE-6985805031F3} = {8C020542-E097-49CB-8E6C-C80A4E14027E}
 		{DAF5BC42-0068-4926-8E0A-A7653C2179B6} = {8C020542-E097-49CB-8E6C-C80A4E14027E}
+		{EFB7C4BF-6968-4140-BF1C-4BBFBE8D0BF0} = {8C020542-E097-49CB-8E6C-C80A4E14027E}
 	EndGlobalSection
 EndGlobal

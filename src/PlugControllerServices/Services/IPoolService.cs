@@ -1,28 +1,23 @@
 using Meshmakers.Octo.Backend.PlugControllerServices.CkModelEntities;
 using Meshmakers.Octo.Common.Shared;
 using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
+using Meshmakers.Octo.SystematizedData.Persistence.DataAccess;
 
 namespace Meshmakers.Octo.Backend.PlugControllerServices.Services;
 
 /// <summary>
-/// Manages plug pools for all tenants
+/// Manages plug pools for all tenants and their state including configuration (plugs loaded in which pools).
 /// </summary>
-public interface IPlugPoolService
+public interface IPoolService
 {
-    /// <summary>
-    /// Registers a hub to receive plug pool updates
-    /// </summary>
-    /// <param name="addPlug">Callback for adding plug events</param>
-    /// <param name="removePlug">Callback for removing plug events</param>
-    void RegisterHub(Func<string, PlugPoolPlugDto, Task> addPlug, Func<string, PlugPoolPlugDto, Task> removePlug);
-    
     /// <summary>
     /// Registers a plug pool operator for a tenant
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="plugPoolName">Name of plug pool</param>
+    /// <param name="connectionId">Connection id to client</param>
     /// <returns></returns>
-    Task<OctoObjectId> RegisterPlugPoolOperatorAsync(string tenantId, string plugPoolName);
+    Task<OctoObjectId> RegisterPlugPoolOperatorAsync(string tenantId, string plugPoolName, string connectionId);
     
     /// <summary>
     /// Unregisters a plug pool operator for a tenant
@@ -45,31 +40,25 @@ public interface IPlugPoolService
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <returns></returns>
-    Task ReloadTenant(string tenantId);
+    Task ReloadTenantAsync(string tenantId);
     
     /// <summary>
     /// Deploys a new plug to a plug pool
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="rtPlug">The runtime entity object of the plug</param>
+    /// <param name="plugPoolRtId">The object id of the plug pool</param>
+    /// <param name="plugRtId">The object id of the plug</param>
     /// <returns></returns>
-    Task DeployPlugAsync(string tenantId, RtPlug rtPlug);
-    
-    /// <summary>
-    /// Updates the deployment of a plug in a plug pool
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="rtPlug">The runtime entity object of the plug</param>
-    /// <returns></returns>
-    Task UpdateDeploymentPlugAsync(string tenantId, RtPlug rtPlug);
+    Task DeployPlugAsync(string tenantId, OctoObjectId plugPoolRtId, OctoObjectId plugRtId);
     
     /// <summary>
     /// Undeploy a plug from a plug pool
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="rtPlug">The runtime entity object of the plug</param>
+    /// <param name="plugPoolRtId">The object id of the plug pool</param>
+    /// <param name="plugRtId">The object id of the plug</param>
     /// <returns></returns>
-    Task UndeployPlugAsync(string tenantId, RtPlug rtPlug);
+    Task UndeployPlugAsync(string tenantId, OctoObjectId plugPoolRtId, OctoObjectId plugRtId);
 
     /// <summary>
     /// Sets a plug pool offline
@@ -80,10 +69,34 @@ public interface IPlugPoolService
     Task SetPoolOfflineAsync(string tenantId, OctoObjectId plugPoolRtId);
     
     /// <summary>
+    /// Sets a plug pool offline using the connection id
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="connectionId">Identifier of connection</param>
+    /// <returns></returns>
+    Task SetPoolOfflineAsync(string tenantId, string connectionId);
+    
+    /// <summary>
     /// Sets a plug pool online
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="plugPoolRtId">Identifier of plug pool</param>
     /// <returns></returns>
     Task SetPoolOnlineAsync(string tenantId, OctoObjectId plugPoolRtId);
+    
+    /// <summary>
+    /// Sets a plug pool online using the connection id
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="connectionId">Identifier of connection</param>
+    /// <returns></returns>
+    Task SetPoolOnlineAsync(string tenantId, string connectionId);
+
+    /// <summary>
+    /// Handles a plug pool update
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="info">Update information object</param>
+    /// <returns></returns>
+    Task OnHandlePoolUpdateAsync(string tenantId, UpdateInfo<RtPlugPool> info);
 }

@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Backend.PlugControllerServices.CkModelEntities;
 using Meshmakers.Octo.Common.Shared;
 using MongoDB.Bson;
 
@@ -47,7 +48,7 @@ public class PlugPoolServiceException : Exception
         return new PlugPoolServiceException($"[{tenantId}] Plug Pool '{poolName}' not found");
     }
 
-    internal static Exception PlugNotFound(string tenantId, ObjectId plugRtId)
+    internal static Exception PlugNotFound(string tenantId, OctoObjectId plugRtId)
     {
         return new PlugPoolServiceException($"[{tenantId}] Plug '{plugRtId}' not found");
     }
@@ -55,6 +56,16 @@ public class PlugPoolServiceException : Exception
     internal static Exception CannotCreatePlugPool(string tenantId, string plugPoolName)
     {
         return new PlugPoolServiceException($"[{tenantId}] Cannot create plug pool '{plugPoolName}'");
+    }
+
+    internal static Exception CommonFailedSetPlugState(string tenantId, OctoObjectId plugRtId, PlugStates plugState, Exception exception)
+    {
+        return new PlugServiceException($"[{tenantId}] Failed to set plug '{plugRtId}' state to '{plugState}'", exception);
+    }
+
+    internal static Exception CommonFailedCannotLoadPlugConfiguration(string tenantId, OctoObjectId plugRtId, Exception exception)
+    {
+        return new PlugServiceException($"[{tenantId}] Failed to load plug '{plugRtId}' configuration", exception);
     }
 }
 

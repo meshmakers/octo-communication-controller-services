@@ -6,5 +6,4 @@ internal interface IConfigurationService
 {
     Task<IEnumerable<PlugControllerStatusDto>> ReadConfig();
     Task WriteConfig(IEnumerable<PlugControllerStatusDto> config, string tenantId);
-    TenantDescription GetOrAddTenant(string tenantId);
 }

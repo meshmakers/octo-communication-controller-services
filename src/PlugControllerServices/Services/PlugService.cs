@@ -1,10 +1,12 @@
+using Meshmakers.Octo.Backend.PlugControllerServices.Caches.Plugs;
 using Meshmakers.Octo.Backend.PlugControllerServices.CkModelEntities;
 using Meshmakers.Octo.Backend.PlugControllerServices.Models;
+using Meshmakers.Octo.Backend.PlugControllerServices.Repository;
 using Meshmakers.Octo.Common.Shared;
 using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Plugs.Contracts.Hubs;
 using Meshmakers.Octo.SystematizedData.Persistence;
 using Meshmakers.Octo.SystematizedData.Persistence.DataAccess;
-using Meshmakers.Octo.SystematizedData.Persistence.DatabaseEntities;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.PlugControllerServices.Services;
@@ -13,144 +15,85 @@ internal class PlugService : IPlugService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-    private readonly ISystemContext _systemContext;
-    private readonly Dictionary<string, OctoObjectId> _plugConnections = new();
+    private readonly IPlugRepository _plugRepository;
+    private readonly IPlugCache _plugCache;
+    private readonly IPlugHubCallbacks _plugHubCallbacks;
 
-    public PlugService(ISystemContext systemContext)
+    public PlugService(IPlugRepository plugRepository, IPlugCache plugCache, IPlugHubCallbacks plugHubCallbacks)
     {
-        _systemContext = systemContext;
+        _plugRepository = plugRepository;
+        _plugCache = plugCache;
+        _plugHubCallbacks = plugHubCallbacks;
     }
 
-    public async Task<PlugConfigurationDto> RegisterPlug(string tenantId, OctoObjectId plugObjectId, string connectionId)
+    public async Task<PlugConfigurationDto> RegisterPlugAsync(string tenantId, OctoObjectId plugRtId, string connectionId)
     {
         Logger.Info("[{TenantId}] Plug '{PlugRtId}' registered with connection id '{ConnectionId}'",
-            tenantId, plugObjectId, connectionId);
+            tenantId, plugRtId, connectionId);
 
-        _plugConnections[connectionId] = plugObjectId;
-        await SetPlugInState(tenantId, plugObjectId, PlugStates.Offline);
+        var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
 
-        return await GetPlugConfiguration(tenantId, plugObjectId);
+        if (!plugTenant.PlugsById.TryGetValue(plugRtId, out var plug))
+        {
+            Logger.Info("[{TenantId}] Plug '{PlugRtId}' not found in cache, fetching from repository",
+                tenantId, plugRtId);
+            var configuration = await GetPlugConfigurationAsync(tenantId, plugRtId);
+            plug = plugTenant.AddPlug(plugRtId, connectionId, configuration);
+        }
+        else
+        {
+            Logger.Warn("[{TenantId}] Plug '{PlugRtId}' already registered, updating connection id to '{ConnectionId}'",
+                tenantId, plugRtId, connectionId);
+
+            plug.UpdateConnectionId(connectionId);
+        }
+
+        await SetPlugInStateAsync(tenantId, plugRtId, PlugStates.Offline);    
+
+        return plug.Configuration;
     }
 
-    public async Task PlugUnRegistered(string tenantId, OctoObjectId plugObjectId, string connectionId)
+    public async Task PlugUnRegisteredAsync(string tenantId, OctoObjectId plugRtId, string connectionId)
     {
         Logger.Info("[{TenantId}] Plug '{PlugRtId}' unregistered with connection id '{ConnectionId}'",
-            tenantId, plugObjectId, connectionId);
+            tenantId, plugRtId, connectionId);
 
-        _plugConnections.Remove(connectionId);
-        await SetPlugInState(tenantId, plugObjectId, PlugStates.Deployed);
+        var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
+        plugTenant.RemovePlug(plugRtId);
+        await SetPlugInStateAsync(tenantId, plugRtId, PlugStates.Deployed);
     }
 
-    public async Task PlugOffline(string tenantId, string connectionId)
+    private async Task SetPlugInStateAsync(string tenantId, OctoObjectId plugRtId, PlugStates plugState)
     {
-        Logger.Info("[{TenantId}] connection id '{ConnectionId}' offline",
-            tenantId, connectionId);
-        
-        if (_plugConnections.TryGetValue(connectionId, out var plugObjectId))
-        {
-            await SetPlugInState(tenantId, plugObjectId, PlugStates.Offline);
-        }
-    }
-
-    public async Task PlugOnline(string tenantId, string connectionId)
-    {
-        Logger.Info("[{TenantId}] connection id '{ConnectionId}' online",
-            tenantId, connectionId);
-        
-        if (_plugConnections.TryGetValue(connectionId, out var plugObjectId))
-        {
-            await SetPlugInState(tenantId, plugObjectId, PlugStates.Online);
-        }
-    }
-
-    private async Task SetPlugInState(string tenantId, OctoObjectId plugObjectId, PlugStates plugState)
-    {
-        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
         Logger.Info("[{TenantId}] Setting state of plug '{PlugObjectId}' to '{PlugState}'",
-            tenantId, plugObjectId, plugState);
+            tenantId, plugRtId, plugState);
         try
         {
-            using var session = await tenantContext.Repository.StartSessionAsync();
-            session.StartTransaction();
-
-            var plugEntity = await GetPlugInAsync(session, tenantContext, plugObjectId);
-            
-            var update = new RtEntity
-            {
-                CkId = plugEntity.CkId,
-                RtId = plugEntity.RtId,
-            };
-            update.SetAttributeValue("State", AttributeValueTypes.Int, (int)plugState);
-
-            await tenantContext.Repository.ApplyChanges(session, new[]
-                { new EntityUpdateInfo(update, EntityModOptions.Update) });
-
-            await session.CommitTransactionAsync();
+            await _plugRepository.SetPlugStateAsync(tenantId, plugRtId, plugState);
         }
         catch (Exception e)
         {
             Logger.Error(e, "[{TenantId}] Error setting state of plug '{PlugObjectId}' to '{PlugState}'",
-                tenantId, plugObjectId, plugState);
-            throw new PlugServiceException($"[{tenantId}] Error setting state of plug '{plugObjectId}' to '{plugState}'", e);
+                tenantId, plugRtId, plugState);
+            
+            throw PlugPoolServiceException.CommonFailedSetPlugState(tenantId, plugRtId, plugState, e);
         }
     }
 
-
-    public async Task<PlugConfigurationDto> GetPlugConfiguration(string tenantId, OctoObjectId plugObjectId)
+    public async Task<PlugConfigurationDto> GetPlugConfigurationAsync(string tenantId, OctoObjectId plugRtId)
     {
-
         try
         {
-            var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
-            var session = await tenantContext.Repository.StartSessionAsync();
-            session.StartTransaction();
-            
-            var plugEntity = await GetPlugInAsync(session, tenantContext, plugObjectId);
+            var plugEntity = await _plugRepository.GetPlugAsync(tenantId, plugRtId);
 
             var persistentServerSettings =
                 plugEntity.Configuration?.Deserialize<PersistentServerSettings>() ?? new PersistentServerSettings();
 
-            var plugGroups = await tenantContext.Repository.GetRtAssociationTargetsAsync<RtPlug, RtPlugGroup>(session,
-                new[] { plugEntity.RtId }, Statics.RoleIdParentChild, GraphDirections.Inbound, null, new DataQueryOperation());
-
-            var plugGroupConfigurations = new List<GroupConfigurationDto>();
-            foreach (var plugGroup in plugGroups[plugEntity.RtId].Result)
-            {
-                var groupConfiguration = new GroupConfigurationDto
-                {
-                    Id = plugGroup.RtId.ToOctoObjectId(),
-                    Name = plugGroup.Designation!
-                };
-                plugGroupConfigurations.Add(groupConfiguration);
-
-                var plugMappings = await tenantContext.Repository.GetRtAssociationTargetsAsync<RtPlugGroup, RtPlugMapping>(session,
-                    new[] { plugGroup.RtId }, Statics.RoleIdParentChild, GraphDirections.Inbound, null, new DataQueryOperation());
-
-                if (plugMappings.Any())
-                {
-                    var mappings = new List<MappingConfigurationDto>();
-                    foreach (var mapping in plugMappings[plugGroup.RtId].Result)
-                    {
-                        if (!string.IsNullOrWhiteSpace(mapping.Designation) && !string.IsNullOrWhiteSpace(mapping.Configuration))
-                        {
-                            mappings.Add(new MappingConfigurationDto
-                            {
-                                Name = mapping.Designation,
-                                Id = mapping.RtId.ToOctoObjectId(),
-                                Configuration = mapping.Configuration
-                            });
-                        }
-                    }
-
-                    groupConfiguration.Mappings = mappings;
-                }
-            }
-
-            await session.CommitTransactionAsync();
-
+            var plugGroupConfigurations = await _plugRepository.GetPlugGroupConfigurationAsync(tenantId, plugRtId);
+       
             var plugConfiguration = new PlugConfigurationDto
             {
-                PlugId = plugObjectId,
+                PlugRtId = plugRtId,
                 ServerConfigurations = new[]
                 {
                     new ServerConfigurationDto
@@ -164,40 +107,110 @@ internal class PlugService : IPlugService
         }
         catch (Exception e)
         {
-            throw new PlugServiceException("Error during loading of plug configuration", e);
+            throw PlugPoolServiceException.CommonFailedCannotLoadPlugConfiguration(tenantId, plugRtId, e);
         }
     }
 
-
-    private async Task<RtPlug> GetPlugInAsync(IOctoSession session, ITenantContext tenantContext,
-        OctoObjectId plugObjectId)
+    public async Task SetPlugOnlineAsync(string tenantId, string connectionId)
     {
-        var plugEntity =
-            await tenantContext.Repository.GetRtEntityAsync<RtPlug>(session, new RtEntityId(Statics.CkIdPlug, plugObjectId));
-        if (plugEntity == null)
+        Logger.Info("[{TenantId}] connection id '{PlugRtId}' online",
+            tenantId, connectionId);
+        
+        var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
+        if (plugTenant.PlugsByConnectionId.TryGetValue(connectionId, out var plug))
         {
-            throw new Exception($"Plug {plugObjectId} not found");
+            await SetPlugInStateAsync(tenantId, plug.PlugRtId, PlugStates.Online);
         }
-
-        return plugEntity;
     }
 
-    public event EventHandler<UpdatedPlugConfigurationEventArgs>? PlugConfigurationUpdated;
-
-
-    public async Task<IEnumerable<OctoObjectId>> GetPlugs(string tenantId)
+    public async Task SetPlugOnlineAsync(string tenantId, OctoObjectId plugRtId)
     {
-        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+        Logger.Info("[{TenantId}] plug rt id '{PlugRtId}' online",
+            tenantId, plugRtId);
         
-        var session = await tenantContext.Repository.StartSessionAsync();
-        session.StartTransaction();
+        var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
+        if (plugTenant.PlugsById.TryGetValue(plugRtId, out var plug))
+        {
+            await SetPlugInStateAsync(tenantId, plug.PlugRtId, PlugStates.Online);
+        }
+    }
+
+    public async Task SetPlugOfflineAsync(string tenantId, string connectionId)
+    {
+        Logger.Info("[{TenantId}] connection id '{ConnectionId}' offline",
+            tenantId, connectionId);
         
-        var resultSet = await tenantContext.Repository.GetRtEntitiesByTypeAsync<RtPlug>(session, new DataQueryOperation());
+        var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
+        
+        if (plugTenant.PlugsByConnectionId.TryGetValue(connectionId, out var plug))
+        {
+            await SetPlugInStateAsync(tenantId, plug.PlugRtId, PlugStates.Offline);
+        }
+    }
 
-        var result = resultSet.Result.Select(x => x.RtId.ToOctoObjectId());
+    public Task ReloadTenantAsync(string tenantId)
+    {
+        Logger.Info("[{TenantId}] Reload tenant", tenantId);
+        return Task.CompletedTask;
+    }
 
-        await session.CommitTransactionAsync();
+    public async Task OnHandlePlugMappingUpdateAsync(string tenantId, UpdateInfo<RtPlugMapping> info)
+    {
+        if (info.Document != null)
+        {
+            var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
+            if (plugTenant.PlugsById.TryGetValue(info.Document.RtId.ToOctoObjectId(), out var plug))
+            {
+                var rtPlug = await _plugRepository.GetPlugByMappingAsync(tenantId, info.Document.RtId.ToOctoObjectId());
 
-        return result;
+                var configuration = await GetPlugConfigurationAsync(tenantId, rtPlug.RtId.ToOctoObjectId());
+
+                if (!configuration.Equals(plug.Configuration))
+                {
+                    plug.UpdateConfiguration(configuration);
+                    await _plugHubCallbacks.PlugConfigurationUpdatedAsync(tenantId, configuration);
+                }
+            }
+        }
+    }
+
+    public async Task OnHandlePlugGroupUpdateAsync(string tenantId, UpdateInfo<RtPlugGroup> info)
+    {
+        if (info.Document != null)
+        {
+            var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
+            if (plugTenant.PlugsById.TryGetValue(info.Document.RtId.ToOctoObjectId(), out var plug))
+            {
+                var rtPlug = await _plugRepository.GetPlugByGroupAsync(tenantId, info.Document.RtId.ToOctoObjectId());
+
+                var configuration = await GetPlugConfigurationAsync(tenantId, rtPlug.RtId.ToOctoObjectId());
+
+                if (!configuration.Equals(plug.Configuration))
+                {
+                    plug.UpdateConfiguration(configuration);
+                    await _plugHubCallbacks.PlugConfigurationUpdatedAsync(tenantId, configuration);
+                }
+            }
+        }
+    }
+
+    public async Task OnHandlePlugUpdateAsync(string tenantId, UpdateInfo<RtPlug> info)
+    {
+        if (info.Document != null)
+        {
+            var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
+            if (plugTenant.PlugsById.TryGetValue(info.Document.RtId.ToOctoObjectId(), out var plug))
+            {
+                var rtPlug = await _plugRepository.GetPlugAsync(tenantId, info.Document.RtId.ToOctoObjectId());
+
+                var configuration = await GetPlugConfigurationAsync(tenantId, rtPlug.RtId.ToOctoObjectId());
+
+                if (!configuration.Equals(plug.Configuration))
+                {
+                    plug.UpdateConfiguration(configuration);
+                    await _plugHubCallbacks.PlugConfigurationUpdatedAsync(tenantId, configuration);
+                }
+            }
+        }
     }
 }

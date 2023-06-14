@@ -55,4 +55,8 @@
       </None>
     </ItemGroup>
 
+    <ItemGroup>
+      <Folder Include="Caches\" />
+    </ItemGroup>
+
 </Project>
