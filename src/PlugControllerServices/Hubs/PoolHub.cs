@@ -30,7 +30,14 @@ public class PoolHub : Hub, IPoolHub
     {
         var tenantId = GetTenantId();
 
-        await _poolService.SetPoolOnlineAsync(tenantId, Context.ConnectionId);
+        try
+        {
+            await _poolService.SetPoolOnlineAsync(tenantId, Context.ConnectionId);
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e, "[{TenantId}] Failed to set pool online", tenantId);
+        }
 
         await base.OnConnectedAsync();
     }
@@ -43,7 +50,14 @@ public class PoolHub : Hub, IPoolHub
     {
         var tenantId = GetTenantId();
 
-        await _poolService.SetPoolOfflineAsync(tenantId, Context.ConnectionId);
+        try
+        {
+            await _poolService.SetPoolOfflineAsync(tenantId, Context.ConnectionId);
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e, "[{TenantId}] Failed to set pool offline", tenantId);
+        }
 
         await base.OnDisconnectedAsync(exception);
     }
