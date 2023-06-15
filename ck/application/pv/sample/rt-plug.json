@@ -37,7 +37,7 @@
         },
         {
           "id": "Meshmakers.Plug.Deployment.ImageVersion",
-          "value": "0.0.2305.25002"
+          "value": "arm64v8-0.0.2305.25002"
         }
       ],
       "associations": [
@@ -79,7 +79,7 @@
         },
         {
           "id": "Meshmakers.Plug.Mapping.Configuration",
-          "value": "{ \"register\": 69, \"registerType\": 3 }"
+          "value": "{ \"register\": 69, \"registerType\": 3, \"pollingInterval\": \"00:00:05\" }"
         }
       ],
       "associations": [
@@ -108,7 +108,7 @@
         },
         {
           "id": "Meshmakers.Plug.Mapping.Configuration",
-          "value": "{ \"register\": 67, \"registerType\": 3 }"
+          "value": "{ \"register\": 67, \"registerType\": 3, \"pollingInterval\": \"00:00:05\" }"
         }
       ],
       "associations": [
@@ -137,7 +137,7 @@
         },
         {
           "id": "Meshmakers.Plug.Mapping.Configuration",
-          "value": "{ \"register\": 82, \"registerType\": 3 }"
+          "value": "{ \"register\": 82, \"registerType\": 3, \"pollingInterval\": \"00:00:05\" }"
         }
       ],
       "associations": [
@@ -154,7 +154,7 @@
         },
         {
           "id": "Meshmakers.Plug.Mapping.Configuration",
-          "value": "{ \"register\": 71, \"registerType\": 3 }"
+          "value": "{ \"register\": 71, \"registerType\": 3, \"pollingInterval\": \"00:00:05\" }"
         }
       ],
       "associations": [
@@ -171,7 +171,7 @@
         },
         {
           "id": "Meshmakers.Plug.Mapping.Configuration",
-          "value": "{ \"register\": 73, \"registerType\": 3 }"
+          "value": "{ \"register\": 73, \"registerType\": 3, \"pollingInterval\": \"00:00:05\" }"
         }
       ],
       "associations": [
@@ -230,7 +230,7 @@
         },
         {
           "id": "Meshmakers.Plug.Mapping.Configuration",
-          "value": "{ \"register\": 107, \"registerType\": 4 }"
+          "value": "{ \"register\": 107, \"registerType\": 4, \"pollingInterval\": \"00:01:00\" }"
         }
       ],
       "associations": [
@@ -247,7 +247,7 @@
         },
         {
           "id": "Meshmakers.Plug.Mapping.Configuration",
-          "value": "{\"register\": 1, \"registerType\": 4 }"
+          "value": "{\"register\": 1, \"registerType\": 4, \"pollingInterval\": \"00:01:00\"}"
         }
       ],
       "associations": [

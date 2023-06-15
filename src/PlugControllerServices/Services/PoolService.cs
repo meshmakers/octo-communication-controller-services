@@ -230,7 +230,7 @@ internal class PoolService : IPoolService
     {
         Logger.Info("[{TenantId}] Setting Plug pool '{PlugPoolRtId}' online", tenantId, plugPoolRtId);
 
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
+        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
         {
             throw PlugPoolServiceException.TenantNotFound(tenantId);
         }
