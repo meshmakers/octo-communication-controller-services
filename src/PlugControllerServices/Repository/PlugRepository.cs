@@ -313,13 +313,6 @@ public class PlugRepository : IPlugRepository
             var plugGroupConfigurations = new List<GroupConfigurationDto>();
             foreach (var plugGroup in plugGroups.Result)
             {
-                var groupConfiguration = new GroupConfigurationDto
-                {
-                    Id = plugGroup.RtId.ToOctoObjectId(),
-                    Name = plugGroup.Designation!
-                };
-                plugGroupConfigurations.Add(groupConfiguration);
-                
                 if (groupResultSet.TryGetValue(plugGroup.RtId, out var mappingSet))
                 {
                     var mappings = new List<MappingConfigurationDto>();
@@ -336,7 +329,13 @@ public class PlugRepository : IPlugRepository
                         }
                     }
 
-                    groupConfiguration.Mappings = mappings;
+                    var groupConfiguration = new GroupConfigurationDto
+                    {
+                        Id = plugGroup.RtId.ToOctoObjectId(),
+                        Name = plugGroup.Designation!,
+                        Mappings = mappings
+                    };
+                    plugGroupConfigurations.Add(groupConfiguration);
                 }
             }
 

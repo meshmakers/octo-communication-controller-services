@@ -8,6 +8,9 @@ using Meshmakers.Octo.SystematizedData.Persistence.DataAccess;
 
 namespace Meshmakers.Octo.Backend.PlugControllerServices.DataSink;
 
+/// <summary>
+/// Message consumer for plug controller
+/// </summary>
 public class MessageConsumer :
     IConsumer<UpdatedValueMessageDto>
 {
@@ -15,6 +18,12 @@ public class MessageConsumer :
     private readonly ISystemContext _systemContext;
     private readonly IPlugService _plugService;
 
+    /// <summary>
+    /// Constructor
+    /// </summary>
+    /// <param name="logger"></param>
+    /// <param name="systemContext"></param>
+    /// <param name="plugService"></param>
     public MessageConsumer(ILogger<MessageConsumer> logger, ISystemContext systemContext, IPlugService plugService)
     {
         _logger = logger;
@@ -22,22 +31,18 @@ public class MessageConsumer :
         _plugService = plugService;
     }
 
+    /// <inheritdoc />
     public async Task Consume(ConsumeContext<UpdatedValueMessageDto> context)
     {
         _logger.LogInformation("[{TenantId}] Received Input: PlugRtId '{PlugRtId}', Name '{MappingId}', Value '{Value}'",
-            context.Message.TenantId, context.Message.PlugId, context.Message.MappingId, context.Message.Value);
+            context.Message.TenantId, context.Message.PlugRtId, context.Message.MappingId, context.Message.Value);
 
         var message = context.Message;
-        var config = await _plugService.GetPlugConfigurationAsync(message.TenantId, message.PlugId);
-        
-        if (config == null)
-        {
-            _logger.LogWarning("[{TenantId}] Plug '{PlugRtId}' not found", message.TenantId, message.PlugId);
-            return;
-        }
         
         try
         {
+            var config = await _plugService.GetPlugConfigurationAsync(message.TenantId, message.PlugRtId);
+
 
             var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(message.TenantId);
 
@@ -69,8 +74,7 @@ public class MessageConsumer :
         }
         catch (Exception e)
         {
-            Console.WriteLine(e);
-            throw;
+            _logger.LogError(e, "[{TenantId}] Failed to update plug '{PlugRtId}'", message.TenantId, message.PlugRtId);
         }
 
     }
