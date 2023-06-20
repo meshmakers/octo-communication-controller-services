@@ -1,0 +1,51 @@
+{
+  "entities": [
+    {
+      "ckId": "Meshmakers.Event",
+      "ckDerivedId": "System.Entity",
+      "isFinal": true,
+      "isAbstract": false,
+      "attributes": [
+        {
+          "id": "Meshmakers.Events.ReceivedDateTime",
+          "name": "ReceivedDateTime"
+        },
+        {
+          "id": "Meshmakers.Events.Message",
+          "name": "Message"
+        }
+      ],
+      "associations": [
+        {
+          "roleId": "System.ParentChild",
+          "targetCkId": "Meshmakers.Equipment",
+          "inboundMultiplicity": "N",
+          "outboundMultiplicity": "ZeroOrOne"
+        }
+      ]
+    },
+    {
+      "ckId": "Meshmakers.Alarm",
+      "ckDerivedId": "Meshmakers.Event",
+      "isFinal": true,
+      "isAbstract": false,
+      "attributes": [
+        {
+          "id": "Meshmakers.Events.State",
+          "name": "State"
+        },
+        {
+          "id": "Meshmakers.Events.ClearedDateTime",
+          "name": "ClearedDateTime"
+        },
+        {
+          "id": "Meshmakers.Events.AcknowledgedDateTime",
+          "name": "AcknowledgedDateTime"
+        }
+      ],
+      "associations": [
+
+      ]
+    }
+  ]
+}

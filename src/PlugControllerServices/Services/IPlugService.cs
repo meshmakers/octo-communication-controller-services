@@ -1,5 +1,4 @@
 using Meshmakers.Octo.Backend.PlugControllerServices.CkModelEntities;
-using Meshmakers.Octo.Backend.PlugControllerServices.Models;
 using Meshmakers.Octo.Common.Shared;
 using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
 using Meshmakers.Octo.SystematizedData.Persistence.DataAccess;
@@ -41,14 +40,6 @@ public interface IPlugService
     /// Sets a plug online
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="connectionId">Identifier of connection</param>
-    /// <returns></returns>
-    Task SetPlugOnlineAsync(string tenantId, string connectionId);
-    
-    /// <summary>
-    /// Sets a plug online
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
     /// <param name="plugRtId">Object Id of plug</param>
     /// <returns></returns>
     Task SetPlugOnlineAsync(string tenantId, OctoObjectId plugRtId);
@@ -57,9 +48,9 @@ public interface IPlugService
     /// Sets a plug offline
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="connectionId">Identifier of connection</param>
+    /// <param name="plugRtId">Object Id of plug</param>
     /// <returns></returns>
-    Task SetPlugOfflineAsync(string tenantId, string connectionId);
+    Task SetPlugOfflineAsync(string tenantId, OctoObjectId plugRtId);
     
     /// <summary>
     /// Reloads an entire tenant
