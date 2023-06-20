@@ -83,7 +83,7 @@ public class PoolHub : Hub, IPoolHub
         }
         catch (Exception e)
         {
-            Logger.Error(e, "Cannot register plugPoolPlug pool operator");
+            Logger.Error(e, "Cannot register pool operator");
             throw;
         }
     }
@@ -105,7 +105,7 @@ public class PoolHub : Hub, IPoolHub
         }
         catch (Exception e)
         {
-            Logger.Error(e, "Cannot unregister plugPoolPlug pool operator");
+            Logger.Error(e, "Cannot unregister pool operator");
             throw;
         }
     }
