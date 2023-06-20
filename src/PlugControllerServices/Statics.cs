@@ -25,7 +25,7 @@ internal static class Statics
     
     public static string? GetPlugPoolName(this HttpContext httpContext)
     {
-        return httpContext.Request.Headers[PlugRtId];
+        return httpContext.Request.Headers[PoolName];
     }
     
     public static OctoObjectId? GetPlugRtId(this HttpContext httpContext)
