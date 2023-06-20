@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Meshmakers.Octo.Backend.DistributedCache;
 using Meshmakers.Octo.Backend.PlugControllerServices.Caches.Pools.Descriptions;
 using Meshmakers.Octo.Common.Shared;
+using NLog;
 
 namespace Meshmakers.Octo.Backend.PlugControllerServices.Caches.Pools;
 
@@ -10,6 +11,7 @@ internal class PoolHubCache : IPoolCachePublish, IPoolCache
     private readonly IDistributedWithPubSubCache _distributedWithPubSubCache;
     private readonly ConcurrentDictionary<string, PoolTenant> _tenantDescriptions = new();
     private IChannel<string>? _channel;
+    private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
     public PoolHubCache(IDistributedWithPubSubCache distributedWithPubSubCache)
     {
@@ -18,6 +20,8 @@ internal class PoolHubCache : IPoolCachePublish, IPoolCache
     
     public async Task InitializeAsync()
     {
+        Logger.Debug("Initializing PoolHubCache");
+        
         if (_channel == null)
         {
             _channel = SubscribeToPlugHubConfigurationUpdates();
@@ -76,6 +80,8 @@ internal class PoolHubCache : IPoolCachePublish, IPoolCache
 
     private void ReloadConfiguration(string configuration)
     {
+        Logger.Info("Reloading PoolHubCache configuration: {Configuration}", configuration);
+        
         var values = configuration.Deserialize<IEnumerable<PoolTenantDescription>>();
         
         _tenantDescriptions.Clear();
@@ -89,6 +95,8 @@ internal class PoolHubCache : IPoolCachePublish, IPoolCache
 
     public void PublishConfiguration()
     {
+        Logger.Info("Publishing PoolHubCache configuration");
+
         var tenantDescriptions= 
             _tenantDescriptions.Select(x => x.Value.GetTenantDescription());
         

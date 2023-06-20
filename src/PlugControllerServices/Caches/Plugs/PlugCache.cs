@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Meshmakers.Octo.Backend.DistributedCache;
 using Meshmakers.Octo.Backend.PlugControllerServices.Caches.Plugs.Descriptions;
 using Meshmakers.Octo.Common.Shared;
+using NLog;
 
 namespace Meshmakers.Octo.Backend.PlugControllerServices.Caches.Plugs;
 
@@ -10,6 +11,7 @@ internal class PlugCache : IPlugCachePublish, IPlugCache
     private readonly IDistributedWithPubSubCache _distributedWithPubSubCache;
     private readonly ConcurrentDictionary<string, PlugTenant> _tenantDescriptions = new();
     private IChannel<string>? _channel;
+    private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
     public PlugCache(IDistributedWithPubSubCache distributedWithPubSubCache)
     {
@@ -18,6 +20,8 @@ internal class PlugCache : IPlugCachePublish, IPlugCache
     
     public async Task InitializeAsync()
     {
+        Logger.Debug("Initializing PlugCache");
+        
         if (_channel == null)
         {
             _channel = SubscribeToPlugHubConfigurationUpdates();
@@ -71,6 +75,8 @@ internal class PlugCache : IPlugCachePublish, IPlugCache
 
     private void ReloadConfiguration(string configuration)
     {
+        Logger.Info("Reloading PlugCache configuration: {Configuration}", configuration);
+
         var values = configuration.Deserialize<IEnumerable<PlugTenantDescription>>();
         
         _tenantDescriptions.Clear();
@@ -83,6 +89,8 @@ internal class PlugCache : IPlugCachePublish, IPlugCache
 
     public void PublishConfiguration()
     {
+        Logger.Info("Publishing PlugCache configuration");
+
         var tenantDescriptions= 
             _tenantDescriptions.Select(x => x.Value.GetTenantDescription());
         
