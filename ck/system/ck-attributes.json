@@ -111,6 +111,44 @@
           "name": "ConfigurationError"
         }
       ]
+    },
+    {
+      "id": "Meshmakers.Events.State",
+      "valueType": "Int",
+      "selectionValues": [
+        {
+          "key": 0,
+          "name": "Received"
+        },
+        {
+          "key": 1,
+          "name": "Cleared"
+        },
+        {
+          "key": 2,
+          "name": "Active"
+        },
+        {
+          "key": 3,
+          "name": "Acknowledged"
+        }
+      ]
+    },
+    {
+      "id": "Meshmakers.Events.Message",
+      "valueType": "String"
+    },
+    {
+      "id": "Meshmakers.Events.ReceivedDateTime",
+      "valueType": "DateTime"
+    },
+    {
+      "id": "Meshmakers.Events.ClearedDateTime",
+      "valueType": "DateTime"
+    },
+    {
+      "id": "Meshmakers.Events.AcknowledgedDateTime",
+      "valueType": "DateTime"
     }
   ]
 }

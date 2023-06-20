@@ -6,7 +6,7 @@ using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
 
 namespace Meshmakers.Octo.Backend.PlugControllerServices.Caches.Plugs;
 
-public class PlugTenant
+internal class PlugTenant
 {
     private readonly IPlugCachePublish _plugCachePublish;
     public string TenantId { get; }
@@ -72,5 +72,13 @@ public class PlugTenant
             TenantId = TenantId,
             Plugs = PlugsById.Values.Select(p => p.GetPlugDescription())
         };
+    }
+
+    public void Clear()
+    {
+        _plugsByConnectId.Clear();
+        _plugsById.Clear();
+        
+        _plugCachePublish.PublishConfiguration();
     }
 }

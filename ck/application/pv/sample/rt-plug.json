@@ -37,7 +37,7 @@
         },
         {
           "id": "Meshmakers.Plug.Deployment.ImageVersion",
-          "value": "arm64v8-0.0.2305.25002"
+          "value": "0.0.2306.16001"
         }
       ],
       "associations": [
@@ -200,7 +200,7 @@
         },
         {
           "id": "Meshmakers.Plug.Deployment.ImageVersion",
-          "value": "0.0.2305.25002"
+          "value": "0.0.2306.16001"
         }
       ],
       "associations": [

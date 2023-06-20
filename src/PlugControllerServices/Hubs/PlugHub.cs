@@ -20,8 +20,9 @@ public class PlugHub : Hub, IPlugHub
     public override async Task OnConnectedAsync()
     {
         var tenantId = GetTenantId();
+        var plugRtId = GetPlugRtId();
 
-        await _plugService.SetPlugOnlineAsync(tenantId, Context.ConnectionId);
+        await _plugService.SetPlugOnlineAsync(tenantId, plugRtId);
 
         await base.OnConnectedAsync();
     }
@@ -29,8 +30,9 @@ public class PlugHub : Hub, IPlugHub
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         var tenantId = GetTenantId();
+        var plugRtId = GetPlugRtId();
 
-        await _plugService.SetPlugOfflineAsync(tenantId, Context.ConnectionId);
+        await _plugService.SetPlugOfflineAsync(tenantId, plugRtId);
 
         await base.OnDisconnectedAsync(exception);
     }
@@ -76,5 +78,17 @@ public class PlugHub : Hub, IPlugHub
         }
 
         return tenantId;
+    }
+    
+    private OctoObjectId GetPlugRtId()
+    {
+        var plugRtId = Context.GetHttpContext()?.GetPlugRtId();
+        if (plugRtId == null)
+        {
+            Context.Abort();
+            throw new InvalidOperationException("PlugRtId is null");
+        }
+
+        return plugRtId.Value;
     }
 }

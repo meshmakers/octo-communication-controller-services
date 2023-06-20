@@ -1,6 +1,6 @@
 namespace Meshmakers.Octo.Backend.PlugControllerServices.Caches.Plugs;
 
-public interface IPlugCache
+internal interface IPlugCache
 {
     Task InitializeAsync();
     PlugTenant AddOrUpdateTenant(string tenantId);

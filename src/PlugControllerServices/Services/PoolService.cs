@@ -49,7 +49,7 @@ internal class PoolService : IPoolService
 
             if (rtPlugPool == null)
             {
-                throw PlugPoolServiceException.CannotCreatePlugPool(tenantId, plugPoolName);
+                throw PoolServiceException.CannotCreatePlugPool(tenantId, plugPoolName);
             }
         }
 
@@ -80,7 +80,7 @@ internal class PoolService : IPoolService
 
         if (!_poolCache.TryGetTenant(tenantId, out var tenantDescription) || tenantDescription == null)
         {
-            throw PlugPoolServiceException.TenantNotFound(tenantId);
+            throw PoolServiceException.TenantNotFound(tenantId);
         }
 
         if (tenantDescription.PoolsByName.TryGetValue(plugPoolName, out var poolDescription))
@@ -94,7 +94,7 @@ internal class PoolService : IPoolService
             return poolDescription.PlugPoolRtId;
         }
 
-        throw PlugPoolServiceException.PlugPoolNotFound(tenantId, plugPoolName);
+        throw PoolServiceException.PlugPoolNotFound(tenantId, plugPoolName);
     }
 
     /// <inheritdoc />
@@ -104,7 +104,7 @@ internal class PoolService : IPoolService
 
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
         {
-            throw PlugPoolServiceException.TenantNotFound(tenantId);
+            throw PoolServiceException.TenantNotFound(tenantId);
         }
 
         if (poolTenant.PoolsById.TryGetValue(plugPoolRtId, out var poolDescription))
@@ -120,25 +120,24 @@ internal class PoolService : IPoolService
             return result;
         }
 
-        throw PlugPoolServiceException.PlugPoolNotFound(tenantId, plugPoolRtId);
+        throw PoolServiceException.PlugPoolNotFound(tenantId, plugPoolRtId);
     }
 
-    public Task ReloadTenantAsync(string tenantId)
+    public async Task ReloadTenantAsync(string tenantId)
     {
         Logger.Info("[{TenantId}] Reloading tenant", tenantId);
 
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
         {
-            throw PlugPoolServiceException.TenantNotFound(tenantId);
+            throw PoolServiceException.TenantNotFound(tenantId);
         }
 
-        // TODO: Implement reload of tenant
-        //tenantDescription.
-        //var plugPoolList = await _plugRepository.GetPlugPoolsAsync(tenantId);
+        foreach (var keyValuePair in poolTenant.PlugsById)
+        {
+            await UndeployPlugAsync(tenantId, keyValuePair.Value.PoolRtId, keyValuePair.Value.PlugRtId);
+        }
 
-        //    throw new NotImplementedException();
-
-        return Task.CompletedTask;
+        poolTenant.Clear();
     }
 
     /// <inheritdoc />
@@ -147,7 +146,7 @@ internal class PoolService : IPoolService
         Logger.Info("[{TenantId}] Deploying Plug '{PlugRtId}' to pool '{PoolRtId}'", tenantId, plugRtId, plugPoolRtId);
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
         {
-            throw PlugPoolServiceException.TenantNotFound(tenantId);
+            throw PoolServiceException.TenantNotFound(tenantId);
         }
 
         if (poolTenant.PoolsById.TryGetValue(plugPoolRtId, out var poolDescription))
@@ -163,7 +162,7 @@ internal class PoolService : IPoolService
             return;
         }
 
-        throw PlugPoolServiceException.PlugPoolNotFound(tenantId, plugPoolRtId);
+        throw PoolServiceException.PlugPoolNotFound(tenantId, plugPoolRtId);
     }
 
     /// <inheritdoc />
@@ -173,9 +172,9 @@ internal class PoolService : IPoolService
 
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
         {
-            throw PlugPoolServiceException.TenantNotFound(tenantId);
+            throw PoolServiceException.TenantNotFound(tenantId);
         }
-        
+
         if (poolTenant.PlugsById.TryGetValue(plugRtId, out var plugDescription))
         {
             if (poolTenant.PoolsById.TryGetValue(plugDescription.PoolRtId, out var poolDescription))
@@ -190,10 +189,10 @@ internal class PoolService : IPoolService
                 return;
             }
 
-            throw PlugPoolServiceException.PlugPoolNotFound(tenantId, plugDescription.PoolRtId);
+            throw PoolServiceException.PlugPoolNotFound(tenantId, plugDescription.PoolRtId);
         }
 
-        throw PlugPoolServiceException.PlugNotFound(tenantId, plugRtId);
+        throw PoolServiceException.PlugNotFound(tenantId, plugRtId);
     }
 
     /// <inheritdoc />
@@ -203,9 +202,9 @@ internal class PoolService : IPoolService
 
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
         {
-            throw PlugPoolServiceException.TenantNotFound(tenantId);
+            throw PoolServiceException.TenantNotFound(tenantId);
         }
-        
+
         if (poolTenant.PoolsById.TryGetValue(plugPoolRtId, out var poolDescription))
         {
             await _plugRepository.SetPlugPoolStateAsync(tenantId, poolDescription.PlugPoolRtId, PlugPoolStates.Offline);
@@ -213,11 +212,11 @@ internal class PoolService : IPoolService
     }
 
     /// <inheritdoc />
-    public async Task SetPoolOfflineAsync(string tenantId, string connectionId)
+    public async Task SetPoolOfflineAsync(string tenantId, string poolName)
     {
         if (_poolCache.TryGetTenant(tenantId, out var poolTenant) && poolTenant != null)
         {
-            poolTenant.PoolsByConnectionId.TryGetValue(connectionId, out var poolDescription);
+            poolTenant.PoolsByName.TryGetValue(poolName, out var poolDescription);
             if (poolDescription != null)
             {
                 await SetPoolOfflineAsync(tenantId, poolDescription.PlugPoolRtId);
@@ -232,7 +231,7 @@ internal class PoolService : IPoolService
 
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
         {
-            throw PlugPoolServiceException.TenantNotFound(tenantId);
+            throw PoolServiceException.TenantNotFound(tenantId);
         }
 
         if (poolTenant.PoolsById.TryGetValue(plugPoolRtId, out var poolDescription))
@@ -242,15 +241,17 @@ internal class PoolService : IPoolService
     }
 
     /// <inheritdoc />
-    public async Task SetPoolOnlineAsync(string tenantId, string connectionId)
+    public async Task SetPoolOnlineAsync(string tenantId, string poolName)
     {
-        if (_poolCache.TryGetTenant(tenantId, out var poolTenant) && poolTenant != null)
+        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
         {
-            poolTenant.PoolsByConnectionId.TryGetValue(connectionId, out var poolDescription);
-            if (poolDescription != null)
-            {
-                await SetPoolOnlineAsync(tenantId, poolDescription.PlugPoolRtId);
-            }
+            throw PoolServiceException.TenantNotFound(tenantId);
+        }
+
+        poolTenant.PoolsByName.TryGetValue(poolName, out var poolDescription);
+        if (poolDescription != null)
+        {
+            await SetPoolOnlineAsync(tenantId, poolDescription.PlugPoolRtId);
         }
     }
 
@@ -267,8 +268,8 @@ internal class PoolService : IPoolService
             PlugPoolRtId = plugPoolRtId,
             PlugPoolName = plugPoolName,
             PlugRtId = rtPlug.RtId.ToOctoObjectId(),
-            ImageName = rtPlug.ImageName ?? throw PlugPoolServiceException.ImageNameNotSet(),
-            Version = rtPlug.ImageVersion ?? throw PlugPoolServiceException.ImageVersionNotSet(),
+            ImageName = rtPlug.ImageName ?? throw PoolServiceException.ImageNameNotSet(),
+            Version = rtPlug.ImageVersion ?? throw PoolServiceException.ImageVersionNotSet(),
         };
     }
 }

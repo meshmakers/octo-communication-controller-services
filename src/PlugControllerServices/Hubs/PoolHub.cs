@@ -29,10 +29,11 @@ public class PoolHub : Hub, IPoolHub
     public override async Task OnConnectedAsync()
     {
         var tenantId = GetTenantId();
+        var poolName = GetPoolName();
 
         try
         {
-            await _poolService.SetPoolOnlineAsync(tenantId, Context.ConnectionId);
+            await _poolService.SetPoolOnlineAsync(tenantId, poolName);
         }
         catch (Exception e)
         {
@@ -68,7 +69,7 @@ public class PoolHub : Hub, IPoolHub
     /// <param name="plugPoolName">Name of plugPoolPlug pool</param>
     /// <returns></returns>
     /// <exception cref="InvalidOperationException"></exception>
-    /// <exception cref="PlugPoolServiceException"></exception>
+    /// <exception cref="PoolServiceException"></exception>
     public async Task<PlugPoolConfigurationDto> RegisterPlugPoolOperatorAsync(string plugPoolName)
     {
         var tenantId = GetTenantId();
@@ -94,7 +95,7 @@ public class PoolHub : Hub, IPoolHub
     /// <param name="plugPoolName">Name of plugPoolPlug pool</param>
     /// <returns></returns>
     /// <exception cref="InvalidOperationException"></exception>
-    /// <exception cref="PlugPoolServiceException"></exception>
+    /// <exception cref="PoolServiceException"></exception>
     public async Task UnregisterPlugPoolOperatorAsync(string plugPoolName)
     {
         var tenantId = GetTenantId();
@@ -121,5 +122,17 @@ public class PoolHub : Hub, IPoolHub
         }
 
         return tenantId;
+    }
+    
+    private string GetPoolName()
+    {
+        var poolName = Context.GetHttpContext()?.GetPlugPoolName();
+        if (poolName == null)
+        {
+            Context.Abort();
+            throw new InvalidOperationException("PoolName is null");
+        }
+
+        return poolName;
     }
 }

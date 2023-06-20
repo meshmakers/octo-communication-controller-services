@@ -2,18 +2,11 @@
   "entities": [
     {
       "ckId": "Meshmakers.Asset",
-      "ckDerivedId": "System.Entity",
+      "ckDerivedId": "Meshmakers.Equipment",
       "isFinal": true,
       "isAbstract": false,
       "attributes": [
-        {
-          "id": "Meshmakers.Designation",
-          "name": "Designation"
-        },
-        {
-          "id": "Meshmakers.Description",
-          "name": "Description"
-        }
+
       ],
       "associations": [
         {
@@ -26,7 +19,7 @@
     },
     {
       "ckId": "Meshmakers.Asset.Part",
-      "ckDerivedId": "System.Entity",
+      "ckDerivedId": "Meshmakers.Equipment",
       "isFinal": true,
       "isAbstract": false,
       "attributes": [
@@ -43,7 +36,7 @@
     },
     {
       "ckId": "Meshmakers.Asset.Component",
-      "ckDerivedId": "System.Entity",
+      "ckDerivedId": "Meshmakers.Equipment",
       "isFinal": true,
       "isAbstract": false,
       "attributes": [

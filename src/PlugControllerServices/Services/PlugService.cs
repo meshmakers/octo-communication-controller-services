@@ -76,7 +76,7 @@ internal class PlugService : IPlugService
             Logger.Error(e, "[{TenantId}] Error setting state of plug '{PlugObjectId}' to '{PlugState}'",
                 tenantId, plugRtId, plugState);
             
-            throw PlugPoolServiceException.CommonFailedSetPlugState(tenantId, plugRtId, plugState, e);
+            throw PlugServiceException.CommonFailedSetPlugState(tenantId, plugRtId, plugState, e);
         }
     }
 
@@ -107,19 +107,7 @@ internal class PlugService : IPlugService
         }
         catch (Exception e)
         {
-            throw PlugPoolServiceException.CommonFailedCannotLoadPlugConfiguration(tenantId, plugRtId, e);
-        }
-    }
-
-    public async Task SetPlugOnlineAsync(string tenantId, string connectionId)
-    {
-        Logger.Info("[{TenantId}] connection id '{PlugRtId}' online",
-            tenantId, connectionId);
-        
-        var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
-        if (plugTenant.PlugsByConnectionId.TryGetValue(connectionId, out var plug))
-        {
-            await SetPlugInStateAsync(tenantId, plug.PlugRtId, PlugStates.Online);
+            throw PlugServiceException.CommonFailedCannotLoadPlugConfiguration(tenantId, plugRtId, e);
         }
     }
 
@@ -135,22 +123,26 @@ internal class PlugService : IPlugService
         }
     }
 
-    public async Task SetPlugOfflineAsync(string tenantId, string connectionId)
+    public async Task SetPlugOfflineAsync(string tenantId, OctoObjectId plugRtId)
     {
-        Logger.Info("[{TenantId}] connection id '{ConnectionId}' offline",
-            tenantId, connectionId);
-        
-        var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
-        
-        if (plugTenant.PlugsByConnectionId.TryGetValue(connectionId, out var plug))
+        if (_plugCache.TryGetTenant(tenantId, out var plugTenant) && plugTenant != null)
         {
-            await SetPlugInStateAsync(tenantId, plug.PlugRtId, PlugStates.Offline);
+            await _plugRepository.SetPlugStateAsync(tenantId, plugRtId, PlugStates.Offline);
         }
     }
 
     public Task ReloadTenantAsync(string tenantId)
     {
         Logger.Info("[{TenantId}] Reload tenant", tenantId);
+
+
+        if (!_plugCache.TryGetTenant(tenantId, out var plugTenant) || plugTenant == null)
+        {
+            throw PlugServiceException.TenantNotFound(tenantId);
+        }
+        
+        plugTenant.Clear();
+        
         return Task.CompletedTask;
     }
 

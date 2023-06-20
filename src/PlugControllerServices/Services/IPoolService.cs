@@ -72,9 +72,9 @@ public interface IPoolService
     /// Sets a plug pool offline using the connection id
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="connectionId">Identifier of connection</param>
+    /// <param name="poolName">Name of plug pool</param>
     /// <returns></returns>
-    Task SetPoolOfflineAsync(string tenantId, string connectionId);
+    Task SetPoolOfflineAsync(string tenantId, string poolName);
     
     /// <summary>
     /// Sets a plug pool online
@@ -88,9 +88,9 @@ public interface IPoolService
     /// Sets a plug pool online using the connection id
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="connectionId">Identifier of connection</param>
+    /// <param name="poolName">Name of plug pool</param>
     /// <returns></returns>
-    Task SetPoolOnlineAsync(string tenantId, string connectionId);
+    Task SetPoolOnlineAsync(string tenantId, string poolName);
 
     /// <summary>
     /// Handles a plug pool update
