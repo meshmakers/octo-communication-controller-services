@@ -37,7 +37,7 @@
         },
         {
           "id": "Meshmakers.CommunicationAdapter.Deployment.ImageVersion",
-          "value": "0.0.2306.20003"
+          "value": "0.0.2306.24002"
         }
       ],
       "associations": [
@@ -153,6 +153,18 @@
           "value": "Power Consumption"
         },
         {
+          "id": "Meshmakers.Plug.Mapping.Reference.Id",
+          "value": "5fc8fda18b2fc75f925e21c2"
+        },
+        {
+          "id": "Meshmakers.Plug.Mapping.Reference.CkId",
+          "value": "Meshmakers.Assets.Meter"
+        },
+        {
+          "id": "Meshmakers.Plug.Mapping.Reference.AttributeId",
+          "value": "Meshmakers.TechDesc.ActivePower"
+        },
+        {
           "id": "Meshmakers.Plug.Mapping.Configuration",
           "value": "{ \"register\": 71, \"registerType\": 3, \"pollingInterval\": \"00:00:05\" }"
         }
@@ -168,6 +180,18 @@
         {
           "id": "Meshmakers.Designation",
           "value": "Net Consumption"
+        },
+        {
+          "id": "Meshmakers.Plug.Mapping.Reference.Id",
+          "value": "5fc8fda18b2fc75f925e21c1"
+        },
+        {
+          "id": "Meshmakers.Plug.Mapping.Reference.CkId",
+          "value": "Meshmakers.Assets.Meter"
+        },
+        {
+          "id": "Meshmakers.Plug.Mapping.Reference.AttributeId",
+          "value": "Meshmakers.TechDesc.ActivePower"
         },
         {
           "id": "Meshmakers.Plug.Mapping.Configuration",
@@ -200,7 +224,7 @@
         },
         {
           "id": "Meshmakers.CommunicationAdapter.Deployment.ImageVersion",
-          "value": "0.0.2306.20003"
+          "value": "0.0.2306.24002"
         }
       ],
       "associations": [
