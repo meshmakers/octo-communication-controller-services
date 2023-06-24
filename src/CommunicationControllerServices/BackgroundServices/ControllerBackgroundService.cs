@@ -227,7 +227,7 @@ internal class ControllerBackgroundService : BackgroundService
                     if (info.Document != null)
                     {
                         Logger.Info("[{TenantId}] Plug '{RtId}' inserted", tenantId, info.Document.OriginRtId);
-                        await _poolService.DeployPlugAsync(tenantId, info.Document.TargetRtId.ToOctoObjectId(),
+                        await _poolService.DeployAdapterAsync(tenantId, info.Document.TargetRtId.ToOctoObjectId(),
                             info.Document.OriginRtId.ToOctoObjectId());
                     }
                     break;
@@ -235,7 +235,7 @@ internal class ControllerBackgroundService : BackgroundService
                     if (info.DocumentBeforeChange != null)
                     {
                         Logger.Info("[{TenantId}] Plug '{RtId}'  deleted", tenantId, info.DocumentBeforeChange.OriginRtId);
-                        await _poolService.UndeployPlugAsync(tenantId, info.DocumentBeforeChange.TargetRtId.ToOctoObjectId(),
+                        await _poolService.UndeployAdapterAsync(tenantId, info.DocumentBeforeChange.TargetRtId.ToOctoObjectId(),
                             info.DocumentBeforeChange.OriginRtId.ToOctoObjectId());
                     }
                     break;
@@ -260,7 +260,7 @@ internal class ControllerBackgroundService : BackgroundService
                     if (info.Document != null)
                     {
                         Logger.Info("[{TenantId}] Plug '{RtId}' inserted", tenantId, info.Document.OriginRtId);
-                        await _poolService.DeployPlugAsync(tenantId, info.Document.TargetRtId.ToOctoObjectId(),
+                        await _poolService.DeployAdapterAsync(tenantId, info.Document.TargetRtId.ToOctoObjectId(),
                             info.Document.OriginRtId.ToOctoObjectId());
                     }
 
@@ -269,7 +269,7 @@ internal class ControllerBackgroundService : BackgroundService
                     if (info.DocumentBeforeChange != null)
                     {
                         Logger.Info("[{TenantId}] Plug '{RtId}'  deleted", tenantId, info.DocumentBeforeChange.OriginRtId);
-                        await _poolService.UndeployPlugAsync(tenantId, info.DocumentBeforeChange.TargetRtId.ToOctoObjectId(),
+                        await _poolService.UndeployAdapterAsync(tenantId, info.DocumentBeforeChange.TargetRtId.ToOctoObjectId(),
                             info.DocumentBeforeChange.OriginRtId.ToOctoObjectId());
                     }
 

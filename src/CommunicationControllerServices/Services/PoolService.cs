@@ -103,9 +103,9 @@ internal class PoolService : IPoolService
     }
 
     /// <inheritdoc />
-    public async Task<PoolConfigurationDto> GetCurrentPlugsAsync(string tenantId, OctoObjectId poolRtId)
+    public async Task<PoolConfigurationDto> GetCurrentAdapterAsync(string tenantId, OctoObjectId poolRtId)
     {
-        Logger.Info("[{TenantId}] Getting current plugs for pool '{PoolRtId}'", tenantId, poolRtId);
+        Logger.Info("[{TenantId}] Getting current adapters for pool '{PoolRtId}'", tenantId, poolRtId);
 
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
         {
@@ -125,10 +125,10 @@ internal class PoolService : IPoolService
             var result = new PoolConfigurationDto
             {
                 CommunicationAdapterList = rtPlugs
-                    .Select(rtPlug => CreatePoolPlugDto(poolRtId, poolDescription.PoolName, rtPlug))
+                    .Select(rtPlug => CreatePoolAdapterDto(poolRtId, poolDescription.PoolName, rtPlug))
             };
             
-            Logger.Info("[{TenantId}] Current plugs for Pool '{PoolRtId}' retrieved", tenantId, poolRtId);
+            Logger.Info("[{TenantId}] Current adapters for Pool '{PoolRtId}' retrieved", tenantId, poolRtId);
             return result;
         }
 
@@ -146,14 +146,14 @@ internal class PoolService : IPoolService
 
         foreach (var keyValuePair in poolTenant.PlugsById)
         {
-            await UndeployPlugAsync(tenantId, keyValuePair.Value.PoolRtId, keyValuePair.Value.PlugRtId);
+            await UndeployAdapterAsync(tenantId, keyValuePair.Value.PoolRtId, keyValuePair.Value.PlugRtId);
         }
 
         poolTenant.Clear();
     }
 
     /// <inheritdoc />
-    public async Task DeployPlugAsync(string tenantId, OctoObjectId poolRtId, OctoObjectId plugRtId)
+    public async Task DeployAdapterAsync(string tenantId, OctoObjectId poolRtId, OctoObjectId plugRtId)
     {
         Logger.Info("[{TenantId}] Deploying Plug '{PlugRtId}' to pool '{PoolRtId}'", tenantId, plugRtId, poolRtId);
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
@@ -164,7 +164,7 @@ internal class PoolService : IPoolService
         if (poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
         {
             var rtPlug = await _plugRepository.GetPlugAsync(tenantId, plugRtId);
-            await _poolHubCallbacks.DeployCommunicationAdapterAsync(tenantId, CreatePoolPlugDto(poolRtId,
+            await _poolHubCallbacks.DeployCommunicationAdapterAsync(tenantId, CreatePoolAdapterDto(poolRtId,
                 poolDescription.PoolName,
                 rtPlug));
 
@@ -178,7 +178,7 @@ internal class PoolService : IPoolService
     }
 
     /// <inheritdoc />
-    public async Task UndeployPlugAsync(string tenantId, OctoObjectId poolRtId, OctoObjectId plugRtId)
+    public async Task UndeployAdapterAsync(string tenantId, OctoObjectId poolRtId, OctoObjectId plugRtId)
     {
         Logger.Info("[{TenantId}] Undeploying Plug '{PlugRtId}' from pool '{PoolRtId}'", tenantId, plugRtId, poolRtId);
 
@@ -192,7 +192,7 @@ internal class PoolService : IPoolService
             if (poolTenant.PoolsById.TryGetValue(plugDescription.PoolRtId, out var poolDescription))
             {
                 var rtPlug = await _plugRepository.GetPlugAsync(tenantId, plugRtId);
-                await _poolHubCallbacks.UndeployCommunicationAdapterAsync(tenantId, CreatePoolPlugDto(poolDescription.PoolRtId,
+                await _poolHubCallbacks.UndeployCommunicationAdapterAsync(tenantId, CreatePoolAdapterDto(poolDescription.PoolRtId,
                     poolDescription.PoolName, rtPlug));
 
                 poolTenant.RemovePlug(rtPlug.RtId.ToOctoObjectId());
@@ -291,8 +291,8 @@ internal class PoolService : IPoolService
                     if (info.UpdateFields.Contains("attributes." + nameof(RtPlug.ImageName).ToCamelCase()) ||
                         info.UpdateFields.Contains("attributes." + nameof(RtPlug.ImageVersion).ToCamelCase()))
                     {
-                        await UndeployPlugAsync(tenantId, plug.PoolRtId, plug.PlugRtId);
-                        await DeployPlugAsync(tenantId, plug.PoolRtId, plug.PlugRtId);
+                        await UndeployAdapterAsync(tenantId, plug.PoolRtId, plug.PlugRtId);
+                        await DeployAdapterAsync(tenantId, plug.PoolRtId, plug.PlugRtId);
                     }
                 }
                 break;
@@ -303,13 +303,14 @@ internal class PoolService : IPoolService
 
     }
 
-    private PoolCommunicationAdapterDto CreatePoolPlugDto(OctoObjectId poolRtId, string poolName, RtPlug rtPlug)
+    private PoolCommunicationAdapterDto CreatePoolAdapterDto(OctoObjectId poolRtId, string poolName, RtPlug rtPlug)
     {
         return new PoolCommunicationAdapterDto
         {
             PoolRtId = poolRtId,
             PoolName = poolName,
             AdapterRtId = rtPlug.RtId.ToOctoObjectId(),
+            AdapterCkId = rtPlug.CkId,
             ImageName = rtPlug.ImageName ?? throw PoolServiceException.ImageNameNotSet(),
             Version = rtPlug.ImageVersion ?? throw PoolServiceException.ImageVersionNotSet(),
         };

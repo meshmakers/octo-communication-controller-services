@@ -33,7 +33,7 @@ public interface IPoolService
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolRtId">The object id of the pool runtime entity</param>
     /// <returns></returns>
-    Task<PoolConfigurationDto> GetCurrentPlugsAsync(string tenantId, OctoObjectId poolRtId);
+    Task<PoolConfigurationDto> GetCurrentAdapterAsync(string tenantId, OctoObjectId poolRtId);
     
     /// <summary>
     /// Reloads an entire tenant
@@ -49,7 +49,7 @@ public interface IPoolService
     /// <param name="poolRtId">The object id of the pool</param>
     /// <param name="plugRtId">The object id of the plug</param>
     /// <returns></returns>
-    Task DeployPlugAsync(string tenantId, OctoObjectId poolRtId, OctoObjectId plugRtId);
+    Task DeployAdapterAsync(string tenantId, OctoObjectId poolRtId, OctoObjectId plugRtId);
     
     /// <summary>
     /// Undeploy a plug from a pool
@@ -58,7 +58,7 @@ public interface IPoolService
     /// <param name="poolRtId">The object id of the pool</param>
     /// <param name="plugRtId">The object id of the plug</param>
     /// <returns></returns>
-    Task UndeployPlugAsync(string tenantId, OctoObjectId poolRtId, OctoObjectId plugRtId);
+    Task UndeployAdapterAsync(string tenantId, OctoObjectId poolRtId, OctoObjectId plugRtId);
 
     /// <summary>
     /// Sets a pool offline
