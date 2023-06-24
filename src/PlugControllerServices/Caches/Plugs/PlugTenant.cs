@@ -33,10 +33,12 @@ internal class PlugTenant
         _plugCachePublish = plugCachePublish;
         
         TenantId = tenantId;
+
+        var plugs = plugDescriptions.Select(p => new Plug(plugCachePublish, p)).ToArray();
         _plugsByConnectId = new ConcurrentDictionary<string, Plug>(
-            plugDescriptions.ToDictionary(p => p.ConnectionId, p => new Plug(plugCachePublish, p)));
+            plugs.ToDictionary(p => p.ConnectionId, p => p));
         _plugsById = new ConcurrentDictionary<OctoObjectId, Plug>(
-            plugDescriptions.ToDictionary(p => p.PlugRtId, p => new Plug(plugCachePublish, p)));
+            plugs.ToDictionary(p => p.PlugRtId, p => p));
         PlugsByConnectionId = new ReadOnlyDictionary<string, Plug>(_plugsByConnectId);
         PlugsById = new ReadOnlyDictionary<OctoObjectId, Plug>(_plugsById);
     }
@@ -70,7 +72,7 @@ internal class PlugTenant
         return new PlugTenantDescription
         {
             TenantId = TenantId,
-            Plugs = PlugsById.Values.Select(p => p.GetPlugDescription())
+            Plugs = PlugsById.Values.Select(p => p.GetPlugDescription()).ToArray()
         };
     }
 

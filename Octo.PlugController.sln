@@ -22,11 +22,11 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PlugControllerServices", "s
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PlugControllerServices.Resources", "src\PlugControllerServices.Resources\PlugControllerServices.Resources.csproj", "{5869AE60-EA46-47AF-8883-9B2BDE1F394C}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Communication.Plugs.Contracts", "src\octo-core\src\Common\Communication.Plugs.Contracts\Communication.Plugs.Contracts.csproj", "{ECC855E6-2039-4828-B3BE-6985805031F3}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Communication.Contracts", "src\octo-core\src\Common\Communication.Contracts\Communication.Contracts.csproj", "{DAF5BC42-0068-4926-8E0A-A7653C2179B6}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Persistence.SystemTests", "src\octo-core\tests\Persistence.SystemTests\Persistence.SystemTests.csproj", "{EFB7C4BF-6968-4140-BF1C-4BBFBE8D0BF0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Communication.Plugs.Contracts", "src\octo-core\src\Common\Communication.Plugs.Contracts\Communication.Plugs.Contracts.csproj", "{45A54A6A-7946-4755-95D3-5E163FFAC233}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Communication.Contracts", "src\octo-core\src\Common\Communication.Contracts\Communication.Contracts.csproj", "{6A988A3D-1E19-4671-91E3-FFA674CC633C}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -70,18 +70,18 @@ Global
 		{5869AE60-EA46-47AF-8883-9B2BDE1F394C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5869AE60-EA46-47AF-8883-9B2BDE1F394C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5869AE60-EA46-47AF-8883-9B2BDE1F394C}.Release|Any CPU.Build.0 = Release|Any CPU
-		{ECC855E6-2039-4828-B3BE-6985805031F3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{ECC855E6-2039-4828-B3BE-6985805031F3}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{ECC855E6-2039-4828-B3BE-6985805031F3}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{ECC855E6-2039-4828-B3BE-6985805031F3}.Release|Any CPU.Build.0 = Release|Any CPU
-		{DAF5BC42-0068-4926-8E0A-A7653C2179B6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{DAF5BC42-0068-4926-8E0A-A7653C2179B6}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{DAF5BC42-0068-4926-8E0A-A7653C2179B6}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{DAF5BC42-0068-4926-8E0A-A7653C2179B6}.Release|Any CPU.Build.0 = Release|Any CPU
 		{EFB7C4BF-6968-4140-BF1C-4BBFBE8D0BF0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{EFB7C4BF-6968-4140-BF1C-4BBFBE8D0BF0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{EFB7C4BF-6968-4140-BF1C-4BBFBE8D0BF0}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{EFB7C4BF-6968-4140-BF1C-4BBFBE8D0BF0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{45A54A6A-7946-4755-95D3-5E163FFAC233}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{45A54A6A-7946-4755-95D3-5E163FFAC233}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{45A54A6A-7946-4755-95D3-5E163FFAC233}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{45A54A6A-7946-4755-95D3-5E163FFAC233}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6A988A3D-1E19-4671-91E3-FFA674CC633C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6A988A3D-1E19-4671-91E3-FFA674CC633C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6A988A3D-1E19-4671-91E3-FFA674CC633C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6A988A3D-1E19-4671-91E3-FFA674CC633C}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{81F09ECC-E5E9-4356-87BD-A7902064B37D} = {A28575DB-337A-494E-A432-E0C678233190}
@@ -91,8 +91,8 @@ Global
 		{1286F7A6-9D0C-4217-B79B-500D933F1A1C} = {8C020542-E097-49CB-8E6C-C80A4E14027E}
 		{3CC01DE2-F054-4006-B47C-3C5E67540CEF} = {A28575DB-337A-494E-A432-E0C678233190}
 		{B7B2AF08-5308-4CC1-82BD-9810E350E2B7} = {A28575DB-337A-494E-A432-E0C678233190}
-		{ECC855E6-2039-4828-B3BE-6985805031F3} = {8C020542-E097-49CB-8E6C-C80A4E14027E}
-		{DAF5BC42-0068-4926-8E0A-A7653C2179B6} = {8C020542-E097-49CB-8E6C-C80A4E14027E}
 		{EFB7C4BF-6968-4140-BF1C-4BBFBE8D0BF0} = {8C020542-E097-49CB-8E6C-C80A4E14027E}
+		{45A54A6A-7946-4755-95D3-5E163FFAC233} = {8C020542-E097-49CB-8E6C-C80A4E14027E}
+		{6A988A3D-1E19-4671-91E3-FFA674CC633C} = {8C020542-E097-49CB-8E6C-C80A4E14027E}
 	EndGlobalSection
 EndGlobal

@@ -4,7 +4,7 @@ using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
 
 namespace Meshmakers.Octo.Backend.PlugControllerServices.Caches.Plugs;
 
-public class Plug
+internal class Plug
 {
     private readonly IPlugCachePublish _plugCachePublish;
 

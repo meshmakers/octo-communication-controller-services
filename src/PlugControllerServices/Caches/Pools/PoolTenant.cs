@@ -38,10 +38,14 @@ internal class PoolTenant
         _poolCachePublish = poolCachePublish;
 
         TenantId = tenantId;
+
+        var pools = poolDescriptions.Select(p => new Pool(_poolCachePublish, p)).ToArray();
+        
         _poolsById = new ConcurrentDictionary<OctoObjectId, Pool>(
-            poolDescriptions.ToDictionary(p => p.PlugPoolRtId, p => new Pool(p)));
+            pools.ToDictionary(p => p.PlugPoolRtId, p => p));
         _poolsByName = new ConcurrentDictionary<string, Pool>(
-            poolDescriptions.ToDictionary(p => p.PoolName, p => new Pool(p)));
+            pools.ToDictionary(p => p.PoolName, p => p));
+        
         _plugsById = new ConcurrentDictionary<OctoObjectId, Plug>(
             poolPlugDescriptions.ToDictionary(p => p.PlugRtId, p => new Plug(p.PlugRtId, p.PoolRtId)));
 
@@ -52,7 +56,7 @@ internal class PoolTenant
 
     public Pool AddPool(string poolName, OctoObjectId plugPoolRtId, string connectionId)
     {
-        var pool = new Pool(plugPoolRtId, poolName, connectionId);
+        var pool = new Pool(_poolCachePublish, plugPoolRtId, poolName, connectionId);
         _poolsById.AddOrUpdate(plugPoolRtId, _ => pool,
             (_, _) => pool);
         _poolsByName.AddOrUpdate(poolName, _ => pool,
@@ -72,14 +76,14 @@ internal class PoolTenant
             }
         }
     }
-
+    
     public PoolTenantDescription GetTenantDescription()
     {
         return new PoolTenantDescription
         {
             TenantId = TenantId,
-            Plugs = PlugsById.Values.Select(p => p.GetPoolPlugDescription()),
-            Pools = PoolsById.Values.Select(p => p.GetPoolDescription())
+            Plugs = _plugsById.Values.Select(p => p.GetPoolPlugDescription()).ToArray(),
+            Pools = _poolsById.Values.Select(p => p.GetPoolDescription()).ToArray()
         };
     }
 
@@ -88,22 +92,25 @@ internal class PoolTenant
         _plugsById.AddOrUpdate(plug.PlugRtId,
             _ => plug,
             (_, _) => plug);
-    }
-
-    public void ClearPlugs(OctoObjectId poolRtId)
-    {
-        foreach (var plug in _plugsById.Values.ToArray())
-        {
-            if (plug.PoolRtId == poolRtId)
-            {
-                _plugsById.Remove(plug.PlugRtId, out _);
-            }
-        }
+        
+        _poolCachePublish.PublishConfiguration();
     }
 
     public void RemovePlug(OctoObjectId plugRtId)
     {
         _plugsById.Remove(plugRtId, out _);
+        
+        _poolCachePublish.PublishConfiguration();
+    }
+    
+    public void RemovePlugs(OctoObjectId poolRtId)
+    {
+        foreach (var plug in PlugsById.Values.Where(x => x.PoolRtId == poolRtId))
+        {
+            _plugsById.Remove(plug.PlugRtId, out _);
+        }
+        
+        _poolCachePublish.PublishConfiguration();
     }
 
     public void Clear()

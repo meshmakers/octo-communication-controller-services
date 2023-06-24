@@ -12,6 +12,7 @@ using Meshmakers.Octo.Backend.PlugControllerServices.Repository;
 using Meshmakers.Octo.Backend.PlugControllerServices.Routing;
 using Meshmakers.Octo.Backend.PlugControllerServices.Services;
 using Meshmakers.Octo.Backend.Swagger.Configuration;
+using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.Communication.Plugs.Contracts.Hubs;
 using Meshmakers.Octo.SystematizedData.Persistence;
 using Meshmakers.Octo.SystematizedData.Persistence.Configuration;

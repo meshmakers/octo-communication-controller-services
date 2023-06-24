@@ -47,10 +47,6 @@
         {
           "id": "Meshmakers.TechDesc.Identification.SerialNumber",
           "value": "722102009007"
-        },
-        {
-          "id": "Meshmakers.TechDesc.Pv.AmountOfPvModules",
-          "value": 37
         }
       ],
       "associations": [
@@ -96,7 +92,70 @@
       "ckId": "Meshmakers.Assets.Photovoltaic.PvModules",
       "attributes": [
         {
+          "id": "Meshmakers.Designation",
+          "value": "Hauptgebäude"
+        },
+        {
+          "id": "Meshmakers.TechDesc.Pv.AmountOfPvModules",
+          "value": 33
+        },
+        {
           "id": "Meshmakers.TechDesc.Pv.ProductionPower",
+          "value": 0
+        }
+      ],
+      "associations": [
+        { "roleId": "System.ParentChild", "targetRtId": "5fc8fda18b2fc75f925e21ac", "targetCkId": "Meshmakers.Equipment.Photovoltaic" }
+      ]
+    },
+    {
+      "rtId": "5fc8fda18b2fc75f925e21c0",
+      "ckId": "Meshmakers.Assets.Photovoltaic.PvModules",
+      "attributes": [
+        {
+          "id": "Meshmakers.Designation",
+          "value": "Nebengebäude"
+        },
+        {
+          "id": "Meshmakers.TechDesc.Pv.AmountOfPvModules",
+          "value": 4
+        },
+        {
+          "id": "Meshmakers.TechDesc.Pv.ProductionPower",
+          "value": 0
+        }
+      ],
+      "associations": [
+        { "roleId": "System.ParentChild", "targetRtId": "5fc8fda18b2fc75f925e21ac", "targetCkId": "Meshmakers.Equipment.Photovoltaic" }
+      ]
+    },
+    {
+      "rtId": "5fc8fda18b2fc75f925e21c1",
+      "ckId": "Meshmakers.Assets.Meter",
+      "attributes": [
+        {
+          "id": "Meshmakers.Designation",
+          "value": "Netzbezug"
+        },
+        {
+          "id": "Meshmakers.TechDesc.ActivePower",
+          "value": 0
+        }
+      ],
+      "associations": [
+        { "roleId": "System.ParentChild", "targetRtId": "5fc8fda18b2fc75f925e21ac", "targetCkId": "Meshmakers.Equipment.Photovoltaic" }
+      ]
+    },
+    {
+      "rtId": "5fc8fda18b2fc75f925e21c1",
+      "ckId": "Meshmakers.Assets.Meter",
+      "attributes": [
+        {
+          "id": "Meshmakers.Designation",
+          "value": "Gebäudeverbrauch"
+        },
+        {
+          "id": "Meshmakers.TechDesc.ActivePower",
           "value": 0
         }
       ],

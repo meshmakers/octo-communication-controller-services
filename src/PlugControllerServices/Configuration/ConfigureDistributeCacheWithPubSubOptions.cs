@@ -1,5 +1,6 @@
 using Meshmakers.Octo.Backend.DistributedCache;
 using Meshmakers.Octo.Backend.PlugControllerServices.Options;
+using Meshmakers.Octo.Common.DistributedCache;
 using Microsoft.Extensions.Options;
 
 namespace Meshmakers.Octo.Backend.PlugControllerServices.Configuration;

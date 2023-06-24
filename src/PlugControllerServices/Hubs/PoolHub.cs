@@ -1,4 +1,6 @@
 using Meshmakers.Octo.Backend.PlugControllerServices.Services;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Plugs.Contracts.Hubs;
 using Microsoft.AspNetCore.SignalR;
@@ -33,7 +35,8 @@ public class PoolHub : Hub, IPoolHub
 
         try
         {
-            await _poolService.SetPoolOnlineAsync(tenantId, poolName);
+            Logger.Info("[{TenantId}] Pool {PoolName} with connection id '{ConnectionId}' connected", tenantId, poolName, Context.ConnectionId);
+            await _poolService.SetPoolOnlineAsync(tenantId, poolName, Context.ConnectionId);
         }
         catch (Exception e)
         {
@@ -50,9 +53,12 @@ public class PoolHub : Hub, IPoolHub
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         var tenantId = GetTenantId();
+        var poolName = GetPoolName();
 
         try
         {
+            Logger.Info("[{TenantId}] Pool {PoolName} with connection id '{ConnectionId}' disconnected", tenantId, poolName, Context.ConnectionId);
+
             await _poolService.SetPoolOfflineAsync(tenantId, Context.ConnectionId);
         }
         catch (Exception e)

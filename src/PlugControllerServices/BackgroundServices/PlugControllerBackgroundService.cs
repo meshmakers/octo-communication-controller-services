@@ -4,6 +4,7 @@ using Meshmakers.Octo.Backend.PlugControllerServices.Caches.Plugs;
 using Meshmakers.Octo.Backend.PlugControllerServices.Caches.Pools;
 using Meshmakers.Octo.Backend.PlugControllerServices.CkModelEntities;
 using Meshmakers.Octo.Backend.PlugControllerServices.Services;
+using Meshmakers.Octo.Common.DistributedCache;
 using Meshmakers.Octo.SystematizedData.Persistence;
 using Meshmakers.Octo.SystematizedData.Persistence.DataAccess;
 using Meshmakers.Octo.SystematizedData.Persistence.DatabaseEntities;
@@ -194,7 +195,8 @@ internal class PlugControllerBackgroundService : BackgroundService
     {
         try
         {
-            await _plugService.OnHandlePlugUpdateAsync(tenantId, info);
+            await _poolService.OnHandlePlugUpdateAsync(tenantId, info);
+       //     await _plugService.OnHandlePlugUpdateAsync(tenantId, info);
         }
         catch (Exception e)
         {
@@ -222,22 +224,22 @@ internal class PlugControllerBackgroundService : BackgroundService
         {
             switch (info.UpdateType)
             {
-                // case UpdateTypes.Insert:
-                //     if (info.Document != null)
-                //     {
-                //         Logger.Info("[{TenantId}] Plug '{RtId}' inserted", tenantId, info.Document.OriginRtId);
-                //         await _plugService.DeployPlugAsync(tenantId, info.Document.TargetRtId.ToOctoObjectId(),
-                //             info.Document.OriginRtId.ToOctoObjectId());
-                //     }
-                //     break;
-                // case UpdateTypes.Delete:
-                //     if (info.DocumentBeforeChange != null)
-                //     {
-                //         Logger.Info("[{TenantId}] Plug '{RtId}'  deleted", tenantId, info.DocumentBeforeChange.OriginRtId);
-                //         await _plugService.UndeployPlugAsync(tenantId, info.DocumentBeforeChange.TargetRtId.ToOctoObjectId(),
-                //             info.DocumentBeforeChange.OriginRtId.ToOctoObjectId());
-                //     }
-                //     break;
+                case UpdateTypes.Insert:
+                    if (info.Document != null)
+                    {
+                        Logger.Info("[{TenantId}] Plug '{RtId}' inserted", tenantId, info.Document.OriginRtId);
+                        await _poolService.DeployPlugAsync(tenantId, info.Document.TargetRtId.ToOctoObjectId(),
+                            info.Document.OriginRtId.ToOctoObjectId());
+                    }
+                    break;
+                case UpdateTypes.Delete:
+                    if (info.DocumentBeforeChange != null)
+                    {
+                        Logger.Info("[{TenantId}] Plug '{RtId}'  deleted", tenantId, info.DocumentBeforeChange.OriginRtId);
+                        await _poolService.UndeployPlugAsync(tenantId, info.DocumentBeforeChange.TargetRtId.ToOctoObjectId(),
+                            info.DocumentBeforeChange.OriginRtId.ToOctoObjectId());
+                    }
+                    break;
                 default:
                     throw new ArgumentOutOfRangeException();
             }

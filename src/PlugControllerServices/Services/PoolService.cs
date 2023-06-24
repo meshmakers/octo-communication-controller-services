@@ -1,12 +1,16 @@
+using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.PlugControllerServices.Caches.Pools;
 using Meshmakers.Octo.Backend.PlugControllerServices.CkModelEntities;
 using Meshmakers.Octo.Backend.PlugControllerServices.Repository;
 using Meshmakers.Octo.Common.Shared;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Plugs.Contracts.Hubs;
 using Meshmakers.Octo.SystematizedData.Persistence;
 using Meshmakers.Octo.SystematizedData.Persistence.DataAccess;
 using NLog;
+using Plug = Meshmakers.Octo.Backend.PlugControllerServices.Caches.Pools.Plug;
 
 namespace Meshmakers.Octo.Backend.PlugControllerServices.Services;
 
@@ -35,41 +39,44 @@ internal class PoolService : IPoolService
     {
         Logger.Info("[{TenantId}] Registering operator for Plug Pool '{PlugPoolName}'",
             tenantId, plugPoolName);
-
-        var plugPoolList = await _plugRepository.GetPlugPoolByNameAsync(tenantId, plugPoolName);
-        var rtPlugPool = plugPoolList.FirstOrDefault();
-        if (rtPlugPool == null)
-        {
-            Logger.Info("[{TenantId}] Creating Plug Pool '{PlugPoolName}'",
-                tenantId, plugPoolName);
-            await _plugRepository.CreatePlugPoolAsync(tenantId, plugPoolName);
-
-            plugPoolList = await _plugRepository.GetPlugPoolByNameAsync(tenantId, plugPoolName);
-            rtPlugPool = plugPoolList.FirstOrDefault();
-
-            if (rtPlugPool == null)
-            {
-                throw PoolServiceException.CannotCreatePlugPool(tenantId, plugPoolName);
-            }
-        }
-
+        
         var poolTenant = _poolCache.AddOrUpdateTenant(tenantId);
 
-        if (poolTenant.PoolsById.TryGetValue(rtPlugPool.RtId.ToOctoObjectId(), out var poolDescription))
+        if (poolTenant.PoolsByName.TryGetValue(plugPoolName, out var poolDescription))
         {
             Logger.Info("[{TenantId}] Plug Pool '{PlugPoolName}' already registered",
                 tenantId, plugPoolName);
-            return poolDescription.PlugPoolRtId;
+
+            poolDescription.UpdateConnectionId(connectionId);
+        }
+        else
+        {
+            var plugPoolList = await _plugRepository.GetPlugPoolByNameAsync(tenantId, plugPoolName);
+            var rtPlugPool = plugPoolList.FirstOrDefault();
+            if (rtPlugPool == null)
+            {
+                Logger.Info("[{TenantId}] Creating Plug Pool '{PlugPoolName}'",
+                    tenantId, plugPoolName);
+                await _plugRepository.CreatePlugPoolAsync(tenantId, plugPoolName);
+
+                plugPoolList = await _plugRepository.GetPlugPoolByNameAsync(tenantId, plugPoolName);
+                rtPlugPool = plugPoolList.FirstOrDefault();
+
+                if (rtPlugPool == null)
+                {
+                    throw PoolServiceException.CannotCreatePlugPool(tenantId, plugPoolName);
+                }
+            }
+
+            poolDescription = poolTenant.AddPool(plugPoolName, rtPlugPool.RtId.ToOctoObjectId(), connectionId);
         }
 
-        poolTenant.AddPool(plugPoolName, rtPlugPool.RtId.ToOctoObjectId(), plugPoolName);
-
         // Update status in asset repository
-        await _plugRepository.SetPlugPoolStateAsync(tenantId, rtPlugPool.RtId.ToOctoObjectId(), PlugPoolStates.Deployed);
+        await _plugRepository.SetPlugPoolStateAsync(tenantId, poolDescription.PlugPoolRtId, PlugPoolStates.Deployed);
 
         Logger.Info("[{TenantId}] Operator for Plug Pool '{PlugPoolName}' registered",
             tenantId, plugPoolName);
-        return rtPlugPool.RtId.ToOctoObjectId();
+        return poolDescription.PlugPoolRtId;
     }
 
     /// <inheritdoc />
@@ -109,13 +116,20 @@ internal class PoolService : IPoolService
 
         if (poolTenant.PoolsById.TryGetValue(plugPoolRtId, out var poolDescription))
         {
+            poolTenant.RemovePlugs(plugPoolRtId);
+            
             var rtPlugs = await _plugRepository.GetPlugsAsync(tenantId, plugPoolRtId);
+            foreach (var rtPlug in rtPlugs)
+            {
+                poolTenant.AddPlug(new Plug(rtPlug.RtId.ToOctoObjectId(), plugPoolRtId));
+            }
+            
             var result = new PlugPoolConfigurationDto
             {
                 Plugs = rtPlugs
                     .Select(rtPlug => CreatePlugPoolPlugDto(plugPoolRtId, poolDescription.PoolName, rtPlug))
             };
-
+            
             Logger.Info("[{TenantId}] Current plugs for Plug Pool '{PlugPoolRtId}' retrieved", tenantId, plugPoolRtId);
             return result;
         }
@@ -241,7 +255,7 @@ internal class PoolService : IPoolService
     }
 
     /// <inheritdoc />
-    public async Task SetPoolOnlineAsync(string tenantId, string poolName)
+    public async Task SetPoolOnlineAsync(string tenantId, string poolName, string connectionId)
     {
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
         {
@@ -251,6 +265,8 @@ internal class PoolService : IPoolService
         poolTenant.PoolsByName.TryGetValue(poolName, out var poolDescription);
         if (poolDescription != null)
         {
+            poolDescription.UpdateConnectionId(connectionId);
+            
             await SetPoolOnlineAsync(tenantId, poolDescription.PlugPoolRtId);
         }
     }
@@ -259,6 +275,34 @@ internal class PoolService : IPoolService
     {
         // TODO: Implement updates of pool entity.
         return Task.CompletedTask;
+    }
+
+    public async Task OnHandlePlugUpdateAsync(string tenantId, UpdateInfo<RtPlug> info)
+    {
+        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
+        {
+            throw PoolServiceException.TenantNotFound(tenantId);
+        }
+
+        switch (info.UpdateType)
+        {
+            case UpdateTypes.Update:
+            case UpdateTypes.Replace:
+                if (info.Document != null && poolTenant.PlugsById.TryGetValue(info.Document.RtId.ToOctoObjectId(), out var plug))
+                {
+                    if (info.UpdateFields.Contains("attributes." + nameof(RtPlug.ImageName).ToCamelCase()) ||
+                        info.UpdateFields.Contains("attributes." + nameof(RtPlug.ImageVersion).ToCamelCase()))
+                    {
+                        await UndeployPlugAsync(tenantId, plug.PoolRtId, plug.PlugRtId);
+                        await DeployPlugAsync(tenantId, plug.PoolRtId, plug.PlugRtId);
+                    }
+                }
+                break;
+            default:
+                // By default we do nothing
+                break;
+        }
+
     }
 
     private PlugPoolPlugDto CreatePlugPoolPlugDto(OctoObjectId plugPoolRtId, string plugPoolName, RtPlug rtPlug)
