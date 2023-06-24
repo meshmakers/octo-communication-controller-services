@@ -2,15 +2,15 @@
   "entities": [
     {
       "rtId": "5fc8fc3d8b2fc75f925e21af",
-      "ckId": "Meshmakers.PlugPool",
+      "ckId": "Meshmakers.CommunicationPool",
       "attributes": [
         {
-          "id": "Meshmakers.PlugPool.State",
+          "id": "Meshmakers.Communication.State",
           "value": 1
         },
         {
-          "id": "Meshmakers.PlugPool.Name",
-          "value": "octo-mesh-test-pool"
+          "id": "Meshmakers.Communication.Name",
+          "value": "k8sfirmianstrasse"
         }
       ],
       "associations": []
@@ -20,11 +20,11 @@
       "ckId": "Meshmakers.Plug",
       "attributes": [
         {
-          "id": "Meshmakers.Plug.State",
+          "id": "Meshmakers.CommunicationAdapter.State",
           "value": 1
         },
         {
-          "id": "Meshmakers.Plug.Type",
+          "id": "Meshmakers.CommunicationAdapter.Type",
           "value": "Meshmakers.Plugs.Modbus"
         },
         {
@@ -32,16 +32,16 @@
           "value": "{ \"server\": \"192.168.13.31\" }"
         },
         {
-          "id": "Meshmakers.Plug.Deployment.ImageName",
+          "id": "Meshmakers.CommunicationAdapter.Deployment.ImageName",
           "value": "meshmakers/octo-communication-plug-modbus"
         },
         {
-          "id": "Meshmakers.Plug.Deployment.ImageVersion",
+          "id": "Meshmakers.CommunicationAdapter.Deployment.ImageVersion",
           "value": "0.0.2306.20003"
         }
       ],
       "associations": [
-        { "roleId": "System.ParentChild", "targetRtId": "5fc8fc3d8b2fc75f925e21af", "targetCkId": "Meshmakers.PlugPool" }
+        { "roleId": "System.ParentChild", "targetRtId": "5fc8fc3d8b2fc75f925e21af", "targetCkId": "Meshmakers.CommunicationPool" }
       ]
     },
     {
@@ -183,28 +183,28 @@
       "ckId": "Meshmakers.Plug",
       "attributes": [
         {
-          "id": "Meshmakers.Plug.State",
+          "id": "Meshmakers.CommunicationAdapter.State",
           "value": 1
         },
         {
-          "id": "Meshmakers.Plug.Type",
+          "id": "Meshmakers.CommunicationAdapter.Type",
           "value": "Meshmakers.Plugs.Modbus"
         },
         {
-          "id": "Meshmakers.Plug.Mapping.Configuration",
+          "id": "Meshmakers.CommunicationAdapter.Mapping.Configuration",
           "value": "{ \"server\": \"192.168.13.30\" }"
         },
         {
-          "id": "Meshmakers.Plug.Deployment.ImageName",
+          "id": "Meshmakers.CommunicationAdapter.Deployment.ImageName",
           "value": "meshmakers/octo-communication-plug-modbus"
         },
         {
-          "id": "Meshmakers.Plug.Deployment.ImageVersion",
+          "id": "Meshmakers.CommunicationAdapter.Deployment.ImageVersion",
           "value": "0.0.2306.20003"
         }
       ],
       "associations": [
-        { "roleId": "System.ParentChild", "targetRtId": "5fc8fc3d8b2fc75f925e21af", "targetCkId": "Meshmakers.PlugPool" }
+        { "roleId": "System.ParentChild", "targetRtId": "5fc8fc3d8b2fc75f925e21af", "targetCkId": "Meshmakers.CommunicationPool" }
       ]
     },
     {
