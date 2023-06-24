@@ -10,92 +10,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="6cea7304-e81d-4edb-82e1-c2c9416e6b3e" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/.idea.Octo.PlugController/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/.idea.Octo.PlugController/.idea/.gitignore" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/.idea.Octo.PlugController/.idea/.name" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/.idea.Octo.PlugController/.idea/encodings.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/.idea.Octo.PlugController/.idea/indexLayout.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/.idea.Octo.PlugController/.idea/vcs.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/Octo.PlugController.sln" beforeDir="false" afterPath="$PROJECT_DIR$/Octo.CommunicationController.sln" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Octo.PlugController.sln.DotSettings" beforeDir="false" afterPath="$PROJECT_DIR$/Octo.CommunicationController.sln.DotSettings" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/devops-build/azure-pipelines.yml" beforeDir="false" afterPath="$PROJECT_DIR$/devops-build/azure-pipelines.yml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices.Resources/PlugControllerServices.Resources.csproj" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices.Resources/CommunicationControllerServices.Resources.csproj" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices.Resources/Resources.Designer.cs" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices.Resources/Resources.resx" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/BackgroundServices/PlugControllerBackgroundService.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/BackgroundServices/ControllerBackgroundService.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Caches/Plugs/Descriptions/PlugDescription.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Caches/Plugs/Descriptions/PlugDescription.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Caches/Plugs/Descriptions/PlugTenantDescription.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Caches/Plugs/Descriptions/PlugTenantDescription.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Caches/Plugs/IPlugCache.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Caches/Plugs/IPlugCache.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Caches/Plugs/IPlugCachePublish.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Caches/Plugs/IPlugCachePublish.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Caches/Plugs/Plug.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Caches/Plugs/Plug.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Caches/Plugs/PlugCache.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Caches/Plugs/PlugCache.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Caches/Plugs/PlugTenant.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Caches/Plugs/PlugTenant.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Caches/Pools/Descriptions/PoolDescription.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Caches/Pools/Descriptions/PoolDescription.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Caches/Pools/Descriptions/PoolPlugDescription.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Caches/Pools/Descriptions/PoolPlugDescription.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Caches/Pools/Descriptions/PoolTenantDescription.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Caches/Pools/Descriptions/PoolTenantDescription.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Caches/Pools/IPoolCache.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Caches/Pools/IPoolCache.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Caches/Pools/IPoolCachePublish.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Caches/Pools/IPoolCachePublish.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Caches/Pools/Plug.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Caches/Pools/Plug.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Caches/Pools/Pool.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Caches/Pools/Pool.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Caches/Pools/PoolHubCache.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Caches/Pools/PoolHubCache.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Caches/Pools/PoolTenant.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Caches/Pools/PoolTenant.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/CkModelEntities/PlugPoolStates.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/CkModelEntities/PoolStates.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/CkModelEntities/PlugStates.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/CkModelEntities/PlugStates.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/CkModelEntities/RtPlug.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/CkModelEntities/RtPlug.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/CkModelEntities/RtPlugGroup.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/CkModelEntities/RtPlugGroup.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/CkModelEntities/RtPlugMapping.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/CkModelEntities/RtPlugMapping.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/CkModelEntities/RtPlugPool.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/CkModelEntities/RtCommunicationPool.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Configuration/ConfigureDistributeCacheWithPubSubOptions.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Configuration/ConfigureDistributeCacheWithPubSubOptions.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Configuration/ConfigureOctoSwaggerOptions.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Configuration/ConfigureOctoSwaggerOptions.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/DataSink/MessageConsumer.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/DataSink/MessageConsumer.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Dockerfile" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Hubs/PlugHub.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Hubs/PlugHub.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Hubs/PlugHubCallbacks.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Hubs/PlugHubCallbacks.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Hubs/PoolHub.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Hubs/PoolHub.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Hubs/PoolHubCallbacks.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Hubs/PoolHubCallbacks.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Models/PersistentServerSettings.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Models/PersistentServerSettings.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Models/PlugControllerStatusDto.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Models/CommunicationControllerStatusDto.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Models/UpdatedPlugConfigurationEventArgs.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Models/UpdatedPlugConfigurationEventArgs.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Options/PlugControllerOptions.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Options/CommunicationControllerOptions.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/PlugControllerServices.csproj" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/CommunicationControllerServices.csproj" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Program.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Program.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Properties/launchSettings.json" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Properties/launchSettings.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Repository/IPlugRepository.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Repository/IPlugRepository.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Repository/PlugRepository.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Repository/PlugRepository.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Repository/PlugRepositoryException.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Repository/PlugRepositoryException.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Routing/TenantIdRouteConstraint.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Routing/TenantIdRouteConstraint.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Services/ConfigurationService.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Services/ConfigurationService.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Services/IConfigurationService.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Services/IConfigurationService.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Services/IPlugService.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Services/IPlugService.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Services/IPoolService.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Services/IPoolService.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Services/MonitoringService.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Services/MonitoringService.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Services/PlugService.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Services/PlugService.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Services/PlugServiceException.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Services/PlugServiceException.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Services/PoolService.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Services/PoolService.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Services/PoolServiceException.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Services/PoolServiceException.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/Statics.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/Statics.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/SystemApi/v1/Controllers/PlugControllerController.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/SystemApi/v1/Controllers/CommunicationControllerController.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/TenantApi/v1/Controllers/PlugController.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/TenantApi/v1/Controllers/PlugController.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/appsettings.Development.json" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/appsettings.Development.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/appsettings.json" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/appsettings.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PlugControllerServices/nlog.config" beforeDir="false" afterPath="$PROJECT_DIR$/src/CommunicationControllerServices/nlog.config" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/octo-core" beforeDir="false" afterPath="$PROJECT_DIR$/src/octo-core" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/octo-core/src/Common/Communication.Contracts/DataTransferObjects/PoolConfigurationDto.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/octo-core/src/Common/Communication.Contracts/DataTransferObjects/PoolConfigurationDto.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/octo-core/src/Common/Communication.Contracts/DataTransferObjects/PoolPlugDto.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/octo-core/src/Common/Communication.Contracts/DataTransferObjects/PoolPlugDto.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/octo-core/src/Common/Communication.Contracts/Hubs/IPoolHub.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/octo-core/src/Common/Communication.Contracts/Hubs/IPoolHub.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/octo-core/src/Common/Communication.Contracts/Hubs/IPoolHubCallbacks.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/octo-core/src/Common/Communication.Contracts/Hubs/IPoolHubCallbacks.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/octo-core/src/Common/Communication.Plugs.Contracts/Hubs/IPlugHub.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/octo-core/src/Common/Communication.Plugs.Contracts/Hubs/IPlugHub.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/octo-core/src/Common/DistributedCache/CacheCommon.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/octo-core/src/Common/DistributedCache/CacheCommon.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/octo-core/tests/Persistence.SystemTests/CkModelEntities/PlugPoolStates.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/octo-core/tests/Persistence.SystemTests/CkModelEntities/PoolStates.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/octo-core/tests/Persistence.SystemTests/CkModelEntities/PlugStates.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/octo-core/tests/Persistence.SystemTests/CkModelEntities/PlugStates.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/octo-core/tests/Persistence.SystemTests/CkModelEntities/RtPlug.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/octo-core/tests/Persistence.SystemTests/CkModelEntities/RtPlug.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/octo-core/tests/Persistence.SystemTests/CkModelEntities/RtPlugGroup.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/octo-core/tests/Persistence.SystemTests/CkModelEntities/RtPlugGroup.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/octo-core/tests/Persistence.SystemTests/CkModelEntities/RtPlugMapping.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/octo-core/tests/Persistence.SystemTests/CkModelEntities/RtPlugMapping.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/octo-core/tests/Persistence.SystemTests/CkModelEntities/RtPlugPool.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/octo-core/tests/Persistence.SystemTests/CkModelEntities/RtCommunicationPool.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/octo-core/tests/Persistence.SystemTests/Statics.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/octo-core/tests/Persistence.SystemTests/Statics.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/octo-core/tests/Persistence.SystemTests/UnitTest1.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/octo-core/tests/Persistence.SystemTests/UnitTest1.cs" afterDir="false" />
-    </list>
+    <list default="true" id="6cea7304-e81d-4edb-82e1-c2c9416e6b3e" name="Changes" comment="" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -217,6 +132,7 @@
     <setting file="file://$PROJECT_DIR$/src/CommunicationControllerServices/Services/MonitoringService.cs" root0="FORCE_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/src/CommunicationControllerServices/Statics.cs" root0="FORCE_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/src/CommunicationControllerServices/TenantApi/v1/Controllers/PlugController.cs" root0="FORCE_HIGHLIGHTING" />
+    <setting file="mock:///Users/gerald/RiderProjects/meshmakers/octo-plug-controller-services/src/octo-core/src/Common/DistributedCache/CacheCommon.cs" root0="SKIP_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/../../smc/smc-backend/src/BackendService/Program.cs" root0="SKIP_HIGHLIGHTING" />
   </component>
   <component name="KubernetesApiPersistence">
@@ -316,7 +232,7 @@
       <workItem from="1687075887824" duration="43195000" />
       <workItem from="1687507627083" duration="1090000" />
       <workItem from="1687522372909" duration="12361000" />
-      <workItem from="1687599968867" duration="2216000" />
+      <workItem from="1687599968867" duration="2332000" />
     </task>
     <task id="LOCAL-00001" summary="Initial version">
       <created>1684327718405</created>
@@ -608,7 +524,15 @@
       <option name="project" value="LOCAL" />
       <updated>1687593401727</updated>
     </task>
-    <option name="localTasksCounter" value="42" />
+    <task id="LOCAL-00042" summary="Fixing naming">
+      <option name="closed" value="true" />
+      <created>1687602264714</created>
+      <option name="number" value="00042" />
+      <option name="presentableId" value="LOCAL-00042" />
+      <option name="project" value="LOCAL" />
+      <updated>1687602264714</updated>
+    </task>
+    <option name="localTasksCounter" value="43" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -628,7 +552,6 @@
   </component>
   <component name="VcsManagerConfiguration">
     <option name="CLEAR_INITIAL_COMMIT_MESSAGE" value="true" />
-    <MESSAGE value="Fix build" />
     <MESSAGE value="Adapted build" />
     <MESSAGE value="Fixes build" />
     <MESSAGE value="Moved broker settings to configuration" />
@@ -653,7 +576,8 @@
     <MESSAGE value="Reworked distributed cache for working with plug controller too." />
     <MESSAGE value="Fixed namespace names" />
     <MESSAGE value="Stabilizing" />
-    <option name="LAST_COMMIT_MESSAGE" value="Stabilizing" />
+    <MESSAGE value="Fixing naming" />
+    <option name="LAST_COMMIT_MESSAGE" value="Fixing naming" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
