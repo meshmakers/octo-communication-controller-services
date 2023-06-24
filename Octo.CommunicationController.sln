@@ -28,6 +28,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CommunicationControllerServ
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CommunicationControllerServices", "src\CommunicationControllerServices\CommunicationControllerServices.csproj", "{12F8E0F3-B97F-466C-85AE-56D3220C644A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Communication.Sockets.Contracts", "src\octo-core\src\Common\Communication.Sockets.Contracts\Communication.Sockets.Contracts.csproj", "{F0C6DD32-4B27-4D1C-AD3B-2746FD7B6872}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -82,6 +84,10 @@ Global
 		{12F8E0F3-B97F-466C-85AE-56D3220C644A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{12F8E0F3-B97F-466C-85AE-56D3220C644A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{12F8E0F3-B97F-466C-85AE-56D3220C644A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F0C6DD32-4B27-4D1C-AD3B-2746FD7B6872}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F0C6DD32-4B27-4D1C-AD3B-2746FD7B6872}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F0C6DD32-4B27-4D1C-AD3B-2746FD7B6872}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F0C6DD32-4B27-4D1C-AD3B-2746FD7B6872}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{81F09ECC-E5E9-4356-87BD-A7902064B37D} = {A28575DB-337A-494E-A432-E0C678233190}
@@ -94,5 +100,6 @@ Global
 		{EFB7C4BF-6968-4140-BF1C-4BBFBE8D0BF0} = {8C020542-E097-49CB-8E6C-C80A4E14027E}
 		{45A54A6A-7946-4755-95D3-5E163FFAC233} = {8C020542-E097-49CB-8E6C-C80A4E14027E}
 		{6A988A3D-1E19-4671-91E3-FFA674CC633C} = {8C020542-E097-49CB-8E6C-C80A4E14027E}
+		{F0C6DD32-4B27-4D1C-AD3B-2746FD7B6872} = {8C020542-E097-49CB-8E6C-C80A4E14027E}
 	EndGlobalSection
 EndGlobal
