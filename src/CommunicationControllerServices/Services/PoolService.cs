@@ -309,7 +309,7 @@ internal class PoolService : IPoolService
         {
             PoolRtId = poolRtId,
             PoolName = poolName,
-            CommunicationAdapterRtId = rtPlug.RtId.ToOctoObjectId(),
+            AdapterRtId = rtPlug.RtId.ToOctoObjectId(),
             ImageName = rtPlug.ImageName ?? throw PoolServiceException.ImageNameNotSet(),
             Version = rtPlug.ImageVersion ?? throw PoolServiceException.ImageVersionNotSet(),
         };
