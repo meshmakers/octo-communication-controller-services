@@ -9,12 +9,96 @@
       "valueType": "String"
     },
     {
-      "id": "Meshmakers.Plug.Type",
+      "id": "Meshmakers.CommunicationAdapter.Type",
       "valueType": "String"
     },
     {
-      "id": "Meshmakers.Plug.LastSeen",
+      "id": "Meshmakers.Communication.LastSeen",
       "valueType": "DateTime"
+    },
+    {
+      "id": "Meshmakers.CommunicationAdapter.Deployment.ImageName",
+      "valueType": "String"
+    },
+    {
+      "id": "Meshmakers.CommunicationAdapter.Deployment.ImageVersion",
+      "valueType": "String"
+    },
+    {
+      "id": "Meshmakers.CommunicationPool.Name",
+      "valueType": "String"
+    },
+    {
+      "id": "Meshmakers.CommunicationAdapter.State",
+      "valueType": "Int",
+      "selectionValues": [
+        {
+          "key": 0,
+          "name": "Created"
+        },
+        {
+          "key": 1,
+          "name": "Pending"
+        },
+        {
+          "key": 2,
+          "name": "Deployed"
+        },
+        {
+          "key": 3,
+          "name": "Offline"
+        },
+        {
+          "key": 4,
+          "name": "Online"
+        },
+        {
+          "key": 5,
+          "name": "DeploymentError"
+        },
+        {
+          "key": 6,
+          "name": "ConfigurationError"
+        }
+      ]
+    },
+    {
+      "id": "Meshmakers.CommunicationPool.State",
+      "valueType": "Int",
+      "selectionValues": [
+        {
+          "key": 0,
+          "name": "Created"
+        },
+        {
+          "key": 1,
+          "name": "Pending"
+        },
+        {
+          "key": 2,
+          "name": "Deployed"
+        },
+        {
+          "key": 3,
+          "name": "Offline"
+        },
+        {
+          "key": 4,
+          "name": "Online"
+        },
+        {
+          "key": 5,
+          "name": "DeploymentError"
+        },
+        {
+          "key": 6,
+          "name": "ConfigurationError"
+        }
+      ]
+    },
+    {
+      "id": "Meshmakers.Socket.Mapping.Configuration",
+      "valueType": "String"
     },
     {
       "id": "Meshmakers.Plug.Mapping.Configuration",
@@ -31,86 +115,6 @@
     {
       "id": "Meshmakers.Plug.Mapping.Reference.AttributeId",
       "valueType": "String"
-    },
-    {
-      "id": "Meshmakers.Plug.Deployment.ImageName",
-      "valueType": "String"
-    },
-    {
-      "id": "Meshmakers.Plug.Deployment.ImageVersion",
-      "valueType": "String"
-    },
-    {
-      "id": "Meshmakers.PlugPool.Name",
-      "valueType": "String"
-    },
-    {
-      "id": "Meshmakers.Plug.State",
-      "valueType": "Int",
-      "selectionValues": [
-        {
-          "key": 0,
-          "name": "Created"
-        },
-        {
-          "key": 1,
-          "name": "Pending"
-        },
-        {
-          "key": 2,
-          "name": "Deployed"
-        },
-        {
-          "key": 3,
-          "name": "Offline"
-        },
-        {
-          "key": 4,
-          "name": "Online"
-        },
-        {
-          "key": 5,
-          "name": "DeploymentError"
-        },
-        {
-          "key": 6,
-          "name": "ConfigurationError"
-        }
-      ]
-    },
-    {
-      "id": "Meshmakers.PlugPool.State",
-      "valueType": "Int",
-      "selectionValues": [
-        {
-          "key": 0,
-          "name": "Created"
-        },
-        {
-          "key": 1,
-          "name": "Pending"
-        },
-        {
-          "key": 2,
-          "name": "Deployed"
-        },
-        {
-          "key": 3,
-          "name": "Offline"
-        },
-        {
-          "key": 4,
-          "name": "Online"
-        },
-        {
-          "key": 5,
-          "name": "DeploymentError"
-        },
-        {
-          "key": 6,
-          "name": "ConfigurationError"
-        }
-      ]
     },
     {
       "id": "Meshmakers.Events.State",

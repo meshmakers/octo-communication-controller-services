@@ -1,0 +1,19 @@
+{
+  "entities": [
+    {
+      "ckId": "Meshmakers.Socket",
+      "ckDerivedId": "Meshmakers.CommunicationAdapter",
+      "isFinal": true,
+      "isAbstract": false,
+      "enableChangeStreamPreAndPostImages": true,
+      "attributes": [
+        {
+          "id": "Meshmakers.Socket.Mapping.Configuration",
+          "name": "Configuration"
+        }
+      ],
+      "associations": [
+      ]
+    }
+  ]
+}

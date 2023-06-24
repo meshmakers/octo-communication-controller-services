@@ -1,67 +1,18 @@
 {
   "entities": [
     {
-      "ckId": "Meshmakers.PlugPool",
-      "ckDerivedId": "System.Entity",
-      "isFinal": true,
-      "isAbstract": false,
-      "attributes": [
-        {
-          "id": "Meshmakers.Plug.LastSeen",
-          "name": "LastSeen"
-        },
-        {
-          "id": "Meshmakers.PlugPool.State",
-          "name": "State"
-        },
-        {
-          "id": "Meshmakers.PlugPool.Name",
-          "name": "Name"
-        }
-      ],
-      "associations": [
-
-      ]
-    },
-    {
       "ckId": "Meshmakers.Plug",
-      "ckDerivedId": "System.Entity",
+      "ckDerivedId": "Meshmakers.CommunicationAdapter",
       "isFinal": true,
       "isAbstract": false,
       "enableChangeStreamPreAndPostImages": true,
       "attributes": [
         {
-          "id": "Meshmakers.Plug.LastSeen",
-          "name": "LastSeen"
-        },
-        {
-          "id": "Meshmakers.Plug.State",
-          "name": "State"
-        },
-        {
-          "id": "Meshmakers.Plug.Type",
-          "name": "Type"
-        },
-        {
           "id": "Meshmakers.Plug.Mapping.Configuration",
           "name": "Configuration"
-        },
-        {
-          "id": "Meshmakers.Plug.Deployment.ImageName",
-          "name": "ImageName"
-        },
-        {
-          "id": "Meshmakers.Plug.Deployment.ImageVersion",
-          "name": "ImageVersion"
         }
       ],
       "associations": [
-        {
-          "roleId": "System.ParentChild",
-          "targetCkId": "Meshmakers.PlugPool",
-          "inboundMultiplicity": "N",
-          "outboundMultiplicity": "ZeroOrOne"
-        }
       ]
     },
     {
