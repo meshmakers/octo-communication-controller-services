@@ -1,0 +1,16 @@
+﻿{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "https": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": false,
+      "launchUrl": "swagger",
+      "applicationUrl": "https://0.0.0.0:5015;http://0.0.0.0:5014",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "OCTO_COMMUNICATIONCONTROLLER__BROKERHOST": "mq.staging.meshmakers.cloud"
+      }
+    }
+  }
+}
