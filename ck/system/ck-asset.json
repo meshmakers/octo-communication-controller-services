@@ -3,7 +3,7 @@
     {
       "ckId": "Meshmakers.Asset",
       "ckDerivedId": "Meshmakers.Equipment",
-      "isFinal": true,
+      "isFinal": false,
       "isAbstract": false,
       "attributes": [
 

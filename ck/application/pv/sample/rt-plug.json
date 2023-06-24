@@ -5,11 +5,11 @@
       "ckId": "Meshmakers.CommunicationPool",
       "attributes": [
         {
-          "id": "Meshmakers.Communication.State",
+          "id": "Meshmakers.CommunicationPool.State",
           "value": 1
         },
         {
-          "id": "Meshmakers.Communication.Name",
+          "id": "Meshmakers.CommunicationPool.Name",
           "value": "k8sfirmianstrasse"
         }
       ],
@@ -191,7 +191,7 @@
           "value": "Meshmakers.Plugs.Modbus"
         },
         {
-          "id": "Meshmakers.CommunicationAdapter.Mapping.Configuration",
+          "id": "Meshmakers.Plug.Mapping.Configuration",
           "value": "{ \"server\": \"192.168.13.30\" }"
         },
         {
