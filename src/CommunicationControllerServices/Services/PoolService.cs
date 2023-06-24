@@ -124,7 +124,7 @@ internal class PoolService : IPoolService
             
             var result = new PoolConfigurationDto
             {
-                Plugs = rtPlugs
+                CommunicationAdapterList = rtPlugs
                     .Select(rtPlug => CreatePoolPlugDto(poolRtId, poolDescription.PoolName, rtPlug))
             };
             
@@ -164,7 +164,7 @@ internal class PoolService : IPoolService
         if (poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
         {
             var rtPlug = await _plugRepository.GetPlugAsync(tenantId, plugRtId);
-            await _poolHubCallbacks.DeployPlugAsync(tenantId, CreatePoolPlugDto(poolRtId,
+            await _poolHubCallbacks.DeployCommunicationAdapterAsync(tenantId, CreatePoolPlugDto(poolRtId,
                 poolDescription.PoolName,
                 rtPlug));
 
@@ -192,7 +192,7 @@ internal class PoolService : IPoolService
             if (poolTenant.PoolsById.TryGetValue(plugDescription.PoolRtId, out var poolDescription))
             {
                 var rtPlug = await _plugRepository.GetPlugAsync(tenantId, plugRtId);
-                await _poolHubCallbacks.UndeployPlugAsync(tenantId, CreatePoolPlugDto(poolDescription.PoolRtId,
+                await _poolHubCallbacks.UndeployCommunicationAdapterAsync(tenantId, CreatePoolPlugDto(poolDescription.PoolRtId,
                     poolDescription.PoolName, rtPlug));
 
                 poolTenant.RemovePlug(rtPlug.RtId.ToOctoObjectId());
@@ -303,13 +303,13 @@ internal class PoolService : IPoolService
 
     }
 
-    private PoolPlugDto CreatePoolPlugDto(OctoObjectId poolRtId, string poolName, RtPlug rtPlug)
+    private PoolCommunicationAdapterDto CreatePoolPlugDto(OctoObjectId poolRtId, string poolName, RtPlug rtPlug)
     {
-        return new PoolPlugDto
+        return new PoolCommunicationAdapterDto
         {
             PoolRtId = poolRtId,
             PoolName = poolName,
-            PlugRtId = rtPlug.RtId.ToOctoObjectId(),
+            CommunicationAdapterRtId = rtPlug.RtId.ToOctoObjectId(),
             ImageName = rtPlug.ImageName ?? throw PoolServiceException.ImageNameNotSet(),
             Version = rtPlug.ImageVersion ?? throw PoolServiceException.ImageVersionNotSet(),
         };
