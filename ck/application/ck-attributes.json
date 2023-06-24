@@ -41,6 +41,18 @@
     {
       "id": "Meshmakers.TechDesc.Pv.ProductionPower",
       "valueType": "Double"
+    },
+    {
+      "id": "Meshmakers.TechDesc.ActivePower",
+      "valueType": "Double"
+    },
+    {
+      "id": "Meshmakers.TechDesc.ReactivePower",
+      "valueType": "Double"
+    },
+    {
+      "id": "Meshmakers.TechDesc.ApparentPower",
+      "valueType": "Double"
     }
   ]
 }

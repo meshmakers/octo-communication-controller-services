@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Meshmakers.Octo.Backend.DistributedCache;
 using Meshmakers.Octo.Backend.PlugControllerServices.Caches.Plugs.Descriptions;
+using Meshmakers.Octo.Common.DistributedCache;
 using Meshmakers.Octo.Common.Shared;
 using NLog;
 
@@ -10,7 +11,7 @@ internal class PlugCache : IPlugCachePublish, IPlugCache
 {
     private readonly IDistributedWithPubSubCache _distributedWithPubSubCache;
     private readonly ConcurrentDictionary<string, PlugTenant> _tenantDescriptions = new();
-    private IChannel<string>? _channel;
+    private IChannel<IEnumerable<PlugTenantDescription>>? _channel;
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
     public PlugCache(IDistributedWithPubSubCache distributedWithPubSubCache)
@@ -25,8 +26,8 @@ internal class PlugCache : IPlugCachePublish, IPlugCache
         if (_channel == null)
         {
             _channel = SubscribeToPlugHubConfigurationUpdates();
-            var configuration = await _distributedWithPubSubCache.GetLastMessageAsStringAsync(CacheCommon.KeyPlugControllerPlugUpdate);
-            if (!string.IsNullOrWhiteSpace(configuration))
+            var configuration = await _distributedWithPubSubCache.GetLastMessageAsync<IEnumerable<PlugTenantDescription>>(CacheCommon.KeyPlugControllerPlugUpdate);
+            if (configuration != null)
             {
                 ReloadConfiguration(configuration);
             }
@@ -58,12 +59,12 @@ internal class PlugCache : IPlugCachePublish, IPlugCache
         return _tenantDescriptions.TryGetValue(tenantId, out plugTenant);
     }
     
-    private IChannel<string> SubscribeToPlugHubConfigurationUpdates()
+    private IChannel<IEnumerable<PlugTenantDescription>> SubscribeToPlugHubConfigurationUpdates()
     {
-        var channel = _distributedWithPubSubCache.Subscribe<string>(CacheCommon.KeyPlugControllerPlugUpdate);
+        var channel = _distributedWithPubSubCache.Subscribe<IEnumerable<PlugTenantDescription>>(CacheCommon.KeyPlugControllerPlugUpdate);
         channel.OnMessage(message =>
         {
-            if (!string.IsNullOrWhiteSpace(message.Message))
+            if (message.Message != null)
             {
                 ReloadConfiguration(message.Message);
             }
@@ -73,14 +74,12 @@ internal class PlugCache : IPlugCachePublish, IPlugCache
         return channel;
     }
 
-    private void ReloadConfiguration(string configuration)
+    private void ReloadConfiguration(IEnumerable<PlugTenantDescription> configuration)
     {
-        Logger.Info("Reloading PlugCache configuration: {Configuration}", configuration);
-
-        var values = configuration.Deserialize<IEnumerable<PlugTenantDescription>>();
+        Logger.Info("Reloading PlugCache configuration: {Configuration}", configuration.Serialize());
         
         _tenantDescriptions.Clear();
-        foreach (var tenantDescription in values)
+        foreach (var tenantDescription in configuration)
         {
             var plugHubTenant = new PlugTenant(this, tenantDescription.TenantId, tenantDescription.Plugs.ToList());
             _tenantDescriptions.AddOrUpdate(tenantDescription.TenantId, _ => plugHubTenant, (_, _) => plugHubTenant);
@@ -92,9 +91,9 @@ internal class PlugCache : IPlugCachePublish, IPlugCache
         Logger.Info("Publishing PlugCache configuration");
 
         var tenantDescriptions= 
-            _tenantDescriptions.Select(x => x.Value.GetTenantDescription());
+            _tenantDescriptions.Select(x => x.Value.GetTenantDescription()).ToArray();
         
-        _distributedWithPubSubCache.PublishAsync(CacheCommon.KeyPlugControllerPlugUpdate, tenantDescriptions.Serialize());
+        _distributedWithPubSubCache.PublishAsync(CacheCommon.KeyPlugControllerPlugUpdate, tenantDescriptions);
     }
 
 }

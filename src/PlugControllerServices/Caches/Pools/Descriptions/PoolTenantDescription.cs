@@ -1,6 +1,6 @@
 namespace Meshmakers.Octo.Backend.PlugControllerServices.Caches.Pools.Descriptions;
 
-public class PoolTenantDescription
+internal class PoolTenantDescription
 {
     public string TenantId { get; set; }= null!;
     public IEnumerable<PoolDescription> Pools { get; set; } = null!;

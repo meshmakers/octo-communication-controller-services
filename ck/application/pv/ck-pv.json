@@ -17,10 +17,6 @@
         {
           "id": "Meshmakers.TechDesc.Identification.SerialNumber",
           "name": "SerialNumber"
-        },
-        {
-          "id": "Meshmakers.TechDesc.Pv.AmountOfPvModules",
-          "name": "AmountOfPvModules"
         }
       ],
       "associations": [
@@ -46,6 +42,10 @@
       "isAbstract": false,
       "attributes": [
         {
+          "id": "Meshmakers.TechDesc.Pv.AmountOfPvModules",
+          "name": "AmountOfPvModules"
+        },
+        {
           "id": "Meshmakers.TechDesc.Pv.ProductionPower",
           "name": "ProductionPower"
         }
@@ -68,6 +68,26 @@
         {
           "id": "Meshmakers.TechDesc.Pv.BatteryPower",
           "name": "BatteryPower"
+        }
+      ]
+    },
+    {
+      "ckId": "Meshmakers.Assets.Meter",
+      "ckDerivedId": "Meshmakers.Asset",
+      "isFinal": true,
+      "isAbstract": false,
+      "attributes": [
+        {
+          "id": "Meshmakers.TechDesc.ActivePower",
+          "name": "ActivePower"
+        },
+        {
+          "id": "Meshmakers.TechDesc.ReactivePower",
+          "name": "ReactivePower"
+        },
+        {
+          "id": "Meshmakers.TechDesc.ApparentPower",
+          "name": "ApparentPower"
         }
       ]
     }

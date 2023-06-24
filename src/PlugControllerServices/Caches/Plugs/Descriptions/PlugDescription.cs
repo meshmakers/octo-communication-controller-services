@@ -3,7 +3,7 @@ using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
 
 namespace Meshmakers.Octo.Backend.PlugControllerServices.Caches.Plugs.Descriptions;
 
-public class PlugDescription
+internal class PlugDescription
 {
     public string ConnectionId { get; }
     public OctoObjectId PlugRtId { get; }

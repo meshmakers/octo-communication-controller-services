@@ -4,7 +4,7 @@ using MongoDB.Bson;
 
 namespace Meshmakers.Octo.Backend.PlugControllerServices.Services;
 
-public class PoolServiceException : Exception
+internal class PoolServiceException : Exception
 {
     public PoolServiceException()
     {

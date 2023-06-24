@@ -3,7 +3,7 @@ using Meshmakers.Octo.Common.Shared;
 
 namespace Meshmakers.Octo.Backend.PlugControllerServices.Services;
 
-public class PlugServiceException : Exception
+internal class PlugServiceException : Exception
 {
     public PlugServiceException()
     {

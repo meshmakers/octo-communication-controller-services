@@ -1,5 +1,6 @@
 using Meshmakers.Octo.Backend.PlugControllerServices.CkModelEntities;
 using Meshmakers.Octo.Common.Shared;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
 using Meshmakers.Octo.SystematizedData.Persistence.DataAccess;
 
@@ -83,14 +84,15 @@ public interface IPoolService
     /// <param name="plugPoolRtId">Identifier of plug pool</param>
     /// <returns></returns>
     Task SetPoolOnlineAsync(string tenantId, OctoObjectId plugPoolRtId);
-    
+
     /// <summary>
     /// Sets a plug pool online using the connection id
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolName">Name of plug pool</param>
+    /// <param name="connectionId">Connection id of pool</param>
     /// <returns></returns>
-    Task SetPoolOnlineAsync(string tenantId, string poolName);
+    Task SetPoolOnlineAsync(string tenantId, string poolName, string connectionId);
 
     /// <summary>
     /// Handles a plug pool update
@@ -99,4 +101,12 @@ public interface IPoolService
     /// <param name="info">Update information object</param>
     /// <returns></returns>
     Task OnHandlePoolUpdateAsync(string tenantId, UpdateInfo<RtPlugPool> info);
+
+    /// <summary>
+    /// Handles a plug update
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="info">Update information object</param>
+    /// <returns></returns>
+    Task OnHandlePlugUpdateAsync(string tenantId, UpdateInfo<RtPlug> info);
 }
