@@ -101,6 +101,7 @@ try
     builder.Services.AddSingleton<IConfigurationService, ConfigurationService>();
     builder.Services.AddSingleton<IPlugService, PlugService>();
     builder.Services.AddSingleton<IPoolService, PoolService>();
+    builder.Services.AddSingleton<ISocketService, SocketService>();
     builder.Services.AddSingleton<IPlugRepository, PlugRepository>();
     builder.Services.AddSingleton<IPoolCache, PoolHubCache>();
     builder.Services.AddSingleton<IPlugCache, PlugCache>();
@@ -124,6 +125,7 @@ try
 
     app.MapHub<PlugHub>("/{tenantId:tenantId}/plugHub");
     app.MapHub<PoolHub>("/{tenantId:tenantId}/poolHub");
+    app.MapHub<SocketHub>("/{tenantId:tenantId}/socketHub");
     app.MapControllerRoute(name: "default",
         pattern: "{tenantId:tenantId}/system/v{version:apiVersion}/{controller}/{action}/{id?}");
 

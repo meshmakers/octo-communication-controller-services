@@ -1,36 +1,29 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
-using Meshmakers.Octo.Communication.Plugs.Contracts.Hubs;
+using Meshmakers.Octo.Communication.Sockets.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Sockets.Contracts.Hubs;
 using Microsoft.AspNetCore.SignalR;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 
-/// <summary>
-/// Hub for plugs
-/// </summary>
-public class PlugHub : Hub, IPlugHub
+public class SocketHub : Hub, ISocketHub
 {
-    private readonly IPlugService _plugService;
+    private readonly ISocketService _socketService;
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-    /// <summary>
-    /// Constructor
-    /// </summary>
-    /// <param name="plugService"></param>
-    public PlugHub(IPlugService plugService)
+    public SocketHub(ISocketService socketService)
     {
-        _plugService = plugService;
+        _socketService = socketService;
     }
 
     /// <inheritdoc />
     public override async Task OnConnectedAsync()
     {
         var tenantId = GetTenantId();
-        var plugRtId = GetPlugRtId();
+        var socketRtId = GetSocketRtId();
 
-        await _plugService.SetPlugOnlineAsync(tenantId, plugRtId);
+        await _socketService.SetSocketOnlineAsync(tenantId, socketRtId);
 
         await base.OnConnectedAsync();
     }
@@ -39,35 +32,35 @@ public class PlugHub : Hub, IPlugHub
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         var tenantId = GetTenantId();
-        var plugRtId = GetPlugRtId();
+        var socketRtId = GetSocketRtId();
 
-        await _plugService.SetPlugOfflineAsync(tenantId, plugRtId);
+        await _socketService.SetSocketOfflineAsync(tenantId, socketRtId);
 
         await base.OnDisconnectedAsync(exception);
     }
 
     /// <inheritdoc />
-    public async Task<PlugConfigurationDto> RegisterPlugAsync(OctoObjectId plugRtId)
+    public async Task<SocketConfigurationDto> RegisterSocketAsync(OctoObjectId socketRtId)
     {
         var tenantId = GetTenantId();
         
         try
         {
-            var configurationDto = await _plugService.RegisterPlugAsync(tenantId, plugRtId, Context.ConnectionId);
+            var configurationDto = await _socketService.RegisterSocketAsync(tenantId, socketRtId, Context.ConnectionId);
 
-            await _plugService.SetPlugOnlineAsync(tenantId, plugRtId);
+            await _socketService.SetSocketOnlineAsync(tenantId, socketRtId);
 
             return configurationDto;
         }
         catch (Exception e)
         {
-            Logger.Error(e, "Cannot register plug");
+            Logger.Error(e, "Cannot register socket");
             throw;
         }
     }
 
     /// <inheritdoc />
-    public async Task UnRegisterPlugAsync(OctoObjectId plugRtId)
+    public async Task UnRegisterSocketAsync(OctoObjectId socketRtId)
     {
         var tenantId = Context.GetHttpContext()?.GetTenantId();
         if (tenantId == null)
@@ -76,7 +69,7 @@ public class PlugHub : Hub, IPlugHub
             throw new InvalidOperationException("TenantId is null");
         }
 
-        await _plugService.PlugUnRegisteredAsync(tenantId, plugRtId, Context.ConnectionId);
+        await _socketService.SocketUnRegisteredAsync(tenantId, socketRtId, Context.ConnectionId);
     }
     
     private string GetTenantId()
@@ -91,15 +84,15 @@ public class PlugHub : Hub, IPlugHub
         return tenantId;
     }
     
-    private OctoObjectId GetPlugRtId()
+    private OctoObjectId GetSocketRtId()
     {
-        var plugRtId = Context.GetHttpContext()?.GetPlugRtId();
-        if (plugRtId == null)
+        var socketRtId = Context.GetHttpContext()?.GetSocketRtId();
+        if (socketRtId == null)
         {
             Context.Abort();
-            throw new InvalidOperationException("PlugRtId is null");
+            throw new InvalidOperationException("SocketRtId is null");
         }
 
-        return plugRtId.Value;
+        return socketRtId.Value;
     }
 }
