@@ -45,6 +45,7 @@
       <ProjectReference Include="..\octo-common-services\src\Swagger\Swagger.csproj" />
       <ProjectReference Include="..\octo-core\src\Common\Communication.Contracts\Communication.Contracts.csproj" />
       <ProjectReference Include="..\octo-core\src\Common\Communication.Plugs.Contracts\Communication.Plugs.Contracts.csproj" />
+      <ProjectReference Include="..\octo-core\src\Common\Communication.Sockets.Contracts\Communication.Sockets.Contracts.csproj" />
       <ProjectReference Include="..\octo-core\src\SystematizedData\Persistence\Persistence.csproj" />
     </ItemGroup>
 

@@ -37,7 +37,7 @@
         },
         {
           "id": "Meshmakers.CommunicationAdapter.Deployment.ImageVersion",
-          "value": "0.0.2306.24002"
+          "value": "0.0.2306.25002"
         }
       ],
       "associations": [
@@ -203,6 +203,35 @@
       ]
     },
     {
+      "rtId": "5fc8fc3d8b2fc75f925e21c5",
+      "ckId": "Meshmakers.Plug.Mapping",
+      "attributes": [
+        {
+          "id": "Meshmakers.Designation",
+          "value": "Production Additional PV"
+        },
+        {
+          "id": "Meshmakers.Plug.Mapping.Reference.Id",
+          "value": "5fc8fda18b2fc75f925e21c0"
+        },
+        {
+          "id": "Meshmakers.Plug.Mapping.Reference.CkId",
+          "value": "Meshmakers.Assets.Photovoltaic.PvModules"
+        },
+        {
+          "id": "Meshmakers.Plug.Mapping.Reference.AttributeId",
+          "value": "Meshmakers.TechDesc.Pv.ProductionPower"
+        },
+        {
+          "id": "Meshmakers.Plug.Mapping.Configuration",
+          "value": "{ \"register\": 75, \"registerType\": 3, \"pollingInterval\": \"00:00:05\", \"scaleInputMin\": 0, \"scaleInputMax\": -10000, \"scaleOutputMin\": 0, \"scaleOutputMax\": 10000 }"
+        }
+      ],
+      "associations": [
+        { "roleId": "System.ParentChild", "targetRtId": "5fc8fc3d8b2fc75f925e21bb", "targetCkId": "Meshmakers.Plug.Group" }
+      ]
+    },
+    {
       "rtId": "5fc8fc3d8b2fc75f925e21c1",
       "ckId": "Meshmakers.Plug",
       "attributes": [
@@ -224,7 +253,7 @@
         },
         {
           "id": "Meshmakers.CommunicationAdapter.Deployment.ImageVersion",
-          "value": "0.0.2306.24002"
+          "value": "0.0.2306.25002"
         }
       ],
       "associations": [
