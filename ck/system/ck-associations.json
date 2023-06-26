@@ -1,9 +1,0 @@
-{
-  "associationRoles": [
-    {
-      "id": "System.ParentChild",
-      "inboundName": "Children",
-      "outboundName": "Parent"
-    }
-  ]
-}

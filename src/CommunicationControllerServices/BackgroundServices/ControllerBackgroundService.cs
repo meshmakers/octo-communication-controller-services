@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Plugs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Sockets;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.CkModelEntities;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Common.DistributedCache;
@@ -25,10 +26,11 @@ internal class ControllerBackgroundService : BackgroundService
     private readonly IDistributedWithPubSubCache _distributedWithPubSubCache;
     private readonly IPoolCache _poolCache;
     private readonly IPlugCache _plugCache;
+    private readonly ISocketCache _socketCache;
     private readonly ConcurrentDictionary<string, IDisposable> _updateStreams = new();
 
     public ControllerBackgroundService(IPoolServiceUpdates poolService, IPlugServiceUpdates plugService, ISocketServiceUpdates socketService, ISystemContext systemContext,
-        IDistributedWithPubSubCache distributedWithPubSubCache, IPoolCache poolCache, IPlugCache plugCache)
+        IDistributedWithPubSubCache distributedWithPubSubCache, IPoolCache poolCache, IPlugCache plugCache, ISocketCache socketCache)
     {
         _poolService = poolService;
         _plugService = plugService;
@@ -37,6 +39,7 @@ internal class ControllerBackgroundService : BackgroundService
         _distributedWithPubSubCache = distributedWithPubSubCache;
         _poolCache = poolCache;
         _plugCache = plugCache;
+        _socketCache = socketCache;
     }
 
 
@@ -51,6 +54,7 @@ internal class ControllerBackgroundService : BackgroundService
         Logger.Info("Initializing caches");
         await _poolCache.InitializeAsync();
         await _plugCache.InitializeAsync();
+        await _socketCache.InitializeAsync();
 
         Logger.Info("Starting tentants");
         await StartTenants();
@@ -283,5 +287,6 @@ internal class ControllerBackgroundService : BackgroundService
         Logger.Info("Reloading tenant '{TenantId}'", tenantId);
         await _poolService.ReloadTenantAsync(tenantId);
         await _plugService.ReloadTenantAsync(tenantId);
+        await _socketService.ReloadTenantAsync(tenantId);
     }
 }
