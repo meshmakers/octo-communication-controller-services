@@ -134,14 +134,9 @@ internal class PlugService : IPlugService
     public Task ReloadTenantAsync(string tenantId)
     {
         Logger.Info("[{TenantId}] Reload tenant", tenantId);
-
-
-        if (!_plugCache.TryGetTenant(tenantId, out var plugTenant) || plugTenant == null)
-        {
-            throw PlugServiceException.TenantNotFound(tenantId);
-        }
         
-        plugTenant.Clear();
+        // More handling is currently not implemented, because the pool service will react on this
+        // and undeploys and deploys the communication adapters currently. 
         
         return Task.CompletedTask;
     }

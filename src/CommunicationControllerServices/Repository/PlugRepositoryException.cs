@@ -107,4 +107,9 @@ public class PlugRepositoryException : Exception
     {
         return new PlugRepositoryException($"[{tenantId}] Failed to get plug by group '{plugGroupRtId}'", exception);
     }
+
+    internal static Exception CommonFailedIsTenantExisting(string tenantId, Exception exception)
+    {
+        return new PlugRepositoryException($"[{tenantId}] Failed to check if tenant exists", exception);
+    }
 }

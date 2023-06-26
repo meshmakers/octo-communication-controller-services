@@ -97,4 +97,11 @@ public interface IPlugRepository
     /// <param name="plugGroupRtId">Object identifier of plug group</param>
     /// <returns></returns>
     Task<RtPlug> GetPlugByGroupAsync(string tenantId, OctoObjectId plugGroupRtId);
+
+    /// <summary>
+    /// Returns true if a tenant exists
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <returns></returns>
+    Task<bool> IsTenantExistingAsync(string tenantId);
 }
