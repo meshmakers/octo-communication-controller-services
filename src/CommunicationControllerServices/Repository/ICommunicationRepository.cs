@@ -7,8 +7,16 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 /// <summary>
 /// Repository for pool related operations
 /// </summary>
-public interface IPlugRepository
+internal interface ICommunicationRepository
 {
+    /// <summary>
+    /// Get all sockets from a pool
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="poolRtId">Object id of pool</param>
+    /// <returns></returns>
+    Task<IReadOnlyCollection<RtSocket>> GetSocketsAsync(string tenantId, OctoObjectId poolRtId);
+    
     /// <summary>
     /// Get all plugs from a pool
     /// </summary>
@@ -23,6 +31,14 @@ public interface IPlugRepository
     /// <param name="tenantId">Tenant identifier</param>
     /// <returns></returns>
     Task<IReadOnlyCollection<RtPlug>> GetPlugsAsync(string tenantId);
+    
+    /// <summary>
+    /// Gets a socket by object id
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="socketRtId">Object id of socket</param>
+    /// <returns></returns>
+    Task<RtSocket> GetSocketAsync(string tenantId, OctoObjectId socketRtId);
     
     /// <summary>
     /// Gets a plug by object id
@@ -58,13 +74,22 @@ public interface IPlugRepository
     Task SetPoolStateAsync(string tenantId, OctoObjectId poolRtId, PoolStates state);
 
     /// <summary>
+    /// Set the state of a socket
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="socketRtId">Object id of socket</param>
+    /// <param name="adapterState">State of adapter</param>
+    /// <returns></returns>
+    Task SetSocketStateAsync(string tenantId, OctoObjectId socketRtId, AdapterStates adapterState);
+    
+    /// <summary>
     /// Set the state of a plug
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="plugRtId">Object id of plug</param>
-    /// <param name="state">State of pool</param>
+    /// <param name="adapterState">State of adapter</param>
     /// <returns></returns>
-    Task SetPlugStateAsync(string tenantId, OctoObjectId plugRtId, PlugStates state);
+    Task SetPlugStateAsync(string tenantId, OctoObjectId plugRtId, AdapterStates adapterState);
 
     /// <summary>
     /// Gets the pool of a plug

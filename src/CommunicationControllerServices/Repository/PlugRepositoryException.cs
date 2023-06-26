@@ -3,16 +3,18 @@ using Meshmakers.Octo.Common.Shared;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 
-public class PlugRepositoryException : Exception
+internal class PlugRepositoryException : Exception
 {
     public PlugRepositoryException()
     {
     }
 
+    // ReSharper disable once MemberCanBePrivate.Global
     public PlugRepositoryException(string message) : base(message)
     {
     }
 
+    // ReSharper disable once MemberCanBePrivate.Global
     public PlugRepositoryException(string message, Exception inner) : base(message, inner)
     {
     }
@@ -83,7 +85,7 @@ public class PlugRepositoryException : Exception
         return new PlugRepositoryException($"[{tenantId}] Failed to set state of pool '{poolRtId}' to '{state}'", exception);
     }
 
-    internal static Exception CommonFailedSetPlugState(string tenantId, OctoObjectId plugRtId, PlugStates state, Exception exception)
+    internal static Exception CommonFailedSetPlugState(string tenantId, OctoObjectId plugRtId, AdapterStates state, Exception exception)
     {
         return new PlugRepositoryException($"[{tenantId}] Failed to set state of plug '{plugRtId}' to '{state}'", exception);
     }
@@ -111,5 +113,20 @@ public class PlugRepositoryException : Exception
     internal static Exception CommonFailedIsTenantExisting(string tenantId, Exception exception)
     {
         return new PlugRepositoryException($"[{tenantId}] Failed to check if tenant exists", exception);
+    }
+
+    internal static Exception CommonFailedGettingSockets(string tenantId, Exception exception)
+    {
+        return new PlugRepositoryException($"[{tenantId}] Failed to get sockets", exception);
+    }
+
+    internal static Exception SocketNotFound(string tenantId, OctoObjectId socketRtId)
+    {
+        return new PlugRepositoryException($"[{tenantId}] Socket '{socketRtId}' does not exist");
+    }
+
+    public static Exception CommonFailedGettingSocket(string tenantId, OctoObjectId socketRtId, Exception exception)
+    {
+        return new PlugRepositoryException($"[{tenantId}] Failed to get socket '{socketRtId}'", exception);
     }
 }

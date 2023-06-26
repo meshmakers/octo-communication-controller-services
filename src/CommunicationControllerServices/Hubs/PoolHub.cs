@@ -17,7 +17,7 @@ public class PoolHub : Hub, IPoolHub
     /// <summary>
     /// Constructor
     /// </summary>
-    /// <param name="poolService"></param>
+    /// <param name="poolService">The responsible pool service</param>
     public PoolHub(IPoolService poolService)
     {
         _poolService = poolService;

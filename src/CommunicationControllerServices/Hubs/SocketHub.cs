@@ -7,11 +7,18 @@ using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 
+/// <summary>
+/// Represents the SignalR hub for sockets
+/// </summary>
 public class SocketHub : Hub, ISocketHub
 {
     private readonly ISocketService _socketService;
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
+    /// <summary>
+    /// Constructor
+    /// </summary>
+    /// <param name="socketService">The responsible socket service</param>
     public SocketHub(ISocketService socketService)
     {
         _socketService = socketService;

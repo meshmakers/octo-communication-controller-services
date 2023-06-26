@@ -6,7 +6,7 @@ using Newtonsoft.Json;
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.CkModelEntities;
 
 [CkId(Statics.CkIdPlugGroup)]
-public class RtPlugGroup : RtEntity
+internal class RtPlugGroup : RtEntity
 {
     [JsonIgnore]
     [BsonIgnore]

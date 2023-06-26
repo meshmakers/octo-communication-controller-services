@@ -2,6 +2,6 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Plugs.D
 
 internal class PlugTenantDescription
 {
-    public IEnumerable<PlugDescription> Plugs { get; set; }
-    public string TenantId { get; set; }
+    public IEnumerable<PlugDescription> Plugs { get; set; } = null!;
+    public string TenantId { get; set; } = null!;
 }

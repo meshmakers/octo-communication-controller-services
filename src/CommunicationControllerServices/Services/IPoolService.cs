@@ -92,20 +92,4 @@ public interface IPoolService
     /// <param name="connectionId">Connection id of pool</param>
     /// <returns></returns>
     Task SetPoolOnlineAsync(string tenantId, string poolName, string connectionId);
-
-    /// <summary>
-    /// Handles a pool update
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="info">Update information object</param>
-    /// <returns></returns>
-    Task OnHandlePoolUpdateAsync(string tenantId, UpdateInfo<RtCommunicationPool> info);
-
-    /// <summary>
-    /// Handles a plug update
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="info">Update information object</param>
-    /// <returns></returns>
-    Task OnHandlePlugUpdateAsync(string tenantId, UpdateInfo<RtPlug> info);
 }

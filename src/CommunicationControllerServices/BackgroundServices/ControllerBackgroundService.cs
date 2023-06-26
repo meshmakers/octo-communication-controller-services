@@ -18,28 +18,21 @@ internal class ControllerBackgroundService : BackgroundService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-    private readonly IPoolService _poolService;
-    private readonly IPlugService _plugService;
+    private readonly IPoolServiceUpdates _poolService;
+    private readonly IPlugServiceUpdates _plugService;
+    private readonly ISocketServiceUpdates _socketService;
     private readonly ISystemContext _systemContext;
     private readonly IDistributedWithPubSubCache _distributedWithPubSubCache;
     private readonly IPoolCache _poolCache;
     private readonly IPlugCache _plugCache;
     private readonly ConcurrentDictionary<string, IDisposable> _updateStreams = new();
 
-    /// <summary>
-    /// Constructor
-    /// </summary>
-    /// <param name="poolService"></param>
-    /// <param name="plugService"></param>
-    /// <param name="systemContext"></param>
-    /// <param name="distributedWithPubSubCache"></param>
-    /// <param name="poolCache"></param>
-    /// <param name="plugCache"></param>
-    public ControllerBackgroundService(IPoolService poolService, IPlugService plugService, ISystemContext systemContext,
+    public ControllerBackgroundService(IPoolServiceUpdates poolService, IPlugServiceUpdates plugService, ISocketServiceUpdates socketService, ISystemContext systemContext,
         IDistributedWithPubSubCache distributedWithPubSubCache, IPoolCache poolCache, IPlugCache plugCache)
     {
         _poolService = poolService;
         _plugService = plugService;
+        _socketService = socketService;
         _systemContext = systemContext;
         _distributedWithPubSubCache = distributedWithPubSubCache;
         _poolCache = poolCache;

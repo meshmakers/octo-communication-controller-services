@@ -1,6 +1,6 @@
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 
-public class PersistentServerSettings
+internal class PersistentServerSettings
 {
     public string Server { get; set; } = null!;
 }

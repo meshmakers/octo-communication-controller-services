@@ -18,7 +18,7 @@
     {
       "id": "Meshmakers.TechDesc.Pv.AmountOfPvModules",
       "reference": "0173-1#02-AAI309#001",
-      "valueType": "String"
+      "valueType": "Int"
     },
     {
       "id": "Meshmakers.TechDesc.Pv.MaximumPower",

@@ -9,16 +9,15 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 /// <summary>
 /// Repository for pool related operations
 /// </summary>
-public class PlugRepository : IPlugRepository
+internal class CommunicationRepository : ICommunicationRepository
 {
     private readonly ISystemContext _systemContext;
-
 
     /// <summary>
     /// Constructor
     /// </summary>
     /// <param name="systemContext">The root object of the persistence layer</param>
-    public PlugRepository(ISystemContext systemContext)
+    public CommunicationRepository(ISystemContext systemContext)
     {
         _systemContext = systemContext;
     }
@@ -51,6 +50,33 @@ public class PlugRepository : IPlugRepository
         catch (Exception e)
         {
             throw PlugRepositoryException.CommonFailedGettingPlugs(tenantId, poolRtId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<RtSocket> GetSocketAsync(string tenantId, OctoObjectId socketRtId)
+    {
+        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+
+        var session = await tenantContext.Repository.StartSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var rtSocket = await tenantContext.Repository.GetRtEntityAsync<RtSocket>(session, socketRtId);
+
+            if (rtSocket == null)
+            {
+                throw PlugRepositoryException.SocketNotFound(tenantId, socketRtId);
+            }
+
+            await session.CommitTransactionAsync();
+
+            return rtSocket;
+        }
+        catch (Exception e)
+        {
+            throw PlugRepositoryException.CommonFailedGettingSocket(tenantId, socketRtId, e);
         }
     }
 
@@ -98,6 +124,28 @@ public class PlugRepository : IPlugRepository
         catch (Exception e)
         {
             throw PlugRepositoryException.CommonFailedIsTenantExisting(tenantId,  e);
+        }
+    }
+    
+    /// <inheritdoc />
+    public async Task<IReadOnlyCollection<RtSocket>> GetSocketsAsync(string tenantId, OctoObjectId poolRtId)
+    {
+        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+
+        var session = await tenantContext.Repository.StartSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var resultSet = await tenantContext.Repository.GetRtEntitiesByTypeAsync<RtSocket>(session, new DataQueryOperation());
+
+            await session.CommitTransactionAsync();
+
+            return resultSet.Result.ToList();
+        }
+        catch (Exception e)
+        {
+            throw PlugRepositoryException.CommonFailedGettingSockets(tenantId, e);
         }
     }
 
@@ -209,8 +257,39 @@ public class PlugRepository : IPlugRepository
         }
     }
 
+    public async Task SetSocketStateAsync(string tenantId, OctoObjectId socketRtId, AdapterStates adapterState)
+    {
+        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+
+        var session = await tenantContext.Repository.StartSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var rtSocketEntity = new RtSocket
+            {
+                RtId = socketRtId.ToObjectId(),
+                State = adapterState
+            };
+
+            var entityUpdateInfoList = new List<EntityUpdateInfo>
+            {
+                new(rtSocketEntity, EntityModOptions.Update)
+            };
+
+            await tenantContext.Repository.ApplyChanges(session, entityUpdateInfoList);
+
+            await session.CommitTransactionAsync();
+        }
+        catch (Exception e)
+        {
+            throw PlugRepositoryException.CommonFailedSetPlugState(tenantId, socketRtId, adapterState, e);
+        }
+        
+    }
+
     /// <inheritdoc />
-    public async Task SetPlugStateAsync(string tenantId, OctoObjectId plugRtId, PlugStates state)
+    public async Task SetPlugStateAsync(string tenantId, OctoObjectId plugRtId, AdapterStates adapterState)
     {
         var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
 
@@ -222,7 +301,7 @@ public class PlugRepository : IPlugRepository
             var rtPlugEntity = new RtPlug
             {
                 RtId = plugRtId.ToObjectId(),
-                State = state
+                State = adapterState
             };
 
             var entityUpdateInfoList = new List<EntityUpdateInfo>
@@ -236,7 +315,7 @@ public class PlugRepository : IPlugRepository
         }
         catch (Exception e)
         {
-            throw PlugRepositoryException.CommonFailedSetPlugState(tenantId, plugRtId, state, e);
+            throw PlugRepositoryException.CommonFailedSetPlugState(tenantId, plugRtId, adapterState, e);
         }
     }
 
