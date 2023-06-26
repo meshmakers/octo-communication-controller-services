@@ -11,17 +11,17 @@ using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
-internal class PlugService : IPlugService
+internal class PlugService : IPlugServiceUpdates
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-    private readonly IPlugRepository _plugRepository;
+    private readonly ICommunicationRepository _communicationRepository;
     private readonly IPlugCache _plugCache;
     private readonly IPlugHubCallbacks _plugHubCallbacks;
 
-    public PlugService(IPlugRepository plugRepository, IPlugCache plugCache, IPlugHubCallbacks plugHubCallbacks)
+    public PlugService(ICommunicationRepository communicationRepository, IPlugCache plugCache, IPlugHubCallbacks plugHubCallbacks)
     {
-        _plugRepository = plugRepository;
+        _communicationRepository = communicationRepository;
         _plugCache = plugCache;
         _plugHubCallbacks = plugHubCallbacks;
     }
@@ -48,7 +48,7 @@ internal class PlugService : IPlugService
             plug.UpdateConnectionId(connectionId);
         }
 
-        await SetPlugInStateAsync(tenantId, plugRtId, PlugStates.Offline);    
+        await SetPlugInStateAsync(tenantId, plugRtId, AdapterStates.Offline);    
 
         return plug.Configuration;
     }
@@ -60,23 +60,23 @@ internal class PlugService : IPlugService
 
         var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
         plugTenant.RemovePlug(plugRtId);
-        await SetPlugInStateAsync(tenantId, plugRtId, PlugStates.Deployed);
+        await SetPlugInStateAsync(tenantId, plugRtId, AdapterStates.Deployed);
     }
 
-    private async Task SetPlugInStateAsync(string tenantId, OctoObjectId plugRtId, PlugStates plugState)
+    private async Task SetPlugInStateAsync(string tenantId, OctoObjectId plugRtId, AdapterStates adapterState)
     {
-        Logger.Info("[{TenantId}] Setting state of plug '{PlugObjectId}' to '{PlugState}'",
-            tenantId, plugRtId, plugState);
+        Logger.Info("[{TenantId}] Setting state of plug '{PlugRtId}' to '{PlugState}'",
+            tenantId, plugRtId, adapterState);
         try
         {
-            await _plugRepository.SetPlugStateAsync(tenantId, plugRtId, plugState);
+            await _communicationRepository.SetPlugStateAsync(tenantId, plugRtId, adapterState);
         }
         catch (Exception e)
         {
             Logger.Error(e, "[{TenantId}] Error setting state of plug '{PlugObjectId}' to '{PlugState}'",
-                tenantId, plugRtId, plugState);
+                tenantId, plugRtId, adapterState);
             
-            throw PlugServiceException.CommonFailedSetPlugState(tenantId, plugRtId, plugState, e);
+            throw PlugServiceException.CommonFailedSetPlugState(tenantId, plugRtId, adapterState, e);
         }
     }
 
@@ -84,12 +84,12 @@ internal class PlugService : IPlugService
     {
         try
         {
-            var plugEntity = await _plugRepository.GetPlugAsync(tenantId, plugRtId);
+            var plugEntity = await _communicationRepository.GetPlugAsync(tenantId, plugRtId);
 
             var persistentServerSettings =
                 plugEntity.Configuration?.Deserialize<PersistentServerSettings>() ?? new PersistentServerSettings();
 
-            var plugGroupConfigurations = await _plugRepository.GetPlugGroupConfigurationAsync(tenantId, plugRtId);
+            var plugGroupConfigurations = await _communicationRepository.GetPlugGroupConfigurationAsync(tenantId, plugRtId);
        
             var plugConfiguration = new PlugConfigurationDto
             {
@@ -119,7 +119,7 @@ internal class PlugService : IPlugService
         var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
         if (plugTenant.PlugsById.TryGetValue(plugRtId, out var plug))
         {
-            await SetPlugInStateAsync(tenantId, plug.PlugRtId, PlugStates.Online);
+            await SetPlugInStateAsync(tenantId, plug.PlugRtId, AdapterStates.Online);
         }
     }
 
@@ -127,7 +127,7 @@ internal class PlugService : IPlugService
     {
         if (_plugCache.TryGetTenant(tenantId, out var plugTenant) && plugTenant != null)
         {
-            await _plugRepository.SetPlugStateAsync(tenantId, plugRtId, PlugStates.Offline);
+            await _communicationRepository.SetPlugStateAsync(tenantId, plugRtId, AdapterStates.Offline);
         }
     }
 
@@ -148,7 +148,7 @@ internal class PlugService : IPlugService
             var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
             if (plugTenant.PlugsById.TryGetValue(info.Document.RtId.ToOctoObjectId(), out var plug))
             {
-                var rtPlug = await _plugRepository.GetPlugByMappingAsync(tenantId, info.Document.RtId.ToOctoObjectId());
+                var rtPlug = await _communicationRepository.GetPlugByMappingAsync(tenantId, info.Document.RtId.ToOctoObjectId());
 
                 var configuration = await GetPlugConfigurationAsync(tenantId, rtPlug.RtId.ToOctoObjectId());
 
@@ -168,7 +168,7 @@ internal class PlugService : IPlugService
             var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
             if (plugTenant.PlugsById.TryGetValue(info.Document.RtId.ToOctoObjectId(), out var plug))
             {
-                var rtPlug = await _plugRepository.GetPlugByGroupAsync(tenantId, info.Document.RtId.ToOctoObjectId());
+                var rtPlug = await _communicationRepository.GetPlugByGroupAsync(tenantId, info.Document.RtId.ToOctoObjectId());
 
                 var configuration = await GetPlugConfigurationAsync(tenantId, rtPlug.RtId.ToOctoObjectId());
 
@@ -188,7 +188,7 @@ internal class PlugService : IPlugService
             var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
             if (plugTenant.PlugsById.TryGetValue(info.Document.RtId.ToOctoObjectId(), out var plug))
             {
-                var rtPlug = await _plugRepository.GetPlugAsync(tenantId, info.Document.RtId.ToOctoObjectId());
+                var rtPlug = await _communicationRepository.GetPlugAsync(tenantId, info.Document.RtId.ToOctoObjectId());
 
                 var configuration = await GetPlugConfigurationAsync(tenantId, rtPlug.RtId.ToOctoObjectId());
 

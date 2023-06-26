@@ -2,6 +2,7 @@ using MassTransit;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.BackgroundServices;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Plugs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Sockets;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Configuration;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.DataSink;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
@@ -13,6 +14,7 @@ using Meshmakers.Octo.Backend.DistributedCache;
 using Meshmakers.Octo.Backend.Swagger.Configuration;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.Communication.Plugs.Contracts.Hubs;
+using Meshmakers.Octo.Communication.Sockets.Contracts.Hubs;
 using Meshmakers.Octo.SystematizedData.Persistence;
 using Meshmakers.Octo.SystematizedData.Persistence.Configuration;
 using Microsoft.Extensions.Options;
@@ -21,8 +23,8 @@ using NLog.Web;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
 // NLog: setup the logger first to catch all errors
-var nlogFactory = NLogBuilder.ConfigureNLog("nlog.config");
-var logger = nlogFactory.GetCurrentClassLogger();
+var nLogFactory = LogManager.Setup().RegisterNLogWeb().LoadConfigurationFromFile("nlog.config").LogFactory;
+var logger = nLogFactory.GetCurrentClassLogger();
 
 try
 {
@@ -98,15 +100,26 @@ try
         // options.AppName = AssetTexts.Backend_AssetServices_UserSchema_Swagger_DisplayName;
     });
 
+    builder.Services.AddSingleton<PlugService>();
+    builder.Services.AddSingleton<IPlugService>(provider => provider.GetRequiredService<PlugService>());
+    builder.Services.AddSingleton<IPlugServiceUpdates>(provider => provider.GetRequiredService<PlugService>());
+    
+    builder.Services.AddSingleton<SocketService>();
+    builder.Services.AddSingleton<ISocketService>(provider => provider.GetRequiredService<SocketService>());
+    builder.Services.AddSingleton<ISocketServiceUpdates>(provider => provider.GetRequiredService<SocketService>());
+    
+    builder.Services.AddSingleton<PoolService>();
+    builder.Services.AddSingleton<IPoolService>(provider => provider.GetRequiredService<PoolService>());
+    builder.Services.AddSingleton<IPoolServiceUpdates>(provider => provider.GetRequiredService<PoolService>());
+    
     builder.Services.AddSingleton<IConfigurationService, ConfigurationService>();
-    builder.Services.AddSingleton<IPlugService, PlugService>();
-    builder.Services.AddSingleton<IPoolService, PoolService>();
-    builder.Services.AddSingleton<ISocketService, SocketService>();
-    builder.Services.AddSingleton<IPlugRepository, PlugRepository>();
+    builder.Services.AddSingleton<ICommunicationRepository, CommunicationRepository>();
     builder.Services.AddSingleton<IPoolCache, PoolHubCache>();
     builder.Services.AddSingleton<IPlugCache, PlugCache>();
+    builder.Services.AddSingleton<ISocketCache, SocketCache>();
     builder.Services.AddSingleton<IPoolHubCallbacks, PoolHubCallbacks>();
     builder.Services.AddSingleton<IPlugHubCallbacks, PlugHubCallbacks>();
+    builder.Services.AddSingleton<ISocketHubCallbacks, SocketHubCallbacks>();
     builder.Services.AddHostedService<ControllerBackgroundService>();
 
     var app = builder.Build();

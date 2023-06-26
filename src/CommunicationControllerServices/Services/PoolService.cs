@@ -12,22 +12,22 @@ using Plug = Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pool
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
-internal class PoolService : IPoolService
+internal class PoolService : IPoolServiceUpdates
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
-    private readonly IPlugRepository _plugRepository;
+    private readonly ICommunicationRepository _communicationRepository;
     private readonly IPoolCache _poolCache;
     private readonly IPoolHubCallbacks _poolHubCallbacks;
 
     /// <summary>
     /// Constructor
     /// </summary>
-    /// <param name="plugRepository">Plug repository</param>
+    /// <param name="communicationRepository">Plug repository</param>
     /// <param name="poolCache">Distributed and synchronized data between nodes</param>
     /// <param name="poolHubCallbacks">Callbacks to inform client of configuration changes</param>
-    public PoolService(IPlugRepository plugRepository, IPoolCache poolCache, IPoolHubCallbacks poolHubCallbacks)
+    public PoolService(ICommunicationRepository communicationRepository, IPoolCache poolCache, IPoolHubCallbacks poolHubCallbacks)
     {
-        _plugRepository = plugRepository;
+        _communicationRepository = communicationRepository;
         _poolCache = poolCache;
         _poolHubCallbacks = poolHubCallbacks;
     }
@@ -49,15 +49,15 @@ internal class PoolService : IPoolService
         }
         else
         {
-            var poolList = await _plugRepository.GetPoolByNameAsync(tenantId, poolName);
+            var poolList = await _communicationRepository.GetPoolByNameAsync(tenantId, poolName);
             var rtPool = poolList.FirstOrDefault();
             if (rtPool == null)
             {
                 Logger.Info("[{TenantId}] Creating pool '{PoolName}'",
                     tenantId, poolName);
-                await _plugRepository.CreatePoolAsync(tenantId, poolName);
+                await _communicationRepository.CreatePoolAsync(tenantId, poolName);
 
-                poolList = await _plugRepository.GetPoolByNameAsync(tenantId, poolName);
+                poolList = await _communicationRepository.GetPoolByNameAsync(tenantId, poolName);
                 rtPool = poolList.FirstOrDefault();
 
                 if (rtPool == null)
@@ -70,7 +70,7 @@ internal class PoolService : IPoolService
         }
 
         // Update status in asset repository
-        await _plugRepository.SetPoolStateAsync(tenantId, poolDescription.PoolRtId, PoolStates.Deployed);
+        await _communicationRepository.SetPoolStateAsync(tenantId, poolDescription.PoolRtId, PoolStates.Deployed);
 
         Logger.Info("[{TenantId}] Operator for pool '{PoolName}' registered",
             tenantId, poolName);
@@ -92,7 +92,7 @@ internal class PoolService : IPoolService
         {
             tenantDescription.RemovePool(poolDescription.PoolRtId);
 
-            await _plugRepository.SetPoolStateAsync(tenantId, poolDescription.PoolRtId, PoolStates.Pending);
+            await _communicationRepository.SetPoolStateAsync(tenantId, poolDescription.PoolRtId, PoolStates.Pending);
 
             Logger.Info("[{TenantId}] Operator for pool '{PoolName}' unregistered",
                 tenantId, poolName);
@@ -116,7 +116,7 @@ internal class PoolService : IPoolService
         {
             poolTenant.RemovePlugs(poolRtId);
 
-            var rtPlugs = await _plugRepository.GetPlugsAsync(tenantId, poolRtId);
+            var rtPlugs = await _communicationRepository.GetPlugsAsync(tenantId, poolRtId);
             Logger.Info("[{TenantId}] '{PlugCount}' adapters found for Pool '{PoolRtId}'", tenantId, rtPlugs.Count, poolRtId);
             foreach (var rtPlug in rtPlugs)
             {
@@ -159,7 +159,7 @@ internal class PoolService : IPoolService
         {
             Logger.Info("[{TenantId}] Checking tenant and reloading plugs", tenantId);
 
-            if (await _plugRepository.IsTenantExistingAsync(tenantId))
+            if (await _communicationRepository.IsTenantExistingAsync(tenantId))
             {
                 // First, register pools
                 foreach (var pool in poolTenant.PoolsByName.Values.ToArray())
@@ -199,7 +199,7 @@ internal class PoolService : IPoolService
 
         if (poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
         {
-            var rtPlug = await _plugRepository.GetPlugAsync(tenantId, plugRtId);
+            var rtPlug = await _communicationRepository.GetPlugAsync(tenantId, plugRtId);
             var adapterDto = CreatePoolAdapterDto(poolRtId,
                 poolDescription.PoolName,
                 rtPlug);
@@ -249,7 +249,7 @@ internal class PoolService : IPoolService
 
         if (poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
         {
-            await _plugRepository.SetPoolStateAsync(tenantId, poolDescription.PoolRtId, PoolStates.Offline);
+            await _communicationRepository.SetPoolStateAsync(tenantId, poolDescription.PoolRtId, PoolStates.Offline);
         }
     }
 
@@ -278,7 +278,7 @@ internal class PoolService : IPoolService
 
         if (poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
         {
-            await _plugRepository.SetPoolStateAsync(tenantId, poolDescription.PoolRtId, PoolStates.Online);
+            await _communicationRepository.SetPoolStateAsync(tenantId, poolDescription.PoolRtId, PoolStates.Online);
         }
     }
 

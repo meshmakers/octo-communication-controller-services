@@ -34,6 +34,13 @@ public interface ISocketService
     Task<SocketConfigurationDto> RegisterSocketAsync(string tenantId, OctoObjectId socketRtId, string connectionId);
 
     /// <summary>
+    /// Gets a socket configuration for a given tenant and socket
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="socketRtId">Object Id of socket</param>
+    Task<SocketConfigurationDto> GetSocketConfigurationAsync(string tenantId, OctoObjectId socketRtId);
+    
+    /// <summary>
     /// Unregisters a socket
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
@@ -41,4 +48,5 @@ public interface ISocketService
     /// <param name="connectionId">Identifier of connection</param>
     /// <returns></returns>
     Task SocketUnRegisteredAsync(string tenantId, OctoObjectId socketRtId, string connectionId);
+
 }

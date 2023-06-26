@@ -18,7 +18,7 @@ public class PlugHub : Hub, IPlugHub
     /// <summary>
     /// Constructor
     /// </summary>
-    /// <param name="plugService"></param>
+    /// <param name="plugService">The responsible plug service</param>
     public PlugHub(IPlugService plugService)
     {
         _plugService = plugService;

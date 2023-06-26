@@ -17,19 +17,14 @@ internal class PlugServiceException : Exception
     {
     }
     
-    internal static Exception CommonFailedSetPlugState(string tenantId, OctoObjectId plugRtId, PlugStates plugState, Exception exception)
+    internal static Exception CommonFailedSetPlugState(string tenantId, OctoObjectId plugRtId, AdapterStates adapterState, Exception exception)
     {
-        return new PlugServiceException($"[{tenantId}] Failed to set plug '{plugRtId}' state to '{plugState}'", exception);
+        return new PlugServiceException($"[{tenantId}] Failed to set plug '{plugRtId}' state to '{adapterState}'", exception);
     }
 
     internal static Exception CommonFailedCannotLoadPlugConfiguration(string tenantId, OctoObjectId plugRtId, Exception exception)
     {
         return new PlugServiceException($"[{tenantId}] Failed to load plug '{plugRtId}' configuration", exception);
-    }
-
-    internal static Exception TenantNotFound(string tenantId)
-    {
-        return new PoolServiceException($"Tenant {tenantId} not found");
     }
 }
 

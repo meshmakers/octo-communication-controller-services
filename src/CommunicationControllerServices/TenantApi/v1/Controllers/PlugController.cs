@@ -15,19 +15,19 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.C
 public class PlugController : ControllerBase
 {
     private readonly ILogger<PlugController> _logger;
-    private readonly IPlugRepository _plugRepository;
+    private readonly ICommunicationRepository _communicationRepository;
     private readonly IPlugService _plugService;
 
     /// <summary>
     /// Constructor
     /// </summary>
     /// <param name="logger">Logging object</param>
-    /// <param name="plugRepository"></param>
+    /// <param name="communicationRepository"></param>
     /// <param name="plugService">Plug-In Management service instance</param>
-    public PlugController(ILogger<PlugController> logger, IPlugRepository plugRepository, IPlugService plugService)
+    internal PlugController(ILogger<PlugController> logger, ICommunicationRepository communicationRepository, IPlugService plugService)
     {
         _logger = logger;
-        _plugRepository = plugRepository;
+        _communicationRepository = communicationRepository;
         _plugService = plugService;
     }
     
@@ -44,7 +44,7 @@ public class PlugController : ControllerBase
             return NotFound("TenantId is null or empty");
         }
 
-        var config = await _plugRepository.GetPlugsAsync(tenantId);
+        var config = await _communicationRepository.GetPlugsAsync(tenantId);
 
         return Ok(config);
     }

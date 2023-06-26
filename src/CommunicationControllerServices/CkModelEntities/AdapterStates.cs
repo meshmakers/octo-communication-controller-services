@@ -1,32 +1,32 @@
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.CkModelEntities;
 
 /// <summary>
-/// Represents the state of a pool.
+/// Represents the state of a communication adapter.
 /// </summary>
-public enum PoolStates
+public enum AdapterStates
 {
     /// <summary>
-    /// The pool is created in database but communication controller has not yet seen it.
+    /// Adapter is created in database but communication controller has not yet seen it.
     /// </summary>
     Created = 0,
     
     /// <summary>
-    /// The pool is created in database and communication controller has seen it.
+    /// Adapter is created in database and communication controller has seen it.
     /// </summary>
     Pending = 1,
     
     /// <summary>
-    /// The pool is deployed but not yet online.
+    /// Adapter is deployed but not yet online.
     /// </summary>
     Deployed = 2,
     
     /// <summary>
-    /// The pool was online but is now offline.
+    /// Adapter was online but is now offline.
     /// </summary>
     Offline = 3,
     
     /// <summary>
-    /// The pool is online.
+    /// Adapter is online.
     /// </summary>
     Online = 4,
     
@@ -36,7 +36,7 @@ public enum PoolStates
     DeploymentError = 5,
     
     /// <summary>
-    /// Configuration of the pool is invalid, so it cannot be deployed.
+    /// The configuration of the adapter is invalid, so it cannot be deployed.
     /// </summary>
     ConfigurationError = 6
 }

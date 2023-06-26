@@ -8,5 +8,5 @@ internal class PoolPlugDescription
     public OctoObjectId PlugRtId { get; set; }
     public OctoObjectId PoolRtId { get; set; }
     
-    public PoolCommunicationAdapterDto AdapterDto { get; set; }
+    public PoolCommunicationAdapterDto AdapterDto { get; set; } = null!;
 }
