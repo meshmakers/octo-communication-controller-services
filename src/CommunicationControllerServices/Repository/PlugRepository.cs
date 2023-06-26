@@ -81,16 +81,36 @@ public class PlugRepository : IPlugRepository
         }
     }
 
+    public async Task<bool> IsTenantExistingAsync(string tenantId)
+    {
+        var systemSession = await _systemContext.StartSystemSessionAsync();
+
+        try
+        {
+            systemSession.StartTransaction();
+
+            var isTenantExisting = await _systemContext.IsTenantExistingAsync(systemSession, tenantId);
+
+            await systemSession.CommitTransactionAsync();
+
+            return isTenantExisting;
+        }
+        catch (Exception e)
+        {
+            throw PlugRepositoryException.CommonFailedIsTenantExisting(tenantId,  e);
+        }
+    }
+
     /// <inheritdoc />
     public async Task<IReadOnlyCollection<RtPlug>> GetPlugsAsync(string tenantId)
     {
         var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
-        
+
         var session = await tenantContext.Repository.StartSessionAsync();
         try
         {
             session.StartTransaction();
-        
+
             var resultSet = await tenantContext.Repository.GetRtEntitiesByTypeAsync<RtPlug>(session, new DataQueryOperation());
 
             await session.CommitTransactionAsync();
@@ -188,7 +208,7 @@ public class PlugRepository : IPlugRepository
             throw PlugRepositoryException.CommonFailedSetPoolState(tenantId, poolRtId, state, e);
         }
     }
-    
+
     /// <inheritdoc />
     public async Task SetPlugStateAsync(string tenantId, OctoObjectId plugRtId, PlugStates state)
     {
@@ -296,7 +316,7 @@ public class PlugRepository : IPlugRepository
         try
         {
             session.StartTransaction();
-            
+
             var plugGroupResultSet = await tenantContext.Repository.GetRtAssociationTargetsAsync<RtPlug, RtPlugGroup>(session,
                 new[] { plugRtId.ToObjectId() }, Statics.RoleIdParentChild, GraphDirections.Inbound, null, new DataQueryOperation());
 
@@ -306,10 +326,10 @@ public class PlugRepository : IPlugRepository
             }
 
             var plugGroups = plugGroupResultSet[plugRtId.ToObjectId()];
-            
+
             var groupResultSet = await tenantContext.Repository.GetRtAssociationTargetsAsync<RtPlugGroup, RtPlugMapping>(session,
-                plugGroups.Result.Select(x=> x.RtId), Statics.RoleIdParentChild, GraphDirections.Inbound, null, new DataQueryOperation());
-            
+                plugGroups.Result.Select(x => x.RtId), Statics.RoleIdParentChild, GraphDirections.Inbound, null, new DataQueryOperation());
+
             var plugGroupConfigurations = new List<GroupConfigurationDto>();
             foreach (var plugGroup in plugGroups.Result)
             {

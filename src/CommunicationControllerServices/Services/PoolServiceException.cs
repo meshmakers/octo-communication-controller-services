@@ -51,6 +51,9 @@ internal class PoolServiceException : Exception
         return new PoolServiceException($"[{tenantId}] Cannot create pool '{poolName}'");
     }
 
-
+    internal static Exception TenantReloadFailed(string tenantId, Exception exception)
+    {
+        return new PoolServiceException($"[{tenantId}] Failed to reload tenant", exception);
+    }
 }
 

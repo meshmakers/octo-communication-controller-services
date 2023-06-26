@@ -47,7 +47,7 @@ internal class PoolTenant
             pools.ToDictionary(p => p.PoolName, p => p));
         
         _plugsById = new ConcurrentDictionary<OctoObjectId, Plug>(
-            poolPlugDescriptions.ToDictionary(p => p.PlugRtId, p => new Plug(p.PlugRtId, p.PoolRtId)));
+            poolPlugDescriptions.ToDictionary(p => p.PlugRtId, p => new Plug(p.PlugRtId, p.PoolRtId, p.AdapterDto)));
 
         PoolsById = new ReadOnlyDictionary<OctoObjectId, Pool>(_poolsById);
         PoolsByName = new ReadOnlyDictionary<string, Pool>(_poolsByName);
