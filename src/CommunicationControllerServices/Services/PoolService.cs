@@ -117,6 +117,7 @@ internal class PoolService : IPoolService
             poolTenant.RemovePlugs(poolRtId);
 
             var rtPlugs = await _plugRepository.GetPlugsAsync(tenantId, poolRtId);
+            Logger.Info("[{TenantId}] '{PlugCount}' adapters found for Pool '{PoolRtId}'", tenantId, rtPlugs.Count, poolRtId);
             foreach (var rtPlug in rtPlugs)
             {
                 poolTenant.AddPlug(new Plug(rtPlug.RtId.ToOctoObjectId(), poolRtId,
@@ -128,7 +129,8 @@ internal class PoolService : IPoolService
                 CommunicationAdapterList = poolTenant.PlugsById.Values.Where(p => p.PoolRtId == poolRtId).Select(p => p.AdapterDto)
             };
 
-            Logger.Info("[{TenantId}] Current adapters for Pool '{PoolRtId}' retrieved", tenantId, poolRtId);
+            Logger.Info("[{TenantId}] Current adapters for Pool '{PoolRtId}' retrieved (Adapter count: {AdapterCount})",
+                tenantId, poolRtId, result.CommunicationAdapterList.Count());
             return result;
         }
 
