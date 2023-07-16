@@ -5,6 +5,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Sockets;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.CkModelEntities;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Common.DistributedCache;
+using Meshmakers.Octo.Common.Shared.DistributedCache;
 using Meshmakers.Octo.SystematizedData.Persistence;
 using Meshmakers.Octo.SystematizedData.Persistence.DataAccess;
 using Meshmakers.Octo.SystematizedData.Persistence.DatabaseEntities;

@@ -419,21 +419,17 @@ internal class CommunicationRepository : ICommunicationRepository
                     {
                         if (!string.IsNullOrWhiteSpace(mapping.Designation) && !string.IsNullOrWhiteSpace(mapping.Configuration))
                         {
-                            mappings.Add(new MappingConfigurationDto
-                            {
-                                Name = mapping.Designation,
-                                Id = mapping.RtId.ToOctoObjectId(),
-                                Configuration = mapping.Configuration
-                            });
+                            mappings.Add(new MappingConfigurationDto(
+                                mapping.Designation,
+                                mapping.RtId.ToOctoObjectId(),
+                                mapping.Configuration));
                         }
                     }
 
-                    var groupConfiguration = new GroupConfigurationDto
-                    {
-                        Id = plugGroup.RtId.ToOctoObjectId(),
-                        Name = plugGroup.Designation!,
-                        Mappings = mappings
-                    };
+                    var groupConfiguration = new GroupConfigurationDto(
+                        plugGroup.Designation!,
+                        plugGroup.RtId.ToOctoObjectId(),
+                        mappings);
                     plugGroupConfigurations.Add(groupConfiguration);
                 }
             }

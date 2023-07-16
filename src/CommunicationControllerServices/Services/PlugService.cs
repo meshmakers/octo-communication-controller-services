@@ -90,19 +90,14 @@ internal class PlugService : IPlugServiceUpdates
                 plugEntity.Configuration?.Deserialize<PersistentServerSettings>() ?? new PersistentServerSettings();
 
             var plugGroupConfigurations = await _communicationRepository.GetPlugGroupConfigurationAsync(tenantId, plugRtId);
-       
-            var plugConfiguration = new PlugConfigurationDto
-            {
-                PlugRtId = plugRtId,
-                ServerConfigurations = new[]
+
+            var plugConfiguration = new PlugConfigurationDto(
+                plugRtId,
+                new[]
                 {
-                    new ServerConfigurationDto
-                    {
-                        Server = persistentServerSettings.Server,
-                        Groups = plugGroupConfigurations
-                    }
+                    new ServerConfigurationDto(persistentServerSettings.Server, plugGroupConfigurations)
                 }
-            };
+            );
             return plugConfiguration;
         }
         catch (Exception e)
