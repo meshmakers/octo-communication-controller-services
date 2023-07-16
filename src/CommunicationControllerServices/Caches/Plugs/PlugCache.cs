@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Plugs.Descriptions;
 using Meshmakers.Octo.Common.DistributedCache;
 using Meshmakers.Octo.Common.Shared;
+using Meshmakers.Octo.Common.Shared.DistributedCache;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Plugs;

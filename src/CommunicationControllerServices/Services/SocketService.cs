@@ -83,11 +83,8 @@ internal class SocketService : ISocketServiceUpdates
         {
             // TODO: Get configuration from repository
             //var socket = await _communicationRepository.GetSocketAsync(tenantId, socketRtId);
-       
-            var plugConfiguration = new SocketConfigurationDto
-            {
-                SocketRtId = socketRtId,
-            };
+
+            var plugConfiguration = new SocketConfigurationDto(socketRtId);
             return Task.FromResult(plugConfiguration);
         }
         catch (Exception e)

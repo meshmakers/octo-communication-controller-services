@@ -1,6 +1,7 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.Common.DistributedCache;
 using Meshmakers.Octo.Common.Shared;
+using Meshmakers.Octo.Common.Shared.DistributedCache;
 using Meshmakers.Octo.SystematizedData.Persistence;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
