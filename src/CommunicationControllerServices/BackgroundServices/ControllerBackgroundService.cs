@@ -1,14 +1,9 @@
 using System.Collections.Concurrent;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Plugs;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Sockets;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.CkModelEntities;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Common.Shared.DistributedCache;
-using Meshmakers.Octo.SystematizedData.Persistence;
-using Meshmakers.Octo.SystematizedData.Persistence.DataAccess;
-using Meshmakers.Octo.SystematizedData.Persistence.DatabaseEntities;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.ConstructionKit.Generated.System.Communication.v1;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repository;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.BackgroundServices;
@@ -22,25 +17,14 @@ internal class ControllerBackgroundService : BackgroundService
 
     private readonly IPoolServiceUpdates _poolService;
     private readonly IPlugServiceUpdates _plugService;
-    private readonly ISocketServiceUpdates _socketService;
     private readonly ISystemContext _systemContext;
-    private readonly IDistributedWithPubSubCache _distributedWithPubSubCache;
-    private readonly IPoolCache _poolCache;
-    private readonly IPlugCache _plugCache;
-    private readonly ISocketCache _socketCache;
     private readonly ConcurrentDictionary<string, IDisposable> _updateStreams = new();
 
-    public ControllerBackgroundService(IPoolServiceUpdates poolService, IPlugServiceUpdates plugService, ISocketServiceUpdates socketService, ISystemContext systemContext,
-        IDistributedWithPubSubCache distributedWithPubSubCache, IPoolCache poolCache, IPlugCache plugCache, ISocketCache socketCache)
+    public ControllerBackgroundService(IPoolServiceUpdates poolService, IPlugServiceUpdates plugService,  ISystemContext systemContext)
     {
         _poolService = poolService;
         _plugService = plugService;
-        _socketService = socketService;
         _systemContext = systemContext;
-        _distributedWithPubSubCache = distributedWithPubSubCache;
-        _poolCache = poolCache;
-        _plugCache = plugCache;
-        _socketCache = socketCache;
     }
 
 
@@ -52,25 +36,13 @@ internal class ControllerBackgroundService : BackgroundService
     {
         Logger.Info("Starting ControllerBackgroundService");
 
-        Logger.Info("Initializing caches");
-        await _poolCache.InitializeAsync();
-        await _plugCache.InitializeAsync();
-        await _socketCache.InitializeAsync();
-
         Logger.Info("Starting tentants");
         await StartTenants();
-
-        Logger.Info("Subscribing to tenant updates");
-        var channel = SubscribeToTenantUpdates();
 
         Logger.Info("BackgroundService started");
         stoppingToken.WaitHandle.WaitOne();
 
         Logger.Info("BackgroundService stopping");
-
-        Logger.Info("Unsubscribing from tenant updates");
-        await channel.UnsubscribeAsync();
-        channel.Dispose();
 
         Logger.Info("Stopping tenants and their update streams");
         foreach (var updateStream in _updateStreams.Values)
@@ -81,26 +53,13 @@ internal class ControllerBackgroundService : BackgroundService
         Logger.Info("ControllerBackgroundService stopped");
     }
 
-    private IChannel<string> SubscribeToTenantUpdates()
-    {
-        var channel = _distributedWithPubSubCache.Subscribe<string>(CacheCommon.KeyTenantUpdate);
-        channel.OnMessage(async message =>
-        {
-            if (!string.IsNullOrWhiteSpace(message.Message))
-            {
-                await ReloadTenantAsync(message.Message);
-            }
-        });
-        return channel;
-    }
-
     private async Task StartTenants()
     {
-        var session = await _systemContext.StartSystemSessionAsync();
+        var session = await _systemContext.GetSystemSessionAsync();
         session.StartTransaction();
 
-        var pagedResult = await _systemContext.GetTenantsAsync(session);
-        foreach (var tenant in pagedResult.List)
+        var pagedResult = await _systemContext.GetChildTenantsAsync(session);
+        foreach (var tenant in pagedResult.Items)
         {
             await StartTenantAsync(tenant.TenantId);
         }
@@ -112,27 +71,28 @@ internal class ControllerBackgroundService : BackgroundService
     {
         Logger.Info("Subscribing to tenant '{TenantId}' for plug updates", tenantId);
 
-        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+        var tenantContext = await _systemContext.GetChildTenantContextAsync(tenantId);
+        var tenantRepository = _systemContext.GetTenantRepository();
 
-        var session = await tenantContext.Repository.StartSessionAsync();
+        var session = await tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         // Subscribe to association updates Plug->PlugGroup
-        var plugPlugGroupSubscription = tenantContext.Repository.SubscribeToRtAssociations<RtPlug, RtPlugGroup>(
+        var plugPlugGroupSubscription = tenantRepository.SubscribeToRtAssociations<RtPlug, RtPlugGroup>(
             new UpdateAssociationStreamFilter
                 { UpdateTypes = UpdateTypes.Delete | UpdateTypes.Insert, RoleId = Statics.RoleIdParentChild });
         plugPlugGroupSubscription.GetUpdates().Subscribe(info => HandlePlugConfigurationUpdateAssociations(tenantId, info).Wait());
         _updateStreams.AddOrUpdate(tenantId, plugPlugGroupSubscription, (_, _) => plugPlugGroupSubscription);
 
         // Subscribe to association updates PlugGroup->PlugMapping
-        var plugGroupPlugMappingSubscription = tenantContext.Repository.SubscribeToRtAssociations<RtPlugGroup, RtPlugMapping>(
+        var plugGroupPlugMappingSubscription = tenantRepository.SubscribeToRtAssociations<RtPlugGroup, RtPlugMapping>(
             new UpdateAssociationStreamFilter
                 { UpdateTypes = UpdateTypes.Delete | UpdateTypes.Insert, RoleId = Statics.RoleIdParentChild });
         plugGroupPlugMappingSubscription.GetUpdates().Subscribe(info => HandlePlugConfigurationUpdateAssociations(tenantId, info).Wait());
         _updateStreams.AddOrUpdate(tenantId, plugGroupPlugMappingSubscription, (_, _) => plugGroupPlugMappingSubscription);
 
         // Subscribe to association updates CommunicationPool->Plug
-        var communicationPoolPlugSubscription = tenantContext.Repository.SubscribeToRtAssociations<RtPlug, RtCommunicationPool>(
+        var communicationPoolPlugSubscription = tenantRepository.SubscribeToRtAssociations<RtPlug, RtCommunicationPool>(
             new UpdateAssociationStreamFilter
                 { UpdateTypes = UpdateTypes.Delete | UpdateTypes.Insert, RoleId = Statics.RoleIdParentChild });
         communicationPoolPlugSubscription.GetUpdates().Subscribe(info => HandlePoolPlugUpdateAssociations(tenantId, info).Wait());
@@ -140,29 +100,29 @@ internal class ControllerBackgroundService : BackgroundService
 
         // Subscribe to updates of CommunicationPool, Plug, PlugGroup and PlugMapping
         var poolSubscription =
-            tenantContext.Repository.SubscribeToRtEntities<RtCommunicationPool>(new UpdateStreamFilter { UpdateTypes = UpdateTypes.All });
+            tenantRepository.SubscribeToRtEntities<RtCommunicationPool>(new UpdateStreamFilter { UpdateTypes = UpdateTypes.All });
         poolSubscription.GetUpdates().Subscribe(info => HandlePoolEntityUpdates(tenantId, info).Wait());
         _updateStreams.AddOrUpdate(tenantId, poolSubscription, (_, _) => poolSubscription);
 
         var plugSubscription =
-            tenantContext.Repository.SubscribeToRtEntities<RtPlug>(new UpdateStreamFilter { UpdateTypes = UpdateTypes.All });
+            tenantRepository.SubscribeToRtEntities<RtPlug>(new UpdateStreamFilter { UpdateTypes = UpdateTypes.All });
         plugSubscription.GetUpdates().Subscribe(info => HandlePlugEntityUpdates(tenantId, info).Wait());
         _updateStreams.AddOrUpdate(tenantId, plugSubscription, (_, _) => plugSubscription);
 
         var plugGroupSubscription =
-            tenantContext.Repository.SubscribeToRtEntities<RtPlugGroup>(new UpdateStreamFilter { UpdateTypes = UpdateTypes.All });
+            tenantRepository.SubscribeToRtEntities<RtPlugGroup>(new UpdateStreamFilter { UpdateTypes = UpdateTypes.All });
         plugGroupSubscription.GetUpdates().Subscribe(info => HandlePlugGroupEntityUpdates(tenantId, info).Wait());
         _updateStreams.AddOrUpdate(tenantId, plugGroupSubscription, (_, _) => plugGroupSubscription);
 
         var plugMappingSubscription =
-            tenantContext.Repository.SubscribeToRtEntities<RtPlugMapping>(new UpdateStreamFilter { UpdateTypes = UpdateTypes.All });
+            tenantRepository.SubscribeToRtEntities<RtPlugMapping>(new UpdateStreamFilter { UpdateTypes = UpdateTypes.All });
         plugMappingSubscription.GetUpdates().Subscribe(info => HandlePlugMappingEntityUpdates(tenantId, info).Wait());
         _updateStreams.AddOrUpdate(tenantId, plugMappingSubscription, (_, _) => plugMappingSubscription);
 
         await session.CommitTransactionAsync();
     }
 
-    private async Task HandlePlugMappingEntityUpdates(string tenantId, UpdateInfo<RtPlugMapping> info)
+    private async Task HandlePlugMappingEntityUpdates(string tenantId, IUpdateInfo<RtPlugMapping> info)
     {
         try
         {
@@ -175,7 +135,7 @@ internal class ControllerBackgroundService : BackgroundService
         }
     }
 
-    private async Task HandlePlugGroupEntityUpdates(string tenantId, UpdateInfo<RtPlugGroup> info)
+    private async Task HandlePlugGroupEntityUpdates(string tenantId, IUpdateInfo<RtPlugGroup> info)
     {
         try
         {
@@ -188,7 +148,7 @@ internal class ControllerBackgroundService : BackgroundService
         }
     }
 
-    private async Task HandlePlugEntityUpdates(string tenantId, UpdateInfo<RtPlug> info)
+    private async Task HandlePlugEntityUpdates(string tenantId, IUpdateInfo<RtPlug> info)
     {
         try
         {
@@ -202,7 +162,7 @@ internal class ControllerBackgroundService : BackgroundService
         }
     }
 
-    private async Task HandlePoolEntityUpdates(string tenantId, UpdateInfo<RtCommunicationPool> info)
+    private async Task HandlePoolEntityUpdates(string tenantId, IUpdateInfo<RtCommunicationPool> info)
     {
         try
         {
@@ -215,7 +175,7 @@ internal class ControllerBackgroundService : BackgroundService
         }
     }
 
-    private async Task HandlePlugConfigurationUpdateAssociations(string tenantId, UpdateInfo<RtAssociation> info)
+    private async Task HandlePlugConfigurationUpdateAssociations(string tenantId, IUpdateInfo<RtAssociation> info)
     {
         try
         {
@@ -225,16 +185,16 @@ internal class ControllerBackgroundService : BackgroundService
                     if (info.Document != null)
                     {
                         Logger.Info("[{TenantId}] Plug '{RtId}' inserted", tenantId, info.Document.OriginRtId);
-                        await _poolService.DeployAdapterAsync(tenantId, info.Document.TargetRtId.ToOctoObjectId(),
-                            info.Document.OriginRtId.ToOctoObjectId());
+                        await _poolService.DeployAdapterAsync(tenantId, info.Document.TargetRtId,
+                            info.Document.OriginRtId);
                     }
                     break;
                 case UpdateTypes.Delete:
                     if (info.DocumentBeforeChange != null)
                     {
                         Logger.Info("[{TenantId}] Plug '{RtId}'  deleted", tenantId, info.DocumentBeforeChange.OriginRtId);
-                        await _poolService.UndeployAdapterAsync(tenantId, info.DocumentBeforeChange.TargetRtId.ToOctoObjectId(),
-                            info.DocumentBeforeChange.OriginRtId.ToOctoObjectId());
+                        await _poolService.UndeployAdapterAsync(tenantId, info.DocumentBeforeChange.TargetRtId,
+                            info.DocumentBeforeChange.OriginRtId);
                     }
                     break;
                 default:
@@ -248,7 +208,7 @@ internal class ControllerBackgroundService : BackgroundService
         }
     }
 
-    private async Task HandlePoolPlugUpdateAssociations(string tenantId, UpdateInfo<RtAssociation> info)
+    private async Task HandlePoolPlugUpdateAssociations(string tenantId, IUpdateInfo<RtAssociation> info)
     {
         try
         {
@@ -258,8 +218,8 @@ internal class ControllerBackgroundService : BackgroundService
                     if (info.Document != null)
                     {
                         Logger.Info("[{TenantId}] Plug '{RtId}' inserted", tenantId, info.Document.OriginRtId);
-                        await _poolService.DeployAdapterAsync(tenantId, info.Document.TargetRtId.ToOctoObjectId(),
-                            info.Document.OriginRtId.ToOctoObjectId());
+                        await _poolService.DeployAdapterAsync(tenantId, info.Document.TargetRtId,
+                            info.Document.OriginRtId);
                     }
 
                     break;
@@ -267,8 +227,8 @@ internal class ControllerBackgroundService : BackgroundService
                     if (info.DocumentBeforeChange != null)
                     {
                         Logger.Info("[{TenantId}] Plug '{RtId}'  deleted", tenantId, info.DocumentBeforeChange.OriginRtId);
-                        await _poolService.UndeployAdapterAsync(tenantId, info.DocumentBeforeChange.TargetRtId.ToOctoObjectId(),
-                            info.DocumentBeforeChange.OriginRtId.ToOctoObjectId());
+                        await _poolService.UndeployAdapterAsync(tenantId, info.DocumentBeforeChange.TargetRtId,
+                            info.DocumentBeforeChange.OriginRtId);
                     }
 
                     break;
@@ -283,11 +243,5 @@ internal class ControllerBackgroundService : BackgroundService
         }
     }
 
-    private async Task ReloadTenantAsync(string tenantId)
-    {
-        Logger.Info("Reloading tenant '{TenantId}'", tenantId);
-        await _poolService.ReloadTenantAsync(tenantId);
-        await _plugService.ReloadTenantAsync(tenantId);
-        await _socketService.ReloadTenantAsync(tenantId);
-    }
+
 }

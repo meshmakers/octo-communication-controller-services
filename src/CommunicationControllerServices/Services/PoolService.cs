@@ -1,12 +1,11 @@
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.CkModelEntities;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
-using Meshmakers.Octo.Common.Shared;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
-using Meshmakers.Octo.SystematizedData.Persistence;
-using Meshmakers.Octo.SystematizedData.Persistence.DataAccess;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.ConstructionKit.Generated.System.Communication.v1;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repository;
 using NLog;
 using Plug = Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools.Plug;
 
@@ -45,7 +44,7 @@ internal class PoolService : IPoolServiceUpdates
             Logger.Info("[{TenantId}] Pool '{PoolName}' already registered",
                 tenantId, poolName);
 
-            poolDescription.UpdateConnectionId(connectionId);
+            poolDescription.UpdateConnectionId(tenantId, connectionId);
         }
         else
         {
@@ -66,11 +65,11 @@ internal class PoolService : IPoolServiceUpdates
                 }
             }
 
-            poolDescription = poolTenant.AddPool(poolName, rtPool.RtId.ToOctoObjectId(), connectionId);
+            poolDescription = poolTenant.AddPool(poolName, rtPool.RtId, connectionId);
         }
 
         // Update status in asset repository
-        await _communicationRepository.SetPoolStateAsync(tenantId, poolDescription.PoolRtId, PoolStates.Deployed);
+        await _communicationRepository.SetPoolStateAsync(tenantId, poolDescription.PoolRtId, RtPoolStateEnum.Deployed);
 
         Logger.Info("[{TenantId}] Operator for pool '{PoolName}' registered",
             tenantId, poolName);
@@ -92,7 +91,7 @@ internal class PoolService : IPoolServiceUpdates
         {
             tenantDescription.RemovePool(poolDescription.PoolRtId);
 
-            await _communicationRepository.SetPoolStateAsync(tenantId, poolDescription.PoolRtId, PoolStates.Pending);
+            await _communicationRepository.SetPoolStateAsync(tenantId, poolDescription.PoolRtId, RtPoolStateEnum.Pending);
 
             Logger.Info("[{TenantId}] Operator for pool '{PoolName}' unregistered",
                 tenantId, poolName);
@@ -120,14 +119,13 @@ internal class PoolService : IPoolServiceUpdates
             Logger.Info("[{TenantId}] '{PlugCount}' adapters found for Pool '{PoolRtId}'", tenantId, rtPlugs.Count, poolRtId);
             foreach (var rtPlug in rtPlugs)
             {
-                poolTenant.AddPlug(new Plug(rtPlug.RtId.ToOctoObjectId(), poolRtId,
+                poolTenant.AddPlug(new Plug(rtPlug.RtId, poolRtId,
                     CreatePoolAdapterDto(poolRtId, poolDescription.PoolName, rtPlug)));
             }
 
-            var result = new PoolConfigurationDto
-            {
-                CommunicationAdapterList = poolTenant.PlugsById.Values.Where(p => p.PoolRtId == poolRtId).Select(p => p.AdapterDto)
-            };
+            var result = new PoolConfigurationDto(
+                poolTenant.PlugsById.Values.Where(p => p.PoolRtId == poolRtId).Select(p => p.AdapterDto)
+            );
 
             Logger.Info("[{TenantId}] Current adapters for Pool '{PoolRtId}' retrieved (Adapter count: {AdapterCount})",
                 tenantId, poolRtId, result.CommunicationAdapterList.Count());
@@ -166,7 +164,7 @@ internal class PoolService : IPoolServiceUpdates
                 {
                     poolTenant.RemovePool(pool.PoolRtId);
                     var poolRtId = await RegisterPoolOperatorAsync(tenantId, pool.PoolName, pool.ConnectionId);
-                    
+
                     // Second, register communicationAdapter
                     var poolConfigurationDto = await GetCurrentAdapterAsync(tenantId, poolRtId);
                     foreach (var adapterDto in poolConfigurationDto.CommunicationAdapterList)
@@ -249,7 +247,7 @@ internal class PoolService : IPoolServiceUpdates
 
         if (poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
         {
-            await _communicationRepository.SetPoolStateAsync(tenantId, poolDescription.PoolRtId, PoolStates.Offline);
+            await _communicationRepository.SetPoolStateAsync(tenantId, poolDescription.PoolRtId, RtPoolStateEnum.Offline);
         }
     }
 
@@ -278,7 +276,7 @@ internal class PoolService : IPoolServiceUpdates
 
         if (poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
         {
-            await _communicationRepository.SetPoolStateAsync(tenantId, poolDescription.PoolRtId, PoolStates.Online);
+            await _communicationRepository.SetPoolStateAsync(tenantId, poolDescription.PoolRtId, RtPoolStateEnum.Online);
         }
     }
 
@@ -293,19 +291,19 @@ internal class PoolService : IPoolServiceUpdates
         poolTenant.PoolsByName.TryGetValue(poolName, out var poolDescription);
         if (poolDescription != null)
         {
-            poolDescription.UpdateConnectionId(connectionId);
+            poolDescription.UpdateConnectionId(tenantId, connectionId);
 
             await SetPoolOnlineAsync(tenantId, poolDescription.PoolRtId);
         }
     }
-
-    public Task OnHandlePoolUpdateAsync(string tenantId, UpdateInfo<RtCommunicationPool> info)
+    
+    public Task OnHandlePoolUpdateAsync(string tenantId, IUpdateInfo<RtCommunicationPool> info)
     {
         // TODO: Implement updates of pool entity.
         return Task.CompletedTask;
     }
 
-    public async Task OnHandlePlugUpdateAsync(string tenantId, UpdateInfo<RtPlug> info)
+    public async Task OnHandlePlugUpdateAsync(string tenantId, IUpdateInfo<RtPlug> info)
     {
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
         {
@@ -316,7 +314,7 @@ internal class PoolService : IPoolServiceUpdates
         {
             case UpdateTypes.Update:
             case UpdateTypes.Replace:
-                if (info.Document != null && poolTenant.PlugsById.TryGetValue(info.Document.RtId.ToOctoObjectId(), out var plug))
+                if (info.Document != null && poolTenant.PlugsById.TryGetValue(info.Document.RtId, out var plug))
                 {
                     if (info.UpdateFields.Contains("attributes." + nameof(RtPlug.ImageName).ToCamelCase()) ||
                         info.UpdateFields.Contains("attributes." + nameof(RtPlug.ImageVersion).ToCamelCase()))
@@ -339,10 +337,12 @@ internal class PoolService : IPoolServiceUpdates
         {
             PoolRtId = poolRtId,
             PoolName = poolName,
-            AdapterRtId = rtPlug.RtId.ToOctoObjectId(),
-            AdapterCkId = rtPlug.CkId,
+            AdapterRtId = rtPlug.RtId,
+            AdapterCkTypeId = rtPlug.CkTypeId,
             ImageName = rtPlug.ImageName ?? throw PoolServiceException.ImageNameNotSet(),
             Version = rtPlug.ImageVersion ?? throw PoolServiceException.ImageVersionNotSet(),
         };
     }
+
+
 }

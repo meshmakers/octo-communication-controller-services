@@ -1,5 +1,5 @@
-using Meshmakers.Octo.Backend.CommunicationControllerServices.CkModelEntities;
-using Meshmakers.Octo.Common.Shared;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.ConstructionKit.Generated.System.Communication.v1;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 
@@ -68,6 +68,11 @@ internal class PlugRepositoryException : Exception
     {
         return new PlugRepositoryException($"[{tenantId}] Failed to get plugs of pool '{poolRtId}'", exception);
     }
+    
+    internal static Exception CommonOperationFailed(OperationResult operationResult)
+    {
+        return new PlugRepositoryException($"Operation failed with with messages: " + operationResult.GetMessages() );
+    }
 
     internal static Exception CommonFailedCreatePool(string tenantId, string poolName, Exception exception)
     {
@@ -79,13 +84,13 @@ internal class PlugRepositoryException : Exception
         return new PlugRepositoryException($"[{tenantId}] Failed to get plug '{plugRtId}'", exception);
     }
 
-    internal static Exception CommonFailedSetPoolState(string tenantId, OctoObjectId poolRtId, PoolStates state,
+    internal static Exception CommonFailedSetPoolState(string tenantId, OctoObjectId poolRtId, RtPoolStateEnum state,
         Exception exception)
     {
         return new PlugRepositoryException($"[{tenantId}] Failed to set state of pool '{poolRtId}' to '{state}'", exception);
     }
 
-    internal static Exception CommonFailedSetPlugState(string tenantId, OctoObjectId plugRtId, AdapterStates state, Exception exception)
+    internal static Exception CommonFailedSetPlugState(string tenantId, OctoObjectId plugRtId, RtAdapterStateEnum state, Exception exception)
     {
         return new PlugRepositoryException($"[{tenantId}] Failed to set state of plug '{plugRtId}' to '{state}'", exception);
     }

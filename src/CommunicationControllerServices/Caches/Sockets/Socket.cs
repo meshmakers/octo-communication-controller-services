@@ -1,6 +1,6 @@
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Sockets.Descriptions;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Communication.Sockets.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages.Payloads;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Sockets;
 
@@ -27,10 +27,10 @@ internal class Socket
     
     public SocketConfigurationDto Configuration { get; private set; }
 
-    public void UpdateConfiguration(SocketConfigurationDto socketConfigurationDto)
+    public void UpdateConfiguration(string tenantId, SocketConfigurationDto socketConfigurationDto)
     {
         Configuration = socketConfigurationDto;
-        _socketCachePublish.PublishConfiguration();
+        _socketCachePublish.PublishConfiguration(tenantId);
     }
 
     public void UpdateConnectionId(string connectionId)
@@ -38,7 +38,7 @@ internal class Socket
         ConnectionId = connectionId;
     }
 
-    public SocketDescription GetPlugDescription()
+    public SocketDescription GetSocketDescription()
     {
         return new SocketDescription(SocketRtId, ConnectionId, Configuration);
     }

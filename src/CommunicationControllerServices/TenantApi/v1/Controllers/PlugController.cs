@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
-using Meshmakers.Octo.Common.Shared;
+using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;

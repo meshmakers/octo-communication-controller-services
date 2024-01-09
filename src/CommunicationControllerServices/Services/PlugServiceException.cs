@@ -1,5 +1,5 @@
-using Meshmakers.Octo.Backend.CommunicationControllerServices.CkModelEntities;
-using Meshmakers.Octo.Common.Shared;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.ConstructionKit.Generated.System.Communication.v1;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
@@ -17,7 +17,7 @@ internal class PlugServiceException : Exception
     {
     }
     
-    internal static Exception CommonFailedSetPlugState(string tenantId, OctoObjectId plugRtId, AdapterStates adapterState, Exception exception)
+    internal static Exception CommonFailedSetPlugState(string tenantId, OctoObjectId plugRtId, RtAdapterStateEnum adapterState, Exception exception)
     {
         return new PlugServiceException($"[{tenantId}] Failed to set plug '{plugRtId}' state to '{adapterState}'", exception);
     }

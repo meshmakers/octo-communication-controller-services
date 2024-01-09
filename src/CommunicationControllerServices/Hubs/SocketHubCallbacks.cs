@@ -1,6 +1,6 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Sockets;
-using Meshmakers.Octo.Communication.Sockets.Contracts.DataTransferObjects;
-using Meshmakers.Octo.Communication.Sockets.Contracts.Hubs;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;

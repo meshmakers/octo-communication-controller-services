@@ -1,26 +1,25 @@
+using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
-using Meshmakers.Octo.Common.DistributedCache;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Common.Shared.DistributedCache;
-using Meshmakers.Octo.SystematizedData.Persistence;
+using Meshmakers.Octo.Common.DistributionEventHub.Services;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
 internal class ConfigurationService : IConfigurationService
 {
     private readonly ISystemContext _systemContext;
-    private readonly IDistributedWithPubSubCache _distributedCache;
+    private readonly IDistributionEventHubService _distributionEventHubService;
 
-    public ConfigurationService(ISystemContext systemContext, IDistributedWithPubSubCache distributedCache)
+    public ConfigurationService(ISystemContext systemContext, IDistributionEventHubService distributionEventHubService)
     {
         _systemContext = systemContext;
-        _distributedCache = distributedCache;
+        _distributionEventHubService = distributionEventHubService;
         
     }
 
     public async Task<IEnumerable<CommunicationControllerStatusDto>> ReadConfig()
     {
-        using var systemSession = await _systemContext.StartSystemSessionAsync();
+        using var systemSession = await _systemContext.GetSystemSessionAsync();
         systemSession.StartTransaction();
         
         var config = await _systemContext.GetConfigurationAsync(systemSession, Statics.CommunicationControllerConfigurationName);
@@ -33,7 +32,7 @@ internal class ConfigurationService : IConfigurationService
 
     public async Task WriteConfig(IEnumerable<CommunicationControllerStatusDto> config, string tenantId)
     {
-        using var systemSession = await _systemContext.StartSystemSessionAsync();
+        using var systemSession = await _systemContext.GetSystemSessionAsync();
         systemSession.StartTransaction();
         
         var configString = config.Serialize();
@@ -41,6 +40,6 @@ internal class ConfigurationService : IConfigurationService
         
         await systemSession.CommitTransactionAsync();
         
-        await _distributedCache.PublishAsync(CacheCommon.KeyCommunicationControllerPoolUpdate, tenantId);
+       // await _distributionEventHubService.PublishAsync(CacheCommon.KeyCommunicationControllerPoolUpdate, tenantId);
     }
 }

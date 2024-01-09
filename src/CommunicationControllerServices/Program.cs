@@ -4,19 +4,17 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Plugs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Sockets;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Configuration;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.DataSink;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Routing;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
-using Meshmakers.Octo.Backend.DistributedCache;
-using Meshmakers.Octo.Backend.Swagger.Configuration;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
-using Meshmakers.Octo.Communication.Plugs.Contracts.Hubs;
-using Meshmakers.Octo.Communication.Sockets.Contracts.Hubs;
-using Meshmakers.Octo.SystematizedData.Persistence;
-using Meshmakers.Octo.SystematizedData.Persistence.Configuration;
+using Meshmakers.Octo.Communication.Contracts.MessageObjects;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
+using Meshmakers.Octo.Services.Swagger.Configuration;
 using Microsoft.Extensions.Options;
 using NLog;
 using NLog.Web;
@@ -54,29 +52,22 @@ try
     // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
     builder.Services.AddSignalR();
     
-    builder.Services.AddMassTransit(x =>
-    {
-        x.AddConsumer<MessageConsumer>();
-        
-        x.UsingRabbitMq((context,cfg) =>
+    builder.Services.ConfigureOptions<ConfigureDistributionEventHubOptions>();
+    
+    builder.Services.AddOctoServiceInfrastructure("CommunicationControllerServices",
+        c =>
         {
-            var plugOptions = context.GetService<IOptions<CommunicationControllerOptions>>();
-            if (plugOptions == null)
-                throw new InvalidOperationException("PlugOptions not configured");
-                    
-            cfg.Host(plugOptions.Value.BrokerHost, plugOptions.Value.BrokerVirtualHost, h => {
-                h.Username(plugOptions.Value.BrokerUsername);
-                h.Password(plugOptions.Value.BrokerPassword);
-            });
+            c.AddRoutedEventConsumer<MessageConsumer, UpdatedValueMessageDto>();
+            c.AddBroadcastEventConsumer<ComControllerPlugUpdateConsumer, ComControllerPlugUpdate>();
+            c.AddBroadcastEventConsumer<ComControllerSocketUpdateConsumer, ComControllerSocketUpdate>();
+            c.AddBroadcastEventConsumer<ComControllerPoolUpdateConsumer, ComControllerPoolUpdate>();
             
-            cfg.ConfigureEndpoints(context);
+            c.AddBroadcastEventConsumer<TenantManagementConsumer, PosUpdateTenant>();
+            c.AddBroadcastEventConsumer<TenantManagementConsumer, PreDeleteTenant>();
         });
-    });
-    
-    
-    builder.Services.ConfigureOptions<ConfigureDistributeCacheWithPubSubOptions>();
-    builder.Services.AddDistributedPubSubCache();
-    builder.Services.AddOctoPersistence();
+
+    builder.Services.AddRuntimeEngine()
+        .AddMongoDbRuntimeRepository();
 
     builder.Services.AddOctoApiVersioningAndDocumentation(options =>
     {
@@ -134,7 +125,6 @@ try
 
     app.UseAuthorization();
     app.UseOctoApiVersioningAndDocumentation();
-    app.UseOctoPersistence();
 
     app.MapHub<PlugHub>("/{tenantId:tenantId}/plugHub");
     app.MapHub<PoolHub>("/{tenantId:tenantId}/poolHub");

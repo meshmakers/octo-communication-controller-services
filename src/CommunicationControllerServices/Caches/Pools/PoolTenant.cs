@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools.Descriptions;
-using Meshmakers.Octo.Common.Shared;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages.Payloads;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
 
@@ -40,7 +40,7 @@ internal class PoolTenant
         TenantId = tenantId;
 
         var pools = poolDescriptions.Select(p => new Pool(_poolCachePublish, p)).ToArray();
-        
+
         _poolsById = new ConcurrentDictionary<OctoObjectId, Pool>(
             pools.ToDictionary(p => p.PoolRtId, p => p));
         _poolsByName = new ConcurrentDictionary<string, Pool>(
@@ -61,7 +61,7 @@ internal class PoolTenant
             (_, _) => pool);
         _poolsByName.AddOrUpdate(poolName, _ => pool,
             (_, _) => pool);
-        _poolCachePublish.PublishConfiguration();
+        _poolCachePublish.PublishConfiguration(TenantId);
 
         return pool;
     }
@@ -72,19 +72,19 @@ internal class PoolTenant
         {
             if (_poolsByName.TryRemove(plugHubPool.PoolName, out _))
             {
-                _poolCachePublish.PublishConfiguration();
+                _poolCachePublish.PublishConfiguration(TenantId);
             }
         }
     }
     
-    public PoolTenantDescription GetTenantDescription()
+    public IEnumerable<PoolPlugDescription> GetPoolPlugDescriptions()
     {
-        return new PoolTenantDescription
-        {
-            TenantId = TenantId,
-            Plugs = _plugsById.Values.Select(p => p.GetPoolPlugDescription()).ToArray(),
-            Pools = _poolsById.Values.Select(p => p.GetPoolDescription()).ToArray()
-        };
+        return PlugsById.Values.Select(p => p.GetPoolPlugDescription()).ToArray();
+    }
+    
+    public IEnumerable<PoolDescription> GetPoolDescriptions()
+    {
+        return PoolsById.Values.Select(p => p.GetPoolDescription()).ToArray();
     }
 
     public void AddPlug(Plug plug)
@@ -93,14 +93,14 @@ internal class PoolTenant
             _ => plug,
             (_, _) => plug);
         
-        _poolCachePublish.PublishConfiguration();
+        _poolCachePublish.PublishConfiguration(TenantId);
     }
 
     public void RemovePlug(OctoObjectId plugRtId)
     {
         _plugsById.Remove(plugRtId, out _);
         
-        _poolCachePublish.PublishConfiguration();
+        _poolCachePublish.PublishConfiguration(TenantId);
     }
     
     public void RemovePlugs(OctoObjectId poolRtId)
@@ -110,7 +110,7 @@ internal class PoolTenant
             _plugsById.Remove(plug.PlugRtId, out _);
         }
         
-        _poolCachePublish.PublishConfiguration();
+        _poolCachePublish.PublishConfiguration(TenantId);
     }
 
     public void Clear()
@@ -119,6 +119,6 @@ internal class PoolTenant
         _poolsByName.Clear();
         _plugsById.Clear();
 
-        _poolCachePublish.PublishConfiguration();
+        _poolCachePublish.PublishConfiguration(TenantId);
     }
 }

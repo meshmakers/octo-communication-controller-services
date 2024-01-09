@@ -1,9 +1,8 @@
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Sockets.Descriptions;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
-using Meshmakers.Octo.Communication.Sockets.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages.Payloads;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Sockets;
 
@@ -52,7 +51,7 @@ internal class SocketTenant
         _plugsById.AddOrUpdate(plugRtId, _ => plug,
             (_, _) => plug);
         
-        _socketCachePublish.PublishConfiguration();
+        _socketCachePublish.PublishConfiguration(TenantId);
 
         return plug;
     }
@@ -63,18 +62,14 @@ internal class SocketTenant
         {
             if (_plugsByConnectId.TryRemove(plug.ConnectionId, out _))
             {
-                _socketCachePublish.PublishConfiguration();
+                _socketCachePublish.PublishConfiguration(TenantId);
             }
         }
     }
 
-    public SocketTenantDescription GetTenantDescription()
+    public IEnumerable<SocketDescription> GetSocketDescriptions()
     {
-        return new SocketTenantDescription
-        {
-            TenantId = TenantId,
-            Sockets = SocketsById.Values.Select(p => p.GetPlugDescription()).ToArray()
-        };
+        return SocketsById.Values.Select(p => p.GetSocketDescription()).ToArray();
     }
 
     public void Clear()
@@ -82,6 +77,6 @@ internal class SocketTenant
         _plugsByConnectId.Clear();
         _plugsById.Clear();
         
-        _socketCachePublish.PublishConfiguration();
+        _socketCachePublish.PublishConfiguration(TenantId);
     }
 }

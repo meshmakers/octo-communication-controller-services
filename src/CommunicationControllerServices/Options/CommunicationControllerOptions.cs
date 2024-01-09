@@ -11,12 +11,11 @@ public class CommunicationControllerOptions
     public CommunicationControllerOptions()
     {
         Authority = "https://localhost:5003";
-        RedisCacheHost = "localhost";
         
         BrokerHost = "localhost";
         BrokerVirtualHost = "/";
         BrokerPort = 5672;
-        BrokerUsername = "guest";
+        BrokerUser = "guest";
         BrokerPassword = "guest";
     }
 
@@ -25,15 +24,6 @@ public class CommunicationControllerOptions
     /// </summary>
     public string Authority { get; set; }
     
-    /// <summary>
-    ///     Gets or sets the redis cache host name
-    /// </summary>
-    public string RedisCacheHost { get; set; }
-
-    /// <summary>
-    ///     Gets or sets the redis cache password
-    /// </summary>
-    public string? RedisCachePassword { get; set; }
     
     /// <summary>
     /// Gets or sets the RabbitMQ broker host name
@@ -53,7 +43,7 @@ public class CommunicationControllerOptions
     /// <summary>
     /// Gets or sets the RabbitMQ broker username
     /// </summary>
-    public string? BrokerUsername { get; set; }
+    public string? BrokerUser { get; set; }
     
     /// <summary>
     /// Gets or sets the RabbitMQ broker password

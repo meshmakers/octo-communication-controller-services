@@ -1,4 +1,5 @@
-using Meshmakers.Octo.Common.Shared;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages.Payloads;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
 
@@ -14,7 +15,7 @@ internal class Pool
         ConnectionId = connectionId;
     }
 
-    public Pool(IPoolCachePublish poolCachePublish, Descriptions.PoolDescription poolDescription)
+    public Pool(IPoolCachePublish poolCachePublish, PoolDescription poolDescription)
     {
         _poolCachePublish = poolCachePublish;
         PoolRtId = poolDescription.PoolRtId;
@@ -27,15 +28,15 @@ internal class Pool
 
     public string ConnectionId { get; private set; }
     
-    public void UpdateConnectionId(string connectionId)
+    public void UpdateConnectionId(string tenantId, string connectionId)
     {
         ConnectionId = connectionId;
-        _poolCachePublish.PublishConfiguration();
+        _poolCachePublish.PublishConfiguration(tenantId);
     }
 
-    public Descriptions.PoolDescription GetPoolDescription()
+    public PoolDescription GetPoolDescription()
     {
-        return new Descriptions.PoolDescription
+        return new PoolDescription
         {
             ConnectionId = ConnectionId,
             PoolName = PoolName,

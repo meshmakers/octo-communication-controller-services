@@ -1,6 +1,6 @@
-using Meshmakers.Octo.Backend.CommunicationControllerServices.CkModelEntities;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.ConstructionKit.Generated.System.Communication.v1;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 
@@ -71,7 +71,7 @@ internal interface ICommunicationRepository
     /// <param name="poolRtId">Object id of pool</param>
     /// <param name="state">State of pool</param>
     /// <returns></returns>
-    Task SetPoolStateAsync(string tenantId, OctoObjectId poolRtId, PoolStates state);
+    Task SetPoolStateAsync(string tenantId, OctoObjectId poolRtId, RtPoolStateEnum state);
 
     /// <summary>
     /// Set the state of a socket
@@ -80,7 +80,7 @@ internal interface ICommunicationRepository
     /// <param name="socketRtId">Object id of socket</param>
     /// <param name="adapterState">State of adapter</param>
     /// <returns></returns>
-    Task SetSocketStateAsync(string tenantId, OctoObjectId socketRtId, AdapterStates adapterState);
+    Task SetSocketStateAsync(string tenantId, OctoObjectId socketRtId, RtAdapterStateEnum adapterState);
     
     /// <summary>
     /// Set the state of a plug
@@ -89,7 +89,7 @@ internal interface ICommunicationRepository
     /// <param name="plugRtId">Object id of plug</param>
     /// <param name="adapterState">State of adapter</param>
     /// <returns></returns>
-    Task SetPlugStateAsync(string tenantId, OctoObjectId plugRtId, AdapterStates adapterState);
+    Task SetPlugStateAsync(string tenantId, OctoObjectId plugRtId, RtAdapterStateEnum adapterState);
 
     /// <summary>
     /// Gets the pool of a plug

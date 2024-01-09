@@ -1,5 +1,5 @@
-using Meshmakers.Octo.Backend.CommunicationControllerServices.CkModelEntities;
-using Meshmakers.Octo.SystematizedData.Persistence.DataAccess;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.ConstructionKit.Generated.System.Communication.v1;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repository;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
@@ -18,7 +18,7 @@ internal interface IPlugServiceUpdates : IPlugService
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="info">Update information object</param>
     /// <returns></returns>
-    Task OnHandlePlugMappingUpdateAsync(string tenantId, UpdateInfo<RtPlugMapping> info);
+    Task OnHandlePlugMappingUpdateAsync(string tenantId, IUpdateInfo<RtPlugMapping> info);
 
     /// <summary>
     /// Handles an update of a plug group
@@ -26,7 +26,7 @@ internal interface IPlugServiceUpdates : IPlugService
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="info">Update information object</param>
     /// <returns></returns>
-    Task OnHandlePlugGroupUpdateAsync(string tenantId, UpdateInfo<RtPlugGroup> info);
+    Task OnHandlePlugGroupUpdateAsync(string tenantId, IUpdateInfo<RtPlugGroup> info);
 
     /// <summary>
     /// Handles an update of a plug
@@ -34,5 +34,5 @@ internal interface IPlugServiceUpdates : IPlugService
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="info">Update information object</param>
     /// <returns></returns>
-    Task OnHandlePlugUpdateAsync(string tenantId, UpdateInfo<RtPlug> info);
+    Task OnHandlePlugUpdateAsync(string tenantId, IUpdateInfo<RtPlug> info);
 }

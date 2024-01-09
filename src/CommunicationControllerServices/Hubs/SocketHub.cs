@@ -1,7 +1,7 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Communication.Sockets.Contracts.DataTransferObjects;
-using Meshmakers.Octo.Communication.Sockets.Contracts.Hubs;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.Hubs;
+using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.SignalR;
 using NLog;
 

@@ -1,12 +1,12 @@
+using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Plugs;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.CkModelEntities;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
-using Meshmakers.Octo.Communication.Plugs.Contracts.Hubs;
-using Meshmakers.Octo.SystematizedData.Persistence;
-using Meshmakers.Octo.SystematizedData.Persistence.DataAccess;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.Hubs;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.ConstructionKit.Generated.System.Communication.v1;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repository;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -48,7 +48,7 @@ internal class PlugService : IPlugServiceUpdates
             plug.UpdateConnectionId(connectionId);
         }
 
-        await SetPlugInStateAsync(tenantId, plugRtId, AdapterStates.Offline);    
+        await SetPlugInStateAsync(tenantId, plugRtId, RtAdapterStateEnum.Offline);    
 
         return plug.Configuration;
     }
@@ -60,10 +60,10 @@ internal class PlugService : IPlugServiceUpdates
 
         var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
         plugTenant.RemovePlug(plugRtId);
-        await SetPlugInStateAsync(tenantId, plugRtId, AdapterStates.Deployed);
+        await SetPlugInStateAsync(tenantId, plugRtId, RtAdapterStateEnum.Deployed);
     }
 
-    private async Task SetPlugInStateAsync(string tenantId, OctoObjectId plugRtId, AdapterStates adapterState)
+    private async Task SetPlugInStateAsync(string tenantId, OctoObjectId plugRtId, RtAdapterStateEnum adapterState)
     {
         Logger.Info("[{TenantId}] Setting state of plug '{PlugRtId}' to '{PlugState}'",
             tenantId, plugRtId, adapterState);
@@ -114,7 +114,7 @@ internal class PlugService : IPlugServiceUpdates
         var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
         if (plugTenant.PlugsById.TryGetValue(plugRtId, out var plug))
         {
-            await SetPlugInStateAsync(tenantId, plug.PlugRtId, AdapterStates.Online);
+            await SetPlugInStateAsync(tenantId, plug.PlugRtId, RtAdapterStateEnum.Online);
         }
     }
 
@@ -122,7 +122,7 @@ internal class PlugService : IPlugServiceUpdates
     {
         if (_plugCache.TryGetTenant(tenantId, out var plugTenant) && plugTenant != null)
         {
-            await _communicationRepository.SetPlugStateAsync(tenantId, plugRtId, AdapterStates.Offline);
+            await _communicationRepository.SetPlugStateAsync(tenantId, plugRtId, RtAdapterStateEnum.Offline);
         }
     }
 
@@ -136,60 +136,60 @@ internal class PlugService : IPlugServiceUpdates
         return Task.CompletedTask;
     }
 
-    public async Task OnHandlePlugMappingUpdateAsync(string tenantId, UpdateInfo<RtPlugMapping> info)
+    public async Task OnHandlePlugMappingUpdateAsync(string tenantId, IUpdateInfo<RtPlugMapping> info)
     {
         if (info.Document != null)
         {
             var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
-            if (plugTenant.PlugsById.TryGetValue(info.Document.RtId.ToOctoObjectId(), out var plug))
+            if (plugTenant.PlugsById.TryGetValue(info.Document.RtId, out var plug))
             {
-                var rtPlug = await _communicationRepository.GetPlugByMappingAsync(tenantId, info.Document.RtId.ToOctoObjectId());
+                var rtPlug = await _communicationRepository.GetPlugByMappingAsync(tenantId, info.Document.RtId);
 
-                var configuration = await GetPlugConfigurationAsync(tenantId, rtPlug.RtId.ToOctoObjectId());
+                var configuration = await GetPlugConfigurationAsync(tenantId, rtPlug.RtId);
 
                 if (!configuration.Equals(plug.Configuration))
                 {
-                    plug.UpdateConfiguration(configuration);
+                    plug.UpdateConfiguration(tenantId, configuration);
                     await _plugHubCallbacks.PlugConfigurationUpdatedAsync(tenantId, configuration);
                 }
             }
         }
     }
 
-    public async Task OnHandlePlugGroupUpdateAsync(string tenantId, UpdateInfo<RtPlugGroup> info)
+    public async Task OnHandlePlugGroupUpdateAsync(string tenantId, IUpdateInfo<RtPlugGroup> info)
     {
         if (info.Document != null)
         {
             var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
-            if (plugTenant.PlugsById.TryGetValue(info.Document.RtId.ToOctoObjectId(), out var plug))
+            if (plugTenant.PlugsById.TryGetValue(info.Document.RtId, out var plug))
             {
-                var rtPlug = await _communicationRepository.GetPlugByGroupAsync(tenantId, info.Document.RtId.ToOctoObjectId());
+                var rtPlug = await _communicationRepository.GetPlugByGroupAsync(tenantId, info.Document.RtId);
 
-                var configuration = await GetPlugConfigurationAsync(tenantId, rtPlug.RtId.ToOctoObjectId());
+                var configuration = await GetPlugConfigurationAsync(tenantId, rtPlug.RtId);
 
                 if (!configuration.Equals(plug.Configuration))
                 {
-                    plug.UpdateConfiguration(configuration);
+                    plug.UpdateConfiguration(tenantId, configuration);
                     await _plugHubCallbacks.PlugConfigurationUpdatedAsync(tenantId, configuration);
                 }
             }
         }
     }
 
-    public async Task OnHandlePlugUpdateAsync(string tenantId, UpdateInfo<RtPlug> info)
+    public async Task OnHandlePlugUpdateAsync(string tenantId, IUpdateInfo<RtPlug> info)
     {
         if (info.Document != null)
         {
             var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
-            if (plugTenant.PlugsById.TryGetValue(info.Document.RtId.ToOctoObjectId(), out var plug))
+            if (plugTenant.PlugsById.TryGetValue(info.Document.RtId, out var plug))
             {
-                var rtPlug = await _communicationRepository.GetPlugAsync(tenantId, info.Document.RtId.ToOctoObjectId());
+                var rtPlug = await _communicationRepository.GetPlugAsync(tenantId, info.Document.RtId);
 
-                var configuration = await GetPlugConfigurationAsync(tenantId, rtPlug.RtId.ToOctoObjectId());
+                var configuration = await GetPlugConfigurationAsync(tenantId, rtPlug.RtId);
 
                 if (!configuration.Equals(plug.Configuration))
                 {
-                    plug.UpdateConfiguration(configuration);
+                    plug.UpdateConfiguration(tenantId, configuration);
                     await _plugHubCallbacks.PlugConfigurationUpdatedAsync(tenantId, configuration);
                 }
             }

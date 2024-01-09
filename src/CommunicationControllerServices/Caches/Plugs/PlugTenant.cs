@@ -1,8 +1,8 @@
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Plugs.Descriptions;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages.Payloads;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Plugs;
 
@@ -15,7 +15,7 @@ internal class PlugTenant
     private readonly ConcurrentDictionary<OctoObjectId, Plug> _plugsById;
 
     public IReadOnlyDictionary<string, Plug> PlugsByConnectionId { get; private set; }
-    public IReadOnlyDictionary<OctoObjectId, Plug> PlugsById { get; private set; }
+    public IReadOnlyDictionary<OctoObjectId, Plug> PlugsById { get; }
 
     public PlugTenant(IPlugCachePublish plugCachePublish, string tenantId)
     {
@@ -51,7 +51,7 @@ internal class PlugTenant
         _plugsById.AddOrUpdate(plugRtId, _ => plug,
             (_, _) => plug);
         
-        _plugCachePublish.PublishConfiguration();
+        _plugCachePublish.PublishConfiguration(TenantId);
 
         return plug;
     }
@@ -62,25 +62,13 @@ internal class PlugTenant
         {
             if (_plugsByConnectId.TryRemove(plug.ConnectionId, out _))
             {
-                _plugCachePublish.PublishConfiguration();
+                _plugCachePublish.PublishConfiguration(TenantId);
             }
         }
     }
 
-    public PlugTenantDescription GetTenantDescription()
+    public IEnumerable<PlugDescription> GetPlugDescriptions()
     {
-        return new PlugTenantDescription
-        {
-            TenantId = TenantId,
-            Plugs = PlugsById.Values.Select(p => p.GetPlugDescription()).ToArray()
-        };
-    }
-
-    public void Clear()
-    {
-        _plugsByConnectId.Clear();
-        _plugsById.Clear();
-        
-        _plugCachePublish.PublishConfiguration();
+        return PlugsById.Values.Select(p => p.GetPlugDescription()).ToArray();
     }
 }

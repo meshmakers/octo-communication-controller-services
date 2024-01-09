@@ -1,6 +1,6 @@
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools.Descriptions;
-using Meshmakers.Octo.Common.Shared;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages.Payloads;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
 
