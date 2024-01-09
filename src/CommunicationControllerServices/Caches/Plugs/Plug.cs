@@ -1,6 +1,6 @@
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Plugs.Descriptions;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages.Payloads;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Plugs;
 
@@ -27,10 +27,10 @@ internal class Plug
     
     public PlugConfigurationDto Configuration { get; private set; }
 
-    public void UpdateConfiguration(PlugConfigurationDto plugConfigurationDto)
+    public void UpdateConfiguration(string tenantId, PlugConfigurationDto plugConfigurationDto)
     {
         Configuration = plugConfigurationDto;
-        _plugCachePublish.PublishConfiguration();
+        _plugCachePublish.PublishConfiguration(tenantId);
     }
 
     public void UpdateConnectionId(string connectionId)

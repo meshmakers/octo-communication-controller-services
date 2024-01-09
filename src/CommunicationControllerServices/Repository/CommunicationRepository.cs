@@ -1,8 +1,9 @@
-using Meshmakers.Octo.Backend.CommunicationControllerServices.CkModelEntities;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Communication.Plugs.Contracts.DataTransferObjects;
-using Meshmakers.Octo.SystematizedData.Persistence;
-using Meshmakers.Octo.SystematizedData.Persistence.DataAccess;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.ConstructionKit.Generated.System.Communication.v1;
+using Meshmakers.Octo.Runtime.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 
@@ -25,23 +26,23 @@ internal class CommunicationRepository : ICommunicationRepository
     /// <inheritdoc />
     public async Task<IReadOnlyCollection<RtPlug>> GetPlugsAsync(string tenantId, OctoObjectId poolRtId)
     {
-        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantContext.Repository.StartSessionAsync();
+        var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
 
-            var plugResultSet = await tenantContext.Repository.GetRtAssociationTargetsAsync<RtCommunicationPool, RtPlug>(session,
-                new[] { poolRtId.ToObjectId() },
-                Statics.RoleIdParentChild, GraphDirections.Inbound, null, new DataQueryOperation());
+            var plugResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtCommunicationPool, RtPlug>(session,
+                new[] { poolRtId },
+                Statics.RoleIdParentChild, GraphDirections.Inbound, null, DataQueryOperation.Create());
 
             if (!plugResultSet.Any())
             {
                 PlugRepositoryException.PoolNotFound(tenantId, poolRtId);
             }
 
-            var list = plugResultSet.First().Value.Result.ToList();
+            var list = plugResultSet.First().Value.Items.ToList();
 
             await session.CommitTransactionAsync();
 
@@ -56,14 +57,14 @@ internal class CommunicationRepository : ICommunicationRepository
     /// <inheritdoc />
     public async Task<RtSocket> GetSocketAsync(string tenantId, OctoObjectId socketRtId)
     {
-        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantContext.Repository.StartSessionAsync();
+        var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
 
-            var rtSocket = await tenantContext.Repository.GetRtEntityAsync<RtSocket>(session, socketRtId);
+            var rtSocket = await tenantRepository.GetRtEntityByRtIdAsync<RtSocket>(session, socketRtId);
 
             if (rtSocket == null)
             {
@@ -83,14 +84,14 @@ internal class CommunicationRepository : ICommunicationRepository
     /// <inheritdoc />
     public async Task<RtPlug> GetPlugAsync(string tenantId, OctoObjectId plugRtId)
     {
-        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantContext.Repository.StartSessionAsync();
+        var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
 
-            var rtPlug = await tenantContext.Repository.GetRtEntityAsync<RtPlug>(session, plugRtId);
+            var rtPlug = await tenantRepository.GetRtEntityByRtIdAsync<RtPlug>(session, plugRtId);
 
             if (rtPlug == null)
             {
@@ -109,13 +110,13 @@ internal class CommunicationRepository : ICommunicationRepository
 
     public async Task<bool> IsTenantExistingAsync(string tenantId)
     {
-        var systemSession = await _systemContext.StartSystemSessionAsync();
+        var systemSession = await _systemContext.GetSystemSessionAsync();
 
         try
         {
             systemSession.StartTransaction();
 
-            var isTenantExisting = await _systemContext.IsTenantExistingAsync(systemSession, tenantId);
+            var isTenantExisting = await _systemContext.IsChildTenantExistingAsync(systemSession, tenantId);
 
             await systemSession.CommitTransactionAsync();
 
@@ -123,25 +124,25 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw PlugRepositoryException.CommonFailedIsTenantExisting(tenantId,  e);
+            throw PlugRepositoryException.CommonFailedIsTenantExisting(tenantId, e);
         }
     }
-    
+
     /// <inheritdoc />
     public async Task<IReadOnlyCollection<RtSocket>> GetSocketsAsync(string tenantId, OctoObjectId poolRtId)
     {
-        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantContext.Repository.StartSessionAsync();
+        var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
 
-            var resultSet = await tenantContext.Repository.GetRtEntitiesByTypeAsync<RtSocket>(session, new DataQueryOperation());
+            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtSocket>(session, DataQueryOperation.Create());
 
             await session.CommitTransactionAsync();
 
-            return resultSet.Result.ToList();
+            return resultSet.Items.ToList();
         }
         catch (Exception e)
         {
@@ -152,18 +153,18 @@ internal class CommunicationRepository : ICommunicationRepository
     /// <inheritdoc />
     public async Task<IReadOnlyCollection<RtPlug>> GetPlugsAsync(string tenantId)
     {
-        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantContext.Repository.StartSessionAsync();
+        var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
 
-            var resultSet = await tenantContext.Repository.GetRtEntitiesByTypeAsync<RtPlug>(session, new DataQueryOperation());
+            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPlug>(session, DataQueryOperation.Create());
 
             await session.CommitTransactionAsync();
 
-            return resultSet.Result.ToList();
+            return resultSet.Items.ToList();
         }
         catch (Exception e)
         {
@@ -174,20 +175,21 @@ internal class CommunicationRepository : ICommunicationRepository
     /// <inheritdoc />
     public async Task<IReadOnlyCollection<RtCommunicationPool>> GetPoolByNameAsync(string tenantId, string poolName)
     {
-        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantContext.Repository.StartSessionAsync();
+        var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
 
-            var poolResultSet = await tenantContext.Repository.GetRtEntitiesByTypeAsync<RtCommunicationPool>(session,
-                new DataQueryOperation
-                    { FieldFilters = new[] { new FieldFilter(nameof(RtCommunicationPool.Name), FieldFilterOperator.Equals, poolName) } });
+            var dataQueryOperation = DataQueryOperation.Create()
+                .FieldFilter(nameof(RtCommunicationPool.Name), FieldFilterOperator.Equals, poolName);
+
+            var poolResultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtCommunicationPool>(session, dataQueryOperation);
 
             await session.CommitTransactionAsync();
 
-            return poolResultSet.Result.ToList();
+            return poolResultSet.Items.ToList();
         }
         catch (Exception e)
         {
@@ -198,25 +200,30 @@ internal class CommunicationRepository : ICommunicationRepository
     /// <inheritdoc />
     public async Task CreatePoolAsync(string tenantId, string poolName)
     {
-        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantContext.Repository.StartSessionAsync();
+        var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
 
-            var rtPlugEntity = new RtCommunicationPool
+            var rtCommunicationPool = new RtCommunicationPool
             {
-                State = PoolStates.Created,
+                State = RtPoolStateEnum.Created,
                 Name = poolName
             };
 
-            var entityUpdateInfoList = new List<EntityUpdateInfo>
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtCommunicationPool>>
             {
-                new(rtPlugEntity, EntityModOptions.Create)
+                EntityUpdateInfo<RtCommunicationPool>.CreateInsert(rtCommunicationPool)
             };
 
-            await tenantContext.Repository.ApplyChanges(session, entityUpdateInfoList);
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw PlugRepositoryException.CommonOperationFailed(operationResult);
+            }
 
             await session.CommitTransactionAsync();
         }
@@ -227,27 +234,32 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
-    public async Task SetPoolStateAsync(string tenantId, OctoObjectId poolRtId, PoolStates state)
+    public async Task SetPoolStateAsync(string tenantId, OctoObjectId poolRtId, RtPoolStateEnum state)
     {
-        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantContext.Repository.StartSessionAsync();
+        var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
 
-            var rtPlugEntity = new RtCommunicationPool
+            var rtCommunicationPool = new RtCommunicationPool
             {
-                RtId = poolRtId.ToObjectId(),
+                RtId = poolRtId,
                 State = state
             };
 
-            var entityUpdateInfoList = new List<EntityUpdateInfo>
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtCommunicationPool>>
             {
-                new(rtPlugEntity, EntityModOptions.Update)
+                EntityUpdateInfo<RtCommunicationPool>.CreateUpdate(rtCommunicationPool.ToRtEntityId(), rtCommunicationPool)
             };
-
-            await tenantContext.Repository.ApplyChanges(session, entityUpdateInfoList);
+            
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw PlugRepositoryException.CommonOperationFailed(operationResult);
+            }
 
             await session.CommitTransactionAsync();
         }
@@ -257,27 +269,31 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task SetSocketStateAsync(string tenantId, OctoObjectId socketRtId, AdapterStates adapterState)
+    public async Task SetSocketStateAsync(string tenantId, OctoObjectId socketRtId, RtAdapterStateEnum adapterState)
     {
-        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantContext.Repository.StartSessionAsync();
+        var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
 
             var rtSocketEntity = new RtSocket
             {
-                RtId = socketRtId.ToObjectId(),
+                RtId = socketRtId,
                 State = adapterState
             };
 
-            var entityUpdateInfoList = new List<EntityUpdateInfo>
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtSocket>>
             {
-                new(rtSocketEntity, EntityModOptions.Update)
+                EntityUpdateInfo<RtSocket>.CreateUpdate(rtSocketEntity.ToRtEntityId(), rtSocketEntity)
             };
-
-            await tenantContext.Repository.ApplyChanges(session, entityUpdateInfoList);
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw PlugRepositoryException.CommonOperationFailed(operationResult);
+            }
 
             await session.CommitTransactionAsync();
         }
@@ -285,31 +301,35 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             throw PlugRepositoryException.CommonFailedSetPlugState(tenantId, socketRtId, adapterState, e);
         }
-        
     }
 
     /// <inheritdoc />
-    public async Task SetPlugStateAsync(string tenantId, OctoObjectId plugRtId, AdapterStates adapterState)
+    public async Task SetPlugStateAsync(string tenantId, OctoObjectId plugRtId, RtAdapterStateEnum adapterState)
     {
-        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantContext.Repository.StartSessionAsync();
+        var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
 
             var rtPlugEntity = new RtPlug
             {
-                RtId = plugRtId.ToObjectId(),
+                RtId = plugRtId,
                 State = adapterState
             };
 
-            var entityUpdateInfoList = new List<EntityUpdateInfo>
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtPlug>>
             {
-                new(rtPlugEntity, EntityModOptions.Update)
+                EntityUpdateInfo<RtPlug>.CreateUpdate(rtPlugEntity.ToRtEntityId(), rtPlugEntity)
             };
 
-            await tenantContext.Repository.ApplyChanges(session, entityUpdateInfoList);
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw PlugRepositoryException.CommonOperationFailed(operationResult);
+            }
 
             await session.CommitTransactionAsync();
         }
@@ -322,21 +342,21 @@ internal class CommunicationRepository : ICommunicationRepository
     /// <inheritdoc />
     public async Task<RtCommunicationPool> GetPoolOfPlugAsync(string tenantId, OctoObjectId plugRtId)
     {
-        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantContext.Repository.StartSessionAsync();
+        var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
 
-            var poolResultSet = await tenantContext.Repository.GetRtAssociationTargetsAsync<RtPlug, RtCommunicationPool>(session,
-                new[] { plugRtId.ToObjectId() }, Statics.RoleIdParentChild, GraphDirections.Inbound, null, new DataQueryOperation());
+            var poolResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPlug, RtCommunicationPool>(session,
+                new[] { plugRtId }, Statics.RoleIdParentChild, GraphDirections.Inbound, null, DataQueryOperation.Create());
 
             await session.CommitTransactionAsync();
 
             if (poolResultSet.Any())
             {
-                var pool = poolResultSet.First().Value.Result.FirstOrDefault();
+                var pool = poolResultSet.First().Value.Items.FirstOrDefault();
                 if (pool != null)
                 {
                     return pool;
@@ -356,23 +376,23 @@ internal class CommunicationRepository : ICommunicationRepository
     /// <inheritdoc />
     public async Task<RtPlug> GetPlugByMappingAsync(string tenantId, OctoObjectId plugMappingRtId)
     {
-        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantContext.Repository.StartSessionAsync();
+        var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
 
-            var poolResultSet = await tenantContext.Repository.GetIndirectRtAssociationTargetsAsync<RtPlugMapping, RtPlug>(session,
-                plugMappingRtId.ToObjectId(), Statics.RoleIdParentChild, GraphDirections.Inbound);
+            var poolResultSet = await tenantRepository.GetIndirectRtAssociationTargetsAsync<RtPlugMapping, RtPlug>(session,
+                plugMappingRtId, Statics.RoleIdParentChild, GraphDirections.Inbound);
 
             await session.CommitTransactionAsync();
 
             if (poolResultSet != null)
             {
-                if (poolResultSet.Result.Any())
+                if (poolResultSet.Items.Any())
                 {
-                    return poolResultSet.Result.First();
+                    return poolResultSet.Items.First();
                 }
 
                 throw PlugRepositoryException.PlugMappingNotAssociatedToPlug(tenantId, plugMappingRtId);
@@ -389,46 +409,59 @@ internal class CommunicationRepository : ICommunicationRepository
     /// <inheritdoc />
     public async Task<IReadOnlyCollection<GroupConfigurationDto>> GetPlugGroupConfigurationAsync(string tenantId, OctoObjectId plugRtId)
     {
-        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantContext.Repository.StartSessionAsync();
+        var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
 
-            var plugGroupResultSet = await tenantContext.Repository.GetRtAssociationTargetsAsync<RtPlug, RtPlugGroup>(session,
-                new[] { plugRtId.ToObjectId() }, Statics.RoleIdParentChild, GraphDirections.Inbound, null, new DataQueryOperation());
+            var plugGroupResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPlug, RtPlugGroup>(session,
+                new[] { plugRtId }, Statics.RoleIdParentChild, GraphDirections.Inbound, null, DataQueryOperation.Create());
 
-            if (!plugGroupResultSet.ContainsKey(plugRtId.ToObjectId()))
+            if (!plugGroupResultSet.ContainsKey(plugRtId))
             {
                 throw PlugRepositoryException.PlugNotFound(tenantId, plugRtId);
             }
 
-            var plugGroups = plugGroupResultSet[plugRtId.ToObjectId()];
+            var plugGroups = plugGroupResultSet[plugRtId];
 
-            var groupResultSet = await tenantContext.Repository.GetRtAssociationTargetsAsync<RtPlugGroup, RtPlugMapping>(session,
-                plugGroups.Result.Select(x => x.RtId), Statics.RoleIdParentChild, GraphDirections.Inbound, null, new DataQueryOperation());
+            var groupResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPlugGroup, RtPlugMapping>(session,
+                plugGroups.Items.Select(x => x.RtId), Statics.RoleIdParentChild, GraphDirections.Inbound, null,
+                DataQueryOperation.Create());
+
+            // TODO: test 
+            var mappingRtIds = groupResultSet.Values.SelectMany(x=> x.Items.Select(x=> x.RtId)).ToList();
+            var mappingResultSet = await tenantRepository.GetRtAssociationsAsync(session, mappingRtIds, GraphDirections.Outbound,
+                SystemCommunicationCkIds.Stream);
+            var mappingRtIdToStreamRtId = mappingResultSet.ToDictionary(x => x.OriginRtId, x => x);
 
             var plugGroupConfigurations = new List<GroupConfigurationDto>();
-            foreach (var plugGroup in plugGroups.Result)
+            foreach (var plugGroup in plugGroups.Items)
             {
                 if (groupResultSet.TryGetValue(plugGroup.RtId, out var mappingSet))
                 {
                     var mappings = new List<MappingConfigurationDto>();
-                    foreach (var mapping in mappingSet.Result)
+                    foreach (var mapping in mappingSet.Items)
                     {
-                        if (!string.IsNullOrWhiteSpace(mapping.Designation) && !string.IsNullOrWhiteSpace(mapping.Configuration))
+                        if (mappingRtIdToStreamRtId.TryGetValue(mapping.RtId, out var streamAssociation))
                         {
-                            mappings.Add(new MappingConfigurationDto(
-                                mapping.Designation,
-                                mapping.RtId.ToOctoObjectId(),
-                                mapping.Configuration));
+                            var config = streamAssociation.GetAttributeStringValueOrDefault(SystemCommunicationCkIds
+                                .MappingConfigurationAttribute);
+                            if (!string.IsNullOrWhiteSpace(mapping.Name) && !string.IsNullOrWhiteSpace(config))
+                            {
+                                mappings.Add(new MappingConfigurationDto(
+                                    mapping.Name,
+                                    mapping.RtId,
+                                    config));
+                            }
                         }
+       
                     }
 
                     var groupConfiguration = new GroupConfigurationDto(
-                        plugGroup.Designation!,
-                        plugGroup.RtId.ToOctoObjectId(),
+                        plugGroup.Name,
+                        plugGroup.RtId,
                         mappings);
                     plugGroupConfigurations.Add(groupConfiguration);
                 }
@@ -445,23 +478,23 @@ internal class CommunicationRepository : ICommunicationRepository
     /// <inheritdoc />
     public async Task<RtPlug> GetPlugByGroupAsync(string tenantId, OctoObjectId plugGroupRtId)
     {
-        var tenantContext = await _systemContext.CreateOrGetTenantContextAsync(tenantId);
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantContext.Repository.StartSessionAsync();
+        var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
 
-            var poolResultSet = await tenantContext.Repository.GetIndirectRtAssociationTargetsAsync<RtPlugGroup, RtPlug>(session,
-                plugGroupRtId.ToObjectId(), Statics.RoleIdParentChild, GraphDirections.Inbound);
+            var poolResultSet = await tenantRepository.GetIndirectRtAssociationTargetsAsync<RtPlugGroup, RtPlug>(session,
+                plugGroupRtId, Statics.RoleIdParentChild, GraphDirections.Inbound);
 
             await session.CommitTransactionAsync();
 
             if (poolResultSet != null)
             {
-                if (poolResultSet.Result.Any())
+                if (poolResultSet.Items.Any())
                 {
-                    return poolResultSet.Result.First();
+                    return poolResultSet.Items.First();
                 }
 
                 throw PlugRepositoryException.PlugGroupNotAssociatedToPlug(tenantId, plugGroupRtId);

@@ -1,37 +1,20 @@
 using System.Collections.Concurrent;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Plugs.Descriptions;
-using Meshmakers.Octo.Common.DistributedCache;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Common.Shared.DistributedCache;
+using Meshmakers.Common.Shared;
+using Meshmakers.Octo.Common.DistributionEventHub.Services;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Plugs;
 
 internal class PlugCache : IPlugCachePublish, IPlugCache
 {
-    private readonly IDistributedWithPubSubCache _distributedWithPubSubCache;
+    private readonly IDistributionEventHubService _distributionEventHubService;
     private readonly ConcurrentDictionary<string, PlugTenant> _tenantDescriptions = new();
-    private IChannel<IEnumerable<PlugTenantDescription>>? _channel;
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-    public PlugCache(IDistributedWithPubSubCache distributedWithPubSubCache)
+    public PlugCache(IDistributionEventHubService distributionEventHubService)
     {
-        _distributedWithPubSubCache = distributedWithPubSubCache;
-    }
-    
-    public async Task InitializeAsync()
-    {
-        Logger.Debug("Initializing PlugCache");
-        
-        if (_channel == null)
-        {
-            _channel = SubscribeToPlugHubConfigurationUpdates();
-            var configuration = await _distributedWithPubSubCache.GetLastMessageAsync<IEnumerable<PlugTenantDescription>>(CacheCommon.KeyCommunicationControllerPlugUpdate);
-            if (configuration != null)
-            {
-                ReloadConfiguration(configuration);
-            }
-        }
+        _distributionEventHubService = distributionEventHubService;
     }
 
     public PlugTenant AddOrUpdateTenant(string tenantId)
@@ -42,7 +25,7 @@ internal class PlugCache : IPlugCachePublish, IPlugCache
             plugTenant = _tenantDescriptions.AddOrUpdate(tenantId, _ => newPlugTenant,
                 (_, _) => newPlugTenant);
             
-            PublishConfiguration();
+            PublishConfiguration(tenantId);
         }
         return plugTenant;
     }
@@ -51,49 +34,31 @@ internal class PlugCache : IPlugCachePublish, IPlugCache
     {
         _tenantDescriptions.TryRemove(tenantId, out _);
         
-        PublishConfiguration();
+        PublishConfiguration(tenantId);
     }
 
     public bool TryGetTenant(string tenantId, out PlugTenant? plugTenant)
     {
         return _tenantDescriptions.TryGetValue(tenantId, out plugTenant);
     }
-    
-    private IChannel<IEnumerable<PlugTenantDescription>> SubscribeToPlugHubConfigurationUpdates()
-    {
-        var channel = _distributedWithPubSubCache.Subscribe<IEnumerable<PlugTenantDescription>>(CacheCommon.KeyCommunicationControllerPlugUpdate);
-        channel.OnMessage(message =>
-        {
-            if (message.Message != null)
-            {
-                ReloadConfiguration(message.Message);
-            }
 
-            return Task.CompletedTask;
-        });
-        return channel;
-    }
-
-    private void ReloadConfiguration(IEnumerable<PlugTenantDescription> configuration)
+    public void ReloadConfiguration(ComControllerPlugUpdate configuration)
     {
         Logger.Info("Reloading PlugCache configuration: {Configuration}", configuration.Serialize());
-        
-        _tenantDescriptions.Clear();
-        foreach (var tenantDescription in configuration)
-        {
-            var plugHubTenant = new PlugTenant(this, tenantDescription.TenantId, tenantDescription.Plugs.ToList());
-            _tenantDescriptions.AddOrUpdate(tenantDescription.TenantId, _ => plugHubTenant, (_, _) => plugHubTenant);
-        }
+
+        _tenantDescriptions.AddOrUpdate(configuration.TenantId, 
+            _ => new PlugTenant(this, configuration.TenantId, configuration.Plugs.ToList()),
+            (_, _) => new PlugTenant(this, configuration.TenantId, configuration.Plugs.ToList()));
     }
 
-    public void PublishConfiguration()
+    public void PublishConfiguration(string tenantId)
     {
-        Logger.Info("Publishing PlugCache configuration");
+        Logger.Info("Publishing PlugCache configuration for tenant '{TenantId}'", tenantId);
 
-        var tenantDescriptions= 
-            _tenantDescriptions.Select(x => x.Value.GetTenantDescription()).ToArray();
-        
-        _distributedWithPubSubCache.PublishAsync(CacheCommon.KeyCommunicationControllerPlugUpdate, tenantDescriptions);
+        if (_tenantDescriptions.TryGetValue(tenantId, out var desc))
+        {
+            _distributionEventHubService.PublishAsync(new ComControllerPlugUpdate(tenantId, desc.GetPlugDescriptions()));
+        }
     }
 
 }

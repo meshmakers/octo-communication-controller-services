@@ -1,5 +1,5 @@
 
-using Meshmakers.Octo.SystematizedData.Persistence;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 

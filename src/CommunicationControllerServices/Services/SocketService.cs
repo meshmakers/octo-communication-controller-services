@@ -1,9 +1,9 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Sockets;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.CkModelEntities;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Communication.Sockets.Contracts.DataTransferObjects;
-using Meshmakers.Octo.Communication.Sockets.Contracts.Hubs;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.Hubs;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.ConstructionKit.Generated.System.Communication.v1;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -45,7 +45,7 @@ internal class SocketService : ISocketServiceUpdates
             plug.UpdateConnectionId(connectionId);
         }
 
-        await SetSocketStateAsync(tenantId, socketRtId, AdapterStates.Offline);    
+        await SetSocketStateAsync(tenantId, socketRtId, RtAdapterStateEnum.Offline);    
 
         return plug.Configuration;
     }
@@ -57,10 +57,10 @@ internal class SocketService : ISocketServiceUpdates
 
         var plugTenant = _socketCache.AddOrUpdateTenant(tenantId);
         plugTenant.RemoveSocket(socketRtId);
-        await SetSocketStateAsync(tenantId, socketRtId, AdapterStates.Deployed);
+        await SetSocketStateAsync(tenantId, socketRtId, RtAdapterStateEnum.Deployed);
     }
 
-    private async Task SetSocketStateAsync(string tenantId, OctoObjectId socketRtId, AdapterStates adapterState)
+    private async Task SetSocketStateAsync(string tenantId, OctoObjectId socketRtId, RtAdapterStateEnum adapterState)
     {
         Logger.Info("[{TenantId}] Setting state of socket '{SocketRtId}' to '{AdapterState}'",
             tenantId, socketRtId, adapterState);
@@ -101,7 +101,7 @@ internal class SocketService : ISocketServiceUpdates
         var plugTenant = _socketCache.AddOrUpdateTenant(tenantId);
         if (plugTenant.SocketsById.TryGetValue(socketRtId, out var socket))
         {
-            await SetSocketStateAsync(tenantId, socket.SocketRtId, AdapterStates.Online);
+            await SetSocketStateAsync(tenantId, socket.SocketRtId, RtAdapterStateEnum.Online);
         }
     }
 
@@ -109,7 +109,7 @@ internal class SocketService : ISocketServiceUpdates
     {
         if (_socketCache.TryGetTenant(tenantId, out var socketTenant) && socketTenant != null)
         {
-            await _communicationRepository.SetSocketStateAsync(tenantId, socketRtId, AdapterStates.Offline);
+            await _communicationRepository.SetSocketStateAsync(tenantId, socketRtId, RtAdapterStateEnum.Offline);
         }
     }
     

@@ -1,0 +1,19 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+- enumId: AdapterState
+  useFlags: false
+  values:
+  - key: 0
+    name: Created
+  - key: 1
+    name: Pending
+  - key: 2
+    name: Deployed
+  - key: 3
+    name: Offline
+  - key: 4
+    name: Online
+  - key: 5
+    name: DeploymentError
+  - key: 6
+    name: ConfigurationError            

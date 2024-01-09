@@ -1,7 +1,5 @@
-using Meshmakers.Octo.Backend.CommunicationControllerServices.CkModelEntities;
-using Meshmakers.Octo.Common.Shared;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
-using Meshmakers.Octo.SystematizedData.Persistence.DataAccess;
+using Meshmakers.Octo.ConstructionKit.Contracts;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 

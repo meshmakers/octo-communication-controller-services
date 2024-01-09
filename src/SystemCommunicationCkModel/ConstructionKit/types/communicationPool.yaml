@@ -1,0 +1,12 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+- typeId: CommunicationPool
+  derivedFromCkTypeId: System/Entity
+  isFinal: true
+  attributes:
+  - id: System.Communication/LastSeen
+    name: LastSeen
+  - id: System.Communication/PoolState
+    name: State
+  - id: System/Name
+    name: Name

@@ -1,5 +1,5 @@
-using Meshmakers.Octo.Backend.CommunicationControllerServices.CkModelEntities;
-using Meshmakers.Octo.SystematizedData.Persistence.DataAccess;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.ConstructionKit.Generated.System.Communication.v1;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repository;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
@@ -11,7 +11,7 @@ internal interface IPoolServiceUpdates : IPoolService
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="info">Update information object</param>
     /// <returns></returns>
-    Task OnHandlePoolUpdateAsync(string tenantId, UpdateInfo<RtCommunicationPool> info);
+    Task OnHandlePoolUpdateAsync(string tenantId, IUpdateInfo<RtCommunicationPool> info);
 
     /// <summary>
     /// Handles a plug update
@@ -19,5 +19,5 @@ internal interface IPoolServiceUpdates : IPoolService
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="info">Update information object</param>
     /// <returns></returns>
-    Task OnHandlePlugUpdateAsync(string tenantId, UpdateInfo<RtPlug> info);
+    Task OnHandlePlugUpdateAsync(string tenantId, IUpdateInfo<RtPlug> info);
 }

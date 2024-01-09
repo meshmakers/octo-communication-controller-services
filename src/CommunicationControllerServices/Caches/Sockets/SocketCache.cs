@@ -1,39 +1,22 @@
 using System.Collections.Concurrent;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Sockets.Descriptions;
-using Meshmakers.Octo.Common.DistributedCache;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Common.Shared.DistributedCache;
+using Meshmakers.Common.Shared;
+using Meshmakers.Octo.Common.DistributionEventHub.Services;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Sockets;
 
 internal class SocketCache : ISocketCachePublish, ISocketCache
 {
-    private readonly IDistributedWithPubSubCache _distributedWithPubSubCache;
+    private readonly IDistributionEventHubService _distributionEventHubService;
     private readonly ConcurrentDictionary<string, SocketTenant> _tenantDescriptions = new();
-    private IChannel<IEnumerable<SocketTenantDescription>>? _channel;
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-    public SocketCache(IDistributedWithPubSubCache distributedWithPubSubCache)
+    public SocketCache(IDistributionEventHubService distributionEventHubService)
     {
-        _distributedWithPubSubCache = distributedWithPubSubCache;
+        _distributionEventHubService = distributionEventHubService;
     }
     
-    public async Task InitializeAsync()
-    {
-        Logger.Debug("Initializing SocketCache");
-        
-        if (_channel == null)
-        {
-            _channel = SubscribeToSocketHubConfigurationUpdates();
-            var configuration = await _distributedWithPubSubCache.GetLastMessageAsync<IEnumerable<SocketTenantDescription>>(CacheCommon.KeyCommunicationControllerSocketUpdate);
-            if (configuration != null)
-            {
-                ReloadConfiguration(configuration);
-            }
-        }
-    }
-
     public SocketTenant AddOrUpdateTenant(string tenantId)
     {
         if (!_tenantDescriptions.TryGetValue(tenantId, out var socketTenant))
@@ -42,7 +25,7 @@ internal class SocketCache : ISocketCachePublish, ISocketCache
             socketTenant = _tenantDescriptions.AddOrUpdate(tenantId, _ => newPlugTenant,
                 (_, _) => newPlugTenant);
             
-            PublishConfiguration();
+            PublishConfiguration(tenantId);
         }
         return socketTenant;
     }
@@ -51,7 +34,7 @@ internal class SocketCache : ISocketCachePublish, ISocketCache
     {
         _tenantDescriptions.TryRemove(tenantId, out _);
         
-        PublishConfiguration();
+        PublishConfiguration(tenantId);
     }
 
     public bool TryGetTenant(string tenantId, out SocketTenant? socketTenant)
@@ -59,41 +42,24 @@ internal class SocketCache : ISocketCachePublish, ISocketCache
         return _tenantDescriptions.TryGetValue(tenantId, out socketTenant);
     }
     
-    private IChannel<IEnumerable<SocketTenantDescription>> SubscribeToSocketHubConfigurationUpdates()
-    {
-        var channel = _distributedWithPubSubCache.Subscribe<IEnumerable<SocketTenantDescription>>(CacheCommon.KeyCommunicationControllerSocketUpdate);
-        channel.OnMessage(message =>
-        {
-            if (message.Message != null)
-            {
-                ReloadConfiguration(message.Message);
-            }
-
-            return Task.CompletedTask;
-        });
-        return channel;
-    }
-
-    private void ReloadConfiguration(IEnumerable<SocketTenantDescription> configuration)
+    public void ReloadConfiguration(ComControllerSocketUpdate configuration)
     {
         Logger.Info("Reloading SocketCache configuration: {Configuration}", configuration.Serialize());
         
+        _tenantDescriptions.AddOrUpdate(configuration.TenantId, 
+            _ => new SocketTenant(this, configuration.TenantId, configuration.Sockets.ToList()),
+            (_, _) => new SocketTenant(this, configuration.TenantId, configuration.Sockets.ToList()));
         _tenantDescriptions.Clear();
-        foreach (var tenantDescription in configuration)
-        {
-            var plugHubTenant = new SocketTenant(this, tenantDescription.TenantId, tenantDescription.Sockets.ToList());
-            _tenantDescriptions.AddOrUpdate(tenantDescription.TenantId, _ => plugHubTenant, (_, _) => plugHubTenant);
-        }
     }
 
-    public void PublishConfiguration()
+    public void PublishConfiguration(string tenantId)
     {
-        Logger.Info("Publishing PlugCache configuration");
-
-        var tenantDescriptions= 
-            _tenantDescriptions.Select(x => x.Value.GetTenantDescription()).ToArray();
+        Logger.Info("Publishing SocketCache configuration '{TenantId}'", tenantId);
         
-        _distributedWithPubSubCache.PublishAsync(CacheCommon.KeyCommunicationControllerSocketUpdate, tenantDescriptions);
+        if (_tenantDescriptions.TryGetValue(tenantId, out var desc))
+        {
+            _distributionEventHubService.PublishAsync(new ComControllerSocketUpdate(tenantId, desc.GetSocketDescriptions()));
+        }
     }
 
 }

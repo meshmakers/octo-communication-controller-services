@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <Description>OctoMesh System communication contruction kit model</Description>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <PackageId>Meshmakers.Octo.ConstructionKit.Models.System.Communication</PackageId>
+        <AssemblyName>Meshmakers.Octo.ConstructionKit.Models.System.Communication</AssemblyName>
+        <RootNamespace>Meshmakers.Octo.ConstructionKit.Models.System.Communication</RootNamespace>
+        
+        <Configurations>Debug;Release;DebugL</Configurations>
+        <Platforms>AnyCPU</Platforms>
+    </PropertyGroup>
+
+    <ItemGroup Condition="'$(Configuration)'!='DebugL'">
+        <PackageReference Include="Meshmakers.Octo.Runtime.Contracts" Version="3.0.20" />
+        <PackageReference Include="Meshmakers.Octo.ConstructionKit.SourceGeneration" OutputItemType="Analyzer" ReferenceOutputAssembly="false" Version="3.0.20" />
+    </ItemGroup>
+    <ItemGroup Condition="'$(Configuration)'=='DebugL'">
+        <PackageReference Include="Meshmakers.Octo.Runtime.Contracts" Version="999.0.0" />
+        <PackageReference Include="Meshmakers.Octo.ConstructionKit.SourceGeneration" OutputItemType="Analyzer" ReferenceOutputAssembly="false" Version="999.0.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Remove="ConstructionKit\ck-*.yaml" />
+        <EmbeddedResource Include="ConstructionKit\ck-*.yaml">
+            <GenerateCkModelServiceClass>true</GenerateCkModelServiceClass>
+        </EmbeddedResource>
+        <None Remove="ConstructionKit\ck-*.cache.json" />
+        <AdditionalFiles Include="ConstructionKit\ck-*.cache.json" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="..\..\assets\meshmakers64.png">
+            <Pack>True</Pack>
+            <PackagePath />
+            <Link>meshmakers64.png</Link>
+        </None>
+        <None Include="..\..\LICENSE">
+            <Pack>True</Pack>
+            <PackagePath />
+            <Link>LICENSE</Link>
+        </None>
+    </ItemGroup>
+</Project>

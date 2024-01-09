@@ -1,0 +1,13 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+- typeId: PlugMapping
+  derivedFromCkTypeId: System/Entity
+  isFinal: true
+  attributes:
+  - id: System/Name
+    name: Name
+  associations:
+    - id: System/ParentChild
+      targetCkTypeId: System.Communication/PlugGroup
+    - id: System.Communication/Stream
+      targetCkTypeId: System/Entity

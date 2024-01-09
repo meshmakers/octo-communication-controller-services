@@ -1,7 +1,8 @@
 using System.ComponentModel.DataAnnotations;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
-using Meshmakers.Octo.SystematizedData.Persistence;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.SystemApi.v1.Controllers;
@@ -68,10 +69,6 @@ public class CommunicationControllerController: ControllerBase
             
             return NoContent();
         }
-        catch (DatabaseException e)
-        {
-            return Conflict(e.Message);
-        }
         catch (TenantException e)
         {
             return Conflict(e.Message);
@@ -101,10 +98,6 @@ public class CommunicationControllerController: ControllerBase
             await _configurationService.WriteConfig(result, tenantId);
             
             return NoContent();
-        }
-        catch (DatabaseException e)
-        {
-            return Conflict(e.Message);
         }
         catch (TenantException e)
         {

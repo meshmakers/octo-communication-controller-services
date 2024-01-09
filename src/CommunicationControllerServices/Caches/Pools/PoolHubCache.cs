@@ -1,37 +1,20 @@
 using System.Collections.Concurrent;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools.Descriptions;
-using Meshmakers.Octo.Common.DistributedCache;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Common.Shared.DistributedCache;
+using Meshmakers.Common.Shared;
+using Meshmakers.Octo.Common.DistributionEventHub.Services;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
 
 internal class PoolHubCache : IPoolCachePublish, IPoolCache
 {
-    private readonly IDistributedWithPubSubCache _distributedWithPubSubCache;
+    private readonly IDistributionEventHubService _distributionEventHubService;
     private readonly ConcurrentDictionary<string, PoolTenant> _tenantDescriptions = new();
-    private IChannel<IEnumerable<PoolTenantDescription>>? _channel;
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-    public PoolHubCache(IDistributedWithPubSubCache distributedWithPubSubCache)
+    public PoolHubCache(IDistributionEventHubService distributionEventHubService)
     {
-        _distributedWithPubSubCache = distributedWithPubSubCache;
-    }
-    
-    public async Task InitializeAsync()
-    {
-        Logger.Debug("Initializing PoolHubCache");
-        
-        if (_channel == null)
-        {
-            _channel = SubscribeToPlugHubConfigurationUpdates();
-            var configuration = await _distributedWithPubSubCache.GetLastMessageAsync<IEnumerable<PoolTenantDescription>>(CacheCommon.KeyCommunicationControllerPoolUpdate);
-            if (configuration != null)
-            {
-                ReloadConfiguration(configuration);
-            }
-        }
+        _distributionEventHubService = distributionEventHubService;
     }
 
     public PoolTenant AddOrUpdateTenant(string tenantId)
@@ -42,7 +25,7 @@ internal class PoolHubCache : IPoolCachePublish, IPoolCache
             tenantDescription = _tenantDescriptions.AddOrUpdate(tenantId, _ => plugHubTenant,
                 (_, _) => plugHubTenant);
             
-            PublishConfiguration();
+            PublishConfiguration(tenantId);
         }
         return tenantDescription;
     }
@@ -51,7 +34,7 @@ internal class PoolHubCache : IPoolCachePublish, IPoolCache
     {
         _tenantDescriptions.TryRemove(tenantId, out _);
         
-        PublishConfiguration();
+        PublishConfiguration(tenantId);
     }
 
     public bool TryGetTenant(string tenantId, out PoolTenant? poolTenant)
@@ -64,43 +47,25 @@ internal class PoolHubCache : IPoolCachePublish, IPoolCache
         return _tenantDescriptions.ContainsKey(tenantId);
     }
 
-    private IChannel<IEnumerable<PoolTenantDescription>> SubscribeToPlugHubConfigurationUpdates()
-    {
-        var channel = _distributedWithPubSubCache.Subscribe<IEnumerable<PoolTenantDescription>>(CacheCommon.KeyCommunicationControllerPoolUpdate);
-        channel.OnMessage(channelMessage =>
-        {
-            if (channelMessage.Message != null)
-            {
-                ReloadConfiguration(channelMessage.Message);
-            }
-
-            return Task.CompletedTask;
-        });
-        return channel;
-    }
-
-    private void ReloadConfiguration(IEnumerable<PoolTenantDescription> configuration)
+    public void ReloadConfiguration(ComControllerPoolUpdate configuration)
     {
         Logger.Info("Reloading PoolHubCache configuration: {Configuration}", configuration.Serialize());
         
-        _tenantDescriptions.Clear();
-        foreach (var poolTenantDescription in configuration)
-        {
-            var plugHubTenant = new PoolTenant(this, poolTenantDescription.TenantId, 
-                poolTenantDescription.Pools.ToList(), poolTenantDescription.Plugs.ToList());
-            _tenantDescriptions.AddOrUpdate(poolTenantDescription.TenantId, _ => plugHubTenant, (_, _) => plugHubTenant);
-        }
+        _tenantDescriptions.AddOrUpdate(configuration.TenantId, 
+            _ => new PoolTenant(this, configuration.TenantId, configuration.Pools.ToList(), configuration.Plugs.ToList()),
+            (_, _) => new PoolTenant(this, configuration.TenantId, configuration.Pools.ToList(), configuration.Plugs.ToList()));
     }
 
-    public void PublishConfiguration()
+    public void PublishConfiguration(string tenantId)
     {
-        Logger.Info("Publishing PoolHubCache configuration");
+        Logger.Info("Publishing PoolHubCache configuration '{TenantId}'", tenantId);
 
-        var tenantDescriptions= 
-            _tenantDescriptions.Select(x => x.Value.GetTenantDescription()).ToArray();
-
-        _distributedWithPubSubCache.PublishAsync(CacheCommon.KeyCommunicationControllerPoolUpdate, tenantDescriptions);
-        Logger.Info("Published PoolHubCache configuration: {Configuration}", tenantDescriptions.Serialize());
+        if (_tenantDescriptions.TryGetValue(tenantId, out var desc))
+        {
+            var poolDescriptions = desc.GetPoolDescriptions();
+            var poolPlugDescriptions = desc.GetPoolPlugDescriptions();
+            _distributionEventHubService.PublishAsync(new ComControllerPoolUpdate(tenantId, poolDescriptions, poolPlugDescriptions));
+        }
     }
 
 }

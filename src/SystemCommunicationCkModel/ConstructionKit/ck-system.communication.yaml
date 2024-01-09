@@ -1,0 +1,138 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-compiled.schema.json
+types:
+- typeId: Plug
+  derivedFromCkTypeId: System.Communication/CommunicationAdapter
+  isFinal: true
+  attributes:
+  - id: System.Communication/MappingConfiguration
+    name: Configuration
+    isOptional: true
+- isCollectionRoot: true
+  typeId: CommunicationAdapter
+  derivedFromCkTypeId: System/Entity
+  isAbstract: true
+  attributes:
+  - id: System.Communication/LastSeen
+    name: LastSeen
+  - id: System.Communication/AdapterState
+    name: State
+  - id: System.Communication/AdapterType
+    name: Type
+  - id: System.Communication/Deployment.ImageName
+    name: ImageName
+  - id: System.Communication/Deployment.ImageVersion
+    name: ImageVersion
+  - id: System/Name
+    name: Name
+  associations:
+  - id: System/ParentChild
+    targetCkTypeId: System.Communication/CommunicationPool
+  enableChangeStreamPreAndPostImages: true
+- typeId: Socket
+  derivedFromCkTypeId: System.Communication/CommunicationAdapter
+  isFinal: true
+  attributes:
+  - id: System.Communication/MappingConfiguration
+    name: Configuration
+    isOptional: true
+- isCollectionRoot: true
+  typeId: CommunicationPool
+  derivedFromCkTypeId: System/Entity
+  isFinal: true
+  attributes:
+  - id: System.Communication/LastSeen
+    name: LastSeen
+  - id: System.Communication/PoolState
+    name: State
+  - id: System/Name
+    name: Name
+- isCollectionRoot: true
+  typeId: PlugGroup
+  derivedFromCkTypeId: System/Entity
+  isFinal: true
+  attributes:
+  - id: System/Name
+    name: Name
+  - id: System/Description
+    name: Description
+  associations:
+  - id: System/ParentChild
+    targetCkTypeId: System.Communication/Plug
+- isCollectionRoot: true
+  typeId: PlugMapping
+  derivedFromCkTypeId: System/Entity
+  isFinal: true
+  attributes:
+  - id: System/Name
+    name: Name
+  associations:
+  - id: System/ParentChild
+    targetCkTypeId: System.Communication/PlugGroup
+  - id: System.Communication/Stream
+    targetCkTypeId: System/Entity
+associationRoles:
+- id: Stream
+  inboundName: MapsFrom
+  outboundName: MapsTo
+  inboundMultiplicity: One
+  outboundMultiplicity: One
+  attributes:
+  - id: System.Communication/MappingConfiguration
+    name: Configuration
+    isOptional: true
+attributes:
+- id: AdapterType
+  valueType: String
+- id: LastSeen
+  valueType: String
+- id: Deployment.ImageName
+  valueType: String
+- id: Deployment.ImageVersion
+  valueType: String
+- id: AdapterState
+  valueType: Enum
+  valueCkEnumId: System.Communication/AdapterState
+- id: PoolState
+  valueType: Enum
+  valueCkEnumId: System.Communication/PoolState
+- id: MappingConfiguration
+  valueType: String
+records: []
+enums:
+- enumId: AdapterState
+  useFlags: false
+  values:
+  - key: 0
+    name: Created
+  - key: 1
+    name: Pending
+  - key: 2
+    name: Deployed
+  - key: 3
+    name: Offline
+  - key: 4
+    name: Online
+  - key: 5
+    name: DeploymentError
+  - key: 6
+    name: ConfigurationError
+- enumId: PoolState
+  useFlags: false
+  values:
+  - key: 0
+    name: Created
+  - key: 1
+    name: Pending
+  - key: 2
+    name: Deployed
+  - key: 3
+    name: Offline
+  - key: 4
+    name: Online
+  - key: 5
+    name: DeploymentError
+  - key: 6
+    name: ConfigurationError
+modelId: System.Communication
+dependencies:
+- System
