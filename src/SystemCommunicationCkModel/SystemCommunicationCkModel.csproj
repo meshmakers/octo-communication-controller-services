@@ -6,7 +6,7 @@
         <PackageId>Meshmakers.Octo.ConstructionKit.Models.System.Communication</PackageId>
         <AssemblyName>Meshmakers.Octo.ConstructionKit.Models.System.Communication</AssemblyName>
         <RootNamespace>Meshmakers.Octo.ConstructionKit.Models.System.Communication</RootNamespace>
-        
+        <OctoSkipCkCompile Condition="'$(Configuration)'=='Release'">true</OctoSkipCkCompile>
         <Configurations>Debug;Release;DebugL</Configurations>
         <Platforms>AnyCPU</Platforms>
     </PropertyGroup>
