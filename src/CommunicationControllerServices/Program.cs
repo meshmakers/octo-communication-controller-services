@@ -1,4 +1,3 @@
-using MassTransit;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.BackgroundServices;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Plugs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
@@ -13,9 +12,12 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
+using Meshmakers.Octo.Services.Common;
+using Meshmakers.Octo.Services.Common.Cors;
 using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
+using Meshmakers.Octo.Services.Infrastructure.Services;
 using Meshmakers.Octo.Services.Swagger.Configuration;
-using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.Cors.Infrastructure;
 using NLog;
 using NLog.Web;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
@@ -91,23 +93,25 @@ try
         // options.AppName = AssetTexts.Backend_AssetServices_UserSchema_Swagger_DisplayName;
     });
 
-    builder.Services.AddSingleton<PlugService>();
-    builder.Services.AddSingleton<IPlugService>(provider => provider.GetRequiredService<PlugService>());
-    builder.Services.AddSingleton<IPlugServiceUpdates>(provider => provider.GetRequiredService<PlugService>());
     
-    builder.Services.AddSingleton<SocketService>();
-    builder.Services.AddSingleton<ISocketService>(provider => provider.GetRequiredService<SocketService>());
-    builder.Services.AddSingleton<ISocketServiceUpdates>(provider => provider.GetRequiredService<SocketService>());
-    
-    builder.Services.AddSingleton<PoolService>();
-    builder.Services.AddSingleton<IPoolService>(provider => provider.GetRequiredService<PoolService>());
-    builder.Services.AddSingleton<IPoolServiceUpdates>(provider => provider.GetRequiredService<PoolService>());
     
     builder.Services.AddSingleton<IConfigurationService, ConfigurationService>();
     builder.Services.AddSingleton<ICommunicationRepository, CommunicationRepository>();
-    builder.Services.AddSingleton<IPoolCache, PoolHubCache>();
-    builder.Services.AddSingleton<IPlugCache, PlugCache>();
-    builder.Services.AddSingleton<ISocketCache, SocketCache>();
+    
+    
+    builder.Services.AddSingletonMultipleInterfaces<PlugService, IPlugService, IPlugServiceUpdates>();
+    builder.Services.AddSingletonMultipleInterfaces<SocketService, ISocketService, ISocketServiceUpdates>();
+    builder.Services.AddSingletonMultipleInterfaces<PoolService, IPoolService, IPoolServiceUpdates>();
+    builder.Services.AddSingletonMultipleInterfaces<PoolHubCache, IPoolCache, IPoolCachePublish>();
+    builder.Services.AddSingletonMultipleInterfaces<PlugCache, IPlugCache, IPlugCachePublish>();
+    builder.Services.AddSingletonMultipleInterfaces<SocketCache, ISocketCache, ISocketCachePublish>();
+
+    builder.Services.AddTransient<IDefaultConfigurationCreatorService, DefaultConfigurationCreatorService>();
+    builder.Services.AddSingleton<CorsPolicyProvider>();
+    builder.Services.AddSingleton<ICorsPolicyProvider>(p => p.GetRequiredService<CorsPolicyProvider>());
+    builder.Services.AddCors();
+    
+    
     builder.Services.AddSingleton<IPoolHubCallbacks, PoolHubCallbacks>();
     builder.Services.AddSingleton<IPlugHubCallbacks, PlugHubCallbacks>();
     builder.Services.AddSingleton<ISocketHubCallbacks, SocketHubCallbacks>();
