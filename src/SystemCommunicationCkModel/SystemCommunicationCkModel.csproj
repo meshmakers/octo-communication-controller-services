@@ -8,6 +8,7 @@
         <RootNamespace>Meshmakers.Octo.ConstructionKit.Models.System.Communication</RootNamespace>
         <Configurations>Debug;Release;DebugL</Configurations>
         <Platforms>AnyCPU</Platforms>
+        <OctoCompileCkModel Condition="'$(Configuration)'=='Release'">false</OctoCompileCkModel>
     </PropertyGroup>
 
     <ItemGroup Condition="'$(Configuration)'!='DebugL'">
