@@ -35,7 +35,7 @@ internal class CommunicationRepository : ICommunicationRepository
 
             var plugResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtCommunicationPool, RtPlug>(session,
                 new[] { poolRtId },
-                Statics.RoleIdParentChild, GraphDirections.Inbound, null, DataQueryOperation.Create());
+                Constants.RoleIdParentChild, GraphDirections.Inbound, null, DataQueryOperation.Create());
 
             if (!plugResultSet.Any())
             {
@@ -350,7 +350,7 @@ internal class CommunicationRepository : ICommunicationRepository
             session.StartTransaction();
 
             var poolResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPlug, RtCommunicationPool>(session,
-                new[] { plugRtId }, Statics.RoleIdParentChild, GraphDirections.Inbound, null, DataQueryOperation.Create());
+                new[] { plugRtId }, Constants.RoleIdParentChild, GraphDirections.Inbound, null, DataQueryOperation.Create());
 
             await session.CommitTransactionAsync();
 
@@ -384,7 +384,7 @@ internal class CommunicationRepository : ICommunicationRepository
             session.StartTransaction();
 
             var poolResultSet = await tenantRepository.GetIndirectRtAssociationTargetsAsync<RtPlugMapping, RtPlug>(session,
-                plugMappingRtId, Statics.RoleIdParentChild, GraphDirections.Inbound);
+                plugMappingRtId, Constants.RoleIdParentChild, GraphDirections.Inbound);
 
             await session.CommitTransactionAsync();
 
@@ -417,7 +417,7 @@ internal class CommunicationRepository : ICommunicationRepository
             session.StartTransaction();
 
             var plugGroupResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPlug, RtPlugGroup>(session,
-                new[] { plugRtId }, Statics.RoleIdParentChild, GraphDirections.Inbound, null, DataQueryOperation.Create());
+                new[] { plugRtId }, Constants.RoleIdParentChild, GraphDirections.Inbound, null, DataQueryOperation.Create());
 
             if (!plugGroupResultSet.ContainsKey(plugRtId))
             {
@@ -427,7 +427,7 @@ internal class CommunicationRepository : ICommunicationRepository
             var plugGroups = plugGroupResultSet[plugRtId];
 
             var groupResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPlugGroup, RtPlugMapping>(session,
-                plugGroups.Items.Select(x => x.RtId), Statics.RoleIdParentChild, GraphDirections.Inbound, null,
+                plugGroups.Items.Select(x => x.RtId), Constants.RoleIdParentChild, GraphDirections.Inbound, null,
                 DataQueryOperation.Create());
 
             // TODO: test 
@@ -486,7 +486,7 @@ internal class CommunicationRepository : ICommunicationRepository
             session.StartTransaction();
 
             var poolResultSet = await tenantRepository.GetIndirectRtAssociationTargetsAsync<RtPlugGroup, RtPlug>(session,
-                plugGroupRtId, Statics.RoleIdParentChild, GraphDirections.Inbound);
+                plugGroupRtId, Constants.RoleIdParentChild, GraphDirections.Inbound);
 
             await session.CommitTransactionAsync();
 

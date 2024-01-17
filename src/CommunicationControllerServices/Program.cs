@@ -1,4 +1,3 @@
-using Meshmakers.Octo.Backend.CommunicationControllerServices.BackgroundServices;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Plugs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Sockets;
@@ -71,6 +70,8 @@ try
     builder.Services.AddRuntimeEngine()
         .AddMongoDbRuntimeRepository();
 
+    builder.Services.AddCkModelSystemCommunication();
+
     builder.Services.AddOctoApiVersioningAndDocumentation(options =>
     {
         options.AddXmlDocAssembly<Program>();
@@ -93,29 +94,20 @@ try
         // options.AppName = AssetTexts.Backend_AssetServices_UserSchema_Swagger_DisplayName;
     });
 
-    
-    
-    builder.Services.AddSingleton<IConfigurationService, ConfigurationService>();
     builder.Services.AddSingleton<ICommunicationRepository, CommunicationRepository>();
     
-    
+    builder.Services.AddSingletonMultipleInterfaces<DefaultConfigurationCreatorService, IDefaultConfigurationCreatorService, IConfigurationService>();
+    builder.Services.AddSingletonMultipleInterfaces<CorsPolicyProvider, ICorsPolicyProvider, CorsPolicyProvider>();
     builder.Services.AddSingletonMultipleInterfaces<PlugService, IPlugService, IPlugServiceUpdates>();
     builder.Services.AddSingletonMultipleInterfaces<SocketService, ISocketService, ISocketServiceUpdates>();
     builder.Services.AddSingletonMultipleInterfaces<PoolService, IPoolService, IPoolServiceUpdates>();
     builder.Services.AddSingletonMultipleInterfaces<PoolHubCache, IPoolCache, IPoolCachePublish>();
     builder.Services.AddSingletonMultipleInterfaces<PlugCache, IPlugCache, IPlugCachePublish>();
     builder.Services.AddSingletonMultipleInterfaces<SocketCache, ISocketCache, ISocketCachePublish>();
-
-    builder.Services.AddTransient<IDefaultConfigurationCreatorService, DefaultConfigurationCreatorService>();
-    builder.Services.AddSingleton<CorsPolicyProvider>();
-    builder.Services.AddSingleton<ICorsPolicyProvider>(p => p.GetRequiredService<CorsPolicyProvider>());
-    builder.Services.AddCors();
-    
     
     builder.Services.AddSingleton<IPoolHubCallbacks, PoolHubCallbacks>();
     builder.Services.AddSingleton<IPlugHubCallbacks, PlugHubCallbacks>();
     builder.Services.AddSingleton<ISocketHubCallbacks, SocketHubCallbacks>();
-    builder.Services.AddHostedService<ControllerBackgroundService>();
 
     var app = builder.Build();
 
