@@ -4,7 +4,7 @@ associationRoles:
     inboundName: MapsFrom
     outboundName: MapsTo
     inboundMultiplicity: ZeroOrOne
-    outboundMultiplicity: One
+    outboundMultiplicity: ZeroOrOne
     attributes:
       - id: System.Communication/MappingConfiguration
         name: Configuration
