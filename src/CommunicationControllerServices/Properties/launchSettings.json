@@ -8,8 +8,7 @@
       "launchUrl": "swagger",
       "applicationUrl": "https://0.0.0.0:5015;http://0.0.0.0:5014",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development",
-        "OCTO_COMMUNICATIONCONTROLLER__BROKERHOST": "mq.staging.meshmakers.cloud"
+        "ASPNETCORE_ENVIRONMENT": "Development"
       }
     }
   }

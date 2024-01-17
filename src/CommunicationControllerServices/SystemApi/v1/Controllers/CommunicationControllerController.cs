@@ -1,8 +1,6 @@
 using System.ComponentModel.DataAnnotations;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
-using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.SystemApi.v1.Controllers;
@@ -28,18 +26,6 @@ public class CommunicationControllerController: ControllerBase
         _logger = logger;
         _configurationService = configurationService;
     }
-    
-    /// <summary>
-    /// Gets the status of tenants with enabled communication controllers
-    /// </summary>
-    /// <returns></returns>
-    [HttpGet]
-    public async Task<IActionResult> Get()
-    {
-        var config = await _configurationService.ReadConfig();
-
-        return Ok(config);
-    }
 
     /// <summary>
     /// Enables the communication controller for a tenant
@@ -52,21 +38,7 @@ public class CommunicationControllerController: ControllerBase
     {
         try
         {
-            var config = await _configurationService.ReadConfig();
-
-            var result = config.ToList();
-            var item = result.SingleOrDefault(x => x.TenantId == tenantId);
-            if (item == null)
-            {
-                result.Add(new CommunicationControllerStatusDto{ IsEnabled = true, TenantId = tenantId});
-            }
-            else
-            {
-                item.IsEnabled = true;
-            }
-
-            await _configurationService.WriteConfig(result, tenantId);
-            
+            await _configurationService.SetupAsync(tenantId);
             return NoContent();
         }
         catch (TenantException e)
@@ -86,17 +58,7 @@ public class CommunicationControllerController: ControllerBase
     {
         try
         {
-            var config = await _configurationService.ReadConfig();
-
-            var result = config.ToList();
-            var item = result.SingleOrDefault(x => x.TenantId == tenantId);
-            if (item != null)
-            {
-                result.Remove(item);
-            }
-
-            await _configurationService.WriteConfig(result, tenantId);
-            
+            await _configurationService.TakeDownAsync(tenantId);
             return NoContent();
         }
         catch (TenantException e)

@@ -1,9 +1,8 @@
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
+using Meshmakers.Octo.Services.Infrastructure.Services;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
-internal interface IConfigurationService
+internal interface IConfigurationService : IDefaultConfigurationCreatorService
 {
-    Task<IEnumerable<CommunicationControllerStatusDto>> ReadConfig();
-    Task WriteConfig(IEnumerable<CommunicationControllerStatusDto> config, string tenantId);
+    Task TakeDownAsync(string tenantId);
 }

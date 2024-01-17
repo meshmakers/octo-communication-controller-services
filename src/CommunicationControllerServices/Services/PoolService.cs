@@ -141,7 +141,8 @@ internal class PoolService : IPoolServiceUpdates
 
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
         {
-            throw PoolServiceException.TenantNotFound(tenantId);
+            Logger.Info("[{TenantId}] Tenant not loaded", tenantId);
+            return;
         }
 
         // First, undeploy all communication adapters

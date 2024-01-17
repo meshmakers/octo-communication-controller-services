@@ -3,14 +3,15 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices;
 
-internal static class Statics
+internal static class Constants
 {
     public const string TenantId = "tenantId";
     public const string PoolName = "pool-name";
     public const string PlugRtId = "plug-rtId";
     public const string SocketRtId = "socket-rtId";
 
-    public const string CommunicationControllerConfigurationName = "CommunicationControllerServices";
+    public const string CommunicationControllerServiceSchemaVersionKey = "CommunicationControllerServices";
+    public const int CommunicationControllerServiceSchemaVersionValue = 1;
 
     public const string CkIdPlug = "Meshmakers.Plug";
     public const string CkIdSocket = "Meshmakers.Socket";
