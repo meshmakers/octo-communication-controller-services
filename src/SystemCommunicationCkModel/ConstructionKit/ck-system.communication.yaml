@@ -74,7 +74,7 @@ associationRoles:
 - id: Stream
   inboundName: MapsFrom
   outboundName: MapsTo
-  inboundMultiplicity: One
+  inboundMultiplicity: ZeroOrOne
   outboundMultiplicity: One
   attributes:
   - id: System.Communication/MappingConfiguration
