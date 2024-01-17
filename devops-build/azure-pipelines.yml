@@ -16,7 +16,7 @@ variables:
   - name: solutionFile
     value: 'Octo.CommunicationController.sln'
   - name: isRelease
-    value: true #${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}  
+    value: ${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}  
   
 stages:
  - stage: Build
