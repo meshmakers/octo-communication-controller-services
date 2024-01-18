@@ -38,11 +38,9 @@ internal class DefaultConfigurationCreatorService : IConfigurationService
         using var session = await _systemContext.GetSystemSessionAsync();
         session.StartTransaction();
         
-        
         // If there is a configuration version, check if we need to update the configuration
         var configurationVersion =
-            await _systemContext.GetConfigurationAsync(session, Constants.CommunicationControllerServiceSchemaVersionKey,
-                new DefaultConfigurationVersion { Version = -1 });
+            await _systemContext.GetConfigurationAsync<DefaultConfigurationVersion>(session, Constants.CommunicationControllerServiceSchemaVersionKey, null);
         if (configurationVersion == null)
         {
             return;
