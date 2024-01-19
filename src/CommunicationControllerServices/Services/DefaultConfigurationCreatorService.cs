@@ -94,20 +94,15 @@ internal class DefaultConfigurationCreatorService : IConfigurationService
             tenantContext = await _systemContext.GetChildTenantContextAsync(tenantId);
         }
         
-        using var session = await tenantContext.GetSystemSessionAsync();
-        session.StartTransaction();
-        
-        if (!await tenantContext.IsCkModelExistingAsync(session, SystemCommunicationCkIds.ModelId))
+        if (!await tenantContext.IsCkModelExistingAsync(SystemCommunicationCkIds.ModelId))
         {
             OperationResult operationResult = new();
-            await tenantContext.ImportCkModelAsync(session, SystemCommunicationCkIds.ModelId, operationResult);
+            await tenantContext.ImportCkModelAsync(SystemCommunicationCkIds.ModelId, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
             {
                 throw InitializationException.ImportCkModelFailed(tenantContext.TenantId, operationResult.GetMessages());
             }
         }
-        
-        await session.CommitTransactionAsync();
     }
     
     private async Task StartTenantAsync(string tenantId)
