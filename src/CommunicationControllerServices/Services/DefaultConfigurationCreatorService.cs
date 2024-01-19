@@ -51,6 +51,7 @@ internal class DefaultConfigurationCreatorService : IConfigurationService
             await _systemContext.GetConfigurationAsync<DefaultConfigurationVersion>(session, Constants.CommunicationControllerServiceSchemaVersionKey, null);
         if (configurationVersion == null)
         {
+            await session.CommitTransactionAsync();
             return;
         }
         
