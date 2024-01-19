@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.ConstructionKit.Generated.System.Communication.v1;
+using Meshmakers.Octo.ConstructionKit.Models.System.ConstructionKit.Generated.System.v1;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repository;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
@@ -31,6 +32,13 @@ internal class DefaultConfigurationCreatorService : IConfigurationService
         // Do nothing if the system tenant is not existing.
         // Identity Service is creating the system tenant currently.
         if (!await _systemContext.IsSystemTenantExistingAsync())
+        {
+            return;
+        }
+        
+        // That means that the system tenant database is existing but (currently) not valid.
+        // We wait for a PosTenantCreated event to create the default configuration.
+        if (!await _systemContext.IsCkModelExistingAsync(SystemCkIds.ModelId))
         {
             return;
         }
