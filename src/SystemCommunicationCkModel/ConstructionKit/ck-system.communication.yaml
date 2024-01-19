@@ -1,12 +1,5 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-compiled.schema.json
 types:
-- typeId: Plug
-  derivedFromCkTypeId: System.Communication/CommunicationAdapter
-  isFinal: true
-  attributes:
-  - id: System.Communication/MappingConfiguration
-    name: Configuration
-    isOptional: true
 - isCollectionRoot: true
   typeId: CommunicationAdapter
   derivedFromCkTypeId: System/Entity
@@ -28,13 +21,6 @@ types:
   - id: System/ParentChild
     targetCkTypeId: System.Communication/CommunicationPool
   enableChangeStreamPreAndPostImages: true
-- typeId: Socket
-  derivedFromCkTypeId: System.Communication/CommunicationAdapter
-  isFinal: true
-  attributes:
-  - id: System.Communication/MappingConfiguration
-    name: Configuration
-    isOptional: true
 - isCollectionRoot: true
   typeId: CommunicationPool
   derivedFromCkTypeId: System/Entity
@@ -46,6 +32,13 @@ types:
     name: State
   - id: System/Name
     name: Name
+- typeId: Plug
+  derivedFromCkTypeId: System.Communication/CommunicationAdapter
+  isFinal: true
+  attributes:
+  - id: System.Communication/MappingConfiguration
+    name: Configuration
+    isOptional: true
 - isCollectionRoot: true
   typeId: PlugGroup
   derivedFromCkTypeId: System/Entity
@@ -70,6 +63,13 @@ types:
     targetCkTypeId: System.Communication/PlugGroup
   - id: System.Communication/Stream
     targetCkTypeId: System/Entity
+- typeId: Socket
+  derivedFromCkTypeId: System.Communication/CommunicationAdapter
+  isFinal: true
+  attributes:
+  - id: System.Communication/MappingConfiguration
+    name: Configuration
+    isOptional: true
 associationRoles:
 - id: Stream
   inboundName: MapsFrom
