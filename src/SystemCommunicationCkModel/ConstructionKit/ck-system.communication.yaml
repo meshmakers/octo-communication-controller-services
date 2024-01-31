@@ -1,74 +1,74 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-compiled.schema.json
 types:
 - typeId: Plug
-  derivedFromCkTypeId: System.Communication/CommunicationAdapter
+  derivedFromCkTypeId: System.Communication-1.0.0/CommunicationAdapter-1.0.0
   isFinal: true
   attributes:
-  - id: System.Communication/MappingConfiguration
+  - id: System.Communication-1.0.0/MappingConfiguration-1.0.0
     name: Configuration
     isOptional: true
 - isCollectionRoot: true
   typeId: CommunicationAdapter
-  derivedFromCkTypeId: System/Entity
+  derivedFromCkTypeId: System-1.0.0/Entity-1.0.0
   isAbstract: true
   associations:
-  - id: System/ParentChild
-    targetCkTypeId: System.Communication/CommunicationPool
+  - id: System-1.0.0/ParentChild-1.0.0
+    targetCkTypeId: System.Communication-1.0.0/CommunicationPool-1.0.0
   enableChangeStreamPreAndPostImages: true
   attributes:
-  - id: System.Communication/LastSeen
+  - id: System.Communication-1.0.0/LastSeen-1.0.0
     name: LastSeen
-  - id: System.Communication/AdapterState
+  - id: System.Communication-1.0.0/AdapterState-1.0.0
     name: State
-  - id: System.Communication/AdapterType
+  - id: System.Communication-1.0.0/AdapterType-1.0.0
     name: Type
-  - id: System.Communication/Deployment.ImageName
+  - id: System.Communication-1.0.0/Deployment.ImageName-1.0.0
     name: ImageName
-  - id: System.Communication/Deployment.ImageVersion
+  - id: System.Communication-1.0.0/Deployment.ImageVersion-1.0.0
     name: ImageVersion
-  - id: System/Name
+  - id: System-1.0.0/Name-1.0.0
     name: Name
 - typeId: Socket
-  derivedFromCkTypeId: System.Communication/CommunicationAdapter
+  derivedFromCkTypeId: System.Communication-1.0.0/CommunicationAdapter-1.0.0
   isFinal: true
   attributes:
-  - id: System.Communication/MappingConfiguration
+  - id: System.Communication-1.0.0/MappingConfiguration-1.0.0
     name: Configuration
     isOptional: true
 - isCollectionRoot: true
   typeId: CommunicationPool
-  derivedFromCkTypeId: System/Entity
+  derivedFromCkTypeId: System-1.0.0/Entity-1.0.0
   isFinal: true
   attributes:
-  - id: System.Communication/LastSeen
+  - id: System.Communication-1.0.0/LastSeen-1.0.0
     name: LastSeen
-  - id: System.Communication/PoolState
+  - id: System.Communication-1.0.0/PoolState-1.0.0
     name: State
-  - id: System/Name
+  - id: System-1.0.0/Name-1.0.0
     name: Name
 - isCollectionRoot: true
   typeId: PlugGroup
-  derivedFromCkTypeId: System/Entity
+  derivedFromCkTypeId: System-1.0.0/Entity-1.0.0
   isFinal: true
   associations:
-  - id: System/ParentChild
-    targetCkTypeId: System.Communication/Plug
+  - id: System-1.0.0/ParentChild-1.0.0
+    targetCkTypeId: System.Communication-1.0.0/Plug-1.0.0
   attributes:
-  - id: System/Name
+  - id: System-1.0.0/Name-1.0.0
     name: Name
-  - id: System/Description
+  - id: System-1.0.0/Description-1.0.0
     name: Description
 - isCollectionRoot: true
   typeId: PlugMapping
-  derivedFromCkTypeId: System/Entity
+  derivedFromCkTypeId: System-1.0.0/Entity-1.0.0
   isFinal: true
   associations:
-  - id: System/ParentChild
-    targetCkTypeId: System.Communication/PlugGroup
-  - id: System.Communication/Stream
-    targetCkTypeId: System/Entity
+  - id: System-1.0.0/ParentChild-1.0.0
+    targetCkTypeId: System.Communication-1.0.0/PlugGroup-1.0.0
+  - id: System.Communication-1.0.0/Stream-1.0.0
+    targetCkTypeId: System-1.0.0/Entity-1.0.0
   attributes:
-  - id: System/Name
+  - id: System-1.0.0/Name-1.0.0
     name: Name
 associationRoles:
 - id: Stream
@@ -77,7 +77,7 @@ associationRoles:
   inboundMultiplicity: ZeroOrOne
   outboundMultiplicity: ZeroOrOne
   attributes:
-  - id: System.Communication/MappingConfiguration
+  - id: System.Communication-1.0.0/MappingConfiguration-1.0.0
     name: Configuration
     isOptional: true
 attributes:
@@ -91,10 +91,10 @@ attributes:
   valueType: String
 - id: AdapterState
   valueType: Enum
-  valueCkEnumId: System.Communication/AdapterState
+  valueCkEnumId: System.Communication-1.0.0/AdapterState-1.0.0
 - id: PoolState
   valueType: Enum
-  valueCkEnumId: System.Communication/PoolState
+  valueCkEnumId: System.Communication-1.0.0/PoolState-1.0.0
 - id: MappingConfiguration
   valueType: String
 records: []
