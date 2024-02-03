@@ -339,7 +339,7 @@ internal class PoolService : IPoolServiceUpdates
             PoolRtId = poolRtId,
             PoolName = poolName,
             AdapterRtId = rtPlug.RtId,
-            AdapterCkTypeId = rtPlug.CkTypeId,
+            AdapterCkTypeId = rtPlug.CkTypeId ?? throw PoolServiceException.CkTypeIdNotSet(),
             ImageName = rtPlug.ImageName ?? throw PoolServiceException.ImageNameNotSet(),
             Version = rtPlug.ImageVersion ?? throw PoolServiceException.ImageVersionNotSet(),
         };
