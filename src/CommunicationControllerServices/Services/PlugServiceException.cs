@@ -17,9 +17,13 @@ internal class PlugServiceException : Exception
     {
     }
     
-    internal static Exception CommonFailedSetPlugState(string tenantId, OctoObjectId plugRtId, RtAdapterStateEnum adapterState, Exception exception)
+    internal static Exception CommonFailedSetPlugDeploymentState(string tenantId, OctoObjectId plugRtId, RtDeploymentStateEnum deploymentState, Exception exception)
     {
-        return new PlugServiceException($"[{tenantId}] Failed to set plug '{plugRtId}' state to '{adapterState}'", exception);
+        return new PlugServiceException($"[{tenantId}] Failed to set plug '{plugRtId}' deployment state to '{deploymentState}'", exception);
+    }
+    internal static Exception CommonFailedSetPlugCommunicationState(string tenantId, OctoObjectId plugRtId, RtCommunicationStateEnum communicationState, Exception exception)
+    {
+        return new PlugServiceException($"[{tenantId}] Failed to set plug '{plugRtId}' communication state to '{communicationState}'", exception);
     }
 
     internal static Exception CommonFailedCannotLoadPlugConfiguration(string tenantId, OctoObjectId plugRtId, Exception exception)

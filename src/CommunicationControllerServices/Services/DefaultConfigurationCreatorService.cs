@@ -10,7 +10,7 @@ using Meshmakers.Octo.Services.Infrastructure.Services;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
-internal class DefaultConfigurationCreatorService : IConfigurationService
+internal class DefaultConfigurationCreatorService : DefaultConfigurationCreatorServiceBase, IConfigurationService
 {
     private readonly ILogger<DefaultConfigurationCreatorService> _logger;
     private readonly ISystemContext _systemContext;
@@ -18,16 +18,17 @@ internal class DefaultConfigurationCreatorService : IConfigurationService
     private readonly IPlugServiceUpdates _plugService;
     private readonly ConcurrentDictionary<string, IDisposable> _updateStreams = new();
 
-    public DefaultConfigurationCreatorService(ILogger<DefaultConfigurationCreatorService> logger, ISystemContext systemContext, 
+    public DefaultConfigurationCreatorService(ILogger<DefaultConfigurationCreatorService> logger, ISystemContext systemContext,
         IPoolServiceUpdates poolService, IPlugServiceUpdates plugService)
+        : base(logger)
     {
         _logger = logger;
         _systemContext = systemContext;
         _poolService = poolService;
         _plugService = plugService;
     }
-    
-    public async Task SetupAsync(string tenantId)
+
+    protected override async Task SetupTenantAsync(string tenantId)
     {
         // Do nothing if the system tenant is not existing.
         // Identity Service is creating the system tenant currently.
@@ -35,34 +36,37 @@ internal class DefaultConfigurationCreatorService : IConfigurationService
         {
             return;
         }
-        
+
         // That means that the system tenant database is existing but (currently) not valid.
         // We wait for a PosTenantCreated event to create the default configuration.
         if (!await _systemContext.IsCkModelExistingAsync(SystemCkIds.ModelId))
         {
             return;
         }
-        
-        using var session = await _systemContext.GetSystemSessionAsync();
+
+        var tenantContext = await _systemContext.FindTenantContextAsync(tenantId);
+
+        using var session = await tenantContext.GetSystemSessionAsync();
         session.StartTransaction();
-        
+
         // If there is a configuration version, check if we need to update the configuration
         var configurationVersion =
-            await _systemContext.GetConfigurationAsync<DefaultConfigurationVersion>(session, Constants.CommunicationControllerServiceSchemaVersionKey, null);
+            await tenantContext.GetConfigurationAsync<DefaultConfigurationVersion>(session,
+                Constants.CommunicationControllerServiceSchemaVersionKey, null);
         if (configurationVersion == null)
         {
             await session.CommitTransactionAsync();
             return;
         }
-        
+
         if (configurationVersion.Version < Constants.CommunicationControllerServiceSchemaVersionValue)
         {
             await ImportCkModelAsync(tenantId);
-            
-            await _systemContext.SetConfigurationAsync(session, Constants.CommunicationControllerServiceSchemaVersionKey,
+
+            await tenantContext.SetConfigurationAsync(session, Constants.CommunicationControllerServiceSchemaVersionKey,
                 new DefaultConfigurationVersion { Version = Constants.CommunicationControllerServiceSchemaVersionValue });
         }
-        
+
         await session.CommitTransactionAsync();
 
         await StartTenantAsync(tenantId);
@@ -70,39 +74,51 @@ internal class DefaultConfigurationCreatorService : IConfigurationService
         // TODO: Implement security configuration
     }
 
-    public async Task TakeDownAsync(string tenantId)
+    public async Task EnableAsync(string tenantId)
     {
-        using var session = await _systemContext.GetSystemSessionAsync();
+        var tenantContext = await _systemContext.FindTenantContextAsync(tenantId);
+
+        using var session = await tenantContext.GetSystemSessionAsync();
         session.StartTransaction();
+
+        await ImportCkModelAsync(tenantId);
+
+        await tenantContext.SetConfigurationAsync(session, Constants.CommunicationControllerServiceSchemaVersionKey,
+            new DefaultConfigurationVersion { Version = Constants.CommunicationControllerServiceSchemaVersionValue });
         
+        await session.CommitTransactionAsync();
+        
+        await StartTenantAsync(tenantId);
+    }
+
+    public async Task DisableAsync(string tenantId)
+    {
+        var tenantContext = await _systemContext.FindTenantContextAsync(tenantId);
+
+        using var session = await tenantContext.GetSystemSessionAsync();
+        session.StartTransaction();
+
         // If there is a configuration version, check if we need to update the configuration
         var configurationVersion =
-            await _systemContext.GetConfigurationAsync(session, Constants.CommunicationControllerServiceSchemaVersionKey,
+            await tenantContext.GetConfigurationAsync(session, Constants.CommunicationControllerServiceSchemaVersionKey,
                 new DefaultConfigurationVersion { Version = -1 });
         if (configurationVersion == null)
         {
             return;
         }
-        
-        await _systemContext.SetConfigurationAsync(session, Constants.CommunicationControllerServiceSchemaVersionKey,
-            new DefaultConfigurationVersion { Version = -1 });
-        
+
+        await tenantContext.DeleteConfigurationAsync(session, Constants.CommunicationControllerServiceSchemaVersionKey);
+
         await session.CommitTransactionAsync();
-        
+
         await StopTenantAsync(tenantId);
-
     }
-
 
 
     private async Task ImportCkModelAsync(string tenantId)
     {
-        ITenantContext tenantContext = _systemContext;
-        if (tenantId != _systemContext.TenantId)
-        {
-            tenantContext = await _systemContext.GetChildTenantContextAsync(tenantId);
-        }
-        
+        var tenantContext = await _systemContext.FindTenantContextAsync(tenantId);
+
         if (!await tenantContext.IsCkModelExistingAsync(SystemCommunicationCkIds.ModelId))
         {
             OperationResult operationResult = new();
@@ -113,61 +129,61 @@ internal class DefaultConfigurationCreatorService : IConfigurationService
             }
         }
     }
-    
+
     private async Task StartTenantAsync(string tenantId)
     {
         _logger.LogInformation("Subscribing to tenant '{TenantId}' for plug updates", tenantId);
 
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
-        session.StartTransaction();
-        
-        // Subscribe to association updates Plug->PlugGroup
-        var plugPlugGroupSubscription = tenantRepository.SubscribeToRtAssociations<RtPlug, RtPlugGroup>(
-            new UpdateAssociationStreamFilter
-                { UpdateTypes = UpdateTypes.Delete | UpdateTypes.Insert, RoleId = Constants.RoleIdParentChild });
-        plugPlugGroupSubscription.GetUpdates().Subscribe(info => HandlePlugConfigurationUpdateAssociations(tenantId, info).Wait());
-        _updateStreams.AddOrUpdate(tenantId, plugPlugGroupSubscription, (_, _) => plugPlugGroupSubscription);
+        // var session = await tenantRepository.GetSessionAsync();
+        // session.StartTransaction();
+        //
+        // // Subscribe to association updates Plug->PlugGroup
+        // var plugPlugGroupSubscription = tenantRepository.SubscribeToRtAssociations<RtPlug, RtPlugGroup>(
+        //     new UpdateAssociationStreamFilter
+        //         { UpdateTypes = UpdateTypes.Delete | UpdateTypes.Insert, RoleId = Constants.RoleIdParentChild });
+        // plugPlugGroupSubscription.GetUpdates().Subscribe(info => HandlePlugConfigurationUpdateAssociations(tenantId, info).Wait());
+        // _updateStreams.AddOrUpdate(tenantId, plugPlugGroupSubscription, (_, _) => plugPlugGroupSubscription);
+        //
+        // // Subscribe to association updates PlugGroup->PlugMapping
+        // var plugGroupPlugMappingSubscription = tenantRepository.SubscribeToRtAssociations<RtPlugGroup, RtPlugMapping>(
+        //     new UpdateAssociationStreamFilter
+        //         { UpdateTypes = UpdateTypes.Delete | UpdateTypes.Insert, RoleId = Constants.RoleIdParentChild });
+        // plugGroupPlugMappingSubscription.GetUpdates().Subscribe(info => HandlePlugConfigurationUpdateAssociations(tenantId, info).Wait());
+        // _updateStreams.AddOrUpdate(tenantId, plugGroupPlugMappingSubscription, (_, _) => plugGroupPlugMappingSubscription);
+        //
+        // // Subscribe to association updates CommunicationPool->Plug
+        // var communicationPoolPlugSubscription = tenantRepository.SubscribeToRtAssociations<RtPlug, RtCommunicationPool>(
+        //     new UpdateAssociationStreamFilter
+        //         { UpdateTypes = UpdateTypes.Delete | UpdateTypes.Insert, RoleId = Constants.RoleIdParentChild });
+        // communicationPoolPlugSubscription.GetUpdates().Subscribe(info => HandlePoolPlugUpdateAssociations(tenantId, info).Wait());
+        // _updateStreams.AddOrUpdate(tenantId, communicationPoolPlugSubscription, (_, _) => communicationPoolPlugSubscription);
+        //
+        // // Subscribe to updates of CommunicationPool, Plug, PlugGroup and PlugMapping
+        // var poolSubscription =
+        //     tenantRepository.SubscribeToRtEntities<RtCommunicationPool>(new UpdateStreamFilter { UpdateTypes = UpdateTypes.All });
+        // poolSubscription.GetUpdates().Subscribe(info => HandlePoolEntityUpdates(tenantId, info).Wait());
+        // _updateStreams.AddOrUpdate(tenantId, poolSubscription, (_, _) => poolSubscription);
+        //
+        // var plugSubscription =
+        //     tenantRepository.SubscribeToRtEntities<RtPlug>(new UpdateStreamFilter { UpdateTypes = UpdateTypes.All });
+        // plugSubscription.GetUpdates().Subscribe(info => HandlePlugEntityUpdates(tenantId, info).Wait());
+        // _updateStreams.AddOrUpdate(tenantId, plugSubscription, (_, _) => plugSubscription);
+        //
+        // var plugGroupSubscription =
+        //     tenantRepository.SubscribeToRtEntities<RtPlugGroup>(new UpdateStreamFilter { UpdateTypes = UpdateTypes.All });
+        // plugGroupSubscription.GetUpdates().Subscribe(info => HandlePlugGroupEntityUpdates(tenantId, info).Wait());
+        // _updateStreams.AddOrUpdate(tenantId, plugGroupSubscription, (_, _) => plugGroupSubscription);
+        //
+        // var plugMappingSubscription =
+        //     tenantRepository.SubscribeToRtEntities<RtPlugMapping>(new UpdateStreamFilter { UpdateTypes = UpdateTypes.All });
+        // plugMappingSubscription.GetUpdates().Subscribe(info => HandlePlugMappingEntityUpdates(tenantId, info).Wait());
+        // _updateStreams.AddOrUpdate(tenantId, plugMappingSubscription, (_, _) => plugMappingSubscription);
 
-        // Subscribe to association updates PlugGroup->PlugMapping
-        var plugGroupPlugMappingSubscription = tenantRepository.SubscribeToRtAssociations<RtPlugGroup, RtPlugMapping>(
-            new UpdateAssociationStreamFilter
-                { UpdateTypes = UpdateTypes.Delete | UpdateTypes.Insert, RoleId = Constants.RoleIdParentChild });
-        plugGroupPlugMappingSubscription.GetUpdates().Subscribe(info => HandlePlugConfigurationUpdateAssociations(tenantId, info).Wait());
-        _updateStreams.AddOrUpdate(tenantId, plugGroupPlugMappingSubscription, (_, _) => plugGroupPlugMappingSubscription);
-
-        // Subscribe to association updates CommunicationPool->Plug
-        var communicationPoolPlugSubscription = tenantRepository.SubscribeToRtAssociations<RtPlug, RtCommunicationPool>(
-            new UpdateAssociationStreamFilter
-                { UpdateTypes = UpdateTypes.Delete | UpdateTypes.Insert, RoleId = Constants.RoleIdParentChild });
-        communicationPoolPlugSubscription.GetUpdates().Subscribe(info => HandlePoolPlugUpdateAssociations(tenantId, info).Wait());
-        _updateStreams.AddOrUpdate(tenantId, communicationPoolPlugSubscription, (_, _) => communicationPoolPlugSubscription);
-
-        // Subscribe to updates of CommunicationPool, Plug, PlugGroup and PlugMapping
-        var poolSubscription =
-            tenantRepository.SubscribeToRtEntities<RtCommunicationPool>(new UpdateStreamFilter { UpdateTypes = UpdateTypes.All });
-        poolSubscription.GetUpdates().Subscribe(info => HandlePoolEntityUpdates(tenantId, info).Wait());
-        _updateStreams.AddOrUpdate(tenantId, poolSubscription, (_, _) => poolSubscription);
-
-        var plugSubscription =
-            tenantRepository.SubscribeToRtEntities<RtPlug>(new UpdateStreamFilter { UpdateTypes = UpdateTypes.All });
-        plugSubscription.GetUpdates().Subscribe(info => HandlePlugEntityUpdates(tenantId, info).Wait());
-        _updateStreams.AddOrUpdate(tenantId, plugSubscription, (_, _) => plugSubscription);
-
-        var plugGroupSubscription =
-            tenantRepository.SubscribeToRtEntities<RtPlugGroup>(new UpdateStreamFilter { UpdateTypes = UpdateTypes.All });
-        plugGroupSubscription.GetUpdates().Subscribe(info => HandlePlugGroupEntityUpdates(tenantId, info).Wait());
-        _updateStreams.AddOrUpdate(tenantId, plugGroupSubscription, (_, _) => plugGroupSubscription);
-
-        var plugMappingSubscription =
-            tenantRepository.SubscribeToRtEntities<RtPlugMapping>(new UpdateStreamFilter { UpdateTypes = UpdateTypes.All });
-        plugMappingSubscription.GetUpdates().Subscribe(info => HandlePlugMappingEntityUpdates(tenantId, info).Wait());
-        _updateStreams.AddOrUpdate(tenantId, plugMappingSubscription, (_, _) => plugMappingSubscription);
-
-        await session.CommitTransactionAsync();
+        // await session.CommitTransactionAsync();
     }
-    
+
     private Task StopTenantAsync(string tenantId)
     {
         _logger.LogInformation("Unsubscribing from tenant '{TenantId}' for plug updates", tenantId);
@@ -211,7 +227,7 @@ internal class DefaultConfigurationCreatorService : IConfigurationService
         try
         {
             await _poolService.OnHandlePlugUpdateAsync(tenantId, info);
-       //     await _plugService.OnHandlePlugUpdateAsync(tenantId, info);
+            //     await _plugService.OnHandlePlugUpdateAsync(tenantId, info);
         }
         catch (Exception e)
         {
@@ -246,6 +262,7 @@ internal class DefaultConfigurationCreatorService : IConfigurationService
                         await _poolService.DeployAdapterAsync(tenantId, info.Document.TargetRtId,
                             info.Document.OriginRtId);
                     }
+
                     break;
                 case UpdateTypes.Delete:
                     if (info.DocumentBeforeChange != null)
@@ -254,6 +271,7 @@ internal class DefaultConfigurationCreatorService : IConfigurationService
                         await _poolService.UndeployAdapterAsync(tenantId, info.DocumentBeforeChange.TargetRtId,
                             info.DocumentBeforeChange.OriginRtId);
                     }
+
                     break;
                 default:
                     throw new ArgumentOutOfRangeException();

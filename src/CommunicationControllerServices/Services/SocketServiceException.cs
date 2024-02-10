@@ -22,8 +22,13 @@ internal class SocketServiceException : Exception
         return new SocketServiceException($"[{tenantId}] Failed to load socket '{socketRtId}' configuration", exception);
     }
 
-    internal static Exception CommonFailedSetSocketState(string tenantId, OctoObjectId socketRtId, RtAdapterStateEnum adapterState, Exception exception)
+    internal static Exception CommonFailedSetSocketDeploymentState(string tenantId, OctoObjectId socketRtId, RtDeploymentStateEnum deploymentState, Exception exception)
     {
-        return new SocketServiceException($"[{tenantId}] Failed to set socket '{socketRtId}' state to '{adapterState}'", exception);
+        return new SocketServiceException($"[{tenantId}] Failed to set socket '{socketRtId}' deployment state to '{deploymentState}'", exception);
+    }
+    
+    internal static Exception CommonFailedSetSocketCommunicationState(string tenantId, OctoObjectId socketRtId, RtCommunicationStateEnum communicationState, Exception exception)
+    {
+        return new SocketServiceException($"[{tenantId}] Failed to set socket '{socketRtId}' communication state to '{communicationState}'", exception);
     }
 }

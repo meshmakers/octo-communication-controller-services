@@ -21,7 +21,7 @@ public class CommunicationControllerController: ControllerBase
     /// </summary>
     /// <param name="logger"></param>
     /// <param name="configurationService"></param>
-    internal CommunicationControllerController(ILogger<CommunicationControllerController> logger, IConfigurationService configurationService)
+    public CommunicationControllerController(ILogger<CommunicationControllerController> logger, IConfigurationService configurationService)
     {
         _logger = logger;
         _configurationService = configurationService;
@@ -38,7 +38,7 @@ public class CommunicationControllerController: ControllerBase
     {
         try
         {
-            await _configurationService.SetupAsync(tenantId);
+            await _configurationService.EnableAsync(tenantId);
             return NoContent();
         }
         catch (TenantException e)
@@ -58,7 +58,7 @@ public class CommunicationControllerController: ControllerBase
     {
         try
         {
-            await _configurationService.TakeDownAsync(tenantId);
+            await _configurationService.DisableAsync(tenantId);
             return NoContent();
         }
         catch (TenantException e)

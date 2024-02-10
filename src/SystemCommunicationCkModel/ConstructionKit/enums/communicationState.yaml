@@ -1,0 +1,9 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+- enumId: CommunicationState
+  useFlags: false
+  values:
+  - key: 0
+    name: Offline
+  - key: 1
+    name: Online

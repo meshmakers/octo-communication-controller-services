@@ -8,11 +8,20 @@ attributes:
   valueType: String  
 - id: Deployment.ImageVersion
   valueType: String
-- id: AdapterState
+- id: CommunicationState
   valueType: Enum
-  valueCkEnumId: System.Communication/AdapterState
-- id: PoolState
+  valueCkEnumId: System.Communication/CommunicationState
+  defaultValues:
+    - 0
+- id: ConfigurationState
   valueType: Enum
-  valueCkEnumId: System.Communication/PoolState 
+  valueCkEnumId: System.Communication/ConfigurationState 
+  defaultValues:
+    - 0
+- id: DeploymentState
+  valueType: Enum
+  valueCkEnumId: System.Communication/DeploymentState
+  defaultValues:
+    - 0
 - id: MappingConfiguration
   valueType: String

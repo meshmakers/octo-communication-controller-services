@@ -69,7 +69,7 @@ internal class PoolService : IPoolServiceUpdates
         }
 
         // Update status in asset repository
-        await _communicationRepository.SetPoolStateAsync(tenantId, poolDescription.PoolRtId, RtPoolStateEnum.Deployed);
+        await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolDescription.PoolRtId, RtDeploymentStateEnum.Deployed);
 
         Logger.Info("[{TenantId}] Operator for pool '{PoolName}' registered",
             tenantId, poolName);
@@ -91,7 +91,7 @@ internal class PoolService : IPoolServiceUpdates
         {
             tenantDescription.RemovePool(poolDescription.PoolRtId);
 
-            await _communicationRepository.SetPoolStateAsync(tenantId, poolDescription.PoolRtId, RtPoolStateEnum.Pending);
+            await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolDescription.PoolRtId, RtDeploymentStateEnum.Pending);
 
             Logger.Info("[{TenantId}] Operator for pool '{PoolName}' unregistered",
                 tenantId, poolName);
@@ -248,7 +248,7 @@ internal class PoolService : IPoolServiceUpdates
 
         if (poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
         {
-            await _communicationRepository.SetPoolStateAsync(tenantId, poolDescription.PoolRtId, RtPoolStateEnum.Offline);
+            await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, poolDescription.PoolRtId, RtCommunicationStateEnum.Offline);
         }
     }
 
@@ -277,7 +277,7 @@ internal class PoolService : IPoolServiceUpdates
 
         if (poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
         {
-            await _communicationRepository.SetPoolStateAsync(tenantId, poolDescription.PoolRtId, RtPoolStateEnum.Online);
+            await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, poolDescription.PoolRtId, RtCommunicationStateEnum.Online);
         }
     }
 
