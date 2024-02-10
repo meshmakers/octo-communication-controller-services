@@ -3,8 +3,4 @@ types:
 - typeId: Plug
   derivedFromCkTypeId: System.Communication/CommunicationAdapter
   isFinal: true
-  attributes:
-  - id: System.Communication/MappingConfiguration
-    name: Configuration
-    isOptional: true
 

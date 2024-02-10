@@ -61,35 +61,62 @@ internal interface ICommunicationRepository
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolName">Name of pool</param>
-    /// <exception cref="PlugRepositoryException"></exception>
+    /// <exception cref="CommunicationRepositoryException"></exception>
     Task CreatePoolAsync(string tenantId, string poolName);
     
     /// <summary>
-    /// Set the state of a pool
+    /// Set the deployment state of a pool
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolRtId">Object id of pool</param>
-    /// <param name="state">State of pool</param>
+    /// <param name="deploymentState">State of pool</param>
     /// <returns></returns>
-    Task SetPoolStateAsync(string tenantId, OctoObjectId poolRtId, RtPoolStateEnum state);
+    Task SetPoolDeploymentStateAsync(string tenantId, OctoObjectId poolRtId, RtDeploymentStateEnum deploymentState);
+    
+    /// <summary>
+    /// Set the communication state of a pool
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="poolRtId">Object id of pool</param>
+    /// <param name="communicationState">State of pool</param>
+    /// <returns></returns>
+    Task SetPoolCommunicationStateAsync(string tenantId, OctoObjectId poolRtId, RtCommunicationStateEnum communicationState);
 
     /// <summary>
-    /// Set the state of a socket
+    /// Set the deployment state of a socket
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="socketRtId">Object id of socket</param>
-    /// <param name="adapterState">State of adapter</param>
+    /// <param name="deploymentState">State of adapter</param>
     /// <returns></returns>
-    Task SetSocketStateAsync(string tenantId, OctoObjectId socketRtId, RtAdapterStateEnum adapterState);
+    Task SetSocketDeploymentStateAsync(string tenantId, OctoObjectId socketRtId, RtDeploymentStateEnum deploymentState);
     
     /// <summary>
-    /// Set the state of a plug
+    /// Set the communication state of a socket
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="socketRtId">Object id of socket</param>
+    /// <param name="communicationState">State of adapter</param>
+    /// <returns></returns>
+    Task SetSocketCommunicationStateAsync(string tenantId, OctoObjectId socketRtId, RtCommunicationStateEnum communicationState);
+    
+    /// <summary>
+    /// Set the deployment state of a plug
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="plugRtId">Object id of plug</param>
-    /// <param name="adapterState">State of adapter</param>
+    /// <param name="deploymentState">State of adapter</param>
     /// <returns></returns>
-    Task SetPlugStateAsync(string tenantId, OctoObjectId plugRtId, RtAdapterStateEnum adapterState);
+    Task SetPlugDeploymentStateAsync(string tenantId, OctoObjectId plugRtId, RtDeploymentStateEnum deploymentState);
+    
+    /// <summary>
+    /// Set the communication state of a plug
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="plugRtId">Object id of plug</param>
+    /// <param name="communicationState">State of adapter</param>
+    /// <returns></returns>
+    Task SetPlugCommunicationStateAsync(string tenantId, OctoObjectId plugRtId, RtCommunicationStateEnum communicationState);
 
     /// <summary>
     /// Gets the pool of a plug

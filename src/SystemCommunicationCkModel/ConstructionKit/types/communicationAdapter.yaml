@@ -7,8 +7,12 @@ types:
   attributes:
   - id: System.Communication/LastSeen
     name: LastSeen
-  - id: System.Communication/AdapterState
-    name: State
+  - id: System.Communication/CommunicationState
+    name: CommunicationState
+  - id: System.Communication/ConfigurationState
+    name: ConfigurationState
+  - id: System.Communication/DeploymentState
+    name: DeploymentState
   - id: System.Communication/AdapterType
     name: Type    
   - id: System.Communication/Deployment.ImageName
@@ -17,6 +21,9 @@ types:
     name: ImageVersion
   - id: System/Name
     name: Name
+  - id: System.Communication/MappingConfiguration
+    name: Configuration
+    isOptional: true    
   associations:
   - id: System/ParentChild
     targetCkTypeId: System.Communication/CommunicationPool    

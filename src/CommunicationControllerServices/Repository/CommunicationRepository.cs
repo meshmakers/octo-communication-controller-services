@@ -39,7 +39,7 @@ internal class CommunicationRepository : ICommunicationRepository
 
             if (!plugResultSet.Any())
             {
-                PlugRepositoryException.PoolNotFound(tenantId, poolRtId);
+                CommunicationRepositoryException.PoolNotFound(tenantId, poolRtId);
             }
 
             var list = plugResultSet.First().Value.Items.ToList();
@@ -50,7 +50,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw PlugRepositoryException.CommonFailedGettingPlugs(tenantId, poolRtId, e);
+            throw CommunicationRepositoryException.CommonFailedGettingPlugs(tenantId, poolRtId, e);
         }
     }
 
@@ -68,7 +68,7 @@ internal class CommunicationRepository : ICommunicationRepository
 
             if (rtSocket == null)
             {
-                throw PlugRepositoryException.SocketNotFound(tenantId, socketRtId);
+                throw CommunicationRepositoryException.SocketNotFound(tenantId, socketRtId);
             }
 
             await session.CommitTransactionAsync();
@@ -77,7 +77,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw PlugRepositoryException.CommonFailedGettingSocket(tenantId, socketRtId, e);
+            throw CommunicationRepositoryException.CommonFailedGettingSocket(tenantId, socketRtId, e);
         }
     }
 
@@ -95,7 +95,7 @@ internal class CommunicationRepository : ICommunicationRepository
 
             if (rtPlug == null)
             {
-                throw PlugRepositoryException.PlugNotFound(tenantId, plugRtId);
+                throw CommunicationRepositoryException.PlugNotFound(tenantId, plugRtId);
             }
 
             await session.CommitTransactionAsync();
@@ -104,7 +104,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw PlugRepositoryException.CommonFailedGettingPlug(tenantId, plugRtId, e);
+            throw CommunicationRepositoryException.CommonFailedGettingPlug(tenantId, plugRtId, e);
         }
     }
 
@@ -124,7 +124,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw PlugRepositoryException.CommonFailedIsTenantExisting(tenantId, e);
+            throw CommunicationRepositoryException.CommonFailedIsTenantExisting(tenantId, e);
         }
     }
 
@@ -146,7 +146,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw PlugRepositoryException.CommonFailedGettingSockets(tenantId, e);
+            throw CommunicationRepositoryException.CommonFailedGettingSockets(tenantId, e);
         }
     }
 
@@ -168,7 +168,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw PlugRepositoryException.CommonFailedGettingPlugs(tenantId, e);
+            throw CommunicationRepositoryException.CommonFailedGettingPlugs(tenantId, e);
         }
     }
 
@@ -193,7 +193,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw PlugRepositoryException.CommonFailedGettingPoolByName(tenantId, poolName, e);
+            throw CommunicationRepositoryException.CommonFailedGettingPoolByName(tenantId, poolName, e);
         }
     }
 
@@ -209,7 +209,9 @@ internal class CommunicationRepository : ICommunicationRepository
 
             var rtCommunicationPool = new RtCommunicationPool
             {
-                State = RtPoolStateEnum.Created,
+                CommunicationState = RtCommunicationStateEnum.Offline,
+                DeploymentState = RtDeploymentStateEnum.Created,
+                ConfigurationState = RtConfigurationStateEnum.Disabled,
                 Name = poolName
             };
 
@@ -222,19 +224,18 @@ internal class CommunicationRepository : ICommunicationRepository
             await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
             {
-                throw PlugRepositoryException.CommonOperationFailed(operationResult);
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
             }
 
             await session.CommitTransactionAsync();
         }
         catch (Exception e)
         {
-            throw PlugRepositoryException.CommonFailedCreatePool(tenantId, poolName, e);
+            throw CommunicationRepositoryException.CommonFailedCreatePool(tenantId, poolName, e);
         }
     }
 
-    /// <inheritdoc />
-    public async Task SetPoolStateAsync(string tenantId, OctoObjectId poolRtId, RtPoolStateEnum state)
+    public async Task SetPoolDeploymentStateAsync(string tenantId, OctoObjectId poolRtId, RtDeploymentStateEnum deploymentState)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -246,7 +247,7 @@ internal class CommunicationRepository : ICommunicationRepository
             var rtCommunicationPool = new RtCommunicationPool
             {
                 RtId = poolRtId,
-                State = state
+                DeploymentState = deploymentState
             };
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtCommunicationPool>>
@@ -258,18 +259,53 @@ internal class CommunicationRepository : ICommunicationRepository
             await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
             {
-                throw PlugRepositoryException.CommonOperationFailed(operationResult);
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
             }
 
             await session.CommitTransactionAsync();
         }
         catch (Exception e)
         {
-            throw PlugRepositoryException.CommonFailedSetPoolState(tenantId, poolRtId, state, e);
+            throw CommunicationRepositoryException.CommonFailedSetPoolDeploymentState(tenantId, poolRtId, deploymentState, e);
         }
     }
 
-    public async Task SetSocketStateAsync(string tenantId, OctoObjectId socketRtId, RtAdapterStateEnum adapterState)
+    public async Task SetPoolCommunicationStateAsync(string tenantId, OctoObjectId poolRtId, RtCommunicationStateEnum communicationState)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var rtCommunicationPool = new RtCommunicationPool
+            {
+                RtId = poolRtId,
+                CommunicationState = communicationState
+            };
+
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtCommunicationPool>>
+            {
+                EntityUpdateInfo<RtCommunicationPool>.CreateUpdate(rtCommunicationPool.ToRtEntityId(), rtCommunicationPool)
+            };
+            
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedSetPoolCommunicationState(tenantId, poolRtId, communicationState, e);
+        }
+    }
+
+    public async Task SetSocketDeploymentStateAsync(string tenantId, OctoObjectId socketRtId, RtDeploymentStateEnum deploymentState)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -281,7 +317,7 @@ internal class CommunicationRepository : ICommunicationRepository
             var rtSocketEntity = new RtSocket
             {
                 RtId = socketRtId,
-                State = adapterState
+                DeploymentState = deploymentState
             };
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtSocket>>
@@ -292,19 +328,52 @@ internal class CommunicationRepository : ICommunicationRepository
             await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
             {
-                throw PlugRepositoryException.CommonOperationFailed(operationResult);
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
             }
 
             await session.CommitTransactionAsync();
         }
         catch (Exception e)
         {
-            throw PlugRepositoryException.CommonFailedSetPlugState(tenantId, socketRtId, adapterState, e);
+            throw CommunicationRepositoryException.CommonFailedSetSocketDeploymentState(tenantId, socketRtId, deploymentState, e);
         }
     }
 
-    /// <inheritdoc />
-    public async Task SetPlugStateAsync(string tenantId, OctoObjectId plugRtId, RtAdapterStateEnum adapterState)
+    public async Task SetSocketCommunicationStateAsync(string tenantId, OctoObjectId socketRtId, RtCommunicationStateEnum communicationState)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var rtSocketEntity = new RtSocket
+            {
+                RtId = socketRtId,
+                CommunicationState = communicationState
+            };
+
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtSocket>>
+            {
+                EntityUpdateInfo<RtSocket>.CreateUpdate(rtSocketEntity.ToRtEntityId(), rtSocketEntity)
+            };
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedSetSocketCommunicationState(tenantId, socketRtId, communicationState, e);
+        }
+    }
+
+    public async Task SetPlugDeploymentStateAsync(string tenantId, OctoObjectId plugRtId, RtDeploymentStateEnum deploymentState)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -316,7 +385,7 @@ internal class CommunicationRepository : ICommunicationRepository
             var rtPlugEntity = new RtPlug
             {
                 RtId = plugRtId,
-                State = adapterState
+                DeploymentState = deploymentState
             };
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtPlug>>
@@ -328,14 +397,49 @@ internal class CommunicationRepository : ICommunicationRepository
             await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
             {
-                throw PlugRepositoryException.CommonOperationFailed(operationResult);
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
             }
 
             await session.CommitTransactionAsync();
         }
         catch (Exception e)
         {
-            throw PlugRepositoryException.CommonFailedSetPlugState(tenantId, plugRtId, adapterState, e);
+            throw CommunicationRepositoryException.CommonFailedSetPlugDeploymentState(tenantId, plugRtId, deploymentState, e);
+        }
+    }
+
+    public async Task SetPlugCommunicationStateAsync(string tenantId, OctoObjectId plugRtId, RtCommunicationStateEnum communicationState)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var rtPlugEntity = new RtPlug
+            {
+                RtId = plugRtId,
+                CommunicationState = communicationState
+            };
+
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtPlug>>
+            {
+                EntityUpdateInfo<RtPlug>.CreateUpdate(rtPlugEntity.ToRtEntityId(), rtPlugEntity)
+            };
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedSetPlugCommunicationState(tenantId, plugRtId, communicationState, e);
         }
     }
 
@@ -362,14 +466,14 @@ internal class CommunicationRepository : ICommunicationRepository
                     return pool;
                 }
 
-                throw PlugRepositoryException.PlugNotAssociatedToPool(tenantId, plugRtId);
+                throw CommunicationRepositoryException.PlugNotAssociatedToPool(tenantId, plugRtId);
             }
 
-            throw PlugRepositoryException.PlugNotFound(tenantId, plugRtId);
+            throw CommunicationRepositoryException.PlugNotFound(tenantId, plugRtId);
         }
         catch (Exception e)
         {
-            throw PlugRepositoryException.CommonGettingPoolOfPlug(tenantId, plugRtId, e);
+            throw CommunicationRepositoryException.CommonGettingPoolOfPlug(tenantId, plugRtId, e);
         }
     }
 
@@ -395,14 +499,14 @@ internal class CommunicationRepository : ICommunicationRepository
                     return poolResultSet.Items.First();
                 }
 
-                throw PlugRepositoryException.PlugMappingNotAssociatedToPlug(tenantId, plugMappingRtId);
+                throw CommunicationRepositoryException.PlugMappingNotAssociatedToPlug(tenantId, plugMappingRtId);
             }
 
-            throw PlugRepositoryException.PlugMappingNotFound(tenantId, plugMappingRtId);
+            throw CommunicationRepositoryException.PlugMappingNotFound(tenantId, plugMappingRtId);
         }
         catch (Exception e)
         {
-            throw PlugRepositoryException.CommonGettingPlugByMapping(tenantId, plugMappingRtId, e);
+            throw CommunicationRepositoryException.CommonGettingPlugByMapping(tenantId, plugMappingRtId, e);
         }
     }
 
@@ -421,7 +525,7 @@ internal class CommunicationRepository : ICommunicationRepository
 
             if (!plugGroupResultSet.ContainsKey(plugRtId))
             {
-                throw PlugRepositoryException.PlugNotFound(tenantId, plugRtId);
+                throw CommunicationRepositoryException.PlugNotFound(tenantId, plugRtId);
             }
 
             var plugGroups = plugGroupResultSet[plugRtId];
@@ -471,7 +575,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw PlugRepositoryException.CommonGettingPlugGroupsOfPlug(tenantId, plugRtId, e);
+            throw CommunicationRepositoryException.CommonGettingPlugGroupsOfPlug(tenantId, plugRtId, e);
         }
     }
 
@@ -497,14 +601,14 @@ internal class CommunicationRepository : ICommunicationRepository
                     return poolResultSet.Items.First();
                 }
 
-                throw PlugRepositoryException.PlugGroupNotAssociatedToPlug(tenantId, plugGroupRtId);
+                throw CommunicationRepositoryException.PlugGroupNotAssociatedToPlug(tenantId, plugGroupRtId);
             }
 
-            throw PlugRepositoryException.PlugGroupNotFound(tenantId, plugGroupRtId);
+            throw CommunicationRepositoryException.PlugGroupNotFound(tenantId, plugGroupRtId);
         }
         catch (Exception e)
         {
-            throw PlugRepositoryException.CommonGettingPlugByGroup(tenantId, plugGroupRtId, e);
+            throw CommunicationRepositoryException.CommonGettingPlugByGroup(tenantId, plugGroupRtId, e);
         }
     }
 }

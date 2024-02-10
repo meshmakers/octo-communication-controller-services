@@ -48,7 +48,8 @@ internal class PlugService : IPlugServiceUpdates
             plug.UpdateConnectionId(connectionId);
         }
 
-        await SetPlugInStateAsync(tenantId, plugRtId, RtAdapterStateEnum.Offline);    
+        await SetPlugDeploymentStateAsync(tenantId, plugRtId, RtDeploymentStateEnum.Deployed);    
+        await SetPlugCommunicationStateAsync(tenantId, plugRtId, RtCommunicationStateEnum.Offline);    
 
         return plug.Configuration;
     }
@@ -60,23 +61,40 @@ internal class PlugService : IPlugServiceUpdates
 
         var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
         plugTenant.RemovePlug(plugRtId);
-        await SetPlugInStateAsync(tenantId, plugRtId, RtAdapterStateEnum.Deployed);
+        await SetPlugDeploymentStateAsync(tenantId, plugRtId, RtDeploymentStateEnum.Created);
     }
 
-    private async Task SetPlugInStateAsync(string tenantId, OctoObjectId plugRtId, RtAdapterStateEnum adapterState)
+    private async Task SetPlugDeploymentStateAsync(string tenantId, OctoObjectId plugRtId, RtDeploymentStateEnum deploymentState)
     {
-        Logger.Info("[{TenantId}] Setting state of plug '{PlugRtId}' to '{PlugState}'",
-            tenantId, plugRtId, adapterState);
+        Logger.Info("[{TenantId}] Setting deployment state of plug '{PlugRtId}' to '{DeploymentState}'",
+            tenantId, plugRtId, deploymentState);
         try
         {
-            await _communicationRepository.SetPlugStateAsync(tenantId, plugRtId, adapterState);
+            await _communicationRepository.SetPlugDeploymentStateAsync(tenantId, plugRtId, deploymentState);
         }
         catch (Exception e)
         {
-            Logger.Error(e, "[{TenantId}] Error setting state of plug '{PlugObjectId}' to '{PlugState}'",
-                tenantId, plugRtId, adapterState);
+            Logger.Error(e, "[{TenantId}] Error setting deployment state of plug '{PlugObjectId}' to '{DeploymentState}'",
+                tenantId, plugRtId, deploymentState);
             
-            throw PlugServiceException.CommonFailedSetPlugState(tenantId, plugRtId, adapterState, e);
+            throw PlugServiceException.CommonFailedSetPlugDeploymentState(tenantId, plugRtId, deploymentState, e);
+        }
+    }
+    
+    private async Task SetPlugCommunicationStateAsync(string tenantId, OctoObjectId plugRtId, RtCommunicationStateEnum communicationState)
+    {
+        Logger.Info("[{TenantId}] Setting communicaton state of plug '{PlugRtId}' to '{CommunicationState}'",
+            tenantId, plugRtId, communicationState);
+        try
+        {
+            await _communicationRepository.SetPlugCommunicationStateAsync(tenantId, plugRtId, communicationState);
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e, "[{TenantId}] Error setting communicaton state of plug '{PlugObjectId}' to '{CommunicationState}'",
+                tenantId, plugRtId, communicationState);
+            
+            throw PlugServiceException.CommonFailedSetPlugCommunicationState(tenantId, plugRtId, communicationState, e);
         }
     }
 
@@ -114,15 +132,18 @@ internal class PlugService : IPlugServiceUpdates
         var plugTenant = _plugCache.AddOrUpdateTenant(tenantId);
         if (plugTenant.PlugsById.TryGetValue(plugRtId, out var plug))
         {
-            await SetPlugInStateAsync(tenantId, plug.PlugRtId, RtAdapterStateEnum.Online);
+            await SetPlugCommunicationStateAsync(tenantId, plug.PlugRtId, RtCommunicationStateEnum.Online);
         }
     }
 
     public async Task SetPlugOfflineAsync(string tenantId, OctoObjectId plugRtId)
     {
+        Logger.Info("[{TenantId}] plug rt id '{PlugRtId}' offline",
+            tenantId, plugRtId);
+        
         if (_plugCache.TryGetTenant(tenantId, out var plugTenant) && plugTenant != null)
         {
-            await _communicationRepository.SetPlugStateAsync(tenantId, plugRtId, RtAdapterStateEnum.Offline);
+            await SetPlugCommunicationStateAsync(tenantId, plugRtId, RtCommunicationStateEnum.Online);
         }
     }
 

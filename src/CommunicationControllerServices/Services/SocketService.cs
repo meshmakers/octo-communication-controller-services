@@ -45,7 +45,8 @@ internal class SocketService : ISocketServiceUpdates
             plug.UpdateConnectionId(connectionId);
         }
 
-        await SetSocketStateAsync(tenantId, socketRtId, RtAdapterStateEnum.Offline);    
+        await SetSocketDeploymentStateAsync(tenantId, socketRtId, RtDeploymentStateEnum.Deployed);    
+        await SetSocketCommunicationStateAsync(tenantId, socketRtId, RtCommunicationStateEnum.Offline);    
 
         return plug.Configuration;
     }
@@ -57,23 +58,40 @@ internal class SocketService : ISocketServiceUpdates
 
         var plugTenant = _socketCache.AddOrUpdateTenant(tenantId);
         plugTenant.RemoveSocket(socketRtId);
-        await SetSocketStateAsync(tenantId, socketRtId, RtAdapterStateEnum.Deployed);
+        await SetSocketDeploymentStateAsync(tenantId, socketRtId, RtDeploymentStateEnum.Created);
     }
-
-    private async Task SetSocketStateAsync(string tenantId, OctoObjectId socketRtId, RtAdapterStateEnum adapterState)
+    
+    private async Task SetSocketDeploymentStateAsync(string tenantId, OctoObjectId socketRtId, RtDeploymentStateEnum deploymentState)
     {
-        Logger.Info("[{TenantId}] Setting state of socket '{SocketRtId}' to '{AdapterState}'",
-            tenantId, socketRtId, adapterState);
+        Logger.Info("[{TenantId}] Setting deployment state of socket '{SocketRtId}' to '{DeploymentState}'",
+            tenantId, socketRtId, deploymentState);
         try
         {
-            await _communicationRepository.SetSocketStateAsync(tenantId, socketRtId, adapterState);
+            await _communicationRepository.SetSocketDeploymentStateAsync(tenantId, socketRtId, deploymentState);
         }
         catch (Exception e)
         {
-            Logger.Error(e, "[{TenantId}] Error setting state of socket '{SocketRtId}' to '{AdapterState}'",
-                tenantId, socketRtId, adapterState);
+            Logger.Error(e, "[{TenantId}] Error setting deployment state of socket '{SocketRtId}' to '{DeploymentState}'",
+                tenantId, socketRtId, deploymentState);
             
-            throw SocketServiceException.CommonFailedSetSocketState(tenantId, socketRtId, adapterState, e);
+            throw SocketServiceException.CommonFailedSetSocketDeploymentState(tenantId, socketRtId, deploymentState, e);
+        }
+    }
+    
+    private async Task SetSocketCommunicationStateAsync(string tenantId, OctoObjectId socketRtId, RtCommunicationStateEnum communicationState)
+    {
+        Logger.Info("[{TenantId}] Setting communicaton state of socket '{SocketRtId}' to '{CommunicationState}'",
+            tenantId, socketRtId, communicationState);
+        try
+        {
+            await _communicationRepository.SetSocketCommunicationStateAsync(tenantId, socketRtId, communicationState);
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e, "[{TenantId}] Error setting communicaton state of socket '{SocketRtId}' to '{CommunicationState}'",
+                tenantId, socketRtId, communicationState);
+            
+            throw SocketServiceException.CommonFailedSetSocketCommunicationState(tenantId, socketRtId, communicationState, e);
         }
     }
 
@@ -101,7 +119,7 @@ internal class SocketService : ISocketServiceUpdates
         var plugTenant = _socketCache.AddOrUpdateTenant(tenantId);
         if (plugTenant.SocketsById.TryGetValue(socketRtId, out var socket))
         {
-            await SetSocketStateAsync(tenantId, socket.SocketRtId, RtAdapterStateEnum.Online);
+            await SetSocketCommunicationStateAsync(tenantId, socket.SocketRtId, RtCommunicationStateEnum.Online);
         }
     }
 
@@ -109,7 +127,7 @@ internal class SocketService : ISocketServiceUpdates
     {
         if (_socketCache.TryGetTenant(tenantId, out var socketTenant) && socketTenant != null)
         {
-            await _communicationRepository.SetSocketStateAsync(tenantId, socketRtId, RtAdapterStateEnum.Offline);
+            await SetSocketCommunicationStateAsync(tenantId, socketRtId, RtCommunicationStateEnum.Offline);
         }
     }
     
