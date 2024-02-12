@@ -12,15 +12,7 @@ internal static class Constants
 
     public const string CommunicationControllerServiceSchemaVersionKey = "CommunicationControllerServices";
     public const int CommunicationControllerServiceSchemaVersionValue = 1;
-
-    public const string CkIdPlug = "Meshmakers.Plug";
-    public const string CkIdSocket = "Meshmakers.Socket";
-    public const string CkIdPlugGroup = "Meshmakers.Plug.Group";
-    public const string CkIdPlugMapping = "Meshmakers.Plug.Mapping";
-    public const string CkIdCommunicationPool = "Meshmakers.CommunicationPool";
-
-    public const string RoleIdParentChild = "System.ParentChild";
-
+    
     public static string? GetTenantId(this HttpContext httpContext)
     {
         return (string?)httpContext.GetRouteValue(TenantId);
