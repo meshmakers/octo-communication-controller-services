@@ -58,6 +58,7 @@ types:
     name: Name
   - id: System-1.0.0/Description-1.0.0
     name: Description
+    isOptional: true
 - isCollectionRoot: true
   typeId: PlugMapping
   derivedFromCkTypeId: System-1.0.0/Entity-1.0.0

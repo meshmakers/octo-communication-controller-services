@@ -1,3 +1,4 @@
+using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Common.DistributionEventHub.Consumers;
 using Meshmakers.Octo.Communication.Contracts.MessageObjects;
@@ -5,6 +6,9 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.ConstructionKit.Generated.System.Communication.v1;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repository;
+using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 
@@ -37,58 +41,57 @@ internal class MessageConsumer : IDistributedConsumer<UpdatedValueMessageDto>
             context.Message.TenantId, context.Message.PlugRtId, context.Message.MappingId, context.Message.Value);
 
         var message = context.Message;
-        
+
         try
         {
-            var config = await _plugService.GetPlugConfigurationAsync(message.TenantId, message.PlugRtId);
-
-
-            var tenantContext = await _systemContext.GetChildTenantContextAsync(message.TenantId);
-            var tenantRepository = tenantContext.GetTenantRepository();
+            var tenantRepository = await _systemContext.FindTenantRepositoryAsync(message.TenantId.NormalizeString());
 
             using var session = await tenantRepository.GetSessionAsync();
             session.StartTransaction();
-            
-            var plugEntity = await GetMappingAsync(session, tenantContext, message.MappingId);
 
-            // if (!string.IsNullOrWhiteSpace(plugEntity.ReferenceId) && !string.IsNullOrWhiteSpace(plugEntity.ReferenceCkId) && !string.IsNullOrWhiteSpace(plugEntity.ReferenceAttributeId))
-            // {
-            //     var asset = await tenantRepository.GetRtEntityByRtIdAsync(session, new RtEntityId(plugEntity.ReferenceCkId, new OctoObjectId(plugEntity.ReferenceId)));
-            //     if (asset == null)
-            //     {
-            //         throw new Exception($"Asset {plugEntity.ReferenceCkId} {plugEntity.ReferenceId} not found");
-            //     }
-            //
-            //     var item = tenantContext.CkCache.GetEntityCacheItem(asset.CkId);
-            //     var x = item.Attributes.SingleOrDefault(a => a.Value.AttributeId == plugEntity.ReferenceAttributeId);
-            //     if (x.Value == null)
-            //     {
-            //         throw new Exception($"Attribute {plugEntity.ReferenceAttributeId} not found");
-            //     }
-            //     asset.SetAttributeValue(x.Value.AttributeName, x.Value.AttributeValueType, message.Value);
-            //     
-            //     await tenantRepository.ApplyChangesAsync(session, new[] { new EntityUpdateInfo(asset, EntityModOptions.Update) });
-            // }
+            var streamAssociation = await GetStreamAssoc(session, tenantRepository, message.MappingId);
+
+            if (streamAssociation != null && (streamAssociation.TargetCkAttributeIds?.Any() ?? false))
+            {
+                var rtEntityId = new RtEntityId(streamAssociation.TargetCkTypeId, streamAssociation.TargetRtId);
+                var asset = await tenantRepository.GetRtEntityByRtIdAsync(session, rtEntityId);
+                if (asset == null)
+                {
+                    throw new Exception($"Asset {streamAssociation.TargetCkTypeId} {streamAssociation.TargetRtId} not found");
+                }
+                
+                var ckTypeGraph = await tenantRepository.GetCkTypeGraphAsync(asset.GetCkTypeId());
+                if (!ckTypeGraph.AllAttributes.TryGetValue(streamAssociation.TargetCkAttributeIds.First(), out var ckTypeAttributeGraph))
+                {
+                    throw new Exception($"Attribute {streamAssociation.TargetCkAttributeIds.First()} not found");
+                }
+                asset.SetAttributeValue(ckTypeAttributeGraph.AttributeName, ckTypeAttributeGraph.ValueType, message.Value);
+
+                OperationResult operationResult = new();
+                await tenantRepository.ApplyChangesAsync(session, new[] { EntityUpdateInfo<RtEntity>.CreateUpdate(rtEntityId, asset)}, operationResult);
+                if (operationResult.HasFatalErrors || operationResult.HasErrors)
+                {
+                    throw new Exception($"Failed to update asset {streamAssociation.TargetCkTypeId} {streamAssociation.TargetRtId}");
+                }
+            }
             
+
             await session.CommitTransactionAsync();
         }
         catch (Exception e)
         {
             _logger.LogError(e, "[{TenantId}] Failed to update plug '{PlugRtId}'", message.TenantId, message.PlugRtId);
         }
-
     }
-    
-    private async Task<RtPlugMapping> GetMappingAsync(IOctoSession systemSession, ITenantContext tenantContext,
+
+    private async Task<RtAssociation?> GetStreamAssoc(IOctoSession session, ITenantRepository tenantRepository,
         OctoObjectId mappingObjectId)
     {
-        var plugMapping =
-            await tenantContext.GetTenantRepository().GetRtEntityByRtIdAsync<RtPlugMapping>(systemSession, mappingObjectId);
-        if (plugMapping == null)
-        {
-            throw new Exception($"Plug mapping {mappingObjectId} not found");
-        }
+        var resultSet =
+            await tenantRepository.GetRtAssociationsAsync(session,
+                new[] { mappingObjectId }, GraphDirections.Outbound,
+                new CkId<CkAssociationRoleId>(SystemCommunicationCkIds.ModelId, SystemCommunicationCkIds.Stream));
 
-        return plugMapping;
+        return resultSet.FirstOrDefault();
     }
 }

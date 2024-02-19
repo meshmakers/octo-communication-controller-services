@@ -35,8 +35,8 @@ internal class CommunicationRepository : ICommunicationRepository
             session.StartTransaction();
 
             var plugResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtCommunicationPool, RtPlug>(session,
-                new[] { poolRtId },
-                SystemCkIds.ParentChild, GraphDirections.Inbound, null, DataQueryOperation.Create());
+                new[] { poolRtId }, new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild), 
+                GraphDirections.Inbound, null, DataQueryOperation.Create());
 
             if (!plugResultSet.Any())
             {
@@ -455,7 +455,8 @@ internal class CommunicationRepository : ICommunicationRepository
             session.StartTransaction();
 
             var poolResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPlug, RtCommunicationPool>(session,
-                new[] { plugRtId }, SystemCkIds.ParentChild, GraphDirections.Inbound, null, DataQueryOperation.Create());
+                new[] { plugRtId }, new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild), 
+                GraphDirections.Inbound, null, DataQueryOperation.Create());
 
             await session.CommitTransactionAsync();
 
@@ -489,7 +490,8 @@ internal class CommunicationRepository : ICommunicationRepository
             session.StartTransaction();
 
             var poolResultSet = await tenantRepository.GetIndirectRtAssociationTargetsAsync<RtPlugMapping, RtPlug>(session,
-                plugMappingRtId, SystemCkIds.ParentChild, GraphDirections.Inbound);
+                plugMappingRtId, new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild), 
+                GraphDirections.Inbound);
 
             await session.CommitTransactionAsync();
 
@@ -522,7 +524,8 @@ internal class CommunicationRepository : ICommunicationRepository
             session.StartTransaction();
 
             var plugGroupResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPlug, RtPlugGroup>(session,
-                new[] { plugRtId }, SystemCkIds.ParentChild, GraphDirections.Inbound, null, DataQueryOperation.Create());
+                new[] { plugRtId }, new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild), 
+                GraphDirections.Inbound, null, DataQueryOperation.Create());
 
             if (!plugGroupResultSet.ContainsKey(plugRtId))
             {
@@ -532,13 +535,13 @@ internal class CommunicationRepository : ICommunicationRepository
             var plugGroups = plugGroupResultSet[plugRtId];
 
             var groupResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPlugGroup, RtPlugMapping>(session,
-                plugGroups.Items.Select(x => x.RtId), SystemCkIds.ParentChild, GraphDirections.Inbound, null,
-                DataQueryOperation.Create());
+                plugGroups.Items.Select(x => x.RtId), 
+                new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild), 
+                GraphDirections.Inbound, null, DataQueryOperation.Create());
 
-            // TODO: test 
             var mappingRtIds = groupResultSet.Values.SelectMany(x=> x.Items.Select(x=> x.RtId)).ToList();
             var mappingResultSet = await tenantRepository.GetRtAssociationsAsync(session, mappingRtIds, GraphDirections.Outbound,
-                SystemCommunicationCkIds.Stream);
+                new CkId<CkAssociationRoleId>(SystemCommunicationCkIds.ModelId, SystemCommunicationCkIds.Stream));
             var mappingRtIdToStreamRtId = mappingResultSet.ToDictionary(x => x.OriginRtId, x => x);
 
             var plugGroupConfigurations = new List<GroupConfigurationDto>();
@@ -551,8 +554,8 @@ internal class CommunicationRepository : ICommunicationRepository
                     {
                         if (mappingRtIdToStreamRtId.TryGetValue(mapping.RtId, out var streamAssociation))
                         {
-                            var config = streamAssociation.GetAttributeStringValueOrDefault(SystemCommunicationCkIds
-                                .MappingConfigurationAttribute);
+                            var config = streamAssociation.GetAttributeStringValueOrDefault(Constants
+                                .ConfigurationAttribute);
                             if (!string.IsNullOrWhiteSpace(mapping.Name) && !string.IsNullOrWhiteSpace(config))
                             {
                                 mappings.Add(new MappingConfigurationDto(
@@ -591,7 +594,8 @@ internal class CommunicationRepository : ICommunicationRepository
             session.StartTransaction();
 
             var poolResultSet = await tenantRepository.GetIndirectRtAssociationTargetsAsync<RtPlugGroup, RtPlug>(session,
-                plugGroupRtId, SystemCkIds.ParentChild, GraphDirections.Inbound);
+                plugGroupRtId, new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild), 
+                GraphDirections.Inbound);
 
             await session.CommitTransactionAsync();
 
