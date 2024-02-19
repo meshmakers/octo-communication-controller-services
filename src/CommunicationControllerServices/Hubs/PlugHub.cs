@@ -1,3 +1,4 @@
+using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
@@ -88,7 +89,7 @@ public class PlugHub : Hub, IPlugHub
             throw new InvalidOperationException("TenantId is null");
         }
 
-        return tenantId;
+        return tenantId.NormalizeString();
     }
     
     private OctoObjectId GetPlugRtId()

@@ -8,4 +8,4 @@ associationRoles:
     attributes:
       - id: System.Communication/MappingConfiguration
         name: Configuration
-        isOptional: true        
+        isOptional: true

@@ -9,6 +9,7 @@ internal static class Constants
     public const string PoolName = "pool-name";
     public const string PlugRtId = "plug-rtId";
     public const string SocketRtId = "socket-rtId";
+    public const string ConfigurationAttribute = "Configuration";
 
     public const string CommunicationControllerServiceSchemaVersionKey = "CommunicationControllerServices";
     public const int CommunicationControllerServiceSchemaVersionValue = 1;
