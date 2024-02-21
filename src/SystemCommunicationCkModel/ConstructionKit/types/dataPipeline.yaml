@@ -1,0 +1,18 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+  - typeId: DataPipeline
+    derivedFromCkTypeId: System/Entity
+    isFinal: true
+    attributes:
+      - id: System/Name
+        name: Name
+      - id: System/Description
+        name: Description
+        isOptional: true
+      - id: ${thisModel}/AdapterPipelineConfiguration
+        name: AdapterPipelineConfiguration
+      - id: ${thisModel}/RetrieverPipelineConfiguration
+        name: RetrieverPipelineConfiguration
+    associations:
+      - id: System/ParentChild
+        targetCkTypeId: System.Communication/CommunicationAdapter

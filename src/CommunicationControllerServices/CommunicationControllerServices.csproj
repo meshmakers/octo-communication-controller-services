@@ -2,7 +2,7 @@
 
     <PropertyGroup>
         <AssemblyName>Meshmakers.Octo.Backend.CommunicationControllerServices</AssemblyName>
-        <Description>Manages Plugs and Sockets for data ingress and egress of an Octo Mesh instance</Description>
+        <Description>Manages communication adapters for data ingress and egress of an Octo Mesh instance</Description>
         <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
         <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
         <IsPackable>false</IsPackable>

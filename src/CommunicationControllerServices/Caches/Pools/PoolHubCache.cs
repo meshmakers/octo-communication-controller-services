@@ -21,9 +21,9 @@ internal class PoolHubCache : IPoolCachePublish, IPoolCache
     {
         if (!_tenantDescriptions.TryGetValue(tenantId, out var tenantDescription))
         {
-            var plugHubTenant = new PoolTenant(this, tenantId);
-            tenantDescription = _tenantDescriptions.AddOrUpdate(tenantId, _ => plugHubTenant,
-                (_, _) => plugHubTenant);
+            var adapterHubTenant = new PoolTenant(this, tenantId);
+            tenantDescription = _tenantDescriptions.AddOrUpdate(tenantId, _ => adapterHubTenant,
+                (_, _) => adapterHubTenant);
             
             PublishConfiguration(tenantId);
         }
@@ -52,8 +52,8 @@ internal class PoolHubCache : IPoolCachePublish, IPoolCache
         Logger.Info("Reloading PoolHubCache configuration: {Configuration}", configuration.Serialize());
         
         _tenantDescriptions.AddOrUpdate(configuration.TenantId, 
-            _ => new PoolTenant(this, configuration.TenantId, configuration.Pools.ToList(), configuration.Plugs.ToList()),
-            (_, _) => new PoolTenant(this, configuration.TenantId, configuration.Pools.ToList(), configuration.Plugs.ToList()));
+            _ => new PoolTenant(this, configuration.TenantId, configuration.Pools.ToList(), configuration.Adapters.ToList()),
+            (_, _) => new PoolTenant(this, configuration.TenantId, configuration.Pools.ToList(), configuration.Adapters.ToList()));
     }
 
     public void PublishConfiguration(string tenantId)
@@ -63,8 +63,8 @@ internal class PoolHubCache : IPoolCachePublish, IPoolCache
         if (_tenantDescriptions.TryGetValue(tenantId, out var desc))
         {
             var poolDescriptions = desc.GetPoolDescriptions();
-            var poolPlugDescriptions = desc.GetPoolPlugDescriptions();
-            _distributionEventHubService.PublishAsync(new ComControllerPoolUpdate(tenantId, poolDescriptions, poolPlugDescriptions));
+            var poolAdapterDescriptions = desc.GetPoolAdapterDescriptions();
+            _distributionEventHubService.PublishAsync(new ComControllerPoolUpdate(tenantId, poolDescriptions, poolAdapterDescriptions));
         }
     }
 

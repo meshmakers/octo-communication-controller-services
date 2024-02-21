@@ -14,10 +14,10 @@ internal interface IPoolServiceUpdates : IPoolService
     Task OnHandlePoolUpdateAsync(string tenantId, IUpdateInfo<RtCommunicationPool> info);
 
     /// <summary>
-    /// Handles a plug update
+    /// Handles a adapter update
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="info">Update information object</param>
     /// <returns></returns>
-    Task OnHandlePlugUpdateAsync(string tenantId, IUpdateInfo<RtPlug> info);
+    Task OnHandleAdapterUpdateAsync(string tenantId, IUpdateInfo<RtCommunicationAdapter> info);
 }

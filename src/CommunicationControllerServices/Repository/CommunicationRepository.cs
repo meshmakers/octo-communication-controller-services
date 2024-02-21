@@ -1,4 +1,3 @@
-using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.ConstructionKit.Generated.System.Communication.v1;
 using Meshmakers.Octo.ConstructionKit.Models.System.ConstructionKit.Generated.System.v1;
@@ -25,7 +24,7 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyCollection<RtPlug>> GetPlugsAsync(string tenantId, OctoObjectId poolRtId)
+    public async Task<IReadOnlyCollection<RtCommunicationAdapter>> GetAdaptersAsync(string tenantId, OctoObjectId poolRtId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -34,16 +33,16 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             session.StartTransaction();
 
-            var plugResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtCommunicationPool, RtPlug>(session,
-                new[] { poolRtId }, new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild), 
+            var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtCommunicationPool, RtCommunicationAdapter>(session,
+                new[] { poolRtId }, new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild),
                 GraphDirections.Inbound, null, DataQueryOperation.Create());
 
-            if (!plugResultSet.Any())
+            if (!resultSet.Any())
             {
-                CommunicationRepositoryException.PoolNotFound(tenantId, poolRtId);
+                throw CommunicationRepositoryException.PoolNotFound(tenantId, poolRtId);
             }
 
-            var list = plugResultSet.First().Value.Items.ToList();
+            var list = resultSet.First().Value.Items.ToList();
 
             await session.CommitTransactionAsync();
 
@@ -51,12 +50,13 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw CommunicationRepositoryException.CommonFailedGettingPlugs(tenantId, poolRtId, e);
+            throw CommunicationRepositoryException.CommonFailedGettingAdapters(tenantId, poolRtId, e);
         }
     }
 
+
     /// <inheritdoc />
-    public async Task<RtSocket> GetSocketAsync(string tenantId, OctoObjectId socketRtId)
+    public async Task<IReadOnlyCollection<RtCommunicationAdapter>> GetAdaptersAsync(string tenantId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -65,81 +65,7 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             session.StartTransaction();
 
-            var rtSocket = await tenantRepository.GetRtEntityByRtIdAsync<RtSocket>(session, socketRtId);
-
-            if (rtSocket == null)
-            {
-                throw CommunicationRepositoryException.SocketNotFound(tenantId, socketRtId);
-            }
-
-            await session.CommitTransactionAsync();
-
-            return rtSocket;
-        }
-        catch (Exception e)
-        {
-            throw CommunicationRepositoryException.CommonFailedGettingSocket(tenantId, socketRtId, e);
-        }
-    }
-
-    /// <inheritdoc />
-    public async Task<RtPlug> GetPlugAsync(string tenantId, OctoObjectId plugRtId)
-    {
-        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
-
-        var session = await tenantRepository.GetSessionAsync();
-        try
-        {
-            session.StartTransaction();
-
-            var rtPlug = await tenantRepository.GetRtEntityByRtIdAsync<RtPlug>(session, plugRtId);
-
-            if (rtPlug == null)
-            {
-                throw CommunicationRepositoryException.PlugNotFound(tenantId, plugRtId);
-            }
-
-            await session.CommitTransactionAsync();
-
-            return rtPlug;
-        }
-        catch (Exception e)
-        {
-            throw CommunicationRepositoryException.CommonFailedGettingPlug(tenantId, plugRtId, e);
-        }
-    }
-
-    public async Task<bool> IsTenantExistingAsync(string tenantId)
-    {
-        var systemSession = await _systemContext.GetSystemSessionAsync();
-
-        try
-        {
-            systemSession.StartTransaction();
-
-            var isTenantExisting = await _systemContext.IsChildTenantExistingAsync(systemSession, tenantId);
-
-            await systemSession.CommitTransactionAsync();
-
-            return isTenantExisting;
-        }
-        catch (Exception e)
-        {
-            throw CommunicationRepositoryException.CommonFailedIsTenantExisting(tenantId, e);
-        }
-    }
-
-    /// <inheritdoc />
-    public async Task<IReadOnlyCollection<RtSocket>> GetSocketsAsync(string tenantId, OctoObjectId poolRtId)
-    {
-        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
-
-        var session = await tenantRepository.GetSessionAsync();
-        try
-        {
-            session.StartTransaction();
-
-            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtSocket>(session, DataQueryOperation.Create());
+            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtCommunicationAdapter>(session, DataQueryOperation.Create());
 
             await session.CommitTransactionAsync();
 
@@ -147,12 +73,12 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw CommunicationRepositoryException.CommonFailedGettingSockets(tenantId, e);
+            throw CommunicationRepositoryException.CommonFailedGettingAdapters(tenantId, e);
         }
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyCollection<RtPlug>> GetPlugsAsync(string tenantId)
+    public async Task<RtCommunicationAdapter> GetAdapterAsync(string tenantId, OctoObjectId adapterRtId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -161,15 +87,20 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             session.StartTransaction();
 
-            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPlug>(session, DataQueryOperation.Create());
+            var adapter = await tenantRepository.GetRtEntityByRtIdAsync<RtCommunicationAdapter>(session, adapterRtId);
+
+            if (adapter == null)
+            {
+                throw CommunicationRepositoryException.AdapterNotFound(tenantId, adapterRtId);
+            }
 
             await session.CommitTransactionAsync();
 
-            return resultSet.Items.ToList();
+            return adapter;
         }
         catch (Exception e)
         {
-            throw CommunicationRepositoryException.CommonFailedGettingPlugs(tenantId, e);
+            throw CommunicationRepositoryException.CommonFailedGettingAdapter(tenantId, adapterRtId, e);
         }
     }
 
@@ -255,7 +186,7 @@ internal class CommunicationRepository : ICommunicationRepository
             {
                 EntityUpdateInfo<RtCommunicationPool>.CreateUpdate(rtCommunicationPool.ToRtEntityId(), rtCommunicationPool)
             };
-            
+
             OperationResult operationResult = new();
             await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
@@ -290,7 +221,7 @@ internal class CommunicationRepository : ICommunicationRepository
             {
                 EntityUpdateInfo<RtCommunicationPool>.CreateUpdate(rtCommunicationPool.ToRtEntityId(), rtCommunicationPool)
             };
-            
+
             OperationResult operationResult = new();
             await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
@@ -306,7 +237,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task SetSocketDeploymentStateAsync(string tenantId, OctoObjectId socketRtId, RtDeploymentStateEnum deploymentState)
+    public async Task SetAdapterDeploymentStateAsync(string tenantId, OctoObjectId adapterRtId, RtDeploymentStateEnum deploymentState)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -315,16 +246,17 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             session.StartTransaction();
 
-            var rtSocketEntity = new RtSocket
+            var rtAdapter = new RtCommunicationAdapter
             {
-                RtId = socketRtId,
+                RtId = adapterRtId,
                 DeploymentState = deploymentState
             };
 
-            var entityUpdateInfoList = new List<EntityUpdateInfo<RtSocket>>
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtCommunicationAdapter>>
             {
-                EntityUpdateInfo<RtSocket>.CreateUpdate(rtSocketEntity.ToRtEntityId(), rtSocketEntity)
+                EntityUpdateInfo<RtCommunicationAdapter>.CreateUpdate(rtAdapter.ToRtEntityId(), rtAdapter)
             };
+
             OperationResult operationResult = new();
             await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
@@ -336,11 +268,12 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw CommunicationRepositoryException.CommonFailedSetSocketDeploymentState(tenantId, socketRtId, deploymentState, e);
+            throw CommunicationRepositoryException.CommonFailedSetAdapterDeploymentState(tenantId, adapterRtId, deploymentState, e);
         }
     }
 
-    public async Task SetSocketCommunicationStateAsync(string tenantId, OctoObjectId socketRtId, RtCommunicationStateEnum communicationState)
+    public async Task SetAdapterCommunicationStateAsync(string tenantId, OctoObjectId adapterRtId,
+        RtCommunicationStateEnum communicationState)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -349,49 +282,15 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             session.StartTransaction();
 
-            var rtSocketEntity = new RtSocket
+            var rtAdapter = new RtCommunicationAdapter
             {
-                RtId = socketRtId,
+                RtId = adapterRtId,
                 CommunicationState = communicationState
             };
 
-            var entityUpdateInfoList = new List<EntityUpdateInfo<RtSocket>>
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtCommunicationAdapter>>
             {
-                EntityUpdateInfo<RtSocket>.CreateUpdate(rtSocketEntity.ToRtEntityId(), rtSocketEntity)
-            };
-            OperationResult operationResult = new();
-            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
-            if (operationResult.HasErrors || operationResult.HasFatalErrors)
-            {
-                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
-            }
-
-            await session.CommitTransactionAsync();
-        }
-        catch (Exception e)
-        {
-            throw CommunicationRepositoryException.CommonFailedSetSocketCommunicationState(tenantId, socketRtId, communicationState, e);
-        }
-    }
-
-    public async Task SetPlugDeploymentStateAsync(string tenantId, OctoObjectId plugRtId, RtDeploymentStateEnum deploymentState)
-    {
-        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
-
-        var session = await tenantRepository.GetSessionAsync();
-        try
-        {
-            session.StartTransaction();
-
-            var rtPlugEntity = new RtPlug
-            {
-                RtId = plugRtId,
-                DeploymentState = deploymentState
-            };
-
-            var entityUpdateInfoList = new List<EntityUpdateInfo<RtPlug>>
-            {
-                EntityUpdateInfo<RtPlug>.CreateUpdate(rtPlugEntity.ToRtEntityId(), rtPlugEntity)
+                EntityUpdateInfo<RtCommunicationAdapter>.CreateUpdate(rtAdapter.ToRtEntityId(), rtAdapter)
             };
 
             OperationResult operationResult = new();
@@ -405,47 +304,12 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw CommunicationRepositoryException.CommonFailedSetPlugDeploymentState(tenantId, plugRtId, deploymentState, e);
-        }
-    }
-
-    public async Task SetPlugCommunicationStateAsync(string tenantId, OctoObjectId plugRtId, RtCommunicationStateEnum communicationState)
-    {
-        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
-
-        var session = await tenantRepository.GetSessionAsync();
-        try
-        {
-            session.StartTransaction();
-
-            var rtPlugEntity = new RtPlug
-            {
-                RtId = plugRtId,
-                CommunicationState = communicationState
-            };
-
-            var entityUpdateInfoList = new List<EntityUpdateInfo<RtPlug>>
-            {
-                EntityUpdateInfo<RtPlug>.CreateUpdate(rtPlugEntity.ToRtEntityId(), rtPlugEntity)
-            };
-
-            OperationResult operationResult = new();
-            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
-            if (operationResult.HasErrors || operationResult.HasFatalErrors)
-            {
-                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
-            }
-
-            await session.CommitTransactionAsync();
-        }
-        catch (Exception e)
-        {
-            throw CommunicationRepositoryException.CommonFailedSetPlugCommunicationState(tenantId, plugRtId, communicationState, e);
+            throw CommunicationRepositoryException.CommonFailedSetAdapterCommunicationState(tenantId, adapterRtId, communicationState, e);
         }
     }
 
     /// <inheritdoc />
-    public async Task<RtCommunicationPool> GetPoolOfPlugAsync(string tenantId, OctoObjectId plugRtId)
+    public async Task<RtCommunicationPool> GetPoolOfAdapterAsync(string tenantId, OctoObjectId adapterRtId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -454,8 +318,8 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             session.StartTransaction();
 
-            var poolResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPlug, RtCommunicationPool>(session,
-                new[] { plugRtId }, new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild), 
+            var poolResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtCommunicationAdapter, RtCommunicationPool>(session,
+                new[] { adapterRtId }, new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild),
                 GraphDirections.Inbound, null, DataQueryOperation.Create());
 
             await session.CommitTransactionAsync();
@@ -468,19 +332,19 @@ internal class CommunicationRepository : ICommunicationRepository
                     return pool;
                 }
 
-                throw CommunicationRepositoryException.PlugNotAssociatedToPool(tenantId, plugRtId);
+                throw CommunicationRepositoryException.AdapterNotAssociatedToPool(tenantId, adapterRtId);
             }
 
-            throw CommunicationRepositoryException.PlugNotFound(tenantId, plugRtId);
+            throw CommunicationRepositoryException.AdapterNotFound(tenantId, adapterRtId);
         }
         catch (Exception e)
         {
-            throw CommunicationRepositoryException.CommonGettingPoolOfPlug(tenantId, plugRtId, e);
+            throw CommunicationRepositoryException.CommonGettingPoolOfAdapter(tenantId, adapterRtId, e);
         }
     }
 
     /// <inheritdoc />
-    public async Task<RtPlug> GetPlugByMappingAsync(string tenantId, OctoObjectId plugMappingRtId)
+    public async Task<RtCommunicationAdapter> GetAdapterByDataPipelineAsync(string tenantId, OctoObjectId dataPipelineRtId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -489,8 +353,8 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             session.StartTransaction();
 
-            var poolResultSet = await tenantRepository.GetIndirectRtAssociationTargetsAsync<RtPlugMapping, RtPlug>(session,
-                plugMappingRtId, new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild), 
+            var poolResultSet = await tenantRepository.GetIndirectRtAssociationTargetsAsync<RtDataPipeline, RtCommunicationAdapter>(session,
+                dataPipelineRtId, new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild),
                 GraphDirections.Inbound);
 
             await session.CommitTransactionAsync();
@@ -502,19 +366,38 @@ internal class CommunicationRepository : ICommunicationRepository
                     return poolResultSet.Items.First();
                 }
 
-                throw CommunicationRepositoryException.PlugMappingNotAssociatedToPlug(tenantId, plugMappingRtId);
+                throw CommunicationRepositoryException.DataPipelineNotAssociatedToAdapter(tenantId, dataPipelineRtId);
             }
 
-            throw CommunicationRepositoryException.PlugMappingNotFound(tenantId, plugMappingRtId);
+            throw CommunicationRepositoryException.DataPipelineNotFound(tenantId, dataPipelineRtId);
         }
         catch (Exception e)
         {
-            throw CommunicationRepositoryException.CommonGettingPlugByMapping(tenantId, plugMappingRtId, e);
+            throw CommunicationRepositoryException.CommonGettingAdapterByDataPipeline(tenantId, dataPipelineRtId, e);
         }
     }
 
-    /// <inheritdoc />
-    public async Task<IReadOnlyCollection<GroupConfigurationDto>> GetPlugGroupConfigurationAsync(string tenantId, OctoObjectId plugRtId)
+    public async Task<bool> IsTenantExistingAsync(string tenantId)
+    {
+        var systemSession = await _systemContext.GetSystemSessionAsync();
+
+        try
+        {
+            systemSession.StartTransaction();
+
+            var isTenantExisting = await _systemContext.IsChildTenantExistingAsync(systemSession, tenantId);
+
+            await systemSession.CommitTransactionAsync();
+
+            return isTenantExisting;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedIsTenantExisting(tenantId, e);
+        }
+    }
+
+    public async Task<IReadOnlyCollection<RtDataPipeline>> GetDataPipelinesAsync(string tenantId, OctoObjectId adapterRtId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -523,97 +406,23 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             session.StartTransaction();
 
-            var plugGroupResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPlug, RtPlugGroup>(session,
-                new[] { plugRtId }, new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild), 
+            var multipleOriginResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtCommunicationAdapter, RtDataPipeline>(
+                session,
+                new[] { adapterRtId }, new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild),
                 GraphDirections.Inbound, null, DataQueryOperation.Create());
-
-            if (!plugGroupResultSet.ContainsKey(plugRtId))
-            {
-                throw CommunicationRepositoryException.PlugNotFound(tenantId, plugRtId);
-            }
-
-            var plugGroups = plugGroupResultSet[plugRtId];
-
-            var groupResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPlugGroup, RtPlugMapping>(session,
-                plugGroups.Items.Select(x => x.RtId), 
-                new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild), 
-                GraphDirections.Inbound, null, DataQueryOperation.Create());
-
-            var mappingRtIds = groupResultSet.Values.SelectMany(x=> x.Items.Select(x=> x.RtId)).ToList();
-            var mappingResultSet = await tenantRepository.GetRtAssociationsAsync(session, mappingRtIds, GraphDirections.Outbound,
-                new CkId<CkAssociationRoleId>(SystemCommunicationCkIds.ModelId, SystemCommunicationCkIds.Stream));
-            var mappingRtIdToStreamRtId = mappingResultSet.ToDictionary(x => x.OriginRtId, x => x);
-
-            var plugGroupConfigurations = new List<GroupConfigurationDto>();
-            foreach (var plugGroup in plugGroups.Items)
-            {
-                if (groupResultSet.TryGetValue(plugGroup.RtId, out var mappingSet))
-                {
-                    var mappings = new List<MappingConfigurationDto>();
-                    foreach (var mapping in mappingSet.Items)
-                    {
-                        if (mappingRtIdToStreamRtId.TryGetValue(mapping.RtId, out var streamAssociation))
-                        {
-                            var config = streamAssociation.GetAttributeStringValueOrDefault(Constants
-                                .ConfigurationAttribute);
-                            if (!string.IsNullOrWhiteSpace(mapping.Name) && !string.IsNullOrWhiteSpace(config))
-                            {
-                                mappings.Add(new MappingConfigurationDto(
-                                    mapping.Name,
-                                    mapping.RtId,
-                                    config));
-                            }
-                        }
-       
-                    }
-
-                    var groupConfiguration = new GroupConfigurationDto(
-                        plugGroup.Name,
-                        plugGroup.RtId,
-                        mappings);
-                    plugGroupConfigurations.Add(groupConfiguration);
-                }
-            }
-
-            return plugGroupConfigurations;
-        }
-        catch (Exception e)
-        {
-            throw CommunicationRepositoryException.CommonGettingPlugGroupsOfPlug(tenantId, plugRtId, e);
-        }
-    }
-
-    /// <inheritdoc />
-    public async Task<RtPlug> GetPlugByGroupAsync(string tenantId, OctoObjectId plugGroupRtId)
-    {
-        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
-
-        var session = await tenantRepository.GetSessionAsync();
-        try
-        {
-            session.StartTransaction();
-
-            var poolResultSet = await tenantRepository.GetIndirectRtAssociationTargetsAsync<RtPlugGroup, RtPlug>(session,
-                plugGroupRtId, new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild), 
-                GraphDirections.Inbound);
 
             await session.CommitTransactionAsync();
 
-            if (poolResultSet != null)
+            if (multipleOriginResultSet.Any())
             {
-                if (poolResultSet.Items.Any())
-                {
-                    return poolResultSet.Items.First();
-                }
-
-                throw CommunicationRepositoryException.PlugGroupNotAssociatedToPlug(tenantId, plugGroupRtId);
+                return multipleOriginResultSet.First().Value.Items.ToList();
             }
 
-            throw CommunicationRepositoryException.PlugGroupNotFound(tenantId, plugGroupRtId);
+            throw CommunicationRepositoryException.AdapterNotFound(tenantId, adapterRtId);
         }
         catch (Exception e)
         {
-            throw CommunicationRepositoryException.CommonGettingPlugByGroup(tenantId, plugGroupRtId, e);
+            throw CommunicationRepositoryException.CommonFailedGettingAdapter(tenantId, adapterRtId, e);
         }
     }
 }

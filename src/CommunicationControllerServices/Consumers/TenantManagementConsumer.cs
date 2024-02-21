@@ -12,23 +12,20 @@ internal class TenantManagementConsumer : IDistributedConsumer<PosUpdateTenant>,
 {
     private readonly ILogger<TenantManagementConsumer> _logger;
     private readonly IPoolServiceUpdates _poolService;
-    private readonly IPlugServiceUpdates _plugService;
-    private readonly ISocketServiceUpdates _socketService;
+    private readonly IAdapterServiceUpdates _adapterService;
 
     /// <summary>
     ///     Constructor.
     /// </summary>
     /// <param name="logger"></param>
     /// <param name="poolService"></param>
-    /// <param name="plugService"></param>
-    /// <param name="socketService"></param>
+    /// <param name="adapterService"></param>
     public TenantManagementConsumer(ILogger<TenantManagementConsumer> logger, IPoolServiceUpdates poolService,
-        IPlugServiceUpdates plugService, ISocketServiceUpdates socketService)
+        IAdapterServiceUpdates adapterService)
     {
         _logger = logger;
         _poolService = poolService;
-        _plugService = plugService;
-        _socketService = socketService;
+        _adapterService = adapterService;
     }
 
     public async Task ConsumeAsync(IDistributedContext<PosUpdateTenant> context)
@@ -47,7 +44,6 @@ internal class TenantManagementConsumer : IDistributedConsumer<PosUpdateTenant>,
     {
         _logger.LogInformation("Reloading tenant '{TenantId}'", tenantId);
         await _poolService.ReloadTenantAsync(tenantId);
-        await _plugService.ReloadTenantAsync(tenantId);
-        await _socketService.ReloadTenantAsync(tenantId);
+        await _adapterService.ReloadTenantAsync(tenantId);
     }
 }

@@ -2,7 +2,6 @@ $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
 - typeId: CommunicationAdapter
   derivedFromCkTypeId: System/Entity
-  isAbstract: true
   enableChangeStreamPreAndPostImages: true
   attributes:
   - id: System.Communication/LastSeen
@@ -21,7 +20,7 @@ types:
     name: ImageVersion
   - id: System/Name
     name: Name
-  - id: System.Communication/MappingConfiguration
+  - id: System.Communication/AdapterConfiguration
     name: Configuration
     isOptional: true    
   associations:

@@ -4,7 +4,7 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
 /// <summary>
-/// Manages pools for all tenants and their state including configuration (plugs loaded in which pools).
+/// Manages pools for all tenants and their state including configuration (adapters loaded in which pools).
 /// </summary>
 public interface IPoolService
 {
@@ -26,7 +26,7 @@ public interface IPoolService
     Task<OctoObjectId> UnregisterPoolOperatorAsync(string tenantId, string poolName);
     
     /// <summary>
-    /// Gets the current plugs in a pool
+    /// Gets the current adapters in a pool
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolRtId">The object id of the pool runtime entity</param>
@@ -41,22 +41,22 @@ public interface IPoolService
     Task ReloadTenantAsync(string tenantId);
     
     /// <summary>
-    /// Deploys a new plug to a pool
+    /// Deploys an new adapter to a pool
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolRtId">The object id of the pool</param>
-    /// <param name="plugRtId">The object id of the plug</param>
+    /// <param name="adapterRtId">The object id of the adapter</param>
     /// <returns></returns>
-    Task DeployAdapterAsync(string tenantId, OctoObjectId poolRtId, OctoObjectId plugRtId);
+    Task DeployAdapterAsync(string tenantId, OctoObjectId poolRtId, OctoObjectId adapterRtId);
     
     /// <summary>
-    /// Undeploy a plug from a pool
+    /// Undeploy an adapter from a pool
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolRtId">The object id of the pool</param>
-    /// <param name="plugRtId">The object id of the plug</param>
+    /// <param name="adapterRtId">The object id of the adapter</param>
     /// <returns></returns>
-    Task UndeployAdapterAsync(string tenantId, OctoObjectId poolRtId, OctoObjectId plugRtId);
+    Task UndeployAdapterAsync(string tenantId, OctoObjectId poolRtId, OctoObjectId adapterRtId);
 
     /// <summary>
     /// Sets a pool offline

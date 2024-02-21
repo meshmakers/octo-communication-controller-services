@@ -23,5 +23,9 @@ attributes:
   valueCkEnumId: System.Communication/DeploymentState
   defaultValues:
     - 0
-- id: MappingConfiguration
+- id: AdapterConfiguration
+  valueType: String     
+- id: AdapterPipelineConfiguration
   valueType: String
+- id: RetrieverPipelineConfiguration
+  valueType: String  

@@ -1,3 +1,4 @@
+using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
@@ -8,29 +9,29 @@ using NLog;
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 
 /// <summary>
-/// Represents the SignalR hub for sockets
+/// Hub for adapter
 /// </summary>
-public class SocketHub : Hub, ISocketHub
+public class AdapterHub : Hub, IAdapterHub
 {
-    private readonly ISocketService _socketService;
+    private readonly IAdapterService _adapterService;
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
     /// <summary>
     /// Constructor
     /// </summary>
-    /// <param name="socketService">The responsible socket service</param>
-    public SocketHub(ISocketService socketService)
+    /// <param name="adapterService">The responsible adapter service</param>
+    public AdapterHub(IAdapterService adapterService)
     {
-        _socketService = socketService;
+        _adapterService = adapterService;
     }
 
     /// <inheritdoc />
     public override async Task OnConnectedAsync()
     {
         var tenantId = GetTenantId();
-        var socketRtId = GetSocketRtId();
+        var adapterRtId = GetAdapterRtId();
 
-        await _socketService.SetSocketOnlineAsync(tenantId, socketRtId);
+        await _adapterService.SetAdapterOnlineAsync(tenantId, adapterRtId);
 
         await base.OnConnectedAsync();
     }
@@ -39,35 +40,35 @@ public class SocketHub : Hub, ISocketHub
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         var tenantId = GetTenantId();
-        var socketRtId = GetSocketRtId();
+        var adapterRtId = GetAdapterRtId();
 
-        await _socketService.SetSocketOfflineAsync(tenantId, socketRtId);
+        await _adapterService.SetAdapterOfflineAsync(tenantId, adapterRtId);
 
         await base.OnDisconnectedAsync(exception);
     }
 
     /// <inheritdoc />
-    public async Task<SocketConfigurationDto> RegisterSocketAsync(OctoObjectId socketRtId)
+    public async Task<AdapterConfigurationDto> RegisterAdapterAsync(OctoObjectId adapterRtId)
     {
         var tenantId = GetTenantId();
         
         try
         {
-            var configurationDto = await _socketService.RegisterSocketAsync(tenantId, socketRtId, Context.ConnectionId);
+            var configurationDto = await _adapterService.RegisterAdapterAsync(tenantId, adapterRtId, Context.ConnectionId);
 
-            await _socketService.SetSocketOnlineAsync(tenantId, socketRtId);
+            await _adapterService.SetAdapterOnlineAsync(tenantId, adapterRtId);
 
             return configurationDto;
         }
         catch (Exception e)
         {
-            Logger.Error(e, "Cannot register socket");
+            Logger.Error(e, "Cannot register adapter");
             throw;
         }
     }
 
     /// <inheritdoc />
-    public async Task UnRegisterSocketAsync(OctoObjectId socketRtId)
+    public async Task UnRegisterAdapterAsync(OctoObjectId adapterRtId)
     {
         var tenantId = Context.GetHttpContext()?.GetTenantId();
         if (tenantId == null)
@@ -76,7 +77,7 @@ public class SocketHub : Hub, ISocketHub
             throw new InvalidOperationException("TenantId is null");
         }
 
-        await _socketService.SocketUnRegisteredAsync(tenantId, socketRtId, Context.ConnectionId);
+        await _adapterService.AdapterUnRegisteredAsync(tenantId, adapterRtId, Context.ConnectionId);
     }
     
     private string GetTenantId()
@@ -88,18 +89,18 @@ public class SocketHub : Hub, ISocketHub
             throw new InvalidOperationException("TenantId is null");
         }
 
-        return tenantId;
+        return tenantId.NormalizeString();
     }
     
-    private OctoObjectId GetSocketRtId()
+    private OctoObjectId GetAdapterRtId()
     {
-        var socketRtId = Context.GetHttpContext()?.GetSocketRtId();
-        if (socketRtId == null)
+        var adapterRtId = Context.GetHttpContext()?.GetAdapterRtId();
+        if (adapterRtId == null)
         {
             Context.Abort();
-            throw new InvalidOperationException("SocketRtId is null");
+            throw new InvalidOperationException("AdapterRtId is null");
         }
 
-        return socketRtId.Value;
+        return adapterRtId.Value;
     }
 }
