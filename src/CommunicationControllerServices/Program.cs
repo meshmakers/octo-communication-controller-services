@@ -1,6 +1,5 @@
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Plugs;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Sockets;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Configuration;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
@@ -59,8 +58,7 @@ try
         c =>
         {
             c.AddRoutedEventConsumer<MessageConsumer, UpdatedValueMessageDto>();
-            c.AddBroadcastEventConsumer<ComControllerPlugUpdateConsumer, ComControllerPlugUpdate>();
-            c.AddBroadcastEventConsumer<ComControllerSocketUpdateConsumer, ComControllerSocketUpdate>();
+            c.AddBroadcastEventConsumer<ComControllerAdapterUpdateConsumer, ComControllerAdapterUpdate>();
             c.AddBroadcastEventConsumer<ComControllerPoolUpdateConsumer, ComControllerPoolUpdate>();
             
             c.AddBroadcastEventConsumer<TenantManagementConsumer, PosUpdateTenant>();
@@ -98,16 +96,13 @@ try
     
     builder.Services.AddSingletonMultipleInterfaces<DefaultConfigurationCreatorService, IDefaultConfigurationCreatorService, IConfigurationService>();
     builder.Services.AddSingletonMultipleInterfaces<CorsPolicyProvider, ICorsPolicyProvider, CorsPolicyProvider>();
-    builder.Services.AddSingletonMultipleInterfaces<PlugService, IPlugService, IPlugServiceUpdates>();
-    builder.Services.AddSingletonMultipleInterfaces<SocketService, ISocketService, ISocketServiceUpdates>();
+    builder.Services.AddSingletonMultipleInterfaces<AdapterService, IAdapterService, IAdapterServiceUpdates>();
     builder.Services.AddSingletonMultipleInterfaces<PoolService, IPoolService, IPoolServiceUpdates>();
     builder.Services.AddSingletonMultipleInterfaces<PoolHubCache, IPoolCache, IPoolCachePublish>();
-    builder.Services.AddSingletonMultipleInterfaces<PlugCache, IPlugCache, IPlugCachePublish>();
-    builder.Services.AddSingletonMultipleInterfaces<SocketCache, ISocketCache, ISocketCachePublish>();
+    builder.Services.AddSingletonMultipleInterfaces<AdapterCache, IAdapterCache, IAdapterCachePublish>();
     
     builder.Services.AddSingleton<IPoolHubCallbacks, PoolHubCallbacks>();
-    builder.Services.AddSingleton<IPlugHubCallbacks, PlugHubCallbacks>();
-    builder.Services.AddSingleton<ISocketHubCallbacks, SocketHubCallbacks>();
+    builder.Services.AddSingleton<IAdapterHubCallbacks, AdapterHubCallbacks>();
 
     var app = builder.Build();
 
@@ -122,9 +117,8 @@ try
     app.UseAuthorization();
     app.UseOctoApiVersioningAndDocumentation();
 
-    app.MapHub<PlugHub>("/{tenantId:tenantId}/plugHub");
+    app.MapHub<AdapterHub>("/{tenantId:tenantId}/adapterHub");
     app.MapHub<PoolHub>("/{tenantId:tenantId}/poolHub");
-    app.MapHub<SocketHub>("/{tenantId:tenantId}/socketHub");
     app.MapControllerRoute(name: "default",
         pattern: "{tenantId:tenantId}/system/v{version:apiVersion}/{controller}/{action}/{id?}");
 

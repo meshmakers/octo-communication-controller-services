@@ -12,11 +12,11 @@ internal class PoolTenant
 
     private readonly ConcurrentDictionary<OctoObjectId, Pool> _poolsById;
     private readonly ConcurrentDictionary<string, Pool> _poolsByName;
-    private readonly ConcurrentDictionary<OctoObjectId, Plug> _plugsById;
+    private readonly ConcurrentDictionary<OctoObjectId, Adapter> _adaptersById;
 
     public IReadOnlyDictionary<OctoObjectId, Pool> PoolsById { get; }
     public IReadOnlyDictionary<string, Pool> PoolsByName { get; private set; }
-    public IReadOnlyDictionary<OctoObjectId, Plug> PlugsById { get; }
+    public IReadOnlyDictionary<OctoObjectId, Adapter> AdaptersById { get; }
 
     public PoolTenant(IPoolCachePublish poolCachePublish, string tenantId)
     {
@@ -25,15 +25,15 @@ internal class PoolTenant
         TenantId = tenantId;
         _poolsById = new ConcurrentDictionary<OctoObjectId, Pool>();
         _poolsByName = new ConcurrentDictionary<string, Pool>();
-        _plugsById = new ConcurrentDictionary<OctoObjectId, Plug>();
+        _adaptersById = new ConcurrentDictionary<OctoObjectId, Adapter>();
 
         PoolsById = new ReadOnlyDictionary<OctoObjectId, Pool>(_poolsById);
         PoolsByName = new ReadOnlyDictionary<string, Pool>(_poolsByName);
-        PlugsById = new ReadOnlyDictionary<OctoObjectId, Plug>(_plugsById);
+        AdaptersById = new ReadOnlyDictionary<OctoObjectId, Adapter>(_adaptersById);
     }
 
     public PoolTenant(IPoolCachePublish poolCachePublish, string tenantId, IList<PoolDescription> poolDescriptions,
-        IList<PoolPlugDescription> poolPlugDescriptions)
+        IList<PoolAdapterDescription> poolAdapterDescriptions)
     {
         _poolCachePublish = poolCachePublish;
 
@@ -46,12 +46,12 @@ internal class PoolTenant
         _poolsByName = new ConcurrentDictionary<string, Pool>(
             pools.ToDictionary(p => p.PoolName, p => p));
         
-        _plugsById = new ConcurrentDictionary<OctoObjectId, Plug>(
-            poolPlugDescriptions.ToDictionary(p => p.PlugRtId, p => new Plug(p.PlugRtId, p.PoolRtId, p.AdapterDto)));
+        _adaptersById = new ConcurrentDictionary<OctoObjectId, Adapter>(
+            poolAdapterDescriptions.ToDictionary(p => p.AdapterRtId, p => new Adapter(p.AdapterRtId, p.PoolRtId, p.AdapterDto)));
 
         PoolsById = new ReadOnlyDictionary<OctoObjectId, Pool>(_poolsById);
         PoolsByName = new ReadOnlyDictionary<string, Pool>(_poolsByName);
-        PlugsById = new ReadOnlyDictionary<OctoObjectId, Plug>(_plugsById);
+        AdaptersById = new ReadOnlyDictionary<OctoObjectId, Adapter>(_adaptersById);
     }
 
     public Pool AddPool(string poolName, OctoObjectId poolRtId, string connectionId)
@@ -68,18 +68,18 @@ internal class PoolTenant
 
     public void RemovePool(OctoObjectId poolRtId)
     {
-        if (_poolsById.TryRemove(poolRtId, out var plugHubPool))
+        if (_poolsById.TryRemove(poolRtId, out var adapterHubPool))
         {
-            if (_poolsByName.TryRemove(plugHubPool.PoolName, out _))
+            if (_poolsByName.TryRemove(adapterHubPool.PoolName, out _))
             {
                 _poolCachePublish.PublishConfiguration(TenantId);
             }
         }
     }
     
-    public IEnumerable<PoolPlugDescription> GetPoolPlugDescriptions()
+    public IEnumerable<PoolAdapterDescription> GetPoolAdapterDescriptions()
     {
-        return PlugsById.Values.Select(p => p.GetPoolPlugDescription()).ToArray();
+        return AdaptersById.Values.Select(p => p.GetPoolAdapterDescription()).ToArray();
     }
     
     public IEnumerable<PoolDescription> GetPoolDescriptions()
@@ -87,27 +87,27 @@ internal class PoolTenant
         return PoolsById.Values.Select(p => p.GetPoolDescription()).ToArray();
     }
 
-    public void AddPlug(Plug plug)
+    public void AddAdapter(Adapter adapter)
     {
-        _plugsById.AddOrUpdate(plug.PlugRtId,
-            _ => plug,
-            (_, _) => plug);
+        _adaptersById.AddOrUpdate(adapter.AdapterRtId,
+            _ => adapter,
+            (_, _) => adapter);
         
         _poolCachePublish.PublishConfiguration(TenantId);
     }
 
-    public void RemovePlug(OctoObjectId plugRtId)
+    public void RemoveAdapter(OctoObjectId adapterRtId)
     {
-        _plugsById.Remove(plugRtId, out _);
+        _adaptersById.Remove(adapterRtId, out _);
         
         _poolCachePublish.PublishConfiguration(TenantId);
     }
     
-    public void RemovePlugs(OctoObjectId poolRtId)
+    public void RemoveAdapters(OctoObjectId poolRtId)
     {
-        foreach (var plug in PlugsById.Values.Where(x => x.PoolRtId == poolRtId))
+        foreach (var adapter in AdaptersById.Values.Where(x => x.PoolRtId == poolRtId))
         {
-            _plugsById.Remove(plug.PlugRtId, out _);
+            _adaptersById.Remove(adapter.AdapterRtId, out _);
         }
         
         _poolCachePublish.PublishConfiguration(TenantId);
@@ -117,7 +117,7 @@ internal class PoolTenant
     {
         _poolsById.Clear();
         _poolsByName.Clear();
-        _plugsById.Clear();
+        _adaptersById.Clear();
 
         _poolCachePublish.PublishConfiguration(TenantId);
     }

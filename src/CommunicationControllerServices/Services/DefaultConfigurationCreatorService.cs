@@ -15,17 +15,17 @@ internal class DefaultConfigurationCreatorService : DefaultConfigurationCreatorS
     private readonly ILogger<DefaultConfigurationCreatorService> _logger;
     private readonly ISystemContext _systemContext;
     private readonly IPoolServiceUpdates _poolService;
-    private readonly IPlugServiceUpdates _plugService;
+    private readonly IAdapterServiceUpdates _adapterService;
     private readonly ConcurrentDictionary<string, IDisposable> _updateStreams = new();
 
     public DefaultConfigurationCreatorService(ILogger<DefaultConfigurationCreatorService> logger, ISystemContext systemContext,
-        IPoolServiceUpdates poolService, IPlugServiceUpdates plugService)
+        IPoolServiceUpdates poolService, IAdapterServiceUpdates adapterService)
         : base(logger)
     {
         _logger = logger;
         _systemContext = systemContext;
         _poolService = poolService;
-        _plugService = plugService;
+        _adapterService = adapterService;
     }
 
     protected override async Task SetupTenantAsync(string tenantId)
@@ -132,7 +132,7 @@ internal class DefaultConfigurationCreatorService : DefaultConfigurationCreatorS
 
     private async Task StartTenantAsync(string tenantId)
     {
-        _logger.LogInformation("Subscribing to tenant '{TenantId}' for plug updates", tenantId);
+        _logger.LogInformation("Subscribing to tenant '{TenantId}' for adapter updates", tenantId);
 
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -186,7 +186,7 @@ internal class DefaultConfigurationCreatorService : DefaultConfigurationCreatorS
 
     private Task StopTenantAsync(string tenantId)
     {
-        _logger.LogInformation("Unsubscribing from tenant '{TenantId}' for plug updates", tenantId);
+        _logger.LogInformation("Unsubscribing from tenant '{TenantId}' for adapter updates", tenantId);
 
         if (_updateStreams.TryRemove(tenantId, out var subscription))
         {
@@ -196,42 +196,29 @@ internal class DefaultConfigurationCreatorService : DefaultConfigurationCreatorS
         return Task.CompletedTask;
     }
 
-    private async Task HandlePlugMappingEntityUpdates(string tenantId, IUpdateInfo<RtPlugMapping> info)
+    private async Task OnHandleDataPipelineUpdateAsync(string tenantId, IUpdateInfo<RtDataPipeline> info)
     {
         try
         {
-            await _plugService.OnHandlePlugMappingUpdateAsync(tenantId, info);
+            await _adapterService.OnHandleDataPipelineUpdateAsync(tenantId, info);
         }
         catch (Exception e)
         {
-            _logger.LogError(e, "Error handling entity plug mapping update");
+            _logger.LogError(e, "Error handling entity data pipeline update");
             // no further action to prevent to destroy the event stream
         }
     }
 
-    private async Task HandlePlugGroupEntityUpdates(string tenantId, IUpdateInfo<RtPlugGroup> info)
+    private async Task HandleAdapterEntityUpdates(string tenantId, IUpdateInfo<RtCommunicationAdapter> info)
     {
         try
         {
-            await _plugService.OnHandlePlugGroupUpdateAsync(tenantId, info);
-        }
-        catch (Exception e)
-        {
-            _logger.LogError(e, "Error handling entity plug group update");
-            // no further action to prevent to destroy the event stream
-        }
-    }
-
-    private async Task HandlePlugEntityUpdates(string tenantId, IUpdateInfo<RtPlug> info)
-    {
-        try
-        {
-            await _poolService.OnHandlePlugUpdateAsync(tenantId, info);
+            await _poolService.OnHandleAdapterUpdateAsync(tenantId, info);
             //     await _plugService.OnHandlePlugUpdateAsync(tenantId, info);
         }
         catch (Exception e)
         {
-            _logger.LogError(e, "Error handling entity plug update");
+            _logger.LogError(e, "Error handling entity adapter update");
             // no further action to prevent to destroy the event stream
         }
     }
@@ -249,7 +236,7 @@ internal class DefaultConfigurationCreatorService : DefaultConfigurationCreatorS
         }
     }
 
-    private async Task HandlePlugConfigurationUpdateAssociations(string tenantId, IUpdateInfo<RtAssociation> info)
+    private async Task HandleAdapterConfigurationUpdateAssociations(string tenantId, IUpdateInfo<RtAssociation> info)
     {
         try
         {
@@ -258,7 +245,7 @@ internal class DefaultConfigurationCreatorService : DefaultConfigurationCreatorS
                 case UpdateTypes.Insert:
                     if (info.Document != null)
                     {
-                        _logger.LogInformation("[{TenantId}] Plug '{RtId}' inserted", tenantId, info.Document.OriginRtId);
+                        _logger.LogInformation("[{TenantId}] Adapter '{RtId}' inserted", tenantId, info.Document.OriginRtId);
                         await _poolService.DeployAdapterAsync(tenantId, info.Document.TargetRtId,
                             info.Document.OriginRtId);
                     }
@@ -267,7 +254,7 @@ internal class DefaultConfigurationCreatorService : DefaultConfigurationCreatorS
                 case UpdateTypes.Delete:
                     if (info.DocumentBeforeChange != null)
                     {
-                        _logger.LogInformation("[{TenantId}] Plug '{RtId}'  deleted", tenantId, info.DocumentBeforeChange.OriginRtId);
+                        _logger.LogInformation("[{TenantId}] Adapter '{RtId}'  deleted", tenantId, info.DocumentBeforeChange.OriginRtId);
                         await _poolService.UndeployAdapterAsync(tenantId, info.DocumentBeforeChange.TargetRtId,
                             info.DocumentBeforeChange.OriginRtId);
                     }
@@ -279,42 +266,7 @@ internal class DefaultConfigurationCreatorService : DefaultConfigurationCreatorS
         }
         catch (Exception e)
         {
-            _logger.LogError(e, "Error handling association plug configuration update");
-            // no further action to prevent to destroy the event stream
-        }
-    }
-
-    private async Task HandlePoolPlugUpdateAssociations(string tenantId, IUpdateInfo<RtAssociation> info)
-    {
-        try
-        {
-            switch (info.UpdateType)
-            {
-                case UpdateTypes.Insert:
-                    if (info.Document != null)
-                    {
-                        _logger.LogInformation("[{TenantId}] Plug '{RtId}' inserted", tenantId, info.Document.OriginRtId);
-                        await _poolService.DeployAdapterAsync(tenantId, info.Document.TargetRtId,
-                            info.Document.OriginRtId);
-                    }
-
-                    break;
-                case UpdateTypes.Delete:
-                    if (info.DocumentBeforeChange != null)
-                    {
-                        _logger.LogInformation("[{TenantId}] Plug '{RtId}'  deleted", tenantId, info.DocumentBeforeChange.OriginRtId);
-                        await _poolService.UndeployAdapterAsync(tenantId, info.DocumentBeforeChange.TargetRtId,
-                            info.DocumentBeforeChange.OriginRtId);
-                    }
-
-                    break;
-                default:
-                    throw new ArgumentOutOfRangeException();
-            }
-        }
-        catch (Exception e)
-        {
-            _logger.LogError(e, "Error handling association pool to plug update");
+            _logger.LogError(e, "Error handling association adapter configuration update");
             // no further action to prevent to destroy the event stream
         }
     }

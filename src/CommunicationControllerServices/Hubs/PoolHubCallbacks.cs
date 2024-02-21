@@ -20,7 +20,7 @@ internal class PoolHubCallbacks : IPoolHubCallbacks
 
 
     /// <summary>
-    /// Deploys a Plug at a pool
+    /// Deploys an adapter at a pool
     /// </summary>
     /// <param name="tenantId"></param>
     /// <param name="poolCommunicationAdapter"></param>
@@ -38,7 +38,7 @@ internal class PoolHubCallbacks : IPoolHubCallbacks
     }
 
     /// <summary>
-    /// Removes a Plug from a pool
+    /// Removes an adapter from a pool
     /// </summary>
     /// <param name="tenantId"></param>
     /// <param name="poolCommunicationAdapter"></param>

@@ -3,7 +3,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repository;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
-internal interface IPlugServiceUpdates : IPlugService
+internal interface IAdapterServiceUpdates : IAdapterService
 {
     /// <summary>
     /// Reloads an entire tenant
@@ -13,26 +13,18 @@ internal interface IPlugServiceUpdates : IPlugService
     Task ReloadTenantAsync(string tenantId);
     
     /// <summary>
-    /// Handles an update of a plug mapping
+    /// Handles an update of a data pipeline 
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="info">Update information object</param>
     /// <returns></returns>
-    Task OnHandlePlugMappingUpdateAsync(string tenantId, IUpdateInfo<RtPlugMapping> info);
+    Task OnHandleDataPipelineUpdateAsync(string tenantId, IUpdateInfo<RtDataPipeline> info);
 
     /// <summary>
-    /// Handles an update of a plug group
+    /// Handles an update of an adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="info">Update information object</param>
     /// <returns></returns>
-    Task OnHandlePlugGroupUpdateAsync(string tenantId, IUpdateInfo<RtPlugGroup> info);
-
-    /// <summary>
-    /// Handles an update of a plug
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="info">Update information object</param>
-    /// <returns></returns>
-    Task OnHandlePlugUpdateAsync(string tenantId, IUpdateInfo<RtPlug> info);
+    Task OnHandleAdapterUpdateAsync(string tenantId, IUpdateInfo<RtCommunicationAdapter> info);
 }

@@ -3,7 +3,6 @@ types:
 - isCollectionRoot: true
   typeId: CommunicationAdapter
   derivedFromCkTypeId: System-1.0.0/Entity-1.0.0
-  isAbstract: true
   associations:
   - id: System-1.0.0/ParentChild-1.0.0
     targetCkTypeId: System.Communication-1.0.0/CommunicationPool-1.0.0
@@ -25,7 +24,7 @@ types:
     name: ImageVersion
   - id: System-1.0.0/Name-1.0.0
     name: Name
-  - id: System.Communication-1.0.0/MappingConfiguration-1.0.0
+  - id: System.Communication-1.0.0/AdapterConfiguration-1.0.0
     name: Configuration
     isOptional: true
 - isCollectionRoot: true
@@ -43,48 +42,29 @@ types:
     name: DeploymentState
   - id: System-1.0.0/Name-1.0.0
     name: Name
-- typeId: Plug
-  derivedFromCkTypeId: System.Communication-1.0.0/CommunicationAdapter-1.0.0
-  isFinal: true
 - isCollectionRoot: true
-  typeId: PlugGroup
+  typeId: DataPipeline
   derivedFromCkTypeId: System-1.0.0/Entity-1.0.0
   isFinal: true
   associations:
   - id: System-1.0.0/ParentChild-1.0.0
-    targetCkTypeId: System.Communication-1.0.0/Plug-1.0.0
+    targetCkTypeId: System.Communication-1.0.0/CommunicationAdapter-1.0.0
   attributes:
   - id: System-1.0.0/Name-1.0.0
     name: Name
   - id: System-1.0.0/Description-1.0.0
     name: Description
     isOptional: true
-- isCollectionRoot: true
-  typeId: PlugMapping
-  derivedFromCkTypeId: System-1.0.0/Entity-1.0.0
-  isFinal: true
-  associations:
-  - id: System-1.0.0/ParentChild-1.0.0
-    targetCkTypeId: System.Communication-1.0.0/PlugGroup-1.0.0
-  - id: System.Communication-1.0.0/Stream-1.0.0
-    targetCkTypeId: System-1.0.0/Entity-1.0.0
-  attributes:
-  - id: System-1.0.0/Name-1.0.0
-    name: Name
-- typeId: Socket
-  derivedFromCkTypeId: System.Communication-1.0.0/CommunicationAdapter-1.0.0
-  isFinal: true
-associationRoles:
-- id: Stream
-  inboundName: MapsFrom
-  outboundName: MapsTo
-  inboundMultiplicity: ZeroOrOne
-  outboundMultiplicity: ZeroOrOne
-  attributes:
-  - id: System.Communication-1.0.0/MappingConfiguration-1.0.0
-    name: Configuration
-    isOptional: true
+  - id: System.Communication-1.0.0/AdapterPipelineConfiguration-1.0.0
+    name: AdapterPipelineConfiguration
+  - id: System.Communication-1.0.0/RetrieverPipelineConfiguration-1.0.0
+    name: RetrieverPipelineConfiguration
+associationRoles: []
 attributes:
+- id: AdapterConfiguration
+  valueType: String
+- id: AdapterPipelineConfiguration
+  valueType: String
 - id: AdapterType
   valueType: String
 - id: CommunicationState
@@ -108,7 +88,7 @@ attributes:
   - 0
 - id: LastSeen
   valueType: String
-- id: MappingConfiguration
+- id: RetrieverPipelineConfiguration
   valueType: String
 records: []
 enums:

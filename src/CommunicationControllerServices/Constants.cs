@@ -7,9 +7,7 @@ internal static class Constants
 {
     public const string TenantId = "tenantId";
     public const string PoolName = "pool-name";
-    public const string PlugRtId = "plug-rtId";
-    public const string SocketRtId = "socket-rtId";
-    public const string ConfigurationAttribute = "Configuration";
+    public const string AdapterRtId = "adapter-rtId";
 
     public const string CommunicationControllerServiceSchemaVersionKey = "CommunicationControllerServices";
     public const int CommunicationControllerServiceSchemaVersionValue = 1;
@@ -24,20 +22,9 @@ internal static class Constants
         return httpContext.Request.Headers[PoolName];
     }
     
-    public static OctoObjectId? GetPlugRtId(this HttpContext httpContext)
+    public static OctoObjectId? GetAdapterRtId(this HttpContext httpContext)
     {
-        var v = (string?) httpContext.Request.Headers[PlugRtId];
-        if (!string.IsNullOrWhiteSpace(v))
-        {
-            return new OctoObjectId(v);
-        }
-
-        return null;
-    }
-    
-    public static OctoObjectId? GetSocketRtId(this HttpContext httpContext)
-    {
-        var v = (string?) httpContext.Request.Headers[SocketRtId];
+        var v = (string?) httpContext.Request.Headers[AdapterRtId];
         if (!string.IsNullOrWhiteSpace(v))
         {
             return new OctoObjectId(v);

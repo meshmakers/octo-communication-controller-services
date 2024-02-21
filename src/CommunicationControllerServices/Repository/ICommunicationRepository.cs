@@ -1,4 +1,3 @@
-using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.ConstructionKit.Generated.System.Communication.v1;
 
@@ -10,43 +9,27 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 internal interface ICommunicationRepository
 {
     /// <summary>
-    /// Get all sockets from a pool
+    /// Get all communication adapter from a pool
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolRtId">Object id of pool</param>
     /// <returns></returns>
-    Task<IReadOnlyCollection<RtSocket>> GetSocketsAsync(string tenantId, OctoObjectId poolRtId);
-    
-    /// <summary>
-    /// Get all plugs from a pool
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="poolRtId">Object id of pool</param>
-    /// <returns></returns>
-    Task<IReadOnlyCollection<RtPlug>> GetPlugsAsync(string tenantId, OctoObjectId poolRtId);
+    Task<IReadOnlyCollection<RtCommunicationAdapter>> GetAdaptersAsync(string tenantId, OctoObjectId poolRtId);
 
     /// <summary>
-    /// Gets a list of initialized plugs of the given tenant
+    /// Gets a list of initialized communication adapter of the given tenant
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <returns></returns>
-    Task<IReadOnlyCollection<RtPlug>> GetPlugsAsync(string tenantId);
+    Task<IReadOnlyCollection<RtCommunicationAdapter>> GetAdaptersAsync(string tenantId);
     
     /// <summary>
-    /// Gets a socket by object id
+    /// Gets an adapter by object id
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="socketRtId">Object id of socket</param>
+    /// <param name="adapterRtId">Object id of communication adapter</param>
     /// <returns></returns>
-    Task<RtSocket> GetSocketAsync(string tenantId, OctoObjectId socketRtId);
-    
-    /// <summary>
-    /// Gets a plug by object id
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="plugRtId">Object id of plug</param>
-    /// <returns></returns>
-    Task<RtPlug> GetPlugAsync(string tenantId, OctoObjectId plugRtId);
+    Task<RtCommunicationAdapter> GetAdapterAsync(string tenantId, OctoObjectId adapterRtId);
 
     /// <summary>
     /// Get pools for a tenant by name
@@ -83,72 +66,38 @@ internal interface ICommunicationRepository
     Task SetPoolCommunicationStateAsync(string tenantId, OctoObjectId poolRtId, RtCommunicationStateEnum communicationState);
 
     /// <summary>
-    /// Set the deployment state of a socket
+    /// Set the deployment state of an adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="socketRtId">Object id of socket</param>
+    /// <param name="adapterRtId">Object id of adapter</param>
     /// <param name="deploymentState">State of adapter</param>
     /// <returns></returns>
-    Task SetSocketDeploymentStateAsync(string tenantId, OctoObjectId socketRtId, RtDeploymentStateEnum deploymentState);
+    Task SetAdapterDeploymentStateAsync(string tenantId, OctoObjectId adapterRtId, RtDeploymentStateEnum deploymentState);
     
     /// <summary>
-    /// Set the communication state of a socket
+    /// Set the communication state of an communication adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="socketRtId">Object id of socket</param>
+    /// <param name="adapterRtId">Object id of adapter</param>
     /// <param name="communicationState">State of adapter</param>
     /// <returns></returns>
-    Task SetSocketCommunicationStateAsync(string tenantId, OctoObjectId socketRtId, RtCommunicationStateEnum communicationState);
-    
-    /// <summary>
-    /// Set the deployment state of a plug
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="plugRtId">Object id of plug</param>
-    /// <param name="deploymentState">State of adapter</param>
-    /// <returns></returns>
-    Task SetPlugDeploymentStateAsync(string tenantId, OctoObjectId plugRtId, RtDeploymentStateEnum deploymentState);
-    
-    /// <summary>
-    /// Set the communication state of a plug
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="plugRtId">Object id of plug</param>
-    /// <param name="communicationState">State of adapter</param>
-    /// <returns></returns>
-    Task SetPlugCommunicationStateAsync(string tenantId, OctoObjectId plugRtId, RtCommunicationStateEnum communicationState);
+    Task SetAdapterCommunicationStateAsync(string tenantId, OctoObjectId adapterRtId, RtCommunicationStateEnum communicationState);
 
     /// <summary>
-    /// Gets the pool of a plug
+    /// Gets the pool of an communication adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="plugRtId">Plug id</param>
+    /// <param name="adapterRtId">Adapter id</param>
     /// <returns></returns>
-    Task<RtCommunicationPool> GetPoolOfPlugAsync(string tenantId, OctoObjectId plugRtId);
+    Task<RtCommunicationPool> GetPoolOfAdapterAsync(string tenantId, OctoObjectId adapterRtId);
 
     /// <summary>
-    /// Gets the corresponding plug of a plug mapping
+    /// Gets the corresponding adapter of a data pipeline
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="plugMappingRtId">Object identifier of plug mapping</param>
+    /// <param name="dataPipelineRtId">Object identifier of data pipeline</param>
     /// <returns></returns>
-    Task<RtPlug> GetPlugByMappingAsync(string tenantId, OctoObjectId plugMappingRtId);
-
-    /// <summary>
-    /// Gets the group/mapping configuration of a plug
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="plugRtId">Object identifier of plug</param>
-    /// <returns></returns>
-    Task<IReadOnlyCollection<GroupConfigurationDto>> GetPlugGroupConfigurationAsync(string tenantId, OctoObjectId plugRtId);
-
-    /// <summary>
-    /// Gets the corresponding plug of a plug group
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="plugGroupRtId">Object identifier of plug group</param>
-    /// <returns></returns>
-    Task<RtPlug> GetPlugByGroupAsync(string tenantId, OctoObjectId plugGroupRtId);
+    Task<RtCommunicationAdapter> GetAdapterByDataPipelineAsync(string tenantId, OctoObjectId dataPipelineRtId);
 
     /// <summary>
     /// Returns true if a tenant exists
@@ -156,4 +105,12 @@ internal interface ICommunicationRepository
     /// <param name="tenantId">Tenant identifier</param>
     /// <returns></returns>
     Task<bool> IsTenantExistingAsync(string tenantId);
+
+    /// <summary>
+    /// Gets the data pipelines of a communication adapter
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="adapterRtId">Object identifier of communication adapter</param>
+    /// <returns></returns>
+    Task<IReadOnlyCollection<RtDataPipeline>> GetDataPipelinesAsync(string tenantId, OctoObjectId adapterRtId);
 }
