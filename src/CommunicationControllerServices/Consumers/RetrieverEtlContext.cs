@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repository;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
@@ -13,12 +14,14 @@ public class RetrieverEtlContext : IRetrieverEtlContext
     /// <param name="tenantId"></param>
     /// <param name="message"></param>
     /// <param name="tenantRepository"></param>
+    /// <param name="session"></param>
     /// <param name="properties"></param>
-    public RetrieverEtlContext(string tenantId, object? message, ITenantRepository tenantRepository, IDictionary<string, object?> properties)
+    public RetrieverEtlContext(string tenantId, string message, ITenantRepository tenantRepository, IOctoSession session, IDictionary<string, object?> properties)
     {
         TenantId = tenantId;
         Message = message;
         TenantRepository = tenantRepository;
+        Session = session;
         Properties = properties;
     }
 
@@ -30,8 +33,11 @@ public class RetrieverEtlContext : IRetrieverEtlContext
 
 
     /// <inheritdoc />
-    public object? Message { get; }
+    public string Message { get; }
 
     /// <inheritdoc />
     public ITenantRepository TenantRepository { get; }
+
+    /// <inheritdoc />
+    public IOctoSession Session { get; }
 }

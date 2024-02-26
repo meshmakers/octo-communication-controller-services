@@ -107,6 +107,9 @@ try
     builder.Services.AddSingleton<IAdapterHubCallbacks, AdapterHubCallbacks>();
     builder.Services.AddDataPipeline()
         .RegisterNode<GetRtEntitiesByTypeNode>()
+        .RegisterNode<GetRtEntitiesByIdNode>()
+        .RegisterNode<CreateUpdateInfoNode>()
+        .RegisterNode<ApplyChangesNode>()
         .RegisterNode<RetrieveFromMessageNode>();
     
     var app = builder.Build();
