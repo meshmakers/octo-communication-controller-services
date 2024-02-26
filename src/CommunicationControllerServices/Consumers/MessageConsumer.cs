@@ -2,13 +2,8 @@ using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Common.DistributionEventHub.Consumers;
 using Meshmakers.Octo.Communication.Contracts.MessageObjects;
-using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.ConstructionKit.Generated.System.Communication.v1;
-using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
-using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repository;
-using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
-using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using Meshmakers.Octo.Sdk.Common.EtlDataPipeline;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 
@@ -20,6 +15,8 @@ internal class MessageConsumer : IDistributedConsumer<UpdatedValueMessageDto>
     readonly ILogger<MessageConsumer> _logger;
     private readonly ISystemContext _systemContext;
     private readonly IAdapterService _adapterService;
+    private readonly IEtlDataOrchestrator _etlDataOrchestrator;
+    private readonly Dictionary<string, object?> _etlContextDictionary = new();
 
     /// <summary>
     /// Constructor
@@ -27,11 +24,14 @@ internal class MessageConsumer : IDistributedConsumer<UpdatedValueMessageDto>
     /// <param name="logger"></param>
     /// <param name="systemContext"></param>
     /// <param name="adapterService"></param>
-    public MessageConsumer(ILogger<MessageConsumer> logger, ISystemContext systemContext, IAdapterService adapterService)
+    /// <param name="etlDataOrchestrator"></param>
+    public MessageConsumer(ILogger<MessageConsumer> logger, ISystemContext systemContext, IAdapterService adapterService,
+        IEtlDataOrchestrator etlDataOrchestrator)
     {
         _logger = logger;
         _systemContext = systemContext;
         _adapterService = adapterService;
+        _etlDataOrchestrator = etlDataOrchestrator;
     }
 
     /// <inheritdoc />
@@ -48,6 +48,11 @@ internal class MessageConsumer : IDistributedConsumer<UpdatedValueMessageDto>
 
             using var session = await tenantRepository.GetSessionAsync();
             session.StartTransaction();
+
+            _logger.LogInformation("Execute pipeline {Id}: {Name}", context.Message.DataPipelineRtId, "unknown");
+            await _etlDataOrchestrator.ExecutePipelineAsync<IRetrieverEtlContext>(TestConfig.Test1,
+                new RetrieverEtlContext(message.TenantId.NormalizeString(), message.Value, tenantRepository, _etlContextDictionary));
+
 
             // var streamAssociation = await GetStreamAssoc(session, tenantRepository, message.MappingId);
             //
@@ -74,7 +79,7 @@ internal class MessageConsumer : IDistributedConsumer<UpdatedValueMessageDto>
             //         throw new Exception($"Failed to update asset {streamAssociation.TargetCkTypeId} {streamAssociation.TargetRtId}");
             //     }
             // }
-            
+
 
             await session.CommitTransactionAsync();
         }
