@@ -21,6 +21,7 @@
     <ItemGroup>
         <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.1" />
         <PackageReference Include="NLog.Web.AspNetCore" Version="5.3.8" />
+        <PackageReference Include="Meshmakers.Octo.Sdk.Common" Version="$(OctoVersion)" />
     </ItemGroup>
 
     <ItemGroup>

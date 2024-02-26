@@ -3,6 +3,8 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Configuration;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Nodes;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Nodes.Extracts;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Routing;
@@ -103,7 +105,10 @@ try
     
     builder.Services.AddSingleton<IPoolHubCallbacks, PoolHubCallbacks>();
     builder.Services.AddSingleton<IAdapterHubCallbacks, AdapterHubCallbacks>();
-
+    builder.Services.AddDataPipeline()
+        .RegisterNode<GetRtEntitiesByTypeNode>()
+        .RegisterNode<RetrieveFromMessageNode>();
+    
     var app = builder.Build();
 
     // Configure the HTTP request pipeline.
