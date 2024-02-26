@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Json.More;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Common.DistributionEventHub.Consumers;
@@ -17,6 +20,7 @@ internal class MessageConsumer : IDistributedConsumer<UpdatedValueMessageDto>
     private readonly IAdapterService _adapterService;
     private readonly IEtlDataOrchestrator _etlDataOrchestrator;
     private readonly Dictionary<string, object?> _etlContextDictionary = new();
+    private readonly JsonSerializerOptions _options;
 
     /// <summary>
     /// Constructor
@@ -32,12 +36,18 @@ internal class MessageConsumer : IDistributedConsumer<UpdatedValueMessageDto>
         _systemContext = systemContext;
         _adapterService = adapterService;
         _etlDataOrchestrator = etlDataOrchestrator;
+        
+        _options = new JsonSerializerOptions
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingDefault,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        };
     }
 
     /// <inheritdoc />
     public async Task ConsumeAsync(IDistributedContext<UpdatedValueMessageDto> context)
     {
-        _logger.LogInformation("[{TenantId}] Received Input: DataPipelineRtId '{DataPipelineRtId}', Value '{Value}'",
+        _logger.LogDebug("[{TenantId}] Received Input: DataPipelineRtId '{DataPipelineRtId}', Value '{Value}'",
             context.Message.TenantId, context.Message.DataPipelineRtId, context.Message.Value);
 
         var message = context.Message;
@@ -46,40 +56,18 @@ internal class MessageConsumer : IDistributedConsumer<UpdatedValueMessageDto>
         {
             var tenantRepository = await _systemContext.FindTenantRepositoryAsync(message.TenantId.NormalizeString());
 
+            if (message.Value == null)
+            {
+                _logger.LogWarning("Value is null, skipping");
+                return;
+            }
+            
             using var session = await tenantRepository.GetSessionAsync();
             session.StartTransaction();
 
             _logger.LogInformation("Execute pipeline {Id}: {Name}", context.Message.DataPipelineRtId, "unknown");
             await _etlDataOrchestrator.ExecutePipelineAsync<IRetrieverEtlContext>(TestConfig.Test1,
-                new RetrieverEtlContext(message.TenantId.NormalizeString(), message.Value, tenantRepository, _etlContextDictionary));
-
-
-            // var streamAssociation = await GetStreamAssoc(session, tenantRepository, message.MappingId);
-            //
-            // if (streamAssociation != null && (streamAssociation.TargetCkAttributeIds?.Any() ?? false))
-            // {
-            //     var rtEntityId = new RtEntityId(streamAssociation.TargetCkTypeId, streamAssociation.TargetRtId);
-            //     var asset = await tenantRepository.GetRtEntityByRtIdAsync(session, rtEntityId);
-            //     if (asset == null)
-            //     {
-            //         throw new Exception($"Asset {streamAssociation.TargetCkTypeId} {streamAssociation.TargetRtId} not found");
-            //     }
-            //     
-            //     var ckTypeGraph = await tenantRepository.GetCkTypeGraphAsync(asset.GetCkTypeId());
-            //     if (!ckTypeGraph.AllAttributes.TryGetValue(streamAssociation.TargetCkAttributeIds.First(), out var ckTypeAttributeGraph))
-            //     {
-            //         throw new Exception($"Attribute {streamAssociation.TargetCkAttributeIds.First()} not found");
-            //     }
-            //     asset.SetAttributeValue(ckTypeAttributeGraph.AttributeName, ckTypeAttributeGraph.ValueType, message.Value);
-            //
-            //     OperationResult operationResult = new();
-            //     await tenantRepository.ApplyChangesAsync(session, new[] { EntityUpdateInfo<RtEntity>.CreateUpdate(rtEntityId, asset)}, operationResult);
-            //     if (operationResult.HasFatalErrors || operationResult.HasErrors)
-            //     {
-            //         throw new Exception($"Failed to update asset {streamAssociation.TargetCkTypeId} {streamAssociation.TargetRtId}");
-            //     }
-            // }
-
+                new RetrieverEtlContext(message.TenantId.NormalizeString(), message.Value, tenantRepository, session, _etlContextDictionary));
 
             await session.CommitTransactionAsync();
         }
@@ -88,15 +76,4 @@ internal class MessageConsumer : IDistributedConsumer<UpdatedValueMessageDto>
             _logger.LogError(e, "[{TenantId}] Failed to update pipeline '{DataPipelineRtId}'", message.TenantId, message.DataPipelineRtId);
         }
     }
-
-    // private async Task<RtAssociation?> GetStreamAssoc(IOctoSession session, ITenantRepository tenantRepository,
-    //     OctoObjectId mappingObjectId)
-    // {
-    //     // var resultSet =
-    //     //     await tenantRepository.GetRtAssociationsAsync(session,
-    //     //         new[] { mappingObjectId }, GraphDirections.Outbound,
-    //     //         new CkId<CkAssociationRoleId>(SystemCommunicationCkIds.ModelId, SystemCommunicationCkIds.Stream));
-    //
-    //     return null;
-    // }
 }

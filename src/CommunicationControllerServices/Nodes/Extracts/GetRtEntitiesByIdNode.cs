@@ -7,9 +7,9 @@ using Meshmakers.Octo.Sdk.Common.EtlDataPipeline.Configuration;
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Nodes.Extracts;
 
 /// <summary>
-/// Configuration for node get rt entities by type
+/// Configuration for node get rt entities by id
 /// </summary>
-public class GetRtEntitiesByTypeNodeConfiguration : NodeConfiguration
+public class GetRtEntitiesByIdNodeConfiguration : NodeConfiguration
 {
     /// <summary>
     /// Gets or sets the target property name
@@ -32,6 +32,11 @@ public class GetRtEntitiesByTypeNodeConfiguration : NodeConfiguration
     public int? Take { get; set; }
     
     /// <summary>
+    /// Gets or sets the rt ids
+    /// </summary>
+    public ICollection<OctoObjectId>? RtIds { get; set; }
+    
+    /// <summary>
     /// A list of field filters
     /// </summary>
     public ICollection<FieldFilter>? FieldFilters { get; set; }
@@ -40,19 +45,25 @@ public class GetRtEntitiesByTypeNodeConfiguration : NodeConfiguration
 /// <summary>
 /// Gets rt entities by type
 /// </summary>
-[Node("GetRtEntitiesByType", 1, typeof(GetRtEntitiesByTypeNodeConfiguration))]
-public class GetRtEntitiesByTypeNode(NodeDelegate next) : IPipelineNode
+[Node("GetRtEntitiesById", 1, typeof(GetRtEntitiesByIdNodeConfiguration))]
+public class GetRtEntitiesByIdNode(NodeDelegate next) : IPipelineNode
 {
     /// <inheritdoc />
     public async Task ProcessObjectAsync(IDataContext dataContext)
     {
         var etlContext = dataContext.PipelineServiceProvider.GetRequiredService<IRetrieverEtlContext>();
 
-        var c = dataContext.GetNodeConfiguration<GetRtEntitiesByTypeNodeConfiguration>();
+        var c = dataContext.GetNodeConfiguration<GetRtEntitiesByIdNodeConfiguration>();
 
         if (c.CkTypeId == null)
         {
             dataContext.Logger.LogError("CkTypeId is not set");
+            return;
+        }
+
+        if (c.RtIds == null)
+        {
+            dataContext.Logger.LogError("RtIds is not set");
             return;
         }
 
@@ -65,10 +76,9 @@ public class GetRtEntitiesByTypeNode(NodeDelegate next) : IPipelineNode
             }
         }
 
-        var r = await etlContext.TenantRepository.GetRtEntitiesByTypeAsync(etlContext.Session, c.CkTypeId, dataQueryOperation, c.Skip, c.Take);
+        var r = await etlContext.TenantRepository.GetRtEntitiesByIdAsync(etlContext.Session, c.CkTypeId, c.RtIds.ToList(), dataQueryOperation, c.Skip, c.Take);
 
         dataContext.SetCurrentValueByName(c.TargetPropertyName, r);
-        
         
         await next(dataContext);
     }

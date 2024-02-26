@@ -14,7 +14,7 @@ internal class RetrieveFromMessageNode(NodeDelegate next) : IPipelineNode
     {
         var etlContext = dataContext.PipelineServiceProvider.GetRequiredService<IRetrieverEtlContext>();
 
-        dataContext.Current = JObject.FromObject(etlContext.Message ?? new JObject());
+        dataContext.Current = JObject.Parse(etlContext.Message);
 
         await next(dataContext);
     }
