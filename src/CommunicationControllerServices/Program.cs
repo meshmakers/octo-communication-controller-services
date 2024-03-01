@@ -57,7 +57,6 @@ try
     builder.Services.AddOctoServiceInfrastructure("CommunicationControllerServices",
         c =>
         {
-            c.AddRoutedEventConsumer<MessageConsumer, UpdatedValueMessageDto>();
             c.AddBroadcastEventConsumer<ComControllerAdapterUpdateConsumer, ComControllerAdapterUpdate>();
             c.AddBroadcastEventConsumer<ComControllerPoolUpdateConsumer, ComControllerPoolUpdate>();
             
@@ -103,7 +102,7 @@ try
     
     builder.Services.AddSingleton<IPoolHubCallbacks, PoolHubCallbacks>();
     builder.Services.AddSingleton<IAdapterHubCallbacks, AdapterHubCallbacks>();
-
+    
     var app = builder.Build();
 
     // Configure the HTTP request pipeline.
