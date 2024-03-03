@@ -3,7 +3,7 @@ attributes:
 - id: AdapterType
   valueType: String
 - id: LastSeen
-  valueType: String  
+  valueType: DateTime  
 - id: Deployment.ImageName
   valueType: String  
 - id: Deployment.ImageVersion
@@ -28,4 +28,6 @@ attributes:
 - id: AdapterPipelineConfiguration
   valueType: String
 - id: RetrieverPipelineConfiguration
+  valueType: String  
+- id: SenderPipelineConfiguration
   valueType: String  

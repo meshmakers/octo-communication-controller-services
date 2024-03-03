@@ -49,4 +49,12 @@ public interface IAdapterService
     /// <param name="adapterRtId">Object Id of adapter</param>
     /// <returns></returns>
     Task SetAdapterOfflineAsync(string tenantId, OctoObjectId adapterRtId);
+    
+    /// <summary>
+    /// Updates an adapter configuration
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="adapterRtId">Object Id of adapter</param>
+    /// <returns></returns>
+    Task UpdateAdapterConfigurationAsync(string tenantId, OctoObjectId adapterRtId);
 }

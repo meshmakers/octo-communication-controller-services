@@ -11,8 +11,13 @@ types:
         isOptional: true
       - id: ${thisModel}/AdapterPipelineConfiguration
         name: AdapterPipelineConfiguration
+        isOptional: true
       - id: ${thisModel}/RetrieverPipelineConfiguration
         name: RetrieverPipelineConfiguration
+        isOptional: true
+      - id: ${thisModel}/SenderPipelineConfiguration
+        name: SenderPipelineConfiguration
+        isOptional: true
     associations:
       - id: System/ParentChild
         targetCkTypeId: System.Communication/CommunicationAdapter
