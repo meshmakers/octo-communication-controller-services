@@ -4,6 +4,10 @@ enums:
   useFlags: false
   values:
   - key: 0
-    name: Offline
+    name: Unregistered
   - key: 1
+    name: Registered
+  - key: 2
     name: Online
+  - key: 3
+    name: Offline

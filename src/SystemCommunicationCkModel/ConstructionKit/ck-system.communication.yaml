@@ -10,6 +10,7 @@ types:
   attributes:
   - id: System.Communication-1.0.0/LastSeen-1.0.0
     name: LastSeen
+    isOptional: true
   - id: System.Communication-1.0.0/CommunicationState-1.0.0
     name: CommunicationState
   - id: System.Communication-1.0.0/ConfigurationState-1.0.0
@@ -57,8 +58,13 @@ types:
     isOptional: true
   - id: System.Communication-1.0.0/AdapterPipelineConfiguration-1.0.0
     name: AdapterPipelineConfiguration
+    isOptional: true
   - id: System.Communication-1.0.0/RetrieverPipelineConfiguration-1.0.0
     name: RetrieverPipelineConfiguration
+    isOptional: true
+  - id: System.Communication-1.0.0/SenderPipelineConfiguration-1.0.0
+    name: SenderPipelineConfiguration
+    isOptional: true
 associationRoles: []
 attributes:
 - id: AdapterConfiguration
@@ -87,8 +93,10 @@ attributes:
   defaultValues:
   - 0
 - id: LastSeen
-  valueType: String
+  valueType: DateTime
 - id: RetrieverPipelineConfiguration
+  valueType: String
+- id: SenderPipelineConfiguration
   valueType: String
 records: []
 enums:
@@ -96,9 +104,13 @@ enums:
   useFlags: false
   values:
   - key: 0
-    name: Offline
+    name: Unregistered
   - key: 1
+    name: Registered
+  - key: 2
     name: Online
+  - key: 3
+    name: Offline
 - enumId: ConfigurationState
   useFlags: false
   values:

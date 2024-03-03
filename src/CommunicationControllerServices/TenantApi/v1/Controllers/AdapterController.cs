@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
@@ -66,5 +67,27 @@ public class AdapterController : ControllerBase
         var config = await _adapterService.GetAdapterConfigurationAsync(tenantId, adapterRtId);
 
         return Ok(config);
+    }
+    
+        
+    /// <summary>
+    /// Enables the communication controller for a tenant
+    /// </summary>
+    /// <param name="tenantId">The id of the tenant.</param>
+    /// <param name="adapterRtId">The id of the adapter.</param>
+    /// <returns></returns>
+    [HttpPost("update")]
+    //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
+    public async Task<IActionResult> Update([Required] string tenantId, [Required] OctoObjectId adapterRtId)
+    {
+        try
+        {
+            await _adapterService.UpdateAdapterConfigurationAsync(tenantId, adapterRtId);
+            return NoContent();
+        }
+        catch (AdapterServiceException e)
+        {
+            return BadRequest(e.Message);
+        }
     }
 }

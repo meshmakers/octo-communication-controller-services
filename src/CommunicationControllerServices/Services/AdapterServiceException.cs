@@ -30,5 +30,10 @@ internal class AdapterServiceException : Exception
     {
         return new AdapterServiceException($"[{tenantId}] Failed to load adapter '{adapterRtId}' configuration", exception);
     }
+
+    internal static Exception AdapterNotLoaded(string tenantId, OctoObjectId adapterRtId)
+    {
+        return new AdapterServiceException($"[{tenantId}] Adapter '{adapterRtId}' not loaded.");
+    }
 }
 

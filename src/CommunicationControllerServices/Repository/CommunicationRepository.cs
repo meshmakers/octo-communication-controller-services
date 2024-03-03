@@ -285,7 +285,8 @@ internal class CommunicationRepository : ICommunicationRepository
             var rtAdapter = new RtCommunicationAdapter
             {
                 RtId = adapterRtId,
-                CommunicationState = communicationState
+                CommunicationState = communicationState,
+                LastSeen = DateTime.UtcNow
             };
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtCommunicationAdapter>>
