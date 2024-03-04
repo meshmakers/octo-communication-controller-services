@@ -84,7 +84,7 @@ public class PoolHub : Hub, IPoolHub
 
             await _poolService.SetPoolOnlineAsync(tenantId, poolRtId);
 
-            return await _poolService.GetCurrentAdapterAsync(tenantId, poolRtId);
+            return await _poolService.GetPoolConfigurationAsync(tenantId, poolRtId);
         }
         catch (Exception e)
         {

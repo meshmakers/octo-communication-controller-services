@@ -11,7 +11,8 @@ internal static class Constants
 
     public const string CommunicationControllerServiceSchemaVersionKey = "CommunicationControllerServices";
     public const int CommunicationControllerServiceSchemaVersionValue = 1;
-    
+    public const string CacheFileName ="CommunicationControllerServicesCache.json";
+
     public static string? GetTenantId(this HttpContext httpContext)
     {
         return (string?)httpContext.GetRouteValue(TenantId);

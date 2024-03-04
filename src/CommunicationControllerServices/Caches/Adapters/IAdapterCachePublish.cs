@@ -4,7 +4,10 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapter
 
 internal interface IAdapterCachePublish
 {
+    Task LoadConfigurationAsync(string tenantId);
+    
     void PublishConfiguration(string tenantId);
+    Task PublishConfigurationAsync(string tenantId);
 
     void ReloadConfiguration(ComControllerAdapterUpdate configuration);
 }

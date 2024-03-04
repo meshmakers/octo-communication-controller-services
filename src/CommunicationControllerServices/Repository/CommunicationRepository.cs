@@ -104,6 +104,28 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
+    public async Task<IReadOnlyCollection<RtCommunicationPool>> GetPoolsAsync(string tenantId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var dataQueryOperation = DataQueryOperation.Create();
+            var poolResultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtCommunicationPool>(session, dataQueryOperation);
+
+            await session.CommitTransactionAsync();
+
+            return poolResultSet.Items.ToList();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingPools(tenantId, e);
+        }
+    }
+
     /// <inheritdoc />
     public async Task<IReadOnlyCollection<RtCommunicationPool>> GetPoolByNameAsync(string tenantId, string poolName)
     {

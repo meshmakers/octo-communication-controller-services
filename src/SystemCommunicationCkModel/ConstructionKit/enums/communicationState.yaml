@@ -6,8 +6,6 @@ enums:
   - key: 0
     name: Unregistered
   - key: 1
-    name: Registered
-  - key: 2
     name: Online
-  - key: 3
+  - key: 2
     name: Offline

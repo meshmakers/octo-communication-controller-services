@@ -10,7 +10,7 @@ using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
-internal class PoolService : IPoolServiceUpdates
+internal class PoolService : IPoolService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly ICommunicationRepository _communicationRepository;
@@ -23,7 +23,8 @@ internal class PoolService : IPoolServiceUpdates
     /// <param name="communicationRepository">Communication repository</param>
     /// <param name="poolCache">Distributed and synchronized data between nodes</param>
     /// <param name="poolHubCallbacks">Callbacks to inform client of configuration changes</param>
-    public PoolService(ICommunicationRepository communicationRepository, IPoolCache poolCache, IPoolHubCallbacks poolHubCallbacks)
+    public PoolService(ICommunicationRepository communicationRepository, IPoolCache poolCache,
+        IPoolHubCallbacks poolHubCallbacks)
     {
         _communicationRepository = communicationRepository;
         _poolCache = poolCache;
@@ -68,7 +69,8 @@ internal class PoolService : IPoolServiceUpdates
         }
 
         // Update status in asset repository
-        await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolDescription.PoolRtId, RtDeploymentStateEnum.Deployed);
+        await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolDescription.PoolRtId,
+            RtDeploymentStateEnum.Deployed);
 
         Logger.Info("[{TenantId}] Operator for pool '{PoolName}' registered",
             tenantId, poolName);
@@ -81,7 +83,7 @@ internal class PoolService : IPoolServiceUpdates
         Logger.Info("[{TenantId}] Unregistering operator for pool '{PoolName}'",
             tenantId, poolName);
 
-        if (!_poolCache.TryGetTenant(tenantId, out var tenantDescription) || tenantDescription == null)
+        if (!_poolCache.TryGetTenant(tenantId, out var tenantDescription))
         {
             throw PoolServiceException.TenantNotFound(tenantId);
         }
@@ -90,7 +92,8 @@ internal class PoolService : IPoolServiceUpdates
         {
             tenantDescription.RemovePool(poolDescription.PoolRtId);
 
-            await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolDescription.PoolRtId, RtDeploymentStateEnum.Pending);
+            await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolDescription.PoolRtId,
+                RtDeploymentStateEnum.Pending);
 
             Logger.Info("[{TenantId}] Operator for pool '{PoolName}' unregistered",
                 tenantId, poolName);
@@ -101,11 +104,11 @@ internal class PoolService : IPoolServiceUpdates
     }
 
     /// <inheritdoc />
-    public async Task<PoolConfigurationDto> GetCurrentAdapterAsync(string tenantId, OctoObjectId poolRtId)
+    public async Task<PoolConfigurationDto> GetPoolConfigurationAsync(string tenantId, OctoObjectId poolRtId)
     {
         Logger.Info("[{TenantId}] Getting current adapters for pool '{PoolRtId}'", tenantId, poolRtId);
 
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
+        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
             throw PoolServiceException.TenantNotFound(tenantId);
         }
@@ -115,7 +118,8 @@ internal class PoolService : IPoolServiceUpdates
             poolTenant.RemoveAdapters(poolRtId);
 
             var rtAdapters = await _communicationRepository.GetAdaptersAsync(tenantId, poolRtId);
-            Logger.Info("[{TenantId}] '{AdapterCount}' adapters found for Pool '{PoolRtId}'", tenantId, rtAdapters.Count, poolRtId);
+            Logger.Info("[{TenantId}] '{AdapterCount}' adapters found for Pool '{PoolRtId}'", tenantId,
+                rtAdapters.Count, poolRtId);
             foreach (var rtAdapter in rtAdapters)
             {
                 poolTenant.AddAdapter(new Adapter(rtAdapter.RtId, poolRtId,
@@ -138,9 +142,75 @@ internal class PoolService : IPoolServiceUpdates
     {
         Logger.Info("[{TenantId}] Reloading tenant", tenantId);
 
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
+        try
         {
-            Logger.Info("[{TenantId}] Tenant not loaded", tenantId);
+            var pools = await _communicationRepository.GetPoolsAsync(tenantId);
+            foreach (var pool in pools)
+            {
+                if (_poolCache.TryGetTenant(tenantId, out var poolTenant))
+                {
+                    if (poolTenant.PoolsById.TryGetValue(pool.RtId, out var poolCache))
+                    {
+                        if (!string.IsNullOrWhiteSpace(poolCache.ConnectionId))
+                        {
+                            await SetPoolOfflineAsync(tenantId, pool.RtId);
+                        }
+                        else
+                        {
+                            await SetPoolOnlineAsync(tenantId, pool.RtId);
+
+                            var poolConfigurationDto = await GetPoolConfigurationAsync(tenantId, pool.RtId);
+
+                            // Check which adapters need to be deployed or undeployed.
+                            var adaptersToUndeploy = poolTenant.AdaptersById.Values.Where(
+                                x => x.PoolRtId == pool.RtId
+                                     && poolConfigurationDto.CommunicationAdapterList
+                                         .All(y => y.PoolRtId != pool.RtId));
+                            var adaptersToDeploy =
+                                poolConfigurationDto.CommunicationAdapterList
+                                    .Where(x => poolTenant.AdaptersById.Values
+                                        .All(y => y.AdapterRtId != x.AdapterRtId));
+
+                            // Undeploy adapters that are not listed any more
+                            foreach (var adapter in adaptersToUndeploy)
+                            {
+                                await UndeployAdapterAsync(tenantId, adapter.PoolRtId,
+                                    adapter.AdapterRtId);
+                            }
+
+                            // Deploy adapters that are listed newly
+                            foreach (var adapterDto in adaptersToDeploy)
+                            {
+                                await DeployAdapterAsync(tenantId, adapterDto.PoolRtId, adapterDto.AdapterRtId);
+                            }
+                        }
+
+                        continue;
+                    }
+                }
+
+                await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, pool.RtId,
+                    RtCommunicationStateEnum.Unregistered);
+            }
+        }
+        catch (Exception e)
+        {
+            throw PoolServiceException.TenantReloadFailed(tenantId, e);
+        }
+    }
+
+    /// <summary>
+    /// Unloads an entire tenant if a tenant gets deleted
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <returns></returns>
+    public async Task UnloadTenantAsync(string tenantId)
+    {
+        Logger.Info("[{TenantId}] Unloading tenant", tenantId);
+
+        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
+        {
+            Logger.Info("[{TenantId}] Tenant not loaded, skipping further unload checks", tenantId);
             return;
         }
 
@@ -151,46 +221,15 @@ internal class PoolService : IPoolServiceUpdates
         }
 
         poolTenant.Clear();
-
-        // Second, check if tenant exists in asset repository and reload adapters
-        try
-        {
-            Logger.Info("[{TenantId}] Checking tenant and reloading adapters", tenantId);
-
-            if (await _communicationRepository.IsTenantExistingAsync(tenantId))
-            {
-                // First, register pools
-                foreach (var pool in poolTenant.PoolsByName.Values.ToArray())
-                {
-                    poolTenant.RemovePool(pool.PoolRtId);
-                    var poolRtId = await RegisterPoolOperatorAsync(tenantId, pool.PoolName, pool.ConnectionId);
-
-                    // Second, register communicationAdapter
-                    var poolConfigurationDto = await GetCurrentAdapterAsync(tenantId, poolRtId);
-                    foreach (var adapterDto in poolConfigurationDto.CommunicationAdapterList)
-                    {
-                        await DeployAdapterAsync(tenantId, poolRtId, adapterDto.AdapterRtId);
-                    }
-                }
-            }
-            else
-            {
-                // It seems that the tenant has been deleted.
-                // TODO: What happens with pools of a tenant that has been deleted? Maybe a zombie state? Disconnect them in operator?
-                _poolCache.RemoveTenant(tenantId);
-            }
-        }
-        catch (Exception e)
-        {
-            throw PoolServiceException.TenantReloadFailed(tenantId, e);
-        }
+        _poolCache.RemoveTenant(tenantId);
     }
 
     /// <inheritdoc />
     public async Task DeployAdapterAsync(string tenantId, OctoObjectId poolRtId, OctoObjectId adapterRtId)
     {
-        Logger.Info("[{TenantId}] Deploying Adapter '{AdapterRtId}' to pool '{PoolRtId}'", tenantId, adapterRtId, poolRtId);
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
+        Logger.Info("[{TenantId}] Deploying Adapter '{AdapterRtId}' to pool '{PoolRtId}'", tenantId, adapterRtId,
+            poolRtId);
+        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
             throw PoolServiceException.TenantNotFound(tenantId);
         }
@@ -215,9 +254,10 @@ internal class PoolService : IPoolServiceUpdates
     /// <inheritdoc />
     public async Task UndeployAdapterAsync(string tenantId, OctoObjectId poolRtId, OctoObjectId adapterRtId)
     {
-        Logger.Info("[{TenantId}] Undeploying Adapter '{AdapterRtId}' from pool '{PoolRtId}'", tenantId, adapterRtId, poolRtId);
+        Logger.Info("[{TenantId}] Undeploying Adapter '{AdapterRtId}' from pool '{PoolRtId}'", tenantId, adapterRtId,
+            poolRtId);
 
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
+        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
             throw PoolServiceException.TenantNotFound(tenantId);
         }
@@ -240,21 +280,22 @@ internal class PoolService : IPoolServiceUpdates
     {
         Logger.Info("[{TenantId}] Setting pool '{PoolRtId}' offline", tenantId, poolRtId);
 
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
+        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
             throw PoolServiceException.TenantNotFound(tenantId);
         }
 
         if (poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
         {
-            await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, poolDescription.PoolRtId, RtCommunicationStateEnum.Offline);
+            await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, poolDescription.PoolRtId,
+                RtCommunicationStateEnum.Offline);
         }
     }
 
     /// <inheritdoc />
     public async Task SetPoolOfflineAsync(string tenantId, string poolName)
     {
-        if (_poolCache.TryGetTenant(tenantId, out var poolTenant) && poolTenant != null)
+        if (_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
             poolTenant.PoolsByName.TryGetValue(poolName, out var poolDescription);
             if (poolDescription != null)
@@ -269,21 +310,22 @@ internal class PoolService : IPoolServiceUpdates
     {
         Logger.Info("[{TenantId}] Setting pool '{PoolRtId}' online", tenantId, poolRtId);
 
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
+        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
             throw PoolServiceException.TenantNotFound(tenantId);
         }
 
         if (poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
         {
-            await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, poolDescription.PoolRtId, RtCommunicationStateEnum.Online);
+            await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, poolDescription.PoolRtId,
+                RtCommunicationStateEnum.Online);
         }
     }
 
     /// <inheritdoc />
     public async Task SetPoolOnlineAsync(string tenantId, string poolName, string connectionId)
     {
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
+        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
             throw PoolServiceException.TenantNotFound(tenantId);
         }
@@ -296,7 +338,7 @@ internal class PoolService : IPoolServiceUpdates
             await SetPoolOnlineAsync(tenantId, poolDescription.PoolRtId);
         }
     }
-    
+
     public Task OnHandlePoolUpdateAsync(string tenantId, IUpdateInfo<RtCommunicationPool> info)
     {
         // TODO: Implement updates of pool entity.
@@ -305,7 +347,7 @@ internal class PoolService : IPoolServiceUpdates
 
     public async Task OnHandleAdapterUpdateAsync(string tenantId, IUpdateInfo<RtCommunicationAdapter> info)
     {
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant) || poolTenant == null)
+        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
             throw PoolServiceException.TenantNotFound(tenantId);
         }
@@ -316,8 +358,10 @@ internal class PoolService : IPoolServiceUpdates
             case UpdateTypes.Replace:
                 if (info.Document != null && poolTenant.AdaptersById.TryGetValue(info.Document.RtId, out var adapter))
                 {
-                    if (info.UpdateFields.Contains("attributes." + nameof(RtCommunicationAdapter.ImageName).ToCamelCase()) ||
-                        info.UpdateFields.Contains("attributes." + nameof(RtCommunicationAdapter.ImageVersion).ToCamelCase()))
+                    if (info.UpdateFields.Contains("attributes." +
+                                                   nameof(RtCommunicationAdapter.ImageName).ToCamelCase()) ||
+                        info.UpdateFields.Contains("attributes." +
+                                                   nameof(RtCommunicationAdapter.ImageVersion).ToCamelCase()))
                     {
                         await UndeployAdapterAsync(tenantId, adapter.PoolRtId, adapter.AdapterRtId);
                         await DeployAdapterAsync(tenantId, adapter.PoolRtId, adapter.AdapterRtId);
@@ -331,7 +375,8 @@ internal class PoolService : IPoolServiceUpdates
         }
     }
 
-    private PoolCommunicationAdapterDto CreatePoolAdapterDto(OctoObjectId poolRtId, string poolName, RtCommunicationAdapter rtAdapter)
+    private PoolCommunicationAdapterDto CreatePoolAdapterDto(OctoObjectId poolRtId, string poolName,
+        RtCommunicationAdapter rtAdapter)
     {
         return new PoolCommunicationAdapterDto
         {
@@ -343,6 +388,4 @@ internal class PoolService : IPoolServiceUpdates
             Version = rtAdapter.ImageVersion ?? throw PoolServiceException.ImageVersionNotSet(),
         };
     }
-
-
 }

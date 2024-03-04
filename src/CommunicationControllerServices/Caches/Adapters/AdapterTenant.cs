@@ -36,7 +36,8 @@ internal class AdapterTenant
 
         var adapters = adapterDescriptions.Select(p => new Adapter(adapterCachePublish, p)).ToArray();
         _adaptersByConnectId = new ConcurrentDictionary<string, Adapter>(
-            adapters.ToDictionary(p => p.ConnectionId, p => p));
+            adapters.Where(x=> !string.IsNullOrWhiteSpace(x.ConnectionId))
+                .ToDictionary(p => p.ConnectionId!, p => p));
         _adaptersById = new ConcurrentDictionary<OctoObjectId, Adapter>(
             adapters.ToDictionary(p => p.AdapterRtId, p => p));
         AdapterByConnectionId = new ReadOnlyDictionary<string, Adapter>(_adaptersByConnectId);
@@ -60,10 +61,40 @@ internal class AdapterTenant
     {
         if (_adaptersById.TryRemove(adapterRtId, out var adapter))
         {
-            if (_adaptersByConnectId.TryRemove(adapter.ConnectionId, out _))
+            if (!string.IsNullOrWhiteSpace(adapter.ConnectionId))
             {
-                _adapterCachePublish.PublishConfiguration(TenantId);
+                if (_adaptersByConnectId.TryRemove(adapter.ConnectionId, out _))
+                {
+                    _adapterCachePublish.PublishConfiguration(TenantId);
+                }
             }
+        }
+    }
+
+    public void UpdateConnectionId(OctoObjectId adapterRtId, string connectionId)
+    {
+        if (_adaptersById.TryGetValue(adapterRtId, out var adapter))
+        {
+            var oldConnectionId = adapter.ConnectionId;
+            adapter.SetConnectionId(connectionId);
+            
+            if (!string.IsNullOrWhiteSpace(oldConnectionId))
+            {
+                _adaptersByConnectId.TryRemove(oldConnectionId, out _);
+            }
+            _adaptersByConnectId.AddOrUpdate(connectionId, _ => adapter,
+                (_, _) => adapter);
+            _adapterCachePublish.PublishConfiguration(TenantId);
+        }
+    }
+    
+    public void RemoveConnectionId(OctoObjectId adapterRtId)
+    {
+        if (_adaptersById.TryGetValue(adapterRtId, out var adapter) && !string.IsNullOrWhiteSpace(adapter.ConnectionId))
+        {
+            _adaptersByConnectId.TryRemove(adapter.ConnectionId, out _);
+            adapter.SetConnectionId(null);
+            _adapterCachePublish.PublishConfiguration(TenantId);
         }
     }
 

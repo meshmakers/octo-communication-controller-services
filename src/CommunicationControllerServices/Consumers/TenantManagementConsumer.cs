@@ -11,8 +11,9 @@ internal class TenantManagementConsumer : IDistributedConsumer<PosUpdateTenant>,
     IDistributedConsumer<PreDeleteTenant>
 {
     private readonly ILogger<TenantManagementConsumer> _logger;
-    private readonly IPoolServiceUpdates _poolService;
-    private readonly IAdapterServiceUpdates _adapterService;
+    private readonly IPoolService _poolService;
+    private readonly IAdapterService _adapterService;
+    private readonly IConfigurationService _configurationService;
 
     /// <summary>
     ///     Constructor.
@@ -20,30 +21,30 @@ internal class TenantManagementConsumer : IDistributedConsumer<PosUpdateTenant>,
     /// <param name="logger"></param>
     /// <param name="poolService"></param>
     /// <param name="adapterService"></param>
-    public TenantManagementConsumer(ILogger<TenantManagementConsumer> logger, IPoolServiceUpdates poolService,
-        IAdapterServiceUpdates adapterService)
+    /// <param name="configurationService"></param>
+    public TenantManagementConsumer(ILogger<TenantManagementConsumer> logger, IPoolService poolService,
+        IAdapterService adapterService, IConfigurationService configurationService)
     {
         _logger = logger;
         _poolService = poolService;
         _adapterService = adapterService;
+        _configurationService = configurationService;
     }
 
     public async Task ConsumeAsync(IDistributedContext<PosUpdateTenant> context)
     {
         _logger.LogInformation("Pre update tenant received: {Text}", context.Message.TenantId);
 
-        await ReloadTenantAsync(context.Message.TenantId);
+        if (await _configurationService.IsEnabledAsync(context.Message.TenantId))
+        {
+            await _adapterService.ReloadTenantAsync(context.Message.TenantId);
+            await _poolService.ReloadTenantAsync(context.Message.TenantId);
+        }
     }
 
     public async Task ConsumeAsync(IDistributedContext<PreDeleteTenant> context)
     {
-        await ReloadTenantAsync(context.Message.TenantId);
-    }
-    
-    private async Task ReloadTenantAsync(string tenantId)
-    {
-        _logger.LogInformation("Reloading tenant '{TenantId}'", tenantId);
-        await _poolService.ReloadTenantAsync(tenantId);
-        await _adapterService.ReloadTenantAsync(tenantId);
+        await _poolService.UnloadTenantAsync(context.Message.TenantId);
+        await _adapterService.UnloadTenantAsync(context.Message.TenantId);
     }
 }

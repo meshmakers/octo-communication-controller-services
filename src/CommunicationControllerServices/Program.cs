@@ -8,7 +8,6 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Routing;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
-using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Services.Common;
 using Meshmakers.Octo.Services.Common.Cors;
@@ -92,11 +91,11 @@ try
     });
 
     builder.Services.AddSingleton<ICommunicationRepository, CommunicationRepository>();
+    builder.Services.AddSingleton<IAdapterService, AdapterService>();
+    builder.Services.AddSingleton<IPoolService, PoolService>();
     
     builder.Services.AddSingletonMultipleInterfaces<DefaultConfigurationCreatorService, IDefaultConfigurationCreatorService, IConfigurationService>();
     builder.Services.AddSingletonMultipleInterfaces<CorsPolicyProvider, ICorsPolicyProvider, CorsPolicyProvider>();
-    builder.Services.AddSingletonMultipleInterfaces<AdapterService, IAdapterService, IAdapterServiceUpdates>();
-    builder.Services.AddSingletonMultipleInterfaces<PoolService, IPoolService, IPoolServiceUpdates>();
     builder.Services.AddSingletonMultipleInterfaces<PoolHubCache, IPoolCache, IPoolCachePublish>();
     builder.Services.AddSingletonMultipleInterfaces<AdapterCache, IAdapterCache, IAdapterCachePublish>();
     

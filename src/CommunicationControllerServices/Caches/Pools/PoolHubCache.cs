@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
@@ -37,7 +38,7 @@ internal class PoolHubCache : IPoolCachePublish, IPoolCache
         PublishConfiguration(tenantId);
     }
 
-    public bool TryGetTenant(string tenantId, out PoolTenant? poolTenant)
+    public bool TryGetTenant(string tenantId, [NotNullWhen(true)] out PoolTenant? poolTenant)
     {
         return _tenantDescriptions.TryGetValue(tenantId, out poolTenant);
     }

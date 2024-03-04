@@ -69,7 +69,6 @@ public class AdapterController : ControllerBase
         return Ok(config);
     }
     
-        
     /// <summary>
     /// Enables the communication controller for a tenant
     /// </summary>

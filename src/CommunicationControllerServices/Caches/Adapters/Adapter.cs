@@ -4,42 +4,36 @@ using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages.Payloads;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 
-internal class Adapter
+internal class Adapter(
+    IAdapterCachePublish adapterCachePublish,
+    OctoObjectId adapterRtId,
+    string? connectionId,
+    AdapterConfigurationDto configuration)
 {
-    private readonly IAdapterCachePublish _adapterCachePublish;
-
-    public Adapter(IAdapterCachePublish adapterCachePublish, OctoObjectId adapterRtId, string connectionId, AdapterConfigurationDto configuration)
-    {
-        _adapterCachePublish = adapterCachePublish;
-        AdapterRtId = adapterRtId;
-        ConnectionId = connectionId;
-        Configuration = configuration;
-    }
-
     public Adapter(IAdapterCachePublish adapterCachePublish, AdapterDescription adapterHubPoolDescription)
         : this(adapterCachePublish, adapterHubPoolDescription.AdapterRtId, adapterHubPoolDescription.ConnectionId, adapterHubPoolDescription.Configuration)
     {
     }
 
-    public OctoObjectId AdapterRtId { get; }
+    public OctoObjectId AdapterRtId { get; } = adapterRtId;
 
-    public string ConnectionId { get; private set; }
-    
-    public AdapterConfigurationDto Configuration { get; private set; }
+    public string? ConnectionId { get; private set; } = connectionId;
+
+    public AdapterConfigurationDto Configuration { get; private set; } = configuration;
 
     public void UpdateConfiguration(string tenantId, AdapterConfigurationDto adapterConfigurationDto)
     {
         Configuration = adapterConfigurationDto;
-        _adapterCachePublish.PublishConfiguration(tenantId);
-    }
-
-    public void UpdateConnectionId(string connectionId)
-    {
-        ConnectionId = connectionId;
+        adapterCachePublish.PublishConfiguration(tenantId);
     }
 
     public AdapterDescription GetAdapterDescription()
     {
         return new AdapterDescription(AdapterRtId, ConnectionId, Configuration);
+    }
+    
+    public void SetConnectionId(string? connectionId)
+    {
+        ConnectionId = connectionId;
     }
 }
