@@ -30,6 +30,14 @@ internal interface ICommunicationRepository
     /// <param name="adapterRtId">Object id of communication adapter</param>
     /// <returns></returns>
     Task<RtCommunicationAdapter> GetAdapterAsync(string tenantId, OctoObjectId adapterRtId);
+    
+    /// <summary>
+    /// Get pools for a tenant
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <returns>List of pools of the tenant</returns>
+    Task<IReadOnlyCollection<RtCommunicationPool>> GetPoolsAsync(string tenantId);
+
 
     /// <summary>
     /// Get pools for a tenant by name

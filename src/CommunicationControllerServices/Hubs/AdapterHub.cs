@@ -11,7 +11,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 /// <summary>
 /// Hub for adapter
 /// </summary>
-public class AdapterHub : Hub, IAdapterHub
+internal class AdapterHub : Hub, IAdapterHub
 {
     private readonly IAdapterService _adapterService;
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
@@ -31,7 +31,7 @@ public class AdapterHub : Hub, IAdapterHub
         var tenantId = GetTenantId();
         var adapterRtId = GetAdapterRtId();
 
-        await _adapterService.SetAdapterOnlineAsync(tenantId, adapterRtId);
+        await _adapterService.SetAdapterOnlineAsync(tenantId, adapterRtId, Context.ConnectionId);
 
         await base.OnConnectedAsync();
     }
@@ -51,13 +51,11 @@ public class AdapterHub : Hub, IAdapterHub
     public async Task<AdapterConfigurationDto> RegisterAdapterAsync(OctoObjectId adapterRtId)
     {
         var tenantId = GetTenantId();
-        
+
         try
         {
-            var configurationDto = await _adapterService.RegisterAdapterAsync(tenantId, adapterRtId, Context.ConnectionId);
-
-            await _adapterService.SetAdapterOnlineAsync(tenantId, adapterRtId);
-
+            var configurationDto =
+                await _adapterService.RegisterAdapterAsync(tenantId, adapterRtId, Context.ConnectionId);
             return configurationDto;
         }
         catch (Exception e)
@@ -77,9 +75,9 @@ public class AdapterHub : Hub, IAdapterHub
             throw new InvalidOperationException("TenantId is null");
         }
 
-        await _adapterService.AdapterUnRegisteredAsync(tenantId, adapterRtId, Context.ConnectionId);
+        await _adapterService.UnregisterAsync(tenantId, adapterRtId, Context.ConnectionId);
     }
-    
+
     private string GetTenantId()
     {
         var tenantId = Context.GetHttpContext()?.GetTenantId();
@@ -91,7 +89,7 @@ public class AdapterHub : Hub, IAdapterHub
 
         return tenantId.NormalizeString();
     }
-    
+
     private OctoObjectId GetAdapterRtId()
     {
         var adapterRtId = Context.GetHttpContext()?.GetAdapterRtId();

@@ -13,8 +13,6 @@ internal class AdapterHubCallbacks : IAdapterHubCallbacks
 {
     private readonly IHubContext<AdapterHub> _adapterContext;
     private readonly IAdapterCache _adapterCache;
-    private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
-
     
     /// <summary>
     /// Constructor
@@ -30,10 +28,10 @@ internal class AdapterHubCallbacks : IAdapterHubCallbacks
     /// <inheritdoc />
     public async Task AdapterConfigurationUpdatedAsync(string tenantId, AdapterConfigurationDto adapterConfiguration)
     {
-        if (_adapterCache.TryGetTenant(tenantId, out var poolTenant) && poolTenant != null)
+        if (_adapterCache.TryGetTenant(tenantId, out var poolTenant))
         {
-            poolTenant.AdapterById.TryGetValue(adapterConfiguration.AdapterRtId, out var adapter);
-            if (adapter != null)
+            if (poolTenant.AdapterById.TryGetValue(adapterConfiguration.AdapterRtId, out var adapter)
+                && !string.IsNullOrWhiteSpace(adapter.ConnectionId))
             {
                 await _adapterContext.Clients.Client(adapter.ConnectionId)
                     .SendAsync(nameof(IAdapterHubCallbacks.AdapterConfigurationUpdatedAsync), tenantId, adapterConfiguration);

@@ -110,4 +110,9 @@ internal class CommunicationRepositoryException : Exception
     {
         return new CommunicationRepositoryException($"[{tenantId}] Failed to check if tenant exists", exception);
     }
+
+    public static Exception CommonFailedGettingPools(string tenantId, Exception exception)
+    {   
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get pools", exception);
+    }
 }

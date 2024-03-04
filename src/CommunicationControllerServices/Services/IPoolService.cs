@@ -31,14 +31,21 @@ public interface IPoolService
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolRtId">The object id of the pool runtime entity</param>
     /// <returns></returns>
-    Task<PoolConfigurationDto> GetCurrentAdapterAsync(string tenantId, OctoObjectId poolRtId);
+    Task<PoolConfigurationDto> GetPoolConfigurationAsync(string tenantId, OctoObjectId poolRtId);
     
     /// <summary>
-    /// Reloads an entire tenant
+    /// (Re)loads an entire tenant during update or during enabling 
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <returns></returns>
     Task ReloadTenantAsync(string tenantId);
+    
+    /// <summary>
+    /// Unloads an entire tenant if a tenant gets deleted or disabled.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <returns></returns>
+    Task UnloadTenantAsync(string tenantId);
     
     /// <summary>
     /// Deploys an new adapter to a pool

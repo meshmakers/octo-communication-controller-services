@@ -20,4 +20,11 @@ public interface IConfigurationService : IDefaultConfigurationCreatorService
     /// <param name="tenantId">Id of the tenant</param>
     /// <returns></returns>
     Task DisableAsync(string tenantId);
+    
+    /// <summary>
+    /// Returns true if the communication controller is enabled for a tenant
+    /// </summary>
+    /// <param name="tenantId"></param>
+    /// <returns></returns>
+    Task<bool> IsEnabledAsync(string tenantId);
 }

@@ -1,7 +1,10 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages.Payloads;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
@@ -9,12 +12,14 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapter
 internal class AdapterCache : IAdapterCachePublish, IAdapterCache
 {
     private readonly IDistributionEventHubService _distributionEventHubService;
+    private readonly IDistributedCacheService _distributedCacheService;
     private readonly ConcurrentDictionary<string, AdapterTenant> _tenantDescriptions = new();
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-    public AdapterCache(IDistributionEventHubService distributionEventHubService)
+    public AdapterCache(IDistributionEventHubService distributionEventHubService, IDistributedCacheService distributedCacheService)
     {
         _distributionEventHubService = distributionEventHubService;
+        _distributedCacheService = distributedCacheService;
     }
 
     public AdapterTenant AddOrUpdateTenant(string tenantId)
@@ -29,7 +34,7 @@ internal class AdapterCache : IAdapterCachePublish, IAdapterCache
         }
         return adapterTenant;
     }
-    
+
     public void RemoveTenant(string tenantId)
     {
         _tenantDescriptions.TryRemove(tenantId, out _);
@@ -37,7 +42,7 @@ internal class AdapterCache : IAdapterCachePublish, IAdapterCache
         PublishConfiguration(tenantId);
     }
 
-    public bool TryGetTenant(string tenantId, out AdapterTenant? adapterTenant)
+    public bool TryGetTenant(string tenantId, [NotNullWhen(true)] out AdapterTenant? adapterTenant)
     {
         return _tenantDescriptions.TryGetValue(tenantId, out adapterTenant);
     }
@@ -50,15 +55,43 @@ internal class AdapterCache : IAdapterCachePublish, IAdapterCache
             _ => new AdapterTenant(this, configuration.TenantId, configuration.Adapters.ToList()),
             (_, _) => new AdapterTenant(this, configuration.TenantId, configuration.Adapters.ToList()));
     }
+    
+    public async Task LoadConfigurationAsync(string tenantId)
+    {
+        Logger.Info("Loading AdapterCache configuration from cache for tenant id '{TenantId}'", tenantId);
+
+        var cacheStream = await _distributedCacheService.GetCacheStreamByFileNameAsync(tenantId, Constants.CacheFileName);
+        if (cacheStream != null)
+        {
+            using var reader = new StreamReader(cacheStream.Stream);
+            var adapterDescriptions = JsonSerializer.Deserialize<AdapterDescription[]>(reader.BaseStream);
+            if (adapterDescriptions != null)
+            {
+                var adapterTenant = new AdapterTenant(this, tenantId, adapterDescriptions);
+                _tenantDescriptions.AddOrUpdate(tenantId, _ => adapterTenant, (_, _) => adapterTenant);   
+            }
+        }
+    }
 
     public void PublishConfiguration(string tenantId)
+    {
+        PublishConfigurationAsync(tenantId).Wait();
+    }
+    
+
+    public async Task PublishConfigurationAsync(string tenantId)
     {
         Logger.Info("Publishing AdapterCache configuration for tenant '{TenantId}'", tenantId);
 
         if (_tenantDescriptions.TryGetValue(tenantId, out var desc))
         {
-            _distributionEventHubService.PublishAsync(new ComControllerAdapterUpdate(tenantId, desc.GetAdapterDescriptions()));
+            using MemoryStream memoryStream = new MemoryStream();
+            await JsonSerializer.SerializeAsync(memoryStream, desc.GetAdapterDescriptions());
+            await memoryStream.FlushAsync();
+            memoryStream.Position = 0;
+            await _distributedCacheService.CreateOrUpdateStreamAsync(tenantId, memoryStream, "application/json", Constants.CacheFileName);
+            
+            await _distributionEventHubService.PublishAsync(new ComControllerAdapterUpdate(tenantId, desc.GetAdapterDescriptions()));
         }
     }
-
 }
