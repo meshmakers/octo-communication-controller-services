@@ -72,6 +72,15 @@ internal class DefaultConfigurationCreatorService(
 
         using var session = await tenantContext.GetSystemSessionAsync();
         session.StartTransaction();
+        
+        // If there is a configuration version, check if we need to update the configuration
+        var configurationVersion =
+            await tenantContext.GetConfigurationAsync(session, Constants.CommunicationControllerServiceSchemaVersionKey,
+                new DefaultConfigurationVersion { Version = -1 });
+        if (configurationVersion?.Version == Constants.CommunicationControllerServiceSchemaVersionValue)
+        {
+            throw ConfigurationException.TenantAlreadyEnabled(tenantId);
+        }
 
         await ImportCkModelAsync(tenantId);
 
@@ -94,9 +103,9 @@ internal class DefaultConfigurationCreatorService(
         var configurationVersion =
             await tenantContext.GetConfigurationAsync(session, Constants.CommunicationControllerServiceSchemaVersionKey,
                 new DefaultConfigurationVersion { Version = -1 });
-        if (configurationVersion == null)
+        if (configurationVersion == null || configurationVersion.Version == -1)
         {
-            return;
+            throw ConfigurationException.TenantAlreadyDisabled(tenantId);
         }
 
         await tenantContext.DeleteConfigurationAsync(session, Constants.CommunicationControllerServiceSchemaVersionKey);

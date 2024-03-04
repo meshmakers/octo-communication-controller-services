@@ -44,9 +44,21 @@ try
     // allow environment variables to override values from other providers.
     builder.Configuration.AddEnvironmentVariables("OCTO_").AddCommandLine(args)
         .AddUserSecrets(typeof(Program).Assembly, true);
+    
+    builder.Services.AddSingleton<ICommunicationRepository, CommunicationRepository>();
+    builder.Services.AddSingleton<IAdapterService, AdapterService>();
+    builder.Services.AddSingleton<IPoolService, PoolService>();
+    
+    builder.Services.AddSingletonMultipleInterfaces<DefaultConfigurationCreatorService, IDefaultConfigurationCreatorService, IConfigurationService>();
+    builder.Services.AddSingletonMultipleInterfaces<CorsPolicyProvider, ICorsPolicyProvider>();
+    builder.Services.AddSingletonMultipleInterfaces<PoolHubCache, IPoolCache, IPoolCachePublish>();
+    builder.Services.AddSingletonMultipleInterfaces<AdapterCache, IAdapterCache, IAdapterCachePublish>();
+    
+    builder.Services.AddSingleton<IPoolHubCallbacks, PoolHubCallbacks>();
+    builder.Services.AddSingleton<IAdapterHubCallbacks, AdapterHubCallbacks>();
 
     // Add services to the container.
-
+    builder.Services.AddCors();
     builder.Services.AddControllers();
     // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
     builder.Services.AddSignalR();
@@ -89,18 +101,6 @@ try
         // options.ClientId = CommonConstants.AsserRepositoryServicesSwaggerClientId;
         // options.AppName = AssetTexts.Backend_AssetServices_UserSchema_Swagger_DisplayName;
     });
-
-    builder.Services.AddSingleton<ICommunicationRepository, CommunicationRepository>();
-    builder.Services.AddSingleton<IAdapterService, AdapterService>();
-    builder.Services.AddSingleton<IPoolService, PoolService>();
-    
-    builder.Services.AddSingletonMultipleInterfaces<DefaultConfigurationCreatorService, IDefaultConfigurationCreatorService, IConfigurationService>();
-    builder.Services.AddSingletonMultipleInterfaces<CorsPolicyProvider, ICorsPolicyProvider, CorsPolicyProvider>();
-    builder.Services.AddSingletonMultipleInterfaces<PoolHubCache, IPoolCache, IPoolCachePublish>();
-    builder.Services.AddSingletonMultipleInterfaces<AdapterCache, IAdapterCache, IAdapterCachePublish>();
-    
-    builder.Services.AddSingleton<IPoolHubCallbacks, PoolHubCallbacks>();
-    builder.Services.AddSingleton<IAdapterHubCallbacks, AdapterHubCallbacks>();
     
     var app = builder.Build();
 
@@ -110,6 +110,8 @@ try
       //  app.UseDeveloperExceptionPage();
     }
 
+    app.UseCors();
+    
     app.UseHttpsRedirection();
 
     app.UseAuthorization();

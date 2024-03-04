@@ -11,9 +11,9 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.SystemApi.v1.C
 [ApiController]
 [Route("system/v{version:apiVersion}/[controller]")]
 [ApiVersion("1.0")]
-public class CommunicationControllerController: ControllerBase
+public class CommunicationController: ControllerBase
 {
-    private readonly ILogger<CommunicationControllerController> _logger;
+    private readonly ILogger<CommunicationController> _logger;
     private readonly IConfigurationService _configurationService;
 
     /// <summary>
@@ -21,7 +21,7 @@ public class CommunicationControllerController: ControllerBase
     /// </summary>
     /// <param name="logger"></param>
     /// <param name="configurationService"></param>
-    public CommunicationControllerController(ILogger<CommunicationControllerController> logger, IConfigurationService configurationService)
+    public CommunicationController(ILogger<CommunicationController> logger, IConfigurationService configurationService)
     {
         _logger = logger;
         _configurationService = configurationService;
@@ -41,9 +41,9 @@ public class CommunicationControllerController: ControllerBase
             await _configurationService.EnableAsync(tenantId);
             return NoContent();
         }
-        catch (TenantException e)
+        catch (ConfigurationException e)
         {
-            return Conflict(e.Message);
+            return BadRequest(e.Message);
         }
     }
     
@@ -61,9 +61,9 @@ public class CommunicationControllerController: ControllerBase
             await _configurationService.DisableAsync(tenantId);
             return NoContent();
         }
-        catch (TenantException e)
+        catch (ConfigurationException e)
         {
-            return Conflict(e.Message);
+            return BadRequest(e.Message);
         }
     }
 }

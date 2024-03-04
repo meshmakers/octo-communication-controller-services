@@ -5,15 +5,15 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
 internal class AdapterServiceException : Exception
 {
-    public AdapterServiceException()
+    private AdapterServiceException()
     {
     }
 
-    public AdapterServiceException(string message) : base(message)
+    private AdapterServiceException(string message) : base(message)
     {
     }
 
-    public AdapterServiceException(string message, Exception inner) : base(message, inner)
+    private AdapterServiceException(string message, Exception inner) : base(message, inner)
     {
     }
     
@@ -34,6 +34,11 @@ internal class AdapterServiceException : Exception
     internal static Exception AdapterNotLoaded(string tenantId, OctoObjectId adapterRtId)
     {
         return new AdapterServiceException($"[{tenantId}] Adapter '{adapterRtId}' not loaded.");
+    }
+
+    public static Exception TenantNotEnabled(string tenantId)
+    {
+        return new AdapterServiceException($"[{tenantId}] Tenant not enabled.");
     }
 }
 

@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -25,7 +26,7 @@ public class AdapterController : ControllerBase
     /// <param name="logger">Logging object</param>
     /// <param name="communicationRepository"></param>
     /// <param name="adapterService">Adapter management service instance</param>
-    internal AdapterController(ILogger<AdapterController> logger, ICommunicationRepository communicationRepository, IAdapterService adapterService)
+    public AdapterController(ILogger<AdapterController> logger, ICommunicationRepository communicationRepository, IAdapterService adapterService)
     {
         _logger = logger;
         _communicationRepository = communicationRepository;
@@ -70,12 +71,12 @@ public class AdapterController : ControllerBase
     }
     
     /// <summary>
-    /// Enables the communication controller for a tenant
+    /// Updates the configuration at an adapter
     /// </summary>
     /// <param name="tenantId">The id of the tenant.</param>
     /// <param name="adapterRtId">The id of the adapter.</param>
     /// <returns></returns>
-    [HttpPost("update")]
+    [HttpPost("{adapterRtId}/update")]
     //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
     public async Task<IActionResult> Update([Required] string tenantId, [Required] OctoObjectId adapterRtId)
     {
@@ -84,7 +85,7 @@ public class AdapterController : ControllerBase
             await _adapterService.UpdateAdapterConfigurationAsync(tenantId, adapterRtId);
             return NoContent();
         }
-        catch (AdapterServiceException e)
+        catch (AdapterHubCallbackException e)
         {
             return BadRequest(e.Message);
         }

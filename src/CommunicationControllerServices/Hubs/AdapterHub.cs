@@ -31,9 +31,17 @@ internal class AdapterHub : Hub, IAdapterHub
         var tenantId = GetTenantId();
         var adapterRtId = GetAdapterRtId();
 
-        await _adapterService.SetAdapterOnlineAsync(tenantId, adapterRtId, Context.ConnectionId);
+        try
+        {
+            await _adapterService.SetAdapterOnlineAsync(tenantId, adapterRtId, Context.ConnectionId);
 
-        await base.OnConnectedAsync();
+            await base.OnConnectedAsync();
+        }
+        catch (AdapterServiceException e)
+        {
+            Logger.Error(e, e.Message);
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -42,9 +50,17 @@ internal class AdapterHub : Hub, IAdapterHub
         var tenantId = GetTenantId();
         var adapterRtId = GetAdapterRtId();
 
-        await _adapterService.SetAdapterOfflineAsync(tenantId, adapterRtId);
+        try
+        {
+            await _adapterService.SetAdapterOfflineAsync(tenantId, adapterRtId);
 
-        await base.OnDisconnectedAsync(exception);
+            await base.OnDisconnectedAsync(exception);
+        }
+        catch (AdapterServiceException e)
+        {
+            Logger.Error(e, e.Message);
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -58,6 +74,11 @@ internal class AdapterHub : Hub, IAdapterHub
                 await _adapterService.RegisterAdapterAsync(tenantId, adapterRtId, Context.ConnectionId);
             return configurationDto;
         }
+        catch (AdapterServiceException e)
+        {
+            Logger.Error(e, e.Message);
+            throw;
+        }
         catch (Exception e)
         {
             Logger.Error(e, "Cannot register adapter");
@@ -68,14 +89,22 @@ internal class AdapterHub : Hub, IAdapterHub
     /// <inheritdoc />
     public async Task UnRegisterAdapterAsync(OctoObjectId adapterRtId)
     {
-        var tenantId = Context.GetHttpContext()?.GetTenantId();
-        if (tenantId == null)
-        {
-            Context.Abort();
-            throw new InvalidOperationException("TenantId is null");
-        }
+        var tenantId = GetTenantId();
 
-        await _adapterService.UnregisterAsync(tenantId, adapterRtId, Context.ConnectionId);
+        try
+        {
+            await _adapterService.UnregisterAsync(tenantId, adapterRtId, Context.ConnectionId);
+        }
+        catch (AdapterServiceException e)
+        {
+            Logger.Error(e, e.Message);
+            throw;
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e, "Cannot unregister adapter");
+            throw;
+        }
     }
 
     private string GetTenantId()

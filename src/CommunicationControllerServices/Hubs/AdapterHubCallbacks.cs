@@ -36,6 +36,11 @@ internal class AdapterHubCallbacks : IAdapterHubCallbacks
                 await _adapterContext.Clients.Client(adapter.ConnectionId)
                     .SendAsync(nameof(IAdapterHubCallbacks.AdapterConfigurationUpdatedAsync), tenantId, adapterConfiguration);
             }
+            else
+            {
+                throw AdapterHubCallbackException.AdapterNotOnline(tenantId, adapterConfiguration.AdapterRtId);
+            }
+                
         }
     }
 }
