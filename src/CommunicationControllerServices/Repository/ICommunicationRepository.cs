@@ -6,7 +6,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 /// <summary>
 /// Repository for pool related operations
 /// </summary>
-internal interface ICommunicationRepository
+public interface ICommunicationRepository
 {
     /// <summary>
     /// Get all communication adapter from a pool

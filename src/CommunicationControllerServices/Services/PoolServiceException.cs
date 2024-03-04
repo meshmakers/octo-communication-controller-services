@@ -4,15 +4,15 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
 internal class PoolServiceException : Exception
 {
-    public PoolServiceException()
+    private PoolServiceException()
     {
     }
 
-    public PoolServiceException(string message) : base(message)
+    private PoolServiceException(string message) : base(message)
     {
     }
 
-    public PoolServiceException(string message, Exception inner) : base(message, inner)
+    private PoolServiceException(string message, Exception inner) : base(message, inner)
     {
     }
 

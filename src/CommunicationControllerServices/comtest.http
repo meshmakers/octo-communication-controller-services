@@ -1,0 +1,18 @@
+## System
+
+### Enables the communication for the given tenant
+POST  {{baseUrl}}/system/v1/communication/enable?tenantId=meshtest
+
+### Disables the communication for the given tenant
+POST  {{baseUrl}}/system/v1/communication/disable?tenantId=meshtest
+
+## Tenant
+
+### Gets all adapters of a tenant
+GET {{baseUrl}}/meshtest/v1/adapter
+
+### Gets the configuration of an adapter
+GET {{baseUrl}}/meshtest/v1/adapter/65d5c447b420da3fb12381bc
+
+### Deploys configuration updates stored in database to the adapter
+POST {{baseUrl}}/meshtest/v1/adapter/65d5c447b420da3fb12381bc/update
