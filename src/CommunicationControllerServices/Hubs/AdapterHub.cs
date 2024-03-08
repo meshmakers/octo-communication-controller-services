@@ -14,15 +14,18 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 internal class AdapterHub : Hub, IAdapterHub
 {
     private readonly IAdapterService _adapterService;
+    private readonly IPipelineDebugService _pipelineDebugService;
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
     /// <summary>
     /// Constructor
     /// </summary>
     /// <param name="adapterService">The responsible adapter service</param>
-    public AdapterHub(IAdapterService adapterService)
+    /// <param name="pipelineDebugService">The responsible pipeline debug service</param>
+    public AdapterHub(IAdapterService adapterService, IPipelineDebugService pipelineDebugService)
     {
         _adapterService = adapterService;
+        _pipelineDebugService = pipelineDebugService;
     }
 
     /// <inheritdoc />
@@ -103,6 +106,21 @@ internal class AdapterHub : Hub, IAdapterHub
         catch (Exception e)
         {
             Logger.Error(e, "Cannot unregister adapter");
+            throw;
+        }
+    }
+
+    public async Task SendDebugDataAsync(OctoObjectId adapterRtId, OctoObjectId pipelineRtId, string debugData)
+    {
+        var tenantId = GetTenantId();
+
+        try
+        {
+            await _pipelineDebugService.CacheDebugInfo(tenantId, adapterRtId, pipelineRtId, debugData);
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e, "Cannot cache debug data");
             throw;
         }
     }

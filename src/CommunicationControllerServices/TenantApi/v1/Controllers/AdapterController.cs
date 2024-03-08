@@ -76,13 +76,13 @@ public class AdapterController : ControllerBase
     /// <param name="tenantId">The id of the tenant.</param>
     /// <param name="adapterRtId">The id of the adapter.</param>
     /// <returns></returns>
-    [HttpPost("{adapterRtId}/update")]
+    [HttpPost("{adapterRtId}/deployUpdate")]
     //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
-    public async Task<IActionResult> Update([Required] string tenantId, [Required] OctoObjectId adapterRtId)
+    public async Task<IActionResult> DeployUpdate([Required] string tenantId, [Required] OctoObjectId adapterRtId)
     {
         try
         {
-            await _adapterService.UpdateAdapterConfigurationAsync(tenantId, adapterRtId);
+            await _adapterService.DeployAdapterConfigurationAsync(tenantId, adapterRtId);
             return NoContent();
         }
         catch (AdapterHubCallbackException e)

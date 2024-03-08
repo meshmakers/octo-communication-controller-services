@@ -48,6 +48,7 @@ try
     builder.Services.AddSingleton<ICommunicationRepository, CommunicationRepository>();
     builder.Services.AddSingleton<IAdapterService, AdapterService>();
     builder.Services.AddSingleton<IPoolService, PoolService>();
+    builder.Services.AddSingleton<IPipelineDebugService, PipelineDebugService>();
     
     builder.Services.AddSingletonMultipleInterfaces<DefaultConfigurationCreatorService, IDefaultConfigurationCreatorService, IConfigurationService>();
     builder.Services.AddSingletonMultipleInterfaces<CorsPolicyProvider, ICorsPolicyProvider>();

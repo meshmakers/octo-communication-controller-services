@@ -80,7 +80,7 @@ internal class AdapterService(
             {
                 throw AdapterServiceException.TenantNotEnabled(tenantId);
             }
-            
+
             var adapter = await communicationRepository.GetAdapterAsync(tenantId, adapterRtId);
 
             var dataPipelines = await communicationRepository.GetDataPipelinesAsync(tenantId, adapterRtId);
@@ -91,6 +91,7 @@ internal class AdapterService(
                     var dataPipelineConfiguration = new DataPipelineConfigurationDto(
                         dataPipeline.Name,
                         dataPipeline.RtId,
+                        false,
                         dataPipeline.AdapterPipelineConfiguration!
                     );
                     return dataPipelineConfiguration;
@@ -121,8 +122,10 @@ internal class AdapterService(
                 adapterTenant.UpdateConnectionId(adapterRtId, connectionId);
                 await SetAdapterCommunicationStateAsync(tenantId, adapter.AdapterRtId, RtCommunicationStateEnum.Online);
             }
+
             return;
         }
+
         throw AdapterServiceException.TenantNotEnabled(tenantId);
     }
 
@@ -138,14 +141,16 @@ internal class AdapterService(
                 adapterTenant.RemoveConnectionId(adapter.AdapterRtId);
                 await SetAdapterCommunicationStateAsync(tenantId, adapterRtId, RtCommunicationStateEnum.Offline);
             }
+
             return;
         }
+
         throw AdapterServiceException.TenantNotEnabled(tenantId);
     }
 
-    public async Task UpdateAdapterConfigurationAsync(string tenantId, OctoObjectId adapterRtId)
+    public async Task DeployAdapterConfigurationAsync(string tenantId, OctoObjectId adapterRtId)
     {
-        Logger.Info("[{TenantId}] adapter rt id '{AdapterRtId}' update configuration",
+        Logger.Info("[{TenantId}] AdapterRtId='{AdapterRtId}' deploy configuration",
             tenantId, adapterRtId);
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
@@ -159,12 +164,54 @@ internal class AdapterService(
                     adapter.UpdateConfiguration(tenantId, configuration);
                     await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, configuration);
                 }
+
+                return;
             }
         }
-        else
+
+        throw AdapterServiceException.AdapterNotLoaded(tenantId, adapterRtId);
+    }
+
+    public async Task DeployPipelineAsync(string tenantId, OctoObjectId adapterRtId, OctoObjectId pipelineRtId)
+    {
+        Logger.Info(
+            "[{TenantId}] AdapterRtId='{AdapterRtId}', PipelineRtId='{PipelineRtId}' deploy debug configuration",
+            tenantId, adapterRtId, pipelineRtId);
+
+        if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
-            throw AdapterServiceException.AdapterNotLoaded(tenantId, adapterRtId);
+            if (adapterTenant.AdapterById.TryGetValue(adapterRtId, out var adapter))
+            {
+                var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtId);
+                var pipeline = await communicationRepository.GetDataPipelineAsync(tenantId, pipelineRtId);
+                if (pipeline == null)
+                {
+                    throw AdapterServiceException.PipelineNotFound(tenantId, pipelineRtId);
+                }
+
+                configuration.DataPipelines ??= new List<DataPipelineConfigurationDto>();
+                var deployedPipeline = configuration.DataPipelines.FirstOrDefault(p => p.DataPipelineRtId == pipelineRtId);
+                if (deployedPipeline != null)
+                {
+                    configuration.DataPipelines.Remove(deployedPipeline);
+                }
+                configuration.DataPipelines.Add(new DataPipelineConfigurationDto(
+                    pipeline.Name,
+                    pipeline.RtId,
+                    true,
+                    pipeline.AdapterPipelineConfiguration!
+                ));
+
+                if (!configuration.Equals(adapter.Configuration))
+                {
+                    await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, configuration);
+                }
+
+                return;
+            }
         }
+
+        throw AdapterServiceException.AdapterNotLoaded(tenantId, adapterRtId);
     }
 
     public async Task ReloadTenantAsync(string tenantId)

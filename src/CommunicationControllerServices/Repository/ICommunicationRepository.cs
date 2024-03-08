@@ -121,4 +121,12 @@ public interface ICommunicationRepository
     /// <param name="adapterRtId">Object identifier of communication adapter</param>
     /// <returns></returns>
     Task<IReadOnlyCollection<RtDataPipeline>> GetDataPipelinesAsync(string tenantId, OctoObjectId adapterRtId);
+    
+    /// <summary>
+    /// Get the data pipeline by id
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="pipelineRtId">Object identifier of data pipeline</param>
+    /// <returns></returns>
+    Task<RtDataPipeline?> GetDataPipelineAsync(string tenantId, OctoObjectId pipelineRtId);
 }
