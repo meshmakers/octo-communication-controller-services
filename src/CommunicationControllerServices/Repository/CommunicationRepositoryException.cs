@@ -111,8 +111,13 @@ internal class CommunicationRepositoryException : Exception
         return new CommunicationRepositoryException($"[{tenantId}] Failed to check if tenant exists", exception);
     }
 
-    public static Exception CommonFailedGettingPools(string tenantId, Exception exception)
+    internal static Exception CommonFailedGettingPools(string tenantId, Exception exception)
     {   
         return new CommunicationRepositoryException($"[{tenantId}] Failed to get pools", exception);
+    }
+
+    internal static Exception CommonFailedGettingPipeline(string tenantId, OctoObjectId pipelineRtId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get pipeline '{pipelineRtId}'", exception);
     }
 }

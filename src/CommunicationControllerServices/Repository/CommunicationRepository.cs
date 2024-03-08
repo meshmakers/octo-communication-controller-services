@@ -448,4 +448,22 @@ internal class CommunicationRepository : ICommunicationRepository
             throw CommunicationRepositoryException.CommonFailedGettingAdapter(tenantId, adapterRtId, e);
         }
     }
+
+    public async Task<RtDataPipeline?> GetDataPipelineAsync(string tenantId, OctoObjectId pipelineRtId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var dataPipeline = await tenantRepository.GetRtEntityByRtIdAsync<RtDataPipeline>(session, pipelineRtId);
+            return dataPipeline;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingPipeline(tenantId, pipelineRtId, e);
+        }
+    }
 }

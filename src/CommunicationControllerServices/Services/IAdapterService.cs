@@ -66,10 +66,19 @@ public interface IAdapterService
     Task SetAdapterOfflineAsync(string tenantId, OctoObjectId adapterRtId);
     
     /// <summary>
-    /// Updates an adapter configuration
+    /// Deployes the db version  an adapter configuration
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="adapterRtId">Object Id of adapter</param>
     /// <returns></returns>
-    Task UpdateAdapterConfigurationAsync(string tenantId, OctoObjectId adapterRtId);
+    Task DeployAdapterConfigurationAsync(string tenantId, OctoObjectId adapterRtId);
+
+    /// <summary>
+    /// Deploys a pipeline to the given adapter
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="adapterRtId">Object id of adapter</param>
+    /// <param name="pipelineRtId">Object id of pipeline</param>
+    /// <returns></returns>
+    Task DeployPipelineAsync(string tenantId, OctoObjectId adapterRtId, OctoObjectId pipelineRtId);
 }

@@ -36,9 +36,14 @@ internal class AdapterServiceException : Exception
         return new AdapterServiceException($"[{tenantId}] Adapter '{adapterRtId}' not loaded.");
     }
 
-    public static Exception TenantNotEnabled(string tenantId)
+    internal static Exception TenantNotEnabled(string tenantId)
     {
         return new AdapterServiceException($"[{tenantId}] Tenant not enabled.");
+    }
+
+    internal static Exception PipelineNotFound(string tenantId, OctoObjectId pipelineRtId)
+    {
+        return new AdapterServiceException($"[{tenantId}] Pipeline '{pipelineRtId}' not found."); 
     }
 }
 
