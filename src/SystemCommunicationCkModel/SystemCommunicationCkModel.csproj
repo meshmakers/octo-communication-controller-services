@@ -8,7 +8,7 @@
         <RootNamespace>Meshmakers.Octo.ConstructionKit.Models.System.Communication</RootNamespace>
         <Configurations>Debug;Release;DebugL</Configurations>
         <Platforms>AnyCPU</Platforms>
-        <OctoCompileCkModel Condition="'$(Configuration)'=='Release'">false</OctoCompileCkModel>
+        <OctoPublishCkModel>true</OctoPublishCkModel>
     </PropertyGroup>
 
     <ItemGroup>
@@ -28,5 +28,9 @@
             <PackagePath />
             <Link>LICENSE</Link>
         </None>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ConstructionKitFolder Visible="false" Include="$(MSBuildProjectDirectory)\ConstructionKit"/>
     </ItemGroup>
 </Project>
