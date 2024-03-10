@@ -4,7 +4,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.ConstructionKit.Generated.System.Communication.v1;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v1;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repository;
 using NLog;
 

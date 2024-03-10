@@ -1,7 +1,7 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.ConstructionKit.Generated.System.Communication.v1;
-using Meshmakers.Octo.ConstructionKit.Models.System.ConstructionKit.Generated.System.v1;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v1;
+using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v1;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
