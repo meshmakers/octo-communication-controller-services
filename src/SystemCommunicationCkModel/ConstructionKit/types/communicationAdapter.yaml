@@ -4,26 +4,26 @@ types:
   derivedFromCkTypeId: System/Entity
   enableChangeStreamPreAndPostImages: true
   attributes:
-  - id: System.Communication/LastSeen
+  - id: ${thisModel}/LastSeen
     name: LastSeen
     isOptional: true
-  - id: System.Communication/CommunicationState
+  - id: ${thisModel}/CommunicationState
     name: CommunicationState
-  - id: System.Communication/ConfigurationState
+  - id: ${thisModel}/ConfigurationState
     name: ConfigurationState
-  - id: System.Communication/DeploymentState
+  - id: ${thisModel}/DeploymentState
     name: DeploymentState
-  - id: System.Communication/AdapterType
+  - id: ${thisModel}/AdapterType
     name: Type    
-  - id: System.Communication/Deployment.ImageName
+  - id: ${thisModel}/Deployment.ImageName
     name: ImageName
-  - id: System.Communication/Deployment.ImageVersion
+  - id: ${thisModel}/Deployment.ImageVersion
     name: ImageVersion
   - id: System/Name
     name: Name
-  - id: System.Communication/AdapterConfiguration
+  - id: ${thisModel}/AdapterConfiguration
     name: Configuration
     isOptional: true    
   associations:
   - id: System/ParentChild
-    targetCkTypeId: System.Communication/CommunicationPool    
+    targetCkTypeId: ${thisModel}/CommunicationPool    

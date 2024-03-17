@@ -4,13 +4,13 @@ types:
   derivedFromCkTypeId: System/Entity
   isFinal: true
   attributes:
-  - id: System.Communication/LastSeen
+  - id: ${thisModel}/LastSeen
     name: LastSeen
-  - id: System.Communication/CommunicationState
+  - id: ${thisModel}/CommunicationState
     name: CommunicationState
-  - id: System.Communication/ConfigurationState
+  - id: ${thisModel}/ConfigurationState
     name: ConfigurationState
-  - id: System.Communication/DeploymentState
+  - id: ${thisModel}/DeploymentState
     name: DeploymentState
   - id: System/Name
     name: Name
