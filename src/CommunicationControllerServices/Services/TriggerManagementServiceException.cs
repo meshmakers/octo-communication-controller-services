@@ -1,0 +1,29 @@
+namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+
+/// <summary>
+/// Exception thrown by the trigger management service
+/// </summary>
+public class TriggerManagementServiceException : Exception
+{
+    private TriggerManagementServiceException()
+    {
+    }
+
+    private TriggerManagementServiceException(string message) : base(message)
+    {
+    }
+
+    private TriggerManagementServiceException(string message, Exception inner) : base(message, inner)
+    {
+    }
+
+    internal static Exception UpdateScheduleFailed(string tenantId, Exception exception)
+    {
+        return new TriggerManagementServiceException($"Failed to update schedule for tenant {tenantId}", exception);
+    }
+
+    internal static Exception RemoveScheduleFailed(string tenantId, Exception exception)
+    {
+        return new TriggerManagementServiceException($"Failed to remove schedule for tenant {tenantId}", exception);
+    }
+}
