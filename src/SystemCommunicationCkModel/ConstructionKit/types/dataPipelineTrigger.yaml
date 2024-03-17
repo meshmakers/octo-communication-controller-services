@@ -1,0 +1,19 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+types:
+  - typeId: DataPipelineTrigger
+    derivedFromCkTypeId: System/Entity
+    isFinal: false
+    isAbstract: false
+    attributes:
+      - id: System/Enabled
+        name: Enabled
+      - id: System.Bot/CronExpression
+        name: CronExpression
+      - id: System/Name
+        name: Name
+      - id: System/Description
+        name: Description
+        isOptional: true
+    associations:
+      - id: ${thisModel}/Triggers
+        targetCkTypeId: ${thisModel}/DataPipeline

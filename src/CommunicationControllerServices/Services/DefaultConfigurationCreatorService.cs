@@ -1,7 +1,6 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v1;
-using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v1;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
@@ -10,6 +9,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
 internal class DefaultConfigurationCreatorService(
     ILogger<DefaultConfigurationCreatorService> logger,
+    ITriggerManagementService triggerManagementService,
     ISystemContext systemContext,
     IPoolService poolService,
     IAdapterCachePublish adapterCachePublish,
@@ -20,14 +20,8 @@ internal class DefaultConfigurationCreatorService(
     {
         // Do nothing if the system tenant is not existing.
         // Identity Service is creating the system tenant currently.
-        if (!await systemContext.IsSystemTenantExistingAsync())
-        {
-            return;
-        }
-
-        // That means that the system tenant database is existing but (currently) not valid.
         // We wait for a PosTenantCreated event to create the default configuration.
-        if (!await systemContext.IsCkModelExistingAsync(SystemCkIds.ModelId))
+        if (!await systemContext.IsSystemTenantExistingAsync())
         {
             return;
         }
@@ -156,11 +150,15 @@ internal class DefaultConfigurationCreatorService(
 
         await adapterService.ReloadTenantAsync(tenantId);
         await poolService.ReloadTenantAsync(tenantId);
+
+        await triggerManagementService.UpdateScheduleAsync(tenantId);
     }
 
     private async Task StopTenantAsync(string tenantId)
     {
         logger.LogInformation("Unloading tenant '{TenantId}'", tenantId);
+
+        await triggerManagementService.RemoveScheduleAsync(tenantId);
 
         await adapterService.UnloadTenantAsync(tenantId);
         await poolService.UnloadTenantAsync(tenantId);

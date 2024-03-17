@@ -20,4 +20,4 @@ types:
         isOptional: true
     associations:
       - id: System/ParentChild
-        targetCkTypeId: System.Communication/CommunicationAdapter
+        targetCkTypeId: ${thisModel}/CommunicationAdapter
