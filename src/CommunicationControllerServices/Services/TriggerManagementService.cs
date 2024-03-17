@@ -28,18 +28,29 @@ internal class TriggerManagementService : ITriggerManagementService
     
     public async Task RemoveScheduleAsync(string tenantId)
     {
-        var scheduleGroup = CreateScheduleGroup(tenantId);
-        await _removeRecurringJobsByScheduleGroupCommandClient.GetResponse<GenericCommandResponse>(new RemoveRecurringJobsByScheduleGroupRequest(scheduleGroup));
+        _logger.LogInformation("Removing triggers of tenant '{TenantId}'", tenantId);
+
+        try
+        {
+            var scheduleGroup = CreateScheduleGroup(tenantId);
+            await _removeRecurringJobsByScheduleGroupCommandClient.GetResponse<GenericCommandResponse>(new RemoveRecurringJobsByScheduleGroupRequest(scheduleGroup));
+        
+            _logger.LogInformation("Removal of triggers of tenant '{TenantId}' completed", tenantId);
+        }
+        catch (Exception e)
+        {
+            throw TriggerManagementServiceException.RemoveScheduleFailed(tenantId, e);
+        }
     }
 
     public async Task UpdateScheduleAsync(string tenantId)
     {
+        _logger.LogInformation("Loading triggers of tenant '{TenantId}'", tenantId);
+
         var scheduleGroup = CreateScheduleGroup(tenantId);
         await RemoveScheduleAsync(tenantId);
 
-        _logger.LogInformation("Loading triggers of tenant '{TenantId}'", tenantId);
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
-
         using var session = await tenantRepository.GetSessionAsync();
 
         try
@@ -70,14 +81,13 @@ internal class TriggerManagementService : ITriggerManagementService
                         rtDataPipelineTrigger.Description ?? rtDataPipelineTrigger.Name,
                         SchedulingMissedEventPolicy.Skip);
                     await _distributionEventHubService.ScheduleRecurringSendAsync(executePipeline,
-                        "queue:pipelineTriggers", recurringSchedulingOptions);
+                        QueueNames.PipelineTriggerQueue, recurringSchedulingOptions);
                 }
             }
         }
         catch (Exception e)
         {
-            Console.WriteLine(e);
-            throw;
+            throw TriggerManagementServiceException.UpdateScheduleFailed(tenantId, e);
         }
 
         _logger.LogInformation("Startup of tenant '{TenantId}' completed", tenantId);

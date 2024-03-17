@@ -11,6 +11,7 @@ using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Services.Common;
 using Meshmakers.Octo.Services.Common.Cors;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Commands;
 using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Meshmakers.Octo.Services.Swagger.Configuration;
@@ -49,8 +50,9 @@ try
     builder.Services.AddSingleton<IAdapterService, AdapterService>();
     builder.Services.AddSingleton<IPoolService, PoolService>();
     builder.Services.AddSingleton<IPipelineDebugService, PipelineDebugService>();
+    builder.Services.AddTransient<ITriggerManagementService, TriggerManagementService>();
     
-    builder.Services.AddSingletonMultipleInterfaces<DefaultConfigurationCreatorService, IDefaultConfigurationCreatorService, IConfigurationService>();
+    builder.Services.AddScopedMultipleInterfaces<DefaultConfigurationCreatorService, IDefaultConfigurationCreatorService, IConfigurationService>();
     builder.Services.AddSingletonMultipleInterfaces<CorsPolicyProvider, ICorsPolicyProvider>();
     builder.Services.AddSingletonMultipleInterfaces<PoolHubCache, IPoolCache, IPoolCachePublish>();
     builder.Services.AddSingletonMultipleInterfaces<AdapterCache, IAdapterCache, IAdapterCachePublish>();
@@ -69,6 +71,8 @@ try
     builder.Services.AddOctoServiceInfrastructure("CommunicationControllerServices",
         c =>
         {
+            c.AddCommandClient<RemoveRecurringJobsByScheduleGroupRequest>(QueueNames.RemoveRecurringJobsByScheduleGroupCommand);
+            
             c.AddBroadcastEventConsumer<ComControllerAdapterUpdateConsumer, ComControllerAdapterUpdate>();
             c.AddBroadcastEventConsumer<ComControllerPoolUpdateConsumer, ComControllerPoolUpdate>();
             

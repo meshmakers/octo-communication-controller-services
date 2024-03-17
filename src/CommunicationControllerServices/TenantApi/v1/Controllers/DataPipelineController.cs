@@ -2,13 +2,12 @@ using System.ComponentModel.DataAnnotations;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.Services.Common.ApiErrors;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
 
 /// <summary>
-/// Manages adapter configuration
+/// Manages data pipelines
 /// </summary>
 [ApiController]
 [Route("{tenantId:tenantId}/v{version:apiVersion}/[controller]")]
