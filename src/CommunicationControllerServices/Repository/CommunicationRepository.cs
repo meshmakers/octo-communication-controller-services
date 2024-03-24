@@ -429,7 +429,7 @@ internal class CommunicationRepository : ICommunicationRepository
 
             var multipleOriginResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtAdapter, RtPipeline>(
                 session,
-                new[] { adapterRtEntityId.RtId }, new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCommunicationCkIds.Executes),
+                new[] { adapterRtEntityId.RtId }, new CkId<CkAssociationRoleId>(SystemCommunicationCkIds.ModelId, SystemCommunicationCkIds.Executes),
                 GraphDirections.Inbound, null, DataQueryOperation.Create());
 
             await session.CommitTransactionAsync();
