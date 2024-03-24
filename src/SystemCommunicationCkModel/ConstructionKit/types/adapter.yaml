@@ -12,8 +12,10 @@ types:
       name: Type
     - id: ${thisModel}/Deployment.ImageName
       name: ImageName
+      isOptional: true
     - id: ${thisModel}/Deployment.ImageVersion
       name: ImageVersion
+      isOptional: true
     - id: ${thisModel}/AdapterConfiguration
       name: Configuration
       isOptional: true  
