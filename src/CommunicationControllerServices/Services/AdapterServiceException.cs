@@ -17,23 +17,23 @@ internal class AdapterServiceException : Exception
     {
     }
     
-    internal static Exception CommonFailedSetAdapterDeploymentState(string tenantId, OctoObjectId adapterRtId, RtDeploymentStateEnum deploymentState, Exception exception)
+    internal static Exception CommonFailedSetAdapterDeploymentState(string tenantId, RtEntityId adapterRtEntityId, RtDeploymentStateEnum deploymentState, Exception exception)
     {
-        return new AdapterServiceException($"[{tenantId}] Failed to set adapter '{adapterRtId}' deployment state to '{deploymentState}'", exception);
+        return new AdapterServiceException($"[{tenantId}] Failed to set adapter '{adapterRtEntityId}' deployment state to '{deploymentState}'", exception);
     }
-    internal static Exception CommonFailedSetAdapterCommunicationState(string tenantId, OctoObjectId adapterRtId, RtCommunicationStateEnum communicationState, Exception exception)
+    internal static Exception CommonFailedSetAdapterCommunicationState(string tenantId, RtEntityId adapterRtEntityId, RtCommunicationStateEnum communicationState, Exception exception)
     {
-        return new AdapterServiceException($"[{tenantId}] Failed to set adapter '{adapterRtId}' communication state to '{communicationState}'", exception);
-    }
-
-    internal static Exception CommonFailedCannotLoadAdapterConfiguration(string tenantId, OctoObjectId adapterRtId, Exception exception)
-    {
-        return new AdapterServiceException($"[{tenantId}] Failed to load adapter '{adapterRtId}' configuration", exception);
+        return new AdapterServiceException($"[{tenantId}] Failed to set adapter '{adapterRtEntityId}' communication state to '{communicationState}'", exception);
     }
 
-    internal static Exception AdapterNotLoaded(string tenantId, OctoObjectId adapterRtId)
+    internal static Exception CommonFailedCannotLoadAdapterConfiguration(string tenantId, RtEntityId adapterRtEntityId, Exception exception)
     {
-        return new AdapterServiceException($"[{tenantId}] Adapter '{adapterRtId}' not loaded.");
+        return new AdapterServiceException($"[{tenantId}] Failed to load adapter '{adapterRtEntityId}' configuration", exception);
+    }
+
+    internal static Exception AdapterNotLoaded(string tenantId, RtEntityId adapterRtEntityId)
+    {
+        return new AdapterServiceException($"[{tenantId}] Adapter '{adapterRtEntityId}' not loaded.");
     }
 
     internal static Exception TenantNotEnabled(string tenantId)

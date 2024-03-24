@@ -41,9 +41,9 @@ internal class PoolServiceException : Exception
         return new PoolServiceException($"[{tenantId}] Pool '{poolName}' not found");
     }
 
-    internal static Exception AdapterNotFound(string tenantId, OctoObjectId adapterRtId)
+    internal static Exception AdapterNotFound(string tenantId, RtEntityId adapterRtEntityId)
     {
-        return new PoolServiceException($"[{tenantId}] Adapter '{adapterRtId}' not found");
+        return new PoolServiceException($"[{tenantId}] Adapter '{adapterRtEntityId}' not found");
     }
 
     internal static Exception CannotCreatePool(string tenantId, string poolName)

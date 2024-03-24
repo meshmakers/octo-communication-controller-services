@@ -54,16 +54,16 @@ public class DataPipelineController : ControllerBase
     /// Updates the configuration at an adapter
     /// </summary>
     /// <param name="tenantId">The id of the tenant.</param>
-    /// <param name="adapterRtId">The id of the adapter where the pipline should be executed.</param>
+    /// <param name="adapterRtEntityId">The id of the adapter where the pipline should be executed.</param>
     /// <param name="pipelineRtId">The id of the pipeline.</param>
     /// <returns></returns>
     [HttpPost("{pipelineRtId}/deploy/{adapterRtId}")]
     //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
-    public async Task<IActionResult> DeployPipeline([Required] string tenantId, [Required] OctoObjectId adapterRtId, [Required] OctoObjectId pipelineRtId)
+    public async Task<IActionResult> DeployPipeline([Required] string tenantId, [Required] RtEntityId adapterRtEntityId, [Required] OctoObjectId pipelineRtId)
     {
         try
         {
-            await _adapterService.DeployPipelineAsync(tenantId, adapterRtId, pipelineRtId);
+            await _adapterService.DeployPipelineAsync(tenantId, adapterRtEntityId, pipelineRtId);
             return NoContent();
         }
         catch (AdapterHubCallbackException e)

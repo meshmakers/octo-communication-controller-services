@@ -6,16 +6,16 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapter
 
 internal class Adapter(
     IAdapterCachePublish adapterCachePublish,
-    OctoObjectId adapterRtId,
+    RtEntityId adapterRtEntityId,
     string? connectionId,
     AdapterConfigurationDto configuration)
 {
     public Adapter(IAdapterCachePublish adapterCachePublish, AdapterDescription adapterHubPoolDescription)
-        : this(adapterCachePublish, adapterHubPoolDescription.AdapterRtId, adapterHubPoolDescription.ConnectionId, adapterHubPoolDescription.Configuration)
+        : this(adapterCachePublish, adapterHubPoolDescription.AdapterRtEntityId, adapterHubPoolDescription.ConnectionId, adapterHubPoolDescription.Configuration)
     {
     }
 
-    public OctoObjectId AdapterRtId { get; } = adapterRtId;
+    public RtEntityId AdapterRtEntityId { get; } = adapterRtEntityId;
 
     public string? ConnectionId { get; private set; } = connectionId;
 
@@ -29,7 +29,7 @@ internal class Adapter(
 
     public AdapterDescription GetAdapterDescription()
     {
-        return new AdapterDescription(AdapterRtId, ConnectionId, Configuration);
+        return new AdapterDescription(AdapterRtEntityId, ConnectionId, Configuration);
     }
     
     public void SetConnectionId(string? connectionId)

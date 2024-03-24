@@ -1,0 +1,20 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+  - typeId: Pipeline
+    derivedFromCkTypeId: ${thisModel}/DeployableEntity
+    isAbstract: true
+    attributes:
+      - id: ${thisModel}/PipelineDefinition
+        name: PipelineDefinition
+    associations:
+      - id: System/ParentChild
+        targetCkTypeId: ${thisModel}/DataPipeline
+      - id: ${thisModel}/Executes
+        targetCkTypeId: ${thisModel}/Adapter
+  - typeId: EdgePipeline
+    derivedFromCkTypeId: ${thisModel}/Pipeline
+  - typeId: MeshPipeline
+    derivedFromCkTypeId: ${thisModel}/Pipeline
+    associations:
+    - id: ${thisModel}/Triggers
+      targetCkTypeId: ${thisModel}/DataPipelineTrigger

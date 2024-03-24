@@ -19,19 +19,19 @@ internal class CommunicationRepositoryException : Exception
     {
     }
 
-    internal static Exception AdapterNotFound(string tenantId, OctoObjectId adapterRtId)
+    internal static Exception AdapterNotFound(string tenantId, RtEntityId adapterRtEntityId)
     {
-        return new CommunicationRepositoryException($"[{tenantId}] Adapter '{adapterRtId}' does not exist");
+        return new CommunicationRepositoryException($"[{tenantId}] Adapter '{adapterRtEntityId}' does not exist");
     }
 
-    internal static Exception AdapterNotAssociatedToPool(string tenantId, OctoObjectId adapterRtId)
+    internal static Exception AdapterNotAssociatedToPool(string tenantId, RtEntityId adapterRtEntityId)
     {
-        return new CommunicationRepositoryException($"[{tenantId}] Adapter '{adapterRtId}' is not associated with a pool");
+        return new CommunicationRepositoryException($"[{tenantId}] Adapter '{adapterRtEntityId}' is not associated with a pool");
     }
 
-    internal static Exception CommonGettingPoolOfAdapter(string tenantId, OctoObjectId adapterRtId, Exception exception)
+    internal static Exception CommonGettingPoolOfAdapter(string tenantId, RtEntityId adapterRtEntityId, Exception exception)
     {
-        return new CommunicationRepositoryException($"[{tenantId}] Failed to get associated pool for adapter '{adapterRtId}'", exception);
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get associated pool for adapter '{adapterRtEntityId}'", exception);
     }
 
     internal static Exception PoolNotFound(string tenantId, OctoObjectId poolRtId)
@@ -39,19 +39,19 @@ internal class CommunicationRepositoryException : Exception
         return new CommunicationRepositoryException($"[{tenantId}] Failed to get pool '{poolRtId}'");
     }
 
-    internal static Exception DataPipelineNotFound(string tenantId, OctoObjectId dataPipelineRtId)
+    internal static Exception PipelineNotFound(string tenantId, OctoObjectId pipelineRtId)
     {
-        return new CommunicationRepositoryException($"[{tenantId}] Data pipeline '{dataPipelineRtId}' does not exist");
+        return new CommunicationRepositoryException($"[{tenantId}] Pipeline '{pipelineRtId}' does not exist");
     }
 
-    internal static Exception DataPipelineNotAssociatedToAdapter(string tenantId, OctoObjectId dataPipelineRtId)
+    internal static Exception PipelineNotAssociatedToAdapter(string tenantId, OctoObjectId pipelineRtId)
     {
-        return new CommunicationRepositoryException($"[{tenantId}] Data pipeline '{dataPipelineRtId}' is not associated with an adapter.");
+        return new CommunicationRepositoryException($"[{tenantId}] Pipeline '{pipelineRtId}' is not associated with an adapter.");
     }
 
-    internal static Exception CommonGettingAdapterByDataPipeline(string tenantId, OctoObjectId dataPipelineRtId, Exception exception)
+    internal static Exception CommonGettingAdapterByDataPipeline(string tenantId, OctoObjectId pipelineRtId, Exception exception)
     {
-        return new CommunicationRepositoryException($"[{tenantId}] Failed to get associated adapter for data pipeline '{dataPipelineRtId}'", exception);
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get associated adapter for data pipeline '{pipelineRtId}'", exception);
     }
 
     internal static Exception CommonFailedGettingPoolByName(string tenantId, string poolName, Exception exception)
@@ -79,9 +79,9 @@ internal class CommunicationRepositoryException : Exception
         return new CommunicationRepositoryException($"[{tenantId}] Failed to create pool '{poolName}'", exception);
     }
 
-    internal static Exception CommonFailedGettingAdapter(string tenantId, OctoObjectId adapterRtId, Exception exception)
+    internal static Exception CommonFailedGettingAdapter(string tenantId, RtEntityId adapterRtEntityId, Exception exception)
     {
-        return new CommunicationRepositoryException($"[{tenantId}] Failed to get adapter '{adapterRtId}'", exception);
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get adapter '{adapterRtEntityId}'", exception);
     }
 
     internal static Exception CommonFailedSetPoolDeploymentState(string tenantId, OctoObjectId poolRtId, RtDeploymentStateEnum state,
@@ -96,14 +96,14 @@ internal class CommunicationRepositoryException : Exception
         return new CommunicationRepositoryException($"[{tenantId}] Failed to set communication state of pool '{poolRtId}' to '{state}'", exception);
     }
 
-    internal static Exception CommonFailedSetAdapterDeploymentState(string tenantId, OctoObjectId adapterRtId, RtDeploymentStateEnum state, Exception exception)
+    internal static Exception CommonFailedSetAdapterDeploymentState(string tenantId, RtEntityId adapterRtEntityId, RtDeploymentStateEnum state, Exception exception)
     {
-        return new CommunicationRepositoryException($"[{tenantId}] Failed to set deployment state of adapter '{adapterRtId}' to '{state}'", exception);
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to set deployment state of adapter '{adapterRtEntityId}' to '{state}'", exception);
     }
     
-    internal static Exception CommonFailedSetAdapterCommunicationState(string tenantId, OctoObjectId adapterRtId, RtCommunicationStateEnum state, Exception exception)
+    internal static Exception CommonFailedSetAdapterCommunicationState(string tenantId, RtEntityId adapterRtEntityId, RtCommunicationStateEnum state, Exception exception)
     {
-        return new CommunicationRepositoryException($"[{tenantId}] Failed to set communication state of adapter '{adapterRtId}' to '{state}'", exception);
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to set communication state of adapter '{adapterRtEntityId}' to '{state}'", exception);
     }
 
     internal static Exception CommonFailedIsTenantExisting(string tenantId, Exception exception)

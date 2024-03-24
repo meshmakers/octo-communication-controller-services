@@ -3,7 +3,6 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
@@ -54,10 +53,10 @@ public class AdapterController : ControllerBase
     /// <summary>
     /// Returns the configuration for a specific adapter
     /// </summary>
-    /// <param name="adapterRtId">The adapter entity object id</param>
+    /// <param name="adapterRtEntityId">The adapter entity object id</param>
     /// <returns>Configuration object</returns>
     [HttpGet("{adapterRtId}")]
-    public async Task<IActionResult> Get([Required] OctoObjectId adapterRtId)
+    public async Task<IActionResult> Get([Required] RtEntityId adapterRtEntityId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
@@ -65,7 +64,7 @@ public class AdapterController : ControllerBase
             return NotFound("TenantId is null or empty");
         }
 
-        var config = await _adapterService.GetAdapterConfigurationAsync(tenantId, adapterRtId);
+        var config = await _adapterService.GetAdapterConfigurationAsync(tenantId, adapterRtEntityId);
 
         return Ok(config);
     }
@@ -74,15 +73,15 @@ public class AdapterController : ControllerBase
     /// Updates the configuration at an adapter
     /// </summary>
     /// <param name="tenantId">The id of the tenant.</param>
-    /// <param name="adapterRtId">The id of the adapter.</param>
+    /// <param name="adapterRtEntityId">The id of the adapter.</param>
     /// <returns></returns>
     [HttpPost("{adapterRtId}/deployUpdate")]
     //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
-    public async Task<IActionResult> DeployUpdate([Required] string tenantId, [Required] OctoObjectId adapterRtId)
+    public async Task<IActionResult> DeployUpdate([Required] string tenantId, [Required] RtEntityId adapterRtEntityId)
     {
         try
         {
-            await _adapterService.DeployAdapterConfigurationAsync(tenantId, adapterRtId);
+            await _adapterService.DeployAdapterConfigurationAsync(tenantId, adapterRtEntityId);
             return NoContent();
         }
         catch (AdapterHubCallbackException e)

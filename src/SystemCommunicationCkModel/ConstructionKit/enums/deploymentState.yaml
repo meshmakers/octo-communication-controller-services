@@ -4,12 +4,11 @@ enums:
   useFlags: false
   values:
   - key: 0
-    name: Created
+    name: Unknown
   - key: 1
     name: Pending
   - key: 2
     name: Deployed
   - key: 3
-    name: DeploymentError
-  - key: 4
-    name: ConfigurationError            
+    name: Error
+   

@@ -14,29 +14,29 @@ public interface ICommunicationRepository
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolRtId">Object id of pool</param>
     /// <returns></returns>
-    Task<IReadOnlyCollection<RtCommunicationAdapter>> GetAdaptersAsync(string tenantId, OctoObjectId poolRtId);
+    Task<IReadOnlyCollection<RtAdapter>> GetAdaptersAsync(string tenantId, OctoObjectId poolRtId);
 
     /// <summary>
     /// Gets a list of initialized communication adapter of the given tenant
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <returns></returns>
-    Task<IReadOnlyCollection<RtCommunicationAdapter>> GetAdaptersAsync(string tenantId);
+    Task<IReadOnlyCollection<RtAdapter>> GetAdaptersAsync(string tenantId);
     
     /// <summary>
     /// Gets an adapter by object id
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="adapterRtId">Object id of communication adapter</param>
+    /// <param name="adapterRtEntityId">Id of adapter</param>
     /// <returns></returns>
-    Task<RtCommunicationAdapter> GetAdapterAsync(string tenantId, OctoObjectId adapterRtId);
+    Task<RtAdapter> GetAdapterAsync(string tenantId, RtEntityId adapterRtEntityId);
     
     /// <summary>
     /// Get pools for a tenant
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <returns>List of pools of the tenant</returns>
-    Task<IReadOnlyCollection<RtCommunicationPool>> GetPoolsAsync(string tenantId);
+    Task<IReadOnlyCollection<RtPool>> GetPoolsAsync(string tenantId);
 
 
     /// <summary>
@@ -45,7 +45,7 @@ public interface ICommunicationRepository
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolName">Name of the pool</param>
     /// <returns>List of pools with the given name</returns>
-    Task<IReadOnlyCollection<RtCommunicationPool>> GetPoolByNameAsync(string tenantId, string poolName);
+    Task<IReadOnlyCollection<RtPool>> GetPoolByNameAsync(string tenantId, string poolName);
 
     /// <summary>
     /// Creates a pool
@@ -77,27 +77,27 @@ public interface ICommunicationRepository
     /// Set the deployment state of an adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="adapterRtId">Object id of adapter</param>
+    /// <param name="adapterRtEntityId">Object id of adapter</param>
     /// <param name="deploymentState">State of adapter</param>
     /// <returns></returns>
-    Task SetAdapterDeploymentStateAsync(string tenantId, OctoObjectId adapterRtId, RtDeploymentStateEnum deploymentState);
+    Task SetAdapterDeploymentStateAsync(string tenantId, RtEntityId adapterRtEntityId, RtDeploymentStateEnum deploymentState);
     
     /// <summary>
     /// Set the communication state of an communication adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="adapterRtId">Object id of adapter</param>
+    /// <param name="adapterRtEntityId">Object id of adapter</param>
     /// <param name="communicationState">State of adapter</param>
     /// <returns></returns>
-    Task SetAdapterCommunicationStateAsync(string tenantId, OctoObjectId adapterRtId, RtCommunicationStateEnum communicationState);
+    Task SetAdapterCommunicationStateAsync(string tenantId, RtEntityId adapterRtEntityId, RtCommunicationStateEnum communicationState);
 
     /// <summary>
     /// Gets the pool of an communication adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="adapterRtId">Adapter id</param>
+    /// <param name="adapterRtEntityId">Adapter id</param>
     /// <returns></returns>
-    Task<RtCommunicationPool> GetPoolOfAdapterAsync(string tenantId, OctoObjectId adapterRtId);
+    Task<RtPool> GetPoolOfAdapterAsync(string tenantId, RtEntityId adapterRtEntityId);
 
     /// <summary>
     /// Gets the corresponding adapter of a data pipeline
@@ -105,7 +105,7 @@ public interface ICommunicationRepository
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="dataPipelineRtId">Object identifier of data pipeline</param>
     /// <returns></returns>
-    Task<RtCommunicationAdapter> GetAdapterByDataPipelineAsync(string tenantId, OctoObjectId dataPipelineRtId);
+    Task<RtAdapter> GetAdapterByDataPipelineAsync(string tenantId, OctoObjectId dataPipelineRtId);
 
     /// <summary>
     /// Returns true if a tenant exists
@@ -115,18 +115,18 @@ public interface ICommunicationRepository
     Task<bool> IsTenantExistingAsync(string tenantId);
 
     /// <summary>
-    /// Gets the data pipelines of a communication adapter
+    /// Gets the pipelines of a communication adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="adapterRtId">Object identifier of communication adapter</param>
+    /// <param name="adapterRtEntityId">Object identifier of communication adapter</param>
     /// <returns></returns>
-    Task<IReadOnlyCollection<RtDataPipeline>> GetDataPipelinesAsync(string tenantId, OctoObjectId adapterRtId);
+    Task<IReadOnlyCollection<RtPipeline>> GetPipelinesAsync(string tenantId, RtEntityId adapterRtEntityId);
     
     /// <summary>
-    /// Get the data pipeline by id
+    /// Get the pipeline by id
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="pipelineRtId">Object identifier of data pipeline</param>
     /// <returns></returns>
-    Task<RtDataPipeline?> GetDataPipelineAsync(string tenantId, OctoObjectId pipelineRtId);
+    Task<RtPipeline?> GetPipelineAsync(string tenantId, OctoObjectId pipelineRtId);
 }

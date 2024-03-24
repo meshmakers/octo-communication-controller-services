@@ -26,7 +26,7 @@ internal class PoolHubCallbacks : IPoolHubCallbacks
     /// <param name="poolCommunicationAdapter"></param>
     public async Task DeployCommunicationAdapterAsync(string tenantId, PoolCommunicationAdapterDto poolCommunicationAdapter)
     {
-        if (_poolCache.TryGetTenant(tenantId, out var poolTenant) && poolTenant != null)
+        if (_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
             poolTenant.PoolsById.TryGetValue(poolCommunicationAdapter.PoolRtId, out var poolDescription);
             if (poolDescription != null)
@@ -44,7 +44,7 @@ internal class PoolHubCallbacks : IPoolHubCallbacks
     /// <param name="poolCommunicationAdapter"></param>
     public async Task UndeployCommunicationAdapterAsync(string tenantId, PoolCommunicationAdapterDto poolCommunicationAdapter)
     {
-        if (_poolCache.TryGetTenant(tenantId, out var poolTenant) && poolTenant != null)
+        if (_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
             poolTenant.PoolsById.TryGetValue(poolCommunicationAdapter.PoolRtId, out var poolDescription);
             if (poolDescription != null)

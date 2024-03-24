@@ -4,6 +4,7 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v1;
+using Meshmakers.Octo.Runtime.Contracts;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -16,23 +17,23 @@ internal class AdapterService(
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-    public async Task<AdapterConfigurationDto> RegisterAdapterAsync(string tenantId, OctoObjectId adapterRtId,
+    public async Task<AdapterConfigurationDto> RegisterAdapterAsync(string tenantId, RtEntityId adapterRtEntityId,
         string connectionId)
     {
         Logger.Info("[{TenantId}] Adapter '{AdapterRtId}' registered with connection id '{ConnectionId}'",
-            tenantId, adapterRtId, connectionId);
+            tenantId, adapterRtEntityId, connectionId);
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
-            if (!adapterTenant.AdapterById.TryGetValue(adapterRtId, out var adapter))
+            if (!adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
             {
                 Logger.Info("[{TenantId}] Adapter '{AdapterRtId}' not found in cache, fetching from repository",
-                    tenantId, adapterRtId);
-                var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtId);
-                adapter = adapterTenant.AddAdapter(adapterRtId, connectionId, configuration);
+                    tenantId, adapterRtEntityId);
+                var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId);
+                adapter = adapterTenant.AddAdapter(adapterRtEntityId, connectionId, configuration);
             }
 
-            await SetAdapterOnlineAsync(tenantId, adapterRtId, connectionId);
+            await SetAdapterOnlineAsync(tenantId, adapterRtEntityId, connectionId);
 
             return adapter.Configuration;
         }
@@ -40,15 +41,15 @@ internal class AdapterService(
         throw AdapterServiceException.TenantNotEnabled(tenantId);
     }
 
-    public async Task UnregisterAsync(string tenantId, OctoObjectId adapterRtId, string connectionId)
+    public async Task UnregisterAsync(string tenantId, RtEntityId adapterRtEntityId, string connectionId)
     {
-        Logger.Info("[{TenantId}] Adapter '{AdapterRtId}' unregistered with connection id '{ConnectionId}'",
-            tenantId, adapterRtId, connectionId);
+        Logger.Info("[{TenantId}] Adapter '{AdapterRtEntityId}' unregistered with connection id '{ConnectionId}'",
+            tenantId, adapterRtEntityId, connectionId);
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
-            adapterTenant.RemoveAdapter(adapterRtId);
-            await SetAdapterCommunicationStateAsync(tenantId, adapterRtId, RtCommunicationStateEnum.Unregistered);
+            adapterTenant.RemoveAdapter(adapterRtEntityId);
+            await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId, RtCommunicationStateEnum.Unregistered);
             return;
         }
 
@@ -72,7 +73,7 @@ internal class AdapterService(
     //     }
     // }
 
-    public async Task<AdapterConfigurationDto> GetAdapterConfigurationAsync(string tenantId, OctoObjectId adapterRtId)
+    public async Task<AdapterConfigurationDto> GetAdapterConfigurationAsync(string tenantId, RtEntityId adapterRtEntityId)
     {
         try
         {
@@ -81,24 +82,23 @@ internal class AdapterService(
                 throw AdapterServiceException.TenantNotEnabled(tenantId);
             }
 
-            var adapter = await communicationRepository.GetAdapterAsync(tenantId, adapterRtId);
+            var adapter = await communicationRepository.GetAdapterAsync(tenantId, adapterRtEntityId);
 
-            var dataPipelines = await communicationRepository.GetDataPipelinesAsync(tenantId, adapterRtId);
+            var pipelines = await communicationRepository.GetPipelinesAsync(tenantId, adapterRtEntityId);
 
-            var dataPipelineConfigurations = dataPipelines
-                .Where(dp => !string.IsNullOrWhiteSpace(dp.AdapterPipelineConfiguration)).Select(dataPipeline =>
+            var dataPipelineConfigurations = pipelines
+                .Where(dp => !string.IsNullOrWhiteSpace(dp.PipelineDefinition)).Select(pipeline =>
                 {
-                    var dataPipelineConfiguration = new DataPipelineConfigurationDto(
-                        dataPipeline.Name,
-                        dataPipeline.RtId,
+                    var dataPipelineConfiguration = new PipelineConfigurationDto(
+                        pipeline.RtId,
                         false,
-                        dataPipeline.AdapterPipelineConfiguration!
+                        pipeline.PipelineDefinition
                     );
                     return dataPipelineConfiguration;
                 }).ToArray();
 
             var adapterConfigurationDto = new AdapterConfigurationDto(
-                adapterRtId,
+                adapterRtEntityId,
                 adapter.Configuration,
                 dataPipelineConfigurations.ToList()
             );
@@ -106,21 +106,21 @@ internal class AdapterService(
         }
         catch (Exception e)
         {
-            throw AdapterServiceException.CommonFailedCannotLoadAdapterConfiguration(tenantId, adapterRtId, e);
+            throw AdapterServiceException.CommonFailedCannotLoadAdapterConfiguration(tenantId, adapterRtEntityId, e);
         }
     }
 
-    public async Task SetAdapterOnlineAsync(string tenantId, OctoObjectId adapterRtId, string connectionId)
+    public async Task SetAdapterOnlineAsync(string tenantId, RtEntityId adapterRtEntityId, string connectionId)
     {
         Logger.Info("[{TenantId}] adapter rt id '{AdapterRtId}' online",
-            tenantId, adapterRtId);
+            tenantId, adapterRtEntityId);
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
-            if (adapterTenant.AdapterById.TryGetValue(adapterRtId, out var adapter))
+            if (adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
             {
-                adapterTenant.UpdateConnectionId(adapterRtId, connectionId);
-                await SetAdapterCommunicationStateAsync(tenantId, adapter.AdapterRtId, RtCommunicationStateEnum.Online);
+                adapterTenant.UpdateConnectionId(adapterRtEntityId, connectionId);
+                await SetAdapterCommunicationStateAsync(tenantId, adapter.AdapterRtEntityId, RtCommunicationStateEnum.Online);
             }
 
             return;
@@ -129,17 +129,17 @@ internal class AdapterService(
         throw AdapterServiceException.TenantNotEnabled(tenantId);
     }
 
-    public async Task SetAdapterOfflineAsync(string tenantId, OctoObjectId adapterRtId)
+    public async Task SetAdapterOfflineAsync(string tenantId, RtEntityId adapterRtEntityId)
     {
         Logger.Info("[{TenantId}] adapter rt id '{AdapterRtId}' offline",
-            tenantId, adapterRtId);
+            tenantId, adapterRtEntityId);
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
-            if (adapterTenant.AdapterById.TryGetValue(adapterRtId, out var adapter))
+            if (adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
             {
-                adapterTenant.RemoveConnectionId(adapter.AdapterRtId);
-                await SetAdapterCommunicationStateAsync(tenantId, adapterRtId, RtCommunicationStateEnum.Offline);
+                adapterTenant.RemoveConnectionId(adapter.AdapterRtEntityId);
+                await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId, RtCommunicationStateEnum.Offline);
             }
 
             return;
@@ -148,16 +148,16 @@ internal class AdapterService(
         throw AdapterServiceException.TenantNotEnabled(tenantId);
     }
 
-    public async Task DeployAdapterConfigurationAsync(string tenantId, OctoObjectId adapterRtId)
+    public async Task DeployAdapterConfigurationAsync(string tenantId, RtEntityId adapterRtEntityId)
     {
         Logger.Info("[{TenantId}] AdapterRtId='{AdapterRtId}' deploy configuration",
-            tenantId, adapterRtId);
+            tenantId, adapterRtEntityId);
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
-            if (adapterTenant.AdapterById.TryGetValue(adapterRtId, out var adapter))
+            if (adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
             {
-                var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtId);
+                var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId);
 
                 if (!configuration.Equals(adapter.Configuration))
                 {
@@ -169,37 +169,36 @@ internal class AdapterService(
             }
         }
 
-        throw AdapterServiceException.AdapterNotLoaded(tenantId, adapterRtId);
+        throw AdapterServiceException.AdapterNotLoaded(tenantId, adapterRtEntityId);
     }
 
-    public async Task DeployPipelineAsync(string tenantId, OctoObjectId adapterRtId, OctoObjectId pipelineRtId)
+    public async Task DeployPipelineAsync(string tenantId, RtEntityId adapterRtEntityId, OctoObjectId pipelineRtId)
     {
         Logger.Info(
             "[{TenantId}] AdapterRtId='{AdapterRtId}', PipelineRtId='{PipelineRtId}' deploy debug configuration",
-            tenantId, adapterRtId, pipelineRtId);
+            tenantId, adapterRtEntityId, pipelineRtId);
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
-            if (adapterTenant.AdapterById.TryGetValue(adapterRtId, out var adapter))
+            if (adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
             {
-                var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtId);
-                var pipeline = await communicationRepository.GetDataPipelineAsync(tenantId, pipelineRtId);
+                var pipeline = await communicationRepository.GetPipelineAsync(tenantId, pipelineRtId);
                 if (pipeline == null)
                 {
                     throw AdapterServiceException.PipelineNotFound(tenantId, pipelineRtId);
                 }
+                
+                var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId);
 
-                configuration.DataPipelines ??= new List<DataPipelineConfigurationDto>();
-                var deployedPipeline = configuration.DataPipelines.FirstOrDefault(p => p.DataPipelineRtId == pipelineRtId);
+                var deployedPipeline = configuration.Pipelines.FirstOrDefault(p => p.PipelineRtId == pipelineRtId);
                 if (deployedPipeline != null)
                 {
-                    configuration.DataPipelines.Remove(deployedPipeline);
+                    configuration.Pipelines.Remove(deployedPipeline);
                 }
-                configuration.DataPipelines.Add(new DataPipelineConfigurationDto(
-                    pipeline.Name,
+                configuration.Pipelines.Add(new PipelineConfigurationDto(
                     pipeline.RtId,
                     true,
-                    pipeline.AdapterPipelineConfiguration!
+                    pipeline.PipelineDefinition
                 ));
 
                 if (!configuration.Equals(adapter.Configuration))
@@ -211,7 +210,7 @@ internal class AdapterService(
             }
         }
 
-        throw AdapterServiceException.AdapterNotLoaded(tenantId, adapterRtId);
+        throw AdapterServiceException.AdapterNotLoaded(tenantId, adapterRtEntityId);
     }
 
     public async Task ReloadTenantAsync(string tenantId)
@@ -223,9 +222,9 @@ internal class AdapterService(
         {
             if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
             {
-                if (adapterTenant.AdapterById.ContainsKey(adapter.RtId))
+                if (adapterTenant.AdapterById.ContainsKey(adapter.ToRtEntityId()))
                 {
-                    await SetAdapterOfflineAsync(tenantId, adapter.RtId);
+                    await SetAdapterOfflineAsync(tenantId, adapter.ToRtEntityId());
                     continue;
                 }
             }
@@ -234,7 +233,7 @@ internal class AdapterService(
                 adapterCache.AddOrUpdateTenant(tenantId);
             }
 
-            await SetAdapterCommunicationStateAsync(tenantId, adapter.RtId, RtCommunicationStateEnum.Unregistered);
+            await SetAdapterCommunicationStateAsync(tenantId, adapter.ToRtEntityId(), RtCommunicationStateEnum.Unregistered);
         }
     }
 
@@ -247,22 +246,22 @@ internal class AdapterService(
         return Task.CompletedTask;
     }
 
-    private async Task SetAdapterCommunicationStateAsync(string tenantId, OctoObjectId adapterRtId,
+    private async Task SetAdapterCommunicationStateAsync(string tenantId, RtEntityId adapterRtEntityId,
         RtCommunicationStateEnum communicationState)
     {
-        Logger.Info("[{TenantId}] Setting communicaton state of adapter '{AdapterRtId}' to '{CommunicationState}'",
-            tenantId, adapterRtId, communicationState);
+        Logger.Info("[{TenantId}] Setting communicaton state of adapter '{AdapterRtEntityId}' to '{CommunicationState}'",
+            tenantId, adapterRtEntityId, communicationState);
         try
         {
-            await communicationRepository.SetAdapterCommunicationStateAsync(tenantId, adapterRtId, communicationState);
+            await communicationRepository.SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId, communicationState);
         }
         catch (Exception e)
         {
             Logger.Error(e,
-                "[{TenantId}] Error setting communicaton state of adapter '{AdapterRtId}' to '{CommunicationState}'",
-                tenantId, adapterRtId, communicationState);
+                "[{TenantId}] Error setting communicaton state of adapter '{AdapterRtEntityId}' to '{CommunicationState}'",
+                tenantId, adapterRtEntityId, communicationState);
 
-            throw AdapterServiceException.CommonFailedSetAdapterCommunicationState(tenantId, adapterRtId,
+            throw AdapterServiceException.CommonFailedSetAdapterCommunicationState(tenantId, adapterRtEntityId,
                 communicationState, e);
         }
     }
