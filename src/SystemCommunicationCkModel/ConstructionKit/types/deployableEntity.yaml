@@ -1,0 +1,16 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+- typeId: DeployableEntity
+  isAbstract: true
+  derivedFromCkTypeId: System/Entity
+  attributes:
+  - id: ${thisModel}/LastSeen
+    name: LastSeen
+    isOptional: true
+  - id: ${thisModel}/DeploymentState
+    name: DeploymentState
+  - id: System/Name
+    name: Name
+  - id: System/Description
+    name: Description
+    isOptional: true

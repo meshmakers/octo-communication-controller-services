@@ -6,27 +6,27 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
 
 internal class Adapter
 {
-    public Adapter(OctoObjectId adapterRtId, OctoObjectId poolRtId, PoolCommunicationAdapterDto poolCommunicationAdapterDto)
+    public Adapter(RtEntityId adapterRtEntityId, OctoObjectId poolRtId, PoolCommunicationAdapterDto poolCommunicationAdapterDto)
     {
-        AdapterRtId = adapterRtId;
+        AdapterRtEntityId = adapterRtEntityId;
         PoolRtId = poolRtId;
         AdapterDto = poolCommunicationAdapterDto;
     }
 
     public Adapter(PoolAdapterDescription poolAdapterDescription)
     {
-        AdapterRtId = poolAdapterDescription.AdapterRtId;
+        AdapterRtEntityId = poolAdapterDescription.AdapterRtEntityId;
         PoolRtId = poolAdapterDescription.PoolRtId;
         AdapterDto = poolAdapterDescription.AdapterDto;
     }
     
     public PoolCommunicationAdapterDto AdapterDto { get; }
-    public OctoObjectId AdapterRtId { get; }
+    public RtEntityId AdapterRtEntityId { get; }
     public OctoObjectId PoolRtId { get; }
 
 
     public PoolAdapterDescription GetPoolAdapterDescription()
     {
-        return new PoolAdapterDescription { AdapterRtId = AdapterRtId, PoolRtId = PoolRtId, AdapterDto = AdapterDto };
+        return new PoolAdapterDescription { AdapterRtEntityId = AdapterRtEntityId, PoolRtId = PoolRtId, AdapterDto = AdapterDto };
     }
 }

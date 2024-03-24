@@ -52,18 +52,18 @@ public interface IPoolService
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolRtId">The object id of the pool</param>
-    /// <param name="adapterRtId">The object id of the adapter</param>
+    /// <param name="adapterRtEntityId">The object id of the adapter</param>
     /// <returns></returns>
-    Task DeployAdapterAsync(string tenantId, OctoObjectId poolRtId, OctoObjectId adapterRtId);
+    Task DeployAdapterAsync(string tenantId, OctoObjectId poolRtId, RtEntityId adapterRtEntityId);
     
     /// <summary>
     /// Undeploy an adapter from a pool
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolRtId">The object id of the pool</param>
-    /// <param name="adapterRtId">The object id of the adapter</param>
+    /// <param name="adapterRtEntityId">The object id of the adapter</param>
     /// <returns></returns>
-    Task UndeployAdapterAsync(string tenantId, OctoObjectId poolRtId, OctoObjectId adapterRtId);
+    Task UndeployAdapterAsync(string tenantId, OctoObjectId poolRtId, RtEntityId adapterRtEntityId);
 
     /// <summary>
     /// Sets a pool offline

@@ -24,10 +24,6 @@ attributes:
   defaultValues:
     - 0
 - id: AdapterConfiguration
-  valueType: String     
-- id: AdapterPipelineConfiguration
   valueType: String
-- id: RetrieverPipelineConfiguration
-  valueType: String  
-- id: SenderPipelineConfiguration
-  valueType: String  
+- id: PipelineDefinition
+  valueType: String

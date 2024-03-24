@@ -58,7 +58,7 @@ internal class TriggerManagementService : ITriggerManagementService
             session.StartTransaction();
 
             DataQueryOperation dataQueryOperation = DataQueryOperation.Create()
-                .FieldEquals(nameof(RtDataPipelineTrigger.Enabled), true);
+                .FieldEquals(nameof(RtDataPipelineTrigger.DeploymentState), true);
 
             var r = await tenantRepository.GetRtEntitiesByTypeAsync<RtDataPipelineTrigger>(session, dataQueryOperation);
 

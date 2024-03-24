@@ -2,7 +2,6 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Microsoft.AspNetCore.SignalR;
-using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 
@@ -30,7 +29,7 @@ internal class AdapterHubCallbacks : IAdapterHubCallbacks
     {
         if (_adapterCache.TryGetTenant(tenantId, out var poolTenant))
         {
-            if (poolTenant.AdapterById.TryGetValue(adapterConfiguration.AdapterRtId, out var adapter)
+            if (poolTenant.AdapterById.TryGetValue(adapterConfiguration.AdapterRtEntityId, out var adapter)
                 && !string.IsNullOrWhiteSpace(adapter.ConnectionId))
             {
                 await _adapterContext.Clients.Client(adapter.ConnectionId)
@@ -38,7 +37,7 @@ internal class AdapterHubCallbacks : IAdapterHubCallbacks
             }
             else
             {
-                throw AdapterHubCallbackException.AdapterNotOnline(tenantId, adapterConfiguration.AdapterRtId);
+                throw AdapterHubCallbackException.AdapterNotOnline(tenantId, adapterConfiguration.AdapterRtEntityId);
             }
                 
         }

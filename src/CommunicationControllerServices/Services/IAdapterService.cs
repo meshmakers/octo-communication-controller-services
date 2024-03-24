@@ -26,59 +26,59 @@ public interface IAdapterService
     /// Registers an adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="adapterRtId">Object Id of adapter</param>
+    /// <param name="adapterRtEntityId">Object Id of adapter</param>
     /// <param name="connectionId">Identifier of connection</param>
     /// <returns></returns>
-    Task<AdapterConfigurationDto> RegisterAdapterAsync(string tenantId, OctoObjectId adapterRtId, string connectionId);
+    Task<AdapterConfigurationDto> RegisterAdapterAsync(string tenantId, RtEntityId adapterRtEntityId, string connectionId);
     
     /// <summary>
     /// Unregisters an adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="adapterRtId">Object Id of adapter</param>
+    /// <param name="adapterRtEntityId">Object Id of adapter</param>
     /// <param name="connectionId">Identifier of connection</param>
     /// <returns></returns>
-    Task UnregisterAsync(string tenantId, OctoObjectId adapterRtId, string connectionId);
+    Task UnregisterAsync(string tenantId, RtEntityId adapterRtEntityId, string connectionId);
     
     /// <summary>
     /// Gets an adapter configuration for a given tenant and adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="adapterRtId">Object Id of adapter</param>
+    /// <param name="adapterRtEntityId">Object Id of adapter</param>
     /// <returns></returns>
-    Task<AdapterConfigurationDto> GetAdapterConfigurationAsync(string tenantId, OctoObjectId adapterRtId);
+    Task<AdapterConfigurationDto> GetAdapterConfigurationAsync(string tenantId, RtEntityId adapterRtEntityId);
 
     /// <summary>
     /// Sets an adapter online
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="adapterRtId">Object Id of adapter</param>
+    /// <param name="adapterRtEntityId">Object Id of adapter</param>
     /// <param name="connectionId">The connection identifier</param>
     /// <returns></returns>
-    Task SetAdapterOnlineAsync(string tenantId, OctoObjectId adapterRtId, string connectionId);
+    Task SetAdapterOnlineAsync(string tenantId, RtEntityId adapterRtEntityId, string connectionId);
     
     /// <summary>
     /// Sets an adapter offline
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="adapterRtId">Object Id of adapter</param>
+    /// <param name="adapterRtEntityId">Object Id of adapter</param>
     /// <returns></returns>
-    Task SetAdapterOfflineAsync(string tenantId, OctoObjectId adapterRtId);
+    Task SetAdapterOfflineAsync(string tenantId, RtEntityId adapterRtEntityId);
     
     /// <summary>
     /// Deployes the db version  an adapter configuration
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="adapterRtId">Object Id of adapter</param>
+    /// <param name="adapterRtEntityId">Object Id of adapter</param>
     /// <returns></returns>
-    Task DeployAdapterConfigurationAsync(string tenantId, OctoObjectId adapterRtId);
+    Task DeployAdapterConfigurationAsync(string tenantId, RtEntityId adapterRtEntityId);
 
     /// <summary>
     /// Deploys a pipeline to the given adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="adapterRtId">Object id of adapter</param>
+    /// <param name="adapterRtEntityId">Object id of adapter</param>
     /// <param name="pipelineRtId">Object id of pipeline</param>
     /// <returns></returns>
-    Task DeployPipelineAsync(string tenantId, OctoObjectId adapterRtId, OctoObjectId pipelineRtId);
+    Task DeployPipelineAsync(string tenantId, RtEntityId adapterRtEntityId, OctoObjectId pipelineRtId);
 }

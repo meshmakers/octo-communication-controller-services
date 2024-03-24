@@ -1,0 +1,26 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+- typeId: Adapter
+  derivedFromCkTypeId: ${thisModel}/DeployableEntity
+  isAbstract: true
+  attributes:
+    - id: ${thisModel}/CommunicationState
+      name: CommunicationState
+    - id: ${thisModel}/ConfigurationState
+      name: ConfigurationState
+    - id: ${thisModel}/AdapterType
+      name: Type
+    - id: ${thisModel}/Deployment.ImageName
+      name: ImageName
+    - id: ${thisModel}/Deployment.ImageVersion
+      name: ImageVersion
+    - id: ${thisModel}/AdapterConfiguration
+      name: Configuration
+      isOptional: true  
+  associations:
+  - id: System/ParentChild
+    targetCkTypeId: ${thisModel}/Pool    
+- typeId: EdgeAdapter
+  derivedFromCkTypeId: ${thisModel}/Adapter
+- typeId: MeshAdapter
+  derivedFromCkTypeId: ${thisModel}/Adapter

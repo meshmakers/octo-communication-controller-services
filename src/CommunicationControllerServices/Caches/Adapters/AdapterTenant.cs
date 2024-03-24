@@ -12,10 +12,10 @@ internal class AdapterTenant
     public string TenantId { get; }
     
     private readonly ConcurrentDictionary<string, Adapter> _adaptersByConnectId;
-    private readonly ConcurrentDictionary<OctoObjectId, Adapter> _adaptersById;
+    private readonly ConcurrentDictionary<RtEntityId, Adapter> _adaptersById;
 
     public IReadOnlyDictionary<string, Adapter> AdapterByConnectionId { get; private set; }
-    public IReadOnlyDictionary<OctoObjectId, Adapter> AdapterById { get; }
+    public IReadOnlyDictionary<RtEntityId, Adapter> AdapterById { get; }
 
     public AdapterTenant(IAdapterCachePublish adapterCachePublish, string tenantId)
     {
@@ -23,9 +23,9 @@ internal class AdapterTenant
 
         TenantId = tenantId;
         _adaptersByConnectId = new ConcurrentDictionary<string, Adapter>();
-        _adaptersById = new ConcurrentDictionary<OctoObjectId, Adapter>();
+        _adaptersById = new ConcurrentDictionary<RtEntityId, Adapter>();
         AdapterByConnectionId = new ReadOnlyDictionary<string, Adapter>(_adaptersByConnectId);
-        AdapterById = new ReadOnlyDictionary<OctoObjectId, Adapter>(_adaptersById);
+        AdapterById = new ReadOnlyDictionary<RtEntityId, Adapter>(_adaptersById);
     }
     
     public AdapterTenant(IAdapterCachePublish adapterCachePublish, string tenantId, IList<AdapterDescription> adapterDescriptions)
@@ -38,18 +38,18 @@ internal class AdapterTenant
         _adaptersByConnectId = new ConcurrentDictionary<string, Adapter>(
             adapters.Where(x=> !string.IsNullOrWhiteSpace(x.ConnectionId))
                 .ToDictionary(p => p.ConnectionId!, p => p));
-        _adaptersById = new ConcurrentDictionary<OctoObjectId, Adapter>(
-            adapters.ToDictionary(p => p.AdapterRtId, p => p));
+        _adaptersById = new ConcurrentDictionary<RtEntityId, Adapter>(
+            adapters.ToDictionary(p => p.AdapterRtEntityId, p => p));
         AdapterByConnectionId = new ReadOnlyDictionary<string, Adapter>(_adaptersByConnectId);
-        AdapterById = new ReadOnlyDictionary<OctoObjectId, Adapter>(_adaptersById);
+        AdapterById = new ReadOnlyDictionary<RtEntityId, Adapter>(_adaptersById);
     }
 
-    public Adapter AddAdapter(OctoObjectId adapterRtId, string connectionId, AdapterConfigurationDto configuration)
+    public Adapter AddAdapter(RtEntityId adapterRtEntityId, string connectionId, AdapterConfigurationDto configuration)
     {
-        var adapter = new Adapter(_adapterCachePublish, adapterRtId, connectionId, configuration);
+        var adapter = new Adapter(_adapterCachePublish, adapterRtEntityId, connectionId, configuration);
         _adaptersByConnectId.AddOrUpdate(connectionId, _ => adapter,
             (_, _) => adapter);
-        _adaptersById.AddOrUpdate(adapterRtId, _ => adapter,
+        _adaptersById.AddOrUpdate(adapterRtEntityId, _ => adapter,
             (_, _) => adapter);
         
         _adapterCachePublish.PublishConfiguration(TenantId);
@@ -57,9 +57,9 @@ internal class AdapterTenant
         return adapter;
     }
 
-    public void RemoveAdapter(OctoObjectId adapterRtId)
+    public void RemoveAdapter(RtEntityId adapterRtEntityId)
     {
-        if (_adaptersById.TryRemove(adapterRtId, out var adapter))
+        if (_adaptersById.TryRemove(adapterRtEntityId, out var adapter))
         {
             if (!string.IsNullOrWhiteSpace(adapter.ConnectionId))
             {
@@ -71,9 +71,9 @@ internal class AdapterTenant
         }
     }
 
-    public void UpdateConnectionId(OctoObjectId adapterRtId, string connectionId)
+    public void UpdateConnectionId(RtEntityId adapterRtEntityId, string connectionId)
     {
-        if (_adaptersById.TryGetValue(adapterRtId, out var adapter))
+        if (_adaptersById.TryGetValue(adapterRtEntityId, out var adapter))
         {
             var oldConnectionId = adapter.ConnectionId;
             adapter.SetConnectionId(connectionId);
@@ -88,9 +88,9 @@ internal class AdapterTenant
         }
     }
     
-    public void RemoveConnectionId(OctoObjectId adapterRtId)
+    public void RemoveConnectionId(RtEntityId adapterRtEntityId)
     {
-        if (_adaptersById.TryGetValue(adapterRtId, out var adapter) && !string.IsNullOrWhiteSpace(adapter.ConnectionId))
+        if (_adaptersById.TryGetValue(adapterRtEntityId, out var adapter) && !string.IsNullOrWhiteSpace(adapter.ConnectionId))
         {
             _adaptersByConnectId.TryRemove(adapter.ConnectionId, out _);
             adapter.SetConnectionId(null);

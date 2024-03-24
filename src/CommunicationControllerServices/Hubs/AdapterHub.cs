@@ -32,11 +32,11 @@ internal class AdapterHub : Hub, IAdapterHub
     public override async Task OnConnectedAsync()
     {
         var tenantId = GetTenantId();
-        var adapterRtId = GetAdapterRtId();
+        var adapterRtEntityId = GetAdapterRtEntityId();
 
         try
         {
-            await _adapterService.SetAdapterOnlineAsync(tenantId, adapterRtId, Context.ConnectionId);
+            await _adapterService.SetAdapterOnlineAsync(tenantId, adapterRtEntityId, Context.ConnectionId);
 
             await base.OnConnectedAsync();
         }
@@ -51,11 +51,11 @@ internal class AdapterHub : Hub, IAdapterHub
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         var tenantId = GetTenantId();
-        var adapterRtId = GetAdapterRtId();
+        var adapterRtEntityId = GetAdapterRtEntityId();
 
         try
         {
-            await _adapterService.SetAdapterOfflineAsync(tenantId, adapterRtId);
+            await _adapterService.SetAdapterOfflineAsync(tenantId, adapterRtEntityId);
 
             await base.OnDisconnectedAsync(exception);
         }
@@ -67,14 +67,14 @@ internal class AdapterHub : Hub, IAdapterHub
     }
 
     /// <inheritdoc />
-    public async Task<AdapterConfigurationDto> RegisterAdapterAsync(OctoObjectId adapterRtId)
+    public async Task<AdapterConfigurationDto> RegisterAdapterAsync(RtEntityId adapterRtEntityId)
     {
         var tenantId = GetTenantId();
 
         try
         {
             var configurationDto =
-                await _adapterService.RegisterAdapterAsync(tenantId, adapterRtId, Context.ConnectionId);
+                await _adapterService.RegisterAdapterAsync(tenantId, adapterRtEntityId, Context.ConnectionId);
             return configurationDto;
         }
         catch (AdapterServiceException e)
@@ -90,13 +90,13 @@ internal class AdapterHub : Hub, IAdapterHub
     }
 
     /// <inheritdoc />
-    public async Task UnRegisterAdapterAsync(OctoObjectId adapterRtId)
+    public async Task UnRegisterAdapterAsync(RtEntityId adapterRtEntityId)
     {
         var tenantId = GetTenantId();
 
         try
         {
-            await _adapterService.UnregisterAsync(tenantId, adapterRtId, Context.ConnectionId);
+            await _adapterService.UnregisterAsync(tenantId, adapterRtEntityId, Context.ConnectionId);
         }
         catch (AdapterServiceException e)
         {
@@ -110,13 +110,13 @@ internal class AdapterHub : Hub, IAdapterHub
         }
     }
 
-    public async Task SendDebugDataAsync(OctoObjectId adapterRtId, OctoObjectId pipelineRtId, string debugData)
+    public async Task SendDebugDataAsync(RtEntityId adapterRtEntityId, OctoObjectId pipelineRtId, string debugData)
     {
         var tenantId = GetTenantId();
 
         try
         {
-            await _pipelineDebugService.CacheDebugInfo(tenantId, adapterRtId, pipelineRtId, debugData);
+            await _pipelineDebugService.CacheDebugInfo(tenantId, adapterRtEntityId, pipelineRtId, debugData);
         }
         catch (Exception e)
         {
@@ -137,9 +137,9 @@ internal class AdapterHub : Hub, IAdapterHub
         return tenantId.NormalizeString();
     }
 
-    private OctoObjectId GetAdapterRtId()
+    private RtEntityId GetAdapterRtEntityId()
     {
-        var adapterRtId = Context.GetHttpContext()?.GetAdapterRtId();
+        var adapterRtId = Context.GetHttpContext()?.GetAdapterRtEntityId();
         if (adapterRtId == null)
         {
             Context.Abort();

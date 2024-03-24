@@ -19,8 +19,8 @@ public class AdapterHubCallbackException : Exception
     {
     }
 
-    internal static Exception AdapterNotOnline(string tenantId, OctoObjectId adapterRtId)
+    internal static Exception AdapterNotOnline(string tenantId, RtEntityId adapterRtEntityId)
     {
-        throw new AdapterHubCallbackException($"[{tenantId}] Adapter '{adapterRtId}' not online.");
+        throw new AdapterHubCallbackException($"[{tenantId}] Adapter '{adapterRtEntityId}' not online.");
     }
 }
