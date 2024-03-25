@@ -41,9 +41,14 @@ internal class AdapterServiceException : Exception
         return new AdapterServiceException($"[{tenantId}] Tenant not enabled.");
     }
 
-    internal static Exception PipelineNotFound(string tenantId, OctoObjectId pipelineRtId)
+    internal static Exception PipelineNotFound(string tenantId, RtEntityId pipelineRtEntityId)
     {
-        return new AdapterServiceException($"[{tenantId}] Pipeline '{pipelineRtId}' not found."); 
+        return new AdapterServiceException($"[{tenantId}] Pipeline '{pipelineRtEntityId}' not found."); 
+    }
+
+    public static Exception DataPipelineNotFound(string tenantId, RtEntityId rtEntityId)
+    {
+        return new AdapterServiceException($"[{tenantId}] Data pipeline of pipeline '{rtEntityId}' not found.");
     }
 }
 

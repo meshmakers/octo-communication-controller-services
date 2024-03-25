@@ -86,21 +86,32 @@ internal class AdapterService(
 
             var pipelines = await communicationRepository.GetPipelinesAsync(tenantId, adapterRtEntityId);
 
-            var dataPipelineConfigurations = pipelines
-                .Where(dp => !string.IsNullOrWhiteSpace(dp.PipelineDefinition)).Select(pipeline =>
+            var pipelineConfigurations = new List<PipelineConfigurationDto>();
+            foreach (var rtPipeline in pipelines)
+            {
+                if (string.IsNullOrWhiteSpace(rtPipeline.PipelineDefinition))
                 {
-                    var dataPipelineConfiguration = new PipelineConfigurationDto(
-                        pipeline.RtId,
-                        false,
-                        pipeline.PipelineDefinition
-                    );
-                    return dataPipelineConfiguration;
-                }).ToArray();
+                    continue;
+                }
+                
+                var dataPipeline = await communicationRepository.GetDataPipelineByPipelineAsync(tenantId, rtPipeline.RtId);
+                if (dataPipeline == null)
+                {
+                    throw AdapterServiceException.DataPipelineNotFound(tenantId, rtPipeline.ToRtEntityId());
+                }
+                var pipelineConfiguration = new PipelineConfigurationDto(
+                    dataPipeline.RtId,
+                    rtPipeline.ToRtEntityId(),
+                    false,
+                    rtPipeline.PipelineDefinition
+                );
+                pipelineConfigurations.Add(pipelineConfiguration);
+            }
 
             var adapterConfigurationDto = new AdapterConfigurationDto(
                 adapterRtEntityId,
                 adapter.Configuration,
-                dataPipelineConfigurations.ToList()
+                pipelineConfigurations
             );
             return adapterConfigurationDto;
         }
@@ -172,31 +183,37 @@ internal class AdapterService(
         throw AdapterServiceException.AdapterNotLoaded(tenantId, adapterRtEntityId);
     }
 
-    public async Task DeployPipelineAsync(string tenantId, RtEntityId adapterRtEntityId, OctoObjectId pipelineRtId)
+    public async Task DeployPipelineAsync(string tenantId, RtEntityId adapterRtEntityId, RtEntityId pipelineRtEntityId)
     {
         Logger.Info(
-            "[{TenantId}] AdapterRtId='{AdapterRtId}', PipelineRtId='{PipelineRtId}' deploy debug configuration",
-            tenantId, adapterRtEntityId, pipelineRtId);
+            "[{TenantId}] AdapterRtId='{AdapterRtId}', PipelineRtEntityId='{PipelineRtEntityId}' deploy debug configuration",
+            tenantId, adapterRtEntityId, pipelineRtEntityId);
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
             if (adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
             {
-                var pipeline = await communicationRepository.GetPipelineAsync(tenantId, pipelineRtId);
+                var pipeline = await communicationRepository.GetPipelineAsync(tenantId, pipelineRtEntityId);
                 if (pipeline == null)
                 {
-                    throw AdapterServiceException.PipelineNotFound(tenantId, pipelineRtId);
+                    throw AdapterServiceException.PipelineNotFound(tenantId, pipelineRtEntityId);
+                }
+                var dataPipeline = await communicationRepository.GetDataPipelineByPipelineAsync(tenantId, pipeline.RtId);
+                if (dataPipeline == null)
+                {
+                    throw AdapterServiceException.DataPipelineNotFound(tenantId, pipelineRtEntityId);
                 }
                 
                 var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId);
 
-                var deployedPipeline = configuration.Pipelines.FirstOrDefault(p => p.PipelineRtId == pipelineRtId);
+                var deployedPipeline = configuration.Pipelines.FirstOrDefault(p => p.PipelineRtEntityId == pipelineRtEntityId);
                 if (deployedPipeline != null)
                 {
                     configuration.Pipelines.Remove(deployedPipeline);
                 }
                 configuration.Pipelines.Add(new PipelineConfigurationDto(
-                    pipeline.RtId,
+                    dataPipeline.RtId,
+                    pipeline.ToRtEntityId(),
                     true,
                     pipeline.PipelineDefinition
                 ));
