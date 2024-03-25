@@ -78,7 +78,7 @@ public interface IAdapterService
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="adapterRtEntityId">Object id of adapter</param>
-    /// <param name="pipelineRtId">Object id of pipeline</param>
+    /// <param name="pipelineRtEntityId">Object id of pipeline</param>
     /// <returns></returns>
-    Task DeployPipelineAsync(string tenantId, RtEntityId adapterRtEntityId, OctoObjectId pipelineRtId);
+    Task DeployPipelineAsync(string tenantId, RtEntityId adapterRtEntityId, RtEntityId pipelineRtEntityId);
 }

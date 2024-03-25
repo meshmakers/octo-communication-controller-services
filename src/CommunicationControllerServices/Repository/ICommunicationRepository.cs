@@ -126,7 +126,15 @@ public interface ICommunicationRepository
     /// Get the pipeline by id
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="pipelineRtId">Object identifier of data pipeline</param>
+    /// <param name="pipelineRtEntityId">Object identifier of pipeline</param>
     /// <returns></returns>
-    Task<RtPipeline?> GetPipelineAsync(string tenantId, OctoObjectId pipelineRtId);
+    Task<RtPipeline?> GetPipelineAsync(string tenantId, RtEntityId pipelineRtEntityId);
+    
+    /// <summary>
+    /// Get the data pipeline based on the child pipeline
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="pipelineRtId">Object identifier of pipeline</param>
+    /// <returns></returns>
+    Task<RtDataPipeline?> GetDataPipelineByPipelineAsync(string tenantId, OctoObjectId pipelineRtId);
 }

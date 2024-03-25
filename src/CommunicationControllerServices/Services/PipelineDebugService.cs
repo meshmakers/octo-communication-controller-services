@@ -8,17 +8,17 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 /// </summary>
 internal class PipelineDebugService : IPipelineDebugService
 {
-    private readonly ConcurrentDictionary<Tuple<string, OctoObjectId>, string> _debugInfo = new();
-    public Task CacheDebugInfo(string tenantId, RtEntityId adapterRtEntityId, OctoObjectId pipelineRtId, string debugInfo)
+    private readonly ConcurrentDictionary<Tuple<string, RtEntityId>, string> _debugInfo = new();
+    public Task CacheDebugInfo(string tenantId, RtEntityId adapterRtEntityId, RtEntityId pipelineRtEntityId, string debugInfo)
     {
-        var key = new Tuple<string, OctoObjectId>(tenantId, pipelineRtId);
+        var key = new Tuple<string, RtEntityId>(tenantId, pipelineRtEntityId);
         _debugInfo.AddOrUpdate(key, debugInfo, (_, _) => debugInfo);
         return Task.CompletedTask;
     }
 
-    public Task<string?> GetDebugInformation(string tenantId, OctoObjectId pipelineRtId)
+    public Task<string?> GetDebugInformation(string tenantId, RtEntityId pipelineRtEntityId)
     {
-        var key = new Tuple<string, OctoObjectId>(tenantId, pipelineRtId);
+        var key = new Tuple<string, RtEntityId>(tenantId, pipelineRtEntityId);
         _debugInfo.TryGetValue(key, out var value);
         return Task.FromResult(value);
     }

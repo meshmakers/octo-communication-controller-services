@@ -161,7 +161,7 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             session.StartTransaction();
 
-            var RtPool = new RtPool
+            var rtPool = new RtPool
             {
                 CommunicationState = RtCommunicationStateEnum.Offline,
                 DeploymentState = RtDeploymentStateEnum.Unknown,
@@ -171,7 +171,7 @@ internal class CommunicationRepository : ICommunicationRepository
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtPool>>
             {
-                EntityUpdateInfo<RtPool>.CreateInsert(RtPool)
+                EntityUpdateInfo<RtPool>.CreateInsert(rtPool)
             };
 
             OperationResult operationResult = new();
@@ -198,7 +198,7 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             session.StartTransaction();
 
-            var RtPool = new RtPool
+            var rtPool = new RtPool
             {
                 RtId = poolRtId,
                 DeploymentState = deploymentState
@@ -206,7 +206,7 @@ internal class CommunicationRepository : ICommunicationRepository
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtPool>>
             {
-                EntityUpdateInfo<RtPool>.CreateUpdate(RtPool.ToRtEntityId(), RtPool)
+                EntityUpdateInfo<RtPool>.CreateUpdate(rtPool.ToRtEntityId(), rtPool)
             };
 
             OperationResult operationResult = new();
@@ -447,7 +447,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task<RtPipeline?> GetPipelineAsync(string tenantId, OctoObjectId pipelineRtId)
+    public async Task<RtPipeline?> GetPipelineAsync(string tenantId, RtEntityId pipelineRtEntityId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -456,8 +456,37 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             session.StartTransaction();
 
-            var rtPipeline = await tenantRepository.GetRtEntityByRtIdAsync<RtPipeline>(session, pipelineRtId);
+            var rtPipeline = await tenantRepository.GetRtEntityByRtIdAsync<RtPipeline>(session, pipelineRtEntityId.RtId);
             return rtPipeline;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingPipeline(tenantId, pipelineRtEntityId, e);
+        }
+    }
+
+    public async Task<RtDataPipeline?> GetDataPipelineByPipelineAsync(string tenantId, OctoObjectId pipelineRtId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var multipleOriginResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPipeline, RtDataPipeline>(
+                session,
+                new[] { pipelineRtId }, new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild),
+                GraphDirections.Outbound, null, DataQueryOperation.Create());
+
+            await session.CommitTransactionAsync();
+
+            if (multipleOriginResultSet.Any())
+            {
+                return multipleOriginResultSet.First().Value.Items.FirstOrDefault();
+            }
+
+            throw CommunicationRepositoryException.PipelineNotFound(tenantId, pipelineRtId);
         }
         catch (Exception e)
         {

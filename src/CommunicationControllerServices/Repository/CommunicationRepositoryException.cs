@@ -116,6 +116,11 @@ internal class CommunicationRepositoryException : Exception
         return new CommunicationRepositoryException($"[{tenantId}] Failed to get pools", exception);
     }
 
+    internal static Exception CommonFailedGettingPipeline(string tenantId, RtEntityId pipelineRtEntityId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get pipeline '{pipelineRtEntityId}'", exception);
+    }
+    
     internal static Exception CommonFailedGettingPipeline(string tenantId, OctoObjectId pipelineRtId, Exception exception)
     {
         return new CommunicationRepositoryException($"[{tenantId}] Failed to get pipeline '{pipelineRtId}'", exception);

@@ -34,10 +34,10 @@ public class DataPipelineController : ControllerBase
     /// <summary>
     /// Returns the configuration for a specific adapter
     /// </summary>
-    /// <param name="pipelineRtId">The pipeline entity object id</param>
+    /// <param name="pipelineRtEntityId">The pipeline entity object id</param>
     /// <returns>Configuration object</returns>
-    [HttpGet("{pipelineRtId}/debugInfo")]
-    public async Task<IActionResult> GetDebugInfo([Required] OctoObjectId pipelineRtId)
+    [HttpGet("{pipelineRtEntityId}/debugInfo")]
+    public async Task<IActionResult> GetDebugInfo([Required] RtEntityId pipelineRtEntityId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
@@ -45,7 +45,7 @@ public class DataPipelineController : ControllerBase
             return NotFound("TenantId is null or empty");
         }
 
-        var config = await _pipelineDebugService.GetDebugInformation(tenantId, pipelineRtId);
+        var config = await _pipelineDebugService.GetDebugInformation(tenantId, pipelineRtEntityId);
 
         return Ok(config);
     }
@@ -55,15 +55,15 @@ public class DataPipelineController : ControllerBase
     /// </summary>
     /// <param name="tenantId">The id of the tenant.</param>
     /// <param name="adapterRtEntityId">The id of the adapter where the pipline should be executed.</param>
-    /// <param name="pipelineRtId">The id of the pipeline.</param>
+    /// <param name="pipelineRtEntityId">The id of the pipeline.</param>
     /// <returns></returns>
-    [HttpPost("{pipelineRtId}/deploy/{adapterRtId}")]
+    [HttpPost("{pipelineRtEntityId}/deploy/{adapterRtEntityId}")]
     //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
-    public async Task<IActionResult> DeployPipeline([Required] string tenantId, [Required] RtEntityId adapterRtEntityId, [Required] OctoObjectId pipelineRtId)
+    public async Task<IActionResult> DeployPipeline([Required] string tenantId, [Required][FromRoute] RtEntityId adapterRtEntityId, [Required][FromRoute] RtEntityId pipelineRtEntityId)
     {
         try
         {
-            await _adapterService.DeployPipelineAsync(tenantId, adapterRtEntityId, pipelineRtId);
+            await _adapterService.DeployPipelineAsync(tenantId, adapterRtEntityId, pipelineRtEntityId);
             return NoContent();
         }
         catch (AdapterHubCallbackException e)

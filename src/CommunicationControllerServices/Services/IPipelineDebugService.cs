@@ -12,16 +12,16 @@ public interface IPipelineDebugService
     /// </summary>
     /// <param name="tenantId">Tenant id</param>
     /// <param name="adapterRtEntityId">Adapter runtime id</param>
-    /// <param name="pipelineRtId">Pipeline runtime id</param>
+    /// <param name="pipelineRtEntityId">Pipeline runtime id</param>
     /// <param name="debugInfo">Debug information</param>
     /// <returns></returns>
-    Task CacheDebugInfo(string tenantId, RtEntityId adapterRtEntityId, OctoObjectId pipelineRtId, string debugInfo);
+    Task CacheDebugInfo(string tenantId, RtEntityId adapterRtEntityId, RtEntityId pipelineRtEntityId, string debugInfo);
 
     /// <summary>
     /// Returns the debug information for a specific pipeline
     /// </summary>
     /// <param name="tenantId">Tenant id</param>
-    /// <param name="pipelineRtId">Pipeline runtime id</param>
+    /// <param name="pipelineRtEntityId">Pipeline runtime id</param>
     /// <returns></returns>
-    Task<string?> GetDebugInformation(string tenantId, OctoObjectId pipelineRtId);
+    Task<string?> GetDebugInformation(string tenantId, RtEntityId pipelineRtEntityId);
 }
