@@ -55,8 +55,8 @@ public class AdapterController : ControllerBase
     /// </summary>
     /// <param name="adapterRtEntityId">The adapter entity object id</param>
     /// <returns>Configuration object</returns>
-    [HttpGet("{adapterRtId}")]
-    public async Task<IActionResult> Get([Required] RtEntityId adapterRtEntityId)
+    [HttpGet]
+    public async Task<IActionResult> Get([Required][FromQuery] RtEntityId adapterRtEntityId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
@@ -75,9 +75,9 @@ public class AdapterController : ControllerBase
     /// <param name="tenantId">The id of the tenant.</param>
     /// <param name="adapterRtEntityId">The id of the adapter.</param>
     /// <returns></returns>
-    [HttpPost("{adapterRtId}/deployUpdate")]
+    [HttpPost("deployUpdate")]
     //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
-    public async Task<IActionResult> DeployUpdate([Required] string tenantId, [Required] RtEntityId adapterRtEntityId)
+    public async Task<IActionResult> DeployUpdate([Required] string tenantId, [Required][FromQuery] string adapterRtEntityId)
     {
         try
         {
