@@ -79,6 +79,7 @@ public interface IAdapterService
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="adapterRtEntityId">Object id of adapter</param>
     /// <param name="pipelineRtEntityId">Object id of pipeline</param>
+    /// <param name="pipelineDefinition">Temporary pipeline definition</param>
     /// <returns></returns>
-    Task DeployPipelineAsync(string tenantId, RtEntityId adapterRtEntityId, RtEntityId pipelineRtEntityId);
+    Task DeployPipelineAsync(string tenantId, RtEntityId adapterRtEntityId, RtEntityId pipelineRtEntityId, string? pipelineDefinition = null);
 }

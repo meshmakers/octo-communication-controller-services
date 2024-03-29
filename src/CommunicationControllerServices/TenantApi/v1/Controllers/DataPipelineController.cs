@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
-using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
@@ -36,8 +36,8 @@ public class DataPipelineController : ControllerBase
     /// </summary>
     /// <param name="pipelineRtEntityId">The pipeline entity object id</param>
     /// <returns>Configuration object</returns>
-    [HttpGet("{pipelineRtEntityId}/debugInfo")]
-    public async Task<IActionResult> GetDebugInfo([Required] RtEntityId pipelineRtEntityId)
+    [HttpGet("debugInfo")]
+    public async Task<IActionResult> GetDebugInfo([Required][FromQuery] string pipelineRtEntityId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
@@ -57,13 +57,17 @@ public class DataPipelineController : ControllerBase
     /// <param name="adapterRtEntityId">The id of the adapter where the pipline should be executed.</param>
     /// <param name="pipelineRtEntityId">The id of the pipeline.</param>
     /// <returns></returns>
-    [HttpPost("{pipelineRtEntityId}/deploy/{adapterRtEntityId}")]
+    [HttpPost("deploy")]
     //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
-    public async Task<IActionResult> DeployPipeline([Required] string tenantId, [Required][FromRoute] RtEntityId adapterRtEntityId, [Required][FromRoute] RtEntityId pipelineRtEntityId)
+    public async Task<IActionResult> DeployPipeline([Required] string tenantId, [Required][FromQuery] string adapterRtEntityId, [Required][FromQuery] string pipelineRtEntityId)
     {
         try
         {
-            await _adapterService.DeployPipelineAsync(tenantId, adapterRtEntityId, pipelineRtEntityId);
+            using var reader = new StreamReader(Request.Body, Encoding.UTF8);
+            
+            var pipelineDefinition = await reader.ReadToEndAsync();
+            await _adapterService.DeployPipelineAsync(tenantId, adapterRtEntityId, pipelineRtEntityId,
+                pipelineDefinition);
             return NoContent();
         }
         catch (AdapterHubCallbackException e)

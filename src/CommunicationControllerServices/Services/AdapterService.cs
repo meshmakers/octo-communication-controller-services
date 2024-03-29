@@ -183,7 +183,7 @@ internal class AdapterService(
         throw AdapterServiceException.AdapterNotLoaded(tenantId, adapterRtEntityId);
     }
 
-    public async Task DeployPipelineAsync(string tenantId, RtEntityId adapterRtEntityId, RtEntityId pipelineRtEntityId)
+    public async Task DeployPipelineAsync(string tenantId, RtEntityId adapterRtEntityId, RtEntityId pipelineRtEntityId, string? pipelineDefinition = null)
     {
         Logger.Info(
             "[{TenantId}] AdapterRtId='{AdapterRtId}', PipelineRtEntityId='{PipelineRtEntityId}' deploy debug configuration",
@@ -215,7 +215,7 @@ internal class AdapterService(
                     dataPipeline.RtId,
                     pipeline.ToRtEntityId(),
                     true,
-                    pipeline.PipelineDefinition
+                    pipelineDefinition ?? pipeline.PipelineDefinition
                 ));
 
                 if (!configuration.Equals(adapter.Configuration))
