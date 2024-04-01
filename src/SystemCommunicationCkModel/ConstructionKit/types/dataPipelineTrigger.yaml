@@ -3,6 +3,8 @@ types:
   - typeId: DataPipelineTrigger
     derivedFromCkTypeId: ${thisModel}/DeployableEntity
     attributes:
+      - id: System/Enabled
+        name: Enabled
       - id: System.Bot/CronExpression
         name: CronExpression
 
