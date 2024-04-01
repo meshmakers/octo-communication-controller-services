@@ -32,6 +32,14 @@ public interface ICommunicationRepository
     Task<RtAdapter> GetAdapterAsync(string tenantId, RtEntityId adapterRtEntityId);
     
     /// <summary>
+    /// Gets an adapter by his pipeline
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="pipelineRtEntityId">Object identifier of pipline</param>
+    /// <returns></returns>
+    Task<RtAdapter?> GetAdapterByPipelineAsync(string tenantId, RtEntityId pipelineRtEntityId);
+    
+    /// <summary>
     /// Get pools for a tenant
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
@@ -100,14 +108,6 @@ public interface ICommunicationRepository
     Task<RtPool> GetPoolOfAdapterAsync(string tenantId, RtEntityId adapterRtEntityId);
 
     /// <summary>
-    /// Gets the corresponding adapter of a data pipeline
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="dataPipelineRtId">Object identifier of data pipeline</param>
-    /// <returns></returns>
-    Task<RtAdapter> GetAdapterByDataPipelineAsync(string tenantId, OctoObjectId dataPipelineRtId);
-
-    /// <summary>
     /// Returns true if a tenant exists
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
@@ -121,6 +121,14 @@ public interface ICommunicationRepository
     /// <param name="adapterRtEntityId">Object identifier of communication adapter</param>
     /// <returns></returns>
     Task<IReadOnlyCollection<RtPipeline>> GetPipelinesAsync(string tenantId, RtEntityId adapterRtEntityId);
+    
+    /// <summary>
+    /// Gets the pipelines of a data pipeline
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="dataPipelineRtId">Object identifier of data pipeline</param>
+    /// <returns></returns>
+    Task<IReadOnlyCollection<RtPipeline>> GetPipelinesAsync(string tenantId, OctoObjectId dataPipelineRtId);
     
     /// <summary>
     /// Get the pipeline by id
@@ -137,4 +145,36 @@ public interface ICommunicationRepository
     /// <param name="pipelineRtId">Object identifier of pipeline</param>
     /// <returns></returns>
     Task<RtDataPipeline?> GetDataPipelineByPipelineAsync(string tenantId, OctoObjectId pipelineRtId);
+    
+    /// <summary>
+    /// Gets a list of triggers of the given tenant
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <returns></returns>
+    Task<IReadOnlyCollection<RtDataPipelineTrigger>> GetTriggersAsync(string tenantId);
+    
+    /// <summary>
+    /// Gets a list of triggers and their pipelines of the given tenant
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <returns></returns>
+    Task<IDictionary<RtDataPipelineTrigger, IList<RtMeshPipeline>>> GetTriggersAndPipelinesAsync(string tenantId);
+    
+    /// <summary>
+    /// Set the deployment state of a data pipeline trigger
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="triggerRtId">Object id of trigger</param>
+    /// <param name="deploymentState">State of trigger</param>
+    /// <returns></returns>
+    Task SetDataPipelineTriggerDeploymentStateAsync(string tenantId, OctoObjectId triggerRtId, RtDeploymentStateEnum deploymentState);
+    
+    /// <summary>
+    /// Set the deployment state of a pipeline
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="pipelineRtEntityId">Object id of pipeline</param>
+    /// <param name="deploymentState">State of pipeline</param>
+    /// <returns></returns>
+    Task SetPipelineDeploymentStateAsync(string tenantId, RtEntityId pipelineRtEntityId, RtDeploymentStateEnum deploymentState);
 }
