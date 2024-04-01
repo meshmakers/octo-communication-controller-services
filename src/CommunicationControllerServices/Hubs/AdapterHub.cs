@@ -110,13 +110,13 @@ internal class AdapterHub : Hub, IAdapterHub
         }
     }
 
-    public async Task SendDebugDataAsync(RtEntityId adapterRtEntityId, RtEntityId pipelineRtEntityId, string debugData)
+    public async Task SendDebugDataAsync(RtEntityId pipelineRtEntityId, string debugData)
     {
         var tenantId = GetTenantId();
 
         try
         {
-            await _pipelineDebugService.CacheDebugInfo(tenantId, adapterRtEntityId, pipelineRtEntityId, debugData);
+            await _pipelineDebugService.CacheDebugInfo(tenantId, pipelineRtEntityId, debugData);
         }
         catch (Exception e)
         {

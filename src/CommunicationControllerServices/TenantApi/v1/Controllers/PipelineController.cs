@@ -2,20 +2,19 @@ using System.ComponentModel.DataAnnotations;
 using System.Text;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
-using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
 
 /// <summary>
-/// Manages data pipelines
+/// Manages edge and mesh pipelines
 /// </summary>
 [ApiController]
 [Route("{tenantId:tenantId}/v{version:apiVersion}/[controller]")]
 [ApiVersion("1.0")]
-public class DataPipelineController : ControllerBase
+public class PipelineController : ControllerBase
 {
-    private readonly ILogger<DataPipelineController> _logger;
+    private readonly ILogger<PipelineController> _logger;
     private readonly IPipelineDebugService _pipelineDebugService;
     private readonly IAdapterService _adapterService;
 
@@ -25,7 +24,7 @@ public class DataPipelineController : ControllerBase
     /// <param name="logger">Logging object</param>
     /// <param name="pipelineDebugService"></param>
     /// <param name="adapterService"></param>
-    public DataPipelineController(ILogger<DataPipelineController> logger, IPipelineDebugService pipelineDebugService, IAdapterService adapterService)
+    public PipelineController(ILogger<PipelineController> logger, IPipelineDebugService pipelineDebugService, IAdapterService adapterService)
     {
         _logger = logger;
         _pipelineDebugService = pipelineDebugService;
@@ -52,18 +51,23 @@ public class DataPipelineController : ControllerBase
     }
     
     /// <summary>
-    /// Updates the configuration at an adapter
+    /// Deploys the pipline definition at the corresponding adapter
     /// </summary>
     /// <param name="tenantId">The id of the tenant.</param>
-    /// <param name="dataPipelineRtId">The id of the data pipeline.</param>
+    /// <param name="adapterRtEntityId">The id of the adapter where the pipline should be executed.</param>
+    /// <param name="pipelineRtEntityId">The id of the pipeline.</param>
     /// <returns></returns>
     [HttpPost("deploy")]
     //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
-    public async Task<IActionResult> DeployDataPipeline([Required] string tenantId, [Required][FromQuery] OctoObjectId dataPipelineRtId)
+    public async Task<IActionResult> DeployPipeline([Required] string tenantId, [Required][FromQuery] string adapterRtEntityId, [Required][FromQuery] string pipelineRtEntityId)
     {
         try
         {
-            await _adapterService.DeployDataPipelineAsync(tenantId, dataPipelineRtId);
+            using var reader = new StreamReader(Request.Body, Encoding.UTF8);
+            
+            var pipelineDefinition = await reader.ReadToEndAsync();
+            await _adapterService.DeployPipelineAsync(tenantId, adapterRtEntityId, pipelineRtEntityId,
+                pipelineDefinition);
             return NoContent();
         }
         catch (AdapterHubCallbackException e)

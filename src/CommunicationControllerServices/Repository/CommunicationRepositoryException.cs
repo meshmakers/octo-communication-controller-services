@@ -125,4 +125,34 @@ internal class CommunicationRepositoryException : Exception
     {
         return new CommunicationRepositoryException($"[{tenantId}] Failed to get pipeline '{pipelineRtId}'", exception);
     }
+
+    internal static Exception CommonFailedSetTriggerDeploymentState(string tenantId, OctoObjectId triggerRtId, RtDeploymentStateEnum deploymentState, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to set deployment state of trigger '{triggerRtId}' to '{deploymentState}'", exception);
+    }
+
+    internal static Exception CommonFailedGettingTriggers(string tenantId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get triggers", exception);
+    }
+
+    internal static Exception CommonFailedSetPipelineDeploymentState(string tenantId, RtEntityId pipelineRtEntityId, RtDeploymentStateEnum deploymentState, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to set deployment state of pipeline '{pipelineRtEntityId}' to '{deploymentState}'", exception);
+    }
+
+    internal static Exception DataPipelineNotFound(string tenantId, OctoObjectId dataPipelineRtId)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Data pipeline '{dataPipelineRtId}' does not exist");
+    }
+
+    internal static Exception CommonFailedGettingByDataPipeline(string tenantId, OctoObjectId dataPipelineRtId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get by data pipeline '{dataPipelineRtId}'", exception);
+    }
+
+    internal static Exception CommonFailedGettingAdapterByPipeline(string tenantId, RtEntityId pipelineRtEntityId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get adapter by pipeline '{pipelineRtEntityId}'", exception);
+    }
 }

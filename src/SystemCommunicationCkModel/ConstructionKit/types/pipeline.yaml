@@ -4,6 +4,8 @@ types:
     derivedFromCkTypeId: ${thisModel}/DeployableEntity
     isAbstract: true
     attributes:
+      - id: System/Enabled
+        name: Enabled 
       - id: ${thisModel}/PipelineDefinition
         name: PipelineDefinition
     associations:

@@ -9,7 +9,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 internal class PipelineDebugService : IPipelineDebugService
 {
     private readonly ConcurrentDictionary<Tuple<string, RtEntityId>, string> _debugInfo = new();
-    public Task CacheDebugInfo(string tenantId, RtEntityId adapterRtEntityId, RtEntityId pipelineRtEntityId, string debugInfo)
+    public Task CacheDebugInfo(string tenantId, RtEntityId pipelineRtEntityId, string debugInfo)
     {
         var key = new Tuple<string, RtEntityId>(tenantId, pipelineRtEntityId);
         _debugInfo.AddOrUpdate(key, debugInfo, (_, _) => debugInfo);

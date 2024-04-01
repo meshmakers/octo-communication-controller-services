@@ -82,4 +82,12 @@ public interface IAdapterService
     /// <param name="pipelineDefinition">Temporary pipeline definition</param>
     /// <returns></returns>
     Task DeployPipelineAsync(string tenantId, RtEntityId adapterRtEntityId, RtEntityId pipelineRtEntityId, string? pipelineDefinition = null);
+
+    /// <summary>
+    /// Deploys a data pipeline to its adapters
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="dataPipelineRtId">Runtime id of data pipeline</param>
+    /// <returns></returns>
+    Task DeployDataPipelineAsync(string tenantId, OctoObjectId dataPipelineRtId);
 }

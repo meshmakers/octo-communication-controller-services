@@ -35,6 +35,12 @@ internal class AdapterService(
 
             await SetAdapterOnlineAsync(tenantId, adapterRtEntityId, connectionId);
 
+            foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
+            {
+                await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
+                    pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Deployed);
+            }
+
             return adapter.Configuration;
         }
 
@@ -48,8 +54,19 @@ internal class AdapterService(
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
+            if (adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
+            {
+                foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
+                {
+                    await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
+                        pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending);
+                }
+                await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId,
+                    RtCommunicationStateEnum.Unregistered);
+            }
+
             adapterTenant.RemoveAdapter(adapterRtEntityId);
-            await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId, RtCommunicationStateEnum.Unregistered);
+
             return;
         }
 
@@ -174,6 +191,11 @@ internal class AdapterService(
                 {
                     adapter.UpdateConfiguration(tenantId, configuration);
                     await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, configuration);
+                    foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
+                    {
+                        await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
+                            pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Deployed);
+                    }
                 }
 
                 return;
@@ -221,6 +243,11 @@ internal class AdapterService(
                 if (!configuration.Equals(adapter.Configuration))
                 {
                     await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, configuration);
+                    foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
+                    {
+                        await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
+                            pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Deployed);
+                    }
                 }
 
                 return;
@@ -228,6 +255,23 @@ internal class AdapterService(
         }
 
         throw AdapterServiceException.AdapterNotLoaded(tenantId, adapterRtEntityId);
+    }
+
+    public async Task DeployDataPipelineAsync(string tenantId, OctoObjectId dataPipelineRtId)
+    {
+        Logger.Info(
+            "[{TenantId}] DataPipelineRtId='{PipelineRtEntityId}' deploy edge and mesh pipeline to adapter",
+            tenantId, dataPipelineRtId);
+        
+        var pipelines = await communicationRepository.GetPipelinesAsync(tenantId, dataPipelineRtId);
+        foreach (var rtPipeline in pipelines)
+        {
+            var adapter = await communicationRepository.GetAdapterByPipelineAsync(tenantId, rtPipeline.ToRtEntityId());
+            if (adapter != null)
+            {
+                await DeployAdapterConfigurationAsync(tenantId, adapter.ToRtEntityId());
+            }
+        }
     }
 
     public async Task ReloadTenantAsync(string tenantId)
