@@ -145,10 +145,10 @@ internal class PoolService : IPoolService
 
         try
         {
-            var pools = await _communicationRepository.GetPoolsAsync(tenantId);
-            foreach (var pool in pools)
+            if (_poolCache.TryGetTenant(tenantId, out var poolTenant))
             {
-                if (_poolCache.TryGetTenant(tenantId, out var poolTenant))
+                var pools = await _communicationRepository.GetPoolsAsync(tenantId);
+                foreach (var pool in pools)
                 {
                     if (poolTenant.PoolsById.TryGetValue(pool.RtId, out var poolCache))
                     {
@@ -188,10 +188,14 @@ internal class PoolService : IPoolService
 
                         continue;
                     }
-                }
 
-                await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, pool.RtId,
-                    RtCommunicationStateEnum.Unregistered);
+                    await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, pool.RtId,
+                        RtCommunicationStateEnum.Unregistered);
+                }
+            }
+            else
+            {
+                _poolCache.AddOrUpdateTenant(tenantId);
             }
         }
         catch (Exception e)
@@ -228,7 +232,8 @@ internal class PoolService : IPoolService
     /// <inheritdoc />
     public async Task DeployAdapterAsync(string tenantId, OctoObjectId poolRtId, RtEntityId adapterRtEntityId)
     {
-        Logger.Info("[{TenantId}] Deploying Adapter '{AdapterRtEntityId}' to pool '{PoolRtId}'", tenantId, adapterRtEntityId,
+        Logger.Info("[{TenantId}] Deploying Adapter '{AdapterRtEntityId}' to pool '{PoolRtId}'", tenantId,
+            adapterRtEntityId,
             poolRtId);
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
@@ -255,7 +260,8 @@ internal class PoolService : IPoolService
     /// <inheritdoc />
     public async Task UndeployAdapterAsync(string tenantId, OctoObjectId poolRtId, RtEntityId adapterRtEntityId)
     {
-        Logger.Info("[{TenantId}] Undeploying Adapter '{AdapterRtEntityId}' from pool '{PoolRtId}'", tenantId, adapterRtEntityId,
+        Logger.Info("[{TenantId}] Undeploying Adapter '{AdapterRtEntityId}' from pool '{PoolRtId}'", tenantId,
+            adapterRtEntityId,
             poolRtId);
 
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
@@ -357,7 +363,8 @@ internal class PoolService : IPoolService
         {
             case UpdateTypes.Update:
             case UpdateTypes.Replace:
-                if (info.Document != null && poolTenant.AdaptersById.TryGetValue(info.Document.ToRtEntityId(), out var adapter))
+                if (info.Document != null &&
+                    poolTenant.AdaptersById.TryGetValue(info.Document.ToRtEntityId(), out var adapter))
                 {
                     if (info.UpdateFields.Contains("attributes." +
                                                    nameof(RtAdapter.ImageName).ToCamelCase()) ||
