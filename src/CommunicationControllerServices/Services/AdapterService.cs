@@ -61,6 +61,7 @@ internal class AdapterService(
                     await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
                         pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending);
                 }
+
                 await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId,
                     RtCommunicationStateEnum.Unregistered);
             }
@@ -90,7 +91,8 @@ internal class AdapterService(
     //     }
     // }
 
-    public async Task<AdapterConfigurationDto> GetAdapterConfigurationAsync(string tenantId, RtEntityId adapterRtEntityId)
+    public async Task<AdapterConfigurationDto> GetAdapterConfigurationAsync(string tenantId,
+        RtEntityId adapterRtEntityId)
     {
         try
         {
@@ -110,12 +112,14 @@ internal class AdapterService(
                 {
                     continue;
                 }
-                
-                var dataPipeline = await communicationRepository.GetDataPipelineByPipelineAsync(tenantId, rtPipeline.RtId);
+
+                var dataPipeline =
+                    await communicationRepository.GetDataPipelineByPipelineAsync(tenantId, rtPipeline.RtId);
                 if (dataPipeline == null)
                 {
                     throw AdapterServiceException.DataPipelineNotFound(tenantId, rtPipeline.ToRtEntityId());
                 }
+
                 var pipelineConfiguration = new PipelineConfigurationDto(
                     dataPipeline.RtId,
                     rtPipeline.ToRtEntityId(),
@@ -148,7 +152,8 @@ internal class AdapterService(
             if (adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
             {
                 adapterTenant.UpdateConnectionId(adapterRtEntityId, connectionId);
-                await SetAdapterCommunicationStateAsync(tenantId, adapter.AdapterRtEntityId, RtCommunicationStateEnum.Online);
+                await SetAdapterCommunicationStateAsync(tenantId, adapter.AdapterRtEntityId,
+                    RtCommunicationStateEnum.Online);
             }
 
             return;
@@ -205,7 +210,8 @@ internal class AdapterService(
         throw AdapterServiceException.AdapterNotLoaded(tenantId, adapterRtEntityId);
     }
 
-    public async Task DeployPipelineAsync(string tenantId, RtEntityId adapterRtEntityId, RtEntityId pipelineRtEntityId, string? pipelineDefinition = null)
+    public async Task DeployPipelineAsync(string tenantId, RtEntityId adapterRtEntityId, RtEntityId pipelineRtEntityId,
+        string? pipelineDefinition = null)
     {
         Logger.Info(
             "[{TenantId}] AdapterRtId='{AdapterRtId}', PipelineRtEntityId='{PipelineRtEntityId}' deploy debug configuration",
@@ -220,19 +226,23 @@ internal class AdapterService(
                 {
                     throw AdapterServiceException.PipelineNotFound(tenantId, pipelineRtEntityId);
                 }
-                var dataPipeline = await communicationRepository.GetDataPipelineByPipelineAsync(tenantId, pipeline.RtId);
+
+                var dataPipeline =
+                    await communicationRepository.GetDataPipelineByPipelineAsync(tenantId, pipeline.RtId);
                 if (dataPipeline == null)
                 {
                     throw AdapterServiceException.DataPipelineNotFound(tenantId, pipelineRtEntityId);
                 }
-                
+
                 var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId);
 
-                var deployedPipeline = configuration.Pipelines.FirstOrDefault(p => p.PipelineRtEntityId == pipelineRtEntityId);
+                var deployedPipeline =
+                    configuration.Pipelines.FirstOrDefault(p => p.PipelineRtEntityId == pipelineRtEntityId);
                 if (deployedPipeline != null)
                 {
                     configuration.Pipelines.Remove(deployedPipeline);
                 }
+
                 configuration.Pipelines.Add(new PipelineConfigurationDto(
                     dataPipeline.RtId,
                     pipeline.ToRtEntityId(),
@@ -262,7 +272,7 @@ internal class AdapterService(
         Logger.Info(
             "[{TenantId}] DataPipelineRtId='{PipelineRtEntityId}' deploy edge and mesh pipeline to adapter",
             tenantId, dataPipelineRtId);
-        
+
         var pipelines = await communicationRepository.GetPipelinesAsync(tenantId, dataPipelineRtId);
         foreach (var rtPipeline in pipelines)
         {
@@ -278,23 +288,24 @@ internal class AdapterService(
     {
         Logger.Info("[{TenantId}] Reloading tenant", tenantId);
 
-        var adapters = await communicationRepository.GetAdaptersAsync(tenantId);
-        foreach (var adapter in adapters)
+        if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
-            if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
+            var adapters = await communicationRepository.GetAdaptersAsync(tenantId);
+            foreach (var adapter in adapters)
             {
                 if (adapterTenant.AdapterById.ContainsKey(adapter.ToRtEntityId()))
                 {
                     await SetAdapterOfflineAsync(tenantId, adapter.ToRtEntityId());
                     continue;
                 }
-            }
-            else
-            {
-                adapterCache.AddOrUpdateTenant(tenantId);
-            }
 
-            await SetAdapterCommunicationStateAsync(tenantId, adapter.ToRtEntityId(), RtCommunicationStateEnum.Unregistered);
+                await SetAdapterCommunicationStateAsync(tenantId, adapter.ToRtEntityId(),
+                    RtCommunicationStateEnum.Unregistered);
+            }
+        }
+        else
+        {
+            adapterCache.AddOrUpdateTenant(tenantId);
         }
     }
 
@@ -310,11 +321,13 @@ internal class AdapterService(
     private async Task SetAdapterCommunicationStateAsync(string tenantId, RtEntityId adapterRtEntityId,
         RtCommunicationStateEnum communicationState)
     {
-        Logger.Info("[{TenantId}] Setting communicaton state of adapter '{AdapterRtEntityId}' to '{CommunicationState}'",
+        Logger.Info(
+            "[{TenantId}] Setting communicaton state of adapter '{AdapterRtEntityId}' to '{CommunicationState}'",
             tenantId, adapterRtEntityId, communicationState);
         try
         {
-            await communicationRepository.SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId, communicationState);
+            await communicationRepository.SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId,
+                communicationState);
         }
         catch (Exception e)
         {
