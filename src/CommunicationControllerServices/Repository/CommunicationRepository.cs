@@ -405,7 +405,7 @@ internal class CommunicationRepository : ICommunicationRepository
 
     public async Task<bool> IsTenantExistingAsync(string tenantId)
     {
-        var systemSession = await _systemContext.GetSystemSessionAsync();
+        var systemSession = await _systemContext.GetAdminSessionAsync();
 
         try
         {

@@ -28,7 +28,7 @@ internal class DefaultConfigurationCreatorService(
 
         var tenantContext = await systemContext.FindTenantContextAsync(tenantId);
 
-        using var session = await tenantContext.GetSystemSessionAsync();
+        using var session = await tenantContext.GetAdminSessionAsync();
         session.StartTransaction();
 
         // If there is a configuration version, check if we need to update the configuration
@@ -64,7 +64,7 @@ internal class DefaultConfigurationCreatorService(
     {
         var tenantContext = await systemContext.FindTenantContextAsync(tenantId);
 
-        using var session = await tenantContext.GetSystemSessionAsync();
+        using var session = await tenantContext.GetAdminSessionAsync();
         session.StartTransaction();
         
         // If there is a configuration version, check if we need to update the configuration
@@ -90,7 +90,7 @@ internal class DefaultConfigurationCreatorService(
     {
         var tenantContext = await systemContext.FindTenantContextAsync(tenantId);
 
-        using var session = await tenantContext.GetSystemSessionAsync();
+        using var session = await tenantContext.GetAdminSessionAsync();
         session.StartTransaction();
 
         // If there is a configuration version, check if we need to update the configuration
@@ -113,7 +113,7 @@ internal class DefaultConfigurationCreatorService(
     {
         var tenantContext = await systemContext.FindTenantContextAsync(tenantId);
 
-        using var session = await tenantContext.GetSystemSessionAsync();
+        using var session = await tenantContext.GetAdminSessionAsync();
         session.StartTransaction();
 
         // If there is a configuration version, check if we need to update the configuration
