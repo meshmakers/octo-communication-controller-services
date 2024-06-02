@@ -12,6 +12,7 @@ trigger:
 
 variables:
   - group: GitSSHGroup
+  - group: ApiKeys
   - group: OctoDefault
   - name: solutionFile
     value: 'Octo.CommunicationController.sln'
@@ -63,9 +64,8 @@ stages:
                '**/*Tests.csproj'
                !'**/*SystemTests.csproj'
              testRunTitle: 'CI'
-         - template: buildAndPushDockerImage.yml
+         - template: build-and-push-docker-image.yml
            parameters:
-             ContainerRegistry: 'dockerhub@ianitor'
              Repository: meshmakers/octo-mesh-communication-controller-services
              Dockerfile: src/CommunicationControllerServices/Dockerfile
              IsRelease: ${{ variables.isRelease }}
