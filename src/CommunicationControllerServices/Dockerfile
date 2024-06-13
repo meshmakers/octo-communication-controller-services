@@ -18,7 +18,7 @@ WORKDIR "/src/src/CommunicationControllerServices"
 RUN dotnet build "CommunicationControllerServices.csproj" -c Release -p:OctoNugetPrivateServer=${OCTO_PRIVATE_NUGET_SERVICE}
 
 FROM build AS publish
-RUN dotnet publish "CommunicationControllerServices.csproj" -c Release -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "CommunicationControllerServices.csproj" -c Release -o /app /p:UseAppHost=false
 
 FROM base AS final
 WORKDIR /app
