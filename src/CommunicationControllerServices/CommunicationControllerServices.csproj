@@ -35,6 +35,7 @@
         <ProjectReference Include="$(OctoCommonServicesPath)src\Common\Common.csproj" />
         <ProjectReference Include="$(OctoCommonServicesPath)src\Swagger\Swagger.csproj" />
         <ProjectReference Include="$(OctoCommonServicesPath)src\Infrastructure\Infrastructure.csproj" />
+        <ProjectReference Include="..\octo-common-services\src\Observability\Observability.csproj" />
         <ProjectReference Include="..\SystemCommunicationCkModel\SystemCommunicationCkModel.csproj" />
         <ProjectReference Include="$(OctoConstructionKitPath)src\Runtime.Engine.MongoDb\Runtime.Engine.MongoDb.csproj" />
     </ItemGroup>
