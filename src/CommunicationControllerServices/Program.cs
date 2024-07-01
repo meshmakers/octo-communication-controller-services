@@ -9,11 +9,13 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Routing;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Extensions;
 using Meshmakers.Octo.Services.Common;
 using Meshmakers.Octo.Services.Common.Cors;
 using Meshmakers.Octo.Services.Common.DistributionEventHub.Commands;
 using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
 using Meshmakers.Octo.Services.Infrastructure.Services;
+using Meshmakers.Octo.Services.Observability;
 using Meshmakers.Octo.Services.Swagger.Configuration;
 using Microsoft.AspNetCore.Cors.Infrastructure;
 using NLog;
@@ -29,6 +31,9 @@ try
     logger.Debug("init main");
 
     var builder = WebApplication.CreateBuilder(args);
+
+    builder.AddObservability()
+        .AddSystemContextHealthCheck();
 
     builder.Services.Configure<OctoSystemConfiguration>(options => builder.Configuration.GetSection("System").Bind(options));
     builder.Services.Configure<CommunicationControllerOptions>(options => builder.Configuration.GetSection("CommunicationController").Bind(options));
@@ -108,6 +113,8 @@ try
     });
     
     var app = builder.Build();
+    
+    app.MapObservability();
 
     // Configure the HTTP request pipeline.
     if (app.Environment.IsDevelopment())
@@ -117,8 +124,6 @@ try
 
     app.UseCors();
     
-    app.UseHttpsRedirection();
-
     app.UseAuthorization();
     app.UseOctoApiVersioningAndDocumentation();
 
