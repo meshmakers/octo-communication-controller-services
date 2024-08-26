@@ -298,6 +298,12 @@ internal class CommunicationRepository : ICommunicationRepository
     public async Task SetAdapterDeploymentStateAsync(string tenantId, RtEntityId adapterRtEntityId,
         RtDeploymentStateEnum deploymentState)
     {
+        await SetAdapterDeploymentStateAsync(tenantId, [adapterRtEntityId], deploymentState);
+    }
+
+    public async Task SetAdapterDeploymentStateAsync(string tenantId, ICollection<RtEntityId> adapterRtEntityIds,
+        RtDeploymentStateEnum deploymentState)
+    {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
         var session = await tenantRepository.GetSessionAsync();
@@ -310,10 +316,11 @@ internal class CommunicationRepository : ICommunicationRepository
                 DeploymentState = deploymentState
             };
 
-            var entityUpdateInfoList = new List<EntityUpdateInfo<RtAdapter>>
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtAdapter>>();
+            foreach (var adapterRtEntityId in adapterRtEntityIds)
             {
-                EntityUpdateInfo<RtAdapter>.CreateUpdate(adapterRtEntityId, rtAdapter)
-            };
+                entityUpdateInfoList.Add(EntityUpdateInfo<RtAdapter>.CreateUpdate(adapterRtEntityId, rtAdapter));
+            }
 
             OperationResult operationResult = new();
             await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
@@ -326,7 +333,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw CommunicationRepositoryException.CommonFailedSetAdapterDeploymentState(tenantId, adapterRtEntityId,
+            throw CommunicationRepositoryException.CommonFailedSetAdapterDeploymentState(tenantId, adapterRtEntityIds,
                 deploymentState, e);
         }
     }

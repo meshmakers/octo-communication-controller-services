@@ -1,5 +1,6 @@
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v1;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
@@ -112,7 +113,19 @@ public interface IPoolService
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolName">Name of pool</param>
     /// <param name="adapterRtEntityId">The object id of the adapter</param>
-    /// <param name="deployed">True if the adapter is deployed, false otherwise</param> 
+    /// <param name="deploymentState">The new deployment state</param>
     /// <returns></returns>
-    Task SetAdapterDeploymentStateAsync(string tenantId, string poolName, RtEntityId adapterRtEntityId, bool deployed);
+    Task SetAdapterDeploymentStateAsync(string tenantId, string poolName, RtEntityId adapterRtEntityId, 
+        RtDeploymentStateEnum deploymentState);
+    
+    /// <summary>
+    /// Updates the deployment state of an adapter in a pool
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="poolName">Name of pool</param>
+    /// <param name="adapterRtEntityIds">The object id of the adapters</param>
+    /// <param name="deploymentState">The new deployment state</param>
+    /// <returns></returns>
+    Task SetAdapterDeploymentStateAsync(string tenantId, string poolName, ICollection<RtEntityId> adapterRtEntityIds, 
+        RtDeploymentStateEnum deploymentState);
 }
