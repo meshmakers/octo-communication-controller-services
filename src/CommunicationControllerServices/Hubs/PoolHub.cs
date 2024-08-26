@@ -1,6 +1,7 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
+using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.SignalR;
 using NLog;
 
@@ -23,9 +24,7 @@ public class PoolHub : Hub, IPoolHub
         _poolService = poolService;
     }
 
-    /// <summary>
-    /// Called when a client connects to the hub
-    /// </summary>
+    /// <inheritdoc />
     public override async Task OnConnectedAsync()
     {
         var tenantId = GetTenantId();
@@ -44,10 +43,7 @@ public class PoolHub : Hub, IPoolHub
         await base.OnConnectedAsync();
     }
 
-    /// <summary>
-    /// Called when a client disconnects from the hub
-    /// </summary>
-    /// <param name="exception"></param>
+    /// <inheritdoc />
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         var tenantId = GetTenantId();
@@ -67,13 +63,7 @@ public class PoolHub : Hub, IPoolHub
         await base.OnDisconnectedAsync(exception);
     }
 
-    /// <summary>
-    /// Registers a pool operator
-    /// </summary>
-    /// <param name="poolName">Name of pool</param>
-    /// <returns></returns>
-    /// <exception cref="InvalidOperationException"></exception>
-    /// <exception cref="PoolServiceException"></exception>
+    /// <inheritdoc />
     public async Task<PoolConfigurationDto> RegisterPoolOperatorAsync(string poolName)
     {
         var tenantId = GetTenantId();
@@ -93,13 +83,7 @@ public class PoolHub : Hub, IPoolHub
         }
     }
 
-    /// <summary>
-    /// Unregisters a pool operator
-    /// </summary>
-    /// <param name="poolName">Name of pool</param>
-    /// <returns></returns>
-    /// <exception cref="InvalidOperationException"></exception>
-    /// <exception cref="PoolServiceException"></exception>
+    /// <inheritdoc />
     public async Task UnregisterPoolOperatorAsync(string poolName)
     {
         var tenantId = GetTenantId();
@@ -111,6 +95,22 @@ public class PoolHub : Hub, IPoolHub
         catch (Exception e)
         {
             Logger.Error(e, "Cannot unregister pool operator");
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task UpdateAdapterDeploymentStateAsync(string poolName, RtEntityId adapterRtEntityId, bool deployed)
+    {
+        var tenantId = GetTenantId();
+
+        try
+        {
+            await _poolService.SetAdapterDeploymentStateAsync(tenantId, poolName, adapterRtEntityId, deployed);
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e, "Cannot update adapter deployment state");
             throw;
         }
     }

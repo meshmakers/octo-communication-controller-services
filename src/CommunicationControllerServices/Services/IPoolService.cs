@@ -48,7 +48,15 @@ public interface IPoolService
     Task UnloadTenantAsync(string tenantId);
     
     /// <summary>
-    /// Deploys an new adapter to a pool
+    /// Deploys all adapters of a pool
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="poolRtId">The object id of the pool</param>
+    /// <returns></returns>
+    Task DeployAdaptersAsync(string tenantId, OctoObjectId poolRtId);
+    
+    /// <summary>
+    /// Deploys a new adapter to a pool
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolRtId">The object id of the pool</param>
@@ -97,4 +105,14 @@ public interface IPoolService
     /// <param name="connectionId">Connection id of pool</param>
     /// <returns></returns>
     Task SetPoolOnlineAsync(string tenantId, string poolName, string connectionId);
+    
+    /// <summary>
+    /// Updates the deployment state of an adapter in a pool
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="poolName">Name of pool</param>
+    /// <param name="adapterRtEntityId">The object id of the adapter</param>
+    /// <param name="deployed">True if the adapter is deployed, false otherwise</param> 
+    /// <returns></returns>
+    Task SetAdapterDeploymentStateAsync(string tenantId, string poolName, RtEntityId adapterRtEntityId, bool deployed);
 }

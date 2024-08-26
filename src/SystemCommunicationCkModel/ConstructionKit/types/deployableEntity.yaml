@@ -4,9 +4,6 @@ types:
   isAbstract: true
   derivedFromCkTypeId: System/Entity
   attributes:
-  - id: ${thisModel}/LastSeen
-    name: LastSeen
-    isOptional: true
   - id: ${thisModel}/DeploymentState
     name: DeploymentState
   - id: System/Name

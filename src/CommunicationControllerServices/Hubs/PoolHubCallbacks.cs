@@ -6,51 +6,52 @@ using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 
-internal class PoolHubCallbacks : IPoolHubCallbacks
+internal class PoolHubCallbacks(IHubContext<PoolHub> hubContext, IPoolCache poolCache) : IPoolHubCallbacks
 {
-    private readonly IHubContext<PoolHub> _hubContext;
-    private readonly IPoolCache _poolCache;
-    private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
-
-    public PoolHubCallbacks(IHubContext<PoolHub> hubContext, IPoolCache poolCache)
+    /// <inheritdoc />
+    public async Task UpdatePoolConfigurationAsync(string tenantId, string poolName,
+        PoolConfigurationDto poolConfigurationDto)
     {
-        _hubContext = hubContext;
-        _poolCache = poolCache;
-    }
-
-
-    /// <summary>
-    /// Deploys an adapter at a pool
-    /// </summary>
-    /// <param name="tenantId"></param>
-    /// <param name="poolCommunicationAdapter"></param>
-    public async Task DeployCommunicationAdapterAsync(string tenantId, PoolCommunicationAdapterDto poolCommunicationAdapter)
-    {
-        if (_poolCache.TryGetTenant(tenantId, out var poolTenant))
+        if (poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
-            poolTenant.PoolsById.TryGetValue(poolCommunicationAdapter.PoolRtId, out var poolDescription);
+            poolTenant.PoolsByName.TryGetValue(poolName, out var poolDescription);
             if (poolDescription != null)
             {
-                await _hubContext.Clients.Client(poolDescription.ConnectionId)
-                    .SendAsync(nameof(IPoolHubCallbacks.DeployCommunicationAdapterAsync), tenantId, poolCommunicationAdapter);
+                await hubContext.Clients.Client(poolDescription.ConnectionId)
+                    .SendAsync(nameof(IPoolHubCallbacks.UpdatePoolConfigurationAsync), tenantId, poolName,
+                        poolConfigurationDto);
             }
         }
     }
 
-    /// <summary>
-    /// Removes an adapter from a pool
-    /// </summary>
-    /// <param name="tenantId"></param>
-    /// <param name="poolCommunicationAdapter"></param>
-    public async Task UndeployCommunicationAdapterAsync(string tenantId, PoolCommunicationAdapterDto poolCommunicationAdapter)
+    /// <inheritdoc />
+    public async Task DeployCommunicationAdapterAsync(string tenantId,
+        PoolCommunicationAdapterDto poolCommunicationAdapter)
     {
-        if (_poolCache.TryGetTenant(tenantId, out var poolTenant))
+        if (poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
-            poolTenant.PoolsById.TryGetValue(poolCommunicationAdapter.PoolRtId, out var poolDescription);
+            poolTenant.PoolsByName.TryGetValue(poolCommunicationAdapter.PoolName, out var poolDescription);
             if (poolDescription != null)
             {
-                await _hubContext.Clients.Client(poolDescription.ConnectionId)
-                    .SendAsync(nameof(IPoolHubCallbacks.UndeployCommunicationAdapterAsync), tenantId, poolCommunicationAdapter);
+                await hubContext.Clients.Client(poolDescription.ConnectionId)
+                    .SendAsync(nameof(IPoolHubCallbacks.DeployCommunicationAdapterAsync), tenantId,
+                        poolCommunicationAdapter);
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task UndeployCommunicationAdapterAsync(string tenantId,
+        PoolCommunicationAdapterDto poolCommunicationAdapter)
+    {
+        if (poolCache.TryGetTenant(tenantId, out var poolTenant))
+        {
+            poolTenant.PoolsByName.TryGetValue(poolCommunicationAdapter.PoolName, out var poolDescription);
+            if (poolDescription != null)
+            {
+                await hubContext.Clients.Client(poolDescription.ConnectionId)
+                    .SendAsync(nameof(IPoolHubCallbacks.UndeployCommunicationAdapterAsync), tenantId,
+                        poolCommunicationAdapter);
             }
         }
     }
