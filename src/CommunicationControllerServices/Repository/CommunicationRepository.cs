@@ -195,7 +195,7 @@ internal class CommunicationRepository : ICommunicationRepository
             var rtPool = new RtPool
             {
                 CommunicationState = RtCommunicationStateEnum.Offline,
-                DeploymentState = RtDeploymentStateEnum.Unknown,
+                DeploymentState = RtDeploymentStateEnum.Undeployed,
                 ConfigurationState = RtConfigurationStateEnum.Disabled,
                 Name = poolName
             };
@@ -270,7 +270,8 @@ internal class CommunicationRepository : ICommunicationRepository
             var rtPool = new RtPool
             {
                 RtId = poolRtId,
-                CommunicationState = communicationState
+                CommunicationState = communicationState,
+                CommunicationStateTimestamp = DateTime.UtcNow
             };
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtPool>>
@@ -343,7 +344,7 @@ internal class CommunicationRepository : ICommunicationRepository
             var rtAdapter = new RtAdapter
             {
                 CommunicationState = communicationState,
-                LastSeen = DateTime.UtcNow
+                CommunicationStateTimestamp = DateTime.UtcNow
             };
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtAdapter>>

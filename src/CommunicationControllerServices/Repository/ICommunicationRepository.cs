@@ -27,7 +27,7 @@ public interface ICommunicationRepository
     /// Gets an adapter by object id
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="adapterRtEntityId">Id of adapter</param>
+    /// <param name="adapterRtEntityId">ID of adapter</param>
     /// <returns></returns>
     Task<RtAdapter> GetAdapterAsync(string tenantId, RtEntityId adapterRtEntityId);
     
@@ -35,7 +35,7 @@ public interface ICommunicationRepository
     /// Gets an adapter by his pipeline
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="pipelineRtEntityId">Object identifier of pipline</param>
+    /// <param name="pipelineRtEntityId">Object identifier of pipeline</param>
     /// <returns></returns>
     Task<RtAdapter?> GetAdapterByPipelineAsync(string tenantId, RtEntityId pipelineRtEntityId);
     
@@ -91,7 +91,7 @@ public interface ICommunicationRepository
     Task SetAdapterDeploymentStateAsync(string tenantId, RtEntityId adapterRtEntityId, RtDeploymentStateEnum deploymentState);
     
     /// <summary>
-    /// Set the communication state of an communication adapter
+    /// Set the communication state of a communication adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="adapterRtEntityId">Object id of adapter</param>
@@ -100,7 +100,7 @@ public interface ICommunicationRepository
     Task SetAdapterCommunicationStateAsync(string tenantId, RtEntityId adapterRtEntityId, RtCommunicationStateEnum communicationState);
 
     /// <summary>
-    /// Gets the pool of an communication adapter
+    /// Gets the pool of a communication adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="adapterRtEntityId">Adapter id</param>

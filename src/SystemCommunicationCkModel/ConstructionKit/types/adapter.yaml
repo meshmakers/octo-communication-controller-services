@@ -4,6 +4,9 @@ types:
   derivedFromCkTypeId: ${thisModel}/DeployableEntity
   isAbstract: true
   attributes:
+    - id: ${thisModel}/CommunicationStateTimestamp
+      name: CommunicationStateTimestamp
+      isOptional: true
     - id: ${thisModel}/CommunicationState
       name: CommunicationState
     - id: ${thisModel}/ConfigurationState

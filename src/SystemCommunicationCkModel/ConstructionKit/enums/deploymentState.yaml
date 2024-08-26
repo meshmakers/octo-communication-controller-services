@@ -4,7 +4,7 @@ enums:
   useFlags: false
   values:
   - key: 0
-    name: Unknown
+    name: Undeployed
   - key: 1
     name: Pending
   - key: 2
