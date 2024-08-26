@@ -2,6 +2,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v1;
 using Microsoft.AspNetCore.SignalR;
 using NLog;
 
@@ -74,7 +75,13 @@ public class PoolHub : Hub, IPoolHub
 
             await _poolService.SetPoolOnlineAsync(tenantId, poolRtId);
 
-            return await _poolService.GetPoolConfigurationAsync(tenantId, poolRtId);
+            var configuration = await _poolService.GetPoolConfigurationAsync(tenantId, poolRtId);
+            
+            await _poolService.SetAdapterDeploymentStateAsync(tenantId, poolName,
+                configuration.CommunicationAdapterList.Select(x=>x.AdapterRtEntityId).ToList(), 
+                RtDeploymentStateEnum.Pending);
+            
+            return configuration;
         }
         catch (Exception e)
         {
@@ -106,7 +113,8 @@ public class PoolHub : Hub, IPoolHub
 
         try
         {
-            await _poolService.SetAdapterDeploymentStateAsync(tenantId, poolName, adapterRtEntityId, deployed);
+            await _poolService.SetAdapterDeploymentStateAsync(tenantId, poolName, adapterRtEntityId,
+                RtDeploymentStateEnum.Deployed);
         }
         catch (Exception e)
         {

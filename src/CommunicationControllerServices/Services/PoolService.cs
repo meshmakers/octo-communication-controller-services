@@ -121,6 +121,13 @@ internal class PoolService : IPoolService
                 rtAdapters.Count, poolRtId);
             foreach (var rtAdapter in rtAdapters)
             {
+                if (string.IsNullOrWhiteSpace(rtAdapter.ImageName) || string.IsNullOrWhiteSpace(rtAdapter.ImageVersion))
+                {
+                    await _communicationRepository.SetAdapterDeploymentStateAsync(tenantId, rtAdapter.ToRtEntityId(),
+                        RtDeploymentStateEnum.Error);
+                    continue;
+                }
+                
                 poolTenant.AddAdapter(new Adapter(rtAdapter.ToRtEntityId(), poolRtId,
                     CreatePoolAdapterDto(poolDescription.PoolName, rtAdapter)));
             }
@@ -363,7 +370,7 @@ internal class PoolService : IPoolService
 
     /// <inheritdoc />
     public async Task SetAdapterDeploymentStateAsync(string tenantId, string poolName, RtEntityId adapterRtEntityId,
-        bool deployed)
+        RtDeploymentStateEnum deploymentState)
     {
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
@@ -375,16 +382,26 @@ internal class PoolService : IPoolService
             throw PoolServiceException.PoolNotFound(tenantId, poolName);
         }
 
-        if (deployed)
+        await _communicationRepository.SetAdapterDeploymentStateAsync(tenantId, adapterRtEntityId,
+            deploymentState);
+    }
+
+    /// <inheritdoc />
+    public async Task SetAdapterDeploymentStateAsync(string tenantId, string poolName, ICollection<RtEntityId> adapterRtEntityIds,
+        RtDeploymentStateEnum deploymentState)
+    {
+        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
-            await _communicationRepository.SetAdapterDeploymentStateAsync(tenantId, adapterRtEntityId,
-                RtDeploymentStateEnum.Deployed);
+            throw PoolServiceException.TenantNotFound(tenantId);
         }
-        else
+
+        if (!poolTenant.PoolsByName.ContainsKey(poolName))
         {
-            await _communicationRepository.SetAdapterDeploymentStateAsync(tenantId, adapterRtEntityId,
-                RtDeploymentStateEnum.Undeployed);
+            throw PoolServiceException.PoolNotFound(tenantId, poolName);
         }
+
+        await _communicationRepository.SetAdapterDeploymentStateAsync(tenantId, adapterRtEntityIds,
+            deploymentState);
     }
 
     private PoolCommunicationAdapterDto CreatePoolAdapterDto(string poolName,

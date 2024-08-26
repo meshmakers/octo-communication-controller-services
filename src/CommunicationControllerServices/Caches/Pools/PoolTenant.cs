@@ -14,9 +14,9 @@ internal class PoolTenant
     private readonly ConcurrentDictionary<string, Pool> _poolsByName;
     private readonly ConcurrentDictionary<RtEntityId, Adapter> _adaptersById;
 
-    public IReadOnlyDictionary<OctoObjectId, Pool> PoolsById { get; }
-    public IReadOnlyDictionary<string, Pool> PoolsByName { get; private set; }
-    public IReadOnlyDictionary<RtEntityId, Adapter> AdaptersById { get; }
+    public IReadOnlyDictionary<OctoObjectId, Pool> PoolsById => _poolsById;
+    public IReadOnlyDictionary<string, Pool> PoolsByName => _poolsByName;
+    public IReadOnlyDictionary<RtEntityId, Adapter> AdaptersById => _adaptersById;
 
     public PoolTenant(IPoolCachePublish poolCachePublish, string tenantId)
     {
@@ -26,10 +26,6 @@ internal class PoolTenant
         _poolsById = new ConcurrentDictionary<OctoObjectId, Pool>();
         _poolsByName = new ConcurrentDictionary<string, Pool>();
         _adaptersById = new ConcurrentDictionary<RtEntityId, Adapter>();
-
-        PoolsById = new ReadOnlyDictionary<OctoObjectId, Pool>(_poolsById);
-        PoolsByName = new ReadOnlyDictionary<string, Pool>(_poolsByName);
-        AdaptersById = new ReadOnlyDictionary<RtEntityId, Adapter>(_adaptersById);
     }
 
     public PoolTenant(IPoolCachePublish poolCachePublish, string tenantId, IList<PoolDescription> poolDescriptions,
@@ -45,13 +41,10 @@ internal class PoolTenant
             pools.ToDictionary(p => p.PoolRtId, p => p));
         _poolsByName = new ConcurrentDictionary<string, Pool>(
             pools.ToDictionary(p => p.PoolName, p => p));
-        
-        _adaptersById = new ConcurrentDictionary<RtEntityId, Adapter>(
-            poolAdapterDescriptions.ToDictionary(p => p.AdapterRtEntityId, p => new Adapter(p.AdapterRtEntityId, p.PoolRtId, p.AdapterDto)));
 
-        PoolsById = new ReadOnlyDictionary<OctoObjectId, Pool>(_poolsById);
-        PoolsByName = new ReadOnlyDictionary<string, Pool>(_poolsByName);
-        AdaptersById = new ReadOnlyDictionary<RtEntityId, Adapter>(_adaptersById);
+        _adaptersById = new ConcurrentDictionary<RtEntityId, Adapter>(
+            poolAdapterDescriptions.ToDictionary(p => p.AdapterRtEntityId,
+                p => new Adapter(p.AdapterRtEntityId, p.PoolRtId, p.AdapterDto)));
     }
 
     public Pool AddPool(string poolName, OctoObjectId poolRtId, string connectionId)
@@ -76,12 +69,12 @@ internal class PoolTenant
             }
         }
     }
-    
+
     public IEnumerable<PoolAdapterDescription> GetPoolAdapterDescriptions()
     {
         return AdaptersById.Values.Select(p => p.GetPoolAdapterDescription()).ToArray();
     }
-    
+
     public IEnumerable<PoolDescription> GetPoolDescriptions()
     {
         return PoolsById.Values.Select(p => p.GetPoolDescription()).ToArray();
@@ -92,24 +85,24 @@ internal class PoolTenant
         _adaptersById.AddOrUpdate(adapter.AdapterRtEntityId,
             _ => adapter,
             (_, _) => adapter);
-        
+
         _poolCachePublish.PublishConfiguration(TenantId);
     }
 
     public void RemoveAdapter(RtEntityId adapterRtEntityId)
     {
         _adaptersById.Remove(adapterRtEntityId, out _);
-        
+
         _poolCachePublish.PublishConfiguration(TenantId);
     }
-    
+
     public void RemoveAdapters(OctoObjectId poolRtId)
     {
         foreach (var adapter in AdaptersById.Values.Where(x => x.PoolRtId == poolRtId))
         {
             _adaptersById.Remove(adapter.AdapterRtEntityId, out _);
         }
-        
+
         _poolCachePublish.PublishConfiguration(TenantId);
     }
 
