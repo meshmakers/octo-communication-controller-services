@@ -68,9 +68,11 @@ stages:
               Contents: |
                 bin/$(BuildConfiguration)/**/*.nupkg
               TargetFolder: $(build.artifactstagingdirectory)
-          - template: generate-documentation.yml
-            parameters:
-              GenerateDocumentation: ${{ variables.generateDocumentation }}
+          - ${{ if eq(variables.generateDocumentation, true) }}:
+              - template: generate-documentation.yml
+                parameters:
+                  ConstructionKits:
+                    - '**/SystemCommunicationCkModel.csproj'
           - task: PublishBuildArtifacts@1
             displayName: 'Publish Artifact: local'
             inputs:
