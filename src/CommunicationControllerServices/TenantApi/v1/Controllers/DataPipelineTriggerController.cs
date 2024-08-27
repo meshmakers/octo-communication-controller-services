@@ -29,12 +29,17 @@ public class DataPipelineTriggerController : ControllerBase
     /// <summary>
     /// Deploy the trigger for the tenant
     /// </summary>
-    /// <param name="tenantId">The id of the tenant.</param>
     /// <returns></returns>
     [HttpPost("deploy")]
     //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
-    public async Task<IActionResult> DeployTrigger([Required] string tenantId)
+    public async Task<IActionResult> DeployTrigger()
     {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound("TenantId is null or empty");
+        }
+        
         try
         {
             await _triggerManagementService.UpdateScheduleAsync(tenantId);
@@ -47,14 +52,19 @@ public class DataPipelineTriggerController : ControllerBase
     }
     
     /// <summary>
-    /// Unddeploy the trigger for the tenant
+    /// Undeploy the trigger for the tenant
     /// </summary>
-    /// <param name="tenantId">The id of the tenant.</param>
     /// <returns></returns>
     [HttpPost("undeploy")]
     //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
-    public async Task<IActionResult> UndeployTrigger([Required] string tenantId)
+    public async Task<IActionResult> UndeployTrigger()
     {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound("TenantId is null or empty");
+        }
+        
         try
         {
             await _triggerManagementService.RemoveScheduleAsync(tenantId);

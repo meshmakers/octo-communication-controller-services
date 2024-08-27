@@ -72,13 +72,18 @@ public class PoolController : ControllerBase
     /// <summary>
     /// Updates the configuration at a pool
     /// </summary>
-    /// <param name="tenantId">The id of the tenant.</param>
     /// <param name="poolRtId">The id of the pool.</param>
     /// <returns></returns>
     [HttpPost("deployUpdate")]
     //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
-    public async Task<IActionResult> DeployUpdate([Required] string tenantId, [Required][FromQuery] OctoObjectId poolRtId)
+    public async Task<IActionResult> DeployUpdate([Required][FromQuery] OctoObjectId poolRtId)
     {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound("TenantId is null or empty");
+        }
+        
         try
         {
             await _poolService.DeployAdaptersAsync(tenantId, poolRtId);

@@ -54,13 +54,18 @@ public class DataPipelineController : ControllerBase
     /// <summary>
     /// Updates the configuration at an adapter
     /// </summary>
-    /// <param name="tenantId">The id of the tenant.</param>
     /// <param name="dataPipelineRtId">The id of the data pipeline.</param>
     /// <returns></returns>
     [HttpPost("deploy")]
     //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
-    public async Task<IActionResult> DeployDataPipeline([Required] string tenantId, [Required][FromQuery] OctoObjectId dataPipelineRtId)
+    public async Task<IActionResult> DeployDataPipeline([Required][FromQuery] OctoObjectId dataPipelineRtId)
     {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound("TenantId is null or empty");
+        }
+        
         try
         {
             await _adapterService.DeployDataPipelineAsync(tenantId, dataPipelineRtId);
