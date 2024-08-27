@@ -51,16 +51,21 @@ public class PipelineController : ControllerBase
     }
     
     /// <summary>
-    /// Deploys the pipline definition at the corresponding adapter
+    /// Deploys the pipeline definition at the corresponding adapter
     /// </summary>
-    /// <param name="tenantId">The id of the tenant.</param>
     /// <param name="adapterRtEntityId">The id of the adapter where the pipline should be executed.</param>
     /// <param name="pipelineRtEntityId">The id of the pipeline.</param>
     /// <returns></returns>
     [HttpPost("deploy")]
     //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
-    public async Task<IActionResult> DeployPipeline([Required] string tenantId, [Required][FromQuery] string adapterRtEntityId, [Required][FromQuery] string pipelineRtEntityId)
+    public async Task<IActionResult> DeployPipeline([Required][FromQuery] string adapterRtEntityId, [Required][FromQuery] string pipelineRtEntityId)
     {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound("TenantId is null or empty");
+        }
+        
         try
         {
             using var reader = new StreamReader(Request.Body, Encoding.UTF8);

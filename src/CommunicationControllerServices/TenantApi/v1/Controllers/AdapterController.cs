@@ -72,13 +72,18 @@ public class AdapterController : ControllerBase
     /// <summary>
     /// Updates the configuration at an adapter
     /// </summary>
-    /// <param name="tenantId">The id of the tenant.</param>
     /// <param name="adapterRtEntityId">The id of the adapter.</param>
     /// <returns></returns>
     [HttpPost("deployUpdate")]
     //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
-    public async Task<IActionResult> DeployUpdate([Required] string tenantId, [Required][FromQuery] string adapterRtEntityId)
+    public async Task<IActionResult> DeployUpdate([Required][FromQuery] string adapterRtEntityId)
     {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound("TenantId is null or empty");
+        }
+        
         try
         {
             await _adapterService.DeployAdapterConfigurationAsync(tenantId, adapterRtEntityId);
