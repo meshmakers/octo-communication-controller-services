@@ -55,4 +55,17 @@ internal class PoolHubCallbacks(IHubContext<PoolHub> hubContext, IPoolCache pool
             }
         }
     }
+
+    /// <inheritdoc />
+    public async Task PreReloadTenantAsync(string tenantId)
+    {
+        if (poolCache.TryGetTenant(tenantId, out var poolTenant))
+        {
+            foreach (var pool in poolTenant.PoolsByName.Values)
+            {
+                await hubContext.Clients.Client(pool.ConnectionId)
+                    .SendAsync(nameof(IPoolHubCallbacks.PreReloadTenantAsync), tenantId);
+            }
+        }
+    }
 }

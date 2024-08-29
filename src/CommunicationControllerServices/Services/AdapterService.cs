@@ -162,7 +162,7 @@ internal class AdapterService(
         throw AdapterServiceException.TenantNotEnabled(tenantId);
     }
 
-    public async Task SetAdapterOfflineAsync(string tenantId, RtEntityId adapterRtEntityId)
+    public async Task SetAdapterCommunicationStateOfflineAsync(string tenantId, RtEntityId adapterRtEntityId)
     {
         Logger.Info("[{TenantId}] adapter rt id '{AdapterRtId}' offline",
             tenantId, adapterRtEntityId);
@@ -288,24 +288,31 @@ internal class AdapterService(
     {
         Logger.Info("[{TenantId}] Reloading tenant", tenantId);
 
-        if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
+        try
         {
-            var adapters = await communicationRepository.GetAdaptersAsync(tenantId);
-            foreach (var adapter in adapters)
+            if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
             {
-                if (adapterTenant.AdapterById.ContainsKey(adapter.ToRtEntityId()))
-                {
-                    await SetAdapterOfflineAsync(tenantId, adapter.ToRtEntityId());
-                    continue;
-                }
+                await adapterHubCallbacks.PreReloadTenantAsync(tenantId);
 
-                await SetAdapterCommunicationStateAsync(tenantId, adapter.ToRtEntityId(),
-                    RtCommunicationStateEnum.Unregistered);
+                var adapters = await communicationRepository.GetAdaptersAsync(tenantId);
+                foreach (var adapter in adapters)
+                {
+                    if (adapterTenant.AdapterById.ContainsKey(adapter.ToRtEntityId()))
+                    {
+                        await SetAdapterCommunicationStateOfflineAsync(tenantId, adapter.ToRtEntityId());
+                        continue;
+                    }
+                    
+                    await SetAdapterCommunicationStateAsync(tenantId, adapter.ToRtEntityId(),
+                        RtCommunicationStateEnum.Unregistered);
+                }
+            
+                adapterCache.RemoveTenant(tenantId);
             }
         }
-        else
+        catch (Exception e)
         {
-            adapterCache.AddOrUpdateTenant(tenantId);
+            throw AdapterServiceException.TenantReloadFailed(tenantId, e);
         }
     }
 

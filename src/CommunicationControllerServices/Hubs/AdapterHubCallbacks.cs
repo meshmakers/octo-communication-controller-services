@@ -42,4 +42,20 @@ internal class AdapterHubCallbacks : IAdapterHubCallbacks
                 
         }
     }
+
+    /// <inheritdoc />
+    public async Task PreReloadTenantAsync(string tenantId)
+    {
+        if (_adapterCache.TryGetTenant(tenantId, out var poolTenant))
+        {
+            foreach (var adapter in poolTenant.AdapterById.Values)
+            {
+                if (!string.IsNullOrWhiteSpace(adapter.ConnectionId))
+                {
+                    await _adapterContext.Clients.Client(adapter.ConnectionId)
+                        .SendAsync(nameof(IAdapterHubCallbacks.PreReloadTenantAsync), tenantId);
+                }
+            }
+        }
+    }
 }

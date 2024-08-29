@@ -55,7 +55,7 @@ internal class AdapterHub : Hub, IAdapterHub
 
         try
         {
-            await _adapterService.SetAdapterOfflineAsync(tenantId, adapterRtEntityId);
+            await _adapterService.SetAdapterCommunicationStateOfflineAsync(tenantId, adapterRtEntityId);
 
             await base.OnDisconnectedAsync(exception);
         }

@@ -9,18 +9,13 @@ using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 
-internal class AdapterCache : IAdapterCachePublish, IAdapterCache
+internal class AdapterCache(
+    IDistributionEventHubService distributionEventHubService,
+    IDistributedCacheService distributedCacheService)
+    : IAdapterCachePublish, IAdapterCache
 {
-    private readonly IDistributionEventHubService _distributionEventHubService;
-    private readonly IDistributedCacheService _distributedCacheService;
     private readonly ConcurrentDictionary<string, AdapterTenant> _tenantDescriptions = new();
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
-
-    public AdapterCache(IDistributionEventHubService distributionEventHubService, IDistributedCacheService distributedCacheService)
-    {
-        _distributionEventHubService = distributionEventHubService;
-        _distributedCacheService = distributedCacheService;
-    }
 
     public AdapterTenant AddOrUpdateTenant(string tenantId)
     {
@@ -60,7 +55,7 @@ internal class AdapterCache : IAdapterCachePublish, IAdapterCache
     {
         Logger.Info("Loading AdapterCache configuration from cache for tenant id '{TenantId}'", tenantId);
 
-        var cacheStream = await _distributedCacheService.GetCacheStreamByFileNameAsync(tenantId, Constants.CacheFileName);
+        var cacheStream = await distributedCacheService.GetCacheStreamByFileNameAsync(tenantId, Constants.CacheFileName);
         if (cacheStream != null)
         {
             using var reader = new StreamReader(cacheStream.Stream);
@@ -89,9 +84,9 @@ internal class AdapterCache : IAdapterCachePublish, IAdapterCache
             await JsonSerializer.SerializeAsync(memoryStream, desc.GetAdapterDescriptions());
             await memoryStream.FlushAsync();
             memoryStream.Position = 0;
-            await _distributedCacheService.CreateOrUpdateStreamAsync(tenantId, memoryStream, "application/json", Constants.CacheFileName);
+            await distributedCacheService.CreateOrUpdateStreamAsync(tenantId, memoryStream, "application/json", Constants.CacheFileName);
             
-            await _distributionEventHubService.PublishAsync(new ComControllerAdapterUpdate(tenantId, desc.GetAdapterDescriptions()));
+            await distributionEventHubService.PublishAsync(new ComControllerAdapterUpdate(tenantId, desc.GetAdapterDescriptions()));
         }
     }
 }
