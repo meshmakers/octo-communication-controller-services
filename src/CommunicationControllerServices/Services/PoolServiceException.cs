@@ -56,9 +56,5 @@ internal class PoolServiceException : Exception
         return new PoolServiceException($"[{tenantId}] Failed to reload tenant", exception);
     }
 
-    public static Exception CkTypeIdNotSet()
-    {
-        return new PoolServiceException("CkTypeId not set");
-    }
 }
 

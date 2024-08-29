@@ -152,6 +152,8 @@ internal class PoolService : IPoolService
         {
             if (_poolCache.TryGetTenant(tenantId, out var poolTenant))
             {
+                await _poolHubCallbacks.PreReloadTenantAsync(tenantId);
+
                 var pools = await _communicationRepository.GetPoolsAsync(tenantId);
                 foreach (var pool in pools)
                 {
@@ -173,10 +175,7 @@ internal class PoolService : IPoolService
                     await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, pool.RtId,
                         RtCommunicationStateEnum.Unregistered);
                 }
-            }
-            else
-            {
-                _poolCache.AddOrUpdateTenant(tenantId);
+                _poolCache.RemoveTenant(tenantId);
             }
         }
         catch (Exception e)
