@@ -34,7 +34,7 @@ public class PoolHub : Hub, IPoolHub
         try
         {
             Logger.Info("[{TenantId}] Pool {PoolName} with connection id '{ConnectionId}' connected", tenantId, poolName, Context.ConnectionId);
-            await _poolService.SetPoolOnlineAsync(tenantId, poolName, Context.ConnectionId);
+            await _poolService.SetCommunicationStateOnlineAsync(tenantId, poolName, Context.ConnectionId);
         }
         catch (Exception e)
         {
@@ -54,7 +54,7 @@ public class PoolHub : Hub, IPoolHub
         {
             Logger.Info("[{TenantId}] Pool {PoolName} with connection id '{ConnectionId}' disconnected", tenantId, poolName, Context.ConnectionId);
 
-            await _poolService.SetPoolOfflineAsync(tenantId, Context.ConnectionId);
+            await _poolService.SetCommunicationStateOfflineAsync(tenantId, Context.ConnectionId);
         }
         catch (Exception e)
         {
@@ -73,7 +73,7 @@ public class PoolHub : Hub, IPoolHub
         {
             var poolRtId = await _poolService.RegisterPoolOperatorAsync(tenantId, poolName, Context.ConnectionId);
 
-            await _poolService.SetPoolOnlineAsync(tenantId, poolRtId);
+            await _poolService.SetCommunicationStateOnlineAsync(tenantId, poolRtId);
 
             var configuration = await _poolService.GetPoolConfigurationAsync(tenantId, poolRtId);
             

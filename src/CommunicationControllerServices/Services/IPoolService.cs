@@ -24,7 +24,7 @@ public interface IPoolService
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolName">Name of pool</param>
     /// <returns></returns>
-    Task<OctoObjectId> UnregisterPoolOperatorAsync(string tenantId, string poolName);
+    Task UnregisterPoolOperatorAsync(string tenantId, string poolName);
     
     /// <summary>
     /// Gets the current adapters in a pool
@@ -35,18 +35,18 @@ public interface IPoolService
     Task<PoolConfigurationDto> GetPoolConfigurationAsync(string tenantId, OctoObjectId poolRtId);
     
     /// <summary>
-    /// (Re)loads an entire tenant during update or during enabling 
+    /// Updates an entire tenant before a tenant is deleted or disabled for communication.
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <returns></returns>
-    Task ReloadTenantAsync(string tenantId);
+    Task PreUpdateTenantAsync(string tenantId);
     
     /// <summary>
-    /// Unloads an entire tenant if a tenant gets deleted or disabled.
+    /// Loads an entire tenant after a tenant has been created or enabled.
     /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="tenantId"></param>
     /// <returns></returns>
-    Task UnloadTenantAsync(string tenantId);
+    Task PosUpdateTenantAsync(string tenantId);
     
     /// <summary>
     /// Deploys all adapters of a pool
@@ -80,7 +80,7 @@ public interface IPoolService
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolRtId">Identifier of pool</param>
     /// <returns></returns>
-    Task SetPoolOfflineAsync(string tenantId, OctoObjectId poolRtId);
+    Task SetCommunicationStateOfflineAsync(string tenantId, OctoObjectId poolRtId);
     
     /// <summary>
     /// Sets a pool offline using the connection id
@@ -88,7 +88,7 @@ public interface IPoolService
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolName">Name of pool</param>
     /// <returns></returns>
-    Task SetPoolOfflineAsync(string tenantId, string poolName);
+    Task SetCommunicationStateOfflineAsync(string tenantId, string poolName);
     
     /// <summary>
     /// Sets a pool online
@@ -96,7 +96,7 @@ public interface IPoolService
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolRtId">Identifier of pool</param>
     /// <returns></returns>
-    Task SetPoolOnlineAsync(string tenantId, OctoObjectId poolRtId);
+    Task SetCommunicationStateOnlineAsync(string tenantId, OctoObjectId poolRtId);
 
     /// <summary>
     /// Sets a pool online using the connection id
@@ -105,7 +105,7 @@ public interface IPoolService
     /// <param name="poolName">Name of pool</param>
     /// <param name="connectionId">Connection id of pool</param>
     /// <returns></returns>
-    Task SetPoolOnlineAsync(string tenantId, string poolName, string connectionId);
+    Task SetCommunicationStateOnlineAsync(string tenantId, string poolName, string connectionId);
     
     /// <summary>
     /// Updates the deployment state of an adapter in a pool

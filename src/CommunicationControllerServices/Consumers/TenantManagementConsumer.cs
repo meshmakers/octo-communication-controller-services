@@ -7,7 +7,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 /// <summary>
 ///    Updates jobs for a tenant
 /// </summary>
-internal class TenantManagementConsumer : IDistributedConsumer<PosUpdateTenant>,
+internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>, IDistributedConsumer<PosUpdateTenant>,
     IDistributedConsumer<PreDeleteTenant>
 {
     private readonly ILogger<TenantManagementConsumer> _logger;
@@ -30,21 +30,36 @@ internal class TenantManagementConsumer : IDistributedConsumer<PosUpdateTenant>,
         _adapterService = adapterService;
         _configurationService = configurationService;
     }
+    
+    public async Task ConsumeAsync(IDistributedContext<PreUpdateTenant> context)
+    {
+        _logger.LogInformation("Pre update tenant received: {TenantId}", context.Message.TenantId);
+        
+        if (await _configurationService.IsEnabledAsync(context.Message.TenantId))
+        {
+            await _adapterService.PreUpdateTenantAsync(context.Message.TenantId);
+            await _poolService.PreUpdateTenantAsync(context.Message.TenantId);
+        }
+    }
 
     public async Task ConsumeAsync(IDistributedContext<PosUpdateTenant> context)
     {
-        _logger.LogInformation("Pre update tenant received: {Text}", context.Message.TenantId);
+        _logger.LogInformation("Pos update tenant received: {TenantId}", context.Message.TenantId);
 
         if (await _configurationService.IsEnabledAsync(context.Message.TenantId))
         {
-            await _adapterService.ReloadTenantAsync(context.Message.TenantId);
-            await _poolService.ReloadTenantAsync(context.Message.TenantId);
+            await _adapterService.PosUpdateTenantAsync(context.Message.TenantId);
+            await _poolService.PosUpdateTenantAsync(context.Message.TenantId);
         }
     }
 
     public async Task ConsumeAsync(IDistributedContext<PreDeleteTenant> context)
     {
-        await _poolService.UnloadTenantAsync(context.Message.TenantId);
-        await _adapterService.UnloadTenantAsync(context.Message.TenantId);
+        _logger.LogInformation("Pre delete tenant received: {TenantId}", context.Message.TenantId);
+        
+        await _poolService.PreUpdateTenantAsync(context.Message.TenantId);
+        await _adapterService.PreUpdateTenantAsync(context.Message.TenantId);
     }
+
+
 }

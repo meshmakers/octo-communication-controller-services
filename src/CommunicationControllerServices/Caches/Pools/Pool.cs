@@ -26,11 +26,17 @@ internal class Pool
     public string PoolName { get; }
     public OctoObjectId PoolRtId { get; }
 
-    public string ConnectionId { get; private set; }
+    public string? ConnectionId { get; private set; }
     
     public void UpdateConnectionId(string tenantId, string connectionId)
     {
         ConnectionId = connectionId;
+        _poolCachePublish.PublishConfiguration(tenantId);
+    }
+    
+    public void RemoveConnectionId(string tenantId)
+    {
+        ConnectionId = null;
         _poolCachePublish.PublishConfiguration(tenantId);
     }
 

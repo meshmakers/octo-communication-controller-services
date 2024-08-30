@@ -26,9 +26,9 @@ internal class PoolServiceException : Exception
         return new PoolServiceException("Image version not set");
     }
 
-    internal static Exception TenantNotFound(string tenantId)
+    internal static Exception TenantNotFoundOrNotEnabled(string tenantId)
     {
-        return new PoolServiceException($"Tenant {tenantId} not found");
+        return new PoolServiceException($"Tenant {tenantId} not found or communication service not enabled");
     }
 
     internal static Exception PoolNotFound(string tenantId, OctoObjectId poolRtId)
