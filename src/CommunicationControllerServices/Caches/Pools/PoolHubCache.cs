@@ -50,7 +50,7 @@ internal class PoolHubCache : IPoolCachePublish, IPoolCache
 
     public void ReloadConfiguration(ComControllerPoolUpdate configuration)
     {
-        Logger.Info("Reloading PoolHubCache configuration: {Configuration}", configuration.Serialize());
+        Logger.Debug("Reloading PoolHubCache configuration: {Configuration}", configuration.Serialize());
         
         _tenantDescriptions.AddOrUpdate(configuration.TenantId, 
             _ => new PoolTenant(this, configuration.TenantId, configuration.Pools.ToList(), configuration.Adapters.ToList()),

@@ -1,14 +1,18 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v1;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
+using Microsoft.Extensions.Options;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
 internal class DefaultConfigurationCreatorService(
     ILogger<DefaultConfigurationCreatorService> logger,
+    IDiagnosticsService diagnosticsService,
+    IOptions<CommunicationControllerOptions> options,
     ITriggerManagementService triggerManagementService,
     ISystemContext systemContext,
     IPoolService poolService,
@@ -16,6 +20,14 @@ internal class DefaultConfigurationCreatorService(
     IAdapterService adapterService)
     : DefaultConfigurationCreatorServiceBase(logger), IConfigurationService
 {
+    public override async Task InitializeAsync()
+    {
+        // Reconfigure the log level based on the configuration
+        await diagnosticsService.ReconfigureLogLevelAsync(options.Value.MinLogLevel);
+
+        await base.InitializeAsync();
+    }
+
     protected override async Task SetupTenantAsync(string tenantId)
     {
         // Do nothing if the system tenant is not existing.

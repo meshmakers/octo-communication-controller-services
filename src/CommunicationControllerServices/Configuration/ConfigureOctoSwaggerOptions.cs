@@ -6,15 +6,9 @@ using Microsoft.Extensions.Options;
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Configuration;
 
 // ReSharper disable once ClassNeverInstantiated.Global
-internal class ConfigureOctoSwaggerOptions : IConfigureNamedOptions<OctoSwaggerOptions>
+internal class ConfigureOctoSwaggerOptions(IOptions<CommunicationControllerOptions> octoOptions)
+    : IConfigureNamedOptions<OctoSwaggerOptions>
 {
-    private readonly IOptions<CommunicationControllerOptions> _octoOptions;
-
-    public ConfigureOctoSwaggerOptions(IOptions<CommunicationControllerOptions> octoOptions)
-    {
-        _octoOptions = octoOptions;
-    }
-
     public void Configure(OctoSwaggerOptions options)
     {
         Configure(Microsoft.Extensions.Options.Options.DefaultName, options);
@@ -22,6 +16,6 @@ internal class ConfigureOctoSwaggerOptions : IConfigureNamedOptions<OctoSwaggerO
 
     public void Configure(string? name, OctoSwaggerOptions options)
     {
-        options.AuthorityUrl = _octoOptions.Value.Authority.EnsureEndsWith("/");
+        options.AuthorityUrl = octoOptions.Value.Authority.EnsureEndsWith("/");
     }
 }
