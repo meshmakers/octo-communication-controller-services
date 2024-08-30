@@ -1,3 +1,5 @@
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 
 /// <summary>
@@ -17,6 +19,7 @@ public class CommunicationControllerOptions
         BrokerPort = 5672;
         BrokerUser = "guest";
         BrokerPassword = "guest";
+        MinLogLevel = LogLevelDto.Warn;
     }
 
     /// <summary>
@@ -49,4 +52,9 @@ public class CommunicationControllerOptions
     /// Gets or sets the RabbitMQ broker password
     /// </summary>
     public string? BrokerPassword { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the minimal log level to be logged
+    /// </summary>
+    public LogLevelDto MinLogLevel { get; set; }
 }

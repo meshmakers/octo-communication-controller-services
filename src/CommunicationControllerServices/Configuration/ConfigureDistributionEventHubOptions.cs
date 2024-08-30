@@ -6,19 +6,11 @@ using Microsoft.Extensions.Options;
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Configuration;
 
 // ReSharper disable once ClassNeverInstantiated.Global
-internal class ConfigureDistributionEventHubOptions : IConfigureNamedOptions<DistributionEventHubOptions>
+internal class ConfigureDistributionEventHubOptions(
+    IOptions<CommunicationControllerOptions> communicationControllerOptions,
+    IOptions<OctoSystemConfiguration> octoSystemConfiguration)
+    : IConfigureNamedOptions<DistributionEventHubOptions>
 {
-    private readonly IOptions<CommunicationControllerOptions> _communicationControllerOptions;
-    private readonly IOptions<OctoSystemConfiguration> _octoSystemConfiguration;
-
-    public ConfigureDistributionEventHubOptions(IOptions<CommunicationControllerOptions> communicationControllerOptions,
-        IOptions<OctoSystemConfiguration> octoSystemConfiguration)
-    {
-        _communicationControllerOptions = communicationControllerOptions;
-        _octoSystemConfiguration = octoSystemConfiguration;
-    }
-
-
     public void Configure(DistributionEventHubOptions options)
     {
         Configure(Microsoft.Extensions.Options.Options.DefaultName, options);
@@ -26,12 +18,12 @@ internal class ConfigureDistributionEventHubOptions : IConfigureNamedOptions<Dis
 
     public void Configure(string? name, DistributionEventHubOptions options)
     {
-        options.BrokerHost = _communicationControllerOptions.Value.BrokerHost;
-        options.BrokerUser = _communicationControllerOptions.Value.BrokerUser;
-        options.BrokerPassword = _communicationControllerOptions.Value.BrokerPassword;
-        options.RepositoryHost = _octoSystemConfiguration.Value.DatabaseHost;
-        options.RepositoryUser = _octoSystemConfiguration.Value.DatabaseUser;
-        options.RepositoryPassword = _octoSystemConfiguration.Value.DatabaseUserPassword;
-        options.DatabaseAuthenticationSource = _octoSystemConfiguration.Value.AuthenticationDatabaseName;
+        options.BrokerHost = communicationControllerOptions.Value.BrokerHost;
+        options.BrokerUser = communicationControllerOptions.Value.BrokerUser;
+        options.BrokerPassword = communicationControllerOptions.Value.BrokerPassword;
+        options.RepositoryHost = octoSystemConfiguration.Value.DatabaseHost;
+        options.RepositoryUser = octoSystemConfiguration.Value.DatabaseUser;
+        options.RepositoryPassword = octoSystemConfiguration.Value.DatabaseUserPassword;
+        options.DatabaseAuthenticationSource = octoSystemConfiguration.Value.AuthenticationDatabaseName;
     }
 }

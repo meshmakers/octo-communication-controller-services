@@ -44,7 +44,7 @@ internal class AdapterCache(
 
     public void ReloadConfiguration(ComControllerAdapterUpdate configuration)
     {
-        Logger.Info("Reloading AdapterCache configuration: {Configuration}", configuration.Serialize());
+        Logger.Debug("Reloading AdapterCache configuration: {Configuration}", configuration.Serialize());
 
         _tenantDescriptions.AddOrUpdate(configuration.TenantId, 
             _ => new AdapterTenant(this, configuration.TenantId, configuration.Adapters.ToList()),
