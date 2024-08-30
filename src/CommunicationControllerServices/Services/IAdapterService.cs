@@ -66,7 +66,7 @@ public interface IAdapterService
     Task SetAdapterCommunicationStateOfflineAsync(string tenantId, RtEntityId adapterRtEntityId);
     
     /// <summary>
-    /// Deployes the db version  an adapter configuration
+    /// Deploys the db version  an adapter configuration
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="adapterRtEntityId">Object Id of adapter</param>

@@ -70,13 +70,13 @@ public class PoolController : ControllerBase
     }
     
     /// <summary>
-    /// Updates the configuration at a pool
+    /// Deploys all adapters of a pool
     /// </summary>
     /// <param name="poolRtId">The id of the pool.</param>
     /// <returns></returns>
-    [HttpPost("deployUpdate")]
+    [HttpPost("deployAllAdaptersOfPool")]
     //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
-    public async Task<IActionResult> DeployUpdate([Required][FromQuery] OctoObjectId poolRtId)
+    public async Task<IActionResult> DeployAllAdaptersOfPoolAsync([Required][FromQuery] OctoObjectId poolRtId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
@@ -87,6 +87,86 @@ public class PoolController : ControllerBase
         try
         {
             await _poolService.DeployAdaptersAsync(tenantId, poolRtId);
+            return NoContent();
+        }
+        catch (PoolServiceException e)
+        {
+            return BadRequest(e.Message);
+        }
+    }
+    
+    /// <summary>
+    /// Undeploys all adapters of a pool
+    /// </summary>
+    /// <param name="poolRtId">The id of the pool.</param>
+    /// <returns></returns>
+    [HttpPost("undeployAllAdaptersOfPool")]
+    //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
+    public async Task<IActionResult> UndeployAllAdaptersOfPoolAsync([Required][FromQuery] OctoObjectId poolRtId)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound("TenantId is null or empty");
+        }
+        
+        try
+        {
+            await _poolService.UndeployAdaptersAsync(tenantId, poolRtId);
+            return NoContent();
+        }
+        catch (PoolServiceException e)
+        {
+            return BadRequest(e.Message);
+        }
+    }
+
+    /// <summary>
+    /// (Re-)Deploys an adapter of a pool
+    /// </summary>
+    /// <param name="poolRtId">The id of the pool.</param>
+    /// <param name="adapterRtEntityId">The id of the adapter.</param>
+    /// <returns></returns>
+    [HttpPost("deployAdapter")]
+    //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
+    public async Task<IActionResult> DeployAdapterAsync([Required][FromQuery] OctoObjectId poolRtId, [Required][FromQuery] string adapterRtEntityId)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound("TenantId is null or empty");
+        }
+        
+        try
+        {
+            await _poolService.DeployAdapterAsync(tenantId, poolRtId, adapterRtEntityId);
+            return NoContent();
+        }
+        catch (PoolServiceException e)
+        {
+            return BadRequest(e.Message);
+        }
+    }
+    
+    /// <summary>
+    /// Undeploys an adapter of a pool
+    /// </summary>
+    /// <param name="poolRtId">The id of the pool.</param>
+    /// <param name="adapterRtEntityId">The id of the adapter.</param>
+    /// <returns></returns>
+    [HttpPost("unDeployAdapter")]
+    //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
+    public async Task<IActionResult> UnDeployAdapterAsync([Required][FromQuery] OctoObjectId poolRtId, [Required][FromQuery] string adapterRtEntityId)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound("TenantId is null or empty");
+        }
+        
+        try
+        {
+            await _poolService.UndeployAdapterAsync(tenantId, poolRtId, adapterRtEntityId);
             return NoContent();
         }
         catch (PoolServiceException e)

@@ -209,15 +209,14 @@ internal class PoolService : IPoolService
 
         // We have to find adapters that are deployed but not listed anymore in database
         var adaptersToUndeploy = poolTenant.AdaptersById.Values
-            .Where(x => x.PoolRtId == poolRtId &&
-                        poolConfigurationDto.CommunicationAdapterList
+            .Where(x => poolConfigurationDto.CommunicationAdapterList
                             .All(y => y.AdapterRtEntityId != x.AdapterRtEntityId));
 
         // Check which adapters need to be deployed or undeployed.
         var adaptersToDeploy =
             poolConfigurationDto.CommunicationAdapterList
                 .Where(x => poolTenant.AdaptersById.Values
-                    .All(y => y.AdapterRtEntityId != x.AdapterRtEntityId));
+                    .Any(y => y.AdapterRtEntityId == x.AdapterRtEntityId));
 
         // Undeploy adapters that are not listed anymore
         foreach (var adapter in adaptersToUndeploy)
@@ -230,6 +229,27 @@ internal class PoolService : IPoolService
         foreach (var adapterDto in adaptersToDeploy)
         {
             await DeployAdapterAsync(tenantId, poolRtId, adapterDto.AdapterRtEntityId);
+        }
+    }
+
+    public async Task UndeployAdaptersAsync(string tenantId, OctoObjectId poolRtId)
+    {
+        Logger.Info("[{TenantId}] Undeploying Adapters to pool '{PoolRtId}'", tenantId,
+            poolRtId);
+        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
+        {
+            throw PoolServiceException.TenantNotFoundOrNotEnabled(tenantId);
+        }
+
+        if (!poolTenant.PoolsById.ContainsKey(poolRtId))
+        {
+            throw PoolServiceException.PoolNotFound(tenantId, poolRtId);
+        }
+
+        foreach (var adapter in poolTenant.AdaptersById.Values)
+        {
+            await UndeployAdapterAsync(tenantId, adapter.PoolRtId,
+                adapter.AdapterRtEntityId);
         }
     }
 

@@ -57,6 +57,14 @@ public interface IPoolService
     Task DeployAdaptersAsync(string tenantId, OctoObjectId poolRtId);
     
     /// <summary>
+    /// Undeploys all adapters of a pool
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="poolRtId">The object id of the pool</param>
+    /// <returns></returns>
+    Task UndeployAdaptersAsync(string tenantId, OctoObjectId poolRtId);
+    
+    /// <summary>
     /// Deploys a new adapter to a pool
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
