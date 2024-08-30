@@ -15,7 +15,7 @@ internal class PoolHubCallbacks(IHubContext<PoolHub> hubContext, IPoolCache pool
         if (poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
             poolTenant.PoolsByName.TryGetValue(poolName, out var poolDescription);
-            if (poolDescription != null)
+            if (poolDescription != null && !string.IsNullOrWhiteSpace(poolDescription.ConnectionId))
             {
                 await hubContext.Clients.Client(poolDescription.ConnectionId)
                     .SendAsync(nameof(IPoolHubCallbacks.UpdatePoolConfigurationAsync), tenantId, poolName,
@@ -31,7 +31,7 @@ internal class PoolHubCallbacks(IHubContext<PoolHub> hubContext, IPoolCache pool
         if (poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
             poolTenant.PoolsByName.TryGetValue(poolCommunicationAdapter.PoolName, out var poolDescription);
-            if (poolDescription != null)
+            if (poolDescription != null && !string.IsNullOrWhiteSpace(poolDescription.ConnectionId))
             {
                 await hubContext.Clients.Client(poolDescription.ConnectionId)
                     .SendAsync(nameof(IPoolHubCallbacks.DeployCommunicationAdapterAsync), tenantId,
@@ -47,7 +47,7 @@ internal class PoolHubCallbacks(IHubContext<PoolHub> hubContext, IPoolCache pool
         if (poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
             poolTenant.PoolsByName.TryGetValue(poolCommunicationAdapter.PoolName, out var poolDescription);
-            if (poolDescription != null)
+            if (poolDescription != null && !string.IsNullOrWhiteSpace(poolDescription.ConnectionId))
             {
                 await hubContext.Clients.Client(poolDescription.ConnectionId)
                     .SendAsync(nameof(IPoolHubCallbacks.UndeployCommunicationAdapterAsync), tenantId,
@@ -57,14 +57,17 @@ internal class PoolHubCallbacks(IHubContext<PoolHub> hubContext, IPoolCache pool
     }
 
     /// <inheritdoc />
-    public async Task PreReloadTenantAsync(string tenantId)
+    public async Task PreUpdateTenantAsync(string tenantId)
     {
         if (poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
             foreach (var pool in poolTenant.PoolsByName.Values)
             {
-                await hubContext.Clients.Client(pool.ConnectionId)
-                    .SendAsync(nameof(IPoolHubCallbacks.PreReloadTenantAsync), tenantId);
+                if (!string.IsNullOrWhiteSpace(pool.ConnectionId))
+                {
+                    await hubContext.Clients.Client(pool.ConnectionId)
+                        .SendAsync(nameof(IPoolHubCallbacks.PreUpdateTenantAsync), tenantId);
+                }
             }
         }
     }

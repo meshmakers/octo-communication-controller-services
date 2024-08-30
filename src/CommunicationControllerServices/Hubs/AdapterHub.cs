@@ -36,7 +36,7 @@ internal class AdapterHub : Hub, IAdapterHub
 
         try
         {
-            await _adapterService.SetAdapterOnlineAsync(tenantId, adapterRtEntityId, Context.ConnectionId);
+            await _adapterService.SetAdapterCommunicationStateOnlineAsync(tenantId, adapterRtEntityId, Context.ConnectionId);
 
             await base.OnConnectedAsync();
         }

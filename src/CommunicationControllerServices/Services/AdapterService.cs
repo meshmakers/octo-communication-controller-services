@@ -33,7 +33,7 @@ internal class AdapterService(
                 adapter = adapterTenant.AddAdapter(adapterRtEntityId, connectionId, configuration);
             }
 
-            await SetAdapterOnlineAsync(tenantId, adapterRtEntityId, connectionId);
+            await SetAdapterCommunicationStateOnlineAsync(tenantId, adapterRtEntityId, connectionId);
 
             foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
             {
@@ -70,8 +70,6 @@ internal class AdapterService(
 
             return;
         }
-
-        throw AdapterServiceException.TenantNotEnabled(tenantId);
     }
 
     // private async Task SetAdapterDeploymentStateAsync(string tenantId, OctoObjectId adapterRtId, RtDeploymentStateEnum deploymentState)
@@ -142,7 +140,8 @@ internal class AdapterService(
         }
     }
 
-    public async Task SetAdapterOnlineAsync(string tenantId, RtEntityId adapterRtEntityId, string connectionId)
+    public async Task SetAdapterCommunicationStateOnlineAsync(string tenantId, RtEntityId adapterRtEntityId,
+        string connectionId)
     {
         Logger.Info("[{TenantId}] adapter rt id '{AdapterRtId}' online",
             tenantId, adapterRtEntityId);
@@ -284,45 +283,45 @@ internal class AdapterService(
         }
     }
 
-    public async Task ReloadTenantAsync(string tenantId)
+    public async Task PreUpdateTenantAsync(string tenantId)
     {
-        Logger.Info("[{TenantId}] Reloading tenant", tenantId);
+        Logger.Info("[{TenantId}] Pre update tenant", tenantId);
 
         try
         {
             if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
             {
-                await adapterHubCallbacks.PreReloadTenantAsync(tenantId);
+                // Inform all adapters that tenant is going to be updated
+                await adapterHubCallbacks.PreUpdateTenantAsync(tenantId);
+                // Remove all adapters from cache, so we skip the possibility to communicate with them
+                adapterCache.RemoveTenant(tenantId);
 
-                var adapters = await communicationRepository.GetAdaptersAsync(tenantId);
-                foreach (var adapter in adapters)
+                foreach (var adapter in adapterTenant.AdapterById.Values)
                 {
-                    if (adapterTenant.AdapterById.ContainsKey(adapter.ToRtEntityId()))
-                    {
-                        await SetAdapterCommunicationStateOfflineAsync(tenantId, adapter.ToRtEntityId());
-                        continue;
-                    }
-                    
-                    await SetAdapterCommunicationStateAsync(tenantId, adapter.ToRtEntityId(),
+                    await SetAdapterCommunicationStateAsync(tenantId, adapter.AdapterRtEntityId,
                         RtCommunicationStateEnum.Unregistered);
                 }
-            
-                adapterCache.RemoveTenant(tenantId);
             }
         }
         catch (Exception e)
         {
-            throw AdapterServiceException.TenantReloadFailed(tenantId, e);
+            throw AdapterServiceException.PreUpdateTenantFailed(tenantId, e);
         }
     }
 
-    public Task UnloadTenantAsync(string tenantId)
+    public Task PosUpdateTenantAsync(string tenantId)
     {
-        Logger.Info("[{TenantId}] Unload tenant", tenantId);
+        Logger.Info("[{TenantId}] Pos update tenant", tenantId);
 
-        adapterCache.RemoveTenant(tenantId);
-
-        return Task.CompletedTask;
+        try
+        {
+            adapterCache.AddOrUpdateTenant(tenantId);
+            return Task.CompletedTask;
+        }
+        catch (Exception e)
+        {
+            throw AdapterServiceException.PosUpdateTenantFailed(tenantId, e);
+        }
     }
 
     private async Task SetAdapterCommunicationStateAsync(string tenantId, RtEntityId adapterRtEntityId,

@@ -51,9 +51,14 @@ internal class AdapterServiceException : Exception
         return new AdapterServiceException($"[{tenantId}] Data pipeline of pipeline '{rtEntityId}' not found.");
     }
 
-    public static Exception TenantReloadFailed(string tenantId, Exception exception)
+    public static Exception PreUpdateTenantFailed(string tenantId, Exception exception)
     {
-        return new AdapterServiceException($"[{tenantId}] Failed to reload tenant", exception);
+        return new AdapterServiceException($"[{tenantId}] Pre update tenant failed.", exception);
+    }
+    
+    public static Exception PosUpdateTenantFailed(string tenantId, Exception exception)
+    {
+        return new AdapterServiceException($"[{tenantId}] Pos update tenant failed.", exception);
     }
 }
 

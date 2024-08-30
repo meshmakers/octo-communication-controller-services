@@ -9,18 +9,18 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 public interface IAdapterService
 {
     /// <summary>
-    /// (Re)loads an entire tenant during update or during enabling 
+    /// Updates an entire tenant before a tenant is deleted or disabled for communication.
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <returns></returns>
-    Task ReloadTenantAsync(string tenantId);
+    Task PreUpdateTenantAsync(string tenantId);
     
     /// <summary>
-    /// Unloads an entire tenant if a tenant gets deleted or disabled
+    /// Loads an entire tenant after a tenant has been created or enabled.
     /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="tenantId"></param>
     /// <returns></returns>
-    Task UnloadTenantAsync(string tenantId);
+    Task PosUpdateTenantAsync(string tenantId);
     
     /// <summary>
     /// Registers an adapter
@@ -55,7 +55,7 @@ public interface IAdapterService
     /// <param name="adapterRtEntityId">Object Id of adapter</param>
     /// <param name="connectionId">The connection identifier</param>
     /// <returns></returns>
-    Task SetAdapterOnlineAsync(string tenantId, RtEntityId adapterRtEntityId, string connectionId);
+    Task SetAdapterCommunicationStateOnlineAsync(string tenantId, RtEntityId adapterRtEntityId, string connectionId);
     
     /// <summary>
     /// Sets an adapter offline

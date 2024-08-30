@@ -148,8 +148,8 @@ internal class DefaultConfigurationCreatorService(
     {
         logger.LogInformation("Loading tenant '{TenantId}'", tenantId);
 
-        await adapterService.ReloadTenantAsync(tenantId);
-        await poolService.ReloadTenantAsync(tenantId);
+        await adapterService.PosUpdateTenantAsync(tenantId);
+        await poolService.PosUpdateTenantAsync(tenantId);
 
         await triggerManagementService.UpdateScheduleAsync(tenantId);
     }
@@ -160,7 +160,7 @@ internal class DefaultConfigurationCreatorService(
 
         await triggerManagementService.RemoveScheduleAsync(tenantId);
 
-        await adapterService.UnloadTenantAsync(tenantId);
-        await poolService.UnloadTenantAsync(tenantId);
+        await adapterService.PreUpdateTenantAsync(tenantId);
+        await poolService.PreUpdateTenantAsync(tenantId);
     }
 }
