@@ -22,7 +22,7 @@ public class CommunicationControllerOptions
 #if DEBUG || DEBUGL
         MinLogLevel = LogLevelDto.Debug;
 #else
-        MinLogLevel = LogLevelDto.Warn;
+        MinLogLevel = LogLevelDto.Info;
 #endif
     }
 
