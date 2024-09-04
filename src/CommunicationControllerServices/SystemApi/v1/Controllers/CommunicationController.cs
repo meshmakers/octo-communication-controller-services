@@ -26,6 +26,17 @@ public class CommunicationController: ControllerBase
         _logger = logger;
         _configurationService = configurationService;
     }
+    
+    
+    /// <summary>
+    /// Pings the communication controller
+    /// </summary>
+    /// <returns></returns>
+    [HttpGet("ping")]
+    public IActionResult Get()
+    {
+        return Ok("Pong");
+    }
 
     /// <summary>
     /// Enables the communication controller for a tenant
