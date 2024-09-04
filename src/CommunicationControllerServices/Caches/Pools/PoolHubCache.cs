@@ -9,14 +9,8 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
 
 internal class PoolHubCache : IPoolCachePublish, IPoolCache
 {
-    private readonly IDistributionEventHubService _distributionEventHubService;
     private readonly ConcurrentDictionary<string, PoolTenant> _tenantDescriptions = new();
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
-
-    public PoolHubCache(IDistributionEventHubService distributionEventHubService)
-    {
-        _distributionEventHubService = distributionEventHubService;
-    }
 
     public PoolTenant AddOrUpdateTenant(string tenantId)
     {
@@ -26,7 +20,7 @@ internal class PoolHubCache : IPoolCachePublish, IPoolCache
             tenantDescription = _tenantDescriptions.AddOrUpdate(tenantId, _ => adapterHubTenant,
                 (_, _) => adapterHubTenant);
             
-            PublishConfiguration(tenantId);
+            PublishConfigurationAsync(tenantId);
         }
         return tenantDescription;
     }
@@ -35,7 +29,7 @@ internal class PoolHubCache : IPoolCachePublish, IPoolCache
     {
         _tenantDescriptions.TryRemove(tenantId, out _);
         
-        PublishConfiguration(tenantId);
+        PublishConfigurationAsync(tenantId);
     }
 
     public bool TryGetTenant(string tenantId, [NotNullWhen(true)] out PoolTenant? poolTenant)
@@ -52,21 +46,23 @@ internal class PoolHubCache : IPoolCachePublish, IPoolCache
     {
         Logger.Debug("Reloading PoolHubCache configuration: {Configuration}", configuration.Serialize());
         
-        _tenantDescriptions.AddOrUpdate(configuration.TenantId, 
-            _ => new PoolTenant(this, configuration.TenantId, configuration.Pools.ToList(), configuration.Adapters.ToList()),
-            (_, _) => new PoolTenant(this, configuration.TenantId, configuration.Pools.ToList(), configuration.Adapters.ToList()));
+        // _tenantDescriptions.AddOrUpdate(configuration.TenantId, 
+        //     _ => new PoolTenant(this, configuration.TenantId, configuration.Pools.ToList(), configuration.Adapters.ToList()),
+        //     (_, _) => new PoolTenant(this, configuration.TenantId, configuration.Pools.ToList(), configuration.Adapters.ToList()));
     }
 
-    public void PublishConfiguration(string tenantId)
+    public Task PublishConfigurationAsync(string tenantId)
     {
         Logger.Info("Publishing PoolHubCache configuration '{TenantId}'", tenantId);
 
-        if (_tenantDescriptions.TryGetValue(tenantId, out var desc))
-        {
-            var poolDescriptions = desc.GetPoolDescriptions();
-            var poolAdapterDescriptions = desc.GetPoolAdapterDescriptions();
-            _distributionEventHubService.PublishAsync(new ComControllerPoolUpdate(tenantId, poolDescriptions, poolAdapterDescriptions));
-        }
+        // if (_tenantDescriptions.TryGetValue(tenantId, out var desc))
+        // {
+        //     var poolDescriptions = desc.GetPoolDescriptions();
+        //     var poolAdapterDescriptions = desc.GetPoolAdapterDescriptions();
+        //     _distributionEventHubService.PublishAsync(new ComControllerPoolUpdate(tenantId, poolDescriptions, poolAdapterDescriptions));
+        // }
+
+        return Task.CompletedTask;
     }
 
 }
