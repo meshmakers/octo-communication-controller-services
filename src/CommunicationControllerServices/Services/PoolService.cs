@@ -141,6 +141,8 @@ internal class PoolService : IPoolService
 
         throw PoolServiceException.PoolNotFound(tenantId, poolRtId);
     }
+    
+    private readonly SemaphoreSlim _semaphore = new(0, 1);
 
     public async Task PreUpdateTenantAsync(string tenantId)
     {
@@ -148,6 +150,8 @@ internal class PoolService : IPoolService
 
         try
         {
+            await _semaphore.WaitAsync();
+
             if (_poolCache.TryGetTenant(tenantId, out var poolTenant))
             {
                 // Inform all pools that tenant is going to be updated
@@ -160,12 +164,15 @@ internal class PoolService : IPoolService
                     await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, pool.PoolRtId,
                         RtCommunicationStateEnum.Unregistered);
                 }
-
             }
         }
         catch (Exception e)
         {
             throw PoolServiceException.TenantReloadFailed(tenantId, e);
+        }
+        finally
+        {
+            _semaphore.Release();
         }
     }
 
@@ -175,6 +182,8 @@ internal class PoolService : IPoolService
 
         try
         {
+            await _semaphore.WaitAsync();
+            
             _poolCache.AddOrUpdateTenant(tenantId);
             
             var pools = await _communicationRepository.GetPoolsAsync(tenantId);
@@ -187,6 +196,10 @@ internal class PoolService : IPoolService
         catch (Exception e)
         {
             throw PoolServiceException.TenantReloadFailed(tenantId, e);
+        }
+        finally
+        {
+            _semaphore.Release();
         }
     }
 

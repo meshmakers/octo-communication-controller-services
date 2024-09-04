@@ -4,18 +4,12 @@ using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 
-internal class ComControllerPoolUpdateConsumer : IDistributedConsumer<ComControllerPoolUpdate>
+internal class ComControllerPoolUpdateConsumer(IPoolCachePublish poolCachePublish)
+    : IDistributedConsumer<ComControllerPoolUpdate>
 {
-    private readonly IPoolCachePublish _poolCachePublish;
-
-    public ComControllerPoolUpdateConsumer(IPoolCachePublish poolCachePublish)
-    {
-        _poolCachePublish = poolCachePublish;
-    }
-    
     public Task ConsumeAsync(IDistributedContext<ComControllerPoolUpdate> context)
     {
-        _poolCachePublish.ReloadConfiguration(context.Message);
+        poolCachePublish.ReloadConfiguration(context.Message);
 
         return Task.CompletedTask;
     }

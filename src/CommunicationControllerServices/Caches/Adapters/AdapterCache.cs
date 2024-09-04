@@ -2,16 +2,13 @@ using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Meshmakers.Common.Shared;
-using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
 using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages.Payloads;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 
-internal class AdapterCache(
-    IDistributionEventHubService distributionEventHubService,
-    IDistributedCacheService distributedCacheService)
+internal class AdapterCache
     : IAdapterCachePublish, IAdapterCache
 {
     private readonly ConcurrentDictionary<string, AdapterTenant> _tenantDescriptions = new();
@@ -51,21 +48,22 @@ internal class AdapterCache(
             (_, _) => new AdapterTenant(this, configuration.TenantId, configuration.Adapters.ToList()));
     }
     
-    public async Task LoadConfigurationAsync(string tenantId)
+    public Task LoadConfigurationAsync(string tenantId)
     {
         Logger.Info("Loading AdapterCache configuration from cache for tenant id '{TenantId}'", tenantId);
 
-        var cacheStream = await distributedCacheService.GetCacheStreamByFileNameAsync(tenantId, Constants.CacheFileName);
-        if (cacheStream != null)
-        {
-            using var reader = new StreamReader(cacheStream.Stream);
-            var adapterDescriptions = JsonSerializer.Deserialize<AdapterDescription[]>(reader.BaseStream);
-            if (adapterDescriptions != null)
-            {
-                var adapterTenant = new AdapterTenant(this, tenantId, adapterDescriptions);
-                _tenantDescriptions.AddOrUpdate(tenantId, _ => adapterTenant, (_, _) => adapterTenant);   
-            }
-        }
+        return Task.CompletedTask;
+        // var cacheStream = await distributedCacheService.GetCacheStreamByFileNameAsync(tenantId, Constants.CacheFileName);
+        // if (cacheStream != null)
+        // {
+        //     using var reader = new StreamReader(cacheStream.Stream);
+        //     var adapterDescriptions = JsonSerializer.Deserialize<AdapterDescription[]>(reader.BaseStream);
+        //     if (adapterDescriptions != null)
+        //     {
+        //         var adapterTenant = new AdapterTenant(this, tenantId, adapterDescriptions);
+        //         _tenantDescriptions.AddOrUpdate(tenantId, _ => adapterTenant, (_, _) => adapterTenant);   
+        //     }
+        // }
     }
 
     public void PublishConfiguration(string tenantId)
@@ -74,19 +72,20 @@ internal class AdapterCache(
     }
     
 
-    public async Task PublishConfigurationAsync(string tenantId)
+    public Task PublishConfigurationAsync(string tenantId)
     {
         Logger.Info("Publishing AdapterCache configuration for tenant '{TenantId}'", tenantId);
 
-        if (_tenantDescriptions.TryGetValue(tenantId, out var desc))
-        {
-            using MemoryStream memoryStream = new MemoryStream();
-            await JsonSerializer.SerializeAsync(memoryStream, desc.GetAdapterDescriptions());
-            await memoryStream.FlushAsync();
-            memoryStream.Position = 0;
-            await distributedCacheService.CreateOrUpdateStreamAsync(tenantId, memoryStream, "application/json", Constants.CacheFileName);
-            
-            await distributionEventHubService.PublishAsync(new ComControllerAdapterUpdate(tenantId, desc.GetAdapterDescriptions()));
-        }
+        // if (_tenantDescriptions.TryGetValue(tenantId, out var desc))
+        // {
+        //     using MemoryStream memoryStream = new MemoryStream();
+        //     await JsonSerializer.SerializeAsync(memoryStream, desc.GetAdapterDescriptions());
+        //     await memoryStream.FlushAsync();
+        //     memoryStream.Position = 0;
+        //     await distributedCacheService.CreateOrUpdateStreamAsync(tenantId, memoryStream, "application/json", Constants.CacheFileName);
+        //     
+        //     await distributionEventHubService.PublishAsync(new ComControllerAdapterUpdate(tenantId, desc.GetAdapterDescriptions()));
+        // }
+        return Task.CompletedTask;
     }
 }

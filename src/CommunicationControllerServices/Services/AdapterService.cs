@@ -67,27 +67,8 @@ internal class AdapterService(
             }
 
             adapterTenant.RemoveAdapter(adapterRtEntityId);
-
-            return;
         }
     }
-
-    // private async Task SetAdapterDeploymentStateAsync(string tenantId, OctoObjectId adapterRtId, RtDeploymentStateEnum deploymentState)
-    // {
-    //     Logger.Info("[{TenantId}] Setting deployment state of adapter '{AdapterRtId}' to '{DeploymentState}'",
-    //         tenantId, adapterRtId, deploymentState);
-    //     try
-    //     {
-    //         await _communicationRepository.SetAdapterDeploymentStateAsync(tenantId, adapterRtId, deploymentState);
-    //     }
-    //     catch (Exception e)
-    //     {
-    //         Logger.Error(e, "[{TenantId}] Error setting deployment state of {{ '{AdapterRtId}' to '{DeploymentState}'",
-    //             tenantId, adapterRtId, deploymentState);
-    //         
-    //         throw AdapterServiceException.CommonFailedSetAdapterDeploymentState(tenantId, adapterRtId, deploymentState, e);
-    //     }
-    // }
 
     public async Task<AdapterConfigurationDto> GetAdapterConfigurationAsync(string tenantId,
         RtEntityId adapterRtEntityId)
@@ -283,12 +264,15 @@ internal class AdapterService(
         }
     }
 
+    private readonly SemaphoreSlim _semaphore = new(0, 1);
+
     public async Task PreUpdateTenantAsync(string tenantId)
     {
         Logger.Info("[{TenantId}] Pre update tenant", tenantId);
 
         try
         {
+            await _semaphore.WaitAsync();
             if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
             {
                 // Inform all adapters that tenant is going to be updated
@@ -307,20 +291,28 @@ internal class AdapterService(
         {
             throw AdapterServiceException.PreUpdateTenantFailed(tenantId, e);
         }
+        finally
+        {
+            _semaphore.Release();
+        }
     }
 
-    public Task PosUpdateTenantAsync(string tenantId)
+    public async Task PosUpdateTenantAsync(string tenantId)
     {
         Logger.Info("[{TenantId}] Pos update tenant", tenantId);
 
         try
         {
+            await _semaphore.WaitAsync();
             adapterCache.AddOrUpdateTenant(tenantId);
-            return Task.CompletedTask;
         }
         catch (Exception e)
         {
             throw AdapterServiceException.PosUpdateTenantFailed(tenantId, e);
+        }
+        finally
+        {
+            _semaphore.Release();
         }
     }
 

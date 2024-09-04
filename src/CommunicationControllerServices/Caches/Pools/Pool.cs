@@ -31,13 +31,13 @@ internal class Pool
     public void UpdateConnectionId(string tenantId, string connectionId)
     {
         ConnectionId = connectionId;
-        _poolCachePublish.PublishConfiguration(tenantId);
+        _poolCachePublish.PublishConfigurationAsync(tenantId);
     }
     
     public void RemoveConnectionId(string tenantId)
     {
         ConnectionId = null;
-        _poolCachePublish.PublishConfiguration(tenantId);
+        _poolCachePublish.PublishConfigurationAsync(tenantId);
     }
 
     public PoolDescription GetPoolDescription()

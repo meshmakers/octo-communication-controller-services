@@ -54,7 +54,7 @@ internal class PoolTenant
             (_, _) => pool);
         _poolsByName.AddOrUpdate(poolName, _ => pool,
             (_, _) => pool);
-        _poolCachePublish.PublishConfiguration(TenantId);
+        _poolCachePublish.PublishConfigurationAsync(TenantId);
 
         return pool;
     }
@@ -65,7 +65,7 @@ internal class PoolTenant
         {
             if (_poolsByName.TryRemove(adapterHubPool.PoolName, out _))
             {
-                _poolCachePublish.PublishConfiguration(TenantId);
+                _poolCachePublish.PublishConfigurationAsync(TenantId);
             }
         }
     }
@@ -86,14 +86,14 @@ internal class PoolTenant
             _ => adapter,
             (_, _) => adapter);
 
-        _poolCachePublish.PublishConfiguration(TenantId);
+        _poolCachePublish.PublishConfigurationAsync(TenantId);
     }
 
     public void RemoveAdapter(RtEntityId adapterRtEntityId)
     {
         _adaptersById.Remove(adapterRtEntityId, out _);
 
-        _poolCachePublish.PublishConfiguration(TenantId);
+        _poolCachePublish.PublishConfigurationAsync(TenantId);
     }
 
     public void RemoveAdapters(OctoObjectId poolRtId)
@@ -103,7 +103,7 @@ internal class PoolTenant
             _adaptersById.Remove(adapter.AdapterRtEntityId, out _);
         }
 
-        _poolCachePublish.PublishConfiguration(TenantId);
+        _poolCachePublish.PublishConfigurationAsync(TenantId);
     }
 
     public void Clear()
@@ -112,8 +112,6 @@ internal class PoolTenant
         _poolsByName.Clear();
         _adaptersById.Clear();
 
-        _poolCachePublish.PublishConfiguration(TenantId);
+        _poolCachePublish.PublishConfigurationAsync(TenantId);
     }
-
-
 }

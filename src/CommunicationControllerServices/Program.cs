@@ -78,9 +78,9 @@ try
         {
             c.AddCommandClient<RemoveRecurringJobsByScheduleGroupRequest>(QueueNames.RemoveRecurringJobsByScheduleGroupCommand);
             
-            c.AddBroadcastEventConsumer<ComControllerAdapterUpdateConsumer, ComControllerAdapterUpdate>();
-            c.AddBroadcastEventConsumer<ComControllerPoolUpdateConsumer, ComControllerPoolUpdate>();
-            
+            // c.AddBroadcastEventConsumer<ComControllerAdapterUpdateConsumer, ComControllerAdapterUpdate>();
+            // c.AddBroadcastEventConsumer<ComControllerPoolUpdateConsumer, ComControllerPoolUpdate>();
+            //
             c.AddBroadcastEventConsumer<TenantManagementConsumer, PreUpdateTenant>();
             c.AddBroadcastEventConsumer<TenantManagementConsumer, PosUpdateTenant>();
             c.AddBroadcastEventConsumer<TenantManagementConsumer, PreDeleteTenant>();
