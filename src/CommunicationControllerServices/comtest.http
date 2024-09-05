@@ -9,6 +9,9 @@ POST {{baseUrl}}/system/v1/diagnostics/reconfigureLogLevel?minLogLevel=Info&maxL
 ### Sets log level of Microsoft to warn
 POST {{baseUrl}}/system/v1/diagnostics/reconfigureLogLevel?minLogLevel=Warn&maxLogLevel=Fatal&loggerName=Microsoft.*
 
+### Sets log level of Microsoft to off
+POST {{baseUrl}}/system/v1/diagnostics/reconfigureLogLevel?minLogLevel=Off&maxLogLevel=Off&loggerName=Microsoft.*
+
 ## System
 
 ### Enables the communication for the given tenant

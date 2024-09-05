@@ -19,7 +19,7 @@ public class CommunicationControllerOptions
         BrokerPort = 5672;
         BrokerUser = "guest";
         BrokerPassword = "guest";
-        MinLogLevel = LogLevelDto.Info;
+        MinLogLevel = LogLevelDto.Warn;
     }
 
     /// <summary>
