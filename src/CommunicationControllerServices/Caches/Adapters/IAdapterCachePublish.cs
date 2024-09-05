@@ -9,5 +9,5 @@ internal interface IAdapterCachePublish
     void PublishConfiguration(string tenantId);
     Task PublishConfigurationAsync(string tenantId);
 
-    void ReloadConfiguration(ComControllerAdapterUpdate configuration);
+    Task ReloadConfigurationAsync(ComControllerAdapterUpdate configuration);
 }

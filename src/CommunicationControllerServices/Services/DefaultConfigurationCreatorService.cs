@@ -20,8 +20,10 @@ internal class DefaultConfigurationCreatorService(
     IAdapterService adapterService)
     : DefaultConfigurationCreatorServiceBase(logger), IConfigurationService
 {
+    
     public override async Task InitializeAsync()
     {
+        
         // Reconfigure the log level based on the configuration
         await diagnosticsService.ReconfigureLogLevelAsync(options.Value.MinLogLevel);
 

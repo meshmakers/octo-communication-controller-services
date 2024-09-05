@@ -42,13 +42,14 @@ internal class PoolHubCache : IPoolCachePublish, IPoolCache
         return _tenantDescriptions.ContainsKey(tenantId);
     }
 
-    public void ReloadConfiguration(ComControllerPoolUpdate configuration)
+    public Task ReloadConfigurationAsync(ComControllerPoolUpdate configuration)
     {
         Logger.Debug("Reloading PoolHubCache configuration: {Configuration}", configuration.Serialize());
         
         // _tenantDescriptions.AddOrUpdate(configuration.TenantId, 
         //     _ => new PoolTenant(this, configuration.TenantId, configuration.Pools.ToList(), configuration.Adapters.ToList()),
         //     (_, _) => new PoolTenant(this, configuration.TenantId, configuration.Pools.ToList(), configuration.Adapters.ToList()));
+        return Task.CompletedTask;
     }
 
     public Task PublishConfigurationAsync(string tenantId)
