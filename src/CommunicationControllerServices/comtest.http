@@ -1,7 +1,7 @@
 ## Diagnostic
 
 ### Gets the current log level of the logger
-POST  {{baseUrl}}/system/v1/diagnostics/reconfigureLogLevel?minLogLevel=Debug&loggerName=Meshmakers.*
+POST  {{baseUrl}}/system/v1/diagnostics/reconfigureLogLevel?minLogLevel=Debug&maxLogLevel=Fatal&loggerName=Meshmakers.*
 
 ### Sets log level of Microsoft to debug
 POST {{baseUrl}}/system/v1/diagnostics/reconfigureLogLevel?minLogLevel=Info&maxLogLevel=Fatal&loggerName=Microsoft.*
