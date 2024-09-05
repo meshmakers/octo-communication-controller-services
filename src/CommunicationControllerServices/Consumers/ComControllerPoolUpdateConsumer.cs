@@ -7,14 +7,14 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 internal class ComControllerPoolUpdateConsumer(ILogger<ComControllerPoolUpdateConsumer> logger, IPoolCachePublish poolCachePublish)
     : IDistributedConsumer<ComControllerPoolUpdate>
 {
-    private readonly DateTime _startDateTime = DateTime.Now;
+    private static readonly DateTime StartDateTime = DateTime.Now;
 
     public async Task ConsumeAsync(IDistributedContext<ComControllerPoolUpdate> context)
     {
         logger.LogInformation("Com controller pool update {TenantId}", context.Message.TenantId);
         try
         {
-            if (context.Message.Timestamp < _startDateTime)
+            if (context.Message.Timestamp < StartDateTime)
             {
                 logger.LogInformation("Ignoring old message");
                 return;

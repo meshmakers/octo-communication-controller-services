@@ -15,7 +15,7 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
     private readonly IPoolService _poolService;
     private readonly IAdapterService _adapterService;
     private readonly IConfigurationService _configurationService;
-    private readonly DateTime _startDateTime;
+    private static readonly DateTime StartDateTime = DateTime.Now;
     private readonly ConcurrentDictionary<Guid, bool> _receivedPreUpdateTenant = new();
 
     /// <summary>
@@ -32,8 +32,6 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
         _poolService = poolService;
         _adapterService = adapterService;
         _configurationService = configurationService;
-
-        _startDateTime = DateTime.Now;
     }
 
 
@@ -42,7 +40,7 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
         _logger.LogInformation("Pre update tenant received: {TenantId}", context.Message.TenantId);
         try
         {
-            if (context.Message.Timestamp < _startDateTime)
+            if (context.Message.Timestamp < StartDateTime)
             {
                 _logger.LogInformation("Ignoring old message");
                 return;
@@ -79,7 +77,7 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
         _logger.LogInformation("Pos update tenant received: {TenantId}", context.Message.TenantId);
         try
         {
-            if (context.Message.Timestamp < _startDateTime)
+            if (context.Message.Timestamp < StartDateTime)
             {
                 _logger.LogInformation("Ignoring old message");
                 return;
@@ -115,7 +113,7 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
         _logger.LogInformation("Pre delete tenant received: {TenantId}", context.Message.TenantId);
         try
         {
-            if (context.Message.Timestamp < _startDateTime)
+            if (context.Message.Timestamp < StartDateTime)
             {
                 _logger.LogInformation("Ignoring old message");
                 return;
