@@ -56,7 +56,8 @@ internal class TriggerManagementService(
                 try
                 {
                     var executePipeline =
-                        new PipelineTriggerSchedule(tenantId, pipelineTriggerKeyValue.Value.Select(x => x.RtId).ToList());
+                        new PipelineTriggerSchedule(tenantId, Guid.NewGuid(), DateTime.Now, 
+                            pipelineTriggerKeyValue.Value.Select(x => x.RtId).ToList());
                     var recurringSchedulingOptions = new RecurringSchedulingOptions(
                         pipelineTrigger.CronExpression,
                         DateTime.Now, null, pipelineTrigger.RtId.ToString(), scheduleGroup,
