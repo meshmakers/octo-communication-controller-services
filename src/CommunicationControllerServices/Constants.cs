@@ -5,10 +5,12 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices;
 
 internal static class Constants
 {
-    public const string TenantId = "tenantId";
-    public const string PoolName = "pool-name";
-    public const string AdapterRtId = "adapter-rtId";
-    public const string AdapterCkTypeId = "adapter-ckTypeId";
+    internal static readonly DateTime StartTime = DateTime.UtcNow;
+
+    private const string TenantId = "tenantId";
+    private const string PoolName = "pool-name";
+    private const string AdapterRtId = "adapter-rtId";
+    private const string AdapterCkTypeId = "adapter-ckTypeId";
 
     public const string CommunicationControllerServiceSchemaVersionKey = "CommunicationControllerServices";
     public const int CommunicationControllerServiceSchemaVersionValue = 1;
