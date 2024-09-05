@@ -1,3 +1,14 @@
+## Diagnostic
+
+### Gets the current log level of the logger
+POST  {{baseUrl}}/system/v1/diagnostics/reconfigureLogLevel?minLogLevel=Debug&loggerName=Meshmakers.*
+
+### Sets log level of Microsoft to debug
+POST {{baseUrl}}/system/v1/diagnostics/reconfigureLogLevel?minLogLevel=Info&maxLogLevel=Fatal&loggerName=Microsoft.*
+
+### Sets log level of Microsoft to warn
+POST {{baseUrl}}/system/v1/diagnostics/reconfigureLogLevel?minLogLevel=Warn&maxLogLevel=Fatal&loggerName=Microsoft.*
+
 ## System
 
 ### Enables the communication for the given tenant
@@ -16,3 +27,6 @@ GET {{baseUrl}}/meshtest/v1/adapter/65d5c447b420da3fb12381bc
 
 ### Deploys configuration updates stored in database to the adapter
 POST {{baseUrl}}/meshtest/v1/adapter/65d5c447b420da3fb12381bc/update
+
+
+

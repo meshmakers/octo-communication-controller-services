@@ -35,6 +35,11 @@ public class CommunicationController: ControllerBase
     [HttpGet("ping")]
     public IActionResult Get()
     {
+        _logger.LogTrace("Ping TRACE");
+        _logger.LogDebug("Ping DEBUG");
+        _logger.LogInformation("Ping INFORMATION");
+        _logger.LogError("Ping ERROR");
+        _logger.LogCritical("Ping CRITICAL");
         return Ok("Pong");
     }
 
