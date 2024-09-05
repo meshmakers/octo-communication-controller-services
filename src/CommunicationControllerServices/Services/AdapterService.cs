@@ -264,7 +264,7 @@ internal class AdapterService(
         }
     }
 
-    private readonly SemaphoreSlim _semaphore = new(0, 1);
+    private readonly SemaphoreSlim _semaphore = new(1, 1);
 
     public async Task PreUpdateTenantAsync(string tenantId)
     {
@@ -294,6 +294,7 @@ internal class AdapterService(
         finally
         {
             _semaphore.Release();
+            Logger.Info("[{TenantId}] Pre update tenant completed", tenantId);
         }
     }
 
@@ -313,6 +314,7 @@ internal class AdapterService(
         finally
         {
             _semaphore.Release();
+            Logger.Info("[{TenantId}] Pos update tenant completed", tenantId);
         }
     }
 

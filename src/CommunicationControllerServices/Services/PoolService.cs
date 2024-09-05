@@ -142,7 +142,7 @@ internal class PoolService : IPoolService
         throw PoolServiceException.PoolNotFound(tenantId, poolRtId);
     }
     
-    private readonly SemaphoreSlim _semaphore = new(0, 1);
+    private readonly SemaphoreSlim _semaphore = new(1, 1);
 
     public async Task PreUpdateTenantAsync(string tenantId)
     {
