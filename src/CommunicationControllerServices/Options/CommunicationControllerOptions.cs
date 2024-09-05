@@ -19,11 +19,7 @@ public class CommunicationControllerOptions
         BrokerPort = 5672;
         BrokerUser = "guest";
         BrokerPassword = "guest";
-#if DEBUG || DEBUGL
-        MinLogLevel = LogLevelDto.Debug;
-#else
         MinLogLevel = LogLevelDto.Info;
-#endif
     }
 
     /// <summary>
