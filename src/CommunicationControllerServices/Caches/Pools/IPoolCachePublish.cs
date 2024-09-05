@@ -5,6 +5,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
 internal interface IPoolCachePublish
 {
     Task PublishConfigurationAsync(string tenantId);
-    
-    void ReloadConfiguration(ComControllerPoolUpdate configuration);
+
+    Task ReloadConfigurationAsync(ComControllerPoolUpdate configuration);
 }
+    

@@ -39,13 +39,15 @@ internal class AdapterCache
         return _tenantDescriptions.TryGetValue(tenantId, out adapterTenant);
     }
 
-    public void ReloadConfiguration(ComControllerAdapterUpdate configuration)
+    public Task ReloadConfigurationAsync(ComControllerAdapterUpdate configuration)
     {
         Logger.Debug("Reloading AdapterCache configuration: {Configuration}", configuration.Serialize());
 
         _tenantDescriptions.AddOrUpdate(configuration.TenantId, 
             _ => new AdapterTenant(this, configuration.TenantId, configuration.Adapters.ToList()),
             (_, _) => new AdapterTenant(this, configuration.TenantId, configuration.Adapters.ToList()));
+
+        return Task.CompletedTask;
     }
     
     public Task LoadConfigurationAsync(string tenantId)

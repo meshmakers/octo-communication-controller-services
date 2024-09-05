@@ -4,13 +4,30 @@ using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 
-internal class ComControllerAdapterUpdateConsumer(IAdapterCachePublish adapterCachePublish)
+internal class ComControllerAdapterUpdateConsumer(ILogger<ComControllerAdapterUpdateConsumer> logger, IAdapterCachePublish adapterCachePublish)
     : IDistributedConsumer<ComControllerAdapterUpdate>
 {
-    public Task ConsumeAsync(IDistributedContext<ComControllerAdapterUpdate> context)
-    {
-        adapterCachePublish.ReloadConfiguration(context.Message);
+    private readonly DateTime _startDateTime = DateTime.Now;
 
-        return Task.CompletedTask;
+    public async Task ConsumeAsync(IDistributedContext<ComControllerAdapterUpdate> context)
+    {
+        logger.LogInformation("Com controller adapter update {TenantId}", context.Message.TenantId);
+        try
+        {
+            if (context.Message.Timestamp < _startDateTime)
+            {
+                logger.LogInformation("Ignoring old message");
+                return;
+            }
+            await adapterCachePublish.ReloadConfigurationAsync(context.Message);
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "Com controller adapter update failed: {TenantId}", context.Message.TenantId);
+        }
+        finally
+        {
+            logger.LogInformation("Com controller adapter update finished: {TenantId}", context.Message.TenantId);
+        }
     }
 }

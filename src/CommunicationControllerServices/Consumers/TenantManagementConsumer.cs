@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Common.DistributionEventHub.Consumers;
 using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
@@ -14,6 +15,8 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
     private readonly IPoolService _poolService;
     private readonly IAdapterService _adapterService;
     private readonly IConfigurationService _configurationService;
+    private readonly DateTime _startDateTime;
+    private readonly ConcurrentDictionary<Guid, bool> _receivedPreUpdateTenant = new();
 
     /// <summary>
     ///     Constructor.
@@ -29,37 +32,122 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
         _poolService = poolService;
         _adapterService = adapterService;
         _configurationService = configurationService;
+
+        _startDateTime = DateTime.Now;
     }
-    
+
+
     public async Task ConsumeAsync(IDistributedContext<PreUpdateTenant> context)
     {
         _logger.LogInformation("Pre update tenant received: {TenantId}", context.Message.TenantId);
-        
-        if (await _configurationService.IsEnabledAsync(context.Message.TenantId))
+        try
         {
-            await _adapterService.PreUpdateTenantAsync(context.Message.TenantId);
-            await _poolService.PreUpdateTenantAsync(context.Message.TenantId);
+            if (context.Message.Timestamp < _startDateTime)
+            {
+                _logger.LogInformation("Ignoring old message");
+                return;
+            }
+
+            // We check if already a pos update tenant message was received for this correlation id
+            if (_receivedPreUpdateTenant.TryGetValue(context.Message.CorrelationId, out bool receivedPreUpdateTenant))
+            {
+                if (!receivedPreUpdateTenant)
+                {
+                    _logger.LogInformation("Pos update tenant message was received before pos update tenant message");
+                    await ExecutePreTenantUpdate(context.Message.TenantId);
+                    await ExecutePosTenantUpdate(context.Message.TenantId);
+                    _receivedPreUpdateTenant.Remove(context.Message.CorrelationId, out _);
+                    return;
+                }
+            }
+
+            _receivedPreUpdateTenant.AddOrUpdate(context.Message.CorrelationId, true, (_, oldValue) => oldValue);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Pre update tenant failed: {TenantId}", context.Message.TenantId);
+        }
+        finally
+        {
+            _logger.LogInformation("Pre update tenant finished: {TenantId}", context.Message.TenantId);
         }
     }
+
 
     public async Task ConsumeAsync(IDistributedContext<PosUpdateTenant> context)
     {
         _logger.LogInformation("Pos update tenant received: {TenantId}", context.Message.TenantId);
-
-        if (await _configurationService.IsEnabledAsync(context.Message.TenantId))
+        try
         {
-            await _adapterService.PosUpdateTenantAsync(context.Message.TenantId);
-            await _poolService.PosUpdateTenantAsync(context.Message.TenantId);
+            if (context.Message.Timestamp < _startDateTime)
+            {
+                _logger.LogInformation("Ignoring old message");
+                return;
+            }
+
+            // We check if already a pre update tenant message was received for this correlation id
+            if (_receivedPreUpdateTenant.TryGetValue(context.Message.CorrelationId, out bool receivedPreUpdateTenant))
+            {
+                if (receivedPreUpdateTenant)
+                {
+                    _logger.LogInformation("Pre update tenant message was received before pos update tenant message");
+                    await ExecutePosTenantUpdate(context.Message.TenantId);
+                    _receivedPreUpdateTenant.Remove(context.Message.CorrelationId, out _);
+                    return;
+                }
+            }
+
+            _receivedPreUpdateTenant.AddOrUpdate(context.Message.CorrelationId, false, (_, oldValue) => oldValue);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Pos update tenant failed: {TenantId}", context.Message.TenantId);
+        }
+        finally
+        {
+            _logger.LogInformation("Pos update tenant finished: {TenantId}", context.Message.TenantId);
         }
     }
+
 
     public async Task ConsumeAsync(IDistributedContext<PreDeleteTenant> context)
     {
         _logger.LogInformation("Pre delete tenant received: {TenantId}", context.Message.TenantId);
-        
-        await _poolService.PreUpdateTenantAsync(context.Message.TenantId);
-        await _adapterService.PreUpdateTenantAsync(context.Message.TenantId);
+        try
+        {
+            if (context.Message.Timestamp < _startDateTime)
+            {
+                _logger.LogInformation("Ignoring old message");
+                return;
+            }
+
+            await ExecutePreTenantUpdate(context.Message.TenantId);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Pre delete tenant failed: {TenantId}", context.Message.TenantId);
+        }
+        finally
+        {
+            _logger.LogInformation("Pre delete tenant finished: {TenantId}", context.Message.TenantId);
+        }
     }
 
+    private async Task ExecutePreTenantUpdate(string tenantId)
+    {
+        if (await _configurationService.IsEnabledAsync(tenantId))
+        {
+            await _adapterService.PreUpdateTenantAsync(tenantId);
+            await _poolService.PreUpdateTenantAsync(tenantId);
+        }
+    }
 
+    private async Task ExecutePosTenantUpdate(string tenantId)
+    {
+        if (await _configurationService.IsEnabledAsync(tenantId))
+        {
+            await _adapterService.PosUpdateTenantAsync(tenantId);
+            await _poolService.PosUpdateTenantAsync(tenantId);
+        }
+    }
 }
