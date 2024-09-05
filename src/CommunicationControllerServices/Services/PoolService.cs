@@ -15,7 +15,7 @@ internal class PoolService : IPoolService
     private readonly ICommunicationRepository _communicationRepository;
     private readonly IPoolCache _poolCache;
     private readonly IPoolHubCallbacks _poolHubCallbacks;
-
+    
     /// <summary>
     /// Constructor
     /// </summary>
@@ -29,7 +29,7 @@ internal class PoolService : IPoolService
         _poolCache = poolCache;
         _poolHubCallbacks = poolHubCallbacks;
     }
-
+    
     /// <inheritdoc />
     public async Task<OctoObjectId> RegisterPoolOperatorAsync(string tenantId, string poolName, string connectionId)
     {
