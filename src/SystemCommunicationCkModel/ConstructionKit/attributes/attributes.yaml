@@ -27,3 +27,5 @@ attributes:
   valueType: String
 - id: PipelineDefinition
   valueType: String
+- id: StatusMessage
+  valueType: String

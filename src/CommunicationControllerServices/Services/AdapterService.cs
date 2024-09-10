@@ -232,12 +232,24 @@ internal class AdapterService(
 
                 if (!configuration.Equals(adapter.Configuration))
                 {
-                    await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, configuration);
-                    foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
+                    var result = await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, configuration);
+                    if (result.IsSuccess)
                     {
-                        await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
-                            pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Deployed);
+                        await communicationRepository.SetAdapterDeploymentStateAsync(tenantId, adapterRtEntityId,
+                            RtDeploymentStateEnum.Deployed, null);
+                     
+                        foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
+                        {
+                            await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
+                                pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Deployed);
+                        }
                     }
+                    else
+                    {
+                        await communicationRepository.SetAdapterDeploymentStateAsync(tenantId, adapterRtEntityId,
+                            RtDeploymentStateEnum.Error, result.ErrorMessage);
+                    }
+          
                 }
 
                 return;

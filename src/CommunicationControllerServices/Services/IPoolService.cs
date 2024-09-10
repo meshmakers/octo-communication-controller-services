@@ -122,10 +122,11 @@ public interface IPoolService
     /// <param name="poolName">Name of pool</param>
     /// <param name="adapterRtEntityId">The object id of the adapter</param>
     /// <param name="deploymentState">The new deployment state</param>
+    /// <param name="statusMessage">The status message</param>
     /// <returns></returns>
     Task SetAdapterDeploymentStateAsync(string tenantId, string poolName, RtEntityId adapterRtEntityId, 
-        RtDeploymentStateEnum deploymentState);
-    
+        RtDeploymentStateEnum deploymentState, string? statusMessage);
+
     /// <summary>
     /// Updates the deployment state of an adapter in a pool
     /// </summary>
@@ -133,7 +134,8 @@ public interface IPoolService
     /// <param name="poolName">Name of pool</param>
     /// <param name="adapterRtEntityIds">The object id of the adapters</param>
     /// <param name="deploymentState">The new deployment state</param>
+    /// <param name="statusMessage">The status message</param>
     /// <returns></returns>
     Task SetAdapterDeploymentStateAsync(string tenantId, string poolName, ICollection<RtEntityId> adapterRtEntityIds, 
-        RtDeploymentStateEnum deploymentState);
+        RtDeploymentStateEnum deploymentState, string? statusMessage);
 }
