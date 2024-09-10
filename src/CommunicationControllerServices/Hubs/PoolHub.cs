@@ -79,7 +79,7 @@ public class PoolHub : Hub, IPoolHub
             
             await _poolService.SetAdapterDeploymentStateAsync(tenantId, poolName,
                 configuration.CommunicationAdapterList.Select(x=>x.AdapterRtEntityId).ToList(), 
-                RtDeploymentStateEnum.Pending);
+                RtDeploymentStateEnum.Pending, null);
             
             return configuration;
         }
@@ -114,7 +114,7 @@ public class PoolHub : Hub, IPoolHub
         try
         {
             await _poolService.SetAdapterDeploymentStateAsync(tenantId, poolName, adapterRtEntityId,
-                RtDeploymentStateEnum.Deployed);
+                RtDeploymentStateEnum.Deployed, null);
         }
         catch (Exception e)
         {

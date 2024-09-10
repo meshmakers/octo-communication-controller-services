@@ -296,13 +296,13 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     public async Task SetAdapterDeploymentStateAsync(string tenantId, RtEntityId adapterRtEntityId,
-        RtDeploymentStateEnum deploymentState)
+        RtDeploymentStateEnum deploymentState, string? statusMessage)
     {
-        await SetAdapterDeploymentStateAsync(tenantId, [adapterRtEntityId], deploymentState);
+        await SetAdapterDeploymentStateAsync(tenantId, [adapterRtEntityId], deploymentState, statusMessage);
     }
 
     public async Task SetAdapterDeploymentStateAsync(string tenantId, ICollection<RtEntityId> adapterRtEntityIds,
-        RtDeploymentStateEnum deploymentState)
+        RtDeploymentStateEnum deploymentState, string? statusMessage)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -313,7 +313,8 @@ internal class CommunicationRepository : ICommunicationRepository
 
             var rtAdapter = new RtAdapter
             {
-                DeploymentState = deploymentState
+                DeploymentState = deploymentState,
+                StatusMessage = statusMessage
             };
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtAdapter>>();

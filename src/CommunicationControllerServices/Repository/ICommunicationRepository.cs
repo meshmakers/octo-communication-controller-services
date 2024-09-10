@@ -88,9 +88,10 @@ public interface ICommunicationRepository
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="adapterRtEntityId">Object id of adapter</param>
     /// <param name="deploymentState">State of adapter</param>
+    /// <param name="statusMessage">Status message</param>
     /// <returns></returns>
     Task SetAdapterDeploymentStateAsync(string tenantId, RtEntityId adapterRtEntityId,
-        RtDeploymentStateEnum deploymentState);
+        RtDeploymentStateEnum deploymentState, string? statusMessage);
 
     /// <summary>
     /// Set the deployment state of an adapter
@@ -98,9 +99,10 @@ public interface ICommunicationRepository
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="adapterRtEntityIds">Object id of adapters</param>
     /// <param name="deploymentState">State of adapter</param>
+    /// <param name="statusMessage">Status message</param>
     /// <returns></returns>
     Task SetAdapterDeploymentStateAsync(string tenantId, ICollection<RtEntityId> adapterRtEntityIds,
-        RtDeploymentStateEnum deploymentState);
+        RtDeploymentStateEnum deploymentState, string? statusMessage);
 
     /// <summary>
     /// Set the communication state of a communication adapter

@@ -122,7 +122,7 @@ internal class PoolService : IPoolService
                 if (string.IsNullOrWhiteSpace(rtAdapter.ImageName) || string.IsNullOrWhiteSpace(rtAdapter.ImageVersion))
                 {
                     await _communicationRepository.SetAdapterDeploymentStateAsync(tenantId, rtAdapter.ToRtEntityId(),
-                        RtDeploymentStateEnum.Error);
+                        RtDeploymentStateEnum.Error, "ImageName or ImageVersion not set");
                     continue;
                 }
 
@@ -384,7 +384,7 @@ internal class PoolService : IPoolService
 
     /// <inheritdoc />
     public async Task SetAdapterDeploymentStateAsync(string tenantId, string poolName, RtEntityId adapterRtEntityId,
-        RtDeploymentStateEnum deploymentState)
+        RtDeploymentStateEnum deploymentState, string? statusMessage)
     {
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
@@ -397,13 +397,13 @@ internal class PoolService : IPoolService
         }
 
         await _communicationRepository.SetAdapterDeploymentStateAsync(tenantId, adapterRtEntityId,
-            deploymentState);
+            deploymentState, statusMessage);
     }
 
     /// <inheritdoc />
     public async Task SetAdapterDeploymentStateAsync(string tenantId, string poolName,
         ICollection<RtEntityId> adapterRtEntityIds,
-        RtDeploymentStateEnum deploymentState)
+        RtDeploymentStateEnum deploymentState, string? statusMessage)
     {
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
@@ -416,7 +416,7 @@ internal class PoolService : IPoolService
         }
 
         await _communicationRepository.SetAdapterDeploymentStateAsync(tenantId, adapterRtEntityIds,
-            deploymentState);
+            deploymentState, statusMessage);
     }
 
     private PoolCommunicationAdapterDto CreatePoolAdapterDto(string poolName,

@@ -25,22 +25,23 @@ internal class AdapterHubCallbacks : IAdapterHubCallbacks
     }
 
     /// <inheritdoc />
-    public async Task AdapterConfigurationUpdatedAsync(string tenantId, AdapterConfigurationDto adapterConfiguration)
+    public async Task<CallbackResult> AdapterConfigurationUpdatedAsync(string tenantId, AdapterConfigurationDto adapterConfiguration)
     {
         if (_adapterCache.TryGetTenant(tenantId, out var poolTenant))
         {
             if (poolTenant.AdapterById.TryGetValue(adapterConfiguration.AdapterRtEntityId, out var adapter)
                 && !string.IsNullOrWhiteSpace(adapter.ConnectionId))
             {
-                await _adapterContext.Clients.Client(adapter.ConnectionId)
-                    .SendAsync(nameof(IAdapterHubCallbacks.AdapterConfigurationUpdatedAsync), tenantId, adapterConfiguration);
-            }
-            else
-            {
-                throw AdapterHubCallbackException.AdapterNotOnline(tenantId, adapterConfiguration.AdapterRtEntityId);
-            }
                 
+                return await _adapterContext.Clients.Client(adapter.ConnectionId)
+                    .InvokeAsync<CallbackResult>(nameof(IAdapterHubCallbacks.AdapterConfigurationUpdatedAsync),
+                        tenantId, adapterConfiguration, CancellationToken.None);
+            }
+
+            throw AdapterHubCallbackException.AdapterNotOnline(tenantId, adapterConfiguration.AdapterRtEntityId);
+
         }
+        throw AdapterHubCallbackException.TenantNotFound(tenantId);
     }
 
     /// <inheritdoc />

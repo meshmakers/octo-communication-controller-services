@@ -23,4 +23,9 @@ public class AdapterHubCallbackException : Exception
     {
         throw new AdapterHubCallbackException($"[{tenantId}] Adapter '{adapterRtEntityId}' not online.");
     }
+
+    internal static Exception TenantNotFound(string tenantId)
+    {
+        throw new AdapterHubCallbackException($"[{tenantId}] Tenant not found.");
+    }
 }
