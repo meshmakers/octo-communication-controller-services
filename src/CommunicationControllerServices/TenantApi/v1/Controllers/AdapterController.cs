@@ -91,6 +91,7 @@ public class AdapterController : ControllerBase
         }
         catch (AdapterHubCallbackException e)
         {
+            _logger.LogError(e, "Error deploying adapter configuration");
             return BadRequest(e.Message);
         }
     }

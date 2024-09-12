@@ -88,10 +88,9 @@ public interface ICommunicationRepository
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="adapterRtEntityId">Object id of adapter</param>
     /// <param name="deploymentState">State of adapter</param>
-    /// <param name="statusMessage">Status message</param>
     /// <returns></returns>
     Task SetAdapterDeploymentStateAsync(string tenantId, RtEntityId adapterRtEntityId,
-        RtDeploymentStateEnum deploymentState, string? statusMessage);
+        RtDeploymentStateEnum deploymentState);
 
     /// <summary>
     /// Set the deployment state of an adapter
@@ -99,10 +98,9 @@ public interface ICommunicationRepository
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="adapterRtEntityIds">Object id of adapters</param>
     /// <param name="deploymentState">State of adapter</param>
-    /// <param name="statusMessage">Status message</param>
     /// <returns></returns>
     Task SetAdapterDeploymentStateAsync(string tenantId, ICollection<RtEntityId> adapterRtEntityIds,
-        RtDeploymentStateEnum deploymentState, string? statusMessage);
+        RtDeploymentStateEnum deploymentState);
 
     /// <summary>
     /// Set the communication state of a communication adapter
@@ -194,4 +192,14 @@ public interface ICommunicationRepository
     /// <returns></returns>
     Task SetPipelineDeploymentStateAsync(string tenantId, RtEntityId pipelineRtEntityId,
         RtDeploymentStateEnum deploymentState);
+
+    /// <summary>
+    /// Set the configuration state of an adapter
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="adapterRtEntityId">Object identifier of communication adapter</param>
+    /// <param name="configurationState">Configuration state</param>
+    /// <param name="stateMessage">An optional status message</param>
+    /// <returns></returns>
+    Task SetAdapterConfigurationStateAsync(string tenantId, RtEntityId adapterRtEntityId, RtConfigurationStateEnum configurationState, string? stateMessage);
 }

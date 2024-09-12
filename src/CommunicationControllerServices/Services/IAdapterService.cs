@@ -1,4 +1,5 @@
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -90,4 +91,13 @@ public interface IAdapterService
     /// <param name="dataPipelineRtId">Runtime id of data pipeline</param>
     /// <returns></returns>
     Task DeployDataPipelineAsync(string tenantId, OctoObjectId dataPipelineRtId);
+
+    /// <summary>
+    /// Updates the configuration state of an adapter
+    /// </summary>
+    /// <param name="tenantId"></param>
+    /// <param name="adapterRtEntityId"></param>
+    /// <param name="deploymentResult"></param>
+    /// <returns></returns>
+    Task UpdateConfigurationStateAsync(string tenantId, RtEntityId adapterRtEntityId, DeploymentResult deploymentResult);
 }

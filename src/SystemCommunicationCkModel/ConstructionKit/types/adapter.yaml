@@ -11,8 +11,6 @@ types:
       name: CommunicationState
     - id: ${thisModel}/ConfigurationState
       name: ConfigurationState
-    - id: ${thisModel}/AdapterType
-      name: Type
     - id: ${thisModel}/Deployment.ImageName
       name: ImageName
       isOptional: true

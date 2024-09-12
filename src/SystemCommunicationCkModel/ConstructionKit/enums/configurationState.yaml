@@ -3,7 +3,11 @@ enums:
 - enumId: ConfigurationState
   values:
   - key: 0
-    name: Disabled
+    name: Undeployed
   - key: 1
-    name: Enabled
+    name: Pending    
+  - key: 2
+    name: Deployed
+  - key: 3
+    name: Error
     

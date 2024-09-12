@@ -91,6 +91,7 @@ public class PoolController : ControllerBase
         }
         catch (PoolServiceException e)
         {
+            _logger.LogError(e, "Error deploying all adapters of pool");
             return BadRequest(e.Message);
         }
     }
@@ -117,6 +118,7 @@ public class PoolController : ControllerBase
         }
         catch (PoolServiceException e)
         {
+            _logger.LogError(e, "Error undeploying all adapters of pool");
             return BadRequest(e.Message);
         }
     }
@@ -144,6 +146,7 @@ public class PoolController : ControllerBase
         }
         catch (PoolServiceException e)
         {
+            _logger.LogError(e, "Error deploying adapter");
             return BadRequest(e.Message);
         }
     }
@@ -171,6 +174,7 @@ public class PoolController : ControllerBase
         }
         catch (PoolServiceException e)
         {
+            _logger.LogError(e, "Error undeploying adapter");
             return BadRequest(e.Message);
         }
     }

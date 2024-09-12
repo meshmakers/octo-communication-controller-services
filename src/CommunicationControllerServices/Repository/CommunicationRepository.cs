@@ -196,7 +196,7 @@ internal class CommunicationRepository : ICommunicationRepository
             {
                 CommunicationState = RtCommunicationStateEnum.Offline,
                 DeploymentState = RtDeploymentStateEnum.Undeployed,
-                ConfigurationState = RtConfigurationStateEnum.Disabled,
+                ConfigurationState = RtConfigurationStateEnum.Undeployed,
                 Name = poolName
             };
 
@@ -296,13 +296,13 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     public async Task SetAdapterDeploymentStateAsync(string tenantId, RtEntityId adapterRtEntityId,
-        RtDeploymentStateEnum deploymentState, string? statusMessage)
+        RtDeploymentStateEnum deploymentState)
     {
-        await SetAdapterDeploymentStateAsync(tenantId, [adapterRtEntityId], deploymentState, statusMessage);
+        await SetAdapterDeploymentStateAsync(tenantId, [adapterRtEntityId], deploymentState);
     }
 
     public async Task SetAdapterDeploymentStateAsync(string tenantId, ICollection<RtEntityId> adapterRtEntityIds,
-        RtDeploymentStateEnum deploymentState, string? statusMessage)
+        RtDeploymentStateEnum deploymentState)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -313,8 +313,7 @@ internal class CommunicationRepository : ICommunicationRepository
 
             var rtAdapter = new RtAdapter
             {
-                DeploymentState = deploymentState,
-                StatusMessage = statusMessage
+                DeploymentState = deploymentState
             };
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtAdapter>>();
@@ -675,6 +674,43 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             throw CommunicationRepositoryException.CommonFailedSetPipelineDeploymentState(tenantId, pipelineRtEntityId,
                 deploymentState, e);
+        }
+    }
+
+    public async Task SetAdapterConfigurationStateAsync(string tenantId, RtEntityId adapterRtEntityId,
+        RtConfigurationStateEnum configurationState, string? stateMessage)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var rtAdapter = new RtAdapter
+            {
+                ConfigurationState = configurationState,
+                StatusMessage = stateMessage
+            };
+
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtAdapter>>
+            {
+                EntityUpdateInfo<RtAdapter>.CreateUpdate(adapterRtEntityId, rtAdapter)
+            };
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedSetAdapterConfigurationState(tenantId, adapterRtEntityId,
+                configurationState, e);
         }
     }
 }

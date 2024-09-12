@@ -13,7 +13,7 @@ internal static class Constants
     private const string AdapterCkTypeId = "adapter-ckTypeId";
 
     public const string CommunicationControllerServiceSchemaVersionKey = "CommunicationControllerServices";
-    public const int CommunicationControllerServiceSchemaVersionValue = 1;
+    public const int CommunicationControllerServiceSchemaVersionValue = 2;
     public const string CacheFileName ="CommunicationControllerServicesCache.json";
 
     public static string? GetTenantId(this HttpContext httpContext)

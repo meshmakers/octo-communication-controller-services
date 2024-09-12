@@ -1,7 +1,5 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 attributes:
-- id: AdapterType
-  valueType: String
 - id: CommunicationStateTimestamp
   valueType: DateTime  
 - id: Deployment.ImageName

@@ -188,4 +188,9 @@ internal class CommunicationRepositoryException : Exception
         return new CommunicationRepositoryException(
             $"[{tenantId}] Failed to get adapter by pipeline '{pipelineRtEntityId}'", exception);
     }
+
+    public static Exception CommonFailedSetAdapterConfigurationState(string tenantId, RtEntityId adapterRtEntityId, RtConfigurationStateEnum configurationState, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to set configuration state of adapter '{adapterRtEntityId}' to '{configurationState}'", exception);
+    }
 }
