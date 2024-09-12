@@ -1,3 +1,5 @@
+using Meshmakers.Octo.ConstructionKit.Contracts;
+
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
 /// <summary>
@@ -25,5 +27,15 @@ public class TriggerManagementServiceException : Exception
     internal static Exception RemoveScheduleFailed(string tenantId, Exception exception)
     {
         return new TriggerManagementServiceException($"Failed to remove schedule for tenant {tenantId}", exception);
+    }
+
+    internal static Exception ExecutePipelineFailed(string tenantId, RtEntityId pipelineRtEntityId, string? errorMessage)
+    {
+        throw new TriggerManagementServiceException($"Failed to execute pipeline {pipelineRtEntityId} for tenant {tenantId}: {errorMessage}");
+    }
+
+    internal static Exception ExecutePipelineExecutionErrorFailed(string tenantId, RtEntityId meshPipelineRtEntityId, Exception exception)
+    {
+        return new TriggerManagementServiceException($"Failed to execute pipeline {meshPipelineRtEntityId} for tenant {tenantId}", exception);
     }
 }

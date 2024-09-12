@@ -77,6 +77,7 @@ try
         c =>
         {
             c.AddCommandClient<RemoveRecurringJobsByScheduleGroupRequest>(QueueNames.RemoveRecurringJobsByScheduleGroupCommand);
+            c.AddCommandClient<ExecuteMeshPipelineRequest>(QueueNames.ExecuteMeshPipelineCommand);
             
             // c.AddBroadcastEventConsumer<ComControllerAdapterUpdateConsumer, ComControllerAdapterUpdate>();
             // c.AddBroadcastEventConsumer<ComControllerPoolUpdateConsumer, ComControllerPoolUpdate>();
@@ -84,6 +85,7 @@ try
             c.AddBroadcastEventConsumer<TenantManagementConsumer, PreUpdateTenant>();
             c.AddBroadcastEventConsumer<TenantManagementConsumer, PosUpdateTenant>();
             c.AddBroadcastEventConsumer<TenantManagementConsumer, PreDeleteTenant>();
+            
         });
 
     builder.Services.AddRuntimeEngine()

@@ -16,6 +16,7 @@ public class PipelineController : ControllerBase
 {
     private readonly ILogger<PipelineController> _logger;
     private readonly IPipelineDebugService _pipelineDebugService;
+    private readonly ITriggerManagementService _triggerManagementService;
     private readonly IAdapterService _adapterService;
 
     /// <summary>
@@ -23,11 +24,14 @@ public class PipelineController : ControllerBase
     /// </summary>
     /// <param name="logger">Logging object</param>
     /// <param name="pipelineDebugService"></param>
+    /// <param name="triggerManagementService"></param>
     /// <param name="adapterService"></param>
-    public PipelineController(ILogger<PipelineController> logger, IPipelineDebugService pipelineDebugService, IAdapterService adapterService)
+    public PipelineController(ILogger<PipelineController> logger, IPipelineDebugService pipelineDebugService, 
+        ITriggerManagementService triggerManagementService, IAdapterService adapterService)
     {
         _logger = logger;
         _pipelineDebugService = pipelineDebugService;
+        _triggerManagementService = triggerManagementService;
         _adapterService = adapterService;
     }
     
@@ -88,6 +92,37 @@ public class PipelineController : ControllerBase
         catch (Exception e)
         {
             _logger.LogError(e, "Error during deployment of pipeline");
+            return BadRequest(e.Message);
+        }
+    }
+    
+    /// <summary>
+    /// Deploys the pipeline definition at the corresponding adapter
+    /// </summary>
+    /// <param name="pipelineRtEntityId">The id of the pipeline.</param>
+    /// <returns></returns>
+    [HttpPost("execute")]
+    //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
+    public async Task<IActionResult> ExecutePipeline([Required][FromQuery] string pipelineRtEntityId)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound("TenantId is null or empty");
+        }
+        
+        try
+        {
+            using var reader = new StreamReader(Request.Body, Encoding.UTF8);
+            
+            var pipelineInput = await reader.ReadToEndAsync();
+            var r = await _triggerManagementService.ExecutePipelineAsync(tenantId, pipelineRtEntityId,
+                pipelineInput);
+            return Ok(r);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Error during execution of pipeline");
             return BadRequest(e.Message);
         }
     }

@@ -1,6 +1,7 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Common.DistributionEventHub;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
+using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v1;
 using Meshmakers.Octo.Services.Common.DistributionEventHub.Commands;
 using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
@@ -11,12 +12,40 @@ internal class TriggerManagementService(
     ILogger<TriggerManagementService> logger,
     ICommunicationRepository communicationRepository,
     ICommandClient<RemoveRecurringJobsByScheduleGroupRequest> removeRecurringJobsByScheduleGroupCommandClient,
+    ICommandClient<ExecuteMeshPipelineRequest> executeMeshPipelineCommandClient,
     IDistributionEventHubService distributionEventHubService)
     : ITriggerManagementService
 {
+    
+    public async Task<string?> ExecutePipelineAsync(string tenantId, RtEntityId meshPipelineRtEntityId, string? pipelineInput)
+    {
+        logger.LogInformation("[{TenantId}] Executing pipeline '{MeshPipelineRtEntityId}'", meshPipelineRtEntityId, tenantId);
+
+        ExecuteMeshPipelineResponse? r;
+        try
+        {
+            r = await executeMeshPipelineCommandClient.GetResponse<ExecuteMeshPipelineResponse>(
+                new ExecuteMeshPipelineRequest(tenantId, meshPipelineRtEntityId, pipelineInput));
+
+            if (r.IsSuccess)
+            {
+                logger.LogInformation("[{TenantId}] Execution of pipeline '{MeshPipelineRtEntityId}' completed", meshPipelineRtEntityId, tenantId);
+                return r.PipelineOutput;
+            }
+        }
+        catch (Exception e)
+        {
+            throw TriggerManagementServiceException.ExecutePipelineExecutionErrorFailed(tenantId, meshPipelineRtEntityId, e);
+        }
+        
+        logger.LogError("[{TenantId}] Execution of pipeline '{MeshPipelineRtEntityId}' failed: {ErrorMessage}", tenantId, meshPipelineRtEntityId, r.ErrorMessage);
+        throw TriggerManagementServiceException.ExecutePipelineFailed(tenantId, meshPipelineRtEntityId, r.ErrorMessage);
+
+    }
+    
     public async Task RemoveScheduleAsync(string tenantId)
     {
-        logger.LogInformation("Removing triggers of tenant '{TenantId}'", tenantId);
+        logger.LogInformation("[{TenantId}] Removing triggers of tenant", tenantId);
 
         try
         {
@@ -31,7 +60,7 @@ internal class TriggerManagementService(
             await removeRecurringJobsByScheduleGroupCommandClient.GetResponse<GenericCommandResponse>(
                 new RemoveRecurringJobsByScheduleGroupRequest(scheduleGroup));
 
-            logger.LogInformation("Removal of triggers of tenant '{TenantId}' completed", tenantId);
+            logger.LogInformation("[{TenantId}] Removal of triggers completed", tenantId);
         }
         catch (Exception e)
         {
@@ -41,7 +70,7 @@ internal class TriggerManagementService(
 
     public async Task UpdateScheduleAsync(string tenantId)
     {
-        logger.LogInformation("Loading triggers of tenant '{TenantId}'", tenantId);
+        logger.LogInformation("[{TenantId}] Loading triggers", tenantId);
 
         var scheduleGroup = CreateScheduleGroup(tenantId);
         await RemoveScheduleAsync(tenantId);
@@ -55,7 +84,7 @@ internal class TriggerManagementService(
                 var pipelineTrigger = pipelineTriggerKeyValue.Key;
                 try
                 {
-                    var executePipeline =
+                    var pipelineTriggerSchedule =
                         new PipelineTriggerSchedule(tenantId, Guid.NewGuid(), DateTime.Now, 
                             pipelineTriggerKeyValue.Value.Select(x => x.RtId).ToList());
                     var recurringSchedulingOptions = new RecurringSchedulingOptions(
@@ -63,7 +92,7 @@ internal class TriggerManagementService(
                         DateTime.Now, null, pipelineTrigger.RtId.ToString(), scheduleGroup,
                         pipelineTrigger.Description ?? pipelineTrigger.Name,
                         SchedulingMissedEventPolicy.Skip);
-                    await distributionEventHubService.ScheduleRecurringSendAsync(executePipeline,
+                    await distributionEventHubService.ScheduleRecurringSendAsync(pipelineTriggerSchedule,
                         QueueNames.PipelineTriggerQueue, recurringSchedulingOptions);
 
                     await communicationRepository.SetDataPipelineTriggerDeploymentStateAsync(tenantId,
@@ -83,7 +112,7 @@ internal class TriggerManagementService(
             throw TriggerManagementServiceException.UpdateScheduleFailed(tenantId, e);
         }
 
-        logger.LogInformation("Startup of tenant '{TenantId}' completed", tenantId);
+        logger.LogInformation("[{TenantId}] Startup completed", tenantId);
     }
 
     private static string CreateScheduleGroup(string tenantId)
