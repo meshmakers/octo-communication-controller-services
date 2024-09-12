@@ -31,14 +31,7 @@ internal class AdapterService(
                     tenantId, adapterRtEntityId);
                 var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId);
                 adapter = adapterTenant.AddAdapter(adapterRtEntityId, connectionId, configuration);
-            }
-
-            await SetAdapterCommunicationStateOnlineAsync(tenantId, adapterRtEntityId, connectionId);
-
-            foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
-            {
-                await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
-                    pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Deployed);
+                await SetAdapterCommunicationStateOnlineAsync(tenantId, adapterRtEntityId, connectionId);
             }
 
             return adapter.Configuration;
@@ -174,13 +167,23 @@ internal class AdapterService(
 
                 if (!configuration.Equals(adapter.Configuration))
                 {
-                    adapter.UpdateConfiguration(tenantId, configuration);
+                    Logger.Info("[{TenantId}] AdapterRtId='{AdapterRtId}' configuration is outdated, updating",
+                        tenantId, adapterRtEntityId);
                     await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, configuration);
+                    adapter.UpdateConfiguration(tenantId, configuration);
+                    
+                    await communicationRepository.SetAdapterConfigurationStateAsync(tenantId, adapterRtEntityId,
+                        RtConfigurationStateEnum.Pending, null);
                     foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
                     {
                         await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
-                            pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Deployed);
+                            pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending);
                     }
+                }
+                else
+                {
+                    Logger.Info("[{TenantId}] AdapterRtId='{AdapterRtId}' configuration is up to date",
+                        tenantId, adapterRtEntityId);
                 }
 
                 return;
@@ -232,24 +235,13 @@ internal class AdapterService(
 
                 if (!configuration.Equals(adapter.Configuration))
                 {
-                    var result = await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, configuration);
-                    if (result.IsSuccess)
+                    await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, configuration);
+
+                    foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
                     {
-                        await communicationRepository.SetAdapterDeploymentStateAsync(tenantId, adapterRtEntityId,
-                            RtDeploymentStateEnum.Deployed, null);
-                     
-                        foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
-                        {
-                            await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
-                                pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Deployed);
-                        }
+                        await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
+                            pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Deployed);
                     }
-                    else
-                    {
-                        await communicationRepository.SetAdapterDeploymentStateAsync(tenantId, adapterRtEntityId,
-                            RtDeploymentStateEnum.Error, result.ErrorMessage);
-                    }
-          
                 }
 
                 return;
@@ -274,6 +266,40 @@ internal class AdapterService(
                 await DeployAdapterConfigurationAsync(tenantId, adapter.ToRtEntityId());
             }
         }
+    }
+
+    public async Task UpdateConfigurationStateAsync(string tenantId, RtEntityId adapterRtEntityId,
+        DeploymentResult deploymentResult)
+    {
+        Logger.Info(
+            "[{TenantId}] AdapterRtId='{AdapterRtId}' update configuration state '{DeploymentResult}'",
+            tenantId, adapterRtEntityId, deploymentResult.IsSuccess);
+
+        if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
+        {
+            if (adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
+            {
+                if (deploymentResult.IsSuccess)
+                {
+                    await communicationRepository.SetAdapterConfigurationStateAsync(tenantId, adapterRtEntityId,
+                        RtConfigurationStateEnum.Deployed, null);
+
+                    foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
+                    {
+                        await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
+                            pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Deployed);
+                    }
+                }
+                else
+                {
+                    await communicationRepository.SetAdapterConfigurationStateAsync(tenantId, adapterRtEntityId,
+                        RtConfigurationStateEnum.Error, deploymentResult.ErrorMessage);
+                }
+
+                return;
+            }
+        }
+        throw AdapterServiceException.AdapterNotLoaded(tenantId, adapterRtEntityId);
     }
 
     private readonly SemaphoreSlim _semaphore = new(1, 1);

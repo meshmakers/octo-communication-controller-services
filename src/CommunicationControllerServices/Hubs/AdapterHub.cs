@@ -125,6 +125,21 @@ internal class AdapterHub : Hub, IAdapterHub
         }
     }
 
+    public async Task SendDeploymentResultAsync(RtEntityId adapterRtEntityId, DeploymentResult deploymentResult)
+    {
+        var tenantId = GetTenantId();
+
+        try
+        {
+            await _adapterService.UpdateConfigurationStateAsync(tenantId, adapterRtEntityId, deploymentResult);
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e, "Cannot cache debug data");
+            throw;
+        }
+    }
+
     private string GetTenantId()
     {
         var tenantId = Context.GetHttpContext()?.GetTenantId();

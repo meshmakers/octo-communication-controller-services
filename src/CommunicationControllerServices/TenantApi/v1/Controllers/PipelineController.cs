@@ -77,14 +77,17 @@ public class PipelineController : ControllerBase
         }
         catch (AdapterHubCallbackException e)
         {
+            _logger.LogError(e, "Pipeline deployment failed (UnprocessableEntity)");
             return UnprocessableEntity(e.Message);
         }
         catch (AdapterServiceException e)
         {
+            _logger.LogError(e, "Pipeline deployment failed (NotFound)");
             return NotFound(e.Message);
         }
         catch (Exception e)
         {
+            _logger.LogError(e, "Error during deployment of pipeline");
             return BadRequest(e.Message);
         }
     }
