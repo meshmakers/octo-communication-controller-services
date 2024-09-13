@@ -235,13 +235,13 @@ internal class AdapterService(
 
                 if (!configuration.Equals(adapter.Configuration))
                 {
-                    await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, configuration);
-
                     foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
                     {
                         await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
-                            pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Deployed);
+                            pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending);
                     }
+                    
+                    await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, configuration);
                 }
 
                 return;
