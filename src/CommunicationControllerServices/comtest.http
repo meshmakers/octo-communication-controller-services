@@ -46,3 +46,5 @@ GET {{baseUrl}}/meshtest/v1/PipelineDebug/System.Communication%2FMeshPipeline@66
 ### Get debug information a node
 GET {{baseUrl}}/meshtest/v1/pipelineDebug/System.Communication%2FMeshPipeline%4066e309cd5b53add9b5cd386a/098c3dfd-a6a6-49f3-93e0-1804f5da9153/PipelineExecution%2FCreateArray%401
 
+### Get the exeuctions of a pipeline edge
+GET {{baseUrl}}/meshtest/v1/PipelineDebug/System.Communication%2FEdgePipeline%4066b07d2995797e1617fd3164
