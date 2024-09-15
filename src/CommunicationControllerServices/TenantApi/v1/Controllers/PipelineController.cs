@@ -15,7 +15,6 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.C
 public class PipelineController : ControllerBase
 {
     private readonly ILogger<PipelineController> _logger;
-    private readonly IPipelineDebugService _pipelineDebugService;
     private readonly ITriggerManagementService _triggerManagementService;
     private readonly IAdapterService _adapterService;
 
@@ -23,36 +22,16 @@ public class PipelineController : ControllerBase
     /// Constructor
     /// </summary>
     /// <param name="logger">Logging object</param>
-    /// <param name="pipelineDebugService"></param>
     /// <param name="triggerManagementService"></param>
     /// <param name="adapterService"></param>
-    public PipelineController(ILogger<PipelineController> logger, IPipelineDebugService pipelineDebugService, 
+    public PipelineController(ILogger<PipelineController> logger, 
         ITriggerManagementService triggerManagementService, IAdapterService adapterService)
     {
         _logger = logger;
-        _pipelineDebugService = pipelineDebugService;
         _triggerManagementService = triggerManagementService;
         _adapterService = adapterService;
     }
     
-    /// <summary>
-    /// Returns the configuration for a specific adapter
-    /// </summary>
-    /// <param name="pipelineRtEntityId">The pipeline entity object id</param>
-    /// <returns>Configuration object</returns>
-    [HttpGet("debugInfo")]
-    public async Task<IActionResult> GetDebugInfo([Required][FromQuery] string pipelineRtEntityId)
-    {
-        var tenantId = HttpContext.GetTenantId();
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            return NotFound("TenantId is null or empty");
-        }
-
-        var config = await _pipelineDebugService.GetDebugInformation(tenantId, pipelineRtEntityId);
-
-        return Ok(config);
-    }
     
     /// <summary>
     /// Deploys the pipeline definition at the corresponding adapter
@@ -100,7 +79,7 @@ public class PipelineController : ControllerBase
     /// Deploys the pipeline definition at the corresponding adapter
     /// </summary>
     /// <param name="pipelineRtEntityId">The id of the pipeline.</param>
-    /// <returns></returns>
+    /// <returns>The pipeline execution id</returns>
     [HttpPost("execute")]
     //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
     public async Task<IActionResult> ExecutePipeline([Required][FromQuery] string pipelineRtEntityId)
@@ -116,9 +95,9 @@ public class PipelineController : ControllerBase
             using var reader = new StreamReader(Request.Body, Encoding.UTF8);
             
             var pipelineInput = await reader.ReadToEndAsync();
-            var r = await _triggerManagementService.ExecutePipelineAsync(tenantId, pipelineRtEntityId,
+            var pipelineExecutionId = await _triggerManagementService.StartExecutePipelineAsync(tenantId, pipelineRtEntityId,
                 pipelineInput);
-            return Ok(r);
+            return Ok(pipelineExecutionId);
         }
         catch (Exception e)
         {

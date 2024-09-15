@@ -110,13 +110,14 @@ internal class AdapterHub : Hub, IAdapterHub
         }
     }
 
-    public async Task SendDebugDataAsync(RtEntityId pipelineRtEntityId, string debugData)
+    public async Task SendDebugDataAsync(RtEntityId pipelineRtEntityId, Guid pipelineExecutionId, DebugPointDto debugPoint)
     {
+        
         var tenantId = GetTenantId();
 
         try
         {
-            await _pipelineDebugService.CacheDebugInfo(tenantId, pipelineRtEntityId, debugData);
+            await _pipelineDebugService.CacheDebugPointAsync(tenantId, pipelineRtEntityId, pipelineExecutionId, debugPoint);
         }
         catch (Exception e)
         {
@@ -124,6 +125,7 @@ internal class AdapterHub : Hub, IAdapterHub
             throw;
         }
     }
+
 
     public async Task SendDeploymentResultAsync(RtEntityId adapterRtEntityId, DeploymentResult deploymentResult)
     {

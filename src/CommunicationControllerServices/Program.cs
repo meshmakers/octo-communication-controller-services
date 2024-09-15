@@ -69,7 +69,11 @@ try
     builder.Services.AddCors();
     builder.Services.AddControllers();
     // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-    builder.Services.AddSignalR();
+    builder.Services.AddSignalR(o =>
+    {
+        o.EnableDetailedErrors = true;
+        o.MaximumReceiveMessageSize = 1024 * 1024 * 100;
+    });
     
     builder.Services.ConfigureOptions<ConfigureDistributionEventHubOptions>();
     

@@ -32,4 +32,17 @@ GET {{baseUrl}}/meshtest/v1/adapter/65d5c447b420da3fb12381bc
 POST {{baseUrl}}/meshtest/v1/adapter/65d5c447b420da3fb12381bc/update
 
 
+## Debug
+
+### Get the exeuctions of a pipeline
+GET {{baseUrl}}/meshtest/v1/PipelineDebug/System.Communication%2FMeshPipeline@66e309cd5b53add9b5cd386a
+
+### Get the latest exeuction of a pipeline
+GET {{baseUrl}}/meshtest/v1/PipelineDebug/System.Communication%2FMeshPipeline@66e309cd5b53add9b5cd386a/latest
+
+### Get debug information of an execution
+GET {{baseUrl}}/meshtest/v1/PipelineDebug/System.Communication%2FMeshPipeline@66e309cd5b53add9b5cd386a/c85e3b77-7b4f-45cf-ac91-dca779e47b89
+
+### Get debug information a node
+GET {{baseUrl}}/meshtest/v1/pipelineDebug/System.Communication%2FMeshPipeline%4066e309cd5b53add9b5cd386a/098c3dfd-a6a6-49f3-93e0-1804f5da9153/PipelineExecution%2FCreateArray%401
 

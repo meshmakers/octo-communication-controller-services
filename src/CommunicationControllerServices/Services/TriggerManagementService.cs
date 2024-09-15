@@ -17,9 +17,9 @@ internal class TriggerManagementService(
     : ITriggerManagementService
 {
     
-    public async Task<string?> ExecutePipelineAsync(string tenantId, RtEntityId meshPipelineRtEntityId, string? pipelineInput)
+    public async Task<Guid> StartExecutePipelineAsync(string tenantId, RtEntityId meshPipelineRtEntityId, string? pipelineInput)
     {
-        logger.LogInformation("[{TenantId}] Executing pipeline '{MeshPipelineRtEntityId}'", meshPipelineRtEntityId, tenantId);
+        logger.LogInformation("[{TenantId}] Executing pipeline '{MeshPipelineRtEntityId}'", tenantId, meshPipelineRtEntityId);
 
         ExecuteMeshPipelineResponse? r;
         try
@@ -27,10 +27,10 @@ internal class TriggerManagementService(
             r = await executeMeshPipelineCommandClient.GetResponse<ExecuteMeshPipelineResponse>(
                 new ExecuteMeshPipelineRequest(tenantId, meshPipelineRtEntityId, pipelineInput));
 
-            if (r.IsSuccess)
+            if (r.IsSuccessStartingExecution)
             {
-                logger.LogInformation("[{TenantId}] Execution of pipeline '{MeshPipelineRtEntityId}' completed", meshPipelineRtEntityId, tenantId);
-                return r.PipelineOutput;
+                logger.LogInformation("[{TenantId}] Start execution of pipeline '{MeshPipelineRtEntityId}' (ExecutionId {PipelineExecutionId}) successful", tenantId, meshPipelineRtEntityId, r.PipelineExecutionId);
+                return r.PipelineExecutionId ?? throw TriggerManagementServiceException.ExecutePipelineExecutionIdNull(tenantId, meshPipelineRtEntityId);
             }
         }
         catch (Exception e)
