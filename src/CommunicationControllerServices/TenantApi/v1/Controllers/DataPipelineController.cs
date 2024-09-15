@@ -16,39 +16,17 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.C
 public class DataPipelineController : ControllerBase
 {
     private readonly ILogger<DataPipelineController> _logger;
-    private readonly IPipelineDebugService _pipelineDebugService;
     private readonly IAdapterService _adapterService;
 
     /// <summary>
     /// Constructor
     /// </summary>
     /// <param name="logger">Logging object</param>
-    /// <param name="pipelineDebugService"></param>
     /// <param name="adapterService"></param>
-    public DataPipelineController(ILogger<DataPipelineController> logger, IPipelineDebugService pipelineDebugService, IAdapterService adapterService)
+    public DataPipelineController(ILogger<DataPipelineController> logger, IAdapterService adapterService)
     {
         _logger = logger;
-        _pipelineDebugService = pipelineDebugService;
         _adapterService = adapterService;
-    }
-    
-    /// <summary>
-    /// Returns the configuration for a specific adapter
-    /// </summary>
-    /// <param name="pipelineRtEntityId">The pipeline entity object id</param>
-    /// <returns>Configuration object</returns>
-    [HttpGet("debugInfo")]
-    public async Task<IActionResult> GetDebugInfo([Required][FromQuery] string pipelineRtEntityId)
-    {
-        var tenantId = HttpContext.GetTenantId();
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            return NotFound("TenantId is null or empty");
-        }
-
-        var config = await _pipelineDebugService.GetDebugInformation(tenantId, pipelineRtEntityId);
-
-        return Ok(config);
     }
     
     /// <summary>

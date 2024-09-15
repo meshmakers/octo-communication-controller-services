@@ -38,4 +38,9 @@ public class TriggerManagementServiceException : Exception
     {
         return new TriggerManagementServiceException($"Failed to execute pipeline {meshPipelineRtEntityId} for tenant {tenantId}", exception);
     }
+
+    internal static Exception ExecutePipelineExecutionIdNull(string tenantId, RtEntityId meshPipelineRtEntityId)
+    {
+        return new TriggerManagementServiceException($"Pipeline execution id is null for pipeline {meshPipelineRtEntityId} for tenant {tenantId}, but the adapter indicate that the execution start was successful");
+    }
 }
