@@ -23,6 +23,10 @@ internal class PipelineDebugService : IPipelineDebugService
         public DebugPointDto? Get(NodePath nodePath)
         {
             var correctedNodePath = nodePath.ToString(CultureInfo.InvariantCulture).Replace("PipelineExecution/", "");
+            if (correctedNodePath == "PipelineExecution")
+            {
+                correctedNodePath = "";
+            }
             _debugInfo.TryGetValue(correctedNodePath, out var value);
             return value;
         }
