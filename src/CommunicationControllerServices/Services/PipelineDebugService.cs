@@ -99,12 +99,24 @@ internal class PipelineDebugService : IPipelineDebugService
 
         public void Add(Guid pipelineExecutionId, DebugPointDto debugPoint)
         {
-            _debugInfo.AddOrUpdate(pipelineExecutionId, _ => new PipelineExecutionRecord(DateTime.UtcNow),
+            _debugInfo.AddOrUpdate(pipelineExecutionId, _ =>
+                {
+                    var record = new PipelineExecutionRecord(DateTime.UtcNow);
+                    record.Add(debugPoint.NodePath, debugPoint);
+                    return record;
+                },
                 (_, record) =>
                 {
                     record.Add(debugPoint.NodePath, debugPoint);
                     return record;
                 });
+            
+            // We leave only the last 10 records
+            if (_debugInfo.Count > 10)
+            {
+                var oldest = _debugInfo.OrderBy(x => x.Value.DateTime).First().Key;
+                _debugInfo.TryRemove(oldest, out _);
+            }
         }
 
         public PipelineExecutionRecord? Get(Guid pipelineExecutionId)
