@@ -22,12 +22,7 @@ internal class PipelineDebugService : IPipelineDebugService
 
         public DebugPointDto? Get(NodePath nodePath)
         {
-            var correctedNodePath = nodePath.ToString(CultureInfo.InvariantCulture).Replace("PipelineExecution/", "");
-            if (correctedNodePath == "PipelineExecution")
-            {
-                correctedNodePath = "";
-            }
-            _debugInfo.TryGetValue(correctedNodePath, out var value);
+            _debugInfo.TryGetValue(nodePath, out var value);
             return value;
         }
 
@@ -42,14 +37,6 @@ internal class PipelineDebugService : IPipelineDebugService
             foreach (var debugPoint in debugPoints)
             {
                 var fullPath = debugPoint.NodePath.ToString(CultureInfo.InvariantCulture);
-                if (string.IsNullOrWhiteSpace(fullPath))
-                {
-                    fullPath = "PipelineExecution";
-                }
-                else
-                {
-                    fullPath = "PipelineExecution/" + fullPath;
-                }
 
                 var lastIndex = fullPath.LastIndexOf("/", StringComparison.Ordinal);
                 var nodeName = fullPath.Substring(lastIndex + 1);
@@ -61,14 +48,6 @@ internal class PipelineDebugService : IPipelineDebugService
             foreach (var debugPoint in debugPoints)
             {
                 var fullPath = debugPoint.NodePath.ToString(CultureInfo.InvariantCulture);
-                if (string.IsNullOrWhiteSpace(fullPath))
-                {
-                    fullPath = "PipelineExecution";
-                }
-                else
-                {
-                    fullPath = "PipelineExecution/" + fullPath;
-                }
 
                 var lastIndex = fullPath.LastIndexOf("/", StringComparison.Ordinal);
                 var nodePath = "";
