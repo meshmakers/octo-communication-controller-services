@@ -168,7 +168,7 @@ internal class PoolService : IPoolService
         }
         catch (Exception e)
         {
-            throw PoolServiceException.TenantReloadFailed(tenantId, e);
+            throw PoolServiceException.PreUpdateTenantFailed(tenantId, e);
         }
         finally
         {
@@ -195,7 +195,7 @@ internal class PoolService : IPoolService
         }
         catch (Exception e)
         {
-            throw PoolServiceException.TenantReloadFailed(tenantId, e);
+            throw PoolServiceException.PosUpdateTenantFailed(tenantId, e);
         }
         finally
         {
