@@ -81,7 +81,7 @@ try
         c =>
         {
             c.AddCommandClient<RemoveRecurringJobsByScheduleGroupRequest>(QueueNames.RemoveRecurringJobsByScheduleGroupCommand);
-            c.AddCommandClient<ExecuteMeshPipelineRequest>(QueueNames.ExecuteMeshPipelineCommand);
+            c.AddRoutedCommandClient<ExecuteMeshPipelineRequest>();
             
             // c.AddBroadcastEventConsumer<ComControllerAdapterUpdateConsumer, ComControllerAdapterUpdate>();
             // c.AddBroadcastEventConsumer<ComControllerPoolUpdateConsumer, ComControllerPoolUpdate>();

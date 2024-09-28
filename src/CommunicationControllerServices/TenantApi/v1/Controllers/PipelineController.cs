@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Text;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
@@ -78,11 +79,11 @@ public class PipelineController : ControllerBase
     /// <summary>
     /// Deploys the pipeline definition at the corresponding adapter
     /// </summary>
-    /// <param name="pipelineRtEntityId">The id of the pipeline.</param>
+    /// <param name="dataPipelineRtId">The runtime id of the data pipeline.</param>
     /// <returns>The pipeline execution id</returns>
     [HttpPost("execute")]
     //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
-    public async Task<IActionResult> ExecutePipeline([Required][FromQuery] string pipelineRtEntityId)
+    public async Task<IActionResult> ExecutePipeline([Required][FromQuery] OctoObjectId dataPipelineRtId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
@@ -95,7 +96,7 @@ public class PipelineController : ControllerBase
             using var reader = new StreamReader(Request.Body, Encoding.UTF8);
             
             var pipelineInput = await reader.ReadToEndAsync();
-            var pipelineExecutionId = await _triggerManagementService.StartExecutePipelineAsync(tenantId, pipelineRtEntityId,
+            var pipelineExecutionId = await _triggerManagementService.StartExecutePipelineAsync(tenantId, dataPipelineRtId,
                 pipelineInput);
             return Ok(pipelineExecutionId);
         }
