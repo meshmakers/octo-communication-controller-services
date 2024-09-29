@@ -196,7 +196,7 @@ internal class CommunicationRepository : ICommunicationRepository
             {
                 CommunicationState = RtCommunicationStateEnum.Offline,
                 DeploymentState = RtDeploymentStateEnum.Undeployed,
-                ConfigurationState = RtConfigurationStateEnum.Undeployed,
+                ConfigurationState = RtConfigurationStateEnum.Unconfigured,
                 Name = poolName
             };
 

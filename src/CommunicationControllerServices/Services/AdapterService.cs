@@ -282,7 +282,7 @@ internal class AdapterService(
                 if (deploymentResult.IsSuccess)
                 {
                     await communicationRepository.SetAdapterConfigurationStateAsync(tenantId, adapterRtEntityId,
-                        RtConfigurationStateEnum.Deployed, null);
+                        RtConfigurationStateEnum.Configured, null);
 
                     foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
                     {
