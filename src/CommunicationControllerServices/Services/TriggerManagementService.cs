@@ -25,8 +25,8 @@ internal class TriggerManagementService(
         try
         {
             var address =
-                $"data-pipeline-{tenantId.ToLower()}-{dataPipelineRtId.ToString().ToLower()}-{QueueNames.ExecuteMeshPipelineCommand.ToLower()}";
-            
+                $"{QueueNames.ExecuteMeshPipelineCommand.ToLower()}-{tenantId.ToLower()}-data-pipeline-{dataPipelineRtId.ToString()?.ToLower()}";
+
             r = await executeMeshPipelineCommandClient.GetResponse<ExecuteMeshPipelineResponse>(address,
                 new ExecuteMeshPipelineRequest(tenantId, pipelineInput));
 
@@ -80,23 +80,30 @@ internal class TriggerManagementService(
 
         try
         {
-            var a = await communicationRepository.GetTriggersAndPipelinesAsync(tenantId);
+            var pipelineTriggerKeyValues = await communicationRepository.GetTriggersAndPipelinesAsync(tenantId);
 
-            foreach (var pipelineTriggerKeyValue in a)
+            foreach (var pipelineTriggerKeyValue in pipelineTriggerKeyValues)
             {
                 var pipelineTrigger = pipelineTriggerKeyValue.Key;
                 try
                 {
-                    var pipelineTriggerSchedule =
-                        new PipelineTriggerSchedule(tenantId, Guid.NewGuid(), DateTime.Now, 
-                            pipelineTriggerKeyValue.Value.Select(x => x.RtId).ToList());
-                    var recurringSchedulingOptions = new RecurringSchedulingOptions(
-                        pipelineTrigger.CronExpression,
-                        DateTime.Now, null, pipelineTrigger.RtId.ToString(), scheduleGroup,
-                        pipelineTrigger.Description ?? pipelineTrigger.Name,
-                        SchedulingMissedEventPolicy.Skip);
-                    await distributionEventHubService.ScheduleRecurringSendAsync(pipelineTriggerSchedule,
-                        QueueNames.PipelineTriggerQueue, recurringSchedulingOptions);
+                    foreach (var meshPipeline in pipelineTriggerKeyValue.Value)
+                    {
+                        var address =
+                            $"{QueueNames.PipelineTriggerQueue.ToLower()}-{tenantId.ToLower()}-{meshPipeline.RtId.ToString().ToLower()}";
+                        
+                        var pipelineTriggerSchedule =
+                            new PipelineTriggerSchedule(tenantId, Guid.NewGuid(), DateTime.Now);
+                    
+                        var recurringSchedulingOptions = new RecurringSchedulingOptions(
+                            pipelineTrigger.CronExpression,
+                            DateTime.Now, null, $"{pipelineTrigger.RtId.ToString()}-pipeline-{meshPipeline.RtId.ToString()}", scheduleGroup,
+                            pipelineTrigger.Description ?? pipelineTrigger.Name,
+                            SchedulingMissedEventPolicy.Skip);
+                    
+                        await distributionEventHubService.ScheduleRecurringSendAsync(pipelineTriggerSchedule,
+                            address, recurringSchedulingOptions);
+                    }
 
                     await communicationRepository.SetDataPipelineTriggerDeploymentStateAsync(tenantId,
                         pipelineTrigger.RtId, RtDeploymentStateEnum.Deployed);
