@@ -1,0 +1,14 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+- typeId: Tag
+  derivedFromCkTypeId: System/Entity
+  isAbstract: false
+  attributes:
+  - id: ${thisModel}/Tag
+    name: Tag
+  - id: ${thisModel}/Name
+    name: Name
+    isOptional: true
+  associations:
+    - id: ${thisModel}/Tag
+      targetCkTypeId: System/Entity

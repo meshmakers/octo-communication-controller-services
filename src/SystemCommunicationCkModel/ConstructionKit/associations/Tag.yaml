@@ -1,0 +1,7 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+associationRoles:
+  - id: Tag
+    inboundName: IsTagging
+    outboundName: TaggedBy
+    inboundMultiplicity: N
+    outboundMultiplicity: N
