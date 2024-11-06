@@ -98,7 +98,7 @@ internal class TriggerManagementService(
                         var recurringSchedulingOptions = new RecurringSchedulingOptions(
                             pipelineTrigger.CronExpression,
                             DateTime.Now, null, $"{pipelineTrigger.RtId.ToString()}-pipeline-{meshPipeline.RtId.ToString()}", scheduleGroup,
-                            pipelineTrigger.Description ?? pipelineTrigger.Name,
+                            pipelineTrigger.Description ?? pipelineTrigger.Name ?? "Pipeline Trigger",
                             SchedulingMissedEventPolicy.Skip);
                     
                         await distributionEventHubService.ScheduleRecurringSendAsync(pipelineTriggerSchedule,
