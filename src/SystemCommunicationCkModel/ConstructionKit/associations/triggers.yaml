@@ -3,5 +3,5 @@ associationRoles:
 - id: Triggers
   inboundName: TriggeredBy
   outboundName: Triggers
-  inboundMultiplicity: One
+  inboundMultiplicity: ZeroOrOne
   outboundMultiplicity: N
