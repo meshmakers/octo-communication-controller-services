@@ -1,0 +1,12 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+attributes:
+  - id: Host
+    valueType: String
+  - id: Port
+    valueType: Int
+  - id: Username
+    valueType: String
+  - id: Password
+    valueType: String
+  - id: IsSslEnabled
+    valueType: Boolean

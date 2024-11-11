@@ -1,0 +1,16 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+  - typeId: EMailSenderConfiguration
+    derivedFromCkTypeId: System/Configuration
+    isFinal: true
+    attributes:
+      - id: ${thisModel}/Host
+        name: Host
+      - id: ${thisModel}/Port
+        name: Port
+      - id: ${thisModel}/Username
+        name: Username
+      - id: ${thisModel}/Password
+        name: Password  
+      - id: ${thisModel}/IsSslEnabled
+        name: IsSslEnabled
