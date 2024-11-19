@@ -1,5 +1,6 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v1;
+using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v1;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 
@@ -158,6 +159,14 @@ public interface ICommunicationRepository
     /// <param name="pipelineRtId">Object identifier of pipeline</param>
     /// <returns></returns>
     Task<RtDataPipeline?> GetDataPipelineByPipelineAsync(string tenantId, OctoObjectId pipelineRtId);
+
+    /// <summary>
+    /// Get configurations of a pipeline
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="pipelineRtId">Object identifier of pipeline</param>
+    /// <returns></returns>
+    Task<IEnumerable<RtConfiguration>> GetConfigurationsByPipelineAsync(string tenantId, OctoObjectId pipelineRtId);
 
     /// <summary>
     /// Gets a list of triggers of the given tenant

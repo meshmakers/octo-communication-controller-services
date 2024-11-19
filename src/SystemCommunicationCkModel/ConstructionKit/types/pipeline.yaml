@@ -13,6 +13,8 @@ types:
         targetCkTypeId: ${thisModel}/DataPipeline
       - id: ${thisModel}/Executes
         targetCkTypeId: ${thisModel}/Adapter
+      - id: ${thisModel}/Uses
+        targetCkTypeId: System/Configuration        
   - typeId: EdgePipeline
     derivedFromCkTypeId: ${thisModel}/Pipeline
   - typeId: MeshPipeline

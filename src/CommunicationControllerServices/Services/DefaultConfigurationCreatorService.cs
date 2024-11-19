@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
+// ReSharper disable once ClassNeverInstantiated.Global
 internal class DefaultConfigurationCreatorService(
     ILogger<DefaultConfigurationCreatorService> logger,
     IDiagnosticsService diagnosticsService,
