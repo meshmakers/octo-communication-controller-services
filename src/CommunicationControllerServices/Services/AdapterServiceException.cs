@@ -60,5 +60,15 @@ internal class AdapterServiceException : Exception
     {
         return new AdapterServiceException($"[{tenantId}] Pos update tenant failed.", exception);
     }
+
+    public static Exception CkTypeIdUndefined()
+    {
+        return new AdapterServiceException("CkTypeId is undefined.");
+    }
+
+    public static Exception RtWellKnownNameUndefined()
+    {
+        return new AdapterServiceException("RtWellKnownName is undefined.");
+    }
 }
 

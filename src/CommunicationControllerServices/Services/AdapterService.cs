@@ -1,3 +1,4 @@
+using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
@@ -91,12 +92,20 @@ internal class AdapterService(
                 {
                     throw AdapterServiceException.DataPipelineNotFound(tenantId, rtPipeline.ToRtEntityId());
                 }
+                
+                var configurations = 
+                    await communicationRepository.GetConfigurationsByPipelineAsync(tenantId, rtPipeline.RtId);
+                var configurationsDto = configurations.Select(c => new ConfigurationDto(c.RtId, 
+                    c.CkTypeId ?? throw AdapterServiceException.CkTypeIdUndefined(),
+                    c.RtWellKnownName ?? throw AdapterServiceException.RtWellKnownNameUndefined(),
+                    c.Serialize()));
 
                 var pipelineConfiguration = new PipelineConfigurationDto(
                     dataPipeline.RtId,
                     rtPipeline.ToRtEntityId(),
                     false,
-                    rtPipeline.PipelineDefinition
+                    rtPipeline.PipelineDefinition,
+                    configurationsDto
                 );
                 pipelineConfigurations.Add(pipelineConfiguration);
             }
@@ -217,23 +226,31 @@ internal class AdapterService(
                     throw AdapterServiceException.DataPipelineNotFound(tenantId, pipelineRtEntityId);
                 }
 
-                var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId);
+                var adapterConfiguration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId);
 
                 var deployedPipeline =
-                    configuration.Pipelines.FirstOrDefault(p => p.PipelineRtEntityId == pipelineRtEntityId);
+                    adapterConfiguration.Pipelines.FirstOrDefault(p => p.PipelineRtEntityId == pipelineRtEntityId);
                 if (deployedPipeline != null)
                 {
-                    configuration.Pipelines.Remove(deployedPipeline);
+                    adapterConfiguration.Pipelines.Remove(deployedPipeline);
                 }
+                
+                var configurations = 
+                    await communicationRepository.GetConfigurationsByPipelineAsync(tenantId, pipelineRtEntityId.RtId);
+                var configurationsDto = configurations.Select(c => new ConfigurationDto(c.RtId, 
+                    c.CkTypeId ?? throw AdapterServiceException.CkTypeIdUndefined(),
+                    c.RtWellKnownName ?? throw AdapterServiceException.RtWellKnownNameUndefined(),
+                    c.Serialize()));
 
-                configuration.Pipelines.Add(new PipelineConfigurationDto(
+                adapterConfiguration.Pipelines.Add(new PipelineConfigurationDto(
                     dataPipeline.RtId,
                     pipeline.ToRtEntityId(),
                     true,
-                    pipelineDefinition ?? pipeline.PipelineDefinition
+                    pipelineDefinition ?? pipeline.PipelineDefinition,
+                    configurationsDto
                 ));
 
-                if (!configuration.Equals(adapter.Configuration))
+                if (!adapterConfiguration.Equals(adapter.Configuration))
                 {
                     foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
                     {
@@ -241,7 +258,7 @@ internal class AdapterService(
                             pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending);
                     }
                     
-                    await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, configuration);
+                    await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, adapterConfiguration);
                 }
 
                 return;

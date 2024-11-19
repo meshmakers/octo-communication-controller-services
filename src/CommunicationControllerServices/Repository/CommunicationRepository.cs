@@ -521,7 +521,7 @@ internal class CommunicationRepository : ICommunicationRepository
             var multipleOriginResultSet =
                 await tenantRepository.GetRtAssociationTargetsAsync<RtPipeline, RtDataPipeline>(
                     session,
-                    new[] { pipelineRtId }, new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild),
+                    [pipelineRtId], new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild),
                     GraphDirections.Outbound, null, DataQueryOperation.Create());
 
             await session.CommitTransactionAsync();
@@ -536,6 +536,35 @@ internal class CommunicationRepository : ICommunicationRepository
         catch (Exception e)
         {
             throw CommunicationRepositoryException.CommonFailedGettingPipeline(tenantId, pipelineRtId, e);
+        }
+    }
+    
+    public async Task<IEnumerable<RtConfiguration>> GetConfigurationsByPipelineAsync(string tenantId, OctoObjectId pipelineRtId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+            
+            var multipleOriginResultSet =
+                await tenantRepository.GetRtAssociationTargetsAsync<RtPipeline, RtConfiguration>(
+                    session,
+                    [pipelineRtId], new CkId<CkAssociationRoleId>(SystemCommunicationCkIds.ModelId, SystemCommunicationCkIds.Uses),
+                    GraphDirections.Outbound, null, DataQueryOperation.Create());
+
+            await session.CommitTransactionAsync();
+
+            if (multipleOriginResultSet.Any())
+            {
+                return multipleOriginResultSet.First().Value.Items;
+            }
+            throw CommunicationRepositoryException.PipelineNotFound(tenantId, pipelineRtId);
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingConfiguration(tenantId, pipelineRtId, e);
         }
     }
 
