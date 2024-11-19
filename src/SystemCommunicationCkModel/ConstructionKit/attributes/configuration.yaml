@@ -10,3 +10,11 @@ attributes:
     valueType: String
   - id: IsSslEnabled
     valueType: Boolean
+  - id: SystemNumber
+    valueType: Int
+  - id: SapClient
+    valueType: Int
+  - id: SapLanguage
+    valueType: String
+  - id: SapTrace
+    valueType: String
