@@ -11,7 +11,7 @@ attributes:
   - id: IsSslEnabled
     valueType: Boolean
   - id: SystemNumber
-    valueType: Int
+    valueType: String
   - id: SapClient
     valueType: Int
   - id: SapLanguage
