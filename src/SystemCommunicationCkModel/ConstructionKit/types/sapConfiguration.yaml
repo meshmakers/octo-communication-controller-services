@@ -18,3 +18,16 @@ types:
         name: Language
       - id: ${thisModel}/SapTrace
         name: Trace
+      - id: ${thisModel}/SapGatewayHost
+        name: GatewayHost
+        isOptional: true
+      - id: ${thisModel}/SapGatewayService
+        name: GatewayService
+        isOptional: true
+      - id: ${thisModel}/SapProgramId
+        name: ProgramId
+        isOptional: true
+      - id: ${thisModel}/SapRegistrationCount
+        name: RegistrationCount
+        isOptional: true
+          
