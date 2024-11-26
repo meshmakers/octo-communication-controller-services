@@ -18,3 +18,13 @@ attributes:
     valueType: String
   - id: SapTrace
     valueType: String
+    defaultValues:
+      - 0
+  - id: SapGatewayHost
+    valueType: String
+  - id: SapGatewayService
+    valueType: String
+  - id: SapProgramId
+    valueType: String
+  - id: SapRegistrationCount
+    valueType: Int
