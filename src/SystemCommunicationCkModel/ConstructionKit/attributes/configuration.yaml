@@ -2,29 +2,45 @@ $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 attributes:
   - id: Host
     valueType: String
+    description: 'The host name is the name of the server on which the external system is running.'
   - id: Port
     valueType: Int
+    description: 'The port number is the number of the port on which the external system is listening for incoming connections.'
   - id: Username
     valueType: String
+    description: 'The username is the name of the user that is used to authenticate with the external system.'
   - id: Password
     valueType: String
+    description: 'The password is the secret that is used to authenticate with the external system.'
   - id: IsSslEnabled
     valueType: Boolean
+    description: 'The Secure Sockets Layer (SSL) protocol is used to secure communication between a client and a server.'
   - id: SystemNumber
     valueType: String
+    description: 'The system number is a two-digit number assigned to an SAP system during installation. It is used to identify the SAP service (e.g. Dispatcher) on a specific port.'
+  - id: SystemId
+    valueType: String
+    description: 'The System ID (SID) is the unique technical name of an SAP system. It consists of three letters and uniquely identifies a system within a landscape.'
   - id: SapClient
-    valueType: Int
+    valueType: String
+    description: 'A client is a tenant instance in an SAP system. SAP is multi-tenant, which means that multiple organizations or departments can work on the same system without sharing data with each other.'
   - id: SapLanguage
     valueType: String
+    description: 'The language key is a two-character code that identifies the language in which the user interface is displayed.'
   - id: SapTrace
     valueType: String
     defaultValues:
-      - 0
+      - 8
+    description: 'The trace level is a number that determines the amount of information that is logged during communication with the SAP system.'
   - id: SapGatewayHost
     valueType: String
+    description: 'An SAP gateway host is a server that provides communication services between SAP systems or between SAP systems and external applications.'
   - id: SapGatewayService
     valueType: String
+    description: 'An SAP gateway service provides communication services that are used between SAP systems or between SAP systems and external applications.'
   - id: SapProgramId
     valueType: String
+    description: 'A program ID is a unique identifier that is used to register a program on an SAP gateway server.'
   - id: SapRegistrationCount
     valueType: Int
+    description: 'The registration count is the number of times a program is registered on an SAP gateway server.'
