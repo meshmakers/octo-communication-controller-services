@@ -11,6 +11,7 @@ types:
         name: SystemNumber
       - id: ${thisModel}/SystemId
         name: SystemId       
+        isOptional: true
       - id: ${thisModel}/Username
         name: User
       - id: ${thisModel}/Password
