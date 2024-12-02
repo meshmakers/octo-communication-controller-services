@@ -3,11 +3,14 @@ types:
   - typeId: SapConfiguration
     derivedFromCkTypeId: System/Configuration
     isFinal: true
+    description: 'The SAP configuration type is used to configure the connection to an SAP system.'
     attributes:
       - id: ${thisModel}/Host
         name: AppServerHost
       - id: ${thisModel}/SystemNumber
         name: SystemNumber
+      - id: ${thisModel}/SystemId
+        name: SystemId       
       - id: ${thisModel}/Username
         name: User
       - id: ${thisModel}/Password
