@@ -27,3 +27,5 @@ attributes:
   valueType: String
 - id: StatusMessage
   valueType: String
+- id: SenderEmail
+  valueType: String

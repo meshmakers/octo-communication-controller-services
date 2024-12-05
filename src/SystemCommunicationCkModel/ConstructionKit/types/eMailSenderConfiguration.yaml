@@ -8,6 +8,9 @@ types:
         name: Host
       - id: ${thisModel}/Port
         name: Port
+      - id: ${thisModel}/SenderEmail
+        name: SenderEmail
+        isOptional: true
       - id: ${thisModel}/Username
         name: Username
       - id: ${thisModel}/Password
