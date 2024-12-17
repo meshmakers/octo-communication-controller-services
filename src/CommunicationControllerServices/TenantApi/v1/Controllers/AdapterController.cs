@@ -55,8 +55,8 @@ public class AdapterController : ControllerBase
     /// </summary>
     /// <param name="adapterRtEntityId">The adapter entity object id</param>
     /// <returns>Configuration object</returns>
-    [HttpGet]
-    public async Task<IActionResult> Get([Required][FromQuery] RtEntityId adapterRtEntityId)
+    [HttpGet("{adapterRtEntityId}")]
+    public async Task<IActionResult> GetItem([Required][FromQuery] RtEntityId adapterRtEntityId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
