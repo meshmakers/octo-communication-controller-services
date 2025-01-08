@@ -39,7 +39,7 @@ try
     builder.Services.Configure<CommunicationControllerOptions>(options => builder.Configuration.GetSection("CommunicationController").Bind(options));
     builder.Services.Configure<RouteOptions>(options =>
         options.ConstraintMap.Add("tenantId", typeof(TenantIdRouteConstraint)));
-    builder.Services.ConfigureOptions<ConfigureOctoSwaggerOptions>();
+    builder.Services.ConfigureOptions<ConfigureOctoOpenApiOptions>();
 
     // NLog: Setup NLog for Dependency injection
     builder.Logging.ClearProviders();
@@ -99,7 +99,6 @@ try
 
     builder.Services.AddOctoApiVersioningAndDocumentation(options =>
     {
-        options.AddXmlDocAssembly<Program>();
         // options.Scopes = new Dictionary<string, string>
         // {
         //     {
@@ -117,7 +116,7 @@ try
 
         // options.ClientId = CommonConstants.AsserRepositoryServicesSwaggerClientId;
         // options.AppName = AssetTexts.Backend_AssetServices_UserSchema_Swagger_DisplayName;
-    });
+    }).AddVersion();
     
     var app = builder.Build();
     
