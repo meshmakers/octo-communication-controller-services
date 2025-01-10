@@ -1,6 +1,8 @@
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
+using IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.SystemApi.v1.Controllers;
@@ -8,6 +10,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.SystemApi.v1.C
 /// <summary>
 /// Manages the communication controller itself
 /// </summary>
+[Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
 [ApiController]
 [Route("system/v{version:apiVersion}/[controller]")]
 [ApiVersion("1.0")]
@@ -33,6 +36,8 @@ public class CommunicationController: ControllerBase
     /// </summary>
     /// <returns></returns>
     [HttpGet("ping")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
     public IActionResult Get()
     {
         _logger.LogTrace("Ping TRACE");
@@ -49,7 +54,9 @@ public class CommunicationController: ControllerBase
     /// <param name="tenantId">The id of the tenant.</param>
     /// <returns></returns>
     [HttpPost("enable")]
-  //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
+    [Authorize(Constants.SystemCommunicationApiPolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Enable([Required] string tenantId)
     {
         try
@@ -69,7 +76,9 @@ public class CommunicationController: ControllerBase
     /// <param name="tenantId">The id of the tenant.</param>
     /// <returns></returns>
     [HttpPost("disable")]
-    //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
+    [Authorize(Constants.SystemCommunicationApiPolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Disable([Required] string tenantId)
     {
         try

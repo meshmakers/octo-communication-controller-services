@@ -1,8 +1,10 @@
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
+using IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
@@ -10,6 +12,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.C
 /// <summary>
 /// Controller to debug the pipeline
 /// </summary>
+[Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
 [ApiController]
 [Route("{tenantId:tenantId}/v{version:apiVersion}/[controller]")]
 [ApiVersion("1.0")]
@@ -35,13 +38,17 @@ public class PipelineDebugController : ControllerBase
     /// <param name="pipelineRtEntityId">The pipeline entity object id</param>
     /// <returns>List of Guids that represent executions</returns>
     [HttpGet("{pipelineRtEntityId}")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> GetPipelineExecutionsAsync([Required] RtEntityId pipelineRtEntityId)
     {
         _logger.LogInformation("GetPipelineExecutions");
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
         {
-            return NotFound("TenantId is null or empty");
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
 
         try
@@ -58,7 +65,7 @@ public class PipelineDebugController : ControllerBase
         catch (Exception e)
         {
             _logger.LogError(e, "Error while getting pipeline executions");
-            return StatusCode(500, new ErrorResponse { ErrorMessage = e.Message});
+            return StatusCode(StatusCodes.Status500InternalServerError, new ErrorResponse { ErrorMessage = e.Message});
         }
     }
 
@@ -68,12 +75,16 @@ public class PipelineDebugController : ControllerBase
     /// <param name="pipelineRtEntityId">The pipeline entity object id</param>
     /// <returns>List of Guids that represent executions</returns>
     [HttpGet("{pipelineRtEntityId}/latest")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> GetLatestPipelineExecutionAsync([Required] RtEntityId pipelineRtEntityId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
         {
-            return NotFound("TenantId is null or empty");
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
 
         try
@@ -90,7 +101,7 @@ public class PipelineDebugController : ControllerBase
         catch (Exception e)
         {
             _logger.LogError(e, "Error while getting pipeline executions");
-            return StatusCode(500, new ErrorResponse { ErrorMessage = e.Message});
+            return StatusCode(StatusCodes.Status500InternalServerError, new ErrorResponse { ErrorMessage = e.Message});
         }
     }
 
@@ -101,13 +112,17 @@ public class PipelineDebugController : ControllerBase
     /// <param name="pipelineExecutionId">The pipeline execution id, that identifies the pipeline execution instance</param>
     /// <returns>List of Guids that represent executions</returns>
     [HttpGet("{pipelineRtEntityId}/{pipelineExecutionId}")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> GetPipelineExecutionDebugPointNodesAsync([Required] RtEntityId pipelineRtEntityId,
         [Required] Guid pipelineExecutionId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
         {
-            return NotFound("TenantId is null or empty");
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
 
         try
@@ -138,13 +153,17 @@ public class PipelineDebugController : ControllerBase
     /// <param name="nodePath">The path of the node</param>
     /// <returns>List of Guids that represent executions</returns>
     [HttpGet("{pipelineRtEntityId}/{pipelineExecutionId}/{nodePath}")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> GetDebugPointAsync([Required] RtEntityId pipelineRtEntityId,
         [Required] Guid pipelineExecutionId, [Required] NodePath nodePath)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
         {
-            return NotFound("TenantId is null or empty");
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
 
         try

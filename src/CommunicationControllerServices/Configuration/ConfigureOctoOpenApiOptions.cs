@@ -16,6 +16,6 @@ internal class ConfigureOctoOpenApiOptions(IOptions<CommunicationControllerOptio
 
     public void Configure(string? name, OctoOpenApiOptions options)
     {
-        options.AuthorityUrl = octoOptions.Value.Authority.EnsureEndsWith("/");
+        options.AuthorityUrl = octoOptions.Value.AuthorityUrl.EnsureEndsWith("/");
     }
 }

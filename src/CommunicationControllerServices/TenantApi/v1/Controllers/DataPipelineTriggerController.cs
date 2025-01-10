@@ -1,6 +1,9 @@
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
+using IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
@@ -8,6 +11,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.C
 /// <summary>
 /// Manages data pipeline trigger
 /// </summary>
+[Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
 [ApiController]
 [Route("{tenantId:tenantId}/v{version:apiVersion}/[controller]")]
 [ApiVersion("1.0")]
@@ -32,13 +36,16 @@ public class DataPipelineTriggerController : ControllerBase
     /// </summary>
     /// <returns></returns>
     [HttpPost("deploy")]
-    //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> DeployTrigger()
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
         {
-            return NotFound("TenantId is null or empty");
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
         
         try
@@ -48,7 +55,7 @@ public class DataPipelineTriggerController : ControllerBase
         }
         catch (Exception e)
         {
-            return BadRequest(e.Message);
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
         }
     }
     
@@ -57,13 +64,16 @@ public class DataPipelineTriggerController : ControllerBase
     /// </summary>
     /// <returns></returns>
     [HttpPost("undeploy")]
-    //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> UndeployTrigger()
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
         {
-            return NotFound("TenantId is null or empty");
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
         
         try
@@ -73,7 +83,7 @@ public class DataPipelineTriggerController : ControllerBase
         }
         catch (Exception e)
         {
-            return BadRequest(e.Message);
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
         }
     }
 }

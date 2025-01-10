@@ -9,4 +9,19 @@
         <Platforms>AnyCPU</Platforms>
     </PropertyGroup>
 
+    <ItemGroup>
+      <EmbeddedResource Update="CommunicationControllerTexts.resx">
+        <Generator>PublicResXFileCodeGenerator</Generator>
+        <LastGenOutput>CommunicationControllerTexts.Designer.cs</LastGenOutput>
+      </EmbeddedResource>
+    </ItemGroup>
+
+    <ItemGroup>
+      <Compile Update="CommunicationControllerTexts.Designer.cs">
+        <DesignTime>True</DesignTime>
+        <AutoGen>True</AutoGen>
+        <DependentUpon>CommunicationControllerTexts.resx</DependentUpon>
+      </Compile>
+    </ItemGroup>
+
 </Project>

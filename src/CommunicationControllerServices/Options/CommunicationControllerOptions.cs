@@ -12,7 +12,8 @@ public class CommunicationControllerOptions
     /// </summary>
     public CommunicationControllerOptions()
     {
-        Authority = "https://localhost:5003";
+        PublicUrl = "https://localhost:5015";
+        AuthorityUrl = "https://localhost:5003";
 
         BrokerHost = "localhost";
         BrokerVirtualHost = "/";
@@ -21,12 +22,16 @@ public class CommunicationControllerOptions
         BrokerPassword = "guest";
         MinLogLevel = LogLevelDto.Debug;
     }
+    
+    /// <summary>
+    ///    (Public) base address of the service
+    /// </summary>
+    public string PublicUrl { get; set; }
 
     /// <summary>
     ///     (Public) base address of the CAS (Central Authorization Services)
     /// </summary>
-    public string Authority { get; set; }
-
+    public string AuthorityUrl { get; set; }
 
     /// <summary>
     /// Gets or sets the RabbitMQ broker host name
