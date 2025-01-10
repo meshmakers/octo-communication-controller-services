@@ -1,9 +1,11 @@
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
+using IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Services.Infrastructure.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.SystemApi.v1.Controllers;
@@ -11,6 +13,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.SystemApi.v1.C
 /// <summary>
 /// Manages the diagnostics settings of the service
 /// </summary>
+[Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
 [ApiController]
 [Route("system/v{version:apiVersion}/[controller]")]
 [ApiVersion("1.0")]
@@ -38,7 +41,9 @@ public class DiagnosticsController: ControllerBase
     /// <param name="loggerName">The name of the logger to be reconfigured.</param>
     /// <returns></returns>
     [HttpPost("reconfigureLogLevel")]
-  //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
+    [Authorize(Constants.SystemCommunicationApiPolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> ReconfigureLogLevelAsync([Required] LogLevelDto minLogLevel,
         [Required] LogLevelDto maxLogLevel, string loggerName = "*")
     {

@@ -1,9 +1,12 @@
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
+using IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
@@ -11,6 +14,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.C
 /// <summary>
 /// Manages adapter configuration
 /// </summary>
+[Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
 [ApiController]
 [Route("{tenantId:tenantId}/v{version:apiVersion}/[controller]")]
 [ApiVersion("1.0")]
@@ -38,12 +42,15 @@ public class AdapterController : ControllerBase
     /// </summary>
     /// <returns></returns>
     [HttpGet]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Get()
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
         {
-            return NotFound("TenantId is null or empty");
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
 
         var config = await _communicationRepository.GetAdaptersAsync(tenantId);
@@ -57,12 +64,15 @@ public class AdapterController : ControllerBase
     /// <param name="adapterRtEntityId">The adapter entity object id</param>
     /// <returns>Configuration object</returns>
     [HttpGet("{adapterRtEntityId}")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetItem([Required][FromQuery] RtEntityId adapterRtEntityId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
         {
-            return NotFound("TenantId is null or empty");
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
 
         var config = await _adapterService.GetAdapterConfigurationAsync(tenantId, adapterRtEntityId);
@@ -76,13 +86,16 @@ public class AdapterController : ControllerBase
     /// <param name="adapterRtEntityId">The id of the adapter.</param>
     /// <returns></returns>
     [HttpPost("deployUpdate")]
-    //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> DeployUpdate([Required][FromQuery] string adapterRtEntityId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
         {
-            return NotFound("TenantId is null or empty");
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
         
         try
@@ -93,7 +106,7 @@ public class AdapterController : ControllerBase
         catch (AdapterHubCallbackException e)
         {
             _logger.LogError(e, "Error deploying adapter configuration");
-            return BadRequest(e.Message);
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
         }
     }
 }

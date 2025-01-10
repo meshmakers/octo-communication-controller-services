@@ -1,8 +1,15 @@
+using IdentityModel;
+using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Resources;
+using Meshmakers.Octo.Common.DistributionEventHub.Services;
+using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v1;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Commands;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Commands.Payloads;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.Extensions.Options;
@@ -15,16 +22,15 @@ internal class DefaultConfigurationCreatorService(
     IDiagnosticsService diagnosticsService,
     IOptions<CommunicationControllerOptions> options,
     ITriggerManagementService triggerManagementService,
+    ICommandClient<CreateIdentityDataCommandRequest> commandClient,
     ISystemContext systemContext,
     IPoolService poolService,
     IAdapterCachePublish adapterCachePublish,
     IAdapterService adapterService)
     : DefaultConfigurationCreatorServiceBase(logger), IConfigurationService
 {
-    
     public override async Task InitializeAsync()
     {
-        
         // Reconfigure the log level based on the configuration
         await diagnosticsService.ReconfigureLogLevelAsync(options.Value.MinLogLevel);
 
@@ -41,10 +47,15 @@ internal class DefaultConfigurationCreatorService(
             return;
         }
 
+        logger.LogInformation("Setting up default configuration for tenant '{TenantId}'", tenantId);
+
         var tenantContext = await systemContext.FindTenantContextAsync(tenantId);
 
         using var session = await tenantContext.GetAdminSessionAsync();
         session.StartTransaction();
+
+        // Identity configuration is next
+        await SetupIdentityDataAsync(tenantId);
 
         // If there is a configuration version, check if we need to update the configuration
         var configurationVersion =
@@ -66,10 +77,10 @@ internal class DefaultConfigurationCreatorService(
         }
 
         await session.CommitTransactionAsync();
-        
+
         // try to load the configuration from the cache
-        await adapterCachePublish.LoadConfigurationAsync(tenantId); 
-        
+        await adapterCachePublish.LoadConfigurationAsync(tenantId);
+
         await StartTenantAsync(tenantId);
 
         // TODO: Implement security configuration
@@ -81,7 +92,7 @@ internal class DefaultConfigurationCreatorService(
 
         using var session = await tenantContext.GetAdminSessionAsync();
         session.StartTransaction();
-        
+
         // If there is a configuration version, check if we need to update the configuration
         var configurationVersion =
             await tenantContext.GetConfigurationAsync(session, Constants.CommunicationControllerServiceSchemaVersionKey,
@@ -97,7 +108,7 @@ internal class DefaultConfigurationCreatorService(
             new DefaultConfigurationVersion { Version = Constants.CommunicationControllerServiceSchemaVersionValue });
 
         await session.CommitTransactionAsync();
-        
+
         await StartTenantAsync(tenantId);
     }
 
@@ -177,5 +188,121 @@ internal class DefaultConfigurationCreatorService(
 
         await adapterService.PreUpdateTenantAsync(tenantId);
         await poolService.PreUpdateTenantAsync(tenantId);
+    }
+
+    private async Task SetupIdentityDataAsync(string tenantId)
+    {
+        using var session = await systemContext.GetAdminSessionAsync();
+        session.StartTransaction();
+
+        // Identity configuration is next
+        if (tenantId != systemContext.TenantId)
+        {
+            // Currently we only support the system tenant.
+            return;
+        }
+
+        logger.LogInformation("Setting up default identity data for tenant '{TenantId}'", tenantId);
+
+        var serviceConfiguration =
+            await systemContext.GetConfigurationAsync(session, Constants.CommunicationControllerServiceIdentityDataVersionKey,
+                new DefaultConfigurationVersion { Version = -1 });
+        if (serviceConfiguration == null ||
+            serviceConfiguration.Version < Constants.CommunicationControllerServiceIdentityDataVersionValue)
+        {
+            logger.LogInformation("Creating identity data for tenant '{TenantId}'", tenantId);
+
+
+            CreateIdentityDataCommandRequest createIdentityDataCommandRequest = new(systemContext.TenantId);
+            CreateApiScopes(createIdentityDataCommandRequest);
+            CreateApiResources(createIdentityDataCommandRequest);
+            CreateClients(createIdentityDataCommandRequest);
+
+            logger.LogInformation("Creating identity data for tenant '{TenantId}'", tenantId);
+            var r = await commandClient.GetResponseWithRetry<EnumCommandResponse<CreateIdentityDataResult>>(
+                createIdentityDataCommandRequest);
+            logger.LogInformation("Create identity data response: {Response}", r.Response);
+            if (r.Response == CreateIdentityDataResult.Success)
+            {
+                await systemContext.SetConfigurationAsync(session,
+                    Constants.CommunicationControllerServiceIdentityDataVersionKey,
+                    new DefaultConfigurationVersion
+                        { Version = Constants.CommunicationControllerServiceIdentityDataVersionValue });
+            }
+            else if (r.Response != CreateIdentityDataResult.FailedTenantHasNoIdentityCk)
+            {
+                logger.LogInformation("The tenant '{TenantId}' has no identity CK, skipped to create identity data",
+                    tenantId);
+            }
+            else
+            {
+                logger.LogError("The tenant '{TenantId}' has no identity CK, skipped to create identity data",
+                    tenantId);
+            }
+        }
+
+        await session.CommitTransactionAsync();
+    }
+
+    private void CreateApiScopes(CreateIdentityDataCommandRequest createIdentityDataCommandRequest)
+    {
+        createIdentityDataCommandRequest.ApiScopes = new List<DistApiScopeDto>
+        {
+            new(CommonConstants.CommunicationSystemApiFullAccess,
+                CommonConstants.CommunicationSystemApiFullAccessDisplayName),
+            new(CommonConstants.CommunicationTenantApiFullAccess,
+                CommonConstants.CommunicationTenantApiFullAccessDisplayName),
+            new(CommonConstants.CommunicationTenantApiReadOnly,
+                CommonConstants.CommunicationTenantApiReadOnlyDisplayName),
+        };
+    }
+
+    private void CreateApiResources(CreateIdentityDataCommandRequest createIdentityDataCommandRequest)
+    {
+        createIdentityDataCommandRequest.ApiResources = new List<DistApiResourcesDto>
+        {
+            new(CommonConstants.BotApi, CommonConstants.BotApiDisplayName)
+            {
+                Description = CommonConstants.BotApiDescription,
+                IsEnabled = true,
+                Scopes = new List<string>
+                {
+                    CommonConstants.CommunicationSystemApiFullAccess,
+                    CommonConstants.CommunicationTenantApiReadOnly,
+                    CommonConstants.CommunicationTenantApiFullAccess
+                }
+            }
+        };
+    }
+
+    private void CreateClients(CreateIdentityDataCommandRequest createIdentityDataCommandRequest)
+    {
+        createIdentityDataCommandRequest.Clients = new List<DistClientDto>
+        {
+            new(CommonConstants.BotServicesSwaggerClientId,
+                CommunicationControllerTexts.SwaggerClient_Description,
+                options.Value.PublicUrl)
+            {
+                AllowedGrantTypes = [OidcConstants.GrantTypes.AuthorizationCode],
+
+                RedirectUris =
+                [
+                    options.Value.PublicUrl.EnsureEndsWith("/swagger/oauth2-redirect.html")
+                ],
+
+                PostLogoutRedirectUris = [options.Value.PublicUrl.EnsureEndsWith("/")],
+                AllowedCorsOrigins = [options.Value.PublicUrl.TrimEnd('/')],
+                AllowedScopes =
+                [
+                    CommonConstants.Scopes.OpenId,
+                    CommonConstants.Scopes.Profile,
+                    CommonConstants.Scopes.Email,
+                    JwtClaimTypes.Role,
+                    CommonConstants.CommunicationSystemApiFullAccess,
+                    CommonConstants.CommunicationTenantApiReadOnly,
+                    CommonConstants.CommunicationTenantApiFullAccess
+                ]
+            }
+        };
     }
 }

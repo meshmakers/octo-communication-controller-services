@@ -14,7 +14,24 @@ internal static class Constants
 
     public const string CommunicationControllerServiceSchemaVersionKey = "CommunicationControllerServices";
     public const int CommunicationControllerServiceSchemaVersionValue = 2;
-    public const string CacheFileName ="CommunicationControllerServicesCache.json";
+    
+    public const string CommunicationControllerServiceIdentityDataVersionKey = "CommunicationControllerServicesIdentityData";
+    public const int CommunicationControllerServiceIdentityDataVersionValue = 1;
+    
+    /// <summary>
+    ///     Policy for system api authorization
+    /// </summary>
+    public const string SystemCommunicationApiPolicy = "SystemCommunicationApiPolicy";
+    
+    /// <summary>
+    ///     Policy for tenant api read only authorization
+    /// </summary>
+    public const string TenantCommunicationApiReadOnlyPolicy = "TenantCommunicationApiReadOnlyPolicy";
+    
+    /// <summary>
+    ///     Policy for tenant api read write authorization
+    /// </summary>
+    public const string TenantCommunicationApiReadWritePolicy = "SystemCommunicationApiReadWritePolicy";
 
     public static string? GetTenantId(this HttpContext httpContext)
     {

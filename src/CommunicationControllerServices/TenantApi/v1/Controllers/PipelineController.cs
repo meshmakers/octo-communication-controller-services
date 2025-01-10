@@ -1,9 +1,12 @@
 using System.ComponentModel.DataAnnotations;
 using System.Text;
 using Asp.Versioning;
+using IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
@@ -11,6 +14,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.C
 /// <summary>
 /// Manages edge and mesh pipelines
 /// </summary>
+[Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
 [ApiController]
 [Route("{tenantId:tenantId}/v{version:apiVersion}/[controller]")]
 [ApiVersion("1.0")]
@@ -42,13 +46,17 @@ public class PipelineController : ControllerBase
     /// <param name="pipelineRtEntityId">The id of the pipeline.</param>
     /// <returns></returns>
     [HttpPost("deploy")]
-    //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> DeployPipeline([Required][FromQuery] string adapterRtEntityId, [Required][FromQuery] string pipelineRtEntityId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
         {
-            return NotFound("TenantId is null or empty");
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
         
         try
@@ -63,17 +71,17 @@ public class PipelineController : ControllerBase
         catch (AdapterHubCallbackException e)
         {
             _logger.LogError(e, "Pipeline deployment failed (UnprocessableEntity)");
-            return UnprocessableEntity(e.Message);
+            return UnprocessableEntity(new ErrorResponse { ErrorMessage = e.Message});
         }
         catch (AdapterServiceException e)
         {
             _logger.LogError(e, "Pipeline deployment failed (NotFound)");
-            return NotFound(e.Message);
+            return NotFound(new ErrorResponse { ErrorMessage = e.Message});
         }
         catch (Exception e)
         {
             _logger.LogError(e, "Error during deployment of pipeline");
-            return BadRequest(e.Message);
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
         }
     }
     
@@ -83,13 +91,15 @@ public class PipelineController : ControllerBase
     /// <param name="dataPipelineRtId">The runtime id of the data pipeline.</param>
     /// <returns>The pipeline execution id</returns>
     [HttpPost("execute")]
-    //  [Authorize(AssetRepositoryServiceConstants.SystemApiReadWritePolicy)]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ExecutePipeline([Required][FromQuery] OctoObjectId dataPipelineRtId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
         {
-            return NotFound("TenantId is null or empty");
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
         
         try
@@ -104,7 +114,7 @@ public class PipelineController : ControllerBase
         catch (Exception e)
         {
             _logger.LogError(e, "Error during execution of pipeline");
-            return BadRequest(e.Message);
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
         }
     }
 }
