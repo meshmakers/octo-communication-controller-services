@@ -23,7 +23,6 @@
         <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.0" />
         <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="9.0.0" />
         <PackageReference Include="NLog.Web.AspNetCore" Version="5.3.15" />
-        <PackageReference Include="Meshmakers.Octo.Sdk.Common" Version="$(OctoVersion)" />
     </ItemGroup>
 
     <ItemGroup>
@@ -47,10 +46,6 @@
         <None Include="nlog.config">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
-    </ItemGroup>
-
-    <ItemGroup>
-      <ReferencePathWithRefAssemblies Update="\Users\gerald\.nuget\packages\mongodb.bson\2.24.0\lib\netstandard2.1\MongoDB.Bson.dll" />
     </ItemGroup>
 
 </Project>
