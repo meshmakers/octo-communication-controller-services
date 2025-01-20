@@ -116,29 +116,8 @@ try
         {
             authenticationOptions.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
             authenticationOptions.DefaultChallengeScheme = BackendCommon.OidcAuthenticationScheme;
-        })
-        .AddOpenIdConnect(BackendCommon.OidcAuthenticationScheme, options =>
-        {
-            options.ClientId = CommonConstants.BotServicesClientId;
-
-            options.Scope.Clear();
-            options.Scope.Add(CommonConstants.Scopes.OpenId);
-            options.Scope.Add(CommonConstants.Scopes.Profile);
-            options.Scope.Add(CommonConstants.Scopes.Email);
-            options.Scope.Add(CommonConstants.Scopes.Role);
-
-            options.SaveTokens = true;
-            options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-            options.GetClaimsFromUserInfoEndpoint = true;
-
-            options.TokenValidationParameters = new TokenValidationParameters
-            {
-                NameClaimType = JwtClaimTypes.Name,
-                RoleClaimType = JwtClaimTypes.Role
-            };
         }).AddJwtBearer(jwt =>
         {
-            jwt.Audience = CommonConstants.CommunicationSystemApi;
             jwt.TokenValidationParameters = new TokenValidationParameters
             {
                 NameClaimType = JwtClaimTypes.Name,
@@ -152,22 +131,22 @@ try
         options.AddPolicy(Constants.SystemCommunicationApiPolicy, authorizationPolicyBuilder =>
         {
             authorizationPolicyBuilder.RequireClaim(BackendCommon.ClaimScope,
-                CommonConstants.CommunicationSystemApiFullAccess,
-                CommonConstants.BotApiReadOnly);
+                CommonConstants.CommunicationSystemApiFullAccess);
         });
 
         options.AddPolicy(Constants.TenantCommunicationApiReadWritePolicy, authorizationPolicyBuilder =>
         {
             authorizationPolicyBuilder.RequireClaim(BackendCommon.ClaimScope,
-                CommonConstants.CommunicationTenantApiFullAccess,
-                CommonConstants.CommunicationTenantApiReadOnly);
+                CommonConstants.CommunicationTenantApiFullAccess);
         });
 
         options.AddPolicy(Constants.TenantCommunicationApiReadOnlyPolicy,
             authorizationPolicyBuilder =>
             {
                 authorizationPolicyBuilder.RequireClaim(BackendCommon.ClaimScope,
+                    CommonConstants.CommunicationTenantApiFullAccess,
                     CommonConstants.CommunicationTenantApiReadOnly);
+
             });
     });
 
