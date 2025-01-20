@@ -261,13 +261,21 @@ internal class DefaultConfigurationCreatorService(
     {
         createIdentityDataCommandRequest.ApiResources = new List<DistApiResourcesDto>
         {
-            new(CommonConstants.BotApi, CommonConstants.BotApiDisplayName)
+            new(CommonConstants.CommunicationSystemApi, CommonConstants.CommunicationSystemApiDisplayName)
             {
-                Description = CommonConstants.BotApiDescription,
+                Description = CommonConstants.CommunicationSystemApiDescription,
                 IsEnabled = true,
                 Scopes = new List<string>
                 {
                     CommonConstants.CommunicationSystemApiFullAccess,
+                }
+            },
+            new(CommonConstants.CommunicationTenantApi, CommonConstants.CommunicationTenantApiDisplayName)
+            {
+                Description = CommonConstants.CommunicationTenantApiDescription,
+                IsEnabled = true,
+                Scopes = new List<string>
+                {
                     CommonConstants.CommunicationTenantApiReadOnly,
                     CommonConstants.CommunicationTenantApiFullAccess
                 }
