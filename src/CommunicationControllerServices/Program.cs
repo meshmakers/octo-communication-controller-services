@@ -206,7 +206,7 @@ try
         options.ApiTitle = CommunicationControllerTexts.Api_Title;
         options.ApiDescription = CommunicationControllerTexts.Api_Description;
 
-        options.ClientId = CommonConstants.AsserRepositoryServicesSwaggerClientId;
+        options.ClientId = CommonConstants.CommunicationControllerServicesSwaggerClientId;
         options.AppName = CommunicationControllerTexts.SwaggerClient_Description;
     }).AddVersion();
 
