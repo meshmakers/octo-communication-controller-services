@@ -118,6 +118,7 @@ try
             authenticationOptions.DefaultChallengeScheme = BackendCommon.OidcAuthenticationScheme;
         }).AddJwtBearer(jwt =>
         {
+            jwt.Audience = CommonConstants.CommunicationSystemApi;
             jwt.TokenValidationParameters = new TokenValidationParameters
             {
                 NameClaimType = JwtClaimTypes.Name,
