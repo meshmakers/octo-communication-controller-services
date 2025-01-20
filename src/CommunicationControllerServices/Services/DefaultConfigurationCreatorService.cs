@@ -287,7 +287,7 @@ internal class DefaultConfigurationCreatorService(
     {
         createIdentityDataCommandRequest.Clients = new List<DistClientDto>
         {
-            new(CommonConstants.BotServicesSwaggerClientId,
+            new(CommonConstants.CommunicationControllerServicesSwaggerClientId,
                 CommunicationControllerTexts.SwaggerClient_Description,
                 options.Value.PublicUrl)
             {

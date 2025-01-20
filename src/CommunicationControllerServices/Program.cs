@@ -138,7 +138,7 @@ try
             };
         }).AddJwtBearer(jwt =>
         {
-            jwt.Audience = CommonConstants.BotApi;
+            jwt.Audience = CommonConstants.CommunicationSystemApi;
             jwt.TokenValidationParameters = new TokenValidationParameters
             {
                 NameClaimType = JwtClaimTypes.Name,
