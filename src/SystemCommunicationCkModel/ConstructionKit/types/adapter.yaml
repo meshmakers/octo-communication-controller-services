@@ -21,7 +21,7 @@ types:
       name: Configuration
       isOptional: true  
   associations:
-  - id: System/ParentChild
+  - id: ${thisModel}/Manages
     targetCkTypeId: ${thisModel}/Pool    
 - typeId: EdgeAdapter
   derivedFromCkTypeId: ${thisModel}/Adapter
