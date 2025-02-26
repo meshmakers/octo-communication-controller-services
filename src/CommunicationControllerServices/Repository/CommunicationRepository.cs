@@ -34,7 +34,7 @@ internal class CommunicationRepository : ICommunicationRepository
             session.StartTransaction();
 
             var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPool, RtAdapter>(session,
-                new[] { poolRtId }, new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild),
+                [poolRtId], new CkId<CkAssociationRoleId>(SystemCommunicationCkIds.ModelId, SystemCommunicationCkIds.Manages),
                 GraphDirections.Inbound, null, DataQueryOperation.Create());
 
             if (!resultSet.Any())
@@ -386,8 +386,8 @@ internal class CommunicationRepository : ICommunicationRepository
             session.StartTransaction();
 
             var poolResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtAdapter, RtPool>(session,
-                new[] { adapterRtEntityId.RtId },
-                new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild),
+                [adapterRtEntityId.RtId],
+                new CkId<CkAssociationRoleId>(SystemCommunicationCkIds.ModelId, SystemCommunicationCkIds.Manages),
                 GraphDirections.Inbound, null, DataQueryOperation.Create());
 
             await session.CommitTransactionAsync();
