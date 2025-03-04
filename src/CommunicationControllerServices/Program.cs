@@ -4,6 +4,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Configuration;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Extensions;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
@@ -41,7 +42,8 @@ try
     var builder = WebApplication.CreateBuilder(args);
 
     builder.AddObservability()
-        .AddSystemContextHealthCheck();
+        .AddSystemContextHealthCheck()
+        .AddAdapterHealthChecks();
 
     builder.Services.Configure<OctoSystemConfiguration>(options =>
         builder.Configuration.GetSection("System").Bind(options));
