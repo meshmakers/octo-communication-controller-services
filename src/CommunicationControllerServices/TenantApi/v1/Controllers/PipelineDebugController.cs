@@ -90,7 +90,6 @@ public class PipelineDebugController : ControllerBase
         try
         {
             var guids = await _pipelineDebugService.GetLatestPipelineExecutionAsync(tenantId, pipelineRtEntityId);
-
             return Ok(guids);
         }
         catch (PipelineDebugInformationNotFoundException e)
@@ -168,7 +167,7 @@ public class PipelineDebugController : ControllerBase
 
         try
         {
-            var debugPointDto = await _pipelineDebugService.GetDebugPointAsync(tenantId, pipelineRtEntityId,
+            var debugPointDto = await _pipelineDebugService.GetDebugPointDataAsync(tenantId, pipelineRtEntityId,
                 pipelineExecutionId, nodePath);
 
             return Ok(debugPointDto);

@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 
@@ -24,8 +25,11 @@ public interface IPipelineDebugService
     /// </summary>
     /// <param name="tenantId">Tenant id</param>
     /// <param name="pipelineRtEntityId">Pipeline runtime id</param>
+    /// <param name="skip">Amount of pipeline executions to skip</param>
+    /// <param name="take">Number of pipeline executions to take</param>
     /// <returns></returns>
-    Task<IEnumerable<Guid>> GetPipelineExecutionsAsync(string tenantId, RtEntityId pipelineRtEntityId);
+    Task<IEnumerable<PipelineExecutionDataDto>> GetPipelineExecutionsAsync(string tenantId,
+        RtEntityId pipelineRtEntityId, int skip = 0, int take = 100);
     
     /// <summary>
     /// Returns the latest pipeline execution id
@@ -33,7 +37,7 @@ public interface IPipelineDebugService
     /// <param name="tenantId">Tenant id</param>
     /// <param name="pipelineRtEntityId">Pipeline runtime id</param>
     /// <returns></returns>
-    Task<Guid> GetLatestPipelineExecutionAsync(string tenantId, RtEntityId pipelineRtEntityId);
+    Task<PipelineExecutionDataDto> GetLatestPipelineExecutionAsync(string tenantId, RtEntityId pipelineRtEntityId);
 
     /// <summary>
     /// Returns cached pipeline execution ids
@@ -53,5 +57,5 @@ public interface IPipelineDebugService
     /// <param name="pipelineExecutionId">Guid that identifies the pipeline execution instance</param>
     /// <param name="nodePath">The path of the node</param>
     /// <returns></returns>
-    Task<DebugPointDto?> GetDebugPointAsync(string tenantId, RtEntityId pipelineRtEntityId, Guid pipelineExecutionId, NodePath nodePath);
+    Task<DebugPointDataDto?> GetDebugPointDataAsync(string tenantId, RtEntityId pipelineRtEntityId, Guid pipelineExecutionId, NodePath nodePath);
 }

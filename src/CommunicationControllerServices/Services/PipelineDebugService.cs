@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Text.Json;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 
@@ -10,17 +12,25 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 /// </summary>
 internal class PipelineDebugService : IPipelineDebugService
 {
-    private class PipelineExecutionRecord(DateTime dateTime)
+    private class PipelineExecutionRecord(Guid id, DateTime dateTime)
     {
+        public Guid Id { get; } = id;
         public DateTime DateTime { get; } = dateTime;
-        private readonly ConcurrentDictionary<NodePath, DebugPointDto> _debugInfo = new();
+        private readonly ConcurrentDictionary<NodePath, DebugPointDataDto> _debugInfo = new();
 
         public void Add(NodePath nodePath, DebugPointDto debugPoint)
         {
-            _debugInfo.AddOrUpdate(nodePath, debugPoint, (_, _) => debugPoint);
+            var debugInfo = new DebugPointDataDto(debugPoint.NodePath, debugPoint.SequenceNumber)
+            {
+                Messages = debugPoint.Messages,
+                Input = debugPoint.Input != null ? JsonDocument.Parse(debugPoint.Input).RootElement : null,
+                Output = debugPoint.Output != null ? JsonDocument.Parse(debugPoint.Output).RootElement : null
+            };
+
+            _debugInfo.AddOrUpdate(nodePath, debugInfo, (_, _) => debugInfo);
         }
 
-        public DebugPointDto? Get(NodePath nodePath)
+        public DebugPointDataDto? Get(NodePath nodePath)
         {
             _debugInfo.TryGetValue(nodePath, out var value);
             return value;
@@ -80,7 +90,7 @@ internal class PipelineDebugService : IPipelineDebugService
         {
             _debugInfo.AddOrUpdate(pipelineExecutionId, _ =>
                 {
-                    var record = new PipelineExecutionRecord(DateTime.UtcNow);
+                    var record = new PipelineExecutionRecord(pipelineExecutionId, DateTime.UtcNow);
                     record.Add(debugPoint.NodePath, debugPoint);
                     return record;
                 },
@@ -89,7 +99,7 @@ internal class PipelineDebugService : IPipelineDebugService
                     record.Add(debugPoint.NodePath, debugPoint);
                     return record;
                 });
-            
+
             // We leave only the last 10 records
             if (_debugInfo.Count > 10)
             {
@@ -104,14 +114,26 @@ internal class PipelineDebugService : IPipelineDebugService
             return value;
         }
 
-        public IEnumerable<Guid> GetPipelineExecutionIds()
+        public IEnumerable<PipelineExecutionDataDto> GetPipelineExecutionIds()
         {
-            return _debugInfo.Keys;
+            return _debugInfo.Values.Select(p => new PipelineExecutionDataDto
+                { Id = p.Id, DateTime = p.DateTime });
         }
 
-        public Guid GetLatestPipelineExecutionId()
+        public PipelineExecutionDataDto? GetLatestPipelineExecutionId()
         {
-            return _debugInfo.OrderByDescending(x => x.Value.DateTime).First().Key;
+            if (_debugInfo.Count == 0)
+            {
+                return null;
+            }
+
+            var latest = _debugInfo.OrderByDescending(x => x.Value.DateTime).First();
+
+            return new PipelineExecutionDataDto
+            {
+                Id = latest.Key,
+                DateTime = latest.Value.DateTime
+            };
         }
     }
 
@@ -128,7 +150,9 @@ internal class PipelineDebugService : IPipelineDebugService
         return Task.CompletedTask;
     }
 
-    public Task<IEnumerable<Guid>> GetPipelineExecutionsAsync(string tenantId, RtEntityId pipelineRtEntityId)
+    public Task<IEnumerable<PipelineExecutionDataDto>> GetPipelineExecutionsAsync(string tenantId,
+        RtEntityId pipelineRtEntityId,
+        int skip = 0, int take = 100)
     {
         var key = new Tuple<string, RtEntityId>(tenantId, pipelineRtEntityId);
         if (_debugInfo.TryGetValue(key, out PipelineExecutionListRecord? value))
@@ -139,12 +163,17 @@ internal class PipelineDebugService : IPipelineDebugService
         throw PipelineDebugInformationNotFoundException.NotFound(tenantId, pipelineRtEntityId);
     }
 
-    public Task<Guid> GetLatestPipelineExecutionAsync(string tenantId, RtEntityId pipelineRtEntityId)
+    public Task<PipelineExecutionDataDto> GetLatestPipelineExecutionAsync(string tenantId,
+        RtEntityId pipelineRtEntityId)
     {
         var key = new Tuple<string, RtEntityId>(tenantId, pipelineRtEntityId);
         if (_debugInfo.TryGetValue(key, out PipelineExecutionListRecord? value))
         {
-            return Task.FromResult(value.GetLatestPipelineExecutionId());
+            var executionData = value.GetLatestPipelineExecutionId();
+            if (executionData != null)
+            {
+                return Task.FromResult(executionData);
+            }
         }
 
         throw PipelineDebugInformationNotFoundException.NotFound(tenantId, pipelineRtEntityId);
@@ -169,7 +198,7 @@ internal class PipelineDebugService : IPipelineDebugService
         throw PipelineDebugInformationNotFoundException.NotFound(tenantId, pipelineRtEntityId);
     }
 
-    public Task<DebugPointDto?> GetDebugPointAsync(string tenantId, RtEntityId pipelineRtEntityId,
+    public Task<DebugPointDataDto?> GetDebugPointDataAsync(string tenantId, RtEntityId pipelineRtEntityId,
         Guid pipelineExecutionId, NodePath nodePath)
     {
         var key = new Tuple<string, RtEntityId>(tenantId, pipelineRtEntityId);
