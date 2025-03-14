@@ -70,5 +70,10 @@ internal class AdapterServiceException : Exception
     {
         return new AdapterServiceException("RtWellKnownName is undefined.");
     }
+
+    public static Exception DeploymentStateNotSupported(RtDeploymentStateEnum rDeploymentState)
+    {
+        return new AdapterServiceException($"Deployment state '{rDeploymentState}' is not supported.");
+    }
 }
 

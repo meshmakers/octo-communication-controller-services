@@ -196,11 +196,12 @@ public interface ICommunicationRepository
     /// Set the deployment state of a pipeline
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="pipelineRtEntityId">Object id of pipeline</param>
-    /// <param name="deploymentState">State of pipeline</param>
+    /// <param name="pipelineRtEntityId">Object id of the pipeline</param>
+    /// <param name="deploymentState">State of the pipeline</param>
+    /// <param name="stateMessage">Optional status message</param>
     /// <returns></returns>
     Task SetPipelineDeploymentStateAsync(string tenantId, RtEntityId pipelineRtEntityId,
-        RtDeploymentStateEnum deploymentState);
+        RtDeploymentStateEnum deploymentState, string? stateMessage);
 
     /// <summary>
     /// Set the configuration state of an adapter

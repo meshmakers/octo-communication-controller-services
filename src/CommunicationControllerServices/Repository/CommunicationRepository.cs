@@ -669,7 +669,7 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     public async Task SetPipelineDeploymentStateAsync(string tenantId, RtEntityId pipelineRtEntityId,
-        RtDeploymentStateEnum deploymentState)
+        RtDeploymentStateEnum deploymentState, string? stateMessage)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -680,7 +680,8 @@ internal class CommunicationRepository : ICommunicationRepository
 
             var pipeline = new RtPipeline
             {
-                DeploymentState = deploymentState
+                DeploymentState = deploymentState,
+                StatusMessage = stateMessage
             };
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtPipeline>>

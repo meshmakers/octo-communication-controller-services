@@ -55,7 +55,7 @@ public interface IPipelineDebugService
     /// <param name="tenantId">Tenant id</param>
     /// <param name="pipelineRtEntityId">Pipeline runtime id</param>
     /// <param name="pipelineExecutionId">Guid that identifies the pipeline execution instance</param>
-    /// <param name="nodePath">The path of the node</param>
+    /// <param name="nodeId">ID of the node</param>
     /// <returns></returns>
-    Task<DebugPointDataDto?> GetDebugPointDataAsync(string tenantId, RtEntityId pipelineRtEntityId, Guid pipelineExecutionId, NodePath nodePath);
+    Task<DebugPointDataDto?> GetDebugPointDataAsync(string tenantId, RtEntityId pipelineRtEntityId, Guid pipelineExecutionId, string nodeId);
 }

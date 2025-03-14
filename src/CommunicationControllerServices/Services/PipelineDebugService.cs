@@ -16,11 +16,12 @@ internal class PipelineDebugService : IPipelineDebugService
     {
         public Guid Id { get; } = id;
         public DateTime DateTime { get; } = dateTime;
-        private readonly ConcurrentDictionary<NodePath, DebugPointDataDto> _debugInfo = new();
+        private readonly ConcurrentDictionary<string, DebugPointDataDto> _debugInfo = new();
 
         public void Add(NodePath nodePath, DebugPointDto debugPoint)
         {
-            var debugInfo = new DebugPointDataDto(debugPoint.NodePath, debugPoint.SequenceNumber)
+            var debugInfo = new DebugPointDataDto(debugPoint.NodeId, debugPoint.NodePath, debugPoint.Description,
+                debugPoint.SequenceNumber)
             {
                 Messages = debugPoint.Messages,
                 Input = debugPoint.Input != null ? JsonDocument.Parse(debugPoint.Input).RootElement : null,
@@ -30,9 +31,9 @@ internal class PipelineDebugService : IPipelineDebugService
             _debugInfo.AddOrUpdate(nodePath, debugInfo, (_, _) => debugInfo);
         }
 
-        public DebugPointDataDto? Get(NodePath nodePath)
+        public DebugPointDataDto? Get(string nodeId)
         {
-            _debugInfo.TryGetValue(nodePath, out var value);
+            _debugInfo.TryGetValue(nodeId, out var value);
             return value;
         }
 
@@ -51,28 +52,34 @@ internal class PipelineDebugService : IPipelineDebugService
                 var lastIndex = fullPath.LastIndexOf("/", StringComparison.Ordinal);
                 var nodeName = fullPath.Substring(lastIndex + 1);
 
-                mergedResultsMap[fullPath] = new DebugPointNode
-                    { SequenceNumber = debugPoint.SequenceNumber, Name = nodeName, FullPath = fullPath };
+                mergedResultsMap[debugPoint.NodeId] = new DebugPointNode
+                {
+                    NodeId = debugPoint.NodeId,
+                    SequenceNumber = debugPoint.SequenceNumber,
+                    Description = debugPoint.Description,
+                    Name = nodeName,
+                    FullPath = debugPoint.NodePath
+                };
             }
 
             foreach (var debugPoint in debugPoints)
             {
-                var fullPath = debugPoint.NodePath.ToString(CultureInfo.InvariantCulture);
+                var fullPath = debugPoint.NodeId.ToString(CultureInfo.InvariantCulture);
 
                 var lastIndex = fullPath.LastIndexOf("/", StringComparison.Ordinal);
-                var nodePath = "";
+                var nodeId = "";
                 if (lastIndex > -1)
                 {
-                    nodePath = fullPath.Substring(0, lastIndex);
+                    nodeId = fullPath.Substring(0, lastIndex);
                 }
 
-                if (mergedResultsMap.TryGetValue(nodePath, out var debugPointNode))
+                if (mergedResultsMap.TryGetValue(nodeId, out var debugPointNode))
                 {
                     debugPointNode.Children ??= new List<DebugPointNode>();
                     debugPointNode.Children.Add(mergedResultsMap[fullPath]);
                 }
 
-                if (string.IsNullOrWhiteSpace(nodePath))
+                if (string.IsNullOrWhiteSpace(nodeId))
                 {
                     roots.Add(mergedResultsMap[fullPath]);
                 }
@@ -91,12 +98,12 @@ internal class PipelineDebugService : IPipelineDebugService
             _debugInfo.AddOrUpdate(pipelineExecutionId, _ =>
                 {
                     var record = new PipelineExecutionRecord(pipelineExecutionId, DateTime.UtcNow);
-                    record.Add(debugPoint.NodePath, debugPoint);
+                    record.Add(debugPoint.NodeId, debugPoint);
                     return record;
                 },
                 (_, record) =>
                 {
-                    record.Add(debugPoint.NodePath, debugPoint);
+                    record.Add(debugPoint.NodeId, debugPoint);
                     return record;
                 });
 
@@ -199,7 +206,7 @@ internal class PipelineDebugService : IPipelineDebugService
     }
 
     public Task<DebugPointDataDto?> GetDebugPointDataAsync(string tenantId, RtEntityId pipelineRtEntityId,
-        Guid pipelineExecutionId, NodePath nodePath)
+        Guid pipelineExecutionId, string nodeId)
     {
         var key = new Tuple<string, RtEntityId>(tenantId, pipelineRtEntityId);
 
@@ -208,7 +215,7 @@ internal class PipelineDebugService : IPipelineDebugService
             var pipelineExecutionRecord = value.Get(pipelineExecutionId);
             if (pipelineExecutionRecord != null)
             {
-                return Task.FromResult(pipelineExecutionRecord.Get(nodePath));
+                return Task.FromResult(pipelineExecutionRecord.Get(nodeId));
             }
 
             throw PipelineDebugInformationNotFoundException.ExecutionNotFound(tenantId, pipelineRtEntityId,

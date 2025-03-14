@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -14,7 +15,7 @@ public interface ITriggerManagementService
     /// <param name="dataPipelineRtId">The runtime id of the data pipeline</param>
     /// <param name="pipelineInput">The input for the pipeline</param>
     /// <returns>The pipeline execution id, if the start of execution was successful</returns>
-    Task<Guid> StartExecutePipelineAsync(string tenantId, OctoObjectId dataPipelineRtId, string? pipelineInput);
+    Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId, OctoObjectId dataPipelineRtId, string? pipelineInput);
     
     /// <summary>
     /// Remove the schedule for the triggers of the tenant
