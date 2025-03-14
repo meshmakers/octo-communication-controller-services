@@ -1,6 +1,7 @@
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Resources;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -53,7 +54,7 @@ internal class AdapterService(
                 foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
                 {
                     await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
-                        pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending);
+                        pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending, null);
                 }
 
                 await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId,
@@ -92,10 +93,10 @@ internal class AdapterService(
                 {
                     throw AdapterServiceException.DataPipelineNotFound(tenantId, rtPipeline.ToRtEntityId());
                 }
-                
-                var configurations = 
+
+                var configurations =
                     await communicationRepository.GetConfigurationsByPipelineAsync(tenantId, rtPipeline.RtId);
-                var configurationsDto = configurations.Select(c => new ConfigurationDto(c.RtId, 
+                var configurationsDto = configurations.Select(c => new ConfigurationDto(c.RtId,
                     c.CkTypeId ?? throw AdapterServiceException.CkTypeIdUndefined(),
                     c.RtWellKnownName ?? throw AdapterServiceException.RtWellKnownNameUndefined(),
                     c.Serialize()));
@@ -180,13 +181,13 @@ internal class AdapterService(
                         tenantId, adapterRtEntityId);
                     await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, configuration);
                     adapter.UpdateConfiguration(tenantId, configuration);
-                    
+
                     await communicationRepository.SetAdapterConfigurationStateAsync(tenantId, adapterRtEntityId,
                         RtConfigurationStateEnum.Pending, null);
                     foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
                     {
                         await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
-                            pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending);
+                            pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending, null);
                     }
                 }
                 else
@@ -234,10 +235,10 @@ internal class AdapterService(
                 {
                     adapterConfiguration.Pipelines.Remove(deployedPipeline);
                 }
-                
-                var configurations = 
+
+                var configurations =
                     await communicationRepository.GetConfigurationsByPipelineAsync(tenantId, pipelineRtEntityId.RtId);
-                var configurationsDto = configurations.Select(c => new ConfigurationDto(c.RtId, 
+                var configurationsDto = configurations.Select(c => new ConfigurationDto(c.RtId,
                     c.CkTypeId ?? throw AdapterServiceException.CkTypeIdUndefined(),
                     c.RtWellKnownName ?? throw AdapterServiceException.RtWellKnownNameUndefined(),
                     c.Serialize()));
@@ -255,9 +256,9 @@ internal class AdapterService(
                     foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
                     {
                         await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
-                            pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending);
+                            pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending, null);
                     }
-                    
+
                     await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, adapterConfiguration);
                 }
 
@@ -304,19 +305,90 @@ internal class AdapterService(
                     foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
                     {
                         await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
-                            pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Deployed);
+                            pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Deployed, null);
                     }
                 }
                 else
                 {
+                    var message = GenerateAdapterMessages(deploymentResult);
                     await communicationRepository.SetAdapterConfigurationStateAsync(tenantId, adapterRtEntityId,
-                        RtConfigurationStateEnum.Error, deploymentResult.ErrorMessage);
+                        RtConfigurationStateEnum.Error, message);
+
+                    foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
+                    {
+                        var pipelineMessage = GeneratePipelineMessages(deploymentResult, pipelineConfigurationDto);
+                        var state = RtDeploymentStateEnum.Deployed;
+                        if (pipelineMessage != null)
+                        {
+                            state = RtDeploymentStateEnum.Error;
+                        }
+                        await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
+                            pipelineConfigurationDto.PipelineRtEntityId, state, pipelineMessage);
+                    }
                 }
 
                 return;
             }
         }
+
         throw AdapterServiceException.AdapterNotLoaded(tenantId, adapterRtEntityId);
+    }
+
+    public async Task<DeploymentResultDto> GetPipelineDeploymentStateAsync(string tenantId, RtEntityId pipelineRtEntityId)
+    {
+        Logger.Info(
+            "[{TenantId}] GetPipelineDeploymentStateAsync PipelineRtEntityId='{PipelineRtEntityId}'",
+            tenantId, pipelineRtEntityId);
+
+        if (adapterCache.TryGetTenant(tenantId, out _))
+        {
+                var r = await communicationRepository.GetPipelineAsync(tenantId, pipelineRtEntityId);
+                if (r == null)
+                {
+                    throw AdapterServiceException.PipelineNotFound(tenantId, pipelineRtEntityId);
+                }
+
+                DeploymentState state;
+                switch (r.DeploymentState)
+                {
+                    case RtDeploymentStateEnum.Deployed:
+                        state = DeploymentState.Success;
+                        break;
+                    case RtDeploymentStateEnum.Undeployed:
+                    case RtDeploymentStateEnum.Pending:
+                        state = DeploymentState.Processing;
+                        break;
+                    case RtDeploymentStateEnum.Error:
+                        state = DeploymentState.Failed;
+                        break;
+                    default:
+                        throw AdapterServiceException.DeploymentStateNotSupported(r.DeploymentState);
+                }
+
+                return new DeploymentResultDto(r.ToRtEntityId(), state, r.StatusMessage);
+        }
+        throw AdapterServiceException.TenantNotEnabled(tenantId);
+    }
+
+    private static string? GeneratePipelineMessages(DeploymentResult deploymentResult,
+        PipelineConfigurationDto pipelineConfigurationDto)
+    {
+        var messages = deploymentResult.ErrorMessages?.Where(x =>
+                           x.PipelineRtEntityId == pipelineConfigurationDto.PipelineRtEntityId).ToList() ??
+                       new List<DeploymentUpdateErrorMessageDto>();
+
+        var message = messages.Any()
+            ? string.Join(Environment.NewLine, messages.Select(x => x.ErrorMessage))
+            : null;
+        return message;
+    }
+
+    private static string GenerateAdapterMessages(DeploymentResult deploymentResult)
+    {
+        var message = deploymentResult.ErrorMessages != null
+            ? string.Join(Environment.NewLine, deploymentResult.ErrorMessages.Select(x => $"{x.PipelineRtEntityId ?? "ADAPTER:"}: {x.ErrorMessage}"))
+            : CommunicationControllerTexts.DeploymentUnknownAdapterError;
+        return message;
     }
 
     private readonly SemaphoreSlim _semaphore = new(1, 1);

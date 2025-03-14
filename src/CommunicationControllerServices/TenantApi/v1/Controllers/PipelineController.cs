@@ -37,12 +37,48 @@ public class PipelineController : ControllerBase
         _triggerManagementService = triggerManagementService;
         _adapterService = adapterService;
     }
+
+    /// <summary>
+    /// Retrieves the deployment state of a pipeline
+    /// </summary>
+    /// <param name="pipelineRtEntityId">The id of the pipeline.</param>
+    /// <returns></returns>
+    [HttpGet("status")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetDeploymentState([Required][FromQuery] RtEntityId pipelineRtEntityId)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
+        }
+
+        try
+        {
+            var deploymentState = await _adapterService.GetPipelineDeploymentStateAsync(tenantId, pipelineRtEntityId);
+            return Ok(deploymentState);
+        }
+        catch (AdapterServiceException e)
+        {
+            _logger.LogError(e, "Pipeline deployment state retrieval failed (NotFound)");
+            return NotFound(new ErrorResponse { ErrorMessage = e.Message});
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Error during retrieval of pipeline deployment state");
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
+        }
+    }
     
     
     /// <summary>
     /// Deploys the pipeline definition at the corresponding adapter
     /// </summary>
-    /// <param name="adapterRtEntityId">The id of the adapter where the pipline should be executed.</param>
+    /// <param name="adapterRtEntityId">The id of the adapter where the pipeline should be executed.</param>
     /// <param name="pipelineRtEntityId">The id of the pipeline.</param>
     /// <returns></returns>
     [HttpPost("deploy")]

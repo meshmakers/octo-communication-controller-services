@@ -81,5 +81,11 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Resources {
                 return ResourceManager.GetString("Api_Description", resourceCulture);
             }
         }
+        
+        public static string DeploymentUnknownAdapterError {
+            get {
+                return ResourceManager.GetString("DeploymentUnknownAdapterError", resourceCulture);
+            }
+        }
     }
 }

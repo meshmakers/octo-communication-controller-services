@@ -36,4 +36,7 @@
     <data name="Api_Description" xml:space="preserve">
         <value>Communication Controller System and Tenant specific API to monitor and control adapters an their configuration.</value>
     </data>
+    <data name="DeploymentUnknownAdapterError" xml:space="preserve">
+        <value>The adapter reported incorrect deployment of the configuration, but no error information was provided. </value>
+    </data>
 </root>

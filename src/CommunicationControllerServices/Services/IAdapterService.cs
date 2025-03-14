@@ -95,9 +95,17 @@ public interface IAdapterService
     /// <summary>
     /// Updates the configuration state of an adapter
     /// </summary>
-    /// <param name="tenantId"></param>
-    /// <param name="adapterRtEntityId"></param>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="adapterRtEntityId">ID of the adapter</param>
     /// <param name="deploymentResult"></param>
     /// <returns></returns>
     Task UpdateConfigurationStateAsync(string tenantId, RtEntityId adapterRtEntityId, DeploymentResult deploymentResult);
+
+    /// <summary>
+    /// Gets the deployment state of a pipeline
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="pipelineRtEntityId">ID of the pipeline</param>
+    /// <returns></returns>
+    Task<DeploymentResultDto> GetPipelineDeploymentStateAsync(string tenantId, RtEntityId pipelineRtEntityId);
 }

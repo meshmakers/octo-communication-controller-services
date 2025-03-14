@@ -149,15 +149,15 @@ public class PipelineDebugController : ControllerBase
     /// </summary>
     /// <param name="pipelineRtEntityId">The pipeline entity object id</param>
     /// <param name="pipelineExecutionId">The pipeline execution id, that identifies the pipeline execution instance</param>
-    /// <param name="nodePath">The path of the node</param>
+    /// <param name="nodeId">ID of the node</param>
     /// <returns>List of Guids that represent executions</returns>
-    [HttpGet("{pipelineRtEntityId}/{pipelineExecutionId}/{nodePath}")]
+    [HttpGet("{pipelineRtEntityId}/{pipelineExecutionId}/{nodeId}")]
     [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> GetDebugPointAsync([Required] RtEntityId pipelineRtEntityId,
-        [Required] Guid pipelineExecutionId, [Required] NodePath nodePath)
+        [Required] Guid pipelineExecutionId, [Required] NodePath nodeId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
@@ -168,7 +168,7 @@ public class PipelineDebugController : ControllerBase
         try
         {
             var debugPointDto = await _pipelineDebugService.GetDebugPointDataAsync(tenantId, pipelineRtEntityId,
-                pipelineExecutionId, nodePath);
+                pipelineExecutionId, nodeId);
 
             return Ok(debugPointDto);
         }

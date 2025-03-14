@@ -127,7 +127,7 @@ internal class AdapterHub : Hub, IAdapterHub
     }
 
 
-    public async Task SendDeploymentResultAsync(RtEntityId adapterRtEntityId, DeploymentResult deploymentResult)
+    public async Task SendDeploymentUpdateResultAsync(RtEntityId adapterRtEntityId, DeploymentResult deploymentResult)
     {
         var tenantId = GetTenantId();
 
