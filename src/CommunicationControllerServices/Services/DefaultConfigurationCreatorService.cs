@@ -31,7 +31,7 @@ internal class DefaultConfigurationCreatorService(
     : DefaultConfigurationCreatorServiceStandardized(logger, systemContext, createIdentityDataCommandClient,
         Constants.CommunicationControllerServiceIdentityDataVersionKey,
         Constants.CommunicationControllerServiceIdentityDataVersionValue,
-        Constants.CommunicationControllerServiceSchemaVersionKey,
+        Constants.CommunicationControllerServiceSchemaVersionKey, false,
         Constants.CommunicationControllerServiceSchemaVersionValue)
 {
     public override async Task InitializeAsync()
