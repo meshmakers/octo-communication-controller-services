@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Common.DistributionEventHub.Consumers;
 using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
+using Meshmakers.Octo.Services.Infrastructure.Services;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 
