@@ -1,7 +1,8 @@
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using IdentityModel;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Meshmakers.Octo.Services.Infrastructure;
+using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
