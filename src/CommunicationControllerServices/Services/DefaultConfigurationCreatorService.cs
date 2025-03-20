@@ -29,10 +29,10 @@ internal class DefaultConfigurationCreatorService(
     IAdapterCachePublish adapterCachePublish,
     IAdapterService adapterService)
     : DefaultConfigurationCreatorServiceStandardized(logger, systemContext, createIdentityDataCommandClient,
-        Constants.CommunicationControllerServiceSchemaVersionKey,
-        Constants.CommunicationControllerServiceSchemaVersionValue,
         Constants.CommunicationControllerServiceIdentityDataVersionKey,
-        Constants.CommunicationControllerServiceIdentityDataVersionValue)
+        Constants.CommunicationControllerServiceIdentityDataVersionValue,
+        Constants.CommunicationControllerServiceSchemaVersionKey,
+        Constants.CommunicationControllerServiceSchemaVersionValue)
 {
     public override async Task InitializeAsync()
     {
