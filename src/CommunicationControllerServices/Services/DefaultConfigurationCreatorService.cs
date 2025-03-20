@@ -60,6 +60,11 @@ internal class DefaultConfigurationCreatorService(
     protected override async Task StartTenantAsync(string tenantId)
     {
         logger.LogInformation("Loading tenant '{TenantId}'", tenantId);
+        if (!await IsSchemaAvailableForTenant(tenantId))
+        {
+            logger.LogInformation("Schema not available for tenant '{TenantId}'", tenantId);
+            return;
+        }
 
         // try to load the configuration from the cache
         await adapterCachePublish.LoadConfigurationAsync(tenantId);
@@ -73,6 +78,11 @@ internal class DefaultConfigurationCreatorService(
     protected override async Task StopTenantAsync(string tenantId)
     {
         logger.LogInformation("Unloading tenant '{TenantId}'", tenantId);
+        if (!await IsSchemaAvailableForTenant(tenantId))
+        {
+            logger.LogInformation("Schema not available for tenant '{TenantId}'", tenantId);
+            return;
+        }
 
         await triggerManagementService.RemoveScheduleAsync(tenantId);
 
