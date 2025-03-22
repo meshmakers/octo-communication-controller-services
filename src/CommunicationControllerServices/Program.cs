@@ -17,15 +17,13 @@ using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Extensions;
-using Meshmakers.Octo.Services.Common;
-using Meshmakers.Octo.Services.Common.Cors;
-using Meshmakers.Octo.Services.Common.DistributionEventHub.Commands;
-using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
+using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Meshmakers.Octo.Services.Observability;
 using Meshmakers.Octo.Services.Swagger.Configuration;
 using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.IdentityModel.Tokens;
 using NLog;
 using NLog.Web;
@@ -71,7 +69,6 @@ try
     builder.Services
         .AddScopedMultipleInterfaces<DefaultConfigurationCreatorService, IDefaultConfigurationCreatorService,
             IConfigurationService>();
-    builder.Services.AddSingletonMultipleInterfaces<CorsPolicyProvider, ICorsPolicyProvider>();
     builder.Services.AddSingletonMultipleInterfaces<PoolHubCache, IPoolCache, IPoolCachePublish>();
     builder.Services.AddSingletonMultipleInterfaces<AdapterCache, IAdapterCache, IAdapterCachePublish>();
 
@@ -114,11 +111,7 @@ try
 
     builder.Services.AddCkModelSystemCommunication();
 
-    builder.Services.AddAuthentication(authenticationOptions =>
-        {
-            authenticationOptions.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-            authenticationOptions.DefaultChallengeScheme = BackendCommon.OidcAuthenticationScheme;
-        }).AddJwtBearer(jwt =>
+    builder.Services.AddAuthentication().AddJwtBearer(jwt =>
         {
             jwt.Audience = CommonConstants.CommunicationSystemApi;
             jwt.TokenValidationParameters = new TokenValidationParameters
@@ -133,20 +126,20 @@ try
     {
         options.AddPolicy(Constants.SystemCommunicationApiPolicy, authorizationPolicyBuilder =>
         {
-            authorizationPolicyBuilder.RequireClaim(BackendCommon.ClaimScope,
+            authorizationPolicyBuilder.RequireClaim(InfrastructureCommon.ClaimScope,
                 CommonConstants.CommunicationSystemApiFullAccess);
         });
 
         options.AddPolicy(Constants.TenantCommunicationApiReadWritePolicy, authorizationPolicyBuilder =>
         {
-            authorizationPolicyBuilder.RequireClaim(BackendCommon.ClaimScope,
+            authorizationPolicyBuilder.RequireClaim(InfrastructureCommon.ClaimScope,
                 CommonConstants.CommunicationTenantApiFullAccess);
         });
 
         options.AddPolicy(Constants.TenantCommunicationApiReadOnlyPolicy,
             authorizationPolicyBuilder =>
             {
-                authorizationPolicyBuilder.RequireClaim(BackendCommon.ClaimScope,
+                authorizationPolicyBuilder.RequireClaim(InfrastructureCommon.ClaimScope,
                     CommonConstants.CommunicationTenantApiFullAccess,
                     CommonConstants.CommunicationTenantApiReadOnly);
 

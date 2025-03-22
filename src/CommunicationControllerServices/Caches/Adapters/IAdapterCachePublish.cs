@@ -1,4 +1,4 @@
-using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 

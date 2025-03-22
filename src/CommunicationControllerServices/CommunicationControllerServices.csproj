@@ -33,7 +33,6 @@
 
     <ItemGroup>
         <ProjectReference Include="..\CommunicationControllerServices.Resources\CommunicationControllerServices.Resources.csproj" />
-        <ProjectReference Include="$(OctoCommonServicesPath)src\Common\Common.csproj" />
         <ProjectReference Include="$(OctoCommonServicesPath)src\Swagger\Swagger.csproj" />
         <ProjectReference Include="$(OctoCommonServicesPath)src\Infrastructure\Infrastructure.csproj" />
         <ProjectReference Include="$(OctoCommonServicesPath)src\Observability\Observability.csproj" />
