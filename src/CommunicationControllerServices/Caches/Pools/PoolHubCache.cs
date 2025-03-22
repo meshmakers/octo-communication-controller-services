@@ -1,8 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using Meshmakers.Common.Shared;
-using Meshmakers.Octo.Common.DistributionEventHub.Services;
-using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;

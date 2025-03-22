@@ -1,7 +1,5 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Common", "src\octo-common-services\src\Common\Common.csproj", "{81F09ECC-E5E9-4356-87BD-A7902064B37D}"
-EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "common-services", "common-services", "{A28575DB-337A-494E-A432-E0C678233190}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "octo-construction-kit", "octo-construction-kit", "{8C020542-E097-49CB-8E6C-C80A4E14027E}"
@@ -22,6 +20,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SystemCommunicationCkModel"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Observability", "src\octo-common-services\src\Observability\Observability.csproj", "{F0E9C133-90AC-47DD-A5AD-4E4A02D86186}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Contracts", "src\octo-common-services\src\Contracts\Contracts.csproj", "{DCAB0ABF-C000-40AD-AA39-AD08989AF775}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -29,12 +29,6 @@ Global
 		DebugL|Any CPU = DebugL|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{81F09ECC-E5E9-4356-87BD-A7902064B37D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{81F09ECC-E5E9-4356-87BD-A7902064B37D}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{81F09ECC-E5E9-4356-87BD-A7902064B37D}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{81F09ECC-E5E9-4356-87BD-A7902064B37D}.Release|Any CPU.Build.0 = Release|Any CPU
-		{81F09ECC-E5E9-4356-87BD-A7902064B37D}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
-		{81F09ECC-E5E9-4356-87BD-A7902064B37D}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
 		{3CC01DE2-F054-4006-B47C-3C5E67540CEF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{3CC01DE2-F054-4006-B47C-3C5E67540CEF}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3CC01DE2-F054-4006-B47C-3C5E67540CEF}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -83,13 +77,19 @@ Global
 		{F0E9C133-90AC-47DD-A5AD-4E4A02D86186}.Release|Any CPU.Build.0 = Release|Any CPU
 		{F0E9C133-90AC-47DD-A5AD-4E4A02D86186}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
 		{F0E9C133-90AC-47DD-A5AD-4E4A02D86186}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
+		{DCAB0ABF-C000-40AD-AA39-AD08989AF775}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DCAB0ABF-C000-40AD-AA39-AD08989AF775}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DCAB0ABF-C000-40AD-AA39-AD08989AF775}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DCAB0ABF-C000-40AD-AA39-AD08989AF775}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DCAB0ABF-C000-40AD-AA39-AD08989AF775}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
+		{DCAB0ABF-C000-40AD-AA39-AD08989AF775}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
-		{81F09ECC-E5E9-4356-87BD-A7902064B37D} = {A28575DB-337A-494E-A432-E0C678233190}
 		{3CC01DE2-F054-4006-B47C-3C5E67540CEF} = {A28575DB-337A-494E-A432-E0C678233190}
 		{B7B2AF08-5308-4CC1-82BD-9810E350E2B7} = {A28575DB-337A-494E-A432-E0C678233190}
 		{B49B3B2F-39B0-4A2C-90A1-C6DE0D9AD39A} = {8C020542-E097-49CB-8E6C-C80A4E14027E}
 		{E4D4366D-CF50-477C-B289-CDB369A49DDD} = {8C020542-E097-49CB-8E6C-C80A4E14027E}
 		{F0E9C133-90AC-47DD-A5AD-4E4A02D86186} = {A28575DB-337A-494E-A432-E0C678233190}
+		{DCAB0ABF-C000-40AD-AA39-AD08989AF775} = {A28575DB-337A-494E-A432-E0C678233190}
 	EndGlobalSection
 EndGlobal

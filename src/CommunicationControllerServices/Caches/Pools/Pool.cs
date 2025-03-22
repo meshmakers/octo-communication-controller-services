@@ -1,5 +1,5 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages.Payloads;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages.Payloads;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
 
