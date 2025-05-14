@@ -31,6 +31,7 @@ internal class DefaultConfigurationCreatorService(
     : DefaultConfigurationCreatorServiceStandardized(logger, systemContext, createIdentityDataCommandClient,
         Constants.CommunicationControllerServiceIdentityDataVersionKey,
         Constants.CommunicationControllerServiceIdentityDataVersionValue,
+        null, // we don't need migrations in this service
         Constants.CommunicationControllerServiceSchemaVersionKey, false,
         Constants.CommunicationControllerServiceSchemaVersionValue)
 {
