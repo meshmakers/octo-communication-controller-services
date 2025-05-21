@@ -322,6 +322,7 @@ internal class AdapterService(
                         {
                             state = RtDeploymentStateEnum.Error;
                         }
+
                         await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
                             pipelineConfigurationDto.PipelineRtEntityId, state, pipelineMessage);
                     }
@@ -334,7 +335,8 @@ internal class AdapterService(
         throw AdapterServiceException.AdapterNotLoaded(tenantId, adapterRtEntityId);
     }
 
-    public async Task<DeploymentResultDto> GetPipelineDeploymentStateAsync(string tenantId, RtEntityId pipelineRtEntityId)
+    public async Task<DeploymentResultDto> GetPipelineDeploymentStateAsync(string tenantId,
+        RtEntityId pipelineRtEntityId)
     {
         Logger.Info(
             "[{TenantId}] GetPipelineDeploymentStateAsync PipelineRtEntityId='{PipelineRtEntityId}'",
@@ -342,31 +344,32 @@ internal class AdapterService(
 
         if (adapterCache.TryGetTenant(tenantId, out _))
         {
-                var r = await communicationRepository.GetPipelineAsync(tenantId, pipelineRtEntityId);
-                if (r == null)
-                {
-                    throw AdapterServiceException.PipelineNotFound(tenantId, pipelineRtEntityId);
-                }
+            var r = await communicationRepository.GetPipelineAsync(tenantId, pipelineRtEntityId);
+            if (r == null)
+            {
+                throw AdapterServiceException.PipelineNotFound(tenantId, pipelineRtEntityId);
+            }
 
-                DeploymentState state;
-                switch (r.DeploymentState)
-                {
-                    case RtDeploymentStateEnum.Deployed:
-                        state = DeploymentState.Success;
-                        break;
-                    case RtDeploymentStateEnum.Undeployed:
-                    case RtDeploymentStateEnum.Pending:
-                        state = DeploymentState.Processing;
-                        break;
-                    case RtDeploymentStateEnum.Error:
-                        state = DeploymentState.Failed;
-                        break;
-                    default:
-                        throw AdapterServiceException.DeploymentStateNotSupported(r.DeploymentState);
-                }
+            DeploymentState state;
+            switch (r.DeploymentState)
+            {
+                case RtDeploymentStateEnum.Deployed:
+                    state = DeploymentState.Success;
+                    break;
+                case RtDeploymentStateEnum.Undeployed:
+                case RtDeploymentStateEnum.Pending:
+                    state = DeploymentState.Processing;
+                    break;
+                case RtDeploymentStateEnum.Error:
+                    state = DeploymentState.Failed;
+                    break;
+                default:
+                    throw AdapterServiceException.DeploymentStateNotSupported(r.DeploymentState);
+            }
 
-                return new DeploymentResultDto(r.ToRtEntityId(), state, r.StatusMessage);
+            return new DeploymentResultDto(r.ToRtEntityId(), state, r.StatusMessage);
         }
+
         throw AdapterServiceException.TenantNotEnabled(tenantId);
     }
 
@@ -386,7 +389,8 @@ internal class AdapterService(
     private static string GenerateAdapterMessages(DeploymentResult deploymentResult)
     {
         var message = deploymentResult.ErrorMessages != null
-            ? string.Join(Environment.NewLine, deploymentResult.ErrorMessages.Select(x => $"{x.PipelineRtEntityId ?? "ADAPTER:"}: {x.ErrorMessage}"))
+            ? string.Join(Environment.NewLine,
+                deploymentResult.ErrorMessages.Select(x => $"{x.PipelineRtEntityId ?? "ADAPTER:"}: {x.ErrorMessage}"))
             : CommunicationControllerTexts.DeploymentUnknownAdapterError;
         return message;
     }
