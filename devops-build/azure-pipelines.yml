@@ -70,9 +70,9 @@ stages:
           - template: build-and-push-docker-image.yml
             parameters:
               PublicRegistryServiceConnection: $(DockerRegistryPublicConnection)
-              PrivateRegistryName: meshmakers/octo-mesh-communication-controller-services
+              PrivateRegistryName: $(DockerRegistryPrivateUri)
+              Repository: meshmakers/octo-mesh-communication-controller-services
               Dockerfile: src/CommunicationControllerServices/Dockerfile
-              PrivateRegistry: $(DockerRegistryPrivateUri)
           - template: handle-artifacts.yml
             parameters:
               constructionKitLibraryPaths:
