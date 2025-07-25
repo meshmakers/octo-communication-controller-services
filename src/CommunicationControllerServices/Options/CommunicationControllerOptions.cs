@@ -20,7 +20,11 @@ public class CommunicationControllerOptions
         BrokerPort = 5672;
         BrokerUser = "guest";
         BrokerPassword = "guest";
-        MinLogLevel = LogLevelDto.Debug;
+#if DEBUGL || DEBUG
+        MinLogLevel = LogLevelDto.Trace;
+#else
+        MinLogLevel = LogLevelDto.Warn;
+#endif
     }
     
     /// <summary>
@@ -32,6 +36,11 @@ public class CommunicationControllerOptions
     ///     (Public) base address of the CAS (Central Authorization Services)
     /// </summary>
     public string AuthorityUrl { get; set; }
+
+    /// <summary>
+    ///     Gets or sets the prefix for the OctoMesh installation instance.
+    /// </summary>
+    public string? InstancePrefix { get; set; }
 
     /// <summary>
     /// Gets or sets the RabbitMQ broker host name
