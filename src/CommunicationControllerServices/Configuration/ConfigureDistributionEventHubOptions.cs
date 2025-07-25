@@ -18,6 +18,7 @@ internal class ConfigureDistributionEventHubOptions(
 
     public void Configure(string? name, DistributionEventHubOptions options)
     {
+        options.InstancePrefix = communicationControllerOptions.Value.InstancePrefix;
         options.BrokerHost = communicationControllerOptions.Value.BrokerHost;
         options.BrokerUser = communicationControllerOptions.Value.BrokerUser;
         options.BrokerPassword = communicationControllerOptions.Value.BrokerPassword;
