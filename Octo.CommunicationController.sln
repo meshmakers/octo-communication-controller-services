@@ -1,26 +1,10 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "common-services", "common-services", "{A28575DB-337A-494E-A432-E0C678233190}"
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "octo-construction-kit", "octo-construction-kit", "{8C020542-E097-49CB-8E6C-C80A4E14027E}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Swagger", "src\octo-common-services\src\Swagger\Swagger.csproj", "{3CC01DE2-F054-4006-B47C-3C5E67540CEF}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Infrastructure", "src\octo-common-services\src\Infrastructure\Infrastructure.csproj", "{B7B2AF08-5308-4CC1-82BD-9810E350E2B7}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CommunicationControllerServices.Resources", "src\CommunicationControllerServices.Resources\CommunicationControllerServices.Resources.csproj", "{F440E8E9-178A-4BF2-AF3E-B9542B1C8C0E}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CommunicationControllerServices", "src\CommunicationControllerServices\CommunicationControllerServices.csproj", "{12F8E0F3-B97F-466C-85AE-56D3220C644A}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Runtime.Contracts.MongoDb", "src\octo-common-services\src\octo-construction-kit-engine-mongodb\src\Runtime.Contracts.MongoDb\Runtime.Contracts.MongoDb.csproj", "{B49B3B2F-39B0-4A2C-90A1-C6DE0D9AD39A}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Runtime.Engine.MongoDb", "src\octo-common-services\src\octo-construction-kit-engine-mongodb\src\Runtime.Engine.MongoDb\Runtime.Engine.MongoDb.csproj", "{E4D4366D-CF50-477C-B289-CDB369A49DDD}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SystemCommunicationCkModel", "src\SystemCommunicationCkModel\SystemCommunicationCkModel.csproj", "{95D52C03-CF5D-463E-9B41-597A124903F5}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Observability", "src\octo-common-services\src\Observability\Observability.csproj", "{F0E9C133-90AC-47DD-A5AD-4E4A02D86186}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Contracts", "src\octo-common-services\src\Contracts\Contracts.csproj", "{DCAB0ABF-C000-40AD-AA39-AD08989AF775}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -29,18 +13,6 @@ Global
 		DebugL|Any CPU = DebugL|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{3CC01DE2-F054-4006-B47C-3C5E67540CEF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{3CC01DE2-F054-4006-B47C-3C5E67540CEF}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{3CC01DE2-F054-4006-B47C-3C5E67540CEF}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{3CC01DE2-F054-4006-B47C-3C5E67540CEF}.Release|Any CPU.Build.0 = Release|Any CPU
-		{3CC01DE2-F054-4006-B47C-3C5E67540CEF}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
-		{3CC01DE2-F054-4006-B47C-3C5E67540CEF}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
-		{B7B2AF08-5308-4CC1-82BD-9810E350E2B7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{B7B2AF08-5308-4CC1-82BD-9810E350E2B7}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{B7B2AF08-5308-4CC1-82BD-9810E350E2B7}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{B7B2AF08-5308-4CC1-82BD-9810E350E2B7}.Release|Any CPU.Build.0 = Release|Any CPU
-		{B7B2AF08-5308-4CC1-82BD-9810E350E2B7}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
-		{B7B2AF08-5308-4CC1-82BD-9810E350E2B7}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
 		{F440E8E9-178A-4BF2-AF3E-B9542B1C8C0E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{F440E8E9-178A-4BF2-AF3E-B9542B1C8C0E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F440E8E9-178A-4BF2-AF3E-B9542B1C8C0E}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -53,43 +25,13 @@ Global
 		{12F8E0F3-B97F-466C-85AE-56D3220C644A}.Release|Any CPU.Build.0 = Release|Any CPU
 		{12F8E0F3-B97F-466C-85AE-56D3220C644A}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
 		{12F8E0F3-B97F-466C-85AE-56D3220C644A}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
-		{B49B3B2F-39B0-4A2C-90A1-C6DE0D9AD39A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{B49B3B2F-39B0-4A2C-90A1-C6DE0D9AD39A}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{B49B3B2F-39B0-4A2C-90A1-C6DE0D9AD39A}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{B49B3B2F-39B0-4A2C-90A1-C6DE0D9AD39A}.Release|Any CPU.Build.0 = Release|Any CPU
-		{B49B3B2F-39B0-4A2C-90A1-C6DE0D9AD39A}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
-		{B49B3B2F-39B0-4A2C-90A1-C6DE0D9AD39A}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
-		{E4D4366D-CF50-477C-B289-CDB369A49DDD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{E4D4366D-CF50-477C-B289-CDB369A49DDD}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{E4D4366D-CF50-477C-B289-CDB369A49DDD}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{E4D4366D-CF50-477C-B289-CDB369A49DDD}.Release|Any CPU.Build.0 = Release|Any CPU
-		{E4D4366D-CF50-477C-B289-CDB369A49DDD}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
-		{E4D4366D-CF50-477C-B289-CDB369A49DDD}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
 		{95D52C03-CF5D-463E-9B41-597A124903F5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{95D52C03-CF5D-463E-9B41-597A124903F5}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{95D52C03-CF5D-463E-9B41-597A124903F5}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{95D52C03-CF5D-463E-9B41-597A124903F5}.Release|Any CPU.Build.0 = Release|Any CPU
 		{95D52C03-CF5D-463E-9B41-597A124903F5}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
 		{95D52C03-CF5D-463E-9B41-597A124903F5}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
-		{F0E9C133-90AC-47DD-A5AD-4E4A02D86186}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{F0E9C133-90AC-47DD-A5AD-4E4A02D86186}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{F0E9C133-90AC-47DD-A5AD-4E4A02D86186}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{F0E9C133-90AC-47DD-A5AD-4E4A02D86186}.Release|Any CPU.Build.0 = Release|Any CPU
-		{F0E9C133-90AC-47DD-A5AD-4E4A02D86186}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
-		{F0E9C133-90AC-47DD-A5AD-4E4A02D86186}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
-		{DCAB0ABF-C000-40AD-AA39-AD08989AF775}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{DCAB0ABF-C000-40AD-AA39-AD08989AF775}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{DCAB0ABF-C000-40AD-AA39-AD08989AF775}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{DCAB0ABF-C000-40AD-AA39-AD08989AF775}.Release|Any CPU.Build.0 = Release|Any CPU
-		{DCAB0ABF-C000-40AD-AA39-AD08989AF775}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
-		{DCAB0ABF-C000-40AD-AA39-AD08989AF775}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
-		{3CC01DE2-F054-4006-B47C-3C5E67540CEF} = {A28575DB-337A-494E-A432-E0C678233190}
-		{B7B2AF08-5308-4CC1-82BD-9810E350E2B7} = {A28575DB-337A-494E-A432-E0C678233190}
-		{B49B3B2F-39B0-4A2C-90A1-C6DE0D9AD39A} = {8C020542-E097-49CB-8E6C-C80A4E14027E}
-		{E4D4366D-CF50-477C-B289-CDB369A49DDD} = {8C020542-E097-49CB-8E6C-C80A4E14027E}
-		{F0E9C133-90AC-47DD-A5AD-4E4A02D86186} = {A28575DB-337A-494E-A432-E0C678233190}
-		{DCAB0ABF-C000-40AD-AA39-AD08989AF775} = {A28575DB-337A-494E-A432-E0C678233190}
 	EndGlobalSection
 EndGlobal
