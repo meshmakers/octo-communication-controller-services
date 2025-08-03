@@ -33,11 +33,12 @@
 
     <ItemGroup>
         <ProjectReference Include="..\CommunicationControllerServices.Resources\CommunicationControllerServices.Resources.csproj" />
-        <ProjectReference Include="$(OctoCommonServicesPath)src\Swagger\Swagger.csproj" />
-        <ProjectReference Include="$(OctoCommonServicesPath)src\Infrastructure\Infrastructure.csproj" />
-        <ProjectReference Include="$(OctoCommonServicesPath)src\Observability\Observability.csproj" />
+        <PackageReference Include="Meshmakers.Octo.Services.Swagger" Version="$(OctoVersion)" />
+        <PackageReference Include="Meshmakers.Octo.Services.Infrastructure" Version="$(OctoVersion)" />
+        <PackageReference Include="Meshmakers.Octo.Services.Observability" Version="$(OctoVersion)" />
+        <PackageReference Include="Meshmakers.Octo.Runtime.Engine.MongoDb" Version="$(OctoVersion)" />
+
         <ProjectReference Include="..\SystemCommunicationCkModel\SystemCommunicationCkModel.csproj" />
-        <ProjectReference Include="$(OctoConstructionKitPath)src\Runtime.Engine.MongoDb\Runtime.Engine.MongoDb.csproj" />
     </ItemGroup>
 
     <ItemGroup>
