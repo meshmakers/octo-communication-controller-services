@@ -614,7 +614,7 @@ internal class CommunicationRepository : ICommunicationRepository
             Dictionary<RtDataPipelineTrigger, IList<RtMeshPipeline>> list = new();
             foreach (var pipelineTrigger in r.Items)
             {
-                if (a.TryGetValue(pipelineTrigger.RtId, out var resultSet))
+                if (a.TryGetValue(pipelineTrigger.ToRtEntityId(), out var resultSet))
                 {
                     list.Add(pipelineTrigger, resultSet.Items.ToList());
                 }
