@@ -4,17 +4,17 @@ types:
     derivedFromCkTypeId: ${thisModel}/DeployableEntity
     isAbstract: true
     attributes:
-      - id: System/Enabled
+      - id: ${System}/Enabled
         name: Enabled 
       - id: ${thisModel}/PipelineDefinition
         name: PipelineDefinition
     associations:
-      - id: System/ParentChild
+      - id: ${System}/ParentChild
         targetCkTypeId: ${thisModel}/DataPipeline
       - id: ${thisModel}/Executes
         targetCkTypeId: ${thisModel}/Adapter
       - id: ${thisModel}/Uses
-        targetCkTypeId: System/Configuration        
+        targetCkTypeId: ${System}/Configuration        
   - typeId: EdgePipeline
     derivedFromCkTypeId: ${thisModel}/Pipeline
   - typeId: MeshPipeline

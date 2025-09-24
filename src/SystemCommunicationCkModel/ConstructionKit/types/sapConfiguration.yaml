@@ -1,7 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
   - typeId: SapConfiguration
-    derivedFromCkTypeId: System/Configuration
+    derivedFromCkTypeId: ${System}/Configuration
     isFinal: true
     description: 'The SAP configuration type is used to configure the connection to an SAP system.'
     attributes:
