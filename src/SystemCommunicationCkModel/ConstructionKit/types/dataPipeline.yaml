@@ -1,10 +1,10 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
   - typeId: DataPipeline
-    derivedFromCkTypeId: System/Entity
+    derivedFromCkTypeId: ${System}/Entity
     attributes:
-    - id: System/Name
+    - id: ${System}/Name
       name: Name
-    - id: System/Description
+    - id: ${System}/Description
       name: Description
       isOptional: true
