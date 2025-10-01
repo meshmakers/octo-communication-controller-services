@@ -35,6 +35,18 @@ internal class AdapterService(
                 adapter = adapterTenant.AddAdapter(adapterRtEntityId, connectionId, configuration);
                 await SetAdapterCommunicationStateOnlineAsync(tenantId, adapterRtEntityId, connectionId);
             }
+            else
+            {
+                Logger.Info("[{TenantId}] Adapter '{AdapterRtId}' found in cache, checking for updates",
+                    tenantId, adapterRtEntityId);
+                var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId);
+                if (!configuration.Equals(adapter.Configuration))
+                {
+                    adapterTenant.RemoveAdapter(adapterRtEntityId);
+                    adapter = adapterTenant.AddAdapter(adapterRtEntityId, connectionId, configuration);
+                    await SetAdapterCommunicationStateOnlineAsync(tenantId, adapterRtEntityId, connectionId);
+                }
+            }
 
             return adapter.Configuration;
         }
