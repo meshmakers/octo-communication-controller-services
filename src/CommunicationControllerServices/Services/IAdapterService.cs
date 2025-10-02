@@ -40,14 +40,16 @@ public interface IAdapterService
     /// <param name="connectionId">Identifier of connection</param>
     /// <returns></returns>
     Task UnregisterAsync(string tenantId, RtEntityId adapterRtEntityId, string connectionId);
-    
+
     /// <summary>
     /// Gets an adapter configuration for a given tenant and adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="adapterRtEntityId">Object Id of adapter</param>
+    /// <param name="onlyDeployedPipelines">Include only deployed pipelines</param>
     /// <returns></returns>
-    Task<AdapterConfigurationDto> GetAdapterConfigurationAsync(string tenantId, RtEntityId adapterRtEntityId);
+    Task<AdapterConfigurationDto> GetAdapterConfigurationAsync(string tenantId, RtEntityId adapterRtEntityId,
+        bool onlyDeployedPipelines = false);
 
     /// <summary>
     /// Sets an adapter online
