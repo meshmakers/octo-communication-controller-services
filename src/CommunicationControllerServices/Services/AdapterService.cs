@@ -31,7 +31,7 @@ internal class AdapterService(
             {
                 Logger.Info("[{TenantId}] Adapter '{AdapterRtId}' not found in cache, fetching from repository",
                     tenantId, adapterRtEntityId);
-                var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId);
+                var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId, true);
                 adapter = adapterTenant.AddAdapter(adapterRtEntityId, connectionId, configuration);
                 await SetAdapterCommunicationStateOnlineAsync(tenantId, adapterRtEntityId, connectionId);
             }
@@ -39,7 +39,7 @@ internal class AdapterService(
             {
                 Logger.Info("[{TenantId}] Adapter '{AdapterRtId}' found in cache, checking for updates",
                     tenantId, adapterRtEntityId);
-                var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId);
+                var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId, true);
                 if (!configuration.Equals(adapter.Configuration))
                 {
                     adapterTenant.RemoveAdapter(adapterRtEntityId);
@@ -78,7 +78,7 @@ internal class AdapterService(
     }
 
     public async Task<AdapterConfigurationDto> GetAdapterConfigurationAsync(string tenantId,
-        RtEntityId adapterRtEntityId)
+        RtEntityId adapterRtEntityId, bool onlyDeployedPipelines = false)
     {
         try
         {
@@ -120,7 +120,10 @@ internal class AdapterService(
                     rtPipeline.PipelineDefinition,
                     configurationsDto
                 );
-                pipelineConfigurations.Add(pipelineConfiguration);
+                if (!onlyDeployedPipelines || rtPipeline.DeploymentState == RtDeploymentStateEnum.Deployed)
+                {
+                    pipelineConfigurations.Add(pipelineConfiguration);
+                }
             }
 
             var adapterConfigurationDto = new AdapterConfigurationDto(
