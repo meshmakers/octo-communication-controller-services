@@ -338,16 +338,17 @@ internal class AdapterService(
                 {
                     if (adapterTenant.AdapterById.TryGetValue(rtAdapter.ToRtEntityId(), out var adapter))
                     {
+                        // Ensure adapter configuration is created only once per adapter
+                        if (!adapterConfigurations.TryGetValue(rtAdapter.ToRtEntityId(), out var adapterConfig))
+                        {
+                            adapterConfig = new AdapterConfigurationDto(rtAdapter.ToRtEntityId(),
+                                rtAdapter.Configuration,
+                                new List<PipelineConfigurationDto>());
+                            adapterConfigurations.Add(adapterConfig.AdapterRtEntityId, adapterConfig);
+                        }
+
                         foreach (var deployedPipelineConfigurationDto in adapter.Configuration.Pipelines)
                         {
-                            if (!adapterConfigurations.TryGetValue(rtAdapter.ToRtEntityId(), out var adapterConfig))
-                            {
-                                adapterConfig = new AdapterConfigurationDto(rtAdapter.ToRtEntityId(),
-                                    rtAdapter.Configuration,
-                                    new List<PipelineConfigurationDto>());
-                                adapterConfigurations.Add(adapterConfig.AdapterRtEntityId, adapterConfig);
-                            }
-
                             if (deployedPipelineConfigurationDto.DataPipelineRtId != dataPipelineRtId)
                             {
                                 adapterConfig.Pipelines.Add(deployedPipelineConfigurationDto);
