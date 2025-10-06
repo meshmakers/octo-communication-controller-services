@@ -49,7 +49,7 @@ public interface IAdapterService
     /// <param name="onlyDeployedPipelines">Include only deployed pipelines</param>
     /// <returns></returns>
     Task<AdapterConfigurationDto> GetAdapterConfigurationAsync(string tenantId, RtEntityId adapterRtEntityId,
-        bool onlyDeployedPipelines = false);
+        bool onlyDeployedPipelines);
 
     /// <summary>
     /// Sets an adapter online
@@ -67,7 +67,7 @@ public interface IAdapterService
     /// <param name="adapterRtEntityId">Object Id of adapter</param>
     /// <returns></returns>
     Task SetAdapterCommunicationStateOfflineAsync(string tenantId, RtEntityId adapterRtEntityId);
-    
+
     /// <summary>
     /// Deploys the db version  an adapter configuration
     /// </summary>
@@ -93,6 +93,14 @@ public interface IAdapterService
     /// <param name="dataPipelineRtId">Runtime id of data pipeline</param>
     /// <returns></returns>
     Task DeployDataPipelineAsync(string tenantId, OctoObjectId dataPipelineRtId);
+    
+    /// <summary>
+    /// Undeploys a data pipeline from its adapters
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="dataPipelineRtId">Runtime id of data pipeline</param>
+    /// <returns></returns>
+    Task UndeployDataPipelineAsync(string tenantId, OctoObjectId dataPipelineRtId);
 
     /// <summary>
     /// Updates the configuration state of an adapter

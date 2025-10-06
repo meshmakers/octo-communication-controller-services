@@ -75,7 +75,7 @@ public class AdapterController : ControllerBase
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
 
-        var config = await _adapterService.GetAdapterConfigurationAsync(tenantId, adapterRtEntityId);
+        var config = await _adapterService.GetAdapterConfigurationAsync(tenantId, adapterRtEntityId, false);
 
         return Ok(config);
     }

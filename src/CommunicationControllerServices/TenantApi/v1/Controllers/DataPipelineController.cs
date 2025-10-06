@@ -71,4 +71,42 @@ public class DataPipelineController : ControllerBase
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
         }
     }
+    
+    /// <summary>
+    /// Undeploys a data pipeline from its adapters
+    /// </summary>
+    /// <param name="dataPipelineRtId">The id of the data pipeline</param>
+    /// <returns></returns>
+    [HttpPost("undeploy")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> UndeployDataPipeline([Required][FromQuery] OctoObjectId dataPipelineRtId)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
+        }
+        
+        try
+        {
+            await _adapterService.UndeployDataPipelineAsync(tenantId, dataPipelineRtId);
+            return NoContent();
+        }
+        catch (AdapterHubCallbackException e)
+        {
+            return UnprocessableEntity(new ErrorResponse { ErrorMessage = e.Message});
+        }
+        catch (AdapterServiceException e)
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = e.Message});
+        }
+        catch (Exception e)
+        {
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
+        }
+    }
 }
