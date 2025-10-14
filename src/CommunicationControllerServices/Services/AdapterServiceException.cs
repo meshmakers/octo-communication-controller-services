@@ -1,5 +1,6 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v1;
+using MongoDB.Bson;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
@@ -75,5 +76,9 @@ internal class AdapterServiceException : Exception
     {
         return new AdapterServiceException($"Deployment state '{rDeploymentState}' is not supported.");
     }
+    
+    public static Exception DataPipelineAdapterNotFound(string tenantId, OctoObjectId dataPipelineRtId)
+    {
+        return new AdapterServiceException($"[{tenantId}] Data pipeline '{dataPipelineRtId}' has no adapter assigned.");
+    }
 }
-
