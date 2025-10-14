@@ -271,8 +271,12 @@ internal class AdapterService(
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
             var adapterConfigurations = new Dictionary<RtEntityId, AdapterConfigurationDto>();
-            foreach (var rtDeployPipeline in
-                     await communicationRepository.GetPipelinesAsync(tenantId, dataPipelineRtId))
+            var rtDeployPipelines = await communicationRepository.GetPipelinesAsync(tenantId, dataPipelineRtId);
+            if (!rtDeployPipelines.Any())
+            {
+                throw AdapterServiceException.DataPipelineAdapterNotFound(tenantId, dataPipelineRtId);
+            }
+            foreach (var rtDeployPipeline in rtDeployPipelines)
             {
                 var rtAdapter = await communicationRepository
                     .GetAdapterByPipelineAsync(tenantId, rtDeployPipeline.ToRtEntityId());
@@ -332,6 +336,11 @@ internal class AdapterService(
             var adapterConfigurations = new Dictionary<RtEntityId, AdapterConfigurationDto>();
 
             var pipelines = await communicationRepository.GetPipelinesAsync(tenantId, dataPipelineRtId);
+            if (!pipelines.Any())
+            {
+                throw AdapterServiceException.DataPipelineAdapterNotFound(tenantId, dataPipelineRtId);
+            }
+
             foreach (var rtUndeployPipeline in pipelines)
             {
                 var rtAdapter = await communicationRepository
