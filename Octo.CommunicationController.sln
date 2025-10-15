@@ -6,6 +6,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CommunicationControllerServ
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SystemCommunicationCkModel", "src\SystemCommunicationCkModel\SystemCommunicationCkModel.csproj", "{95D52C03-CF5D-463E-9B41-597A124903F5}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tests", "Tests", "{0E112844-E984-42B7-BF69-96172A272F33}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CommunicationControllerService.Tests", "tests\CommunicationControllerService.Tests\CommunicationControllerService.Tests.csproj", "{E4BC608A-5730-44C0-A8C4-199CCC771E0F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -31,7 +35,14 @@ Global
 		{95D52C03-CF5D-463E-9B41-597A124903F5}.Release|Any CPU.Build.0 = Release|Any CPU
 		{95D52C03-CF5D-463E-9B41-597A124903F5}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
 		{95D52C03-CF5D-463E-9B41-597A124903F5}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
+		{E4BC608A-5730-44C0-A8C4-199CCC771E0F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E4BC608A-5730-44C0-A8C4-199CCC771E0F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E4BC608A-5730-44C0-A8C4-199CCC771E0F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E4BC608A-5730-44C0-A8C4-199CCC771E0F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E4BC608A-5730-44C0-A8C4-199CCC771E0F}.DebugL|Any CPU.ActiveCfg = Debug|Any CPU
+		{E4BC608A-5730-44C0-A8C4-199CCC771E0F}.DebugL|Any CPU.Build.0 = Debug|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
+		{E4BC608A-5730-44C0-A8C4-199CCC771E0F} = {0E112844-E984-42B7-BF69-96172A272F33}
 	EndGlobalSection
 EndGlobal
