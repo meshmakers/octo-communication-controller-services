@@ -229,14 +229,14 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
         var configuration1 = new RtConfiguration
         {
             RtId = OctoObjectId.GenerateNewId(),
-            CkTypeId = new CkId<CkTypeId>(new CkModelId("System.Communication/Config"), new CkTypeId("1.0")),
+            CkTypeId = SystemCkIds.RtCkConfigurationTypeId,
             RtWellKnownName = "config1"
         };
 
         var configuration2 = new RtConfiguration
         {
             RtId = OctoObjectId.GenerateNewId(),
-            CkTypeId = new CkId<CkTypeId>(new CkModelId("System.Communication/Config"), new CkTypeId("1.0")),
+            CkTypeId = SystemCkIds.RtCkConfigurationTypeId,
             RtWellKnownName = "config2"
         };
 
