@@ -12,9 +12,8 @@ internal static class Constants
     private const string AdapterRtId = "adapter-rtId";
     private const string AdapterCkTypeId = "adapter-ckTypeId";
 
-    public const string CommunicationControllerServiceSchemaVersionKey = "CommunicationControllerServices";
-    public const int CommunicationControllerServiceSchemaVersionValue = 2;
-    
+    public const string CommunicationControllerServiceEnabledKey = "CommunicationControllerServicesEnabled";
+
     public const string CommunicationControllerServiceIdentityDataVersionKey = "CommunicationControllerServicesIdentityData";
     public const int CommunicationControllerServiceIdentityDataVersionValue = 2;
     
@@ -49,7 +48,7 @@ internal static class Constants
         var ckTypeId = (string?) httpContext.Request.Headers[AdapterCkTypeId];
         if (!string.IsNullOrWhiteSpace(rtId) && !string.IsNullOrWhiteSpace(ckTypeId))
         {
-            return new RtEntityId(new CkId<CkTypeId>(ckTypeId), new OctoObjectId(rtId));
+            return new RtEntityId(new RtCkId<CkTypeId>(ckTypeId), new OctoObjectId(rtId));
         }
 
         return null;

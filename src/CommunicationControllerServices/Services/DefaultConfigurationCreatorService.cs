@@ -32,8 +32,8 @@ internal class DefaultConfigurationCreatorService(
         Constants.CommunicationControllerServiceIdentityDataVersionKey,
         Constants.CommunicationControllerServiceIdentityDataVersionValue,
         null, // we don't need migrations in this service
-        Constants.CommunicationControllerServiceSchemaVersionKey, false,
-        Constants.CommunicationControllerServiceSchemaVersionValue)
+        Constants.CommunicationControllerServiceEnabledKey // the service can be enabled/disabled
+        )
 {
     public override async Task InitializeAsync()
     {
@@ -45,10 +45,10 @@ internal class DefaultConfigurationCreatorService(
 
     protected override async Task ImportCkModelAsync(IOctoAdminSession session, ITenantContext tenantContext)
     {
-        if (!await tenantContext.IsCkModelExistingAsync(SystemCommunicationCkIds.ModelId))
+        if (!await tenantContext.IsCkModelExistingAsync(SystemCommunicationCkIds.CkModelId))
         {
             OperationResult operationResult = new();
-            await tenantContext.ImportCkModelAsync(SystemCommunicationCkIds.ModelId, operationResult);
+            await tenantContext.ImportCkModelAsync(SystemCommunicationCkIds.CkModelId, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
             {
                 throw InitializationException.ImportCkModelFailed(tenantContext.TenantId,
@@ -61,7 +61,7 @@ internal class DefaultConfigurationCreatorService(
     protected override async Task StartTenantAsync(string tenantId)
     {
         logger.LogInformation("Loading tenant '{TenantId}'", tenantId);
-        if (!await IsSchemaAvailableForTenant(tenantId))
+        if (!await IsEnabledAsync(tenantId))
         {
             logger.LogInformation("Schema not available for tenant '{TenantId}'", tenantId);
             return;
@@ -79,11 +79,6 @@ internal class DefaultConfigurationCreatorService(
     protected override async Task StopTenantAsync(string tenantId)
     {
         logger.LogInformation("Unloading tenant '{TenantId}'", tenantId);
-        if (!await IsSchemaAvailableForTenant(tenantId))
-        {
-            logger.LogInformation("Schema not available for tenant '{TenantId}'", tenantId);
-            return;
-        }
 
         await triggerManagementService.RemoveScheduleAsync(tenantId);
 

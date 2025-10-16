@@ -527,7 +527,7 @@ internal class AdapterService(
     {
         var messages = deploymentResult.ErrorMessages?.Where(x =>
                            x.PipelineRtEntityId == pipelineConfigurationDto.PipelineRtEntityId).ToList() ??
-                       new List<DeploymentUpdateErrorMessageDto>();
+                       [];
 
         var message = messages.Any()
             ? string.Join(Environment.NewLine, messages.Select(x => x.ErrorMessage))

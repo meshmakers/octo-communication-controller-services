@@ -75,7 +75,7 @@ internal class PipelineDebugService : IPipelineDebugService
 
                 if (mergedResultsMap.TryGetValue(nodeId, out var debugPointNode))
                 {
-                    debugPointNode.Children ??= new List<DebugPointNode>();
+                    debugPointNode.Children ??= [];
                     debugPointNode.Children.Add(mergedResultsMap[fullPath]);
                 }
 

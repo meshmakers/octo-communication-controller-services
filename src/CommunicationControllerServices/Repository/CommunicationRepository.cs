@@ -34,7 +34,7 @@ internal class CommunicationRepository : ICommunicationRepository
             session.StartTransaction();
 
             var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPool, RtAdapter>(session,
-                [poolRtId], new CkId<CkAssociationRoleId>(SystemCommunicationCkIds.ModelId, SystemCommunicationCkIds.Manages),
+                [poolRtId] , SystemCommunicationCkIds.RtCkManagesRoleId,
                 GraphDirections.Inbound, null, DataQueryOperation.Create());
 
             if (!resultSet.Any())
@@ -117,7 +117,7 @@ internal class CommunicationRepository : ICommunicationRepository
             var multipleOriginResultSet =
                 await tenantRepository.GetRtAssociationTargetsAsync<RtPipeline, RtAdapter>(
                     session,
-                    new[] { pipelineRtEntityId.RtId }, new CkId<CkAssociationRoleId>(SystemCommunicationCkIds.ModelId, SystemCommunicationCkIds.Executes),
+                    [pipelineRtEntityId.RtId], SystemCommunicationCkIds.RtCkExecutesRoleId,
                     GraphDirections.Outbound, null, DataQueryOperation.Create());
 
             await session.CommitTransactionAsync();
@@ -387,7 +387,7 @@ internal class CommunicationRepository : ICommunicationRepository
 
             var poolResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtAdapter, RtPool>(session,
                 [adapterRtEntityId.RtId],
-                new CkId<CkAssociationRoleId>(SystemCommunicationCkIds.ModelId, SystemCommunicationCkIds.Manages),
+                SystemCommunicationCkIds.RtCkManagesRoleId,
                 GraphDirections.Inbound, null, DataQueryOperation.Create());
 
             await session.CommitTransactionAsync();
@@ -442,8 +442,8 @@ internal class CommunicationRepository : ICommunicationRepository
 
             var multipleOriginResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtAdapter, RtPipeline>(
                 session,
-                new[] { adapterRtEntityId.RtId },
-                new CkId<CkAssociationRoleId>(SystemCommunicationCkIds.ModelId, SystemCommunicationCkIds.Executes),
+                [adapterRtEntityId.RtId],
+                SystemCommunicationCkIds.RtCkExecutesRoleId,
                 GraphDirections.Inbound, null, DataQueryOperation.Create());
 
             await session.CommitTransactionAsync();
@@ -471,7 +471,8 @@ internal class CommunicationRepository : ICommunicationRepository
             session.StartTransaction();
 
             var originResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtDataPipeline, RtPipeline>(session,
-                new[] { dataPipelineRtId }, new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild),
+                [dataPipelineRtId],
+                SystemCkIds.RtCkParentChildRoleId,
                 GraphDirections.Inbound, null, DataQueryOperation.Create());
 
             await session.CommitTransactionAsync();
@@ -521,7 +522,8 @@ internal class CommunicationRepository : ICommunicationRepository
             var multipleOriginResultSet =
                 await tenantRepository.GetRtAssociationTargetsAsync<RtPipeline, RtDataPipeline>(
                     session,
-                    [pipelineRtId], new CkId<CkAssociationRoleId>(SystemCkIds.ModelId, SystemCkIds.ParentChild),
+                    [pipelineRtId],
+                    SystemCkIds.RtCkParentChildRoleId,
                     GraphDirections.Outbound, null, DataQueryOperation.Create());
 
             await session.CommitTransactionAsync();
@@ -551,7 +553,8 @@ internal class CommunicationRepository : ICommunicationRepository
             var multipleOriginResultSet =
                 await tenantRepository.GetRtAssociationTargetsAsync<RtPipeline, RtConfiguration>(
                     session,
-                    [pipelineRtId], new CkId<CkAssociationRoleId>(SystemCommunicationCkIds.ModelId, SystemCommunicationCkIds.Uses),
+                    [pipelineRtId],
+                    SystemCommunicationCkIds.RtCkUsesRoleId,
                     GraphDirections.Outbound, null, DataQueryOperation.Create());
 
             await session.CommitTransactionAsync();
@@ -605,11 +608,9 @@ internal class CommunicationRepository : ICommunicationRepository
             var r = await tenantRepository.GetRtEntitiesByTypeAsync<RtDataPipelineTrigger>(session, dataQueryOperation);
 
             dataQueryOperation = DataQueryOperation.Create();
-            var ckRoleId =
-                new CkId<CkAssociationRoleId>(SystemCommunicationCkIds.ModelId, SystemCommunicationCkIds.Triggers);
             var a = await tenantRepository.GetRtAssociationTargetsAsync<RtDataPipelineTrigger, RtMeshPipeline>(session,
                 r.Items.Select(x => x.RtId).ToList(),
-                ckRoleId, GraphDirections.Inbound, null, dataQueryOperation);
+                SystemCommunicationCkIds.RtCkTriggersRoleId, GraphDirections.Inbound, null, dataQueryOperation);
 
             Dictionary<RtDataPipelineTrigger, IList<RtMeshPipeline>> list = new();
             foreach (var pipelineTrigger in r.Items)
@@ -647,7 +648,7 @@ internal class CommunicationRepository : ICommunicationRepository
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtDataPipelineTrigger>>
             {
                 EntityUpdateInfo<RtDataPipelineTrigger>.CreateUpdate(
-                    new RtEntityId(SystemCommunicationCkIds.ModelId, SystemCommunicationCkIds.DataPipelineTriggerTypeId,
+                    new RtEntityId(SystemCommunicationCkIds.RtCkDataPipelineTriggerTypeId,
                         triggerRtId),
                     pipelineTrigger)
             };
