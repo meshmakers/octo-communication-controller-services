@@ -7,11 +7,11 @@ internal static class RtEntityCreator
 {
     public static RtDataPipeline CreateDataPipeline(string? id = null)
     {
-        id = id ?? OctoObjectId.GenerateNewId().ToString();
+        id ??= OctoObjectId.GenerateNewId().ToString();
         return new RtDataPipeline
         {
             RtId = new OctoObjectId(id),
-            CkTypeId = new CkId<CkTypeId>(new CkModelId("System.Communication/DataPipeline"), new CkTypeId("1.0"))
+            CkTypeId = SystemCommunicationCkIds.RtCkDataPipelineTypeId
         };
     }
 
@@ -21,7 +21,7 @@ internal static class RtEntityCreator
         return new RtPipeline
         {
             RtId = new OctoObjectId(id),
-            CkTypeId = new CkId<CkTypeId>(new CkModelId("System.Communication/MeshPipeline"), new CkTypeId("1.0")),
+            CkTypeId = SystemCommunicationCkIds.RtCkMeshPipelineTypeId,
             PipelineDefinition = pipelineDefinition ?? "pipelineDefinition",
             DeploymentState = RtDeploymentStateEnum.Deployed
         };
@@ -33,7 +33,7 @@ internal static class RtEntityCreator
         return new RtAdapter
         {
             RtId = new OctoObjectId(id),
-            CkTypeId = new CkId<CkTypeId>(new CkModelId("System.Communication/MeshAdapter"), new CkTypeId("1.0"))
+            CkTypeId = SystemCommunicationCkIds.RtCkMeshAdapterTypeId
         };
     }
 }
