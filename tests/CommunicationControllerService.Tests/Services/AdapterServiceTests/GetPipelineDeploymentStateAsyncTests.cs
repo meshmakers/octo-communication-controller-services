@@ -22,12 +22,10 @@ internal class GetPipelineDeploymentStateAsyncTests : AdapterServiceTestsBase
         var rtPipeline = RtEntityCreator.CreatePipeline();
 
         // Act & Assert
-        var exception = await Assert.That(async () =>
+        await Assert.That(async () =>
                 await AdapterService.GetPipelineDeploymentStateAsync("unknownTenant", rtPipeline.ToRtEntityId()))
-            .Throws<AdapterServiceException>();
-
-        await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.Message).Contains("Tenant not enabled");
+            .Throws<AdapterServiceException>()
+            .WithMessageContaining("Tenant not enabled");
     }
 
     [Test]
@@ -44,9 +42,8 @@ internal class GetPipelineDeploymentStateAsyncTests : AdapterServiceTestsBase
                 await AdapterService.GetPipelineDeploymentStateAsync(TenantId, rtPipeline.ToRtEntityId()))
             .Throws<AdapterServiceException>();
 
-        await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.Message).Contains("Pipeline")
-            .And.Contains("not found");
+         await Assert.That(exception).IsNotNull()
+             .And.Member(e => e.Message, msg => msg.Contains("Pipeline").And.Contains("not found"));
     }
 
     [Test]
@@ -67,10 +64,10 @@ internal class GetPipelineDeploymentStateAsyncTests : AdapterServiceTestsBase
         using var _ = Assert.Multiple();
 
         await Assert.That(result).IsNotNull()
-            .And.HasMember(r => r.PipelineRtEntityId).IsEqualTo(rtPipeline.ToRtEntityId());
+            .And.Member(r => r.PipelineRtEntityId, id => id.IsEqualTo(rtPipeline.ToRtEntityId()));
 
         await Assert.That(result).IsNotNull()
-            .And.HasMember(r => r.State).IsEqualTo(DeploymentState.Success);
+            .And.Member(r => r.State, state => state.IsEqualTo(DeploymentState.Success));
 
         await Assert.That(result.StateMessages).IsEqualTo("Successfully deployed");
     }
@@ -90,7 +87,7 @@ internal class GetPipelineDeploymentStateAsyncTests : AdapterServiceTestsBase
 
         // Assert
         await Assert.That(result).IsNotNull()
-            .And.HasMember(r => r.State).IsEqualTo(DeploymentState.Processing);
+            .And.Member(r => r.State, state => state.IsEqualTo(DeploymentState.Processing));
     }
 
     [Test]
@@ -108,7 +105,7 @@ internal class GetPipelineDeploymentStateAsyncTests : AdapterServiceTestsBase
 
         // Assert
         await Assert.That(result).IsNotNull()
-            .And.HasMember(r => r.State).IsEqualTo(DeploymentState.Processing);
+            .And.Member(r => r.State, state => state.IsEqualTo(DeploymentState.Processing));
     }
 
     [Test]
@@ -129,7 +126,7 @@ internal class GetPipelineDeploymentStateAsyncTests : AdapterServiceTestsBase
         using var _ = Assert.Multiple();
 
         await Assert.That(result).IsNotNull()
-            .And.HasMember(r => r.State).IsEqualTo(DeploymentState.Failed);
+            .And.Member(r => r.State, state => state.IsEqualTo(DeploymentState.Failed));
 
         await Assert.That(result.StateMessages).IsEqualTo("Deployment failed");
     }
@@ -150,8 +147,7 @@ internal class GetPipelineDeploymentStateAsyncTests : AdapterServiceTestsBase
             .Throws<AdapterServiceException>();
 
         await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.Message).Contains("Deployment state")
-            .And.Contains("not supported");
+            .And.Member(e => e.Message, msg => msg.Contains("Deployment state").And.Contains("not supported"));
     }
 
     [Test]
@@ -170,6 +166,6 @@ internal class GetPipelineDeploymentStateAsyncTests : AdapterServiceTestsBase
 
         // Assert
         await Assert.That(result).IsNotNull()
-            .And.HasMember(r => r.StateMessages).IsNull();
+            .And.Member(r => r.StateMessages, msg => msg.IsNull());
     }
 }
