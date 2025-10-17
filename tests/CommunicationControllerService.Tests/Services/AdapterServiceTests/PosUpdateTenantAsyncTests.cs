@@ -31,7 +31,7 @@ internal class PosUpdateTenantAsyncTests : AdapterServiceTestsBase
         using var _ = Assert.Multiple();
 
         await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.Message).Contains("Pos update tenant failed");
+            .And.Member(e => e.Message, msg => msg.Contains("Pos update tenant failed"));
 
         var innerEx = exception?.InnerException;
         await Assert.That(innerEx).IsNotNull()

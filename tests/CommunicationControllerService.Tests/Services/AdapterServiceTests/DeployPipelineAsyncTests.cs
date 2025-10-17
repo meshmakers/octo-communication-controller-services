@@ -30,8 +30,7 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
             .Throws<AdapterServiceException>();
 
         await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.Message).Contains("Adapter")
-            .And.Contains("not loaded");
+            .And.Member(e => e.Message, msg => msg.Contains("Adapter").And.Contains("not loaded"));
     }
 
     [Test]
@@ -47,8 +46,7 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
             .Throws<AdapterServiceException>();
 
         await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.Message).Contains("Adapter")
-            .And.Contains("not loaded");
+            .And.Member(e => e.Message, msg => msg.Contains("Adapter").And.Contains("not loaded"));
     }
 
     [Test]
@@ -73,8 +71,7 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
             .Throws<AdapterServiceException>();
 
         await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.Message).Contains("Pipeline")
-            .And.Contains("not found");
+            .And.Member(e => e.Message, msg => msg.Contains("Pipeline").And.Contains("not found"));
     }
 
     [Test]
@@ -101,8 +98,7 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
             .Throws<AdapterServiceException>();
 
         await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.Message).Contains("Data pipeline")
-            .And.Contains("not found");
+            .And.Member(e => e.Message, msg => msg.Contains("Data pipeline").And.Contains("not found"));
     }
 
     [Test]

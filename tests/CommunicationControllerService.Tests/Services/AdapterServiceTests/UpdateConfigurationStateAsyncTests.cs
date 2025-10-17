@@ -30,8 +30,7 @@ internal class UpdateConfigurationStateAsyncTests : AdapterServiceTestsBase
             .Throws<AdapterServiceException>();
 
         await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.Message).Contains("Adapter")
-            .And.Contains("not loaded");
+            .And.Member(e => e.Message, msg => msg.Contains("Adapter").And.Contains("not loaded"));
     }
 
     [Test]
@@ -47,8 +46,7 @@ internal class UpdateConfigurationStateAsyncTests : AdapterServiceTestsBase
             .Throws<AdapterServiceException>();
 
         await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.Message).Contains("Adapter")
-            .And.Contains("not loaded");
+            .And.Member(e => e.Message, msg => msg.Contains("Adapter").And.Contains("not loaded"));
     }
 
     [Test]

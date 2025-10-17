@@ -127,10 +127,10 @@ internal class PreUpdateTenantAsyncTests : AdapterServiceTestsBase
             .Throws<AdapterServiceException>();
 
         await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.Message).Contains("Pre update tenant failed");
+            .And.Member(e => e.Message, msg => msg.Contains("Pre update tenant failed"));
 
         await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.InnerException).IsEqualTo(expectedException);
+            .And.Member(e => e.InnerException, inner => inner.IsEqualTo(expectedException));
     }
 
     [Test]
@@ -157,7 +157,7 @@ internal class PreUpdateTenantAsyncTests : AdapterServiceTestsBase
         using var _ = Assert.Multiple();
 
         await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.Message).Contains("Pre update tenant failed");
+            .And.Member(e => e.Message, msg => msg.Contains("Pre update tenant failed"));
 
         var innerEx = exception?.InnerException;
         await Assert.That(innerEx).IsNotNull();
