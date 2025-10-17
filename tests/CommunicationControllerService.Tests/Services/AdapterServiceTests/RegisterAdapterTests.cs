@@ -200,11 +200,11 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
 
         var pipeline = configuration.Pipelines.FirstOrDefault(e => e.PipelineRtEntityId == rtPipeline.ToRtEntityId());
         await Assert.That(pipeline).IsNotNull()
-            .And.HasMember(e => e.NodeConfiguration).IsEqualTo(rtPipeline.PipelineDefinition);
-        
+            .And.Member(e => e.NodeConfiguration, config => config.IsEqualTo(rtPipeline.PipelineDefinition));
+
         pipeline = configuration.Pipelines.FirstOrDefault(e => e.PipelineRtEntityId == rtPipelineNew.ToRtEntityId());
         await Assert.That(pipeline).IsNotNull()
-            .And.HasMember(e => e.NodeConfiguration).IsEqualTo(rtPipelineNew.PipelineDefinition);
+            .And.Member(e => e.NodeConfiguration, config => config.IsEqualTo(rtPipelineNew.PipelineDefinition));
 
         await CommunicationRepository.Received(1).SetAdapterCommunicationStateAsync(TenantId,
             rtAdapter.ToRtEntityId(),

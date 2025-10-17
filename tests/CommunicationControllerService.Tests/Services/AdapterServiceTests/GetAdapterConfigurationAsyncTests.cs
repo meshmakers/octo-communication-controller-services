@@ -28,13 +28,13 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
             .Throws<AdapterServiceException>();
 
         await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.Message).Contains("Failed to load adapter");
+            .And.Member(e => e.Message, msg => msg.Contains("Failed to load adapter"));
 
         await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.InnerException).IsNotNull();
+            .And.Member(e => e.InnerException, inner => inner.IsNotNull());
 
         await Assert.That(exception!.InnerException).IsNotNull()
-            .And.HasMember(e => e!.Message).Contains("Tenant not enabled");
+            .And.Member(e => e!.Message, msg => msg.Contains("Tenant not enabled"));
     }
 
     [Test]
@@ -185,14 +185,13 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
             .Throws<AdapterServiceException>();
 
         await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.Message).Contains("Failed to load adapter");
+            .And.Member(e => e.Message, msg => msg.Contains("Failed to load adapter"));
 
         await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.InnerException).IsNotNull();
+            .And.Member(e => e.InnerException, inner => inner.IsNotNull());
 
         await Assert.That(exception!.InnerException).IsNotNull()
-            .And.HasMember(e => e!.Message).Contains("Data pipeline")
-            .And.Contains("not found");
+            .And.Member(e => e!.Message, msg => msg.Contains("Data pipeline").And.Contains("not found"));
     }
 
     [Test]
@@ -211,11 +210,10 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
             .Throws<AdapterServiceException>();
 
         await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.Message).Contains("Failed to load adapter")
-            .And.Contains("configuration");
+            .And.Member(e => e.Message, msg => msg.Contains("Failed to load adapter").And.Contains("configuration"));
 
         await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.InnerException).IsEqualTo(expectedException);
+            .And.Member(e => e.InnerException, inner => inner.IsEqualTo(expectedException));
     }
 
     [Test]

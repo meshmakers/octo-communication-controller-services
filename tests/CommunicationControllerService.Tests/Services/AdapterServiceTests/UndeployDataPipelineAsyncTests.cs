@@ -28,7 +28,7 @@ internal class UndeployDataPipelineAsyncTests : AdapterServiceTestsBase
             .Throws<AdapterServiceException>();
 
         await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.Message).Contains("Tenant not enabled");
+            .And.Member(e => e.Message, msg => msg.Contains("Tenant not enabled"));
     }
 
     [Test]
@@ -46,7 +46,7 @@ internal class UndeployDataPipelineAsyncTests : AdapterServiceTestsBase
             .Throws<AdapterServiceException>();
 
         await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.Message).Contains("has no adapter assigned");
+            .And.Member(e => e.Message, msg => msg.Contains("has no adapter assigned"));
     }
 
     [Test]
@@ -105,8 +105,7 @@ internal class UndeployDataPipelineAsyncTests : AdapterServiceTestsBase
             .Throws<AdapterServiceException>();
 
         await Assert.That(exception).IsNotNull()
-            .And.HasMember(e => e.Message).Contains("Adapter")
-            .And.Contains("not loaded");
+            .And.Member(e => e.Message, msg => msg.Contains("Adapter").And.Contains("not loaded"));
     }
 
     [Test]
