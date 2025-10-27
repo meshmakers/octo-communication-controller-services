@@ -85,6 +85,4 @@ stages:
             parameters:
               constructionKitLibraryPaths:
                 - 'src/SystemCommunicationCkModel/bin/$(buildConfiguration)/$(artifactsFrameworkVersion)/octo-ck-libraries/SystemCommunicationCkModel'
-
-   
-
+          - template: push-nuget-package.yml    
