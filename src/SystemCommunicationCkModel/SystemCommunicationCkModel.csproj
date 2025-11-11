@@ -8,7 +8,7 @@
         <RootNamespace>Meshmakers.Octo.ConstructionKit.Models.System.Communication</RootNamespace>
         <Configurations>Debug;Release;DebugL</Configurations>
         <Platforms>AnyCPU</Platforms>
-        <OctoPublishCkModel Condition="'$(TargetFramework)' == 'net9.0'">true</OctoPublishCkModel>
+        <OctoPublishCkModel Condition="'$(TargetFramework)' == 'net9.0' And $(OctoPublishCkModel) == ''">true</OctoPublishCkModel>
         <OctoGenerateCkDocumentation Condition="'$(TargetFramework)' == 'net9.0'">true</OctoGenerateCkDocumentation>
     </PropertyGroup>
 

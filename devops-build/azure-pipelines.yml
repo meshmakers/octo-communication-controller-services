@@ -64,7 +64,7 @@ stages:
             inputs:
               command: 'build'
               projects:  $(SolutionFile)
-              arguments: '--configuration $(BuildConfiguration) /p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCatalog="$(OctoPublishCatalog)" /p:OctoPrivateGitHubApiKey=$(GitHubPAT) /p:OctoPublicGitHubApiKey=$(GitHubPAT)'
+              arguments: '--configuration $(BuildConfiguration) /p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPrivateGitHubApiKey=$(GitHubPAT) /p:OctoPublicGitHubApiKey=$(GitHubPAT)'
               publishWebProjects: false
               zipAfterPublish: false
               modifyOutputPath: false
@@ -72,7 +72,7 @@ stages:
             displayName: 'Test'
             inputs:
               command: 'test'
-              arguments: '--configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer)'
+              arguments: '--configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false'
               projects: |
                 **/*Tests.csproj
                 !**/*SystemTests.csproj
