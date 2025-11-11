@@ -165,7 +165,7 @@ internal class GetPipelineDeploymentStateAsyncTests : AdapterServiceTestsBase
         var result = await AdapterService.GetPipelineDeploymentStateAsync(TenantId, rtPipeline.ToRtEntityId());
 
         // Assert
-        await Assert.That(result).IsNotNull()
-            .And.Member(r => r.StateMessages, msg => msg.IsNull());
+        await Assert.That(result).IsNotNull();
+        await Assert.That(result.StateMessages).IsNull();
     }
 }
