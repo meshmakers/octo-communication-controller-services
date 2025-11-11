@@ -30,9 +30,6 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
         await Assert.That(exception).IsNotNull()
             .And.Member(e => e.Message, msg => msg.Contains("Failed to load adapter"));
 
-        await Assert.That(exception).IsNotNull()
-            .And.Member(e => e.InnerException, inner => inner.IsNotNull());
-
         await Assert.That(exception!.InnerException).IsNotNull()
             .And.Member(e => e!.Message, msg => msg.Contains("Tenant not enabled"));
     }
@@ -186,9 +183,6 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
 
         await Assert.That(exception).IsNotNull()
             .And.Member(e => e.Message, msg => msg.Contains("Failed to load adapter"));
-
-        await Assert.That(exception).IsNotNull()
-            .And.Member(e => e.InnerException, inner => inner.IsNotNull());
 
         await Assert.That(exception!.InnerException).IsNotNull()
             .And.Member(e => e!.Message, msg => msg.Contains("Data pipeline").And.Contains("not found"));
