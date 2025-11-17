@@ -44,7 +44,7 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
         rtPipelineDeployed.DeploymentState = RtDeploymentStateEnum.Deployed;
 
         var rtPipelinePending = RtEntityCreator.CreatePipeline();
-        rtPipelinePending.DeploymentState = RtDeploymentStateEnum.Pending;
+        rtPipelinePending.DeploymentState = RtDeploymentStateEnum.Undeployed;
 
         CommunicationRepository.GetAdapterAsync(TenantId, rtAdapter.ToRtEntityId())
             .Returns(rtAdapter);
