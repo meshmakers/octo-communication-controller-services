@@ -106,7 +106,8 @@ internal class AdapterService(
                     throw AdapterServiceException.DataPipelineNotFound(tenantId, rtPipeline.ToRtEntityId());
                 }
 
-                if (!onlyDeployedPipelines || rtPipeline.DeploymentState == RtDeploymentStateEnum.Deployed)
+                if (!onlyDeployedPipelines || rtPipeline.DeploymentState == RtDeploymentStateEnum.Pending ||
+                    rtPipeline.DeploymentState == RtDeploymentStateEnum.Deployed)
                 {
                     pipelineConfigurations.Add(
                         await CreatePipelineConfigurationAsync(tenantId, dataPipeline.RtId, rtPipeline, false));
@@ -158,6 +159,11 @@ internal class AdapterService(
             {
                 adapterTenant.RemoveConnectionId(adapter.AdapterRtEntityId);
                 await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId, RtCommunicationStateEnum.Offline);
+                foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
+                {
+                    await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
+                        pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending, null);
+                }
             }
 
             return;
@@ -276,6 +282,7 @@ internal class AdapterService(
             {
                 throw AdapterServiceException.DataPipelineAdapterNotFound(tenantId, dataPipelineRtId);
             }
+
             foreach (var rtDeployPipeline in rtDeployPipelines)
             {
                 var rtAdapter = await communicationRepository
