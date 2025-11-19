@@ -2,9 +2,6 @@
 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
-        <TargetFramework>net9.0</TargetFramework>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
         <RootNamespace>Meshmakers.Octo.Backend.CommunicationControllerService.Tests</RootNamespace>
         <AssemblyName>Meshmakers.Octo.Backend.CommunicationControllerService.Tests</AssemblyName>
     </PropertyGroup>
@@ -15,7 +12,7 @@
         <PrivateAssets>all</PrivateAssets>
         <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       </PackageReference>
-      <PackageReference Include="TUnit" Version="1.0.48" />
+      <PackageReference Include="TUnit" Version="1.2.3" />
     </ItemGroup>
 
     <ItemGroup>
