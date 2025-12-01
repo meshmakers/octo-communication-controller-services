@@ -199,7 +199,7 @@ internal class PreUpdateTenantAsyncTests : AdapterServiceTestsBase
         await AdapterService.PreUpdateTenantAsync(TenantId);
 
         // Assert
-        await Assert.That(callOrder).HasCount().EqualTo(3);
+        await Assert.That(callOrder).Count().EqualTo(3);
         await Assert.That(callOrder[0]).IsEqualTo("PreUpdateTenantCallback");
         await Assert.That(callOrder[1]).IsEqualTo("RemoveTenant");
         await Assert.That(callOrder[2]).IsEqualTo("SetAdapterCommunicationState");

@@ -64,7 +64,7 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
         using var _ = Assert.Multiple();
 
         await Assert.That(configuration).IsNotNull();
-        await Assert.That(configuration.Pipelines).HasCount(1);
+        await Assert.That(configuration.Pipelines).Count().IsEqualTo(1);
         await Assert.That(configuration.Pipelines.First().PipelineRtEntityId).IsEqualTo(rtPipelineDeployed.ToRtEntityId());
     }
 
@@ -98,7 +98,7 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
         using var _ = Assert.Multiple();
 
         await Assert.That(configuration).IsNotNull();
-        await Assert.That(configuration.Pipelines).HasCount(2);
+        await Assert.That(configuration.Pipelines).Count().IsEqualTo(2);
 
         var deployedPipeline = configuration.Pipelines.FirstOrDefault(p => p.PipelineRtEntityId == rtPipelineDeployed.ToRtEntityId());
         await Assert.That(deployedPipeline).IsNotNull();
@@ -125,7 +125,7 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
         using var _ = Assert.Multiple();
 
         await Assert.That(configuration).IsNotNull();
-        await Assert.That(configuration.Pipelines).HasCount(0);
+        await Assert.That(configuration.Pipelines).Count().IsEqualTo(0);
         await Assert.That(configuration.AdapterRtEntityId).IsEqualTo(rtAdapter.ToRtEntityId());
     }
 
@@ -158,7 +158,7 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
         using var _ = Assert.Multiple();
 
         await Assert.That(configuration).IsNotNull();
-        await Assert.That(configuration.Pipelines).HasCount(1);
+        await Assert.That(configuration.Pipelines).Count().IsEqualTo(1);
         await Assert.That(configuration.Pipelines.First().PipelineRtEntityId).IsEqualTo(rtPipelineWithDefinition.ToRtEntityId());
     }
 
@@ -248,10 +248,10 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
         using var _ = Assert.Multiple();
 
         await Assert.That(configuration).IsNotNull();
-        await Assert.That(configuration.Pipelines).HasCount(1);
+        await Assert.That(configuration.Pipelines).Count().IsEqualTo(1);
 
         var pipeline = configuration.Pipelines.First();
-        await Assert.That(pipeline.Configurations).HasCount(2);
+        await Assert.That(pipeline.Configurations).Count().IsEqualTo(2);;
         await Assert.That(pipeline.Configurations.Select(c => c.ConfigurationRtId))
             .Contains(configuration1.RtId)
             .And.Contains(configuration2.RtId);

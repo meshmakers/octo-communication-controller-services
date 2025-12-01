@@ -143,8 +143,9 @@ internal class UpdateConfigurationStateAsyncTests : AdapterServiceTestsBase
 
         var errorMessages = new List<DeploymentUpdateErrorMessageDto>
         {
-            new DeploymentUpdateErrorMessageDto
+            new()
             {
+                ErrorCategory = DeploymentErrorCategories.Uncategorized,
                 PipelineRtEntityId = rtPipeline1.ToRtEntityId(),
                 ErrorMessage = "Pipeline 1 failed to deploy"
             }
@@ -194,13 +195,15 @@ internal class UpdateConfigurationStateAsyncTests : AdapterServiceTestsBase
 
         var errorMessages = new List<DeploymentUpdateErrorMessageDto>
         {
-            new DeploymentUpdateErrorMessageDto
+            new()
             {
+                ErrorCategory = DeploymentErrorCategories.Uncategorized,
                 PipelineRtEntityId = rtPipeline1.ToRtEntityId(),
                 ErrorMessage = "Error 1"
             },
-            new DeploymentUpdateErrorMessageDto
+            new()
             {
+                ErrorCategory = DeploymentErrorCategories.Uncategorized,
                 PipelineRtEntityId = rtPipeline2.ToRtEntityId(),
                 ErrorMessage = "Error 2"
             }
