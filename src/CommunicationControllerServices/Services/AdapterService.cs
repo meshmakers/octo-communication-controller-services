@@ -546,7 +546,7 @@ internal class AdapterService(
     {
         var message = deploymentResult.ErrorMessages != null
             ? string.Join(Environment.NewLine,
-                deploymentResult.ErrorMessages.Select(x => $"{x.PipelineRtEntityId ?? "ADAPTER:"}: {x.ErrorMessage}"))
+                deploymentResult.ErrorMessages.Select(x => $"{x.PipelineRtEntityId?.ToString() ?? "ADAPTER:"}: {x.ErrorMessage}"))
             : CommunicationControllerTexts.DeploymentUnknownAdapterError;
         return message;
     }
