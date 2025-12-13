@@ -51,8 +51,7 @@ internal class AdapterHealthChecks(IAdapterCache adapterCache, ISystemContext sy
 
     private bool IsUnhealthy(RtAdapter a)
     {
-        return a.CommunicationState != RtCommunicationStateEnum.Online ||
-            a.ConfigurationState != RtConfigurationStateEnum.Configured;
+        return a.ConfigurationState == RtConfigurationStateEnum.Error;
     }
 
     private void AddUnhealthyAdapter(
