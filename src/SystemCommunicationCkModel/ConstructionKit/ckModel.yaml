@@ -1,5 +1,5 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-meta.schema.json
 modelId: System.Communication
 dependencies:
-- "System-[1.0,)"
-- "System.Bot-[1.0,)"
+- "System-(,2.0)"
+- "System.Bot-(,2.0)"
