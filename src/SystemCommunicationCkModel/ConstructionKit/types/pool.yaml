@@ -1,13 +1,13 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
 - typeId: Pool
-  derivedFromCkTypeId: ${thisModel}/DeployableEntity
+  derivedFromCkTypeId: ${this}/DeployableEntity
   isFinal: true
   attributes:
-  - id: ${thisModel}/CommunicationStateTimestamp
+  - id: ${this}/CommunicationStateTimestamp
     name: CommunicationStateTimestamp
     isOptional: true
-  - id: ${thisModel}/CommunicationState
+  - id: ${this}/CommunicationState
     name: CommunicationState
-  - id: ${thisModel}/ConfigurationState
+  - id: ${this}/ConfigurationState
     name: ConfigurationState

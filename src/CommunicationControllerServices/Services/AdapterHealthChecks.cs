@@ -1,6 +1,6 @@
 ﻿using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v1;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
