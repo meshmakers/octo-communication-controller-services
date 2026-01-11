@@ -135,13 +135,11 @@ internal class AdapterService(
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
-            if (adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
-            {
-                adapterTenant.UpdateConnectionId(adapterRtEntityId, connectionId);
-                await SetAdapterCommunicationStateAsync(tenantId, adapter.AdapterRtEntityId,
-                    RtCommunicationStateEnum.Online);
-            }
+            adapterTenant.UpdateConnectionId(adapterRtEntityId, connectionId);
 
+            // Always update DB state, even if adapter is not in cache yet
+            await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId,
+                RtCommunicationStateEnum.Online);
             return;
         }
 
@@ -158,7 +156,6 @@ internal class AdapterService(
             if (adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
             {
                 adapterTenant.RemoveConnectionId(adapter.AdapterRtEntityId);
-                await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId, RtCommunicationStateEnum.Offline);
                 foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
                 {
                     await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
@@ -166,6 +163,8 @@ internal class AdapterService(
                 }
             }
 
+            // Always update DB state, even if adapter is not in cache yet
+            await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId, RtCommunicationStateEnum.Offline);
             return;
         }
 

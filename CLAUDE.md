@@ -106,9 +106,10 @@ docker build -f src/CommunicationControllerServices/Dockerfile -t octo-communica
 
 ## Testing Framework
 
-Tests use **TUnit** (not xUnit or NUnit) with **NSubstitute** for mocking. Test structure:
-- Base test classes define common setup (e.g., `AdapterServiceTestsBase`)
+Tests use **TUnit** (not xUnit or NUnit) with **NSubstitute** for mocking:
+- Base test classes define common setup and mocked dependencies (e.g., `AdapterServiceTestsBase`)
 - Test methods use `[Test]` attribute
+- Assertions use TUnit's `Assert.That()` fluent API
 - Mock setup uses NSubstitute's fluent API
 
 Example test structure:
@@ -118,11 +119,15 @@ public class MyTests : MyTestsBase
     [Test]
     public async Task ShouldDoSomething()
     {
-        // Arrange - setup in base class
+        // Arrange - mocks configured in base class
+        _mockRepository.GetAsync(Arg.Any<string>()).Returns(expectedResult);
+
         // Act
         var result = await _service.DoSomethingAsync();
+
         // Assert
-        result.Should()...
+        await Assert.That(result).IsNotNull();
+        await Assert.That(result.Value).IsEqualTo(expected);
     }
 }
 ```
@@ -164,7 +169,48 @@ Adapters and Pools track deployment state:
 
 ## Configuration Notes
 
-- `InternalsVisibleTo` configured for tests and DynamicProxy (line 52-53 in .csproj)
-- Target framework: .NET 9.0
+- `InternalsVisibleTo` configured for tests and DynamicProxy (for NSubstitute proxy generation)
+- Target framework: .NET 10.0
 - NLog configuration in `src/CommunicationControllerServices/nlog.config`
 - SignalR configured with 100MB max message size
+- Three build configurations: `Debug`, `Release`, `DebugL` (local development with version 999.0.0)
+
+## Exception Handling Pattern
+
+Services use a factory method pattern for exceptions with private constructors and static factory methods:
+
+```csharp
+// Wrong - don't throw generic exceptions
+throw new AdapterServiceException("Tenant not enabled");
+
+// Correct - use factory methods
+throw AdapterServiceException.TenantNotEnabled(tenantId);
+```
+
+Each service has a dedicated exception class: `AdapterServiceException`, `PoolServiceException`, `PipelineDebugServiceException`, `TriggerManagementServiceException`, `CommunicationRepositoryException`.
+
+## Cache Architecture
+
+Caches use a dual-interface pattern for separation of concerns:
+- **Read interface** (e.g., `IAdapterCache`): Query cached state
+- **Publish interface** (e.g., `IAdapterCachePublish`): Load and publish configuration changes
+
+Both interfaces are implemented by the same singleton, registered via:
+```csharp
+services.AddSingletonMultipleInterfaces<AdapterCache, IAdapterCache, IAdapterCachePublish>();
+```
+
+## HTTP Context Extensions
+
+Access tenant and adapter info from request context via extension methods in `Constants.cs`:
+- `HttpContext.GetTenantId()` - from route value
+- `HttpContext.GetPoolName()` - from "pool-name" header
+- `HttpContext.GetAdapterRtEntityId()` - constructs `RtEntityId` from "adapter-rtId" and "adapter-ckTypeId" headers
+
+## API Structure
+
+Controllers are split by scope:
+- **System API** (`SystemApi/v1/Controllers/`): System-level operations (enable/disable tenants)
+- **Tenant API** (`TenantApi/v1/Controllers/`): Tenant-scoped operations for adapters, pools, pipelines
+
+Routes follow pattern: `{tenantId:tenantId}/v{version:apiVersion}/[controller]`
