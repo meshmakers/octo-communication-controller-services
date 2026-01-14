@@ -31,7 +31,9 @@ internal class DefaultConfigurationCreatorService(
     : DefaultConfigurationCreatorServiceStandardized(logger, systemContext, createIdentityDataCommandClient,
         Constants.CommunicationControllerServiceIdentityDataVersionKey,
         Constants.CommunicationControllerServiceIdentityDataVersionValue,
-        null, // we don't need migrations in this service
+        null, // migrationService - we don't need migrations in this service
+        null, // ckModelUpgradeService - we don't need CK model migrations in this service
+        null, // runtimeRepositoryProvider - not needed without CK model migrations
         Constants.CommunicationControllerServiceEnabledKey // the service can be enabled/disabled
         )
 {
