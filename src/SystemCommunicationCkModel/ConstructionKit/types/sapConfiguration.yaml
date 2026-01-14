@@ -5,33 +5,33 @@ types:
     isFinal: true
     description: 'The SAP configuration type is used to configure the connection to an SAP system.'
     attributes:
-      - id: ${thisModel}/Host
+      - id: ${this}/Host
         name: AppServerHost
-      - id: ${thisModel}/SystemNumber
+      - id: ${this}/SystemNumber
         name: SystemNumber
-      - id: ${thisModel}/SystemId
+      - id: ${this}/SystemId
         name: SystemId       
         isOptional: true
-      - id: ${thisModel}/Username
+      - id: ${this}/Username
         name: User
-      - id: ${thisModel}/Password
+      - id: ${this}/Password
         name: Password
-      - id: ${thisModel}/SapClient
+      - id: ${this}/SapClient
         name: Client
-      - id: ${thisModel}/SapLanguage
+      - id: ${this}/SapLanguage
         name: Language
-      - id: ${thisModel}/SapTrace
+      - id: ${this}/SapTrace
         name: Trace
-      - id: ${thisModel}/SapGatewayHost
+      - id: ${this}/SapGatewayHost
         name: GatewayHost
         isOptional: true
-      - id: ${thisModel}/SapGatewayService
+      - id: ${this}/SapGatewayService
         name: GatewayService
         isOptional: true
-      - id: ${thisModel}/SapProgramId
+      - id: ${this}/SapProgramId
         name: ProgramId
         isOptional: true
-      - id: ${thisModel}/SapRegistrationCount
+      - id: ${this}/SapRegistrationCount
         name: RegistrationCount
         isOptional: true
           

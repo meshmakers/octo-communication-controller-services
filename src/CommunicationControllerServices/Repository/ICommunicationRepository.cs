@@ -1,6 +1,6 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v1;
-using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v1;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 

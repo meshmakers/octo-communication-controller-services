@@ -8,17 +8,17 @@ attributes:
   valueType: String
 - id: CommunicationState
   valueType: Enum
-  valueCkEnumId: System.Communication/CommunicationState
+  valueCkEnumId: ${this}/CommunicationState
   defaultValues:
     - 0
 - id: ConfigurationState
   valueType: Enum
-  valueCkEnumId: System.Communication/ConfigurationState 
+  valueCkEnumId: ${this}/ConfigurationState
   defaultValues:
     - 0
 - id: DeploymentState
   valueType: Enum
-  valueCkEnumId: System.Communication/DeploymentState
+  valueCkEnumId: ${this}/DeploymentState
   defaultValues:
     - 0
 - id: AdapterConfiguration

@@ -4,16 +4,16 @@ types:
     derivedFromCkTypeId: ${System}/Configuration
     isFinal: true
     attributes:
-      - id: ${thisModel}/Host
+      - id: ${this}/Host
         name: Host
-      - id: ${thisModel}/Port
+      - id: ${this}/Port
         name: Port
-      - id: ${thisModel}/SenderEmail
+      - id: ${this}/SenderEmail
         name: SenderEmail
         isOptional: true
-      - id: ${thisModel}/Username
+      - id: ${this}/Username
         name: Username
-      - id: ${thisModel}/Password
+      - id: ${this}/Password
         name: Password  
-      - id: ${thisModel}/IsSslEnabled
+      - id: ${this}/IsSslEnabled
         name: IsSslEnabled

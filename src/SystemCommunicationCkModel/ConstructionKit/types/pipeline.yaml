@@ -1,24 +1,24 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
   - typeId: Pipeline
-    derivedFromCkTypeId: ${thisModel}/DeployableEntity
+    derivedFromCkTypeId: ${this}/DeployableEntity
     isAbstract: true
     attributes:
       - id: ${System}/Enabled
         name: Enabled 
-      - id: ${thisModel}/PipelineDefinition
+      - id: ${this}/PipelineDefinition
         name: PipelineDefinition
     associations:
       - id: ${System}/ParentChild
-        targetCkTypeId: ${thisModel}/DataPipeline
-      - id: ${thisModel}/Executes
-        targetCkTypeId: ${thisModel}/Adapter
-      - id: ${thisModel}/Uses
+        targetCkTypeId: ${this}/DataPipeline
+      - id: ${this}/Executes
+        targetCkTypeId: ${this}/Adapter
+      - id: ${this}/Uses
         targetCkTypeId: ${System}/Configuration        
   - typeId: EdgePipeline
-    derivedFromCkTypeId: ${thisModel}/Pipeline
+    derivedFromCkTypeId: ${this}/Pipeline
   - typeId: MeshPipeline
-    derivedFromCkTypeId: ${thisModel}/Pipeline
+    derivedFromCkTypeId: ${this}/Pipeline
     associations:
-    - id: ${thisModel}/Triggers
-      targetCkTypeId: ${thisModel}/DataPipelineTrigger
+    - id: ${this}/Triggers
+      targetCkTypeId: ${this}/DataPipelineTrigger
