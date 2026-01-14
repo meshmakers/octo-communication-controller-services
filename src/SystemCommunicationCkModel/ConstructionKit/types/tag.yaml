@@ -4,11 +4,11 @@ types:
   derivedFromCkTypeId: ${System}/Entity
   isAbstract: false
   attributes:
-  - id: ${thisModel}/Tag
+  - id: ${this}/Tag
     name: Tag
-  - id: ${thisModel}/Name
+  - id: ${this}/Name
     name: Name
     isOptional: true
   associations:
-    - id: ${thisModel}/Tag
+    - id: ${this}/Tag
       targetCkTypeId: ${System}/Entity

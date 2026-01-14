@@ -6,7 +6,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Resources;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v1;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
@@ -31,7 +31,9 @@ internal class DefaultConfigurationCreatorService(
     : DefaultConfigurationCreatorServiceStandardized(logger, systemContext, createIdentityDataCommandClient,
         Constants.CommunicationControllerServiceIdentityDataVersionKey,
         Constants.CommunicationControllerServiceIdentityDataVersionValue,
-        null, // we don't need migrations in this service
+        null, // migrationService - we don't need migrations in this service
+        null, // ckModelUpgradeService - we don't need CK model migrations in this service
+        null, // runtimeRepositoryProvider - not needed without CK model migrations
         Constants.CommunicationControllerServiceEnabledKey // the service can be enabled/disabled
         )
 {
