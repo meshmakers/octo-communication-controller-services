@@ -30,7 +30,7 @@ internal class SetAdapterCommunicationStateTests : AdapterServiceTestsBase
     }
 
     [Test]
-    public async Task SetAdapterCommunicationStateOnlineAsync_AdapterNotInCache_DoesNotThrow()
+    public async Task SetAdapterCommunicationStateOnlineAsync_AdapterNotInCache_StillUpdatesDbState()
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
@@ -38,9 +38,10 @@ internal class SetAdapterCommunicationStateTests : AdapterServiceTestsBase
         // Act - should not throw
         await AdapterService.SetAdapterCommunicationStateOnlineAsync(TenantId, rtAdapter.ToRtEntityId(), ConnectionId);
 
-        // Assert - no repository calls should be made
-        await CommunicationRepository.DidNotReceiveWithAnyArgs()
-            .SetAdapterCommunicationStateAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<RtCommunicationStateEnum>());
+        // Assert - DB state should always be updated, even if adapter is not in cache
+        // This ensures the DB reflects the correct state after service restarts or cache misses
+        await CommunicationRepository.Received(1)
+            .SetAdapterCommunicationStateAsync(TenantId, rtAdapter.ToRtEntityId(), RtCommunicationStateEnum.Online);
     }
 
     [Test]
@@ -93,7 +94,7 @@ internal class SetAdapterCommunicationStateTests : AdapterServiceTestsBase
     }
 
     [Test]
-    public async Task SetAdapterCommunicationStateOfflineAsync_AdapterNotInCache_DoesNotThrow()
+    public async Task SetAdapterCommunicationStateOfflineAsync_AdapterNotInCache_StillUpdatesDbState()
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
@@ -101,9 +102,10 @@ internal class SetAdapterCommunicationStateTests : AdapterServiceTestsBase
         // Act - should not throw
         await AdapterService.SetAdapterCommunicationStateOfflineAsync(TenantId, rtAdapter.ToRtEntityId());
 
-        // Assert - no repository calls should be made
-        await CommunicationRepository.DidNotReceiveWithAnyArgs()
-            .SetAdapterCommunicationStateAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<RtCommunicationStateEnum>());
+        // Assert - DB state should always be updated, even if adapter is not in cache
+        // This ensures the DB reflects the correct state after service restarts or cache misses
+        await CommunicationRepository.Received(1)
+            .SetAdapterCommunicationStateAsync(TenantId, rtAdapter.ToRtEntityId(), RtCommunicationStateEnum.Offline);
     }
 
     [Test]
