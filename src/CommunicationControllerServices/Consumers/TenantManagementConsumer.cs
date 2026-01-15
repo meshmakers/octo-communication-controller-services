@@ -16,6 +16,7 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
     private readonly IPoolService _poolService;
     private readonly IAdapterService _adapterService;
     private readonly IConfigurationService _configurationService;
+    private readonly ICommunicationEventService _eventService;
     private readonly ConcurrentDictionary<Guid, bool> _receivedPreUpdateTenant = new();
 
     /// <summary>
@@ -25,13 +26,16 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
     /// <param name="poolService"></param>
     /// <param name="adapterService"></param>
     /// <param name="configurationService"></param>
+    /// <param name="eventService"></param>
     public TenantManagementConsumer(ILogger<TenantManagementConsumer> logger, IPoolService poolService,
-        IAdapterService adapterService, IConfigurationService configurationService)
+        IAdapterService adapterService, IConfigurationService configurationService,
+        ICommunicationEventService eventService)
     {
         _logger = logger;
         _poolService = poolService;
         _adapterService = adapterService;
         _configurationService = configurationService;
+        _eventService = eventService;
     }
 
 
@@ -64,6 +68,8 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
         catch (Exception e)
         {
             _logger.LogError(e, "Pre update tenant failed: {TenantId}", context.Message.TenantId);
+            await _eventService.StoreErrorEventAsync(context.Message.TenantId,
+                $"Pre-update tenant failed: {e.Message}");
         }
         finally
         {
@@ -100,6 +106,8 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
         catch (Exception e)
         {
             _logger.LogError(e, "Pos update tenant failed: {TenantId}", context.Message.TenantId);
+            await _eventService.StoreErrorEventAsync(context.Message.TenantId,
+                $"Post-update tenant failed: {e.Message}");
         }
         finally
         {
@@ -124,6 +132,8 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
         catch (Exception e)
         {
             _logger.LogError(e, "Pre delete tenant failed: {TenantId}", context.Message.TenantId);
+            await _eventService.StoreErrorEventAsync(context.Message.TenantId,
+                $"Pre-delete tenant failed: {e.Message}");
         }
         finally
         {

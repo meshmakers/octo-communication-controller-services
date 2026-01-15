@@ -23,7 +23,7 @@ This is the **Octo Communication Controller Services** - an ASP.NET Core web ser
 
 The service follows a layered architecture:
 - **Hubs Layer** (`src/CommunicationControllerServices/Hubs/`) - SignalR hubs for real-time communication
-- **Service Layer** (`src/CommunicationControllerServices/Services/`) - Core business logic (`AdapterService`, `PoolService`, `PipelineDebugService`, `TriggerManagementService`)
+- **Service Layer** (`src/CommunicationControllerServices/Services/`) - Core business logic (`AdapterService`, `PoolService`, `PipelineDebugService`, `TriggerManagementService`, `CommunicationEventService`)
 - **Repository Layer** (`src/CommunicationControllerServices/Repository/`) - Data access via MongoDB Runtime Engine
 - **Cache Layer** (`src/CommunicationControllerServices/Caches/`) - In-memory state synchronized across nodes via hub callbacks
 - **Consumers** (`src/CommunicationControllerServices/Consumers/`) - Message bus event consumers for tenant lifecycle management
@@ -47,6 +47,51 @@ All operations are tenant-scoped. Routes use a custom `tenantId` constraint. The
 - Version controlled via `$(OctoVersion)` in `Directory.Build.props`
 - MongoDB for persistence (via Octo Runtime Engine MongoDb)
 - RabbitMQ for messaging (via Octo Infrastructure DistributionEventHub)
+
+### System Events
+
+The service uses the Octo Notification system to log important business events for auditing and monitoring. Events are stored per-tenant in MongoDB.
+
+**Event Service Architecture:**
+- `ICommunicationEventService` / `CommunicationEventService` - Helper service that handles scoped `IEventRepository` access for singleton services
+- Events use `RtEventSourcesEnum.CommunicationService` as the source identifier
+
+**Logged Events:**
+
+| Component | Event | Level | Description |
+|-----------|-------|-------|-------------|
+| Service Startup | Service started | Information | Logged on application start |
+| AdapterService | Adapter registered | Information | Adapter connected and registered |
+| AdapterService | Adapter unregistered | Information | Adapter disconnected |
+| AdapterService | Adapter online/offline | Information | Adapter connection state changed |
+| AdapterService | Configuration deployed | Information | Pipeline configuration sent to adapter |
+| AdapterService | Configuration failed | Error | Adapter deployment failed with errors |
+| AdapterService | Data pipeline deployed/undeployed | Information | Pipeline deployment to adapters |
+| AdapterService | Tenant pre/post-update | Information | Tenant lifecycle events |
+| PoolService | Pool operator registered/unregistered | Information | Pool operator connection state |
+| PoolService | Adapter deployed/undeployed to pool | Information | Adapter assignment to pools |
+| PoolService | Tenant pre/post-update | Information | Tenant lifecycle events |
+| TriggerManagementService | Pipeline execution started | Information | Manual pipeline trigger |
+| TriggerManagementService | Pipeline execution failed | Error | Pipeline execution errors |
+| TriggerManagementService | Trigger schedule updated | Information | Scheduled triggers updated |
+| TenantManagementConsumer | Tenant update failed | Error | Errors during tenant lifecycle |
+| Hubs | Operation failed | Error | Hub operation errors |
+
+**Usage in Services:**
+```csharp
+// Inject ICommunicationEventService in singleton services
+public class MyService(ICommunicationEventService eventService)
+{
+    public async Task DoSomethingAsync(string tenantId)
+    {
+        // Store information event
+        await eventService.StoreInformationEventAsync(tenantId, "Operation completed.");
+
+        // Store error event
+        await eventService.StoreErrorEventAsync(tenantId, $"Operation failed: {error}");
+    }
+}
+```
 
 ## Development Commands
 
@@ -130,6 +175,12 @@ public class MyTests : MyTestsBase
         await Assert.That(result.Value).IsEqualTo(expected);
     }
 }
+```
+
+**Mocking System Events:**
+When testing services that use `ICommunicationEventService`, create a mock in the test base class:
+```csharp
+protected readonly ICommunicationEventService CommunicationEventService = Substitute.For<ICommunicationEventService>();
 ```
 
 ## Important Patterns

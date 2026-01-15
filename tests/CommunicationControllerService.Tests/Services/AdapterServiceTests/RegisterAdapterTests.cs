@@ -44,7 +44,8 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
         await Assert.That(pipeline.PipelineRtEntityId).IsEqualTo(rtPipeline.ToRtEntityId());
         await Assert.That(pipeline.NodeConfiguration).IsEqualTo(rtPipeline.PipelineDefinition);
 
-        await CommunicationRepository.Received(1).SetAdapterCommunicationStateAsync(TenantId,
+        // Note: Online state is set in OnConnectedAsync, not in RegisterAdapterAsync
+        await CommunicationRepository.DidNotReceiveWithAnyArgs().SetAdapterCommunicationStateAsync(TenantId,
             rtAdapter.ToRtEntityId(),
             RtCommunicationStateEnum.Online);
     }
@@ -125,11 +126,12 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
         await Assert.That(pipeline.PipelineRtEntityId).IsEqualTo(rtPipeline.ToRtEntityId());
         await Assert.That(pipeline.NodeConfiguration).IsEqualTo(rtPipeline.PipelineDefinition);
 
-        await CommunicationRepository.Received(1).SetAdapterCommunicationStateAsync(TenantId,
+        // Note: Online state is set in OnConnectedAsync, not in RegisterAdapterAsync
+        await CommunicationRepository.DidNotReceiveWithAnyArgs().SetAdapterCommunicationStateAsync(TenantId,
             rtAdapter.ToRtEntityId(),
             RtCommunicationStateEnum.Online);
     }
-    
+
     [Test]
     public async Task RegisterAdapter_Removed_All_Pipelines()
     {
@@ -161,11 +163,12 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
         await Assert.That(configuration).IsNotNull();
         await Assert.That(configuration.Pipelines).Count().IsEqualTo(0);
 
-        await CommunicationRepository.Received(1).SetAdapterCommunicationStateAsync(TenantId,
+        // Note: Online state is set in OnConnectedAsync, not in RegisterAdapterAsync
+        await CommunicationRepository.DidNotReceiveWithAnyArgs().SetAdapterCommunicationStateAsync(TenantId,
             rtAdapter.ToRtEntityId(),
             RtCommunicationStateEnum.Online);
     }
-    
+
     [Test]
     public async Task RegisterAdapter_Add_Pipeline()
     {
@@ -206,7 +209,8 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
         await Assert.That(pipeline).IsNotNull()
             .And.Member(e => e.NodeConfiguration, config => config.IsEqualTo(rtPipelineNew.PipelineDefinition));
 
-        await CommunicationRepository.Received(1).SetAdapterCommunicationStateAsync(TenantId,
+        // Note: Online state is set in OnConnectedAsync, not in RegisterAdapterAsync
+        await CommunicationRepository.DidNotReceiveWithAnyArgs().SetAdapterCommunicationStateAsync(TenantId,
             rtAdapter.ToRtEntityId(),
             RtCommunicationStateEnum.Online);
     }

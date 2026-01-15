@@ -15,14 +15,17 @@ public class PoolHub : Hub, IPoolHub
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly IPoolService _poolService;
+    private readonly ICommunicationEventService _eventService;
 
     /// <summary>
     /// Constructor
     /// </summary>
     /// <param name="poolService">The responsible pool service</param>
-    public PoolHub(IPoolService poolService)
+    /// <param name="eventService">Service for storing system events</param>
+    public PoolHub(IPoolService poolService, ICommunicationEventService eventService)
     {
         _poolService = poolService;
+        _eventService = eventService;
     }
 
     /// <inheritdoc />
@@ -86,6 +89,8 @@ public class PoolHub : Hub, IPoolHub
         catch (Exception e)
         {
             Logger.Error(e, "Cannot register pool operator");
+            await _eventService.StoreErrorEventAsync(tenantId,
+                $"Failed to register pool operator for pool '{poolName}': {e.Message}");
             throw;
         }
     }
@@ -102,6 +107,8 @@ public class PoolHub : Hub, IPoolHub
         catch (Exception e)
         {
             Logger.Error(e, "Cannot unregister pool operator");
+            await _eventService.StoreErrorEventAsync(tenantId,
+                $"Failed to unregister pool operator for pool '{poolName}': {e.Message}");
             throw;
         }
     }
@@ -119,6 +126,8 @@ public class PoolHub : Hub, IPoolHub
         catch (Exception e)
         {
             Logger.Error(e, "Cannot update adapter deployment state");
+            await _eventService.StoreErrorEventAsync(tenantId,
+                $"Failed to update adapter deployment state for adapter '{adapterRtEntityId}' in pool '{poolName}': {e.Message}");
             throw;
         }
     }

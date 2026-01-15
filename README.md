@@ -14,6 +14,7 @@ ASP.NET Core web service for managing communication adapters and pools in the Oc
 - [Development](#development)
 - [Testing](#testing)
 - [Deployment](#deployment)
+- [System Events](#system-events)
 
 ## Overview
 
@@ -234,6 +235,25 @@ public interface IPipelineDebugService
     Task<IReadOnlyCollection<DebugHistory>> GetDebugHistoryAsync(string tenantId);
 }
 ```
+
+#### CommunicationEventService
+
+System event logging for auditing and monitoring:
+
+```csharp
+public interface ICommunicationEventService
+{
+    Task StoreEventAsync(string tenantId, RtEventLevelsEnum level, string message);
+    Task StoreInformationEventAsync(string tenantId, string message);
+    Task StoreWarningEventAsync(string tenantId, string message);
+    Task StoreErrorEventAsync(string tenantId, string message);
+    void StoreSystemInformationEvent(string message);
+    void StoreSystemWarningEvent(string message);
+    void StoreSystemErrorEvent(string message);
+}
+```
+
+This service wraps `IEventRepository` from `Meshmakers.Octo.Services.Notifications` to handle scoped lifetime requirements for singleton services.
 
 ### Caches
 
@@ -550,9 +570,98 @@ The service supports horizontal scaling with:
 | `Meshmakers.Octo.Runtime.Engine.MongoDb` | MongoDB abstraction |
 | `Meshmakers.Octo.Services.Infrastructure` | Shared infrastructure |
 | `Meshmakers.Octo.Services.Swagger` | OpenAPI/Swagger support |
+| `Meshmakers.Octo.Services.Notifications` | System event logging |
 | `Meshmakers.Octo.Infrastructure.DistributionEventHub` | RabbitMQ messaging |
 
 Octo package versions are centrally managed via `$(OctoVersion)` in `Directory.Build.props`.
+
+## System Events
+
+The service logs important business events for auditing and monitoring using the Octo Notification system.
+
+### Event Architecture
+
+Events are stored per-tenant in MongoDB via `IEventRepository`. The service uses `ICommunicationEventService` as a wrapper to handle scoped lifetime requirements for singleton services.
+
+```csharp
+// Registration in Program.cs
+builder.Services.AddOctoNotification();
+builder.Services.AddSingleton<ICommunicationEventService, CommunicationEventService>();
+
+// Service start event
+app.Lifetime.ApplicationStarted.Register(() =>
+{
+    var eventRepository = app.Services.GetRequiredService<IEventRepository>();
+    eventRepository.StoreSystemInformationEvent(RtEventSourcesEnum.CommunicationService,
+        "Communication Controller Services started.");
+});
+```
+
+### Logged Events
+
+| Component | Event | Level | Trigger |
+|-----------|-------|-------|---------|
+| **Service Startup** | Service started | Information | Application start |
+| **AdapterService** | Adapter registered | Information | Adapter connects and registers |
+| | Adapter unregistered | Information | Adapter disconnects |
+| | Adapter online | Information | SignalR connection established |
+| | Adapter offline | Information | SignalR connection lost |
+| | Configuration deployed | Information | Pipeline config sent to adapter |
+| | Configuration failed | Error | Adapter reports deployment error |
+| | Data pipeline deployed | Information | Pipeline deployed to adapters |
+| | Data pipeline undeployed | Information | Pipeline removed from adapters |
+| | Tenant pre-update | Information | Before tenant config reload |
+| | Tenant post-update | Information | After tenant config reload |
+| **PoolService** | Pool operator registered | Information | Pool operator connects |
+| | Pool operator unregistered | Information | Pool operator disconnects |
+| | Adapter deployed to pool | Information | Adapter assigned to pool |
+| | Adapter undeployed from pool | Information | Adapter removed from pool |
+| | Tenant pre-update | Information | Before tenant config reload |
+| | Tenant post-update | Information | After tenant config reload |
+| **TriggerManagementService** | Pipeline execution started | Information | Manual pipeline trigger |
+| | Pipeline execution failed | Error | Pipeline execution error |
+| | Trigger schedule updated | Information | Scheduled triggers updated |
+| | Trigger schedule update failed | Error | Schedule update error |
+| **TenantManagementConsumer** | Pre-update failed | Error | Error during pre-update |
+| | Post-update failed | Error | Error during post-update |
+| | Pre-delete failed | Error | Error during pre-delete |
+| **Hubs** | Registration failed | Error | Hub operation error |
+| | Debug data cache failed | Error | Error caching debug data |
+| | Deployment update failed | Error | Error updating deployment result |
+
+### Usage Example
+
+```csharp
+// In a singleton service
+internal class MyService(ICommunicationEventService eventService)
+{
+    public async Task DoOperationAsync(string tenantId)
+    {
+        try
+        {
+            // ... perform operation ...
+
+            await eventService.StoreInformationEventAsync(tenantId,
+                "Operation completed successfully.");
+        }
+        catch (Exception e)
+        {
+            await eventService.StoreErrorEventAsync(tenantId,
+                $"Operation failed: {e.Message}");
+            throw;
+        }
+    }
+}
+```
+
+### Event Levels
+
+| Level | Usage |
+|-------|-------|
+| `Information` | Normal operations, state changes, successful completions |
+| `Warning` | Recoverable issues, deprecated operations |
+| `Error` | Failed operations, exceptions |
+| `Critical` | System-level failures (not currently used) |
 
 ## License
 
