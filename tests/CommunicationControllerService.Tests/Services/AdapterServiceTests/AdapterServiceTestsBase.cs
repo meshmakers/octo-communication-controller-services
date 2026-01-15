@@ -18,6 +18,7 @@ internal abstract class AdapterServiceTestsBase
     protected readonly IAdapterCache AdapterCache;
     protected readonly ICommunicationRepository CommunicationRepository;
     protected readonly IAdapterCachePublish AdapterCachePublish;
+    protected readonly ICommunicationEventService CommunicationEventService;
     protected readonly AdapterTenant AdapterTenant;
 
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
@@ -27,9 +28,10 @@ internal abstract class AdapterServiceTestsBase
         AdapterCache = Substitute.For<IAdapterCache>();
         CommunicationRepository = Substitute.For<ICommunicationRepository>();
         AdapterCachePublish = Substitute.For<IAdapterCachePublish>();
-        AdapterService = new AdapterService(CommunicationRepository, AdapterCache, AdapterHubCallbacks);
+        CommunicationEventService = Substitute.For<ICommunicationEventService>();
+        AdapterService = new AdapterService(CommunicationRepository, AdapterCache, AdapterHubCallbacks, CommunicationEventService);
         AdapterTenant = new AdapterTenant(AdapterCachePublish, TenantId);
-        
+
         InitAdapterCache();
     }
     

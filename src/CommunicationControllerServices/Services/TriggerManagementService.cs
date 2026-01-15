@@ -14,7 +14,8 @@ internal class TriggerManagementService(
     ICommunicationRepository communicationRepository,
     ICommandClient<RemoveRecurringJobsByScheduleGroupRequest> removeRecurringJobsByScheduleGroupCommandClient,
     IRoutedCommandClient<ExecuteMeshPipelineRequest> executeMeshPipelineCommandClient,
-    IDistributionEventHubService distributionEventHubService)
+    IDistributionEventHubService distributionEventHubService,
+    ICommunicationEventService eventService)
     : ITriggerManagementService
 {
     public async Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId,
@@ -38,6 +39,10 @@ internal class TriggerManagementService(
                     logger.LogInformation(
                         "[{TenantId}] Start execution of pipeline '{DataPipelineRtId}' (ExecutionId {PipelineExecutionId}) successful",
                         tenantId, dataPipelineRtId, r.PipelineExecutionId);
+
+                    await eventService.StoreInformationEventAsync(tenantId,
+                        $"Pipeline '{dataPipelineRtId}' execution started (ExecutionId: {r.PipelineExecutionId}).");
+
                     return new PipelineExecutionDataDto
                                { Id = r.PipelineExecutionId.Value, DateTime = r.ExecutionStartTime.Value } ??
                            throw TriggerManagementServiceException.ExecutePipelineExecutionIdNull(tenantId,
@@ -50,9 +55,13 @@ internal class TriggerManagementService(
         }
         catch (Exception e)
         {
+            await eventService.StoreErrorEventAsync(tenantId,
+                $"Pipeline '{dataPipelineRtId}' execution failed: {e.Message}");
             throw TriggerManagementServiceException.ExecutePipelineExecutionErrorFailed(tenantId, dataPipelineRtId, e);
         }
 
+        await eventService.StoreErrorEventAsync(tenantId,
+            $"Pipeline '{dataPipelineRtId}' execution failed: {r.ErrorMessage}");
         logger.LogError("[{TenantId}] Execution of pipeline '{DataPipelineRtId}' failed: {ErrorMessage}"
             , tenantId, dataPipelineRtId, r.ErrorMessage);
         throw TriggerManagementServiceException.ExecutePipelineFailed(tenantId, dataPipelineRtId, r.ErrorMessage);
@@ -128,9 +137,14 @@ internal class TriggerManagementService(
                     throw;
                 }
             }
+
+            await eventService.StoreInformationEventAsync(tenantId,
+                $"Trigger schedule updated with {pipelineTriggerKeyValues.Count} trigger(s).");
         }
         catch (Exception e)
         {
+            await eventService.StoreErrorEventAsync(tenantId,
+                $"Trigger schedule update failed: {e.Message}");
             throw TriggerManagementServiceException.UpdateScheduleFailed(tenantId, e);
         }
 

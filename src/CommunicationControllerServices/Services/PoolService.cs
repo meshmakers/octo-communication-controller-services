@@ -15,19 +15,22 @@ internal class PoolService : IPoolService
     private readonly ICommunicationRepository _communicationRepository;
     private readonly IPoolCache _poolCache;
     private readonly IPoolHubCallbacks _poolHubCallbacks;
-    
+    private readonly ICommunicationEventService _eventService;
+
     /// <summary>
     /// Constructor
     /// </summary>
     /// <param name="communicationRepository">Communication repository</param>
     /// <param name="poolCache">Distributed and synchronized data between nodes</param>
     /// <param name="poolHubCallbacks">Callbacks to inform client of configuration changes</param>
+    /// <param name="eventService">Service for storing system events</param>
     public PoolService(ICommunicationRepository communicationRepository, IPoolCache poolCache,
-        IPoolHubCallbacks poolHubCallbacks)
+        IPoolHubCallbacks poolHubCallbacks, ICommunicationEventService eventService)
     {
         _communicationRepository = communicationRepository;
         _poolCache = poolCache;
         _poolHubCallbacks = poolHubCallbacks;
+        _eventService = eventService;
     }
     
     /// <inheritdoc />
@@ -74,6 +77,10 @@ internal class PoolService : IPoolService
         await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolDescription.PoolRtId,
             RtDeploymentStateEnum.Deployed);
 
+        await _eventService.StoreInformationEventAsync(tenantId,
+            $"Pool operator for pool '{poolName}' registered with connection id '{connectionId}'.",
+            new RtEntityId(SystemCommunicationCkIds.RtCkPoolTypeId, poolDescription.PoolRtId));
+
         Logger.Info("[{TenantId}] Operator for pool '{PoolName}' registered",
             tenantId, poolName);
         return poolDescription.PoolRtId;
@@ -93,6 +100,10 @@ internal class PoolService : IPoolService
 
                 await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolDescription.PoolRtId,
                     RtDeploymentStateEnum.Pending);
+
+                await _eventService.StoreInformationEventAsync(tenantId,
+                    $"Pool operator for pool '{poolName}' unregistered.",
+                    new RtEntityId(SystemCommunicationCkIds.RtCkPoolTypeId, poolDescription.PoolRtId));
 
                 Logger.Info("[{TenantId}] Operator for pool '{PoolName}' unregistered",
                     tenantId, poolName);
@@ -164,6 +175,9 @@ internal class PoolService : IPoolService
                     await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, pool.PoolRtId,
                         RtCommunicationStateEnum.Unregistered);
                 }
+
+                await _eventService.StoreInformationEventAsync(tenantId,
+                    $"Tenant pre-update completed. {poolTenant.PoolsByName.Count} pool(s) disconnected.");
             }
         }
         catch (Exception e)
@@ -183,15 +197,18 @@ internal class PoolService : IPoolService
         try
         {
             await _semaphore.WaitAsync();
-            
+
             _poolCache.AddOrUpdateTenant(tenantId);
-            
+
             var pools = await _communicationRepository.GetPoolsAsync(tenantId);
             foreach (var pool in pools)
             {
                 await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, pool.RtId,
                     RtCommunicationStateEnum.Unregistered);
             }
+
+            await _eventService.StoreInformationEventAsync(tenantId,
+                "Tenant post-update completed. Pool cache re-initialized.");
         }
         catch (Exception e)
         {
@@ -285,6 +302,9 @@ internal class PoolService : IPoolService
 
             poolTenant.AddAdapter(new Adapter(adapterRtEntityId, poolRtId, adapterDto));
 
+            await _eventService.StoreInformationEventAsync(tenantId,
+                $"Adapter '{adapterRtEntityId}' deployed to pool '{poolDescription.PoolName}'.", adapterRtEntityId);
+
             Logger.Info("[{TenantId}] Adapter '{AdapterRtEntityId}' deployed", tenantId, adapterRtEntityId);
             return;
         }
@@ -309,6 +329,9 @@ internal class PoolService : IPoolService
             await _poolHubCallbacks.UndeployCommunicationAdapterAsync(tenantId, adapterDescription.AdapterDto);
 
             poolTenant.RemoveAdapter(adapterRtEntityId);
+
+            await _eventService.StoreInformationEventAsync(tenantId,
+                $"Adapter '{adapterRtEntityId}' undeployed from pool.", adapterRtEntityId);
 
             Logger.Info("[{TenantId}] Adapter '{AdapterRtEntityId}' undeployed", tenantId, adapterRtEntityId);
             return;

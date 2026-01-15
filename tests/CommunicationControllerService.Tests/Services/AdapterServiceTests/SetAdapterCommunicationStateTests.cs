@@ -45,13 +45,53 @@ internal class SetAdapterCommunicationStateTests : AdapterServiceTestsBase
     }
 
     [Test]
-    public async Task SetAdapterCommunicationStateOnlineAsync_AdapterInCache_SetsOnlineAndUpdatesConnection()
+    public async Task SetAdapterCommunicationStateOnlineAsync_AdapterInCacheWithoutConnection_LogsOnlineEvent()
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
         var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
         var rtPipeline = RtEntityCreator.CreatePipeline();
 
+        // Add adapter with connection, then remove it (simulates adapter in cache but disconnected)
+        AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), "oldConnectionId", new AdapterConfigurationDto(
+            rtAdapter.ToRtEntityId(),
+            null,
+            [
+                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline.ToRtEntityId(), false,
+                    rtPipeline.PipelineDefinition, [])
+            ]
+        ));
+        AdapterTenant.RemoveConnectionId(rtAdapter.ToRtEntityId());
+
+        var newConnectionId = "newConnectionId";
+
+        // Act
+        await AdapterService.SetAdapterCommunicationStateOnlineAsync(TenantId, rtAdapter.ToRtEntityId(), newConnectionId);
+
+        // Assert
+        using var _ = Assert.Multiple();
+
+        await CommunicationRepository.Received(1)
+            .SetAdapterCommunicationStateAsync(TenantId, rtAdapter.ToRtEntityId(), RtCommunicationStateEnum.Online);
+
+        // Verify connection ID was updated in cache
+        await Assert.That(AdapterTenant.AdapterById[rtAdapter.ToRtEntityId()].ConnectionId).IsEqualTo(newConnectionId);
+
+        // Verify "is now online" event was logged (not "reconnected") with adapter as related entity
+        await CommunicationEventService.Received(1)
+            .StoreInformationEventAsync(TenantId, Arg.Is<string>(s => s.Contains("is now online")),
+                rtAdapter.ToRtEntityId());
+    }
+
+    [Test]
+    public async Task SetAdapterCommunicationStateOnlineAsync_AdapterAlreadyOnline_LogsReconnectEvent()
+    {
+        // Arrange
+        var rtAdapter = RtEntityCreator.CreateAdapter();
+        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtPipeline = RtEntityCreator.CreatePipeline();
+
+        // Add adapter with existing connection (simulates adapter already online)
         AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
             rtAdapter.ToRtEntityId(),
             null,
@@ -74,6 +114,11 @@ internal class SetAdapterCommunicationStateTests : AdapterServiceTestsBase
 
         // Verify connection ID was updated in cache
         await Assert.That(AdapterTenant.AdapterById[rtAdapter.ToRtEntityId()].ConnectionId).IsEqualTo(newConnectionId);
+
+        // Verify "reconnected" event was logged (not "is now online") with adapter as related entity
+        await CommunicationEventService.Received(1)
+            .StoreInformationEventAsync(TenantId, Arg.Is<string>(s => s.Contains("reconnected")),
+                rtAdapter.ToRtEntityId());
     }
 
     [Test]

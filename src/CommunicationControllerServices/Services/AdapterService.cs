@@ -14,7 +14,8 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 internal class AdapterService(
     ICommunicationRepository communicationRepository,
     IAdapterCache adapterCache,
-    IAdapterHubCallbacks adapterHubCallbacks)
+    IAdapterHubCallbacks adapterHubCallbacks,
+    ICommunicationEventService eventService)
     : IAdapterService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
@@ -27,13 +28,17 @@ internal class AdapterService(
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
+            await eventService.StoreInformationEventAsync(tenantId,
+                $"Adapter '{adapterRtEntityId}' registered with connection id '{connectionId}'.",
+                adapterRtEntityId);
+
             if (!adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
             {
                 Logger.Info("[{TenantId}] Adapter '{AdapterRtId}' not found in cache, fetching from repository",
                     tenantId, adapterRtEntityId);
                 var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId, true);
                 adapter = adapterTenant.AddAdapter(adapterRtEntityId, connectionId, configuration);
-                await SetAdapterCommunicationStateOnlineAsync(tenantId, adapterRtEntityId, connectionId);
+                // Note: Online state is already set in OnConnectedAsync, no need to set it again here
             }
             else
             {
@@ -44,7 +49,7 @@ internal class AdapterService(
                 {
                     adapterTenant.RemoveAdapter(adapterRtEntityId);
                     adapter = adapterTenant.AddAdapter(adapterRtEntityId, connectionId, configuration);
-                    await SetAdapterCommunicationStateOnlineAsync(tenantId, adapterRtEntityId, connectionId);
+                    // Note: Online state is already set in OnConnectedAsync, no need to set it again here
                 }
             }
 
@@ -61,6 +66,10 @@ internal class AdapterService(
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
+            await eventService.StoreInformationEventAsync(tenantId,
+                $"Adapter '{adapterRtEntityId}' unregistered with connection id '{connectionId}'.",
+                adapterRtEntityId);
+
             if (adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
             {
                 foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
@@ -130,26 +139,49 @@ internal class AdapterService(
     public async Task SetAdapterCommunicationStateOnlineAsync(string tenantId, RtEntityId adapterRtEntityId,
         string connectionId)
     {
-        Logger.Info("[{TenantId}] adapter rt id '{AdapterRtId}' online",
-            tenantId, adapterRtEntityId);
-
-        if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
+        if (!adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
-            adapterTenant.UpdateConnectionId(adapterRtEntityId, connectionId);
-
-            // Always update DB state, even if adapter is not in cache yet
-            await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId,
-                RtCommunicationStateEnum.Online);
-            return;
+            throw AdapterServiceException.TenantNotEnabled(tenantId);
         }
 
-        throw AdapterServiceException.TenantNotEnabled(tenantId);
+        // Check if adapter was already online (has an existing connection)
+        var wasAlreadyOnline = adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var existingAdapter)
+                               && !string.IsNullOrWhiteSpace(existingAdapter.ConnectionId);
+
+        if (wasAlreadyOnline)
+        {
+            Logger.Info("[{TenantId}] adapter rt id '{AdapterRtId}' reconnected (previous connection: '{OldConnectionId}', new connection: '{NewConnectionId}')",
+                tenantId, adapterRtEntityId, existingAdapter!.ConnectionId, connectionId);
+
+            await eventService.StoreInformationEventAsync(tenantId,
+                $"Adapter '{adapterRtEntityId}' reconnected (new connection id: '{connectionId}').",
+                adapterRtEntityId);
+        }
+        else
+        {
+            Logger.Info("[{TenantId}] adapter rt id '{AdapterRtId}' online",
+                tenantId, adapterRtEntityId);
+
+            await eventService.StoreInformationEventAsync(tenantId,
+                $"Adapter '{adapterRtEntityId}' is now online.",
+                adapterRtEntityId);
+        }
+
+        adapterTenant.UpdateConnectionId(adapterRtEntityId, connectionId);
+
+        // Always update DB state, even if adapter is not in cache yet
+        await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId,
+            RtCommunicationStateEnum.Online);
     }
 
     public async Task SetAdapterCommunicationStateOfflineAsync(string tenantId, RtEntityId adapterRtEntityId)
     {
         Logger.Info("[{TenantId}] adapter rt id '{AdapterRtId}' offline",
             tenantId, adapterRtEntityId);
+
+        await eventService.StoreInformationEventAsync(tenantId,
+            $"Adapter '{adapterRtEntityId}' is now offline.",
+            adapterRtEntityId);
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
@@ -198,6 +230,10 @@ internal class AdapterService(
                     }
 
                     await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, configuration);
+
+                    await eventService.StoreInformationEventAsync(tenantId,
+                        $"Configuration deployed to adapter '{adapterRtEntityId}' with {configuration.Pipelines.Count} pipeline(s).",
+                        adapterRtEntityId);
                 }
                 else
                 {
@@ -273,6 +309,9 @@ internal class AdapterService(
             "[{TenantId}] DataPipelineRtId='{PipelineRtEntityId}' deploy edge and mesh pipeline to adapter",
             tenantId, dataPipelineRtId);
 
+        await eventService.StoreInformationEventAsync(tenantId,
+            $"Deploying data pipeline '{dataPipelineRtId}' to adapters.");
+
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
             var adapterConfigurations = new Dictionary<RtEntityId, AdapterConfigurationDto>();
@@ -336,6 +375,10 @@ internal class AdapterService(
         Logger.Info(
             "[{TenantId}] DataPipelineRtId='{PipelineRtEntityId}' undeploy edge and mesh pipeline from adapter",
             tenantId, dataPipelineRtId);
+
+        await eventService.StoreInformationEventAsync(tenantId,
+            $"Undeploying data pipeline '{dataPipelineRtId}' from adapters.",
+            new RtEntityId(SystemCommunicationCkIds.RtCkDataPipelineTriggerTypeId, dataPipelineRtId));
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
@@ -417,6 +460,10 @@ internal class AdapterService(
                         await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
                             pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Deployed, null);
                     }
+
+                    await eventService.StoreInformationEventAsync(tenantId,
+                        $"Adapter '{adapterRtEntityId}' configuration deployed successfully with {adapter.Configuration.Pipelines.Count} pipeline(s).",
+                        adapterRtEntityId);
                 }
                 else
                 {
@@ -436,6 +483,10 @@ internal class AdapterService(
                         await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
                             pipelineConfigurationDto.PipelineRtEntityId, state, pipelineMessage);
                     }
+
+                    await eventService.StoreErrorEventAsync(tenantId,
+                        $"Adapter '{adapterRtEntityId}' configuration deployment failed: {message}",
+                        adapterRtEntityId);
                 }
 
                 return;
@@ -571,6 +622,9 @@ internal class AdapterService(
                     await SetAdapterCommunicationStateAsync(tenantId, adapter.AdapterRtEntityId,
                         RtCommunicationStateEnum.Unregistered);
                 }
+
+                await eventService.StoreInformationEventAsync(tenantId,
+                    $"Tenant pre-update completed. {adapterTenant.AdapterById.Count} adapter(s) disconnected.");
             }
         }
         catch (Exception e)
@@ -592,6 +646,9 @@ internal class AdapterService(
         {
             await _semaphore.WaitAsync();
             adapterCache.AddOrUpdateTenant(tenantId);
+
+            await eventService.StoreInformationEventAsync(tenantId,
+                "Tenant post-update completed. Adapter cache re-initialized.");
         }
         catch (Exception e)
         {

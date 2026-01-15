@@ -21,6 +21,8 @@ using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
+using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v1;
+using Meshmakers.Octo.Services.Notifications.Services;
 using Meshmakers.Octo.Services.Observability;
 using Meshmakers.Octo.Services.Swagger.Configuration;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -61,6 +63,7 @@ try
         .AddUserSecrets(typeof(Program).Assembly, true);
 
     builder.Services.AddSingleton<ICommunicationRepository, CommunicationRepository>();
+    builder.Services.AddSingleton<ICommunicationEventService, CommunicationEventService>();
     builder.Services.AddSingleton<IAdapterService, AdapterService>();
     builder.Services.AddSingleton<IPoolService, PoolService>();
     builder.Services.AddSingleton<IPipelineDebugService, PipelineDebugService>();
@@ -110,6 +113,7 @@ try
         .AddMongoDbRuntimeRepository();
 
     builder.Services.AddCkModelSystemCommunicationV2();
+    builder.Services.AddOctoNotification();
 
     builder.Services.AddAuthentication().AddJwtBearer(jwt =>
         {
@@ -205,6 +209,13 @@ try
     app.MapControllerRoute(name: "default",
         pattern: "{tenantId:tenantId}/system/v{version:apiVersion}/{controller}/{action}/{id?}");
 
+    // Log service start event
+    app.Lifetime.ApplicationStarted.Register(() =>
+    {
+        var eventRepository = app.Services.GetRequiredService<IEventRepository>();
+        eventRepository.StoreSystemInformationEvent(RtEventSourcesEnum.CommunicationService,
+            "Communication Controller Services started.");
+    });
 
     app.Run();
 }

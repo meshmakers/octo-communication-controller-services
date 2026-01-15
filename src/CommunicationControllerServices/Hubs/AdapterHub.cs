@@ -15,6 +15,7 @@ internal class AdapterHub : Hub, IAdapterHub
 {
     private readonly IAdapterService _adapterService;
     private readonly IPipelineDebugService _pipelineDebugService;
+    private readonly ICommunicationEventService _eventService;
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
     /// <summary>
@@ -22,10 +23,13 @@ internal class AdapterHub : Hub, IAdapterHub
     /// </summary>
     /// <param name="adapterService">The responsible adapter service</param>
     /// <param name="pipelineDebugService">The responsible pipeline debug service</param>
-    public AdapterHub(IAdapterService adapterService, IPipelineDebugService pipelineDebugService)
+    /// <param name="eventService">Service for storing system events</param>
+    public AdapterHub(IAdapterService adapterService, IPipelineDebugService pipelineDebugService,
+        ICommunicationEventService eventService)
     {
         _adapterService = adapterService;
         _pipelineDebugService = pipelineDebugService;
+        _eventService = eventService;
     }
 
     /// <inheritdoc />
@@ -85,6 +89,8 @@ internal class AdapterHub : Hub, IAdapterHub
         catch (Exception e)
         {
             Logger.Error(e, "Cannot register adapter");
+            await _eventService.StoreErrorEventAsync(tenantId,
+                $"Failed to register adapter: {e.Message}");
             throw;
         }
     }
@@ -106,13 +112,15 @@ internal class AdapterHub : Hub, IAdapterHub
         catch (Exception e)
         {
             Logger.Error(e, "Cannot unregister adapter");
+            await _eventService.StoreErrorEventAsync(tenantId,
+                $"Failed to unregister adapter: {e.Message}");
             throw;
         }
     }
 
     public async Task SendDebugDataAsync(RtEntityId pipelineRtEntityId, Guid pipelineExecutionId, DebugPointDto debugPoint)
     {
-        
+
         var tenantId = GetTenantId();
 
         try
@@ -122,6 +130,8 @@ internal class AdapterHub : Hub, IAdapterHub
         catch (Exception e)
         {
             Logger.Error(e, "Cannot cache debug data");
+            await _eventService.StoreErrorEventAsync(tenantId,
+                $"Failed to cache debug data for pipeline '{pipelineRtEntityId}': {e.Message}");
             throw;
         }
     }
@@ -137,7 +147,9 @@ internal class AdapterHub : Hub, IAdapterHub
         }
         catch (Exception e)
         {
-            Logger.Error(e, "Cannot cache debug data");
+            Logger.Error(e, "Cannot update deployment result");
+            await _eventService.StoreErrorEventAsync(tenantId,
+                $"Failed to update deployment result for adapter '{adapterRtEntityId}': {e.Message}");
             throw;
         }
     }
