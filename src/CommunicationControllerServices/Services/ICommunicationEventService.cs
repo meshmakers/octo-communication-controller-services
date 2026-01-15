@@ -1,5 +1,5 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v1;
+using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
