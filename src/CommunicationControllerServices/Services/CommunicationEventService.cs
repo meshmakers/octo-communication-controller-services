@@ -1,6 +1,8 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Services.Notifications;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Meshmakers.Octo.Services.Notifications.Services;
+using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
@@ -11,6 +13,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 internal class CommunicationEventService : ICommunicationEventService
 {
     private readonly IServiceProvider _serviceProvider;
+    private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
     public CommunicationEventService(IServiceProvider serviceProvider)
     {
@@ -20,10 +23,19 @@ internal class CommunicationEventService : ICommunicationEventService
     public async Task StoreEventAsync(string tenantId, RtEventLevelsEnum level, string message,
         RtEntityId? associatedRtEntityId = null)
     {
-        using var scope = _serviceProvider.CreateScope();
-        var eventRepository = scope.ServiceProvider.GetRequiredService<IEventRepository>();
-        await eventRepository.StoreEventAsync(tenantId, RtEventSourcesEnum.CommunicationService, level, message,
-            associatedRtEntityId);
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var eventRepository = scope.ServiceProvider.GetRequiredService<IEventRepository>();
+            await eventRepository.StoreEventAsync(tenantId, RtEventSourcesEnum.CommunicationService, level, message,
+                associatedRtEntityId);
+        }
+        catch (EventStoreFailedException ex)
+        {
+            Logger.Warn(ex, "[{TenantId}] Failed to store event (level: {Level}, message: '{Message}'). " +
+                           "Event storage failures do not affect core functionality.",
+                tenantId, level, message);
+        }
     }
 
     public async Task StoreInformationEventAsync(string tenantId, string message,
