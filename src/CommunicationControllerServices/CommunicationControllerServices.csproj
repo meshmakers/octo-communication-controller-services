@@ -51,6 +51,7 @@
     
     <ItemGroup>
         <InternalsVisibleTo Include="Meshmakers.Octo.Backend.CommunicationControllerService.Tests" />
+        <InternalsVisibleTo Include="CommControllerServices.IntegrationTests" />
         <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
     </ItemGroup>
 
