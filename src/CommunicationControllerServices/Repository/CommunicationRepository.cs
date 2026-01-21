@@ -95,9 +95,24 @@ internal class CommunicationRepository : ICommunicationRepository
                 throw CommunicationRepositoryException.AdapterNotFound(tenantId, adapterRtEntityId);
             }
 
+            if (adapter.CkTypeId == null)
+            {
+                throw CommunicationRepositoryException.AdapterTypeMissing(tenantId, adapterRtEntityId);
+            }
+
+            if (adapter.CkTypeId != adapterRtEntityId.CkTypeId)
+            {
+                throw CommunicationRepositoryException.AdapterTypeMismatch(tenantId, adapterRtEntityId,
+                    adapter.CkTypeId);
+            }
+
             await session.CommitTransactionAsync();
 
             return adapter;
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
         }
         catch (Exception e)
         {
@@ -128,6 +143,10 @@ internal class CommunicationRepository : ICommunicationRepository
             }
 
             throw CommunicationRepositoryException.PipelineNotFound(tenantId, pipelineRtEntityId.RtId);
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
         }
         catch (Exception e)
         {
@@ -214,6 +233,10 @@ internal class CommunicationRepository : ICommunicationRepository
 
             await session.CommitTransactionAsync();
         }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
         catch (Exception e)
         {
             throw CommunicationRepositoryException.CommonFailedCreatePool(tenantId, poolName, e);
@@ -249,6 +272,10 @@ internal class CommunicationRepository : ICommunicationRepository
             }
 
             await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
         }
         catch (Exception e)
         {
@@ -287,6 +314,10 @@ internal class CommunicationRepository : ICommunicationRepository
             }
 
             await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
         }
         catch (Exception e)
         {
@@ -331,6 +362,10 @@ internal class CommunicationRepository : ICommunicationRepository
 
             await session.CommitTransactionAsync();
         }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
         catch (Exception e)
         {
             throw CommunicationRepositoryException.CommonFailedSetAdapterDeploymentState(tenantId, adapterRtEntityIds,
@@ -368,6 +403,10 @@ internal class CommunicationRepository : ICommunicationRepository
 
             await session.CommitTransactionAsync();
         }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
         catch (Exception e)
         {
             throw CommunicationRepositoryException.CommonFailedSetAdapterCommunicationState(tenantId, adapterRtEntityId,
@@ -404,6 +443,10 @@ internal class CommunicationRepository : ICommunicationRepository
             }
 
             throw CommunicationRepositoryException.AdapterNotFound(tenantId, adapterRtEntityId);
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
         }
         catch (Exception e)
         {
@@ -455,6 +498,10 @@ internal class CommunicationRepository : ICommunicationRepository
 
             throw CommunicationRepositoryException.AdapterNotFound(tenantId, adapterRtEntityId);
         }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
         catch (Exception e)
         {
             throw CommunicationRepositoryException.CommonFailedGettingAdapter(tenantId, adapterRtEntityId, e);
@@ -485,6 +532,10 @@ internal class CommunicationRepository : ICommunicationRepository
 
             throw CommunicationRepositoryException.DataPipelineNotFound(tenantId, dataPipelineRtId);
         }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
         catch (Exception e)
         {
             throw CommunicationRepositoryException.CommonFailedGettingByDataPipeline(tenantId, dataPipelineRtId, e);
@@ -503,6 +554,10 @@ internal class CommunicationRepository : ICommunicationRepository
             var rtPipeline =
                 await tenantRepository.GetRtEntityByRtIdAsync<RtPipeline>(session, pipelineRtEntityId.RtId);
             return rtPipeline;
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
         }
         catch (Exception e)
         {
@@ -535,6 +590,10 @@ internal class CommunicationRepository : ICommunicationRepository
 
             throw CommunicationRepositoryException.PipelineNotFound(tenantId, pipelineRtId);
         }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
         catch (Exception e)
         {
             throw CommunicationRepositoryException.CommonFailedGettingPipeline(tenantId, pipelineRtId, e);
@@ -564,6 +623,10 @@ internal class CommunicationRepository : ICommunicationRepository
                 return multipleOriginResultSet.First().Value.Items;
             }
             throw CommunicationRepositoryException.PipelineNotFound(tenantId, pipelineRtId);
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
         }
         catch (Exception e)
         {
@@ -662,6 +725,10 @@ internal class CommunicationRepository : ICommunicationRepository
 
             await session.CommitTransactionAsync();
         }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
         catch (Exception e)
         {
             throw CommunicationRepositoryException.CommonFailedSetTriggerDeploymentState(tenantId, triggerRtId,
@@ -701,6 +768,10 @@ internal class CommunicationRepository : ICommunicationRepository
 
             await session.CommitTransactionAsync();
         }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
         catch (Exception e)
         {
             throw CommunicationRepositoryException.CommonFailedSetPipelineDeploymentState(tenantId, pipelineRtEntityId,
@@ -737,6 +808,10 @@ internal class CommunicationRepository : ICommunicationRepository
             }
 
             await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
         }
         catch (Exception e)
         {

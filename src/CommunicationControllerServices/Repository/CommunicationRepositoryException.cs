@@ -198,4 +198,14 @@ internal class CommunicationRepositoryException : Exception
     {
         return new CommunicationRepositoryException($"[{tenantId}] Failed to get configurations of pipeline '{pipelineRtId}'", exception);
     }
+
+    public static Exception AdapterTypeMismatch(string tenantId, RtEntityId requestedAdapterRtEntityId, RtCkId<CkTypeId> returnedAdapterCkTypeId)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Adapter type mismatch: requested adapter '{requestedAdapterRtEntityId}' has different type than returned adapter type '{returnedAdapterCkTypeId}'");
+    }
+
+    public static Exception AdapterTypeMissing(string tenantId, RtEntityId adapterRtEntityId)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Adapter type is missing for adapter '{adapterRtEntityId}'");
+    }
 }

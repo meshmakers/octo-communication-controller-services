@@ -130,6 +130,10 @@ internal class AdapterService(
             );
             return adapterConfigurationDto;
         }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
         catch (Exception e)
         {
             throw AdapterServiceException.CommonFailedCannotLoadAdapterConfiguration(tenantId, adapterRtEntityId, e);
