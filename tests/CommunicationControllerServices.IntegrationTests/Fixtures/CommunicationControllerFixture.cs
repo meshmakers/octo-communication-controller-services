@@ -1,4 +1,7 @@
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Extensions;
+using Meshmakers.Octo.ConstructionKit.Contracts.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTests.Fixtures;
 
@@ -89,6 +92,19 @@ public class CommunicationControllerFixture : DatabaseFixture
             await session.AbortTransactionAsync();
             throw;
         }
+
+        // Import the CK model and load the CK cache for the test tenant
+        Console.Error.WriteLine("[CommunicationControllerFixture] Initializing tenant for testing...");
+        Console.Error.Flush();
+
+        var ckCacheService = GetService<ICkCacheService>();
+        await systemContext.InitializeTenantForTestingAsync(TestTenantId, ckCacheService);
+
+        Console.Error.WriteLine("[CommunicationControllerFixture] Tenant initialized");
+        Console.Error.Flush();
+
+        Console.Error.WriteLine("[CommunicationControllerFixture] Fixture initialization complete");
+        Console.Error.Flush();
     }
 
     /// <summary>

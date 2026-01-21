@@ -3,6 +3,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Extensions;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Services;
+using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Runtime.Engine.MongoDb.Services.Defaults;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -96,6 +97,9 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
         services.AddLogging(builder => builder.AddConsole());
 
+        // Add infrastructure with short service name (MongoDB app name limit is 128 bytes)
+        services.AddOctoServiceInfrastructure("CommCtrlTests", _ => { });
+
         services.AddRuntimeEngine()
             .AddMongoDbRuntimeRepository();
 
@@ -103,7 +107,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
         services.Configure<OctoSystemConfiguration>(t =>
         {
-            t.SystemDatabaseName = "communicationcontrollerintegrationtests";
+            t.SystemDatabaseName = "commctrl-int-tests";
             t.DatabaseHost = databaseHost;
             t.AdminUser = _options.AdminUser;
             t.AdminUserPassword = _options.AdminUserPassword;
@@ -235,7 +239,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
                 services.Configure<OctoSystemConfiguration>(t =>
                 {
-                    t.SystemDatabaseName = "communicationcontrollerintegrationtests";
+                    t.SystemDatabaseName = "commctrl-int-tests";
                     t.DatabaseHost = databaseHost;
                     t.AdminUser = _options.AdminUser;
                     t.AdminUserPassword = _options.AdminUserPassword;
@@ -244,14 +248,16 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 });
             }
 
-            // Remove MassTransit hosted services that try to connect to RabbitMQ
-            Console.Error.WriteLine("[WebFactory] Removing MassTransit hosted services...");
+            // Remove hosted services that try to connect to RabbitMQ or initialize configuration
+            Console.Error.WriteLine("[WebFactory] Removing hosted services that require external connections...");
             Console.Error.Flush();
-            var massTransitHostedServices = services
+            var hostedServicesToRemove = services
                 .Where(s => s.ServiceType == typeof(IHostedService) &&
-                            s.ImplementationType?.FullName?.Contains("MassTransit") == true)
+                            (s.ImplementationType?.FullName?.Contains("MassTransit") == true ||
+                             s.ImplementationType?.FullName?.Contains("ConfigurationInitialization") == true ||
+                             s.ImplementationType?.FullName?.Contains("HostedInitializer") == true))
                 .ToList();
-            foreach (var service in massTransitHostedServices)
+            foreach (var service in hostedServicesToRemove)
             {
                 Console.Error.WriteLine($"[WebFactory] Removing: {service.ImplementationType?.FullName}");
                 services.Remove(service);

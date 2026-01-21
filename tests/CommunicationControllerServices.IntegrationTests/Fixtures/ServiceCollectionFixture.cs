@@ -1,23 +1,29 @@
 using MartinCostello.Logging.XUnit;
+using MassTransit;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Extensions;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
+using SystemBotCkModel.Generated.System.Bot.v2;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Extensions;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Services;
 using Meshmakers.Octo.Runtime.Engine.MongoDb.Services.Defaults;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Meshmakers.Octo.Services.Notifications.Services;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using NSubstitute;
 using Xunit;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTests.Fixtures;
@@ -34,11 +40,16 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
     {
         Services = new ServiceCollection();
 
+        // Add infrastructure with short service name (MongoDB app name limit is 128 bytes)
+        Services.AddOctoServiceInfrastructure("CommCtrlTests", _ => { });
+
         // Add runtime engine with MongoDB
         Services.AddRuntimeEngine()
             .AddMongoDbRuntimeRepository();
 
-        // Add CK models
+        // Add CK models (order matters: base models first, then dependent models)
+        Services.AddCkModelSystemV2();
+        Services.AddCkModelSystemBotV2();
         Services.AddCkModelSystemCommunicationV2();
         Services.AddCkModelSystemNotificationV2();
 
@@ -63,6 +74,17 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
 
         // Reset tenant notification to default implementation without using RabbitMQ
         Services.AddSingleton<ITenantNotifications, DefaultTenantNotifications>();
+
+        // Add mock command clients (required by TriggerManagementService and DefaultConfigurationCreatorService)
+        // These are normally provided by the distribution event hub but are not needed for integration tests
+        Services.AddSingleton(Substitute.For<ICommandClient<RemoveRecurringJobsByScheduleGroupRequest>>());
+        Services.AddSingleton(Substitute.For<ICommandClient<CreateIdentityDataCommandRequest>>());
+        Services.AddSingleton(Substitute.For<IRoutedCommandClient<ExecuteMeshPipelineRequest>>());
+        Services.AddSingleton(Substitute.For<IDistributionEventHubService>());
+
+        // Add mock SignalR hub contexts (required by hub callbacks)
+        Services.AddSingleton(Substitute.For<IHubContext<PoolHub>>());
+        Services.AddSingleton(Substitute.For<IHubContext<AdapterHub>>());
 
         // Add logging with xUnit output
         Services.AddLogging(loggingBuilder =>

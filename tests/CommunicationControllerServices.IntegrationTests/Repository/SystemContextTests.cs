@@ -7,9 +7,8 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTes
 /// <summary>
 /// Integration tests for system context and tenant management.
 /// </summary>
-[Collection("Sequential")]
+[Collection("CommunicationController")]
 public class SystemContextTests(CommunicationControllerFixture fixture)
-    : IClassFixture<CommunicationControllerFixture>
 {
     [Fact]
     public async Task IsSystemTenantExisting_ShouldReturnTrue()

@@ -19,6 +19,11 @@
         <PackageReference Include="Meshmakers.Octo.ConstructionKit.Models.System" Version="$(OctoVersion)" />
     </ItemGroup>
 
+    <!-- Reference to System.Bot CK model from octo-bot-services (required dependency) -->
+    <ItemGroup>
+        <ProjectReference Include="..\..\..\octo-bot-services\src\SystemBotCkModel\SystemBotCkModel.csproj" />
+    </ItemGroup>
+
     <ItemGroup>
         <None Include="..\..\assets\meshmakers64.png">
             <Pack>True</Pack>
