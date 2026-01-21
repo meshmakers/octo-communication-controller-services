@@ -6,6 +6,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is the **Octo Communication Controller Services** - an ASP.NET Core web service that manages communication adapters and pools for data ingress and egress in an Octo Mesh instance. The service acts as a central hub for coordinating communication between external adapters (data pipeline executors) and pools (device groups) in a multi-tenant environment.
 
+## Development Standards
+
+**MANDATORY for all code changes:**
+
+1. **Unit Tests Required**: Every new feature, bug fix, or code change must include corresponding unit tests in `tests/CommunicationControllerService.Tests/`. Use TUnit framework with NSubstitute for mocking.
+
+2. **Integration Tests Required**: Changes affecting repository operations, database interactions, or multi-component workflows must include integration tests in `tests/CommunicationControllerServices.IntegrationTests/`. Use xUnit framework with FluentAssertions.
+
+3. **Documentation Updates Required**: This developer documentation (CLAUDE.md) must be updated when:
+   - Adding new architectural patterns or components
+   - Introducing new services, repositories, or significant classes
+   - Changing test infrastructure or fixtures
+   - Adding new configuration options
+   - Modifying API structures or authentication/authorization
+
+4. **All Tests Must Pass**: Before completing any task, run both unit tests (`dotnet test`) and integration tests to ensure all tests pass.
+
 ## Key Architecture Concepts
 
 ### Core Components
@@ -183,6 +200,63 @@ When testing services that use `ICommunicationEventService`, create a mock in th
 protected readonly ICommunicationEventService CommunicationEventService = Substitute.For<ICommunicationEventService>();
 ```
 
+## Integration Testing
+
+Integration tests are located in `tests/CommunicationControllerServices.IntegrationTests/` and use **xUnit** with **FluentAssertions** (unlike unit tests which use TUnit).
+
+### Fixture Architecture
+
+Integration tests use a hierarchical fixture structure:
+
+1. **`ServiceCollectionFixture`** - Base fixture providing DI container setup with all required services
+2. **`DatabaseFixture`** - Extends ServiceCollectionFixture, adds MongoDB connection via Testcontainers
+3. **`CommunicationControllerFixture`** - Main fixture that initializes system tenant, test tenant, and CK cache
+
+### CK Model Dependencies
+
+The System.Communication CK model depends on:
+- `System` (base model)
+- `System.Bot` (required dependency)
+
+All three models must be imported in order before tests can work with typed entities like `RtPool`, `RtAdapter`, etc.
+
+### Tenant Initialization for Tests
+
+**CRITICAL:** To properly initialize a tenant for integration testing, you must:
+1. Import CK models in dependency order (System → System.Bot → System.Communication)
+2. Load the CK cache using `ITenantRepository.LoadCacheForTenantAsync(cacheService)` with the shared `ICkCacheService` from DI
+
+The extension method `InitializeTenantForTestingAsync` in `src/CommunicationControllerServices/Extensions/TenantInitializationExtensions.cs` handles this:
+
+```csharp
+// In fixture initialization:
+var ckCacheService = GetService<ICkCacheService>();
+await systemContext.InitializeTenantForTestingAsync(TestTenantId, ckCacheService);
+```
+
+**Why this matters:** The `CommunicationRepository` uses `ISystemContext.FindTenantRepositoryAsync(tenantId)` to get tenant repositories. For MongoDB to correctly deserialize entities to their typed classes (e.g., `RtPool` instead of `RtEntity`), the CK cache must be loaded into the same `ICkCacheService` singleton that the repository uses.
+
+### Running Integration Tests
+
+```bash
+# Run all integration tests (requires Docker for MongoDB Testcontainers)
+dotnet test --project tests/CommunicationControllerServices.IntegrationTests/CommunicationControllerServices.IntegrationTests.csproj
+
+# Run a specific integration test
+dotnet test --project tests/CommunicationControllerServices.IntegrationTests/CommunicationControllerServices.IntegrationTests.csproj --filter "FullyQualifiedName~CommunicationRepositoryTests"
+```
+
+### Service Registration in Tests
+
+The `ServiceCollectionFixture` registers CK models in dependency order:
+```csharp
+// Add CK models (order matters: base models first, then dependent models)
+Services.AddCkModelSystemV2();
+Services.AddCkModelSystemBotV2();
+Services.AddCkModelSystemCommunicationV2();
+Services.AddCkModelSystemNotificationV2();
+```
+
 ## Important Patterns
 
 ### Service Registration
@@ -214,7 +288,8 @@ Adapters and Pools track deployment state:
 - Main service: `src/CommunicationControllerServices/`
 - Construction Kit model: `src/SystemCommunicationCkModel/`
 - Resource strings: `src/CommunicationControllerServices.Resources/`
-- Tests: `tests/CommunicationControllerService.Tests/`
+- Unit tests (TUnit): `tests/CommunicationControllerService.Tests/`
+- Integration tests (xUnit): `tests/CommunicationControllerServices.IntegrationTests/`
 - CI/CD: `devops-build/azure-pipelines.yml`
 - Output directory: `bin/$(Configuration)/`
 
