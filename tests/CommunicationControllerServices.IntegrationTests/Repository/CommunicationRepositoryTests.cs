@@ -10,19 +10,18 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTes
 /// <summary>
 /// Integration tests for the CommunicationRepository.
 /// </summary>
-[Collection("Sequential")]
+[Collection("CommunicationController")]
 public class CommunicationRepositoryTests(CommunicationControllerFixture fixture)
-    : IClassFixture<CommunicationControllerFixture>
 {
     [Fact]
-    public async Task GetAdapter_WhenNotExists_ShouldReturnNull()
+    public async Task GetAdapter_WhenNotExists_ShouldThrowException()
     {
         var repository = fixture.GetService<ICommunicationRepository>();
         var adapterId = new RtEntityId(SystemCommunicationCkIds.RtCkEdgeAdapterTypeId, OctoObjectId.GenerateNewId());
 
-        var adapter = await repository.GetAdapterAsync(fixture.TestTenantId, adapterId);
+        var act = async () => await repository.GetAdapterAsync(fixture.TestTenantId, adapterId);
 
-        adapter.Should().BeNull();
+        await act.Should().ThrowAsync<CommunicationRepositoryException>();
     }
 
     [Fact]

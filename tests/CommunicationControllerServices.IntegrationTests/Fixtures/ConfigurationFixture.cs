@@ -11,7 +11,7 @@ public abstract class ConfigurationFixture : ServiceCollectionFixture
 {
     private readonly IntegrationTestConfiguration _configuration;
 
-    public string SystemDatabaseName => "communicationcontrollerintegrationtests";
+    public string SystemDatabaseName => "commctrl-int-tests";
 
     protected ConfigurationFixture()
     {

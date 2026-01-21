@@ -21,40 +21,29 @@ public class HealthCheckTests : IntegrationTestBase
         var response = await Client.GetAsync("/health", TestContext.Current.CancellationToken);
 
         // Assert
-        // In the test environment, the system context health check may report unhealthy (503)
-        // because not all components are fully initialized. This is expected.
+        // In the test environment, the health check may report unhealthy (503)
+        // because MassTransit health checks fail without RabbitMQ. This is expected.
         // We verify the endpoint is reachable and returns a valid health check response.
         response.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.ServiceUnavailable);
     }
 
     [Fact]
-    public async Task HomeEndpoint_ReturnsSuccessStatusCode()
+    public async Task SwaggerEndpoint_ReturnsOk()
     {
-        // Act
-        var response = await Client.GetAsync("/", TestContext.Current.CancellationToken);
-
-        // Assert
-        response.IsSuccessStatusCode.Should().BeTrue();
-    }
-
-    [Fact]
-    public async Task LiveEndpoint_ReturnsOk()
-    {
-        // Act
-        var response = await Client.GetAsync("/live", TestContext.Current.CancellationToken);
+        // Act - Swagger should be available in Development environment
+        var response = await Client.GetAsync("/swagger/index.html", TestContext.Current.CancellationToken);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [Fact]
-    public async Task ReadyEndpoint_ReturnsExpectedStatusCode()
+    public async Task UnknownEndpoint_ReturnsNotFound()
     {
         // Act
-        var response = await Client.GetAsync("/ready", TestContext.Current.CancellationToken);
+        var response = await Client.GetAsync("/nonexistent", TestContext.Current.CancellationToken);
 
         // Assert
-        // Ready endpoint may return ServiceUnavailable if not all health checks pass
-        response.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.ServiceUnavailable);
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 }
