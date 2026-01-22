@@ -1,0 +1,43 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+- typeId: PipelineStatistics
+  derivedFromCkTypeId: ${System}/Entity
+  attributes:
+    # Last hour statistics
+    - id: ${this}/LastHourSuccessCount
+      name: LastHourSuccessCount
+    - id: ${this}/LastHourFailureCount
+      name: LastHourFailureCount
+    - id: ${this}/LastHourAvgDurationMs
+      name: LastHourAvgDurationMs
+    # Last 12 hours statistics
+    - id: ${this}/Last12HoursSuccessCount
+      name: Last12HoursSuccessCount
+    - id: ${this}/Last12HoursFailureCount
+      name: Last12HoursFailureCount
+    - id: ${this}/Last12HoursAvgDurationMs
+      name: Last12HoursAvgDurationMs
+    # Last 24 hours statistics
+    - id: ${this}/Last24HoursSuccessCount
+      name: Last24HoursSuccessCount
+    - id: ${this}/Last24HoursFailureCount
+      name: Last24HoursFailureCount
+    - id: ${this}/Last24HoursAvgDurationMs
+      name: Last24HoursAvgDurationMs
+    # Last 30 days statistics
+    - id: ${this}/Last30DaysSuccessCount
+      name: Last30DaysSuccessCount
+    - id: ${this}/Last30DaysFailureCount
+      name: Last30DaysFailureCount
+    - id: ${this}/Last30DaysAvgDurationMs
+      name: Last30DaysAvgDurationMs
+    # Meta information
+    - id: ${this}/LastUpdatedAt
+      name: LastUpdatedAt
+      isOptional: true
+    - id: ${this}/LastExecutionAt
+      name: LastExecutionAt
+      isOptional: true
+  associations:
+    - id: ${this}/StatisticsForPipeline
+      targetCkTypeId: ${this}/Pipeline

@@ -1,0 +1,13 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+- enumId: PipelineTriggerType
+  useFlags: false
+  values:
+  - key: 0
+    name: Manual
+  - key: 1
+    name: Scheduled
+  - key: 2
+    name: Event
+  - key: 3
+    name: Startup

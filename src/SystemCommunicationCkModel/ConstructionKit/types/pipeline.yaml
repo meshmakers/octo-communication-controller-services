@@ -5,9 +5,14 @@ types:
     isAbstract: true
     attributes:
       - id: ${System}/Enabled
-        name: Enabled 
+        name: Enabled
       - id: ${this}/PipelineDefinition
         name: PipelineDefinition
+      - id: ${this}/CurrentExecutionId
+        name: CurrentExecutionId
+        isOptional: true
+      - id: ${this}/IsExecuting
+        name: IsExecuting
     associations:
       - id: ${System}/ParentChild
         targetCkTypeId: ${this}/DataPipeline

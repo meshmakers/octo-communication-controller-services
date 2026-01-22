@@ -107,7 +107,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
         services.Configure<OctoSystemConfiguration>(t =>
         {
-            t.SystemDatabaseName = "commctrl-int-tests";
+            t.SystemDatabaseName = "commctrl-web-tests";
             t.DatabaseHost = databaseHost;
             t.AdminUser = _options.AdminUser;
             t.AdminUserPassword = _options.AdminUserPassword;
@@ -239,7 +239,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
                 services.Configure<OctoSystemConfiguration>(t =>
                 {
-                    t.SystemDatabaseName = "commctrl-int-tests";
+                    t.SystemDatabaseName = "commctrl-web-tests";
                     t.DatabaseHost = databaseHost;
                     t.AdminUser = _options.AdminUser;
                     t.AdminUserPassword = _options.AdminUserPassword;

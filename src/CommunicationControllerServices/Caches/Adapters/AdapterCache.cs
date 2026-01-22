@@ -37,6 +37,11 @@ internal class AdapterCache
         return _tenantDescriptions.TryGetValue(tenantId, out adapterTenant);
     }
 
+    public IReadOnlyList<string> GetEnabledTenantIds()
+    {
+        return _tenantDescriptions.Keys.ToList();
+    }
+
     public Task ReloadConfigurationAsync(ComControllerAdapterUpdate configuration)
     {
         Logger.Debug("Reloading AdapterCache configuration: {Configuration}", configuration.Serialize());

@@ -40,10 +40,11 @@ This is the **Octo Communication Controller Services** - an ASP.NET Core web ser
 
 The service follows a layered architecture:
 - **Hubs Layer** (`src/CommunicationControllerServices/Hubs/`) - SignalR hubs for real-time communication
-- **Service Layer** (`src/CommunicationControllerServices/Services/`) - Core business logic (`AdapterService`, `PoolService`, `PipelineDebugService`, `TriggerManagementService`, `CommunicationEventService`)
+- **Service Layer** (`src/CommunicationControllerServices/Services/`) - Core business logic (`AdapterService`, `PoolService`, `PipelineDebugService`, `TriggerManagementService`, `PipelineExecutionService`, `CommunicationEventService`)
 - **Repository Layer** (`src/CommunicationControllerServices/Repository/`) - Data access via MongoDB Runtime Engine
 - **Cache Layer** (`src/CommunicationControllerServices/Caches/`) - In-memory state synchronized across nodes via hub callbacks
 - **Consumers** (`src/CommunicationControllerServices/Consumers/`) - Message bus event consumers for tenant lifecycle management
+- **Background Services** (`src/CommunicationControllerServices/BackgroundServices/`) - Periodic maintenance tasks
 
 ### Multi-Tenancy
 
@@ -91,6 +92,9 @@ The service uses the Octo Notification system to log important business events f
 | TriggerManagementService | Pipeline execution started | Information | Manual pipeline trigger |
 | TriggerManagementService | Pipeline execution failed | Error | Pipeline execution errors |
 | TriggerManagementService | Trigger schedule updated | Information | Scheduled triggers updated |
+| PipelineExecutionService | Pipeline execution failed | Error | Adapter reports failed execution |
+| PipelineExecutionService | Pipeline execution cancelled | Information | Adapter reports cancelled execution |
+| PipelineExecutionService | Old executions cleaned up | Information | Retention cleanup completed |
 | TenantManagementConsumer | Tenant update failed | Error | Errors during tenant lifecycle |
 | Hubs | Operation failed | Error | Hub operation errors |
 
@@ -276,6 +280,15 @@ Configuration is bound to strongly-typed options classes:
 - `CommunicationControllerOptions` from `CommunicationController` section
 - Environment variables prefixed with `OCTO_` override appsettings
 
+**Pipeline Execution Configuration Options:**
+```csharp
+// CommunicationControllerOptions
+public int PipelineExecutionRetentionDays { get; set; } = 30;    // Days to keep execution records
+public int StatisticsUpdateIntervalMinutes { get; set; } = 5;    // Statistics aggregation interval
+public bool StoreInputData { get; set; } = false;                // Whether to store pipeline input data
+public int MaxInputDataLength { get; set; } = 10000;             // Max length of stored input data
+```
+
 ### Deployment State Management
 
 Adapters and Pools track deployment state:
@@ -313,7 +326,7 @@ throw new AdapterServiceException("Tenant not enabled");
 throw AdapterServiceException.TenantNotEnabled(tenantId);
 ```
 
-Each service has a dedicated exception class: `AdapterServiceException`, `PoolServiceException`, `PipelineDebugServiceException`, `TriggerManagementServiceException`, `CommunicationRepositoryException`.
+Each service has a dedicated exception class: `AdapterServiceException`, `PoolServiceException`, `PipelineDebugServiceException`, `TriggerManagementServiceException`, `PipelineExecutionServiceException`, `CommunicationRepositoryException`.
 
 ## Cache Architecture
 
@@ -340,3 +353,52 @@ Controllers are split by scope:
 - **Tenant API** (`TenantApi/v1/Controllers/`): Tenant-scoped operations for adapters, pools, pipelines
 
 Routes follow pattern: `{tenantId:tenantId}/v{version:apiVersion}/[controller]`
+
+## Pipeline Execution Metrics
+
+The `PipelineExecutionService` tracks pipeline execution metrics reported by adapters via SignalR. This enables real-time monitoring and historical analysis of pipeline performance.
+
+### CK Model Entities
+
+| Type | Description |
+|------|-------------|
+| `RtPipelineExecution` | Records individual pipeline execution with status, timing, and optional input data |
+| `RtPipelineStatistics` | Aggregated statistics per pipeline (1h, 12h, 24h, 30d periods) |
+| `RtPipelineExecutionStatusEnum` | Status: Running, Completed, Failed, Interrupted, Cancelled |
+| `RtPipelineTriggerTypeEnum` | Trigger: Manual, Scheduled, Event, Startup |
+
+### Hub Methods (AdapterHub)
+
+Adapters report execution lifecycle via SignalR:
+- `ReportExecutionStartAsync(PipelineExecutionStartDto)` - Reports execution start
+- `ReportExecutionEndAsync(PipelineExecutionEndDto)` - Reports execution completion
+- `ReportInterruptedExecutionResultAsync(PipelineExecutionEndDto)` - Reports final status after reconnect
+- `GetInterruptedExecutionIdsAsync()` - Gets IDs of executions interrupted by disconnect
+
+### Interruption Handling
+
+When an adapter disconnects unexpectedly:
+1. All running executions for that adapter are marked as `Interrupted`
+2. On reconnect, adapter can query interrupted execution IDs
+3. Adapter reports final status via `ReportInterruptedExecutionResultAsync`
+
+### Background Services
+
+| Service | Interval | Description |
+|---------|----------|-------------|
+| `PipelineStatisticsBackgroundService` | 5 minutes | Aggregates execution statistics for all pipelines |
+| `ExecutionCleanupBackgroundService` | Daily | Removes execution records older than retention period |
+
+### Service Methods
+
+```csharp
+// IPipelineExecutionService
+Task StartExecutionAsync(string tenantId, RtEntityId adapterRtEntityId, PipelineExecutionStartDto startDto);
+Task CompleteExecutionAsync(string tenantId, RtEntityId adapterRtEntityId, PipelineExecutionEndDto endDto);
+Task MarkExecutionsAsInterruptedAsync(string tenantId, RtEntityId adapterRtEntityId);
+Task ReportInterruptedExecutionResultAsync(string tenantId, RtEntityId adapterRtEntityId, PipelineExecutionEndDto endDto);
+Task<IReadOnlyList<string>> GetInterruptedExecutionIdsAsync(string tenantId, RtEntityId adapterRtEntityId);
+Task UpdateStatisticsAsync(string tenantId, RtEntityId pipelineRtEntityId);
+Task UpdateAllStatisticsAsync(string tenantId);
+Task<int> CleanupOldExecutionsAsync(string tenantId, int retentionDays);
+```

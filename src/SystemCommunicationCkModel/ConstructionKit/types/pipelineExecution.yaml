@@ -1,0 +1,30 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+- typeId: PipelineExecution
+  derivedFromCkTypeId: ${System}/Entity
+  attributes:
+    - id: ${this}/ExecutionId
+      name: ExecutionId
+    - id: ${this}/ExecutionStatus
+      name: Status
+    - id: ${this}/TriggerType
+      name: TriggerType
+    - id: ${this}/StartedAt
+      name: StartedAt
+    - id: ${this}/CompletedAt
+      name: CompletedAt
+      isOptional: true
+    - id: ${this}/DurationMs
+      name: DurationMs
+      isOptional: true
+    - id: ${this}/ErrorMessage
+      name: ErrorMessage
+      isOptional: true
+    - id: ${this}/InputData
+      name: InputData
+      isOptional: true
+  associations:
+    - id: ${this}/ExecutedPipeline
+      targetCkTypeId: ${this}/Pipeline
+    - id: ${this}/ExecutingAdapter
+      targetCkTypeId: ${this}/Adapter
