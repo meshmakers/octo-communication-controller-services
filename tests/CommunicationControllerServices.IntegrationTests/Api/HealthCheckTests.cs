@@ -7,16 +7,11 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTes
 
 /// <summary>
 /// HTTP-based integration tests for health endpoints.
-/// NOTE: These tests are temporarily skipped due to a conflict with the Octo Runtime Engine's
-/// global state management. The WebApplicationFactory initializes static state that interferes
-/// with the CommunicationControllerFixture's CK cache initialization.
-/// TODO: Move these tests to a separate test project for process isolation.
 /// </summary>
 [Collection("ZWebFactory")]
 public class HealthCheckTests(CustomWebApplicationFactory factory) : IntegrationTestBase(factory)
 {
-
-    [Fact(Skip = "Conflicts with CommunicationControllerFixture due to shared static state in Octo Runtime Engine")]
+    [Fact]
     public async Task HealthEndpoint_ReturnsExpectedStatusCode()
     {
         // Act
@@ -29,7 +24,7 @@ public class HealthCheckTests(CustomWebApplicationFactory factory) : Integration
         response.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.ServiceUnavailable);
     }
 
-    [Fact(Skip = "Conflicts with CommunicationControllerFixture due to shared static state in Octo Runtime Engine")]
+    [Fact]
     public async Task SwaggerEndpoint_ReturnsOk()
     {
         // Act - Swagger should be available in Development environment
@@ -39,7 +34,7 @@ public class HealthCheckTests(CustomWebApplicationFactory factory) : Integration
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
-    [Fact(Skip = "Conflicts with CommunicationControllerFixture due to shared static state in Octo Runtime Engine")]
+    [Fact]
     public async Task UnknownEndpoint_ReturnsNotFound()
     {
         // Act
