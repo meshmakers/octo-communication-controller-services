@@ -1,0 +1,29 @@
+﻿$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+  - typeId: EnergyCommunityConfiguration
+    derivedFromCkTypeId: ${System}/Configuration
+    description: "Configuration for an energy community"
+    attributes:
+      - id: ${this}/EnergyCommunityId
+        name: EnergyCommunityId
+      - id: ${this}/NetworkPartnerId
+        name: PartnerId
+      - id: ${this}/HeaderLogo
+        name: HeaderLogo
+        isOptional: true
+      - id: ${this}/FooterLogo
+        name: FooterLogo
+        isOptional: true
+      - id: ${this}/UiThemeColors
+        name: Colors
+        isOptional: true
+      - id: ${this}/ConsumptionRecordRequestDelay
+        name: ConsumptionRecordRequestDelay
+        isOptional: false
+      - id: ${this}/ConsumerPrice
+        name: ConsumerPrice
+        isOptional: false
+      - id: ${this}/ProducerPrice
+        name: ProducerPrice
+        isOptional: false
+        

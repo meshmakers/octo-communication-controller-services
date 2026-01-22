@@ -1,0 +1,41 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+attributes:
+  - id: EnergyCommunityId
+    valueType: String
+    description: "ID of the energy community"
+  - id: NetworkPartnerId
+    valueType: String
+    description: "ID of the network partner (Marktpartner"
+  - id: HeaderLogo
+    valueType: BinaryLinked
+    description: "Icon for the app header"
+  - id: FooterLogo
+    valueType: BinaryLinked
+    description: "Icon for the app footer"
+  - id: ConsumptionRecordRequestDelay
+    valueType: Int
+    description: "Delay in days before automatic consumption record requests are sent"
+    defaultValues:
+      - 5
+  - id: ConsumerPrice
+    valueType: Double
+    description: "Price per kWh for consumers in the energy community"
+  - id: ProducerPrice
+    valueType: Double
+    description: "Price per kWh for producers in the energy community"
+  - id: PrimaryColor
+    valueType: String
+    description: The primary color of the theme
+  - id: SecondaryColor
+    valueType: String
+    description: The secondary color of the theme
+  - id: TertiaryColor
+    valueType: String
+    description: The tertiary color of the theme
+  - id: NeutralColor
+    valueType: String
+    description: The neutral color of the theme
+  - id: UiThemeColors
+    valueType: Record
+    valueCkRecordId: ${this}/UiThemeColors
+    description: Theme color configuration for an application
