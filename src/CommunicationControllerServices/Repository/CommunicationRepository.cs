@@ -819,4 +819,646 @@ internal class CommunicationRepository : ICommunicationRepository
                 configurationState, e);
         }
     }
+
+    #region Pipeline Execution
+
+    public async Task CreatePipelineExecutionAsync(string tenantId, RtPipelineExecution execution,
+        RtEntityId pipelineRtEntityId, RtEntityId adapterRtEntityId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtPipelineExecution>>
+            {
+                EntityUpdateInfo<RtPipelineExecution>.CreateInsert(execution)
+            };
+
+            // Create associations to Pipeline and Adapter - must be created together with entity
+            // due to minimum multiplicity constraint (One)
+            var associations = new List<AssociationUpdateInfo>
+            {
+                AssociationUpdateInfo.CreateInsert(
+                    execution.ToRtEntityId(),
+                    pipelineRtEntityId,
+                    SystemCommunicationCkIds.RtCkExecutedPipelineRoleId),
+                AssociationUpdateInfo.CreateInsert(
+                    execution.ToRtEntityId(),
+                    adapterRtEntityId,
+                    SystemCommunicationCkIds.RtCkExecutingAdapterRoleId)
+            };
+
+            // Apply entity and associations together to satisfy minimum multiplicity constraint
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, associations, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedCreatePipelineExecution(tenantId, execution.ExecutionId, e);
+        }
+    }
+
+    public async Task UpdatePipelineExecutionAsync(string tenantId, string executionId,
+        RtPipelineExecutionStatusEnum status, DateTime? completedAt, int? durationMs, string? errorMessage)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            // Find the execution by ExecutionId field
+            var queryOptions = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtPipelineExecution.ExecutionId), FieldFilterOperator.Equals, executionId);
+
+            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(session, queryOptions);
+            var execution = resultSet.Items.FirstOrDefault();
+
+            if (execution == null)
+            {
+                throw CommunicationRepositoryException.ExecutionNotFound(tenantId, executionId);
+            }
+
+            var updatedExecution = new RtPipelineExecution
+            {
+                Status = status,
+                CompletedAt = completedAt,
+                DurationMs = durationMs,
+                ErrorMessage = errorMessage
+            };
+
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtPipelineExecution>>
+            {
+                EntityUpdateInfo<RtPipelineExecution>.CreateUpdate(execution.ToRtEntityId(), updatedExecution)
+            };
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedUpdatePipelineExecution(tenantId, executionId, e);
+        }
+    }
+
+    public async Task<RtPipelineExecution?> GetPipelineExecutionAsync(string tenantId, string executionId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var queryOptions = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtPipelineExecution.ExecutionId), FieldFilterOperator.Equals, executionId);
+
+            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(session, queryOptions);
+
+            await session.CommitTransactionAsync();
+
+            return resultSet.Items.FirstOrDefault();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGetPipelineExecution(tenantId, executionId, e);
+        }
+    }
+
+    public async Task<IReadOnlyList<RtPipelineExecution>> GetPipelineExecutionsAsync(string tenantId,
+        RtEntityId pipelineRtEntityId, DateTime? from, DateTime? to, int? limit)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var queryOptions = RtEntityQueryOptions.Create()
+                .SortOrder(nameof(RtPipelineExecution.StartedAt), SortOrders.Descending);
+
+            if (from.HasValue)
+            {
+                queryOptions.FieldFilter(nameof(RtPipelineExecution.StartedAt), FieldFilterOperator.GreaterEqualThan, from.Value);
+            }
+
+            if (to.HasValue)
+            {
+                queryOptions.FieldFilter(nameof(RtPipelineExecution.StartedAt), FieldFilterOperator.LessEqualThan, to.Value);
+            }
+
+            var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPipeline, RtPipelineExecution>(
+                session,
+                [pipelineRtEntityId.RtId],
+                SystemCommunicationCkIds.RtCkExecutedPipelineRoleId,
+                GraphDirections.Inbound,
+                null,
+                queryOptions);
+
+            await session.CommitTransactionAsync();
+
+            if (resultSet.Any())
+            {
+                var items = resultSet.First().Value.Items.ToList();
+                // Apply limit in memory if specified
+                return limit.HasValue ? items.Take(limit.Value).ToList() : items;
+            }
+
+            return [];
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGetPipelineExecutions(tenantId, pipelineRtEntityId, e);
+        }
+    }
+
+    public async Task<IReadOnlyList<RtPipelineExecution>> GetRunningExecutionsForAdapterAsync(string tenantId,
+        RtEntityId adapterRtEntityId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var queryOptions = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtPipelineExecution.Status), FieldFilterOperator.Equals, (int)RtPipelineExecutionStatusEnum.Running);
+
+            var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtAdapter, RtPipelineExecution>(
+                session,
+                [adapterRtEntityId.RtId],
+                SystemCommunicationCkIds.RtCkExecutingAdapterRoleId,
+                GraphDirections.Inbound,
+                null,
+                queryOptions);
+
+            await session.CommitTransactionAsync();
+
+            if (resultSet.Any())
+            {
+                return resultSet.First().Value.Items.ToList();
+            }
+
+            return [];
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGetRunningExecutions(tenantId, adapterRtEntityId, e);
+        }
+    }
+
+    public async Task<IReadOnlyList<string>> GetInterruptedExecutionIdsAsync(string tenantId, RtEntityId adapterRtEntityId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var queryOptions = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtPipelineExecution.Status), FieldFilterOperator.Equals, (int)RtPipelineExecutionStatusEnum.Interrupted);
+
+            var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtAdapter, RtPipelineExecution>(
+                session,
+                [adapterRtEntityId.RtId],
+                SystemCommunicationCkIds.RtCkExecutingAdapterRoleId,
+                GraphDirections.Inbound,
+                null,
+                queryOptions);
+
+            await session.CommitTransactionAsync();
+
+            if (resultSet.Any())
+            {
+                return resultSet.First().Value.Items
+                    .Where(e => e.ExecutionId != null)
+                    .Select(e => e.ExecutionId!)
+                    .ToList();
+            }
+
+            return [];
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGetInterruptedExecutions(tenantId, adapterRtEntityId, e);
+        }
+    }
+
+    public async Task SetPipelineCurrentExecutionAsync(string tenantId, RtEntityId pipelineRtEntityId, string? executionId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var pipeline = new RtPipeline
+            {
+                CurrentExecutionId = executionId,
+                IsExecuting = executionId != null
+            };
+
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtPipeline>>
+            {
+                EntityUpdateInfo<RtPipeline>.CreateUpdate(pipelineRtEntityId, pipeline)
+            };
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedSetPipelineCurrentExecution(tenantId, pipelineRtEntityId, e);
+        }
+    }
+
+    public async Task<int> DeleteOldExecutionsAsync(string tenantId, DateTime olderThan)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var queryOptions = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtPipelineExecution.StartedAt), FieldFilterOperator.LessThan, olderThan);
+
+            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(session, queryOptions);
+            var executions = resultSet.Items.ToList();
+
+            if (!executions.Any())
+            {
+                await session.CommitTransactionAsync();
+                return 0;
+            }
+
+            var entityUpdateInfoList = executions
+                .Select(e => EntityUpdateInfo<RtPipelineExecution>.CreateDelete(e.ToRtEntityId()))
+                .ToList();
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+            return executions.Count;
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedDeleteOldExecutions(tenantId, olderThan, e);
+        }
+    }
+
+    #endregion
+
+    #region Pipeline Statistics
+
+    public async Task<RtPipelineStatistics?> GetPipelineStatisticsAsync(string tenantId, RtEntityId pipelineRtEntityId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var queryOptions = RtEntityQueryOptions.Create();
+
+            var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPipeline, RtPipelineStatistics>(
+                session,
+                [pipelineRtEntityId.RtId],
+                SystemCommunicationCkIds.RtCkStatisticsForPipelineRoleId,
+                GraphDirections.Inbound,
+                null,
+                queryOptions);
+
+            await session.CommitTransactionAsync();
+
+            if (resultSet.Any())
+            {
+                return resultSet.First().Value.Items.FirstOrDefault();
+            }
+
+            return null;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGetPipelineStatistics(tenantId, pipelineRtEntityId, e);
+        }
+    }
+
+    public async Task UpsertPipelineStatisticsAsync(string tenantId, RtPipelineStatistics statistics,
+        RtEntityId pipelineRtEntityId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            // Check if statistics already exist
+            var existing = await GetPipelineStatisticsAsync(tenantId, pipelineRtEntityId);
+
+            OperationResult operationResult = new();
+
+            if (existing == null)
+            {
+                // Insert new statistics
+                var entityUpdateInfoList = new List<EntityUpdateInfo<RtPipelineStatistics>>
+                {
+                    EntityUpdateInfo<RtPipelineStatistics>.CreateInsert(statistics)
+                };
+
+                await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+                if (operationResult.HasErrors || operationResult.HasFatalErrors)
+                {
+                    throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+                }
+
+                // Create association to Pipeline
+                var associations = new List<AssociationUpdateInfo>
+                {
+                    AssociationUpdateInfo.CreateInsert(
+                        statistics.ToRtEntityId(),
+                        pipelineRtEntityId,
+                        SystemCommunicationCkIds.RtCkStatisticsForPipelineRoleId)
+                };
+
+                await tenantRepository.ApplyChangesAsync(session, associations, operationResult);
+            }
+            else
+            {
+                // Update existing statistics
+                var entityUpdateInfoList = new List<EntityUpdateInfo<RtPipelineStatistics>>
+                {
+                    EntityUpdateInfo<RtPipelineStatistics>.CreateUpdate(existing.ToRtEntityId(), statistics)
+                };
+
+                await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            }
+
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedUpsertPipelineStatistics(tenantId, pipelineRtEntityId, e);
+        }
+    }
+
+    public async Task<ExecutionAggregateResult> GetExecutionAggregateAsync(string tenantId,
+        RtEntityId pipelineRtEntityId, DateTime from, DateTime to)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var queryOptions = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtPipelineExecution.StartedAt), FieldFilterOperator.GreaterEqualThan, from)
+                .FieldFilter(nameof(RtPipelineExecution.StartedAt), FieldFilterOperator.LessEqualThan, to);
+
+            var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPipeline, RtPipelineExecution>(
+                session,
+                [pipelineRtEntityId.RtId],
+                SystemCommunicationCkIds.RtCkExecutedPipelineRoleId,
+                GraphDirections.Inbound,
+                null,
+                queryOptions);
+
+            await session.CommitTransactionAsync();
+
+            if (!resultSet.Any())
+            {
+                return new ExecutionAggregateResult(0, 0, 0, 0);
+            }
+
+            var executions = resultSet.First().Value.Items.ToList();
+
+            var successCount = executions.Count(e => e.Status == RtPipelineExecutionStatusEnum.Completed);
+            var failureCount = executions.Count(e => e.Status == RtPipelineExecutionStatusEnum.Failed);
+            var executionsWithDuration = executions.Where(e => e.DurationMs.HasValue).ToList();
+            var totalDurationMs = executionsWithDuration.Sum(e => e.DurationMs!.Value);
+
+            return new ExecutionAggregateResult(successCount, failureCount, totalDurationMs, executionsWithDuration.Count);
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGetExecutionAggregate(tenantId, pipelineRtEntityId, e);
+        }
+    }
+
+    #endregion
+
+    #region Bulk Operations
+
+    public async Task BulkInsertPipelineExecutionsAsync(string tenantId, IEnumerable<RtPipelineExecution> executions,
+        RtEntityId pipelineRtEntityId, RtEntityId adapterRtEntityId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var executionList = executions.ToList();
+            var entityUpdateInfoList = executionList
+                .Select(EntityUpdateInfo<RtPipelineExecution>.CreateInsert)
+                .ToList();
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            // Create associations for all executions
+            var associations = executionList.SelectMany(execution => new[]
+            {
+                AssociationUpdateInfo.CreateInsert(
+                    execution.ToRtEntityId(),
+                    pipelineRtEntityId,
+                    SystemCommunicationCkIds.RtCkExecutedPipelineRoleId),
+                AssociationUpdateInfo.CreateInsert(
+                    execution.ToRtEntityId(),
+                    adapterRtEntityId,
+                    SystemCommunicationCkIds.RtCkExecutingAdapterRoleId)
+            }).ToList();
+
+            await tenantRepository.ApplyChangesAsync(session, associations, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedBulkInsertExecutions(tenantId, e);
+        }
+    }
+
+    public async Task<ISet<string>> GetExistingExecutionIdsAsync(string tenantId, IEnumerable<string> executionIds)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var idList = executionIds.ToList();
+            var queryOptions = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtPipelineExecution.ExecutionId), FieldFilterOperator.In, idList);
+
+            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(session, queryOptions);
+
+            await session.CommitTransactionAsync();
+
+            return resultSet.Items
+                .Where(e => e.ExecutionId != null)
+                .Select(e => e.ExecutionId!)
+                .ToHashSet();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGetExistingExecutionIds(tenantId, e);
+        }
+    }
+
+    public async Task UpdateAdapterSyncSequenceNumberAsync(string tenantId, RtEntityId adapterRtEntityId, int sequenceNumber)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var adapter = new RtAdapter
+            {
+                LastSyncedSequenceNumber = sequenceNumber
+            };
+
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtAdapter>>
+            {
+                EntityUpdateInfo<RtAdapter>.CreateUpdate(adapterRtEntityId, adapter)
+            };
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedUpdateAdapterSyncSequenceNumber(tenantId, adapterRtEntityId, e);
+        }
+    }
+
+    public async Task<int> GetAdapterSyncSequenceNumberAsync(string tenantId, RtEntityId adapterRtEntityId)
+    {
+        var adapter = await GetAdapterAsync(tenantId, adapterRtEntityId);
+        return adapter.LastSyncedSequenceNumber;
+    }
+
+    #endregion
+
+    #region Pipeline Queries
+
+    public async Task<IReadOnlyCollection<RtPipeline>> GetAllPipelinesAsync(string tenantId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var queryOptions = RtEntityQueryOptions.Create();
+            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipeline>(session, queryOptions);
+
+            await session.CommitTransactionAsync();
+
+            return resultSet.Items.ToList();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGetAllPipelines(tenantId, e);
+        }
+    }
+
+    #endregion
 }

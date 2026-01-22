@@ -1,9 +1,9 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 attributes:
 - id: CommunicationStateTimestamp
-  valueType: DateTime  
+  valueType: DateTime
 - id: Deployment.ImageName
-  valueType: String  
+  valueType: String
 - id: Deployment.ImageVersion
   valueType: String
 - id: CommunicationState
@@ -29,3 +29,116 @@ attributes:
   valueType: String
 - id: SenderEmail
   valueType: String
+
+# Pipeline Execution attributes
+- id: ExecutionId
+  valueType: String
+  description: Unique identifier (GUID) for this execution
+- id: ExecutionStatus
+  valueType: Enum
+  valueCkEnumId: ${this}/PipelineExecutionStatus
+  defaultValues:
+    - 0
+- id: TriggerType
+  valueType: Enum
+  valueCkEnumId: ${this}/PipelineTriggerType
+  defaultValues:
+    - 0
+- id: StartedAt
+  valueType: DateTime
+  description: Timestamp when execution started
+- id: CompletedAt
+  valueType: DateTime
+  description: Timestamp when execution completed
+- id: DurationMs
+  valueType: Int
+  description: Execution duration in milliseconds
+- id: ErrorMessage
+  valueType: String
+  description: Error message if execution failed
+- id: InputData
+  valueType: String
+  description: Optional input data (JSON) for debugging
+- id: CurrentExecutionId
+  valueType: String
+  description: ID of currently running execution (GUID)
+- id: IsExecuting
+  valueType: Boolean
+  description: Whether the pipeline is currently executing
+  defaultValues:
+    - false
+
+# Pipeline Statistics attributes
+- id: LastHourSuccessCount
+  valueType: Int
+  description: Successful executions in the last hour
+  defaultValues:
+    - 0
+- id: LastHourFailureCount
+  valueType: Int
+  description: Failed executions in the last hour
+  defaultValues:
+    - 0
+- id: LastHourAvgDurationMs
+  valueType: Int
+  description: Average execution duration in the last hour (ms)
+  defaultValues:
+    - 0
+- id: Last12HoursSuccessCount
+  valueType: Int
+  description: Successful executions in the last 12 hours
+  defaultValues:
+    - 0
+- id: Last12HoursFailureCount
+  valueType: Int
+  description: Failed executions in the last 12 hours
+  defaultValues:
+    - 0
+- id: Last12HoursAvgDurationMs
+  valueType: Int
+  description: Average execution duration in the last 12 hours (ms)
+  defaultValues:
+    - 0
+- id: Last24HoursSuccessCount
+  valueType: Int
+  description: Successful executions in the last 24 hours
+  defaultValues:
+    - 0
+- id: Last24HoursFailureCount
+  valueType: Int
+  description: Failed executions in the last 24 hours
+  defaultValues:
+    - 0
+- id: Last24HoursAvgDurationMs
+  valueType: Int
+  description: Average execution duration in the last 24 hours (ms)
+  defaultValues:
+    - 0
+- id: Last30DaysSuccessCount
+  valueType: Int
+  description: Successful executions in the last 30 days
+  defaultValues:
+    - 0
+- id: Last30DaysFailureCount
+  valueType: Int
+  description: Failed executions in the last 30 days
+  defaultValues:
+    - 0
+- id: Last30DaysAvgDurationMs
+  valueType: Int
+  description: Average execution duration in the last 30 days (ms)
+  defaultValues:
+    - 0
+- id: LastUpdatedAt
+  valueType: DateTime
+  description: When statistics were last calculated
+- id: LastExecutionAt
+  valueType: DateTime
+  description: Timestamp of the most recent execution
+
+# Adapter offline sync attribute
+- id: LastSyncedSequenceNumber
+  valueType: Int
+  description: Last synced sequence number for offline sync
+  defaultValues:
+    - 0

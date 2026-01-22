@@ -1,5 +1,6 @@
 using IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.BackgroundServices;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Configuration;
@@ -66,6 +67,7 @@ try
     builder.Services.AddSingleton<IAdapterService, AdapterService>();
     builder.Services.AddSingleton<IPoolService, PoolService>();
     builder.Services.AddSingleton<IPipelineDebugService, PipelineDebugService>();
+    builder.Services.AddSingleton<IPipelineExecutionService, PipelineExecutionService>();
     builder.Services.AddTransient<ITriggerManagementService, TriggerManagementService>();
 
     builder.Services
@@ -76,6 +78,10 @@ try
 
     builder.Services.AddSingleton<IPoolHubCallbacks, PoolHubCallbacks>();
     builder.Services.AddSingleton<IAdapterHubCallbacks, AdapterHubCallbacks>();
+
+    // Add background services for pipeline execution metrics
+    builder.Services.AddHostedService<PipelineStatisticsBackgroundService>();
+    builder.Services.AddHostedService<ExecutionCleanupBackgroundService>();
 
     // Add services to the container.
     builder.Services.AddCors();

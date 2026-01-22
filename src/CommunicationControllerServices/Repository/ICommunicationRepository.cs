@@ -212,4 +212,164 @@ public interface ICommunicationRepository
     /// <param name="stateMessage">An optional status message</param>
     /// <returns></returns>
     Task SetAdapterConfigurationStateAsync(string tenantId, RtEntityId adapterRtEntityId, RtConfigurationStateEnum configurationState, string? stateMessage);
+
+    #region Pipeline Execution
+
+    /// <summary>
+    /// Creates a new pipeline execution record
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="execution">The execution entity to create</param>
+    /// <param name="pipelineRtEntityId">Pipeline being executed</param>
+    /// <param name="adapterRtEntityId">Adapter executing the pipeline</param>
+    Task CreatePipelineExecutionAsync(string tenantId, RtPipelineExecution execution,
+        RtEntityId pipelineRtEntityId, RtEntityId adapterRtEntityId);
+
+    /// <summary>
+    /// Updates an existing pipeline execution record
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="executionId">Execution ID (GUID as string)</param>
+    /// <param name="status">New status</param>
+    /// <param name="completedAt">Completion timestamp</param>
+    /// <param name="durationMs">Duration in milliseconds</param>
+    /// <param name="errorMessage">Error message if failed</param>
+    Task UpdatePipelineExecutionAsync(string tenantId, string executionId,
+        RtPipelineExecutionStatusEnum status, DateTime? completedAt, int? durationMs, string? errorMessage);
+
+    /// <summary>
+    /// Gets a pipeline execution by its execution ID
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="executionId">Execution ID (GUID as string)</param>
+    /// <returns>The execution or null if not found</returns>
+    Task<RtPipelineExecution?> GetPipelineExecutionAsync(string tenantId, string executionId);
+
+    /// <summary>
+    /// Gets pipeline executions for a specific pipeline
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="pipelineRtEntityId">Pipeline identifier</param>
+    /// <param name="from">Optional start date filter</param>
+    /// <param name="to">Optional end date filter</param>
+    /// <param name="limit">Optional result limit</param>
+    /// <returns>List of executions</returns>
+    Task<IReadOnlyList<RtPipelineExecution>> GetPipelineExecutionsAsync(string tenantId,
+        RtEntityId pipelineRtEntityId, DateTime? from, DateTime? to, int? limit);
+
+    /// <summary>
+    /// Gets all running executions for a specific adapter
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="adapterRtEntityId">Adapter identifier</param>
+    /// <returns>List of running executions</returns>
+    Task<IReadOnlyList<RtPipelineExecution>> GetRunningExecutionsForAdapterAsync(string tenantId,
+        RtEntityId adapterRtEntityId);
+
+    /// <summary>
+    /// Gets execution IDs that are in Interrupted state for an adapter
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="adapterRtEntityId">Adapter identifier</param>
+    /// <returns>List of interrupted execution IDs</returns>
+    Task<IReadOnlyList<string>> GetInterruptedExecutionIdsAsync(string tenantId, RtEntityId adapterRtEntityId);
+
+    /// <summary>
+    /// Sets the current execution ID on a pipeline
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="pipelineRtEntityId">Pipeline identifier</param>
+    /// <param name="executionId">Execution ID or null to clear</param>
+    Task SetPipelineCurrentExecutionAsync(string tenantId, RtEntityId pipelineRtEntityId, string? executionId);
+
+    /// <summary>
+    /// Deletes executions older than the specified date
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="olderThan">Delete executions older than this date</param>
+    /// <returns>Number of deleted executions</returns>
+    Task<int> DeleteOldExecutionsAsync(string tenantId, DateTime olderThan);
+
+    #endregion
+
+    #region Pipeline Statistics
+
+    /// <summary>
+    /// Gets or creates statistics for a specific pipeline
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="pipelineRtEntityId">Pipeline identifier</param>
+    /// <returns>Statistics entity or null if not found</returns>
+    Task<RtPipelineStatistics?> GetPipelineStatisticsAsync(string tenantId, RtEntityId pipelineRtEntityId);
+
+    /// <summary>
+    /// Creates or updates pipeline statistics
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="statistics">Statistics to upsert</param>
+    /// <param name="pipelineRtEntityId">Pipeline identifier</param>
+    Task UpsertPipelineStatisticsAsync(string tenantId, RtPipelineStatistics statistics,
+        RtEntityId pipelineRtEntityId);
+
+    /// <summary>
+    /// Gets aggregated execution statistics for a pipeline within a time range
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="pipelineRtEntityId">Pipeline identifier</param>
+    /// <param name="from">Start of time range</param>
+    /// <param name="to">End of time range</param>
+    /// <returns>Aggregated statistics</returns>
+    Task<ExecutionAggregateResult> GetExecutionAggregateAsync(string tenantId,
+        RtEntityId pipelineRtEntityId, DateTime from, DateTime to);
+
+    #endregion
+
+    #region Bulk Operations (for offline sync)
+
+    /// <summary>
+    /// Bulk inserts pipeline executions
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="executions">Executions to insert</param>
+    /// <param name="pipelineRtEntityId">Pipeline identifier</param>
+    /// <param name="adapterRtEntityId">Adapter identifier</param>
+    Task BulkInsertPipelineExecutionsAsync(string tenantId, IEnumerable<RtPipelineExecution> executions,
+        RtEntityId pipelineRtEntityId, RtEntityId adapterRtEntityId);
+
+    /// <summary>
+    /// Gets existing execution IDs from a list (for deduplication)
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="executionIds">List of execution IDs to check</param>
+    /// <returns>Set of existing execution IDs</returns>
+    Task<ISet<string>> GetExistingExecutionIdsAsync(string tenantId, IEnumerable<string> executionIds);
+
+    /// <summary>
+    /// Updates the last synced sequence number for an adapter
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="adapterRtEntityId">Adapter identifier</param>
+    /// <param name="sequenceNumber">New sequence number</param>
+    Task UpdateAdapterSyncSequenceNumberAsync(string tenantId, RtEntityId adapterRtEntityId, int sequenceNumber);
+
+    /// <summary>
+    /// Gets the last synced sequence number for an adapter
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="adapterRtEntityId">Adapter identifier</param>
+    /// <returns>Last synced sequence number</returns>
+    Task<int> GetAdapterSyncSequenceNumberAsync(string tenantId, RtEntityId adapterRtEntityId);
+
+    #endregion
+
+    #region Pipeline Queries for Statistics
+
+    /// <summary>
+    /// Gets all pipelines for a tenant
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <returns>List of all pipelines</returns>
+    Task<IReadOnlyCollection<RtPipeline>> GetAllPipelinesAsync(string tenantId);
+
+    #endregion
 }

@@ -1,0 +1,15 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+- enumId: PipelineExecutionStatus
+  useFlags: false
+  values:
+  - key: 0
+    name: Running
+  - key: 1
+    name: Completed
+  - key: 2
+    name: Failed
+  - key: 3
+    name: Interrupted
+  - key: 4
+    name: Cancelled

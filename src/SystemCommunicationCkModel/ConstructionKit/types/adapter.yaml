@@ -19,7 +19,9 @@ types:
       isOptional: true
     - id: ${this}/AdapterConfiguration
       name: Configuration
-      isOptional: true  
+      isOptional: true
+    - id: ${this}/LastSyncedSequenceNumber
+      name: LastSyncedSequenceNumber
   associations:
   - id: ${this}/Manages
     targetCkTypeId: ${this}/Pool    

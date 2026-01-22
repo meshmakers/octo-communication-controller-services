@@ -208,4 +208,100 @@ internal class CommunicationRepositoryException : Exception
     {
         return new CommunicationRepositoryException($"[{tenantId}] Adapter type is missing for adapter '{adapterRtEntityId}'");
     }
+
+    #region Pipeline Execution Exceptions
+
+    internal static Exception ExecutionNotFound(string tenantId, string? executionId)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Pipeline execution '{executionId}' not found");
+    }
+
+    internal static Exception CommonFailedCreatePipelineExecution(string tenantId, string? executionId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to create pipeline execution '{executionId}'", exception);
+    }
+
+    internal static Exception CommonFailedUpdatePipelineExecution(string tenantId, string executionId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to update pipeline execution '{executionId}'", exception);
+    }
+
+    internal static Exception CommonFailedGetPipelineExecution(string tenantId, string executionId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get pipeline execution '{executionId}'", exception);
+    }
+
+    internal static Exception CommonFailedGetPipelineExecutions(string tenantId, RtEntityId pipelineRtEntityId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get pipeline executions for pipeline '{pipelineRtEntityId}'", exception);
+    }
+
+    internal static Exception CommonFailedGetRunningExecutions(string tenantId, RtEntityId adapterRtEntityId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get running executions for adapter '{adapterRtEntityId}'", exception);
+    }
+
+    internal static Exception CommonFailedGetInterruptedExecutions(string tenantId, RtEntityId adapterRtEntityId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get interrupted executions for adapter '{adapterRtEntityId}'", exception);
+    }
+
+    internal static Exception CommonFailedSetPipelineCurrentExecution(string tenantId, RtEntityId pipelineRtEntityId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to set current execution for pipeline '{pipelineRtEntityId}'", exception);
+    }
+
+    internal static Exception CommonFailedDeleteOldExecutions(string tenantId, DateTime olderThan, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to delete old executions older than '{olderThan}'", exception);
+    }
+
+    #endregion
+
+    #region Pipeline Statistics Exceptions
+
+    internal static Exception CommonFailedGetPipelineStatistics(string tenantId, RtEntityId pipelineRtEntityId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get pipeline statistics for pipeline '{pipelineRtEntityId}'", exception);
+    }
+
+    internal static Exception CommonFailedUpsertPipelineStatistics(string tenantId, RtEntityId pipelineRtEntityId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to upsert pipeline statistics for pipeline '{pipelineRtEntityId}'", exception);
+    }
+
+    internal static Exception CommonFailedGetExecutionAggregate(string tenantId, RtEntityId pipelineRtEntityId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get execution aggregate for pipeline '{pipelineRtEntityId}'", exception);
+    }
+
+    #endregion
+
+    #region Bulk Operations Exceptions
+
+    internal static Exception CommonFailedBulkInsertExecutions(string tenantId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to bulk insert executions", exception);
+    }
+
+    internal static Exception CommonFailedGetExistingExecutionIds(string tenantId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get existing execution IDs", exception);
+    }
+
+    internal static Exception CommonFailedUpdateAdapterSyncSequenceNumber(string tenantId, RtEntityId adapterRtEntityId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to update sync sequence number for adapter '{adapterRtEntityId}'", exception);
+    }
+
+    #endregion
+
+    #region Pipeline Query Exceptions
+
+    internal static Exception CommonFailedGetAllPipelines(string tenantId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get all pipelines", exception);
+    }
+
+    #endregion
 }
