@@ -68,15 +68,27 @@ stages:
               publishWebProjects: false
               zipAfterPublish: false
               modifyOutputPath: false
+          - script: |
+              echo "=== Docker Diagnostics ==="
+              echo "DOCKER_HOST: $DOCKER_HOST"
+              docker version || echo "ERROR: Docker not available"
+              docker info || echo "ERROR: Docker info failed"
+              echo ""
+              echo "=== Pre-pulling MongoDB image ==="
+              docker pull mongo:8.0.15 || echo "Warning: Failed to pre-pull MongoDB image"
+            displayName: 'Docker diagnostics and pre-pull'
+            env:
+              DOCKER_HOST: unix:///var/run/docker.sock
           - task: DotNetCoreCLI@2
             displayName: 'Test'
             inputs:
               command: 'test'
-              arguments: '--configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false'
+              arguments: '--configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false --logger "console;verbosity=detailed"'
               projects: |
                 **/*Tests.csproj
                 !**/*SystemTests.csproj
-              testRunTitle: 'CI'
+            env:
+              DOCKER_HOST: unix:///var/run/docker.sock
           - template: build-and-push-docker-image.yml
             parameters:
               PublicRegistryServiceConnection: $(DockerRegistryPublicConnection)
