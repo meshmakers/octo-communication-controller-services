@@ -80,13 +80,22 @@ stages:
             env:
               DOCKER_HOST: unix:///var/run/docker.sock
           - task: DotNetCoreCLI@2
-            displayName: 'Test'
+            displayName: 'Unit Tests (TUnit)'
             inputs:
               command: 'test'
-              arguments: '--configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false --logger "console;verbosity=detailed"'
+              arguments: '--configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false'
               projects: |
                 **/*Tests.csproj
+                !**/*IntegrationTests.csproj
                 !**/*SystemTests.csproj
+              publishTestResults: false
+          - task: DotNetCoreCLI@2
+            displayName: 'Integration Tests (xUnit)'
+            inputs:
+              command: 'test'
+              arguments: '--configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false'
+              projects: '**/*IntegrationTests.csproj'
+              publishTestResults: false
             env:
               DOCKER_HOST: unix:///var/run/docker.sock
           - template: build-and-push-docker-image.yml
