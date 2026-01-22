@@ -1,0 +1,13 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+records:
+  - recordId: UiThemeColors
+    description: "Theme information for an app"
+    attributes:
+      - id: ${this}/PrimaryColor
+        name: PrimaryColor
+      - id: ${this}/SecondaryColor
+        name: SecondaryColor
+      - id: ${this}/TertiaryColor
+        name: TertiaryColor
+      - id: ${this}/NeutralColor
+        name: NeutralColor
