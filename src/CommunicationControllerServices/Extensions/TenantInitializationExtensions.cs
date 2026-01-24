@@ -24,6 +24,11 @@ public static class TenantInitializationExtensions
         string tenantId,
         ICkCacheService ckCacheService)
     {
+        // Get the tenant repository FIRST, before any imports
+        // This ensures we use the same repository instance for both import context and cache loading
+        // IMPORTANT: This must be done before GetChildTenantContextAsync to avoid caching issues
+        var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
+
         // Import the CK models to the tenant's database
         // System.Communication depends on System and System.Bot, so we import in order
         using (var importSession = await systemContext.GetAdminSessionAsync())
@@ -80,8 +85,7 @@ public static class TenantInitializationExtensions
 
         // Load the CK cache for the tenant AFTER the import transaction is committed
         // This ensures the cache loader can see the imported models in MongoDB
-        // Use FindTenantRepositoryAsync to get the same repository instance that CommunicationRepository uses
-        var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
+        // Use the SAME tenant repository we got at the start to ensure consistency
         await tenantRepository.LoadCacheForTenantAsync(ckCacheService);
     }
 }
