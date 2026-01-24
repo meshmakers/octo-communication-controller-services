@@ -227,8 +227,9 @@ All three models must be imported in order before tests can work with typed enti
 ### Tenant Initialization for Tests
 
 **CRITICAL:** To properly initialize a tenant for integration testing, you must:
-1. Import CK models in dependency order (System → System.Bot → System.Communication)
-2. Load the CK cache using `ITenantRepository.LoadCacheForTenantAsync(cacheService)` with the shared `ICkCacheService` from DI
+1. Get the tenant repository FIRST, before any CK model imports (to avoid repository caching issues)
+2. Import CK models in dependency order (System → System.Bot → System.Communication)
+3. Load the CK cache using `ITenantRepository.LoadCacheForTenantAsync(cacheService)` with the shared `ICkCacheService` from DI
 
 The extension method `InitializeTenantForTestingAsync` in `src/CommunicationControllerServices/Extensions/TenantInitializationExtensions.cs` handles this:
 
@@ -238,7 +239,24 @@ var ckCacheService = GetService<ICkCacheService>();
 await systemContext.InitializeTenantForTestingAsync(TestTenantId, ckCacheService);
 ```
 
-**Why this matters:** The `CommunicationRepository` uses `ISystemContext.FindTenantRepositoryAsync(tenantId)` to get tenant repositories. For MongoDB to correctly deserialize entities to their typed classes (e.g., `RtPool` instead of `RtEntity`), the CK cache must be loaded into the same `ICkCacheService` singleton that the repository uses.
+**Implementation details of `InitializeTenantForTestingAsync`:**
+```csharp
+// 1. Get tenant repository FIRST, before any imports
+// This ensures we use the same repository instance for both import context and cache loading
+var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
+
+// 2. Import CK models in a transaction (System → System.Bot → System.Communication)
+using (var importSession = await systemContext.GetAdminSessionAsync())
+{
+    // ... import models in dependency order ...
+}
+
+// 3. Load the CK cache AFTER the import transaction is committed
+// Use the SAME tenant repository we got at the start to ensure consistency
+await tenantRepository.LoadCacheForTenantAsync(ckCacheService);
+```
+
+**Why this matters:** The `CommunicationRepository` uses `ISystemContext.FindTenantRepositoryAsync(tenantId)` to get tenant repositories. For MongoDB to correctly deserialize entities to their typed classes (e.g., `RtPool` instead of `RtEntity`), the CK cache must be loaded into the same `ICkCacheService` singleton that the repository uses. Getting the tenant repository before imports ensures the same instance is used throughout.
 
 ### Running Integration Tests
 
@@ -252,14 +270,27 @@ dotnet test --project tests/CommunicationControllerServices.IntegrationTests/Com
 
 ### Service Registration in Tests
 
-The `ServiceCollectionFixture` registers CK models in dependency order:
+**CRITICAL - Registration Order:** CK models MUST be registered BEFORE `AddMongoDbRuntimeRepository()`. This ensures BSON class maps are available when MongoDB is initialized for typed entity deserialization.
+
 ```csharp
-// Add CK models (order matters: base models first, then dependent models)
+// CORRECT order in ServiceCollectionFixture:
+
+// 1. Add CK models FIRST (order matters: base models first, then dependent models)
+// IMPORTANT: CK models must be registered before AddMongoDbRuntimeRepository()
+// to ensure BSON class maps are available for typed entity deserialization
 Services.AddCkModelSystemV2();
 Services.AddCkModelSystemBotV2();
 Services.AddCkModelSystemCommunicationV2();
 Services.AddCkModelSystemNotificationV2();
+
+// 2. Add runtime engine with MongoDB AFTER CK models
+Services.AddRuntimeEngine()
+    .AddMongoDbRuntimeRepository();
 ```
+
+**Common Error:** If you see `InvalidCastException: Unable to cast object of type 'RtEntity' to type 'RtPool'` (or similar), it typically means:
+1. CK models were registered after MongoDB repository initialization, OR
+2. The CK cache was not properly loaded for the tenant
 
 ## Important Patterns
 

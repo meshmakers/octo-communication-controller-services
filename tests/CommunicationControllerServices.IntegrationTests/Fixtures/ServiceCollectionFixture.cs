@@ -36,15 +36,17 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         // Add infrastructure with short service name (MongoDB app name limit is 128 bytes)
         Services.AddOctoServiceInfrastructure("CommCtrlTests", _ => { });
 
-        // Add runtime engine with MongoDB
-        Services.AddRuntimeEngine()
-            .AddMongoDbRuntimeRepository();
-
-        // Add CK models (order matters: base models first, then dependent models)
+        // Add CK models FIRST (order matters: base models first, then dependent models)
+        // IMPORTANT: CK models must be registered before AddMongoDbRuntimeRepository()
+        // to ensure BSON class maps are available for typed entity deserialization
         Services.AddCkModelSystemV2();
         Services.AddCkModelSystemBotV2();
         Services.AddCkModelSystemCommunicationV2();
         Services.AddCkModelSystemNotificationV2();
+
+        // Add runtime engine with MongoDB AFTER CK models
+        Services.AddRuntimeEngine()
+            .AddMongoDbRuntimeRepository();
 
         // Add communication controller services
         Services.AddSingleton<ICommunicationRepository, CommunicationRepository>();
