@@ -26,4 +26,10 @@ types:
       - id: ${this}/ProducerPrice
         name: ProducerPrice
         isOptional: false
+      - id: ${this}/TaxRate
+        name: TaxRate
+        isOptional: false
+      - id: ${this}/FarmerTaxRate
+        name: FarmerTaxRate
+        isOptional: false
         
