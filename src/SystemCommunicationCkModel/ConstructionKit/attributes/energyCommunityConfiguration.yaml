@@ -39,3 +39,13 @@ attributes:
     valueType: Record
     valueCkRecordId: ${this}/UiThemeColors
     description: Theme color configuration for an application
+  - id: TaxRate
+    valueType: Double
+    description: "Tax rate applied to energy transactions in the community"
+    defaultValues:
+      - 20.0
+  - id: FarmerTaxRate
+    valueType: Double
+    description: "Tax rate applied to farmers in the energy community"
+    defaultValues:
+      - 13.0
