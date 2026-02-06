@@ -112,7 +112,9 @@ internal class AdapterService(
                     await communicationRepository.GetDataPipelineByPipelineAsync(tenantId, rtPipeline.RtId);
                 if (dataPipeline == null)
                 {
-                    throw AdapterServiceException.DataPipelineNotFound(tenantId, rtPipeline.ToRtEntityId());
+                    Logger.Warn("[{TenantId}] Data pipeline for pipeline '{PipelineRtId}' not found, skipping",
+                        tenantId, rtPipeline.ToRtEntityId());
+                    continue;
                 }
 
                 if (!onlyDeployedPipelines || rtPipeline.DeploymentState == RtDeploymentStateEnum.Pending ||
