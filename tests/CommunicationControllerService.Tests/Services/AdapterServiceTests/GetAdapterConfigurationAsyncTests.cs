@@ -163,7 +163,7 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
     }
 
     [Test]
-    public async Task GetAdapterConfigurationAsync_DataPipelineNotFound_ThrowsException()
+    public async Task GetAdapterConfigurationAsync_DataPipelineNotFound_SkipsPipeline()
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
@@ -176,16 +176,12 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
         CommunicationRepository.GetDataPipelineByPipelineAsync(TenantId, rtPipeline.RtId)
             .Returns((RtDataPipeline?)null);
 
-        // Act & Assert
-        var exception = await Assert.That(async () =>
-                await AdapterService.GetAdapterConfigurationAsync(TenantId, rtAdapter.ToRtEntityId(), false))
-            .Throws<AdapterServiceException>();
+        // Act
+        var configuration = await AdapterService.GetAdapterConfigurationAsync(TenantId, rtAdapter.ToRtEntityId(), false);
 
-        await Assert.That(exception).IsNotNull()
-            .And.Member(e => e.Message, msg => msg.Contains("Failed to load adapter"));
-
-        await Assert.That(exception!.InnerException).IsNotNull()
-            .And.Member(e => e!.Message, msg => msg.Contains("Data pipeline").And.Contains("not found"));
+        // Assert - pipeline without DataPipeline should be skipped
+        await Assert.That(configuration).IsNotNull();
+        await Assert.That(configuration.Pipelines).IsEmpty();
     }
 
     [Test]
