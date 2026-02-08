@@ -497,6 +497,15 @@ internal class AdapterService(
 
                 return;
             }
+
+            // Adapter not yet in cache - this can happen during service restart when the adapter
+            // sends deployment results before re-registering. The adapter will re-register and
+            // receive a new configuration, so this deployment result can be safely ignored.
+            Logger.Warn(
+                "[{TenantId}] AdapterRtId='{AdapterRtId}' received deployment update but adapter is not loaded in cache. " +
+                "This can occur during service restart. The deployment result will be ignored.",
+                tenantId, adapterRtEntityId);
+            return;
         }
 
         throw AdapterServiceException.AdapterNotLoaded(tenantId, adapterRtEntityId);
@@ -652,6 +661,13 @@ internal class AdapterService(
         {
             await _semaphore.WaitAsync();
             adapterCache.AddOrUpdateTenant(tenantId);
+
+            var adapters = await communicationRepository.GetAdaptersAsync(tenantId);
+            foreach (var adapter in adapters)
+            {
+                await communicationRepository.SetAdapterCommunicationStateAsync(tenantId, adapter.ToRtEntityId(),
+                    RtCommunicationStateEnum.Offline);
+            }
 
             await eventService.StoreInformationEventAsync(tenantId,
                 "Tenant post-update completed. Adapter cache re-initialized.");

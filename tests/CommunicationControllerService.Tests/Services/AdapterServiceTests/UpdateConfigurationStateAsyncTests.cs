@@ -34,19 +34,21 @@ internal class UpdateConfigurationStateAsyncTests : AdapterServiceTestsBase
     }
 
     [Test]
-    public async Task UpdateConfigurationStateAsync_AdapterNotInCache_ThrowsException()
+    public async Task UpdateConfigurationStateAsync_AdapterNotInCache_DoesNotThrow()
     {
-        // Arrange
+        // Arrange - tenant is in cache but adapter is not (simulates service restart scenario)
         var rtAdapter = RtEntityCreator.CreateAdapter();
         var deploymentResult = new DeploymentResult { IsSuccess = true, ErrorMessages = null };
 
-        // Act & Assert
-        var exception = await Assert.That(async () =>
+        // Act & Assert - should not throw, deployment result is silently ignored
+        await Assert.That(async () =>
                 await AdapterService.UpdateConfigurationStateAsync(TenantId, rtAdapter.ToRtEntityId(), deploymentResult))
-            .Throws<AdapterServiceException>();
+            .ThrowsNothing();
 
-        await Assert.That(exception).IsNotNull()
-            .And.Member(e => e.Message, msg => msg.Contains("Adapter").And.Contains("not loaded"));
+        // Verify no repository calls were made since adapter is not in cache
+        await CommunicationRepository.DidNotReceive()
+            .SetAdapterConfigurationStateAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(),
+                Arg.Any<RtConfigurationStateEnum>(), Arg.Any<string?>());
     }
 
     [Test]
