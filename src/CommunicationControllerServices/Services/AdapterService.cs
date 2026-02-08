@@ -61,17 +61,22 @@ internal class AdapterService(
 
     public async Task UnregisterAsync(string tenantId, RtEntityId adapterRtEntityId, string connectionId)
     {
-        Logger.Info("[{TenantId}] Adapter '{AdapterRtEntityId}' unregistered with connection id '{ConnectionId}'",
-            tenantId, adapterRtEntityId, connectionId);
-
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
-            await eventService.StoreInformationEventAsync(tenantId,
-                $"Adapter '{adapterRtEntityId}' unregistered with connection id '{connectionId}'.",
-                adapterRtEntityId);
-
             if (adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
             {
+                // Check if the unregistering connection is still the current one.
+                // If a newer connection has already replaced it, this is a stale unregister
+                // from an old connection and should be ignored.
+                if (!string.IsNullOrWhiteSpace(adapter.ConnectionId) && adapter.ConnectionId != connectionId)
+                {
+                    Logger.Warn(
+                        "[{TenantId}] AdapterRtId='{AdapterRtId}' ignoring stale unregister for connection '{OldConnectionId}' " +
+                        "(current connection: '{CurrentConnectionId}')",
+                        tenantId, adapterRtEntityId, connectionId, adapter.ConnectionId);
+                    return;
+                }
+
                 foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
                 {
                     await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
@@ -81,6 +86,13 @@ internal class AdapterService(
                 await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId,
                     RtCommunicationStateEnum.Unregistered);
             }
+
+            Logger.Info("[{TenantId}] Adapter '{AdapterRtEntityId}' unregistered with connection id '{ConnectionId}'",
+                tenantId, adapterRtEntityId, connectionId);
+
+            await eventService.StoreInformationEventAsync(tenantId,
+                $"Adapter '{adapterRtEntityId}' unregistered with connection id '{connectionId}'.",
+                adapterRtEntityId);
 
             adapterTenant.RemoveAdapter(adapterRtEntityId);
         }
