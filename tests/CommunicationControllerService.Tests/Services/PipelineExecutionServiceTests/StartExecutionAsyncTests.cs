@@ -57,9 +57,6 @@ internal class StartExecutionAsyncTests : PipelineExecutionServiceTestsBase
                 e.TriggerType == RtPipelineTriggerTypeEnum.Manual),
             rtPipeline.ToRtEntityId(),
             rtAdapter.ToRtEntityId());
-
-        await CommunicationRepository.Received(1).SetPipelineCurrentExecutionAsync(
-            TenantId, rtPipeline.ToRtEntityId(), executionId);
     }
 
     [Test]

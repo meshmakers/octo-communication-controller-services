@@ -1071,45 +1071,6 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task SetPipelineCurrentExecutionAsync(string tenantId, RtEntityId pipelineRtEntityId, string? executionId)
-    {
-        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
-
-        var session = await tenantRepository.GetSessionAsync();
-        try
-        {
-            session.StartTransaction();
-
-            var pipeline = new RtPipeline
-            {
-                CurrentExecutionId = executionId,
-                IsExecuting = executionId != null
-            };
-
-            var entityUpdateInfoList = new List<EntityUpdateInfo<RtPipeline>>
-            {
-                EntityUpdateInfo<RtPipeline>.CreateUpdate(pipelineRtEntityId, pipeline)
-            };
-
-            OperationResult operationResult = new();
-            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
-            if (operationResult.HasErrors || operationResult.HasFatalErrors)
-            {
-                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
-            }
-
-            await session.CommitTransactionAsync();
-        }
-        catch (CommunicationRepositoryException)
-        {
-            throw;
-        }
-        catch (Exception e)
-        {
-            throw CommunicationRepositoryException.CommonFailedSetPipelineCurrentExecution(tenantId, pipelineRtEntityId, e);
-        }
-    }
-
     public async Task<int> DeleteOldExecutionsAsync(string tenantId, DateTime olderThan)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);

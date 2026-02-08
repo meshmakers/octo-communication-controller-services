@@ -275,14 +275,6 @@ public interface ICommunicationRepository
     Task<IReadOnlyList<string>> GetInterruptedExecutionIdsAsync(string tenantId, RtEntityId adapterRtEntityId);
 
     /// <summary>
-    /// Sets the current execution ID on a pipeline
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="pipelineRtEntityId">Pipeline identifier</param>
-    /// <param name="executionId">Execution ID or null to clear</param>
-    Task SetPipelineCurrentExecutionAsync(string tenantId, RtEntityId pipelineRtEntityId, string? executionId);
-
-    /// <summary>
     /// Deletes executions older than the specified date
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
