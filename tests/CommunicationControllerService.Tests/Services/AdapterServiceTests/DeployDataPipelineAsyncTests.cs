@@ -46,7 +46,7 @@ internal class DeployDataPipelineAsyncTests : AdapterServiceTestsBase
             .Throws<AdapterServiceException>();
 
         await Assert.That(exception).IsNotNull()
-            .And.Member(e => e.Message, msg => msg.Contains("has no adapter assigned"));
+            .And.Member(e => e.Message, msg => msg.Contains("has no edge or mesh pipeline assigned"));
     }
 
     [Test]
@@ -280,38 +280,23 @@ internal class DeployDataPipelineAsyncTests : AdapterServiceTestsBase
     }
 
     [Test]
-    public async Task DeployDataPipelineAsync_PipelineWithoutAdapter_SkipsPipeline()
+    public async Task DeployDataPipelineAsync_PipelineWithoutAdapter_ThrowsException()
     {
         // Arrange
-        var rtAdapter = RtEntityCreator.CreateAdapter();
         var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
-        var rtPipeline1 = RtEntityCreator.CreatePipeline();
-        var rtPipeline2 = RtEntityCreator.CreatePipeline(); // This one has no adapter
-
-        AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
-            rtAdapter.ToRtEntityId(),
-            null,
-            []
-        ));
+        var rtPipeline = RtEntityCreator.CreatePipeline();
 
         CommunicationRepository.GetPipelinesAsync(TenantId, rtDataPipeline.RtId)
-            .Returns([rtPipeline1, rtPipeline2]);
-        CommunicationRepository.GetAdapterByPipelineAsync(TenantId, rtPipeline1.ToRtEntityId())
-            .Returns(rtAdapter);
-        CommunicationRepository.GetAdapterByPipelineAsync(TenantId, rtPipeline2.ToRtEntityId())
-            .Returns((RtAdapter?)null); // Pipeline 2 has no adapter
-        CommunicationRepository.GetAdapterAsync(TenantId, rtAdapter.ToRtEntityId())
-            .Returns(rtAdapter);
-        CommunicationRepository.GetConfigurationsByPipelineAsync(TenantId, rtPipeline1.RtId)
-            .Returns([]);
+            .Returns([rtPipeline]);
+        CommunicationRepository.GetAdapterByPipelineAsync(TenantId, rtPipeline.ToRtEntityId())
+            .Returns((RtAdapter?)null);
 
-        // Act
-        await AdapterService.DeployDataPipelineAsync(TenantId, rtDataPipeline.RtId);
+        // Act & Assert
+        var exception = await Assert.That(async () =>
+                await AdapterService.DeployDataPipelineAsync(TenantId, rtDataPipeline.RtId))
+            .Throws<AdapterServiceException>();
 
-        // Assert - Only pipeline1 should be deployed
-        await AdapterHubCallbacks.Received(1).AdapterConfigurationUpdatedAsync(TenantId,
-            Arg.Is<AdapterConfigurationDto>(config =>
-                config.Pipelines.Count == 1 &&
-                config.Pipelines.First().PipelineRtEntityId == rtPipeline1.ToRtEntityId()));
+        await Assert.That(exception).IsNotNull()
+            .And.Member(e => e.Message, msg => msg.Contains("has no adapter assigned"));
     }
 }

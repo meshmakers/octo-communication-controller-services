@@ -6,13 +6,9 @@ types:
     attributes:
       - id: ${System}/Enabled
         name: Enabled
+        isOptional: true
       - id: ${this}/PipelineDefinition
         name: PipelineDefinition
-      - id: ${this}/CurrentExecutionId
-        name: CurrentExecutionId
-        isOptional: true
-      - id: ${this}/IsExecuting
-        name: IsExecuting
     associations:
       - id: ${System}/ParentChild
         targetCkTypeId: ${this}/DataPipeline

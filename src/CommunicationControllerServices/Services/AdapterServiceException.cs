@@ -77,8 +77,13 @@ internal class AdapterServiceException : Exception
         return new AdapterServiceException($"Deployment state '{rDeploymentState}' is not supported.");
     }
     
-    public static Exception DataPipelineAdapterNotFound(string tenantId, OctoObjectId dataPipelineRtId)
+    public static Exception DataPipelineHasNoPipelines(string tenantId, OctoObjectId dataPipelineRtId)
     {
-        return new AdapterServiceException($"[{tenantId}] Data pipeline '{dataPipelineRtId}' has no adapter assigned.");
+        return new AdapterServiceException($"[{tenantId}] Data pipeline '{dataPipelineRtId}' has no edge or mesh pipeline assigned.");
+    }
+
+    public static Exception PipelineAdapterNotAssigned(string tenantId, RtEntityId pipelineRtEntityId)
+    {
+        return new AdapterServiceException($"[{tenantId}] Pipeline '{pipelineRtEntityId}' has no adapter assigned. An adapter must be assigned when a pipeline exists.");
     }
 }

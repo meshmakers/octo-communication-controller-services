@@ -348,7 +348,7 @@ internal class AdapterService(
             var rtDeployPipelines = await communicationRepository.GetPipelinesAsync(tenantId, dataPipelineRtId);
             if (!rtDeployPipelines.Any())
             {
-                throw AdapterServiceException.DataPipelineAdapterNotFound(tenantId, dataPipelineRtId);
+                throw AdapterServiceException.DataPipelineHasNoPipelines(tenantId, dataPipelineRtId);
             }
 
             foreach (var rtDeployPipeline in rtDeployPipelines)
@@ -356,39 +356,41 @@ internal class AdapterService(
                 var rtAdapter = await communicationRepository
                     .GetAdapterByPipelineAsync(tenantId, rtDeployPipeline.ToRtEntityId());
 
-                if (rtAdapter != null)
+                if (rtAdapter == null)
                 {
-                    if (adapterTenant.AdapterById.TryGetValue(rtAdapter.ToRtEntityId(), out var adapter))
+                    throw AdapterServiceException.PipelineAdapterNotAssigned(tenantId, rtDeployPipeline.ToRtEntityId());
+                }
+
+                if (adapterTenant.AdapterById.TryGetValue(rtAdapter.ToRtEntityId(), out var adapter))
+                {
+                    if (!adapterConfigurations.TryGetValue(rtAdapter.ToRtEntityId(), out var adapterConfig))
                     {
-                        if (!adapterConfigurations.TryGetValue(rtAdapter.ToRtEntityId(), out var adapterConfig))
-                        {
-                            adapterConfig = new AdapterConfigurationDto(rtAdapter.ToRtEntityId(),
-                                rtAdapter.Configuration, new List<PipelineConfigurationDto>());
+                        adapterConfig = new AdapterConfigurationDto(rtAdapter.ToRtEntityId(),
+                            rtAdapter.Configuration, new List<PipelineConfigurationDto>());
 
-                            adapterConfigurations.Add(adapterConfig.AdapterRtEntityId, adapterConfig);
-                        }
-
-                        foreach (var deployedPipelineConfigurationDto in adapter.Configuration.Pipelines)
-                        {
-                            // If the pipeline is already deployed, we remove it so the new version can be added
-                            if (deployedPipelineConfigurationDto.DataPipelineRtId == dataPipelineRtId)
-                            {
-                                adapterConfig.Pipelines.Remove(deployedPipelineConfigurationDto);
-                            }
-                            else if (!adapterConfig.Pipelines.Contains(deployedPipelineConfigurationDto))
-                            {
-                                adapterConfig.Pipelines.Add(deployedPipelineConfigurationDto);
-                            }
-                        }
-
-                        adapterConfig.Pipelines.Add(
-                            await CreatePipelineConfigurationAsync(tenantId, dataPipelineRtId, rtDeployPipeline,
-                                false));
+                        adapterConfigurations.Add(adapterConfig.AdapterRtEntityId, adapterConfig);
                     }
-                    else
+
+                    foreach (var deployedPipelineConfigurationDto in adapter.Configuration.Pipelines)
                     {
-                        throw AdapterServiceException.AdapterNotLoaded(tenantId, rtAdapter.ToRtEntityId());
+                        // If the pipeline is already deployed, we remove it so the new version can be added
+                        if (deployedPipelineConfigurationDto.DataPipelineRtId == dataPipelineRtId)
+                        {
+                            adapterConfig.Pipelines.Remove(deployedPipelineConfigurationDto);
+                        }
+                        else if (!adapterConfig.Pipelines.Contains(deployedPipelineConfigurationDto))
+                        {
+                            adapterConfig.Pipelines.Add(deployedPipelineConfigurationDto);
+                        }
                     }
+
+                    adapterConfig.Pipelines.Add(
+                        await CreatePipelineConfigurationAsync(tenantId, dataPipelineRtId, rtDeployPipeline,
+                            false));
+                }
+                else
+                {
+                    throw AdapterServiceException.AdapterNotLoaded(tenantId, rtAdapter.ToRtEntityId());
                 }
             }
 
@@ -417,7 +419,7 @@ internal class AdapterService(
             var pipelines = await communicationRepository.GetPipelinesAsync(tenantId, dataPipelineRtId);
             if (!pipelines.Any())
             {
-                throw AdapterServiceException.DataPipelineAdapterNotFound(tenantId, dataPipelineRtId);
+                throw AdapterServiceException.DataPipelineHasNoPipelines(tenantId, dataPipelineRtId);
             }
 
             foreach (var rtUndeployPipeline in pipelines)
@@ -425,39 +427,43 @@ internal class AdapterService(
                 var rtAdapter = await communicationRepository
                     .GetAdapterByPipelineAsync(tenantId, rtUndeployPipeline.ToRtEntityId());
 
-                if (rtAdapter != null)
+                if (rtAdapter == null)
                 {
-                    if (adapterTenant.AdapterById.TryGetValue(rtAdapter.ToRtEntityId(), out var adapter))
-                    {
-                        // Ensure adapter configuration is created only once per adapter
-                        if (!adapterConfigurations.TryGetValue(rtAdapter.ToRtEntityId(), out var adapterConfig))
-                        {
-                            adapterConfig = new AdapterConfigurationDto(rtAdapter.ToRtEntityId(),
-                                rtAdapter.Configuration,
-                                new List<PipelineConfigurationDto>());
-                            adapterConfigurations.Add(adapterConfig.AdapterRtEntityId, adapterConfig);
-                        }
+                    Logger.Warn("[{TenantId}] Pipeline '{PipelineRtEntityId}' has no adapter assigned, skipping undeploy",
+                        tenantId, rtUndeployPipeline.ToRtEntityId());
+                    continue;
+                }
 
-                        foreach (var deployedPipelineConfigurationDto in adapter.Configuration.Pipelines)
+                if (adapterTenant.AdapterById.TryGetValue(rtAdapter.ToRtEntityId(), out var adapter))
+                {
+                    // Ensure adapter configuration is created only once per adapter
+                    if (!adapterConfigurations.TryGetValue(rtAdapter.ToRtEntityId(), out var adapterConfig))
+                    {
+                        adapterConfig = new AdapterConfigurationDto(rtAdapter.ToRtEntityId(),
+                            rtAdapter.Configuration,
+                            new List<PipelineConfigurationDto>());
+                        adapterConfigurations.Add(adapterConfig.AdapterRtEntityId, adapterConfig);
+                    }
+
+                    foreach (var deployedPipelineConfigurationDto in adapter.Configuration.Pipelines)
+                    {
+                        if (deployedPipelineConfigurationDto.DataPipelineRtId != dataPipelineRtId &&
+                            !adapterConfig.Pipelines.Contains(deployedPipelineConfigurationDto))
                         {
-                            if (deployedPipelineConfigurationDto.DataPipelineRtId != dataPipelineRtId &&
-                                !adapterConfig.Pipelines.Contains(deployedPipelineConfigurationDto))
-                            {
-                                adapterConfig.Pipelines.Add(deployedPipelineConfigurationDto);
-                            }
-                            else
-                            {
-                                await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
-                                    deployedPipelineConfigurationDto.PipelineRtEntityId,
-                                    RtDeploymentStateEnum.Undeployed,
-                                    null);
-                            }
+                            adapterConfig.Pipelines.Add(deployedPipelineConfigurationDto);
+                        }
+                        else
+                        {
+                            await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
+                                deployedPipelineConfigurationDto.PipelineRtEntityId,
+                                RtDeploymentStateEnum.Undeployed,
+                                null);
                         }
                     }
-                    else
-                    {
-                        throw AdapterServiceException.AdapterNotLoaded(tenantId, rtAdapter.ToRtEntityId());
-                    }
+                }
+                else
+                {
+                    throw AdapterServiceException.AdapterNotLoaded(tenantId, rtAdapter.ToRtEntityId());
                 }
             }
 

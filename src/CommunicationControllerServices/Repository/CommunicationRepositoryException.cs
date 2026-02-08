@@ -246,11 +246,6 @@ internal class CommunicationRepositoryException : Exception
         return new CommunicationRepositoryException($"[{tenantId}] Failed to get interrupted executions for adapter '{adapterRtEntityId}'", exception);
     }
 
-    internal static Exception CommonFailedSetPipelineCurrentExecution(string tenantId, RtEntityId pipelineRtEntityId, Exception exception)
-    {
-        return new CommunicationRepositoryException($"[{tenantId}] Failed to set current execution for pipeline '{pipelineRtEntityId}'", exception);
-    }
-
     internal static Exception CommonFailedDeleteOldExecutions(string tenantId, DateTime olderThan, Exception exception)
     {
         return new CommunicationRepositoryException($"[{tenantId}] Failed to delete old executions older than '{olderThan}'", exception);

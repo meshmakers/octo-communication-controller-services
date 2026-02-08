@@ -42,9 +42,6 @@ internal class PipelineExecutionService(
             // Create execution record and associations
             await communicationRepository.CreatePipelineExecutionAsync(tenantId, execution, dto.PipelineRtEntityId, adapterRtEntityId);
 
-            // Set pipeline current execution
-            await communicationRepository.SetPipelineCurrentExecutionAsync(tenantId, dto.PipelineRtEntityId, dto.ExecutionId);
-
             await eventService.StoreInformationEventAsync(tenantId,
                 $"Pipeline execution '{dto.ExecutionId}' started (trigger: {dto.TriggerType}).",
                 dto.PipelineRtEntityId);

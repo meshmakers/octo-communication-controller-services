@@ -25,6 +25,8 @@ attributes:
   valueType: String
 - id: PipelineDefinition
   valueType: String
+  defaultValues:
+    - ""
 - id: StatusMessage
   valueType: String
 - id: SenderEmail
@@ -59,15 +61,6 @@ attributes:
 - id: InputData
   valueType: String
   description: Optional input data (JSON) for debugging
-- id: CurrentExecutionId
-  valueType: String
-  description: ID of currently running execution (GUID)
-- id: IsExecuting
-  valueType: Boolean
-  description: Whether the pipeline is currently executing
-  defaultValues:
-    - false
-
 # Pipeline Statistics attributes
 - id: LastHourSuccessCount
   valueType: Int
