@@ -133,7 +133,7 @@ internal class SetAdapterCommunicationStateTests : AdapterServiceTestsBase
 
         // Act & Assert
         await Assert.That(async () =>
-                await AdapterService.SetAdapterCommunicationStateOfflineAsync("unknownTenant", rtAdapter.ToRtEntityId()))
+                await AdapterService.SetAdapterCommunicationStateOfflineAsync("unknownTenant", rtAdapter.ToRtEntityId(), ConnectionId))
             .Throws<AdapterServiceException>()
             .WithMessageContaining("Tenant not enabled");
     }
@@ -145,7 +145,7 @@ internal class SetAdapterCommunicationStateTests : AdapterServiceTestsBase
         var rtAdapter = RtEntityCreator.CreateAdapter();
 
         // Act - should not throw
-        await AdapterService.SetAdapterCommunicationStateOfflineAsync(TenantId, rtAdapter.ToRtEntityId());
+        await AdapterService.SetAdapterCommunicationStateOfflineAsync(TenantId, rtAdapter.ToRtEntityId(), ConnectionId);
 
         // Assert - DB state should always be updated, even if adapter is not in cache
         // This ensures the DB reflects the correct state after service restarts or cache misses
@@ -171,7 +171,7 @@ internal class SetAdapterCommunicationStateTests : AdapterServiceTestsBase
         ));
 
         // Act
-        await AdapterService.SetAdapterCommunicationStateOfflineAsync(TenantId, rtAdapter.ToRtEntityId());
+        await AdapterService.SetAdapterCommunicationStateOfflineAsync(TenantId, rtAdapter.ToRtEntityId(), ConnectionId);
 
         // Assert
         using var _ = Assert.Multiple();
@@ -181,5 +181,39 @@ internal class SetAdapterCommunicationStateTests : AdapterServiceTestsBase
 
         // Verify connection ID was removed from cache
         await Assert.That(AdapterTenant.AdapterById[rtAdapter.ToRtEntityId()].ConnectionId).IsNull();
+    }
+
+    [Test]
+    public async Task SetAdapterCommunicationStateOfflineAsync_StaleDisconnect_IgnoresAndDoesNotSetOffline()
+    {
+        // Arrange - adapter is in cache with a newer connection
+        var rtAdapter = RtEntityCreator.CreateAdapter();
+        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtPipeline = RtEntityCreator.CreatePipeline();
+
+        var newConnectionId = "newConnectionId";
+        var staleConnectionId = "oldConnectionId";
+
+        AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), newConnectionId, new AdapterConfigurationDto(
+            rtAdapter.ToRtEntityId(),
+            null,
+            [
+                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline.ToRtEntityId(), false,
+                    rtPipeline.PipelineDefinition, [])
+            ]
+        ));
+
+        // Act - stale disconnect from old connection
+        await AdapterService.SetAdapterCommunicationStateOfflineAsync(TenantId, rtAdapter.ToRtEntityId(), staleConnectionId);
+
+        // Assert - should NOT set offline in DB or remove connection from cache
+        using var _ = Assert.Multiple();
+
+        await CommunicationRepository.DidNotReceive()
+            .SetAdapterCommunicationStateAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(),
+                Arg.Any<RtCommunicationStateEnum>());
+
+        // Verify connection ID is still the new one
+        await Assert.That(AdapterTenant.AdapterById[rtAdapter.ToRtEntityId()].ConnectionId).IsEqualTo(newConnectionId);
     }
 }
