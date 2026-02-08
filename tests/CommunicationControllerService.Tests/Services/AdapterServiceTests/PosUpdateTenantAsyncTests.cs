@@ -1,4 +1,8 @@
+using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using Meshmakers.Octo.Runtime.Contracts;
 using NSubstitute;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.AdapterServiceTests;
@@ -8,11 +12,58 @@ internal class PosUpdateTenantAsyncTests : AdapterServiceTestsBase
     [Test]
     public async Task PosUpdateTenantAsync_Success_CallsAddOrUpdateTenant()
     {
+        // Arrange
+        CommunicationRepository.GetAdaptersAsync(TenantId)
+            .Returns(Array.Empty<RtAdapter>());
+
         // Act
         await AdapterService.PosUpdateTenantAsync(TenantId);
 
         // Assert
         AdapterCache.Received(1).AddOrUpdateTenant(TenantId);
+    }
+
+    [Test]
+    public async Task PosUpdateTenantAsync_WithAdapters_ResetsAllAdapterCommunicationStatesToOffline()
+    {
+        // Arrange
+        var adapter1 = RtEntityCreator.CreateAdapter();
+        var adapter2 = RtEntityCreator.CreateAdapter();
+        adapter1.CommunicationState = RtCommunicationStateEnum.Online;
+        adapter2.CommunicationState = RtCommunicationStateEnum.Online;
+
+        CommunicationRepository.GetAdaptersAsync(TenantId)
+            .Returns(new[] { adapter1, adapter2 });
+
+        // Act
+        await AdapterService.PosUpdateTenantAsync(TenantId);
+
+        // Assert
+        using var _ = Assert.Multiple();
+
+        await CommunicationRepository.Received(1)
+            .SetAdapterCommunicationStateAsync(TenantId, adapter1.ToRtEntityId(),
+                RtCommunicationStateEnum.Offline);
+
+        await CommunicationRepository.Received(1)
+            .SetAdapterCommunicationStateAsync(TenantId, adapter2.ToRtEntityId(),
+                RtCommunicationStateEnum.Offline);
+    }
+
+    [Test]
+    public async Task PosUpdateTenantAsync_WithNoAdapters_DoesNotCallSetCommunicationState()
+    {
+        // Arrange
+        CommunicationRepository.GetAdaptersAsync(TenantId)
+            .Returns(Array.Empty<RtAdapter>());
+
+        // Act
+        await AdapterService.PosUpdateTenantAsync(TenantId);
+
+        // Assert
+        await CommunicationRepository.DidNotReceive()
+            .SetAdapterCommunicationStateAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(),
+                Arg.Any<RtCommunicationStateEnum>());
     }
 
     [Test]
