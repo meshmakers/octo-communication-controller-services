@@ -1005,8 +1005,6 @@ internal class CommunicationRepository : ICommunicationRepository
         var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var queryOptions = RtEntityQueryOptions.Create()
                 .FieldFilter(nameof(RtPipelineExecution.Status), FieldFilterOperator.Equals, (int)RtPipelineExecutionStatusEnum.Running);
 
@@ -1017,8 +1015,6 @@ internal class CommunicationRepository : ICommunicationRepository
                 GraphDirections.Inbound,
                 null,
                 queryOptions);
-
-            await session.CommitTransactionAsync();
 
             if (resultSet.Any())
             {
@@ -1040,8 +1036,6 @@ internal class CommunicationRepository : ICommunicationRepository
         var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var queryOptions = RtEntityQueryOptions.Create()
                 .FieldFilter(nameof(RtPipelineExecution.Status), FieldFilterOperator.Equals, (int)RtPipelineExecutionStatusEnum.Interrupted);
 
@@ -1052,8 +1046,6 @@ internal class CommunicationRepository : ICommunicationRepository
                 GraphDirections.Inbound,
                 null,
                 queryOptions);
-
-            await session.CommitTransactionAsync();
 
             if (resultSet.Any())
             {
@@ -1230,8 +1222,6 @@ internal class CommunicationRepository : ICommunicationRepository
         var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var queryOptions = RtEntityQueryOptions.Create()
                 .FieldFilter(nameof(RtPipelineExecution.StartedAt), FieldFilterOperator.GreaterEqualThan, from)
                 .FieldFilter(nameof(RtPipelineExecution.StartedAt), FieldFilterOperator.LessEqualThan, to);
@@ -1243,8 +1233,6 @@ internal class CommunicationRepository : ICommunicationRepository
                 GraphDirections.Inbound,
                 null,
                 queryOptions);
-
-            await session.CommitTransactionAsync();
 
             if (!resultSet.Any())
             {
