@@ -170,13 +170,13 @@ internal class UnregisterAsyncTests : AdapterServiceTestsBase
     }
 
     [Test]
-    public async Task UnregisterAsync_CalledWithDifferentConnectionId_StillUnregisters()
+    public async Task UnregisterAsync_StaleConnection_IgnoresAndDoesNotUnregister()
     {
-        // Arrange
+        // Arrange - adapter is in cache with a newer connection
         var rtAdapter = RtEntityCreator.CreateAdapter();
         var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
         var rtPipeline = RtEntityCreator.CreatePipeline();
-        var differentConnectionId = "differentConnectionId";
+        var staleConnectionId = "oldConnectionId";
 
         AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
             rtAdapter.ToRtEntityId(),
@@ -187,21 +187,22 @@ internal class UnregisterAsyncTests : AdapterServiceTestsBase
             ]
         ));
 
-        // Act - Note: connectionId parameter is logged but not used in logic
-        await AdapterService.UnregisterAsync(TenantId, rtAdapter.ToRtEntityId(), differentConnectionId);
+        // Act - stale unregister from old connection
+        await AdapterService.UnregisterAsync(TenantId, rtAdapter.ToRtEntityId(), staleConnectionId);
 
-        // Assert
+        // Assert - should NOT unregister or change state
         using var _ = Assert.Multiple();
 
-        await CommunicationRepository.Received(1)
-            .SetPipelineDeploymentStateAsync(TenantId, rtPipeline.ToRtEntityId(),
-                RtDeploymentStateEnum.Pending, null);
+        await CommunicationRepository.DidNotReceive()
+            .SetPipelineDeploymentStateAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(),
+                Arg.Any<RtDeploymentStateEnum>(), Arg.Any<string?>());
 
-        await CommunicationRepository.Received(1)
-            .SetAdapterCommunicationStateAsync(TenantId, rtAdapter.ToRtEntityId(),
-                RtCommunicationStateEnum.Unregistered);
+        await CommunicationRepository.DidNotReceive()
+            .SetAdapterCommunicationStateAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(),
+                Arg.Any<RtCommunicationStateEnum>());
 
-        // Verify adapter was removed from cache
-        await Assert.That(AdapterTenant.AdapterById.ContainsKey(rtAdapter.ToRtEntityId())).IsFalse();
+        // Verify adapter is still in cache with the current connection
+        await Assert.That(AdapterTenant.AdapterById.ContainsKey(rtAdapter.ToRtEntityId())).IsTrue();
+        await Assert.That(AdapterTenant.AdapterById[rtAdapter.ToRtEntityId()].ConnectionId).IsEqualTo(ConnectionId);
     }
 }
