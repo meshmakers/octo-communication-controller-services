@@ -134,11 +134,13 @@ internal class AdapterHub : Hub, IAdapterHub
 
     public async Task SendDebugDataAsync(RtEntityId pipelineRtEntityId, Guid pipelineExecutionId, DebugPointDto debugPoint)
     {
-
         var tenantId = GetTenantId();
 
         try
         {
+            Logger.Info("[{TenantId}] Received debug data for pipeline '{PipelineRtEntityId}', execution '{ExecutionId}', node '{NodeId}'",
+                tenantId, pipelineRtEntityId, pipelineExecutionId, debugPoint.NodeId);
+
             await _pipelineDebugService.CacheDebugPointAsync(tenantId, pipelineRtEntityId, pipelineExecutionId, debugPoint);
         }
         catch (Exception e)
