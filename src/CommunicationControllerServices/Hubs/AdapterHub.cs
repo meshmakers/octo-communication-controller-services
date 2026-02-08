@@ -68,7 +68,7 @@ internal class AdapterHub : Hub, IAdapterHub
             // Mark any running executions as interrupted before going offline
             await _pipelineExecutionService.MarkExecutionsAsInterruptedAsync(tenantId, adapterRtEntityId);
 
-            await _adapterService.SetAdapterCommunicationStateOfflineAsync(tenantId, adapterRtEntityId);
+            await _adapterService.SetAdapterCommunicationStateOfflineAsync(tenantId, adapterRtEntityId, Context.ConnectionId);
 
             await base.OnDisconnectedAsync(exception);
         }

@@ -180,19 +180,25 @@ internal class AdapterService(
             RtCommunicationStateEnum.Online);
     }
 
-    public async Task SetAdapterCommunicationStateOfflineAsync(string tenantId, RtEntityId adapterRtEntityId)
+    public async Task SetAdapterCommunicationStateOfflineAsync(string tenantId, RtEntityId adapterRtEntityId,
+        string connectionId)
     {
-        Logger.Info("[{TenantId}] adapter rt id '{AdapterRtId}' offline",
-            tenantId, adapterRtEntityId);
-
-        await eventService.StoreInformationEventAsync(tenantId,
-            $"Adapter '{adapterRtEntityId}' is now offline.",
-            adapterRtEntityId);
-
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
             if (adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
             {
+                // Check if the disconnecting connection is still the current one.
+                // If a newer connection has already replaced it, this is a stale disconnect
+                // event and should be ignored to avoid overwriting the Online state.
+                if (!string.IsNullOrWhiteSpace(adapter.ConnectionId) && adapter.ConnectionId != connectionId)
+                {
+                    Logger.Warn(
+                        "[{TenantId}] AdapterRtId='{AdapterRtId}' ignoring stale disconnect for connection '{OldConnectionId}' " +
+                        "(current connection: '{CurrentConnectionId}')",
+                        tenantId, adapterRtEntityId, connectionId, adapter.ConnectionId);
+                    return;
+                }
+
                 adapterTenant.RemoveConnectionId(adapter.AdapterRtEntityId);
                 foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
                 {
@@ -201,7 +207,13 @@ internal class AdapterService(
                 }
             }
 
-            // Always update DB state, even if adapter is not in cache yet
+            Logger.Info("[{TenantId}] adapter rt id '{AdapterRtId}' offline (connection '{ConnectionId}')",
+                tenantId, adapterRtEntityId, connectionId);
+
+            await eventService.StoreInformationEventAsync(tenantId,
+                $"Adapter '{adapterRtEntityId}' is now offline.",
+                adapterRtEntityId);
+
             await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId, RtCommunicationStateEnum.Offline);
             return;
         }

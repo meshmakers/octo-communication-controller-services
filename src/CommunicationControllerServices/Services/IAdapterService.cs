@@ -65,8 +65,9 @@ public interface IAdapterService
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="adapterRtEntityId">Object Id of adapter</param>
+    /// <param name="connectionId">The connection identifier of the disconnecting connection</param>
     /// <returns></returns>
-    Task SetAdapterCommunicationStateOfflineAsync(string tenantId, RtEntityId adapterRtEntityId);
+    Task SetAdapterCommunicationStateOfflineAsync(string tenantId, RtEntityId adapterRtEntityId, string connectionId);
 
     /// <summary>
     /// Deploys the db version  an adapter configuration
