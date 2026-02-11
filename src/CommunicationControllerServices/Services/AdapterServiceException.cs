@@ -86,4 +86,12 @@ internal class AdapterServiceException : Exception
     {
         return new AdapterServiceException($"[{tenantId}] Pipeline '{pipelineRtEntityId}' has no adapter assigned. An adapter must be assigned when a pipeline exists.");
     }
+
+    internal static AdapterServiceException DeploymentTimedOut(string tenantId, RtEntityId adapterRtEntityId,
+        TimeSpan timeout) =>
+        new($"[{tenantId}] Adapter '{adapterRtEntityId}' deployment timed out after {timeout.TotalSeconds}s");
+
+    internal static AdapterServiceException DeploymentFailed(string tenantId, RtEntityId adapterRtEntityId,
+        string? message) =>
+        new($"[{tenantId}] Adapter '{adapterRtEntityId}' deployment failed: {message}");
 }

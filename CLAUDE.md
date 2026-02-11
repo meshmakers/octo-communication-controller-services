@@ -227,9 +227,10 @@ All three models must be imported in order before tests can work with typed enti
 ### Tenant Initialization for Tests
 
 **CRITICAL:** To properly initialize a tenant for integration testing, you must:
-1. Get the tenant repository FIRST, before any CK model imports (to avoid repository caching issues)
-2. Import CK models in dependency order (System → System.Bot → System.Communication)
-3. Load the CK cache using `ITenantRepository.LoadCacheForTenantAsync(cacheService)` with the shared `ICkCacheService` from DI
+1. Import CK models in dependency order (System → System.Bot → System.Communication) within a transaction
+2. **Commit the transaction BEFORE loading the CK cache** (LoadCacheForTenantAsync creates a separate MongoDB session that cannot see uncommitted data)
+3. **Unload any previously loaded tenant cache** before reloading (the cache loader skips tenants already in the cache)
+4. Load the CK cache using `ITenantRepository.LoadCacheForTenantAsync(cacheService)` with the shared `ICkCacheService` from DI
 
 The extension method `InitializeTenantForTestingAsync` in `src/CommunicationControllerServices/Extensions/TenantInitializationExtensions.cs` handles this:
 
@@ -241,22 +242,25 @@ await systemContext.InitializeTenantForTestingAsync(TestTenantId, ckCacheService
 
 **Implementation details of `InitializeTenantForTestingAsync`:**
 ```csharp
-// 1. Get tenant repository FIRST, before any imports
-// This ensures we use the same repository instance for both import context and cache loading
-var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
-
-// 2. Import CK models in a transaction (System → System.Bot → System.Communication)
+// 1. Import CK models in a transaction (System → System.Bot → System.Communication)
 using (var importSession = await systemContext.GetAdminSessionAsync())
 {
     // ... import models in dependency order ...
+    await importSession.CommitTransactionAsync();
+}
+
+// 2. Unload stale cache (if tenant was loaded during imports)
+if (ckCacheService.IsTenantLoaded(tenantId))
+{
+    ckCacheService.Unload(tenantId);
 }
 
 // 3. Load the CK cache AFTER the import transaction is committed
-// Use the SAME tenant repository we got at the start to ensure consistency
+var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
 await tenantRepository.LoadCacheForTenantAsync(ckCacheService);
 ```
 
-**Why this matters:** The `CommunicationRepository` uses `ISystemContext.FindTenantRepositoryAsync(tenantId)` to get tenant repositories. For MongoDB to correctly deserialize entities to their typed classes (e.g., `RtPool` instead of `RtEntity`), the CK cache must be loaded into the same `ICkCacheService` singleton that the repository uses. Getting the tenant repository before imports ensures the same instance is used throughout.
+**Why this matters:** `LoadCacheForTenantAsync` internally creates a new MongoDB session (via `TenantRepository.RefreshCkCacheServiceAsync`) that cannot see uncommitted data from other transactions. If the cache is loaded before the import transaction commits, newly imported models (like System.Communication) will be silently missing from the cache. Additionally, `ModelLoaderService.LoadAsync` has an `IsTenantLoaded` guard that skips loading if the tenant is already cached, so any stale cache must be unloaded first.
 
 ### Running Integration Tests
 

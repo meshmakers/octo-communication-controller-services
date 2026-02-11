@@ -2,6 +2,7 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
 using Meshmakers.Octo.Runtime.Contracts;
@@ -33,6 +34,7 @@ internal abstract class AdapterServiceTestsBase
         AdapterTenant = new AdapterTenant(AdapterCachePublish, TenantId);
 
         InitAdapterCache();
+        SimulateAdapterDeploymentCallback();
     }
     
     [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]
@@ -43,6 +45,22 @@ internal abstract class AdapterServiceTestsBase
             {
                 x[1] = AdapterTenant;
                 return true;
+            });
+    }
+
+    [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]
+    private void SimulateAdapterDeploymentCallback()
+    {
+        AdapterHubCallbacks.AdapterConfigurationUpdatedAsync(Arg.Any<string>(), Arg.Any<AdapterConfigurationDto>())
+            .Returns(callInfo =>
+            {
+                var adapterConfiguration = callInfo.Arg<AdapterConfigurationDto>();
+                _ = Task.Run(async () =>
+                {
+                    await AdapterService.UpdateConfigurationStateAsync(TenantId, adapterConfiguration.AdapterRtEntityId,
+                        new DeploymentResult { IsSuccess = true });
+                });
+                return Task.CompletedTask;
             });
     }
     
