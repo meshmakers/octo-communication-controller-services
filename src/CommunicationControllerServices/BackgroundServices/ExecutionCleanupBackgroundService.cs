@@ -35,8 +35,8 @@ internal class ExecutionCleanupBackgroundService : BackgroundService
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        Logger.Info("Execution cleanup background service starting with retention period of {RetentionDays} days",
-            _options.PipelineExecutionRetentionDays);
+        Logger.Info("Execution cleanup background service starting with retention period of {RetentionDays} days and execution timeout of {TimeoutHours} hours",
+            _options.PipelineExecutionRetentionDays, _options.PipelineExecutionTimeoutHours);
 
         try
         {
@@ -72,12 +72,38 @@ internal class ExecutionCleanupBackgroundService : BackgroundService
 
         Logger.Info("Starting execution cleanup for {TenantCount} tenants", tenantIds.Count);
 
+        var totalTimedOut = 0;
         var totalDeleted = 0;
 
         foreach (var tenantId in tenantIds)
         {
             try
             {
+                // First, timeout stale running executions
+                var timedOutCount = await _pipelineExecutionService.TimeoutStaleExecutionsAsync(
+                    tenantId,
+                    _options.PipelineExecutionTimeoutHours);
+
+                totalTimedOut += timedOutCount;
+
+                if (timedOutCount > 0)
+                {
+                    Logger.Info("Timed out {TimedOutCount} stale executions for tenant '{TenantId}'",
+                        timedOutCount, tenantId);
+                }
+            }
+            catch (PipelineExecutionServiceException ex)
+            {
+                Logger.Warn(ex, "Failed to timeout stale executions for tenant '{TenantId}'", tenantId);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Unexpected error timing out stale executions for tenant '{TenantId}'", tenantId);
+            }
+
+            try
+            {
+                // Then, delete old executions based on retention policy
                 var deletedCount = await _pipelineExecutionService.CleanupOldExecutionsAsync(
                     tenantId,
                     _options.PipelineExecutionRetentionDays);
@@ -100,6 +126,7 @@ internal class ExecutionCleanupBackgroundService : BackgroundService
             }
         }
 
-        Logger.Info("Execution cleanup completed. Total deleted: {TotalDeleted}", totalDeleted);
+        Logger.Info("Execution cleanup completed. Total timed out: {TotalTimedOut}, Total deleted: {TotalDeleted}",
+            totalTimedOut, totalDeleted);
     }
 }

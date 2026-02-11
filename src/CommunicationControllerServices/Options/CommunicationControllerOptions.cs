@@ -75,12 +75,12 @@ public class CommunicationControllerOptions
     /// <summary>
     /// Gets or sets the number of days to retain pipeline execution records
     /// </summary>
-    public int PipelineExecutionRetentionDays { get; set; } = 30;
+    public int PipelineExecutionRetentionDays { get; set; } = 3;
 
     /// <summary>
     /// Gets or sets the interval in minutes for updating pipeline statistics
     /// </summary>
-    public int StatisticsUpdateIntervalMinutes { get; set; } = 5;
+    public int StatisticsUpdateIntervalMinutes { get; set; } = 60;
 
     /// <summary>
     /// Gets or sets whether to store input data with execution records
@@ -91,4 +91,9 @@ public class CommunicationControllerOptions
     /// Gets or sets the maximum length of input data to store
     /// </summary>
     public int MaxInputDataLength { get; set; } = 10000;
+
+    /// <summary>
+    /// Gets or sets the timeout in hours after which running executions are marked as failed
+    /// </summary>
+    public int PipelineExecutionTimeoutHours { get; set; } = 24;
 }

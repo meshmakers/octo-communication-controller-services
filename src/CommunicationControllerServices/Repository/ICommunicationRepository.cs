@@ -282,6 +282,14 @@ public interface ICommunicationRepository
     /// <returns>Number of deleted executions</returns>
     Task<int> DeleteOldExecutionsAsync(string tenantId, DateTime olderThan);
 
+    /// <summary>
+    /// Finds running executions older than the specified date and marks them as failed
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="olderThan">Timeout threshold - executions started before this date are considered stale</param>
+    /// <returns>Number of timed out executions</returns>
+    Task<int> TimeoutStaleExecutionsAsync(string tenantId, DateTime olderThan);
+
     #endregion
 
     #region Pipeline Statistics

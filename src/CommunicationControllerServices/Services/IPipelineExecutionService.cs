@@ -70,6 +70,14 @@ public interface IPipelineExecutionService
     Task<int> CleanupOldExecutionsAsync(string tenantId, int retentionDays);
 
     /// <summary>
+    /// Marks stale running executions as failed after timeout
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="timeoutHours">Number of hours after which running executions are considered stale</param>
+    /// <returns>Number of timed out executions</returns>
+    Task<int> TimeoutStaleExecutionsAsync(string tenantId, int timeoutHours);
+
+    /// <summary>
     /// Processes buffered executions from an adapter (for offline sync)
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>

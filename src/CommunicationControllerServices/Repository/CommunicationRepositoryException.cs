@@ -251,6 +251,11 @@ internal class CommunicationRepositoryException : Exception
         return new CommunicationRepositoryException($"[{tenantId}] Failed to delete old executions older than '{olderThan}'", exception);
     }
 
+    internal static Exception CommonFailedTimeoutStaleExecutions(string tenantId, DateTime olderThan, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to timeout stale executions older than '{olderThan}'", exception);
+    }
+
     #endregion
 
     #region Pipeline Statistics Exceptions
