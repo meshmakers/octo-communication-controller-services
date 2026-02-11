@@ -65,4 +65,9 @@ internal class PipelineExecutionServiceException : Exception
     {
         return new PipelineExecutionServiceException($"[{tenantId}] Failed to process buffered executions for adapter '{adapterRtEntityId}'", exception);
     }
+
+    internal static Exception CommonFailedTimeoutStaleExecutions(string tenantId, Exception exception)
+    {
+        return new PipelineExecutionServiceException($"[{tenantId}] Failed to timeout stale executions", exception);
+    }
 }

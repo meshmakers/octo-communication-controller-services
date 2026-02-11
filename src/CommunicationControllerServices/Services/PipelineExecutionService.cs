@@ -244,20 +244,17 @@ internal class PipelineExecutionService(
         {
             var now = DateTime.UtcNow;
 
-            // Get aggregates for different time periods
-            var lastHour = await communicationRepository.GetExecutionAggregateAsync(tenantId, pipelineRtEntityId,
-                now.AddHours(-1), now);
-            var last12Hours = await communicationRepository.GetExecutionAggregateAsync(tenantId, pipelineRtEntityId,
-                now.AddHours(-12), now);
-            var last24Hours = await communicationRepository.GetExecutionAggregateAsync(tenantId, pipelineRtEntityId,
-                now.AddHours(-24), now);
-            var last30Days = await communicationRepository.GetExecutionAggregateAsync(tenantId, pipelineRtEntityId,
-                now.AddDays(-30), now);
+            // Load all executions from the last 30 days in a single query
+            var allExecutions = await communicationRepository.GetPipelineExecutionsAsync(
+                tenantId, pipelineRtEntityId, now.AddDays(-30), now, null);
 
-            // Get the last execution time
-            var recentExecutions = await communicationRepository.GetPipelineExecutionsAsync(tenantId,
-                pipelineRtEntityId, null, null, 1);
-            var lastExecutionAt = recentExecutions.FirstOrDefault()?.StartedAt;
+            // Compute sub-windows in-memory from the loaded data
+            var lastHour = ComputeAggregate(allExecutions, now.AddHours(-1));
+            var last12Hours = ComputeAggregate(allExecutions, now.AddHours(-12));
+            var last24Hours = ComputeAggregate(allExecutions, now.AddHours(-24));
+            var last30Days = ComputeAggregate(allExecutions, now.AddDays(-30));
+
+            var lastExecutionAt = allExecutions.FirstOrDefault()?.StartedAt;
 
             var statistics = new RtPipelineStatistics
             {
@@ -288,6 +285,21 @@ internal class PipelineExecutionService(
                 tenantId, pipelineRtEntityId);
             throw PipelineExecutionServiceException.CommonFailedUpdateStatistics(tenantId, pipelineRtEntityId, e);
         }
+    }
+
+    /// <summary>
+    /// Computes aggregate statistics from a list of executions starting from a given cutoff time
+    /// </summary>
+    private static ExecutionAggregateResult ComputeAggregate(IReadOnlyList<RtPipelineExecution> executions, DateTime from)
+    {
+        var filtered = executions.Where(e => e.StartedAt >= from).ToList();
+
+        var successCount = filtered.Count(e => e.Status == RtPipelineExecutionStatusEnum.Completed);
+        var failureCount = filtered.Count(e => e.Status == RtPipelineExecutionStatusEnum.Failed);
+        var executionsWithDuration = filtered.Where(e => e.DurationMs.HasValue).ToList();
+        var totalDurationMs = executionsWithDuration.Sum(e => (long)e.DurationMs!.Value);
+
+        return new ExecutionAggregateResult(successCount, failureCount, totalDurationMs, executionsWithDuration.Count);
     }
 
     public async Task UpdateAllStatisticsAsync(string tenantId)
@@ -348,6 +360,34 @@ internal class PipelineExecutionService(
         {
             Logger.Error(e, "[{TenantId}] Failed to cleanup old executions", tenantId);
             throw PipelineExecutionServiceException.CommonFailedCleanupOldExecutions(tenantId, e);
+        }
+    }
+
+    public async Task<int> TimeoutStaleExecutionsAsync(string tenantId, int timeoutHours)
+    {
+        Logger.Debug("[{TenantId}] Timing out stale executions older than {TimeoutHours} hours",
+            tenantId, timeoutHours);
+
+        try
+        {
+            var olderThan = DateTime.UtcNow.AddHours(-timeoutHours);
+            var timedOutCount = await communicationRepository.TimeoutStaleExecutionsAsync(tenantId, olderThan);
+
+            if (timedOutCount > 0)
+            {
+                Logger.Info("[{TenantId}] Timed out {Count} stale executions",
+                    tenantId, timedOutCount);
+
+                await eventService.StoreInformationEventAsync(tenantId,
+                    $"Timed out {timedOutCount} stale pipeline executions running longer than {timeoutHours} hours.");
+            }
+
+            return timedOutCount;
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e, "[{TenantId}] Failed to timeout stale executions", tenantId);
+            throw PipelineExecutionServiceException.CommonFailedTimeoutStaleExecutions(tenantId, e);
         }
     }
 

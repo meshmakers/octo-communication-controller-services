@@ -318,10 +318,11 @@ Configuration is bound to strongly-typed options classes:
 **Pipeline Execution Configuration Options:**
 ```csharp
 // CommunicationControllerOptions
-public int PipelineExecutionRetentionDays { get; set; } = 30;    // Days to keep execution records
-public int StatisticsUpdateIntervalMinutes { get; set; } = 5;    // Statistics aggregation interval
+public int PipelineExecutionRetentionDays { get; set; } = 3;     // Days to keep execution records
+public int StatisticsUpdateIntervalMinutes { get; set; } = 60;   // Statistics aggregation interval
 public bool StoreInputData { get; set; } = false;                // Whether to store pipeline input data
 public int MaxInputDataLength { get; set; } = 10000;             // Max length of stored input data
+public int PipelineExecutionTimeoutHours { get; set; } = 24;     // Hours after which running executions are marked as failed
 ```
 
 ### Deployment State Management
@@ -421,8 +422,8 @@ When an adapter disconnects unexpectedly:
 
 | Service | Interval | Description |
 |---------|----------|-------------|
-| `PipelineStatisticsBackgroundService` | 5 minutes | Aggregates execution statistics for all pipelines |
-| `ExecutionCleanupBackgroundService` | Daily | Removes execution records older than retention period |
+| `PipelineStatisticsBackgroundService` | 60 minutes | Aggregates execution statistics for all pipelines |
+| `ExecutionCleanupBackgroundService` | Daily | Times out stale running executions and removes records older than retention period |
 
 ### Service Methods
 
@@ -436,4 +437,5 @@ Task<IReadOnlyList<string>> GetInterruptedExecutionIdsAsync(string tenantId, RtE
 Task UpdateStatisticsAsync(string tenantId, RtEntityId pipelineRtEntityId);
 Task UpdateAllStatisticsAsync(string tenantId);
 Task<int> CleanupOldExecutionsAsync(string tenantId, int retentionDays);
+Task<int> TimeoutStaleExecutionsAsync(string tenantId, int timeoutHours);
 ```

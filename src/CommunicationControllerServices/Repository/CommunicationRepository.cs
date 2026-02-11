@@ -1066,6 +1066,64 @@ internal class CommunicationRepository : ICommunicationRepository
     public async Task<int> DeleteOldExecutionsAsync(string tenantId, DateTime olderThan)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+        const int batchSize = 500;
+
+        try
+        {
+            // Query all old executions once
+            var querySession = await tenantRepository.GetSessionAsync();
+            querySession.StartTransaction();
+
+            var queryOptions = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtPipelineExecution.StartedAt), FieldFilterOperator.LessThan, olderThan);
+
+            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(querySession, queryOptions);
+            var allExecutions = resultSet.Items.ToList();
+
+            await querySession.CommitTransactionAsync();
+
+            if (!allExecutions.Any())
+            {
+                return 0;
+            }
+
+            // Delete in batches to avoid oversized transactions
+            var totalDeleted = 0;
+            foreach (var batch in allExecutions.Chunk(batchSize))
+            {
+                var session = await tenantRepository.GetSessionAsync();
+                session.StartTransaction();
+
+                var entityUpdateInfoList = batch
+                    .Select(e => EntityUpdateInfo<RtPipelineExecution>.CreateDelete(e.ToRtEntityId()))
+                    .ToList();
+
+                OperationResult operationResult = new();
+                await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+                if (operationResult.HasErrors || operationResult.HasFatalErrors)
+                {
+                    throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+                }
+
+                await session.CommitTransactionAsync();
+                totalDeleted += batch.Length;
+            }
+
+            return totalDeleted;
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedDeleteOldExecutions(tenantId, olderThan, e);
+        }
+    }
+
+    public async Task<int> TimeoutStaleExecutionsAsync(string tenantId, DateTime olderThan)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
         var session = await tenantRepository.GetSessionAsync();
         try
@@ -1073,19 +1131,29 @@ internal class CommunicationRepository : ICommunicationRepository
             session.StartTransaction();
 
             var queryOptions = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtPipelineExecution.Status), FieldFilterOperator.Equals, (int)RtPipelineExecutionStatusEnum.Running)
                 .FieldFilter(nameof(RtPipelineExecution.StartedAt), FieldFilterOperator.LessThan, olderThan);
 
             var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(session, queryOptions);
-            var executions = resultSet.Items.ToList();
+            var staleExecutions = resultSet.Items.ToList();
 
-            if (!executions.Any())
+            if (!staleExecutions.Any())
             {
                 await session.CommitTransactionAsync();
                 return 0;
             }
 
-            var entityUpdateInfoList = executions
-                .Select(e => EntityUpdateInfo<RtPipelineExecution>.CreateDelete(e.ToRtEntityId()))
+            var entityUpdateInfoList = staleExecutions
+                .Select(e =>
+                {
+                    var updated = new RtPipelineExecution
+                    {
+                        Status = RtPipelineExecutionStatusEnum.Failed,
+                        ErrorMessage = "Execution timed out",
+                        CompletedAt = DateTime.UtcNow
+                    };
+                    return EntityUpdateInfo<RtPipelineExecution>.CreateUpdate(e.ToRtEntityId(), updated);
+                })
                 .ToList();
 
             OperationResult operationResult = new();
@@ -1096,7 +1164,7 @@ internal class CommunicationRepository : ICommunicationRepository
             }
 
             await session.CommitTransactionAsync();
-            return executions.Count;
+            return staleExecutions.Count;
         }
         catch (CommunicationRepositoryException)
         {
@@ -1104,7 +1172,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw CommunicationRepositoryException.CommonFailedDeleteOldExecutions(tenantId, olderThan, e);
+            throw CommunicationRepositoryException.CommonFailedTimeoutStaleExecutions(tenantId, olderThan, e);
         }
     }
 
