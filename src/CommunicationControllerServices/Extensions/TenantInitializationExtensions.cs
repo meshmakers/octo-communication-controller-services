@@ -3,6 +3,7 @@ using Meshmakers.Octo.ConstructionKit.Contracts.Services;
 using Meshmakers.Octo.ConstructionKit.Models.System.Bot.Generated.System.Bot.v2;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
+using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Extensions;
@@ -24,13 +25,8 @@ public static class TenantInitializationExtensions
         string tenantId,
         ICkCacheService ckCacheService)
     {
-        // Get the tenant repository FIRST, before any imports
-        // This ensures we use the same repository instance for both import context and cache loading
-        // IMPORTANT: This must be done before GetChildTenantContextAsync to avoid caching issues
-        var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
-
-        // Import the CK models to the tenant's database
-        // System.Communication depends on System and System.Bot, so we import in order
+        // Import the CK models to the tenant's database.
+        // System.Communication depends on System and System.Bot, so we import in order.
         using (var importSession = await systemContext.GetAdminSessionAsync())
         {
             importSession.StartTransaction();
@@ -83,9 +79,18 @@ public static class TenantInitializationExtensions
             }
         }
 
-        // Load the CK cache for the tenant AFTER the import transaction is committed
-        // This ensures the cache loader can see the imported models in MongoDB
-        // Use the SAME tenant repository we got at the start to ensure consistency
+        // Unload the tenant cache if it was previously loaded (e.g., during model imports).
+        // LoadCacheForTenantAsync uses a separate MongoDB session that cannot see uncommitted
+        // data, so the cache must be loaded AFTER the import transaction is committed.
+        // Additionally, the cache loader skips tenants that are already loaded, so we must
+        // unload first to force a fresh reload that includes all committed models.
+        if (ckCacheService.IsTenantLoaded(tenantId))
+        {
+            ckCacheService.Unload(tenantId);
+        }
+
+        // Load the CK cache after the import transaction is committed.
+        var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
         await tenantRepository.LoadCacheForTenantAsync(ckCacheService);
     }
 }

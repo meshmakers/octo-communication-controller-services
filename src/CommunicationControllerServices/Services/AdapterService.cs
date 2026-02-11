@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
@@ -19,6 +20,11 @@ internal class AdapterService(
     : IAdapterService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+
+    private static readonly TimeSpan DeploymentTimeout = TimeSpan.FromSeconds(120);
+
+    private readonly ConcurrentDictionary<RtEntityId, TaskCompletionSource<DeploymentResult>>
+        _pendingDeployments = new();
 
     public async Task<AdapterConfigurationDto> RegisterAdapterAsync(string tenantId, RtEntityId adapterRtEntityId,
         string connectionId)
@@ -259,7 +265,7 @@ internal class AdapterService(
                             pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending, null);
                     }
 
-                    await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, configuration);
+                    await SendConfigurationAndWaitForResultAsync(tenantId, adapterRtEntityId, configuration);
 
                     await eventService.StoreInformationEventAsync(tenantId,
                         $"Configuration deployed to adapter '{adapterRtEntityId}' with {configuration.Pipelines.Count} pipeline(s).",
@@ -323,7 +329,7 @@ internal class AdapterService(
                             pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending, null);
                     }
 
-                    await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, adapterConfiguration);
+                    await SendConfigurationAndWaitForResultAsync(tenantId, adapterRtEntityId, adapterConfiguration);
                 }
 
                 return;
@@ -475,12 +481,51 @@ internal class AdapterService(
         throw AdapterServiceException.TenantNotEnabled(tenantId);
     }
 
+
+    private async Task SendConfigurationAndWaitForResultAsync(string tenantId, RtEntityId adapterRtEntityId,
+        AdapterConfigurationDto adapterConfiguration)
+    {
+        var tcs = new TaskCompletionSource<DeploymentResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _pendingDeployments[adapterRtEntityId] = tcs;
+
+        try
+        {
+            await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, adapterConfiguration);
+
+            var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(DeploymentTimeout));
+            if (completedTask != tcs.Task)
+            {
+                _pendingDeployments.TryRemove(adapterRtEntityId, out _);
+                throw AdapterServiceException.DeploymentTimedOut(tenantId, adapterRtEntityId, DeploymentTimeout);
+            }
+
+            var result = await tcs.Task;
+            if (!result.IsSuccess)
+            {
+                throw AdapterServiceException.DeploymentFailed(tenantId, adapterRtEntityId,
+                    GenerateAdapterMessages(result));
+            }
+        }
+        catch
+        {
+            _pendingDeployments.TryRemove(adapterRtEntityId, out _);
+            throw;
+        }
+    }
+
     public async Task UpdateConfigurationStateAsync(string tenantId, RtEntityId adapterRtEntityId,
         DeploymentResult deploymentResult)
     {
         Logger.Info(
             "[{TenantId}] AdapterRtId='{AdapterRtId}' update configuration state '{DeploymentResult}'",
             tenantId, adapterRtEntityId, deploymentResult.IsSuccess);
+
+        // Complete any pending deployment wait so the caller of DeployPipelineAsync/DeployAdapterConfigurationAsync
+        // gets unblocked before we update the database state.
+        if (_pendingDeployments.TryRemove(adapterRtEntityId, out var tcs))
+        {
+            tcs.TrySetResult(deploymentResult);
+        }
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
