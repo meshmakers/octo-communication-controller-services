@@ -236,6 +236,11 @@ internal class CommunicationRepositoryException : Exception
         return new CommunicationRepositoryException($"[{tenantId}] Failed to get pipeline executions for pipeline '{pipelineRtEntityId}'", exception);
     }
 
+    internal static Exception CommonFailedHasExecutionsWithStatus(string tenantId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to check for executions with status", exception);
+    }
+
     internal static Exception CommonFailedGetRunningExecutions(string tenantId, RtEntityId adapterRtEntityId, Exception exception)
     {
         return new CommunicationRepositoryException($"[{tenantId}] Failed to get running executions for adapter '{adapterRtEntityId}'", exception);
