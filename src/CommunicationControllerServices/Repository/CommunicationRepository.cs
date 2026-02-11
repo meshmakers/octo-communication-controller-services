@@ -997,6 +997,25 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
+    public async Task<bool> HasExecutionsWithStatusAsync(string tenantId, RtPipelineExecutionStatusEnum status)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            var queryOptions = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtPipelineExecution.Status), FieldFilterOperator.Equals, (int)status);
+
+            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(session, queryOptions);
+            return resultSet.Items.Any();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedHasExecutionsWithStatus(tenantId, e);
+        }
+    }
+
     public async Task<IReadOnlyList<RtPipelineExecution>> GetRunningExecutionsForAdapterAsync(string tenantId,
         RtEntityId adapterRtEntityId)
     {
@@ -1005,6 +1024,12 @@ internal class CommunicationRepository : ICommunicationRepository
         var session = await tenantRepository.GetSessionAsync();
         try
         {
+            // Short-circuit: check if any running executions exist at all before expensive association traversal
+            if (!await HasExecutionsWithStatusAsync(tenantId, RtPipelineExecutionStatusEnum.Running))
+            {
+                return [];
+            }
+
             var queryOptions = RtEntityQueryOptions.Create()
                 .FieldFilter(nameof(RtPipelineExecution.Status), FieldFilterOperator.Equals, (int)RtPipelineExecutionStatusEnum.Running);
 
@@ -1036,6 +1061,12 @@ internal class CommunicationRepository : ICommunicationRepository
         var session = await tenantRepository.GetSessionAsync();
         try
         {
+            // Short-circuit: check if any interrupted executions exist at all before expensive association traversal
+            if (!await HasExecutionsWithStatusAsync(tenantId, RtPipelineExecutionStatusEnum.Interrupted))
+            {
+                return [];
+            }
+
             var queryOptions = RtEntityQueryOptions.Create()
                 .FieldFilter(nameof(RtPipelineExecution.Status), FieldFilterOperator.Equals, (int)RtPipelineExecutionStatusEnum.Interrupted);
 
@@ -1066,7 +1097,7 @@ internal class CommunicationRepository : ICommunicationRepository
     public async Task<int> DeleteOldExecutionsAsync(string tenantId, DateTime olderThan)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
-        const int batchSize = 500;
+        const int batchSize = 50;
 
         try
         {

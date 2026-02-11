@@ -258,6 +258,14 @@ public interface ICommunicationRepository
         RtEntityId pipelineRtEntityId, DateTime? from, DateTime? to, int? limit);
 
     /// <summary>
+    /// Checks whether any executions with the given status exist (cheap query without association traversal)
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="status">Status to check for</param>
+    /// <returns>True if at least one execution with the given status exists</returns>
+    Task<bool> HasExecutionsWithStatusAsync(string tenantId, RtPipelineExecutionStatusEnum status);
+
+    /// <summary>
     /// Gets all running executions for a specific adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
