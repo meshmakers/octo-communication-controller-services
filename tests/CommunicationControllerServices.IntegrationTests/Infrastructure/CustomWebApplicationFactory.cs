@@ -100,6 +100,15 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         // Add infrastructure with short service name (MongoDB app name limit is 128 bytes)
         services.AddOctoServiceInfrastructure("CommCtrlTests", _ => { });
 
+        // Register CK models BEFORE AddMongoDbRuntimeRepository() to ensure BSON class maps
+        // are available. Since BSON class maps are static/global, the first call to
+        // AddMongoDbRuntimeRepository() in the process freezes the discriminator convention.
+        // Without CK models registered at that point, types like RtPool cannot be deserialized.
+        services.AddCkModelSystemV2();
+        services.AddCkModelSystemBotV2();
+        services.AddCkModelSystemCommunicationV2();
+        services.AddCkModelSystemNotificationV2();
+
         services.AddRuntimeEngine()
             .AddMongoDbRuntimeRepository();
 
