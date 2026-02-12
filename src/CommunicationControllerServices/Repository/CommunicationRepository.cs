@@ -3,6 +3,7 @@ using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.Syst
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
@@ -997,25 +998,6 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task<bool> HasExecutionsWithStatusAsync(string tenantId, RtPipelineExecutionStatusEnum status)
-    {
-        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
-
-        var session = await tenantRepository.GetSessionAsync();
-        try
-        {
-            var queryOptions = RtEntityQueryOptions.Create()
-                .FieldFilter(nameof(RtPipelineExecution.Status), FieldFilterOperator.Equals, (int)status);
-
-            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(session, queryOptions);
-            return resultSet.Items.Any();
-        }
-        catch (Exception e)
-        {
-            throw CommunicationRepositoryException.CommonFailedHasExecutionsWithStatus(tenantId, e);
-        }
-    }
-
     public async Task<IReadOnlyList<RtPipelineExecution>> GetRunningExecutionsForAdapterAsync(string tenantId,
         RtEntityId adapterRtEntityId)
     {
@@ -1024,29 +1006,12 @@ internal class CommunicationRepository : ICommunicationRepository
         var session = await tenantRepository.GetSessionAsync();
         try
         {
-            // Short-circuit: check if any running executions exist at all before expensive association traversal
-            if (!await HasExecutionsWithStatusAsync(tenantId, RtPipelineExecutionStatusEnum.Running))
-            {
-                return [];
-            }
+            // Reversed query: start from Running executions (few: 0-30) instead of
+            // adapter associations (many: 7K-18K), then check which belong to this adapter.
+            var executions = await GetExecutionsForAdapterByStatusAsync(
+                tenantRepository, session, adapterRtEntityId, RtPipelineExecutionStatusEnum.Running);
 
-            var queryOptions = RtEntityQueryOptions.Create()
-                .FieldFilter(nameof(RtPipelineExecution.Status), FieldFilterOperator.Equals, (int)RtPipelineExecutionStatusEnum.Running);
-
-            var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtAdapter, RtPipelineExecution>(
-                session,
-                [adapterRtEntityId.RtId],
-                SystemCommunicationCkIds.RtCkExecutingAdapterRoleId,
-                GraphDirections.Inbound,
-                null,
-                queryOptions);
-
-            if (resultSet.Any())
-            {
-                return resultSet.First().Value.Items.ToList();
-            }
-
-            return [];
+            return executions;
         }
         catch (Exception e)
         {
@@ -1061,37 +1026,69 @@ internal class CommunicationRepository : ICommunicationRepository
         var session = await tenantRepository.GetSessionAsync();
         try
         {
-            // Short-circuit: check if any interrupted executions exist at all before expensive association traversal
-            if (!await HasExecutionsWithStatusAsync(tenantId, RtPipelineExecutionStatusEnum.Interrupted))
-            {
-                return [];
-            }
+            // Reversed query: start from Interrupted executions (few) instead of
+            // adapter associations (many: 7K-18K), then check which belong to this adapter.
+            var executions = await GetExecutionsForAdapterByStatusAsync(
+                tenantRepository, session, adapterRtEntityId, RtPipelineExecutionStatusEnum.Interrupted);
 
-            var queryOptions = RtEntityQueryOptions.Create()
-                .FieldFilter(nameof(RtPipelineExecution.Status), FieldFilterOperator.Equals, (int)RtPipelineExecutionStatusEnum.Interrupted);
-
-            var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtAdapter, RtPipelineExecution>(
-                session,
-                [adapterRtEntityId.RtId],
-                SystemCommunicationCkIds.RtCkExecutingAdapterRoleId,
-                GraphDirections.Inbound,
-                null,
-                queryOptions);
-
-            if (resultSet.Any())
-            {
-                return resultSet.First().Value.Items
-                    .Where(e => e.ExecutionId != null)
-                    .Select(e => e.ExecutionId!)
-                    .ToList();
-            }
-
-            return [];
+            return executions
+                .Where(e => e.ExecutionId != null)
+                .Select(e => e.ExecutionId!)
+                .ToList();
         }
         catch (Exception e)
         {
             throw CommunicationRepositoryException.CommonFailedGetInterruptedExecutions(tenantId, adapterRtEntityId, e);
         }
+    }
+
+    /// <summary>
+    /// Gets pipeline executions for a specific adapter filtered by status using a reversed query approach.
+    /// Instead of traversing from adapter (many associations) to executions, this first queries
+    /// executions by status (few results), then checks which ones belong to the specified adapter.
+    /// </summary>
+    private static async Task<List<RtPipelineExecution>> GetExecutionsForAdapterByStatusAsync(
+        ITenantRepository tenantRepository, IOctoSession session,
+        RtEntityId adapterRtEntityId, RtPipelineExecutionStatusEnum status)
+    {
+        // Step 1: Get all executions with the desired status (typically 0-30 results)
+        var statusQueryOptions = RtEntityQueryOptions.Create()
+            .FieldFilter(nameof(RtPipelineExecution.Status), FieldFilterOperator.Equals, (int)status);
+
+        var allWithStatus = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(session, statusQueryOptions);
+
+        if (!allWithStatus.Items.Any())
+        {
+            return [];
+        }
+
+        // Step 2: For those executions, check which ones are associated with this adapter.
+        // Each execution has ~2 associations, so this is very cheap (0-30 entities × 2 associations)
+        // compared to the old approach (1 adapter × 7K-18K associations).
+        var executionRtIds = allWithStatus.Items.Select(e => e.RtId).ToList();
+
+        var associationResult = await tenantRepository.GetRtAssociationTargetsAsync<RtPipelineExecution, RtAdapter>(
+            session,
+            executionRtIds,
+            SystemCommunicationCkIds.RtCkExecutingAdapterRoleId,
+            GraphDirections.Outbound,
+            [adapterRtEntityId.RtId],
+            RtEntityQueryOptions.Create());
+
+        // Step 3: Collect execution IDs that have the association to this adapter
+        var matchingExecutionRtIds = new HashSet<OctoObjectId>();
+        foreach (var entry in associationResult)
+        {
+            if (entry.Value.Items.Any())
+            {
+                matchingExecutionRtIds.Add(entry.Key.RtId);
+            }
+        }
+
+        // Step 4: Return matching executions
+        return allWithStatus.Items
+            .Where(e => matchingExecutionRtIds.Contains(e.RtId))
+            .ToList();
     }
 
     public async Task<int> DeleteOldExecutionsAsync(string tenantId, DateTime olderThan)
