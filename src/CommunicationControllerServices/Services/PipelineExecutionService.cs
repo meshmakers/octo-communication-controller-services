@@ -248,6 +248,31 @@ internal class PipelineExecutionService(
             var allExecutions = await communicationRepository.GetPipelineExecutionsAsync(
                 tenantId, pipelineRtEntityId, now.AddDays(-30), now, null);
 
+            if (allExecutions.Count == 0)
+            {
+                // No executions in the last 30 days - check if statistics need updating
+                var existingStatistics = await communicationRepository.GetPipelineStatisticsAsync(tenantId, pipelineRtEntityId);
+
+                if (existingStatistics == null)
+                {
+                    // No statistics exist and no executions - nothing to do
+                    Logger.Debug("[{TenantId}] No executions and no existing statistics for pipeline '{PipelineRtEntityId}', skipping update",
+                        tenantId, pipelineRtEntityId);
+                    return;
+                }
+
+                if (IsStatisticsEmpty(existingStatistics))
+                {
+                    // Statistics already show zero activity - no need to update
+                    Logger.Debug("[{TenantId}] Statistics already empty for pipeline '{PipelineRtEntityId}', skipping update",
+                        tenantId, pipelineRtEntityId);
+                    return;
+                }
+
+                // Statistics have non-zero values but no executions remain (retention cleanup) - reset to zero
+                // Fall through to normal upsert with zero values
+            }
+
             // Compute sub-windows in-memory from the loaded data
             var lastHour = ComputeAggregate(allExecutions, now.AddHours(-1));
             var last12Hours = ComputeAggregate(allExecutions, now.AddHours(-12));
@@ -476,6 +501,19 @@ internal class PipelineExecutionService(
         }
 
         return await communicationRepository.GetAdapterSyncSequenceNumberAsync(tenantId, adapterRtEntityId);
+    }
+
+    private static bool IsStatisticsEmpty(RtPipelineStatistics statistics)
+    {
+        return statistics.LastExecutionAt == null &&
+               statistics.LastHourSuccessCount == 0 &&
+               statistics.LastHourFailureCount == 0 &&
+               statistics.Last12HoursSuccessCount == 0 &&
+               statistics.Last12HoursFailureCount == 0 &&
+               statistics.Last24HoursSuccessCount == 0 &&
+               statistics.Last24HoursFailureCount == 0 &&
+               statistics.Last30DaysSuccessCount == 0 &&
+               statistics.Last30DaysFailureCount == 0;
     }
 
     /// <summary>

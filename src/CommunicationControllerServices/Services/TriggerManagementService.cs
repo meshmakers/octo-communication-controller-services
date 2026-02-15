@@ -108,6 +108,18 @@ internal class TriggerManagementService(
                 var pipelineTrigger = pipelineTriggerKeyValue.Key;
                 try
                 {
+                    if (pipelineTriggerKeyValue.Value.Count == 0)
+                    {
+                        logger.LogError(
+                            "[{TenantId}] Trigger '{TriggerRtId}' has no associated pipelines and cannot be deployed",
+                            tenantId, pipelineTrigger.RtId);
+                        await eventService.StoreErrorEventAsync(tenantId,
+                            $"Trigger '{pipelineTrigger.RtId}' has no associated pipelines and cannot be deployed.");
+                        await communicationRepository.SetDataPipelineTriggerDeploymentStateAsync(tenantId,
+                            pipelineTrigger.RtId, RtDeploymentStateEnum.Error);
+                        continue;
+                    }
+
                     foreach (var meshPipeline in pipelineTriggerKeyValue.Value)
                     {
                         var address =
