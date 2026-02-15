@@ -29,11 +29,9 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPool, RtAdapter>(session,
                 [poolRtId] , SystemCommunicationCkIds.RtCkManagesRoleId,
                 GraphDirections.Inbound, null, RtEntityQueryOptions.Create());
@@ -43,11 +41,7 @@ internal class CommunicationRepository : ICommunicationRepository
                 throw CommunicationRepositoryException.PoolNotFound(tenantId, poolRtId);
             }
 
-            var list = resultSet.First().Value.Items.ToList();
-
-            await session.CommitTransactionAsync();
-
-            return list;
+            return resultSet.First().Value.Items.ToList();
         }
         catch (Exception e)
         {
@@ -61,15 +55,11 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var resultSet =
                 await tenantRepository.GetRtEntitiesByTypeAsync<RtAdapter>(session, RtEntityQueryOptions.Create());
-
-            await session.CommitTransactionAsync();
 
             return resultSet.Items.ToList();
         }
@@ -84,11 +74,9 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var adapter = await tenantRepository.GetRtEntityByRtIdAsync<RtAdapter>(session, adapterRtEntityId.RtId);
 
             if (adapter == null)
@@ -107,8 +95,6 @@ internal class CommunicationRepository : ICommunicationRepository
                     adapter.CkTypeId);
             }
 
-            await session.CommitTransactionAsync();
-
             return adapter;
         }
         catch (CommunicationRepositoryException)
@@ -125,18 +111,14 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var multipleOriginResultSet =
                 await tenantRepository.GetRtAssociationTargetsAsync<RtPipeline, RtAdapter>(
                     session,
                     [pipelineRtEntityId.RtId], SystemCommunicationCkIds.RtCkExecutesRoleId,
                     GraphDirections.Outbound, null, RtEntityQueryOptions.Create());
-
-            await session.CommitTransactionAsync();
 
             if (multipleOriginResultSet.Any())
             {
@@ -159,15 +141,11 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var dataQueryOperation = RtEntityQueryOptions.Create();
             var poolResultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPool>(session, dataQueryOperation);
-
-            await session.CommitTransactionAsync();
 
             return poolResultSet.Items.ToList();
         }
@@ -182,17 +160,13 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var dataQueryOperation = RtEntityQueryOptions.Create()
                 .FieldFilter(nameof(RtPool.Name), FieldFilterOperator.Equals, poolName);
 
             var poolResultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPool>(session, dataQueryOperation);
-
-            await session.CommitTransactionAsync();
 
             return poolResultSet.Items.ToList();
         }
@@ -207,7 +181,7 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
@@ -249,7 +223,7 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
@@ -290,7 +264,7 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
@@ -338,7 +312,7 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
@@ -379,7 +353,7 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
@@ -420,17 +394,13 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var poolResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtAdapter, RtPool>(session,
                 [adapterRtEntityId.RtId],
                 SystemCommunicationCkIds.RtCkManagesRoleId,
                 GraphDirections.Inbound, null, RtEntityQueryOptions.Create());
-
-            await session.CommitTransactionAsync();
 
             if (poolResultSet.Any())
             {
@@ -461,11 +431,7 @@ internal class CommunicationRepository : ICommunicationRepository
 
         try
         {
-            systemSession.StartTransaction();
-
             var isTenantExisting = await _systemContext.IsChildTenantExistingAsync(systemSession, tenantId);
-
-            await systemSession.CommitTransactionAsync();
 
             return isTenantExisting;
         }
@@ -479,18 +445,14 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var multipleOriginResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtAdapter, RtPipeline>(
                 session,
                 [adapterRtEntityId.RtId],
                 SystemCommunicationCkIds.RtCkExecutesRoleId,
                 GraphDirections.Inbound, null, RtEntityQueryOptions.Create());
-
-            await session.CommitTransactionAsync();
 
             if (multipleOriginResultSet.Any())
             {
@@ -513,17 +475,13 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var originResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtDataPipeline, RtPipeline>(session,
                 [dataPipelineRtId],
                 SystemCkIds.RtCkParentChildRoleId,
                 GraphDirections.Inbound, null, RtEntityQueryOptions.Create());
-
-            await session.CommitTransactionAsync();
 
             if (originResultSet.Any())
             {
@@ -547,11 +505,9 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var rtPipeline =
                 await tenantRepository.GetRtEntityByRtIdAsync<RtPipeline>(session, pipelineRtEntityId.RtId);
             return rtPipeline;
@@ -570,19 +526,15 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var multipleOriginResultSet =
                 await tenantRepository.GetRtAssociationTargetsAsync<RtPipeline, RtDataPipeline>(
                     session,
                     [pipelineRtId],
                     SystemCkIds.RtCkParentChildRoleId,
                     GraphDirections.Outbound, null, RtEntityQueryOptions.Create());
-
-            await session.CommitTransactionAsync();
 
             if (multipleOriginResultSet.Any())
             {
@@ -605,19 +557,15 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-            
             var multipleOriginResultSet =
                 await tenantRepository.GetRtAssociationTargetsAsync<RtPipeline, RtConfiguration>(
                     session,
                     [pipelineRtId],
                     SystemCommunicationCkIds.RtCkUsesRoleId,
                     GraphDirections.Outbound, null, RtEntityQueryOptions.Create());
-
-            await session.CommitTransactionAsync();
 
             if (multipleOriginResultSet.Any())
             {
@@ -639,15 +587,12 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var queryOptions = RtEntityQueryOptions.Create();
             var r = await tenantRepository.GetRtEntitiesByTypeAsync<RtDataPipelineTrigger>(session, queryOptions);
 
-            await session.CommitTransactionAsync();
             return r.Items.ToList();
         }
         catch (Exception e)
@@ -661,11 +606,9 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var queryOptions = RtEntityQueryOptions.Create()
                 .FieldEquals(nameof(RtDataPipelineTrigger.Enabled), true);
 
@@ -685,7 +628,6 @@ internal class CommunicationRepository : ICommunicationRepository
                 }
             }
 
-            await session.CommitTransactionAsync();
             return list;
         }
         catch (Exception e)
@@ -699,7 +641,7 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
@@ -742,7 +684,7 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
@@ -785,7 +727,7 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
@@ -828,7 +770,7 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
@@ -877,7 +819,7 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
@@ -930,17 +872,13 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var queryOptions = RtEntityQueryOptions.Create()
                 .FieldFilter(nameof(RtPipelineExecution.ExecutionId), FieldFilterOperator.Equals, executionId);
 
             var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(session, queryOptions);
-
-            await session.CommitTransactionAsync();
 
             return resultSet.Items.FirstOrDefault();
         }
@@ -955,11 +893,9 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var queryOptions = RtEntityQueryOptions.Create()
                 .SortOrder(nameof(RtPipelineExecution.StartedAt), SortOrders.Descending);
 
@@ -981,8 +917,6 @@ internal class CommunicationRepository : ICommunicationRepository
                 null,
                 queryOptions);
 
-            await session.CommitTransactionAsync();
-
             if (resultSet.Any())
             {
                 var items = resultSet.First().Value.Items.ToList();
@@ -1003,7 +937,7 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
             // Reversed query: start from Running executions (few: 0-30) instead of
@@ -1023,7 +957,7 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
             // Reversed query: start from Interrupted executions (few) instead of
@@ -1119,7 +1053,7 @@ internal class CommunicationRepository : ICommunicationRepository
             var totalDeleted = 0;
             foreach (var batch in allExecutions.Chunk(batchSize))
             {
-                var session = await tenantRepository.GetSessionAsync();
+                using var session = await tenantRepository.GetSessionAsync();
                 session.StartTransaction();
 
                 var entityUpdateInfoList = batch
@@ -1153,7 +1087,7 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
@@ -1212,11 +1146,9 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var queryOptions = RtEntityQueryOptions.Create();
 
             var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPipeline, RtPipelineStatistics>(
@@ -1226,8 +1158,6 @@ internal class CommunicationRepository : ICommunicationRepository
                 GraphDirections.Inbound,
                 null,
                 queryOptions);
-
-            await session.CommitTransactionAsync();
 
             if (resultSet.Any())
             {
@@ -1247,7 +1177,7 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
@@ -1315,7 +1245,7 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
             var queryOptions = RtEntityQueryOptions.Create()
@@ -1359,7 +1289,7 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
@@ -1411,18 +1341,14 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var idList = executionIds.ToList();
             var queryOptions = RtEntityQueryOptions.Create()
                 .FieldFilter(nameof(RtPipelineExecution.ExecutionId), FieldFilterOperator.In, idList);
 
             var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(session, queryOptions);
-
-            await session.CommitTransactionAsync();
 
             return resultSet.Items
                 .Where(e => e.ExecutionId != null)
@@ -1439,7 +1365,7 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
@@ -1487,15 +1413,11 @@ internal class CommunicationRepository : ICommunicationRepository
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var queryOptions = RtEntityQueryOptions.Create();
             var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipeline>(session, queryOptions);
-
-            await session.CommitTransactionAsync();
 
             return resultSet.Items.ToList();
         }
