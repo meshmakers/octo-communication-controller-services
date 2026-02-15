@@ -92,7 +92,7 @@ internal class StatisticsTests : PipelineExecutionServiceTestsBase
     }
 
     [Test]
-    public async Task UpdateStatisticsAsync_NoRecentExecutions_SetsNullLastExecutionAt()
+    public async Task UpdateStatisticsAsync_NoExecutions_NoExistingStatistics_SkipsUpsert()
     {
         // Arrange
         var rtPipeline = RtEntityCreator.CreatePipeline();
@@ -101,13 +101,93 @@ internal class StatisticsTests : PipelineExecutionServiceTestsBase
             TenantId, rtPipeline.ToRtEntityId(), Arg.Any<DateTime>(), Arg.Any<DateTime>(), null)
             .Returns(new List<RtPipelineExecution>());
 
+        CommunicationRepository.GetPipelineStatisticsAsync(TenantId, rtPipeline.ToRtEntityId())
+            .Returns((RtPipelineStatistics?)null);
+
         // Act
         await PipelineExecutionService.UpdateStatisticsAsync(TenantId, rtPipeline.ToRtEntityId());
 
-        // Assert
+        // Assert - upsert should NOT be called since no executions and no existing stats
+        await CommunicationRepository.DidNotReceive().UpsertPipelineStatisticsAsync(
+            TenantId,
+            Arg.Any<RtPipelineStatistics>(),
+            rtPipeline.ToRtEntityId());
+    }
+
+    [Test]
+    public async Task UpdateStatisticsAsync_NoExecutions_ExistingEmptyStatistics_SkipsUpsert()
+    {
+        // Arrange
+        var rtPipeline = RtEntityCreator.CreatePipeline();
+
+        CommunicationRepository.GetPipelineExecutionsAsync(
+            TenantId, rtPipeline.ToRtEntityId(), Arg.Any<DateTime>(), Arg.Any<DateTime>(), null)
+            .Returns(new List<RtPipelineExecution>());
+
+        CommunicationRepository.GetPipelineStatisticsAsync(TenantId, rtPipeline.ToRtEntityId())
+            .Returns(new RtPipelineStatistics
+            {
+                LastExecutionAt = null,
+                LastHourSuccessCount = 0,
+                LastHourFailureCount = 0,
+                Last12HoursSuccessCount = 0,
+                Last12HoursFailureCount = 0,
+                Last24HoursSuccessCount = 0,
+                Last24HoursFailureCount = 0,
+                Last30DaysSuccessCount = 0,
+                Last30DaysFailureCount = 0
+            });
+
+        // Act
+        await PipelineExecutionService.UpdateStatisticsAsync(TenantId, rtPipeline.ToRtEntityId());
+
+        // Assert - upsert should NOT be called since stats are already empty
+        await CommunicationRepository.DidNotReceive().UpsertPipelineStatisticsAsync(
+            TenantId,
+            Arg.Any<RtPipelineStatistics>(),
+            rtPipeline.ToRtEntityId());
+    }
+
+    [Test]
+    public async Task UpdateStatisticsAsync_NoExecutions_ExistingNonEmptyStatistics_ResetsToZero()
+    {
+        // Arrange
+        var rtPipeline = RtEntityCreator.CreatePipeline();
+
+        CommunicationRepository.GetPipelineExecutionsAsync(
+            TenantId, rtPipeline.ToRtEntityId(), Arg.Any<DateTime>(), Arg.Any<DateTime>(), null)
+            .Returns(new List<RtPipelineExecution>());
+
+        CommunicationRepository.GetPipelineStatisticsAsync(TenantId, rtPipeline.ToRtEntityId())
+            .Returns(new RtPipelineStatistics
+            {
+                LastExecutionAt = DateTime.UtcNow.AddDays(-5),
+                LastHourSuccessCount = 0,
+                LastHourFailureCount = 0,
+                Last12HoursSuccessCount = 0,
+                Last12HoursFailureCount = 0,
+                Last24HoursSuccessCount = 0,
+                Last24HoursFailureCount = 0,
+                Last30DaysSuccessCount = 10,
+                Last30DaysFailureCount = 2
+            });
+
+        // Act
+        await PipelineExecutionService.UpdateStatisticsAsync(TenantId, rtPipeline.ToRtEntityId());
+
+        // Assert - upsert SHOULD be called to reset stats to zero
         await CommunicationRepository.Received(1).UpsertPipelineStatisticsAsync(
             TenantId,
-            Arg.Is<RtPipelineStatistics>(s => s.LastExecutionAt == null),
+            Arg.Is<RtPipelineStatistics>(s =>
+                s.LastExecutionAt == null &&
+                s.LastHourSuccessCount == 0 &&
+                s.LastHourFailureCount == 0 &&
+                s.Last12HoursSuccessCount == 0 &&
+                s.Last12HoursFailureCount == 0 &&
+                s.Last24HoursSuccessCount == 0 &&
+                s.Last24HoursFailureCount == 0 &&
+                s.Last30DaysSuccessCount == 0 &&
+                s.Last30DaysFailureCount == 0),
             rtPipeline.ToRtEntityId());
     }
 
@@ -134,13 +214,20 @@ internal class StatisticsTests : PipelineExecutionServiceTestsBase
         // Arrange
         var rtPipeline1 = RtEntityCreator.CreatePipeline();
         var rtPipeline2 = RtEntityCreator.CreatePipeline();
+        var now = DateTime.UtcNow;
 
         CommunicationRepository.GetAllPipelinesAsync(TenantId)
             .Returns(new List<RtPipeline> { rtPipeline1, rtPipeline2 });
 
+        // Provide executions so the optimization doesn't skip the upsert
+        var executions = new List<RtPipelineExecution>
+        {
+            CreateExecutionWithTiming(RtPipelineExecutionStatusEnum.Completed, now.AddMinutes(-30), 1000)
+        };
+
         CommunicationRepository.GetPipelineExecutionsAsync(
             TenantId, Arg.Any<RtEntityId>(), Arg.Any<DateTime>(), Arg.Any<DateTime>(), null)
-            .Returns(new List<RtPipelineExecution>());
+            .Returns(executions);
 
         // Act
         await PipelineExecutionService.UpdateAllStatisticsAsync(TenantId);
@@ -157,10 +244,17 @@ internal class StatisticsTests : PipelineExecutionServiceTestsBase
     {
         // Arrange
         var rtPipeline = RtEntityCreator.CreatePipeline();
+        var now = DateTime.UtcNow;
+
+        // Provide executions so the optimization doesn't skip the upsert
+        var executions = new List<RtPipelineExecution>
+        {
+            CreateExecutionWithTiming(RtPipelineExecutionStatusEnum.Completed, now.AddMinutes(-30), 1000)
+        };
 
         CommunicationRepository.GetPipelineExecutionsAsync(
             TenantId, rtPipeline.ToRtEntityId(), Arg.Any<DateTime>(), Arg.Any<DateTime>(), null)
-            .Returns(new List<RtPipelineExecution>());
+            .Returns(executions);
 
         // Act
         await PipelineExecutionService.UpdateStatisticsAsync(TenantId, rtPipeline.ToRtEntityId());

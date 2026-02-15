@@ -119,4 +119,40 @@ internal static class RtEntityCreator
             LastUpdatedAt = DateTime.UtcNow
         };
     }
+
+    public static RtDataPipelineTrigger CreateDataPipelineTrigger(string? cronExpression = null,
+        string? name = null, string? id = null)
+    {
+        id ??= OctoObjectId.GenerateNewId().ToString();
+        return new RtDataPipelineTrigger
+        {
+            RtId = new OctoObjectId(id),
+            CkTypeId = SystemCommunicationCkIds.RtCkDataPipelineTriggerTypeId,
+            Enabled = true,
+            CronExpression = cronExpression ?? "0 * * * *",
+            Name = name ?? "Test Trigger"
+        };
+    }
+
+    public static RtEntityId ToRtEntityId(this RtDataPipelineTrigger entity)
+    {
+        return new RtEntityId(entity.CkTypeId!, entity.RtId);
+    }
+
+    public static RtMeshPipeline CreateMeshPipeline(string? pipelineDefinition = null, string? id = null)
+    {
+        id ??= OctoObjectId.GenerateNewId().ToString();
+        return new RtMeshPipeline
+        {
+            RtId = new OctoObjectId(id),
+            CkTypeId = SystemCommunicationCkIds.RtCkMeshPipelineTypeId,
+            PipelineDefinition = pipelineDefinition ?? "pipelineDefinition",
+            DeploymentState = RtDeploymentStateEnum.Deployed
+        };
+    }
+
+    public static RtEntityId ToRtEntityId(this RtMeshPipeline entity)
+    {
+        return new RtEntityId(entity.CkTypeId!, entity.RtId);
+    }
 }
