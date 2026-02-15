@@ -83,6 +83,14 @@ try
     builder.Services.AddHostedService<PipelineStatisticsBackgroundService>();
     builder.Services.AddHostedService<ExecutionCleanupBackgroundService>();
 
+    // Add execution report background processor - decouples heavy DB writes from SignalR hub
+    // method processing so that execution reports don't block deployment results
+    builder.Services.AddSingleton<PipelineExecutionReportProcessor>();
+    builder.Services.AddSingleton<IPipelineExecutionReportQueue>(sp =>
+        sp.GetRequiredService<PipelineExecutionReportProcessor>());
+    builder.Services.AddHostedService(sp =>
+        sp.GetRequiredService<PipelineExecutionReportProcessor>());
+
     // Add services to the container.
     builder.Services.AddCors();
     builder.Services.AddControllers();

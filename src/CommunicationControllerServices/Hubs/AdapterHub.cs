@@ -20,6 +20,7 @@ internal class AdapterHub : Hub, IAdapterHub
     private readonly IPipelineDebugService _pipelineDebugService;
     private readonly ICommunicationEventService _eventService;
     private readonly IPipelineExecutionService _pipelineExecutionService;
+    private readonly IPipelineExecutionReportQueue _executionReportQueue;
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
     /// <summary>
@@ -29,13 +30,16 @@ internal class AdapterHub : Hub, IAdapterHub
     /// <param name="pipelineDebugService">The responsible pipeline debug service</param>
     /// <param name="eventService">Service for storing system events</param>
     /// <param name="pipelineExecutionService">Service for managing pipeline execution metrics</param>
+    /// <param name="executionReportQueue">Queue for background processing of execution reports</param>
     public AdapterHub(IAdapterService adapterService, IPipelineDebugService pipelineDebugService,
-        ICommunicationEventService eventService, IPipelineExecutionService pipelineExecutionService)
+        ICommunicationEventService eventService, IPipelineExecutionService pipelineExecutionService,
+        IPipelineExecutionReportQueue executionReportQueue)
     {
         _adapterService = adapterService;
         _pipelineDebugService = pipelineDebugService;
         _eventService = eventService;
         _pipelineExecutionService = pipelineExecutionService;
+        _executionReportQueue = executionReportQueue;
     }
 
     /// <inheritdoc />
@@ -171,84 +175,45 @@ internal class AdapterHub : Hub, IAdapterHub
     }
 
     /// <summary>
-    /// Reports the start of a pipeline execution from the adapter
+    /// Reports the start of a pipeline execution from the adapter.
+    /// Enqueues the report for background processing to avoid blocking the SignalR connection.
     /// </summary>
     /// <param name="startDto">The execution start details</param>
-    public async Task ReportExecutionStartAsync(PipelineExecutionStartDto startDto)
+    public Task ReportExecutionStartAsync(PipelineExecutionStartDto startDto)
     {
         var tenantId = GetTenantId();
         var adapterRtEntityId = GetAdapterRtEntityId();
 
-        try
-        {
-            await _pipelineExecutionService.StartExecutionAsync(tenantId, adapterRtEntityId, startDto);
-        }
-        catch (PipelineExecutionServiceException e)
-        {
-            Logger.Error(e, e.Message);
-            throw;
-        }
-        catch (Exception e)
-        {
-            Logger.Error(e, "Cannot report execution start");
-            await _eventService.StoreErrorEventAsync(tenantId,
-                $"Failed to report execution start for pipeline '{startDto.PipelineRtEntityId}': {e.Message}");
-            throw;
-        }
+        _executionReportQueue.EnqueueStart(tenantId, adapterRtEntityId, startDto);
+        return Task.CompletedTask;
     }
 
     /// <summary>
-    /// Reports the end of a pipeline execution from the adapter
+    /// Reports the end of a pipeline execution from the adapter.
+    /// Enqueues the report for background processing to avoid blocking the SignalR connection.
     /// </summary>
     /// <param name="endDto">The execution end details</param>
-    public async Task ReportExecutionEndAsync(PipelineExecutionEndDto endDto)
+    public Task ReportExecutionEndAsync(PipelineExecutionEndDto endDto)
     {
         var tenantId = GetTenantId();
         var adapterRtEntityId = GetAdapterRtEntityId();
 
-        try
-        {
-            await _pipelineExecutionService.CompleteExecutionAsync(tenantId, adapterRtEntityId, endDto);
-        }
-        catch (PipelineExecutionServiceException e)
-        {
-            Logger.Error(e, e.Message);
-            throw;
-        }
-        catch (Exception e)
-        {
-            Logger.Error(e, "Cannot report execution end");
-            await _eventService.StoreErrorEventAsync(tenantId,
-                $"Failed to report execution end for execution '{endDto.ExecutionId}': {e.Message}");
-            throw;
-        }
+        _executionReportQueue.EnqueueComplete(tenantId, adapterRtEntityId, endDto);
+        return Task.CompletedTask;
     }
 
     /// <summary>
-    /// Reports the final result of a previously interrupted execution after adapter reconnect
+    /// Reports the final result of a previously interrupted execution after adapter reconnect.
+    /// Enqueues the report for background processing to avoid blocking the SignalR connection.
     /// </summary>
     /// <param name="endDto">The final execution result</param>
-    public async Task ReportInterruptedExecutionResultAsync(PipelineExecutionEndDto endDto)
+    public Task ReportInterruptedExecutionResultAsync(PipelineExecutionEndDto endDto)
     {
         var tenantId = GetTenantId();
         var adapterRtEntityId = GetAdapterRtEntityId();
 
-        try
-        {
-            await _pipelineExecutionService.ReportInterruptedExecutionResultAsync(tenantId, adapterRtEntityId, endDto);
-        }
-        catch (PipelineExecutionServiceException e)
-        {
-            Logger.Error(e, e.Message);
-            throw;
-        }
-        catch (Exception e)
-        {
-            Logger.Error(e, "Cannot report interrupted execution result");
-            await _eventService.StoreErrorEventAsync(tenantId,
-                $"Failed to report interrupted execution result for execution '{endDto.ExecutionId}': {e.Message}");
-            throw;
-        }
+        _executionReportQueue.EnqueueInterruptedResult(tenantId, adapterRtEntityId, endDto);
+        return Task.CompletedTask;
     }
 
     /// <summary>
