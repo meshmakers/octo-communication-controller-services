@@ -2,6 +2,11 @@ $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
 - typeId: PipelineExecution
   derivedFromCkTypeId: ${System}/Entity
+  indexes:
+  - indexType: "Ascending"
+    fields:
+      - attributePaths:
+        - StartedAt
   attributes:
     - id: ${this}/ExecutionId
       name: ExecutionId
