@@ -105,7 +105,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         // AddMongoDbRuntimeRepository() in the process freezes the discriminator convention.
         // Without CK models registered at that point, types like RtPool cannot be deserialized.
         services.AddCkModelSystemV2();
-        services.AddCkModelSystemBotV2();
+        services.AddCkModelSystemBotV3();
         services.AddCkModelSystemCommunicationV2();
         services.AddCkModelSystemNotificationV2();
 
