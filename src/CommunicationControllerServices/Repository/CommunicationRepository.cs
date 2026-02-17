@@ -1372,13 +1372,6 @@ internal class CommunicationRepository : ICommunicationRepository
                 .Select(EntityUpdateInfo<RtPipelineExecution>.CreateInsert)
                 .ToList();
 
-            OperationResult operationResult = new();
-            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
-            if (operationResult.HasErrors || operationResult.HasFatalErrors)
-            {
-                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
-            }
-
             // Create associations for all executions
             var associations = executionList.SelectMany(execution => new[]
             {
@@ -1392,7 +1385,9 @@ internal class CommunicationRepository : ICommunicationRepository
                     SystemCommunicationCkIds.RtCkExecutingAdapterRoleId)
             }).ToList();
 
-            await tenantRepository.ApplyChangesAsync(session, associations, operationResult);
+            // Apply entities and associations together to satisfy minimum multiplicity constraint
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, associations, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
             {
                 throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
