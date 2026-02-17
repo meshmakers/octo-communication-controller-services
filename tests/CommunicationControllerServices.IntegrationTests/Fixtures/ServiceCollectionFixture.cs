@@ -40,7 +40,7 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         // IMPORTANT: CK models must be registered before AddMongoDbRuntimeRepository()
         // to ensure BSON class maps are available for typed entity deserialization
         Services.AddCkModelSystemV2();
-        Services.AddCkModelSystemBotV2();
+        Services.AddCkModelSystemBotV3();
         Services.AddCkModelSystemCommunicationV2();
         Services.AddCkModelSystemNotificationV2();
 
