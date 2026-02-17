@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
@@ -323,6 +324,15 @@ public interface ICommunicationRepository
         RtEntityId pipelineRtEntityId, DateTime from, DateTime to);
 
     #endregion
+
+    /// <summary>
+    /// Bulk updates pipeline executions (queries all by executionId IN filter, then applies updates in one transaction)
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="updates">List of updates to apply</param>
+    /// <returns>Number of successfully updated executions</returns>
+    Task<int> BulkUpdatePipelineExecutionsAsync(string tenantId,
+        IReadOnlyList<PipelineExecutionUpdate> updates);
 
     #region Bulk Operations (for offline sync)
 

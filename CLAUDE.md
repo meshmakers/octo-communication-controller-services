@@ -422,6 +422,7 @@ When an adapter disconnects unexpectedly:
 
 | Service | Interval | Description |
 |---------|----------|-------------|
+| `PipelineExecutionReportProcessor` | Continuous | Drains execution reports from Channel in batches, bulk-inserts starts and bulk-updates completions |
 | `PipelineStatisticsBackgroundService` | 60 minutes | Aggregates execution statistics for all pipelines |
 | `ExecutionCleanupBackgroundService` | Daily | Times out stale running executions and removes records older than retention period |
 

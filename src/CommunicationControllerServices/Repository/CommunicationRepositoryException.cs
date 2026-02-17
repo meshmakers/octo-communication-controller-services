@@ -284,6 +284,11 @@ internal class CommunicationRepositoryException : Exception
         return new CommunicationRepositoryException($"[{tenantId}] Failed to bulk insert executions", exception);
     }
 
+    internal static Exception CommonFailedBulkUpdateExecutions(string tenantId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to bulk update executions", exception);
+    }
+
     internal static Exception CommonFailedGetExistingExecutionIds(string tenantId, Exception exception)
     {
         return new CommunicationRepositoryException($"[{tenantId}] Failed to get existing execution IDs", exception);
