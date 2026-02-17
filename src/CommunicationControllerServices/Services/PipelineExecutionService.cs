@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
@@ -58,6 +59,113 @@ internal class PipelineExecutionService(
             Logger.Error(e, "[{TenantId}] Failed to start execution '{ExecutionId}' for pipeline '{PipelineRtEntityId}'",
                 tenantId, dto.ExecutionId, dto.PipelineRtEntityId);
             throw PipelineExecutionServiceException.CommonFailedStartExecution(tenantId, dto.ExecutionId, e);
+        }
+    }
+
+    public async Task BatchStartExecutionsAsync(string tenantId, RtEntityId adapterRtEntityId,
+        IReadOnlyList<PipelineExecutionStartDto> dtos)
+    {
+        if (dtos.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!adapterCache.TryGetTenant(tenantId, out _))
+            {
+                throw PipelineExecutionServiceException.TenantNotEnabled(tenantId);
+            }
+
+            // Group by pipeline for bulk insert
+            var groupedByPipeline = dtos.GroupBy(d => d.PipelineRtEntityId);
+
+            foreach (var group in groupedByPipeline)
+            {
+                var pipelineRtEntityId = group.Key;
+                var executions = group.Select(dto => new RtPipelineExecution
+                {
+                    RtId = OctoObjectId.GenerateNewId(),
+                    ExecutionId = dto.ExecutionId,
+                    Status = RtPipelineExecutionStatusEnum.Running,
+                    TriggerType = ConvertTriggerType(dto.TriggerType),
+                    StartedAt = dto.StartedAt,
+                    InputData = dto.InputData
+                }).ToList();
+
+                await communicationRepository.BulkInsertPipelineExecutionsAsync(
+                    tenantId, executions, pipelineRtEntityId, adapterRtEntityId);
+            }
+
+            Logger.Info("[{TenantId}] Batch started {Count} executions for adapter '{AdapterRtEntityId}'",
+                tenantId, dtos.Count, adapterRtEntityId);
+        }
+        catch (PipelineExecutionServiceException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e, "[{TenantId}] Failed to batch start {Count} executions",
+                tenantId, dtos.Count);
+            throw;
+        }
+    }
+
+    public async Task BatchCompleteExecutionsAsync(string tenantId, IReadOnlyList<PipelineExecutionEndDto> dtos)
+    {
+        if (dtos.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!adapterCache.TryGetTenant(tenantId, out _))
+            {
+                throw PipelineExecutionServiceException.TenantNotEnabled(tenantId);
+            }
+
+            var updates = dtos.Select(dto => new PipelineExecutionUpdate
+            {
+                ExecutionId = dto.ExecutionId,
+                Status = ConvertExecutionStatus(dto.Status),
+                CompletedAt = dto.CompletedAt,
+                DurationMs = dto.DurationMs,
+                ErrorMessage = dto.ErrorMessage
+            }).ToList();
+
+            var updatedCount = await communicationRepository.BulkUpdatePipelineExecutionsAsync(tenantId, updates);
+
+            // Log summary for failures
+            var failedCount = dtos.Count(d => d.Status == PipelineExecutionStatus.Failed);
+            if (failedCount > 0)
+            {
+                var failedMessages = dtos
+                    .Where(d => d.Status == PipelineExecutionStatus.Failed)
+                    .Select(d => d.ErrorMessage)
+                    .Where(m => m != null)
+                    .ToFrozenSet();
+
+                foreach (var message in failedMessages)
+                {
+                    await eventService.StoreErrorEventAsync(tenantId,
+                        $"Pipeline execution failed: {message}");
+                }
+            }
+
+            Logger.Info("[{TenantId}] Batch completed {UpdatedCount}/{TotalCount} executions",
+                tenantId, updatedCount, dtos.Count);
+        }
+        catch (PipelineExecutionServiceException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e, "[{TenantId}] Failed to batch complete {Count} executions",
+                tenantId, dtos.Count);
+            throw;
         }
     }
 

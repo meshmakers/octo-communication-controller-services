@@ -868,6 +868,79 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
+    public async Task<int> BulkUpdatePipelineExecutionsAsync(string tenantId,
+        IReadOnlyList<Models.PipelineExecutionUpdate> updates)
+    {
+        if (updates.Count == 0)
+        {
+            return 0;
+        }
+
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            // Query all executions at once using IN filter
+            var executionIds = updates.Select(u => u.ExecutionId).ToList();
+            var queryOptions = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtPipelineExecution.ExecutionId), FieldFilterOperator.In, executionIds);
+
+            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(session, queryOptions);
+            var executionMap = resultSet.Items
+                .Where(e => e.ExecutionId != null)
+                .ToDictionary(e => e.ExecutionId!);
+
+            // Build all update operations
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtPipelineExecution>>();
+            foreach (var update in updates)
+            {
+                if (!executionMap.TryGetValue(update.ExecutionId, out var execution))
+                {
+                    continue;
+                }
+
+                var updatedExecution = new RtPipelineExecution
+                {
+                    Status = update.Status,
+                    CompletedAt = update.CompletedAt,
+                    DurationMs = update.DurationMs,
+                    ErrorMessage = update.ErrorMessage
+                };
+
+                entityUpdateInfoList.Add(
+                    EntityUpdateInfo<RtPipelineExecution>.CreateUpdate(execution.ToRtEntityId(), updatedExecution));
+            }
+
+            if (entityUpdateInfoList.Count == 0)
+            {
+                await session.CommitTransactionAsync();
+                return 0;
+            }
+
+            // Apply all updates in one call
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+            return entityUpdateInfoList.Count;
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedBulkUpdateExecutions(tenantId, e);
+        }
+    }
+
     public async Task<RtPipelineExecution?> GetPipelineExecutionAsync(string tenantId, string executionId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);

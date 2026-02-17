@@ -26,6 +26,21 @@ public interface IPipelineExecutionService
     Task CompleteExecutionAsync(string tenantId, RtEntityId adapterRtEntityId, PipelineExecutionEndDto dto);
 
     /// <summary>
+    /// Reports the start of multiple pipeline executions in a single batch operation
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="adapterRtEntityId">Adapter executing the pipelines</param>
+    /// <param name="dtos">Execution start details grouped by pipeline</param>
+    Task BatchStartExecutionsAsync(string tenantId, RtEntityId adapterRtEntityId, IReadOnlyList<PipelineExecutionStartDto> dtos);
+
+    /// <summary>
+    /// Reports the completion of multiple pipeline executions in a single batch operation
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="dtos">Execution end details</param>
+    Task BatchCompleteExecutionsAsync(string tenantId, IReadOnlyList<PipelineExecutionEndDto> dtos);
+
+    /// <summary>
     /// Marks all running executions for an adapter as interrupted (called on disconnect)
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
