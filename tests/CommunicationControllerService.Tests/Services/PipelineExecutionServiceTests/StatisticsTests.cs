@@ -69,9 +69,17 @@ internal class StatisticsTests : PipelineExecutionServiceTestsBase
         // Sort descending by StartedAt (as the repository would return)
         executionsLast30Days.Sort((a, b) => b.StartedAt.CompareTo(a.StartedAt));
 
+        // Mock the paginated overload used by batch-based statistics computation
         CommunicationRepository.GetPipelineExecutionsAsync(
-            TenantId, rtPipeline.ToRtEntityId(), Arg.Any<DateTime>(), Arg.Any<DateTime>(), null)
-            .Returns(executionsLast30Days);
+            TenantId, rtPipeline.ToRtEntityId(), Arg.Any<DateTime>(), Arg.Any<DateTime>(),
+            Arg.Any<int>(), Arg.Any<int>())
+            .Returns(callInfo =>
+            {
+                var skip = callInfo.ArgAt<int>(4);
+                return skip == 0
+                    ? (IReadOnlyList<RtPipelineExecution>)executionsLast30Days
+                    : new List<RtPipelineExecution>();
+            });
 
         // Act
         await PipelineExecutionService.UpdateStatisticsAsync(TenantId, rtPipeline.ToRtEntityId());
@@ -98,7 +106,8 @@ internal class StatisticsTests : PipelineExecutionServiceTestsBase
         var rtPipeline = RtEntityCreator.CreatePipeline();
 
         CommunicationRepository.GetPipelineExecutionsAsync(
-            TenantId, rtPipeline.ToRtEntityId(), Arg.Any<DateTime>(), Arg.Any<DateTime>(), null)
+            TenantId, rtPipeline.ToRtEntityId(), Arg.Any<DateTime>(), Arg.Any<DateTime>(),
+            Arg.Any<int>(), Arg.Any<int>())
             .Returns(new List<RtPipelineExecution>());
 
         CommunicationRepository.GetPipelineStatisticsAsync(TenantId, rtPipeline.ToRtEntityId())
@@ -121,7 +130,8 @@ internal class StatisticsTests : PipelineExecutionServiceTestsBase
         var rtPipeline = RtEntityCreator.CreatePipeline();
 
         CommunicationRepository.GetPipelineExecutionsAsync(
-            TenantId, rtPipeline.ToRtEntityId(), Arg.Any<DateTime>(), Arg.Any<DateTime>(), null)
+            TenantId, rtPipeline.ToRtEntityId(), Arg.Any<DateTime>(), Arg.Any<DateTime>(),
+            Arg.Any<int>(), Arg.Any<int>())
             .Returns(new List<RtPipelineExecution>());
 
         CommunicationRepository.GetPipelineStatisticsAsync(TenantId, rtPipeline.ToRtEntityId())
@@ -155,7 +165,8 @@ internal class StatisticsTests : PipelineExecutionServiceTestsBase
         var rtPipeline = RtEntityCreator.CreatePipeline();
 
         CommunicationRepository.GetPipelineExecutionsAsync(
-            TenantId, rtPipeline.ToRtEntityId(), Arg.Any<DateTime>(), Arg.Any<DateTime>(), null)
+            TenantId, rtPipeline.ToRtEntityId(), Arg.Any<DateTime>(), Arg.Any<DateTime>(),
+            Arg.Any<int>(), Arg.Any<int>())
             .Returns(new List<RtPipelineExecution>());
 
         CommunicationRepository.GetPipelineStatisticsAsync(TenantId, rtPipeline.ToRtEntityId())
@@ -198,7 +209,8 @@ internal class StatisticsTests : PipelineExecutionServiceTestsBase
         var rtPipeline = RtEntityCreator.CreatePipeline();
 
         CommunicationRepository.GetPipelineExecutionsAsync(
-            TenantId, rtPipeline.ToRtEntityId(), Arg.Any<DateTime>(), Arg.Any<DateTime>(), null)
+            TenantId, rtPipeline.ToRtEntityId(), Arg.Any<DateTime>(), Arg.Any<DateTime>(),
+            Arg.Any<int>(), Arg.Any<int>())
             .Returns(Task.FromException<IReadOnlyList<RtPipelineExecution>>(new InvalidOperationException("Database error")));
 
         // Act & Assert
@@ -226,8 +238,15 @@ internal class StatisticsTests : PipelineExecutionServiceTestsBase
         };
 
         CommunicationRepository.GetPipelineExecutionsAsync(
-            TenantId, Arg.Any<RtEntityId>(), Arg.Any<DateTime>(), Arg.Any<DateTime>(), null)
-            .Returns(executions);
+            TenantId, Arg.Any<RtEntityId>(), Arg.Any<DateTime>(), Arg.Any<DateTime>(),
+            Arg.Any<int>(), Arg.Any<int>())
+            .Returns(callInfo =>
+            {
+                var skip = callInfo.ArgAt<int>(4);
+                return skip == 0
+                    ? (IReadOnlyList<RtPipelineExecution>)executions
+                    : new List<RtPipelineExecution>();
+            });
 
         // Act
         await PipelineExecutionService.UpdateAllStatisticsAsync(TenantId);
@@ -240,7 +259,7 @@ internal class StatisticsTests : PipelineExecutionServiceTestsBase
     }
 
     [Test]
-    public async Task UpdateStatisticsAsync_SingleQuery_OnlyCallsGetPipelineExecutionsOnce()
+    public async Task UpdateStatisticsAsync_BatchedQuery_UsesSkipTakePagination()
     {
         // Arrange
         var rtPipeline = RtEntityCreator.CreatePipeline();
@@ -253,15 +272,23 @@ internal class StatisticsTests : PipelineExecutionServiceTestsBase
         };
 
         CommunicationRepository.GetPipelineExecutionsAsync(
-            TenantId, rtPipeline.ToRtEntityId(), Arg.Any<DateTime>(), Arg.Any<DateTime>(), null)
-            .Returns(executions);
+            TenantId, rtPipeline.ToRtEntityId(), Arg.Any<DateTime>(), Arg.Any<DateTime>(),
+            Arg.Any<int>(), Arg.Any<int>())
+            .Returns(callInfo =>
+            {
+                var skip = callInfo.ArgAt<int>(4);
+                return skip == 0
+                    ? (IReadOnlyList<RtPipelineExecution>)executions
+                    : new List<RtPipelineExecution>();
+            });
 
         // Act
         await PipelineExecutionService.UpdateStatisticsAsync(TenantId, rtPipeline.ToRtEntityId());
 
-        // Assert - should only call GetPipelineExecutionsAsync once (not 4x GetExecutionAggregateAsync + 1x GetPipelineExecutionsAsync)
-        await CommunicationRepository.Received(1).GetPipelineExecutionsAsync(
-            TenantId, rtPipeline.ToRtEntityId(), Arg.Any<DateTime>(), Arg.Any<DateTime>(), null);
+        // Assert - should use the paginated overload with skip/take (not the old overload with limit)
+        await CommunicationRepository.Received().GetPipelineExecutionsAsync(
+            TenantId, rtPipeline.ToRtEntityId(), Arg.Any<DateTime>(), Arg.Any<DateTime>(),
+            Arg.Any<int>(), Arg.Any<int>());
 
         // Should NOT call GetExecutionAggregateAsync at all
         await CommunicationRepository.DidNotReceive().GetExecutionAggregateAsync(
