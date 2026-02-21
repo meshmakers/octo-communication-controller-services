@@ -988,13 +988,56 @@ internal class CommunicationRepository : ICommunicationRepository
                 SystemCommunicationCkIds.RtCkExecutedPipelineRoleId,
                 GraphDirections.Inbound,
                 null,
-                queryOptions);
+                queryOptions,
+                take: limit);
 
             if (resultSet.Any())
             {
-                var items = resultSet.First().Value.Items.ToList();
-                // Apply limit in memory if specified
-                return limit.HasValue ? items.Take(limit.Value).ToList() : items;
+                return resultSet.First().Value.Items.ToList();
+            }
+
+            return [];
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGetPipelineExecutions(tenantId, pipelineRtEntityId, e);
+        }
+    }
+
+    public async Task<IReadOnlyList<RtPipelineExecution>> GetPipelineExecutionsAsync(string tenantId,
+        RtEntityId pipelineRtEntityId, DateTime? from, DateTime? to, int skip, int take)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            var queryOptions = RtEntityQueryOptions.Create()
+                .SortOrder(nameof(RtPipelineExecution.StartedAt), SortOrders.Descending);
+
+            if (from.HasValue)
+            {
+                queryOptions.FieldFilter(nameof(RtPipelineExecution.StartedAt), FieldFilterOperator.GreaterEqualThan, from.Value);
+            }
+
+            if (to.HasValue)
+            {
+                queryOptions.FieldFilter(nameof(RtPipelineExecution.StartedAt), FieldFilterOperator.LessEqualThan, to.Value);
+            }
+
+            var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPipeline, RtPipelineExecution>(
+                session,
+                [pipelineRtEntityId.RtId],
+                SystemCommunicationCkIds.RtCkExecutedPipelineRoleId,
+                GraphDirections.Inbound,
+                null,
+                queryOptions,
+                skip,
+                take);
+
+            if (resultSet.Any())
+            {
+                return resultSet.First().Value.Items.ToList();
             }
 
             return [];

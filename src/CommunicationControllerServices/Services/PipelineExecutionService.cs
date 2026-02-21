@@ -351,19 +351,74 @@ internal class PipelineExecutionService(
         try
         {
             var now = DateTime.UtcNow;
+            var from30Days = now.AddDays(-30);
+            var from24Hours = now.AddHours(-24);
+            var from12Hours = now.AddHours(-12);
+            var from1Hour = now.AddHours(-1);
 
-            // Load all executions from the last 30 days in a single query
-            var allExecutions = await communicationRepository.GetPipelineExecutionsAsync(
-                tenantId, pipelineRtEntityId, now.AddDays(-30), now, null);
+            // Accumulate statistics across batches to avoid loading all executions at once.
+            // Using skip/take triggers the optimized MongoDB query path which applies $limit
+            // inside $lookup, preventing the 16MB BSON document size limit from being exceeded.
+            var lastHour = new StatisticsAccumulator();
+            var last12Hours = new StatisticsAccumulator();
+            var last24Hours = new StatisticsAccumulator();
+            var last30Days = new StatisticsAccumulator();
+            DateTime? lastExecutionAt = null;
+            var totalLoaded = 0;
 
-            if (allExecutions.Count == 0)
+            const int batchSize = 5000;
+            var skip = 0;
+
+            while (true)
+            {
+                var batch = await communicationRepository.GetPipelineExecutionsAsync(
+                    tenantId, pipelineRtEntityId, from30Days, now, skip, batchSize);
+
+                if (batch.Count == 0)
+                {
+                    break;
+                }
+
+                // First batch contains the most recent execution (sorted descending)
+                lastExecutionAt ??= batch[0].StartedAt;
+
+                foreach (var exec in batch)
+                {
+                    AccumulateExecution(last30Days, exec);
+
+                    if (exec.StartedAt >= from24Hours)
+                    {
+                        AccumulateExecution(last24Hours, exec);
+                    }
+
+                    if (exec.StartedAt >= from12Hours)
+                    {
+                        AccumulateExecution(last12Hours, exec);
+                    }
+
+                    if (exec.StartedAt >= from1Hour)
+                    {
+                        AccumulateExecution(lastHour, exec);
+                    }
+                }
+
+                totalLoaded += batch.Count;
+
+                if (batch.Count < batchSize)
+                {
+                    break;
+                }
+
+                skip += batchSize;
+            }
+
+            if (totalLoaded == 0)
             {
                 // No executions in the last 30 days - check if statistics need updating
                 var existingStatistics = await communicationRepository.GetPipelineStatisticsAsync(tenantId, pipelineRtEntityId);
 
                 if (existingStatistics == null)
                 {
-                    // No statistics exist and no executions - nothing to do
                     Logger.Debug("[{TenantId}] No executions and no existing statistics for pipeline '{PipelineRtEntityId}', skipping update",
                         tenantId, pipelineRtEntityId);
                     return;
@@ -371,7 +426,6 @@ internal class PipelineExecutionService(
 
                 if (IsStatisticsEmpty(existingStatistics))
                 {
-                    // Statistics already show zero activity - no need to update
                     Logger.Debug("[{TenantId}] Statistics already empty for pipeline '{PipelineRtEntityId}', skipping update",
                         tenantId, pipelineRtEntityId);
                     return;
@@ -380,14 +434,6 @@ internal class PipelineExecutionService(
                 // Statistics have non-zero values but no executions remain (retention cleanup) - reset to zero
                 // Fall through to normal upsert with zero values
             }
-
-            // Compute sub-windows in-memory from the loaded data
-            var lastHour = ComputeAggregate(allExecutions, now.AddHours(-1));
-            var last12Hours = ComputeAggregate(allExecutions, now.AddHours(-12));
-            var last24Hours = ComputeAggregate(allExecutions, now.AddHours(-24));
-            var last30Days = ComputeAggregate(allExecutions, now.AddDays(-30));
-
-            var lastExecutionAt = allExecutions.FirstOrDefault()?.StartedAt;
 
             var statistics = new RtPipelineStatistics
             {
@@ -409,14 +455,32 @@ internal class PipelineExecutionService(
 
             await communicationRepository.UpsertPipelineStatisticsAsync(tenantId, statistics, pipelineRtEntityId);
 
-            Logger.Debug("[{TenantId}] Statistics updated for pipeline '{PipelineRtEntityId}'",
-                tenantId, pipelineRtEntityId);
+            Logger.Debug("[{TenantId}] Statistics updated for pipeline '{PipelineRtEntityId}' ({TotalExecutions} executions processed)",
+                tenantId, pipelineRtEntityId, totalLoaded);
         }
         catch (Exception e)
         {
             Logger.Error(e, "[{TenantId}] Failed to update statistics for pipeline '{PipelineRtEntityId}'",
                 tenantId, pipelineRtEntityId);
             throw PipelineExecutionServiceException.CommonFailedUpdateStatistics(tenantId, pipelineRtEntityId, e);
+        }
+    }
+
+    private static void AccumulateExecution(StatisticsAccumulator accumulator, RtPipelineExecution exec)
+    {
+        if (exec.Status == RtPipelineExecutionStatusEnum.Completed)
+        {
+            accumulator.SuccessCount++;
+        }
+        else if (exec.Status == RtPipelineExecutionStatusEnum.Failed)
+        {
+            accumulator.FailureCount++;
+        }
+
+        if (exec.DurationMs.HasValue)
+        {
+            accumulator.TotalDurationMs += exec.DurationMs.Value;
+            accumulator.ExecutionWithDurationCount++;
         }
     }
 
@@ -433,6 +497,18 @@ internal class PipelineExecutionService(
         var totalDurationMs = executionsWithDuration.Sum(e => (long)e.DurationMs!.Value);
 
         return new ExecutionAggregateResult(successCount, failureCount, totalDurationMs, executionsWithDuration.Count);
+    }
+
+    /// <summary>
+    /// Mutable accumulator for computing statistics across batches
+    /// </summary>
+    private class StatisticsAccumulator
+    {
+        public int SuccessCount;
+        public int FailureCount;
+        public long TotalDurationMs;
+        public int ExecutionWithDurationCount;
+        public long AvgDurationMs => ExecutionWithDurationCount > 0 ? TotalDurationMs / ExecutionWithDurationCount : 0;
     }
 
     public async Task UpdateAllStatisticsAsync(string tenantId)

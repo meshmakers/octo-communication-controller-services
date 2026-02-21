@@ -259,6 +259,21 @@ public interface ICommunicationRepository
         RtEntityId pipelineRtEntityId, DateTime? from, DateTime? to, int? limit);
 
     /// <summary>
+    /// Gets a page of pipeline executions for a specific pipeline.
+    /// Uses skip/take pagination which triggers the optimized MongoDB query path
+    /// with $limit inside $lookup, avoiding the 16MB BSON document size limit.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="pipelineRtEntityId">Pipeline identifier</param>
+    /// <param name="from">Optional start date filter</param>
+    /// <param name="to">Optional end date filter</param>
+    /// <param name="skip">Number of results to skip</param>
+    /// <param name="take">Number of results to take</param>
+    /// <returns>List of executions for the requested page</returns>
+    Task<IReadOnlyList<RtPipelineExecution>> GetPipelineExecutionsAsync(string tenantId,
+        RtEntityId pipelineRtEntityId, DateTime? from, DateTime? to, int skip, int take);
+
+    /// <summary>
     /// Gets all running executions for a specific adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
