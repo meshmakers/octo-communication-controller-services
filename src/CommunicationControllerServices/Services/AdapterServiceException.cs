@@ -94,4 +94,8 @@ internal class AdapterServiceException : Exception
     internal static AdapterServiceException DeploymentFailed(string tenantId, RtEntityId adapterRtEntityId,
         string? message) =>
         new($"[{tenantId}] Adapter '{adapterRtEntityId}' deployment failed: {message}");
+
+    internal static AdapterServiceException PipelineSchemaValidationFailed(string tenantId,
+        RtEntityId adapterRtEntityId, IReadOnlyList<string> errors) =>
+        new($"[{tenantId}] Pipeline schema validation failed for adapter '{adapterRtEntityId}': {string.Join("; ", errors)}");
 }

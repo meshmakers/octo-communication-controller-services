@@ -114,6 +114,60 @@ internal class AdapterHub : Hub, IAdapterHub
     }
 
     /// <inheritdoc />
+    public async Task<AdapterConfigurationDto> RegisterAdapterWithNodesAsync(RtEntityId adapterRtEntityId,
+        IReadOnlyList<NodeDescriptorDto> nodeDescriptors)
+    {
+        var tenantId = GetTenantId();
+
+        try
+        {
+            var configurationDto =
+                await _adapterService.RegisterAdapterAsync(tenantId, adapterRtEntityId, Context.ConnectionId,
+                    nodeDescriptors);
+            return configurationDto;
+        }
+        catch (AdapterServiceException e)
+        {
+            Logger.Error(e, e.Message);
+            throw;
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e, "Cannot register adapter with nodes");
+            await _eventService.StoreErrorEventAsync(tenantId,
+                $"Failed to register adapter with nodes: {e.Message}");
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<AdapterConfigurationDto> RegisterAdapterWithSchemaAsync(RtEntityId adapterRtEntityId,
+        IReadOnlyList<NodeDescriptorDto> nodeDescriptors, string pipelineSchemaJson)
+    {
+        var tenantId = GetTenantId();
+
+        try
+        {
+            var configurationDto =
+                await _adapterService.RegisterAdapterAsync(tenantId, adapterRtEntityId, Context.ConnectionId,
+                    nodeDescriptors, pipelineSchemaJson);
+            return configurationDto;
+        }
+        catch (AdapterServiceException e)
+        {
+            Logger.Error(e, e.Message);
+            throw;
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e, "Cannot register adapter with schema");
+            await _eventService.StoreErrorEventAsync(tenantId,
+                $"Failed to register adapter with schema: {e.Message}");
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
     public async Task UnRegisterAdapterAsync(RtEntityId adapterRtEntityId)
     {
         var tenantId = GetTenantId();

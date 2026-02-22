@@ -81,6 +81,70 @@ public class AdapterController : ControllerBase
     }
     
     /// <summary>
+    /// Returns aggregated node descriptors from all connected adapters.
+    /// Used by Refinery Studio to populate the visual pipeline editor.
+    /// </summary>
+    /// <returns>List of node descriptors with JSON schemas</returns>
+    [HttpGet("nodes")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    public IActionResult GetNodes()
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        try
+        {
+            var nodeDescriptors = _adapterService.GetAllNodeDescriptors(tenantId);
+            return Ok(nodeDescriptors);
+        }
+        catch (AdapterServiceException e)
+        {
+            _logger.LogError(e, "Error getting node descriptors");
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
+        }
+    }
+
+    /// <summary>
+    /// Returns the composite pipeline JSON Schema for a specific adapter.
+    /// Used by Monaco editor for YAML/JSON autocompletion and validation.
+    /// </summary>
+    /// <param name="adapterRtEntityId">The adapter entity object id</param>
+    /// <returns>JSON Schema document</returns>
+    [HttpGet("pipeline-schema")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    public IActionResult GetPipelineSchema([Required][FromQuery] RtEntityId adapterRtEntityId)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        try
+        {
+            var schema = _adapterService.GetPipelineSchema(tenantId, adapterRtEntityId);
+            if (schema == null)
+            {
+                return NotFound(new ErrorResponse { ErrorMessage = "Pipeline schema not available for this adapter" });
+            }
+
+            return Content(schema, "application/schema+json");
+        }
+        catch (AdapterServiceException e)
+        {
+            _logger.LogError(e, "Error getting pipeline schema");
+            return NotFound(new ErrorResponse { ErrorMessage = e.Message });
+        }
+    }
+
+    /// <summary>
     /// Updates the configuration at an adapter
     /// </summary>
     /// <param name="adapterRtEntityId">The id of the adapter.</param>
