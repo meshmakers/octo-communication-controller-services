@@ -96,4 +96,9 @@ public class CommunicationControllerOptions
     /// Gets or sets the timeout in hours after which running executions are marked as failed
     /// </summary>
     public int PipelineExecutionTimeoutHours { get; set; } = 24;
+
+    /// <summary>
+    /// Gets or sets whether to validate pipeline definitions against the adapter's JSON Schema before deployment
+    /// </summary>
+    public bool EnablePipelineSchemaValidation { get; set; } = false;
 }

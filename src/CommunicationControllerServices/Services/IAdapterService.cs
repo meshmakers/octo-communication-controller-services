@@ -31,6 +31,44 @@ public interface IAdapterService
     /// <param name="connectionId">Identifier of connection</param>
     /// <returns></returns>
     Task<AdapterConfigurationDto> RegisterAdapterAsync(string tenantId, RtEntityId adapterRtEntityId, string connectionId);
+
+    /// <summary>
+    /// Registers an adapter with node descriptors
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="adapterRtEntityId">Object Id of adapter</param>
+    /// <param name="connectionId">Identifier of connection</param>
+    /// <param name="nodeDescriptors">Pipeline node descriptors provided by the adapter</param>
+    /// <returns></returns>
+    Task<AdapterConfigurationDto> RegisterAdapterAsync(string tenantId, RtEntityId adapterRtEntityId,
+        string connectionId, IReadOnlyList<NodeDescriptorDto> nodeDescriptors);
+
+    /// <summary>
+    /// Registers an adapter with node descriptors and a pipeline schema
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="adapterRtEntityId">Object Id of adapter</param>
+    /// <param name="connectionId">Identifier of connection</param>
+    /// <param name="nodeDescriptors">Pipeline node descriptors provided by the adapter</param>
+    /// <param name="pipelineSchemaJson">Composite JSON Schema for the full pipeline definition</param>
+    /// <returns></returns>
+    Task<AdapterConfigurationDto> RegisterAdapterAsync(string tenantId, RtEntityId adapterRtEntityId,
+        string connectionId, IReadOnlyList<NodeDescriptorDto> nodeDescriptors, string pipelineSchemaJson);
+
+    /// <summary>
+    /// Gets the pipeline schema for a specific adapter
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="adapterRtEntityId">Object Id of adapter</param>
+    /// <returns>The pipeline schema JSON, or null if not available</returns>
+    string? GetPipelineSchema(string tenantId, RtEntityId adapterRtEntityId);
+
+    /// <summary>
+    /// Gets aggregated node descriptors from all connected adapters for a tenant
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <returns>List of node descriptors from all connected adapters</returns>
+    IReadOnlyList<NodeDescriptorDto> GetAllNodeDescriptors(string tenantId);
     
     /// <summary>
     /// Unregisters an adapter

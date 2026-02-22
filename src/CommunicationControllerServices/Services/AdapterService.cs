@@ -7,7 +7,9 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Runtime.Contracts;
+using Microsoft.Extensions.Options;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -16,7 +18,9 @@ internal class AdapterService(
     ICommunicationRepository communicationRepository,
     IAdapterCache adapterCache,
     IAdapterHubCallbacks adapterHubCallbacks,
-    ICommunicationEventService eventService)
+    ICommunicationEventService eventService,
+    IPipelineSchemaValidator pipelineSchemaValidator,
+    IOptions<CommunicationControllerOptions> communicationControllerOptions)
     : IAdapterService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
@@ -26,8 +30,69 @@ internal class AdapterService(
     private readonly ConcurrentDictionary<RtEntityId, TaskCompletionSource<DeploymentResult>>
         _pendingDeployments = new();
 
-    public async Task<AdapterConfigurationDto> RegisterAdapterAsync(string tenantId, RtEntityId adapterRtEntityId,
+    public Task<AdapterConfigurationDto> RegisterAdapterAsync(string tenantId, RtEntityId adapterRtEntityId,
         string connectionId)
+    {
+        return RegisterAdapterInternalAsync(tenantId, adapterRtEntityId, connectionId, null);
+    }
+
+    public Task<AdapterConfigurationDto> RegisterAdapterAsync(string tenantId, RtEntityId adapterRtEntityId,
+        string connectionId, IReadOnlyList<NodeDescriptorDto> nodeDescriptors)
+    {
+        return RegisterAdapterInternalAsync(tenantId, adapterRtEntityId, connectionId, nodeDescriptors);
+    }
+
+    public Task<AdapterConfigurationDto> RegisterAdapterAsync(string tenantId, RtEntityId adapterRtEntityId,
+        string connectionId, IReadOnlyList<NodeDescriptorDto> nodeDescriptors, string pipelineSchemaJson)
+    {
+        return RegisterAdapterInternalAsync(tenantId, adapterRtEntityId, connectionId, nodeDescriptors, pipelineSchemaJson);
+    }
+
+    public string? GetPipelineSchema(string tenantId, RtEntityId adapterRtEntityId)
+    {
+        if (!adapterCache.TryGetTenant(tenantId, out var adapterTenant))
+        {
+            throw AdapterServiceException.TenantNotEnabled(tenantId);
+        }
+
+        if (!adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
+        {
+            throw AdapterServiceException.AdapterNotLoaded(tenantId, adapterRtEntityId);
+        }
+
+        return adapter.PipelineSchemaJson;
+    }
+
+    public IReadOnlyList<NodeDescriptorDto> GetAllNodeDescriptors(string tenantId)
+    {
+        if (!adapterCache.TryGetTenant(tenantId, out var adapterTenant))
+        {
+            throw AdapterServiceException.TenantNotEnabled(tenantId);
+        }
+
+        // Aggregate node descriptors from all connected adapters, deduplicating by NodeName+Version
+        var seen = new HashSet<(string, int)>();
+        var result = new List<NodeDescriptorDto>();
+
+        foreach (var adapter in adapterTenant.AdapterById.Values)
+        {
+            if (adapter.NodeDescriptors == null) continue;
+
+            foreach (var descriptor in adapter.NodeDescriptors)
+            {
+                if (seen.Add((descriptor.NodeName, descriptor.Version)))
+                {
+                    result.Add(descriptor);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private async Task<AdapterConfigurationDto> RegisterAdapterInternalAsync(string tenantId,
+        RtEntityId adapterRtEntityId, string connectionId, IReadOnlyList<NodeDescriptorDto>? nodeDescriptors,
+        string? pipelineSchemaJson = null)
     {
         Logger.Info("[{TenantId}] Adapter '{AdapterRtId}' registered with connection id '{ConnectionId}'",
             tenantId, adapterRtEntityId, connectionId);
@@ -57,6 +122,20 @@ internal class AdapterService(
                     adapter = adapterTenant.AddAdapter(adapterRtEntityId, connectionId, configuration);
                     // Note: Online state is already set in OnConnectedAsync, no need to set it again here
                 }
+            }
+
+            if (nodeDescriptors != null)
+            {
+                Logger.Info("[{TenantId}] Adapter '{AdapterRtId}' reported {NodeCount} node descriptors",
+                    tenantId, adapterRtEntityId, nodeDescriptors.Count);
+                adapter.SetNodeDescriptors(nodeDescriptors);
+            }
+
+            if (pipelineSchemaJson != null)
+            {
+                Logger.Info("[{TenantId}] Adapter '{AdapterRtId}' reported pipeline schema ({SchemaLength} chars)",
+                    tenantId, adapterRtEntityId, pipelineSchemaJson.Length);
+                adapter.SetPipelineSchema(pipelineSchemaJson);
             }
 
             return adapter.Configuration;
@@ -295,6 +374,11 @@ internal class AdapterService(
         {
             if (adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
             {
+                if (pipelineDefinition != null)
+                {
+                    ValidatePipelineDefinition(tenantId, adapterRtEntityId, adapter, pipelineDefinition);
+                }
+
                 var pipeline = await communicationRepository.GetPipelineAsync(tenantId, pipelineRtEntityId);
                 if (pipeline == null)
                 {
@@ -777,6 +861,21 @@ internal class AdapterService(
 
             throw AdapterServiceException.CommonFailedSetAdapterCommunicationState(tenantId, adapterRtEntityId,
                 communicationState, e);
+        }
+    }
+
+    private void ValidatePipelineDefinition(string tenantId, RtEntityId adapterRtEntityId,
+        Adapter adapter, string pipelineDefinition)
+    {
+        if (!communicationControllerOptions.Value.EnablePipelineSchemaValidation) return;
+        if (adapter.PipelineSchemaJson == null) return;
+
+        var errors = pipelineSchemaValidator.Validate(pipelineDefinition, adapter.PipelineSchemaJson);
+        if (errors.Count > 0)
+        {
+            Logger.Warn("[{TenantId}] Pipeline schema validation failed for adapter '{AdapterRtId}': {Errors}",
+                tenantId, adapterRtEntityId, string.Join("; ", errors));
+            throw AdapterServiceException.PipelineSchemaValidationFailed(tenantId, adapterRtEntityId, errors);
         }
     }
 }

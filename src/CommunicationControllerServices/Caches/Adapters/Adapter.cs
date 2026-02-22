@@ -21,17 +21,39 @@ internal class Adapter(
 
     public AdapterConfigurationDto Configuration { get; private set; } = configuration;
 
+    /// <summary>
+    /// Node descriptors reported by this adapter during registration.
+    /// Null if the adapter did not provide any (older adapter version).
+    /// </summary>
+    public IReadOnlyList<NodeDescriptorDto>? NodeDescriptors { get; private set; }
+
+    /// <summary>
+    /// Composite pipeline JSON Schema reported by this adapter during registration.
+    /// Null if the adapter did not provide one.
+    /// </summary>
+    public string? PipelineSchemaJson { get; private set; }
+
     public void UpdateConfiguration(string tenantId, AdapterConfigurationDto adapterConfigurationDto)
     {
         Configuration = adapterConfigurationDto;
         adapterCachePublish.PublishConfiguration(tenantId);
     }
 
+    public void SetNodeDescriptors(IReadOnlyList<NodeDescriptorDto>? nodeDescriptors)
+    {
+        NodeDescriptors = nodeDescriptors;
+    }
+
+    public void SetPipelineSchema(string? pipelineSchemaJson)
+    {
+        PipelineSchemaJson = pipelineSchemaJson;
+    }
+
     public AdapterDescription GetAdapterDescription()
     {
         return new AdapterDescription(AdapterRtEntityId, ConnectionId, Configuration);
     }
-    
+
     public void SetConnectionId(string? connectionId)
     {
         ConnectionId = connectionId;

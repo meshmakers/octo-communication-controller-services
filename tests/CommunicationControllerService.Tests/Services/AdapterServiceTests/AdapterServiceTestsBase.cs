@@ -1,11 +1,13 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
 using Meshmakers.Octo.Runtime.Contracts;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.AdapterServiceTests;
@@ -20,6 +22,7 @@ internal abstract class AdapterServiceTestsBase
     protected readonly ICommunicationRepository CommunicationRepository;
     protected readonly IAdapterCachePublish AdapterCachePublish;
     protected readonly ICommunicationEventService CommunicationEventService;
+    protected readonly IPipelineSchemaValidator PipelineSchemaValidator;
     protected readonly AdapterTenant AdapterTenant;
 
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
@@ -30,7 +33,11 @@ internal abstract class AdapterServiceTestsBase
         CommunicationRepository = Substitute.For<ICommunicationRepository>();
         AdapterCachePublish = Substitute.For<IAdapterCachePublish>();
         CommunicationEventService = Substitute.For<ICommunicationEventService>();
-        AdapterService = new AdapterService(CommunicationRepository, AdapterCache, AdapterHubCallbacks, CommunicationEventService);
+        PipelineSchemaValidator = Substitute.For<IPipelineSchemaValidator>();
+        var options = Substitute.For<IOptions<CommunicationControllerOptions>>();
+        options.Value.Returns(new CommunicationControllerOptions());
+        AdapterService = new AdapterService(CommunicationRepository, AdapterCache, AdapterHubCallbacks,
+            CommunicationEventService, PipelineSchemaValidator, options);
         AdapterTenant = new AdapterTenant(AdapterCachePublish, TenantId);
 
         InitAdapterCache();
