@@ -7,6 +7,10 @@ types:
     fields:
       - attributePaths:
         - StartedAt
+  - indexType: "Ascending"
+    fields:
+      - attributePaths:
+        - executionId
   attributes:
     - id: ${this}/ExecutionId
       name: ExecutionId
