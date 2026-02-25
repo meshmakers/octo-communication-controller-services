@@ -81,7 +81,7 @@ internal class TriggerManagementService(
             }
 
             var scheduleGroup = CreateScheduleGroup(tenantId);
-            await removeRecurringJobsByScheduleGroupCommandClient.GetResponse<GenericCommandResponse>(
+            await removeRecurringJobsByScheduleGroupCommandClient.GetResponseWithRetry<GenericCommandResponse>(
                 new RemoveRecurringJobsByScheduleGroupRequest(scheduleGroup));
 
             logger.LogInformation("[{TenantId}] Removal of triggers completed", tenantId);

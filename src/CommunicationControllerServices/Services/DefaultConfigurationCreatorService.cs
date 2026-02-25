@@ -27,14 +27,17 @@ internal class DefaultConfigurationCreatorService(
     ISystemContext systemContext,
     IPoolService poolService,
     IAdapterCachePublish adapterCachePublish,
-    IAdapterService adapterService)
+    IAdapterService adapterService,
+    FailedTenantRegistry failedTenantRegistry,
+    ICommunicationEventService communicationEventService)
     : DefaultConfigurationCreatorServiceStandardized(logger, systemContext, createIdentityDataCommandClient,
         Constants.CommunicationControllerServiceIdentityDataVersionKey,
         Constants.CommunicationControllerServiceIdentityDataVersionValue,
         null, // migrationService - we don't need migrations in this service
         null, // ckModelUpgradeService - we don't need CK model migrations in this service
         null, // runtimeRepositoryProvider - not needed without CK model migrations
-        Constants.CommunicationControllerServiceEnabledKey // the service can be enabled/disabled
+        Constants.CommunicationControllerServiceEnabledKey, // the service can be enabled/disabled
+        failedTenantRegistry: failedTenantRegistry
         )
 {
     public override async Task InitializeAsync()
@@ -86,6 +89,24 @@ internal class DefaultConfigurationCreatorService(
 
         await adapterService.PreUpdateTenantAsync(tenantId);
         await poolService.PreUpdateTenantAsync(tenantId);
+    }
+
+    protected override async Task OnTenantStartFailedAsync(string tenantId, Exception exception)
+    {
+        await communicationEventService.StoreErrorEventAsync(tenantId,
+            $"Tenant startup failed: {exception.Message}. Will retry in background.");
+    }
+
+    protected override async Task OnTenantRetrySucceededAsync(string tenantId)
+    {
+        await communicationEventService.StoreInformationEventAsync(tenantId,
+            "Tenant startup retry succeeded.");
+    }
+
+    protected override async Task OnTenantRetriesExhaustedAsync(string tenantId, int retryCount)
+    {
+        await communicationEventService.StoreErrorEventAsync(tenantId,
+            $"Tenant startup permanently failed after {retryCount} retries. Manual intervention required.");
     }
 
     protected override void CreateApiScopes(CreateIdentityDataCommandRequest createIdentityDataCommandRequest)
