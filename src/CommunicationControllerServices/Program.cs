@@ -21,6 +21,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb.Extensions;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Meshmakers.Octo.Services.Infrastructure;
+using Meshmakers.Octo.Services.Infrastructure.Configuration;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Meshmakers.Octo.Services.Notifications.Services;
@@ -216,6 +217,7 @@ try
     app.UseCors();
 
     app.UseAuthorization();
+    app.UseOctoTenantAuthorization();
     app.UseOctoApiVersioningAndDocumentation();
 
     app.MapHub<AdapterHub>("/{tenantId:tenantId}/adapterHub");
