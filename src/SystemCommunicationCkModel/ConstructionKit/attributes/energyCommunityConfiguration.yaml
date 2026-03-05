@@ -39,6 +39,33 @@ attributes:
     valueType: Record
     valueCkRecordId: ${this}/UiThemeColors
     description: Theme color configuration for an application
+  - id: AppTitle
+    valueType: String
+    description: "Browser tab title of the web application"
+  - id: AppHeading
+    valueType: String
+    description: "Heading displayed in the application header bar"
+  - id: BillingReportName
+    valueType: String
+    description: "Name of the Telerik billing report template (e.g. SBEG_Billing.trdp)"
+  - id: HeaderGradientStart
+    valueType: String
+    description: "Start color of the header gradient"
+  - id: HeaderGradientEnd
+    valueType: String
+    description: "End color of the header gradient"
+  - id: FooterGradientStart
+    valueType: String
+    description: "Start color of the footer gradient"
+  - id: FooterGradientEnd
+    valueType: String
+    description: "End color of the footer gradient"
+  - id: BackgroundColor
+    valueType: String
+    description: "Background color of the web application"
+  - id: Favicon
+    valueType: BinaryLinked
+    description: "Favicon icon for the web application"
   - id: TaxRate
     valueType: Double
     description: "Tax rate applied to energy transactions in the community"

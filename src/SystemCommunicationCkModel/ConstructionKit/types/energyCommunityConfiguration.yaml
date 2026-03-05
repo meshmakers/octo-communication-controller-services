@@ -4,6 +4,9 @@ types:
     derivedFromCkTypeId: ${System}/Configuration
     description: "Configuration for an energy community"
     attributes:
+      - id: ${System}/Name
+        name: Name
+        isOptional: true
       - id: ${this}/EnergyCommunityId
         name: EnergyCommunityId
       - id: ${this}/NetworkPartnerId
@@ -16,6 +19,33 @@ types:
         isOptional: true
       - id: ${this}/UiThemeColors
         name: Colors
+        isOptional: true
+      - id: ${this}/AppTitle
+        name: AppTitle
+        isOptional: true
+      - id: ${this}/AppHeading
+        name: AppHeading
+        isOptional: true
+      - id: ${this}/BillingReportName
+        name: BillingReportName
+        isOptional: true
+      - id: ${this}/HeaderGradientStart
+        name: HeaderGradientStart
+        isOptional: true
+      - id: ${this}/HeaderGradientEnd
+        name: HeaderGradientEnd
+        isOptional: true
+      - id: ${this}/FooterGradientStart
+        name: FooterGradientStart
+        isOptional: true
+      - id: ${this}/FooterGradientEnd
+        name: FooterGradientEnd
+        isOptional: true
+      - id: ${this}/BackgroundColor
+        name: BackgroundColor
+        isOptional: true
+      - id: ${this}/Favicon
+        name: Favicon
         isOptional: true
       - id: ${this}/ConsumptionRecordRequestDelay
         name: ConsumptionRecordRequestDelay

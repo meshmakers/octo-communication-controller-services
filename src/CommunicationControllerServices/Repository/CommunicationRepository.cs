@@ -1144,33 +1144,28 @@ internal class CommunicationRepository : ICommunicationRepository
     public async Task<int> DeleteOldExecutionsAsync(string tenantId, DateTime olderThan)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
-        const int batchSize = 50;
+        const int batchSize = 100;
 
         try
         {
-            // Query all old executions once
-            var querySession = await tenantRepository.GetSessionAsync();
-            querySession.StartTransaction();
-
             var queryOptions = RtEntityQueryOptions.Create()
                 .FieldFilter(nameof(RtPipelineExecution.StartedAt), FieldFilterOperator.LessThan, olderThan);
 
-            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(querySession, queryOptions);
-            var allExecutions = resultSet.Items.ToList();
-
-            await querySession.CommitTransactionAsync();
-
-            if (!allExecutions.Any())
-            {
-                return 0;
-            }
-
-            // Delete in batches to avoid oversized transactions
             var totalDeleted = 0;
-            foreach (var batch in allExecutions.Chunk(batchSize))
+            while (true)
             {
                 using var session = await tenantRepository.GetSessionAsync();
                 session.StartTransaction();
+
+                var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(
+                    session, queryOptions, skip: 0, take: batchSize);
+                var batch = resultSet.Items.ToList();
+
+                if (batch.Count == 0)
+                {
+                    await session.CommitTransactionAsync();
+                    break;
+                }
 
                 var entityUpdateInfoList = batch
                     .Select(e => EntityUpdateInfo<RtPipelineExecution>.CreateDelete(e.ToRtEntityId()))
@@ -1184,7 +1179,7 @@ internal class CommunicationRepository : ICommunicationRepository
                 }
 
                 await session.CommitTransactionAsync();
-                totalDeleted += batch.Length;
+                totalDeleted += batch.Count;
             }
 
             return totalDeleted;
@@ -1202,47 +1197,55 @@ internal class CommunicationRepository : ICommunicationRepository
     public async Task<int> TimeoutStaleExecutionsAsync(string tenantId, DateTime olderThan)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+        const int batchSize = 100;
 
-        using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            session.StartTransaction();
-
             var queryOptions = RtEntityQueryOptions.Create()
                 .FieldFilter(nameof(RtPipelineExecution.Status), FieldFilterOperator.Equals, (int)RtPipelineExecutionStatusEnum.Running)
                 .FieldFilter(nameof(RtPipelineExecution.StartedAt), FieldFilterOperator.LessThan, olderThan);
 
-            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(session, queryOptions);
-            var staleExecutions = resultSet.Items.ToList();
-
-            if (!staleExecutions.Any())
+            var totalTimedOut = 0;
+            while (true)
             {
-                await session.CommitTransactionAsync();
-                return 0;
-            }
+                using var session = await tenantRepository.GetSessionAsync();
+                session.StartTransaction();
 
-            var entityUpdateInfoList = staleExecutions
-                .Select(e =>
+                var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(
+                    session, queryOptions, skip: 0, take: batchSize);
+                var batch = resultSet.Items.ToList();
+
+                if (batch.Count == 0)
                 {
-                    var updated = new RtPipelineExecution
-                    {
-                        Status = RtPipelineExecutionStatusEnum.Failed,
-                        ErrorMessage = "Execution timed out",
-                        CompletedAt = DateTime.UtcNow
-                    };
-                    return EntityUpdateInfo<RtPipelineExecution>.CreateUpdate(e.ToRtEntityId(), updated);
-                })
-                .ToList();
+                    await session.CommitTransactionAsync();
+                    break;
+                }
 
-            OperationResult operationResult = new();
-            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
-            if (operationResult.HasErrors || operationResult.HasFatalErrors)
-            {
-                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+                var entityUpdateInfoList = batch
+                    .Select(e =>
+                    {
+                        var updated = new RtPipelineExecution
+                        {
+                            Status = RtPipelineExecutionStatusEnum.Failed,
+                            ErrorMessage = "Execution timed out",
+                            CompletedAt = DateTime.UtcNow
+                        };
+                        return EntityUpdateInfo<RtPipelineExecution>.CreateUpdate(e.ToRtEntityId(), updated);
+                    })
+                    .ToList();
+
+                OperationResult operationResult = new();
+                await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+                if (operationResult.HasErrors || operationResult.HasFatalErrors)
+                {
+                    throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+                }
+
+                await session.CommitTransactionAsync();
+                totalTimedOut += batch.Count;
             }
 
-            await session.CommitTransactionAsync();
-            return staleExecutions.Count;
+            return totalTimedOut;
         }
         catch (CommunicationRepositoryException)
         {
