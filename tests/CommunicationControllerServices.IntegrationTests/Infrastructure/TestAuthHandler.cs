@@ -36,8 +36,7 @@ public class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOptions>
         {
             new Claim(ClaimTypes.Name, "TestUser"),
             new Claim(ClaimTypes.NameIdentifier, "test-user-id"),
-            new Claim(InfrastructureCommon.ClaimScope, CommonConstants.CommunicationSystemApiFullAccess),
-            new Claim(InfrastructureCommon.ClaimScope, CommonConstants.CommunicationTenantApiFullAccess),
+            new Claim(InfrastructureCommon.ClaimScope, CommonConstants.OctoApiFullAccess),
         };
 
         var identity = new ClaimsIdentity(claims, SchemeName);

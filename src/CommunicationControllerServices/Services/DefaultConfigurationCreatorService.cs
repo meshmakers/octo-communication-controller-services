@@ -111,41 +111,12 @@ internal class DefaultConfigurationCreatorService(
 
     protected override void CreateApiScopes(CreateIdentityDataCommandRequest createIdentityDataCommandRequest)
     {
-        createIdentityDataCommandRequest.ApiScopes = new List<DistApiScopeDto>
-        {
-            new(CommonConstants.CommunicationSystemApiFullAccess,
-                CommonConstants.CommunicationSystemApiFullAccessDisplayName),
-            new(CommonConstants.CommunicationTenantApiFullAccess,
-                CommonConstants.CommunicationTenantApiFullAccessDisplayName),
-            new(CommonConstants.CommunicationTenantApiReadOnly,
-                CommonConstants.CommunicationTenantApiReadOnlyDisplayName),
-        };
+        // Scopes are now registered centrally by the identity service
     }
 
     protected override  void CreateApiResources(CreateIdentityDataCommandRequest createIdentityDataCommandRequest)
     {
-        createIdentityDataCommandRequest.ApiResources = new List<DistApiResourcesDto>
-        {
-            new(CommonConstants.CommunicationSystemApi, CommonConstants.CommunicationSystemApiDisplayName)
-            {
-                Description = CommonConstants.CommunicationSystemApiDescription,
-                IsEnabled = true,
-                Scopes = new List<string>
-                {
-                    CommonConstants.CommunicationSystemApiFullAccess,
-                }
-            },
-            new(CommonConstants.CommunicationTenantApi, CommonConstants.CommunicationTenantApiDisplayName)
-            {
-                Description = CommonConstants.CommunicationTenantApiDescription,
-                IsEnabled = true,
-                Scopes = new List<string>
-                {
-                    CommonConstants.CommunicationTenantApiReadOnly,
-                    CommonConstants.CommunicationTenantApiFullAccess
-                }
-            }
-        };
+        // API resources are now registered centrally by the identity service
     }
 
     protected override  void CreateClients(CreateIdentityDataCommandRequest createIdentityDataCommandRequest)
@@ -171,9 +142,7 @@ internal class DefaultConfigurationCreatorService(
                     CommonConstants.Scopes.Profile,
                     CommonConstants.Scopes.Email,
                     JwtClaimTypes.Role,
-                    CommonConstants.CommunicationSystemApiFullAccess,
-                    CommonConstants.CommunicationTenantApiReadOnly,
-                    CommonConstants.CommunicationTenantApiFullAccess
+                    CommonConstants.OctoApiFullAccess
                 ]
             }
         };
