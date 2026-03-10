@@ -1,0 +1,11 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+attributes:
+  - id: ClientId
+    valueType: String
+    description: "OAuth2 Client ID for authenticating with the external API."
+  - id: ClientSecret
+    valueType: String
+    description: "OAuth2 Client Secret for authenticating with the external API."
+  - id: IsSandbox
+    valueType: Boolean
+    description: "If true, the adapter connects to the sandbox environment instead of production."
