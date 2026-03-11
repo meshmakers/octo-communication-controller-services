@@ -1,0 +1,24 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+  - typeId: SftpConfiguration
+    derivedFromCkTypeId: ${System}/Configuration
+    isFinal: true
+    attributes:
+      - id: ${this}/Host
+        name: Host
+      - id: ${this}/Port
+        name: Port
+      - id: ${this}/Username
+        name: Username
+      - id: ${this}/Password
+        name: Password
+        isOptional: true
+      - id: ${this}/PrivateKey
+        name: PrivateKey
+        isOptional: true
+      - id: ${this}/PrivateKeyPassphrase
+        name: PrivateKeyPassphrase
+        isOptional: true
+      - id: ${this}/MaxConcurrentConnections
+        name: MaxConcurrentConnections
+        isOptional: true
