@@ -53,3 +53,6 @@ attributes:
   - id: PrivateKeyPassphrase
     valueType: String
     description: 'The private key passphrase is a secret that is used to protect the private key.'
+  - id: Folder
+    valueType: String
+    description: 'The mailbox folder to monitor for incoming emails (e.g. INBOX).'
