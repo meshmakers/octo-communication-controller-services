@@ -1,0 +1,13 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+  - typeId: MicrosoftGraphConfiguration
+    derivedFromCkTypeId: ${System}/Configuration
+    description: "Microsoft Graph API configuration for OAuth2 client credentials authentication"
+    isFinal: true
+    attributes:
+      - id: ${this}/AzureTenantId
+        name: AzureTenantId
+      - id: ${this}/ClientId
+        name: ClientId
+      - id: ${this}/ClientSecret
+        name: ClientSecret
