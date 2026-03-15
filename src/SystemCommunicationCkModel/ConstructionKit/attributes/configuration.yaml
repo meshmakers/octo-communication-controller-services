@@ -56,3 +56,6 @@ attributes:
   - id: Folder
     valueType: String
     description: 'The mailbox folder to monitor for incoming emails (e.g. INBOX).'
+  - id: AzureTenantId
+    valueType: String
+    description: 'The Azure Active Directory tenant ID (GUID) for OAuth2 authentication.'
