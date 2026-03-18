@@ -44,3 +44,18 @@ attributes:
   - id: SapRegistrationCount
     valueType: Int
     description: 'The registration count is the number of times a program is registered on an SAP gateway server.'
+  - id: MaxConcurrentConnections
+    valueType: Int
+    description: 'The maximum number of concurrent connections is the maximum number of connections that can be established with an external system at the same time.'
+  - id: PrivateKey
+    valueType: String
+    description: 'The private key is a secret key that is used in asymmetric encryption to authenticate with the external system.'
+  - id: PrivateKeyPassphrase
+    valueType: String
+    description: 'The private key passphrase is a secret that is used to protect the private key.'
+  - id: Folder
+    valueType: String
+    description: 'The mailbox folder to monitor for incoming emails (e.g. INBOX).'
+  - id: AzureTenantId
+    valueType: String
+    description: 'The Azure Active Directory tenant ID (GUID) for OAuth2 authentication.'

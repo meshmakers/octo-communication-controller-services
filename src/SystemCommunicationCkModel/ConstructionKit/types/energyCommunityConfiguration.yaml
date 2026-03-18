@@ -1,7 +1,7 @@
 ﻿$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
   - typeId: EnergyCommunityConfiguration
-    derivedFromCkTypeId: ${System}/Configuration
+    derivedFromCkTypeId: ${this}/EdaConfiguration
     description: "Configuration for an energy community"
     attributes:
       - id: ${System}/Name
@@ -9,8 +9,6 @@ types:
         isOptional: true
       - id: ${this}/EnergyCommunityId
         name: EnergyCommunityId
-      - id: ${this}/NetworkPartnerId
-        name: PartnerId
       - id: ${this}/HeaderLogo
         name: HeaderLogo
         isOptional: true
