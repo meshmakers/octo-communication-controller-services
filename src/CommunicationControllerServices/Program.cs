@@ -211,6 +211,7 @@ try
 
     app.UseCors();
 
+    app.UseAuthentication();
     app.UseAuthorization();
     app.UseOctoTenantAuthorization();
     app.UseOctoApiVersioningAndDocumentation();
