@@ -21,6 +21,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb.Extensions;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Meshmakers.Octo.Services.Infrastructure;
+using Meshmakers.Octo.Services.Infrastructure.Configuration;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Meshmakers.Octo.Services.Notifications.Services;
@@ -131,7 +132,7 @@ try
 
     builder.Services.AddAuthentication().AddJwtBearer(jwt =>
         {
-            jwt.Audience = CommonConstants.CommunicationSystemApi;
+            jwt.Audience = CommonConstants.OctoApi;
             jwt.TokenValidationParameters = new TokenValidationParameters
             {
                 NameClaimType = JwtClaimTypes.Name,
@@ -145,22 +146,21 @@ try
         options.AddPolicy(Constants.SystemCommunicationApiPolicy, authorizationPolicyBuilder =>
         {
             authorizationPolicyBuilder.RequireClaim(InfrastructureCommon.ClaimScope,
-                CommonConstants.CommunicationSystemApiFullAccess);
+                CommonConstants.OctoApiFullAccess);
         });
 
         options.AddPolicy(Constants.TenantCommunicationApiReadWritePolicy, authorizationPolicyBuilder =>
         {
             authorizationPolicyBuilder.RequireClaim(InfrastructureCommon.ClaimScope,
-                CommonConstants.CommunicationTenantApiFullAccess);
+                CommonConstants.OctoApiFullAccess);
         });
 
         options.AddPolicy(Constants.TenantCommunicationApiReadOnlyPolicy,
             authorizationPolicyBuilder =>
             {
                 authorizationPolicyBuilder.RequireClaim(InfrastructureCommon.ClaimScope,
-                    CommonConstants.CommunicationTenantApiFullAccess,
-                    CommonConstants.CommunicationTenantApiReadOnly);
-
+                    CommonConstants.OctoApiFullAccess,
+                    CommonConstants.OctoApiReadOnly);
             });
     });
 
@@ -169,27 +169,23 @@ try
         options.Scopes = new Dictionary<string, string>
         {
             {
-                CommonConstants.CommunicationSystemApiFullAccess,
-                CommunicationControllerTexts.Scope_SystemFullAccess_Description
+                CommonConstants.OctoApiFullAccess,
+                CommonConstants.OctoApiFullAccessDisplayName
             },
             {
-                CommonConstants.CommunicationTenantApiFullAccess,
-                CommunicationControllerTexts.Scope_TenantFullAccess_Description
-            },
-            {
-                CommonConstants.CommunicationTenantApiReadOnly,
-                CommunicationControllerTexts.Scope_TenantReadonlyAccess_Description
+                CommonConstants.OctoApiReadOnly,
+                CommonConstants.OctoApiReadOnlyDisplayName
             }
         };
 
         options.PolicyScopeMapping = new Dictionary<string, IEnumerable<string>>
         {
-            { Constants.SystemCommunicationApiPolicy, [CommonConstants.CommunicationSystemApiFullAccess] },
+            { Constants.SystemCommunicationApiPolicy, [CommonConstants.OctoApiFullAccess] },
             {
                 Constants.TenantCommunicationApiReadWritePolicy,
-                [CommonConstants.CommunicationTenantApiFullAccess, CommonConstants.CommunicationTenantApiReadOnly]
+                [CommonConstants.OctoApiFullAccess]
             },
-            { Constants.TenantCommunicationApiReadOnlyPolicy, [CommonConstants.CommunicationTenantApiReadOnly] }
+            { Constants.TenantCommunicationApiReadOnlyPolicy, [CommonConstants.OctoApiReadOnly] }
         };
 
         options.XmlDocDataTransferObjectAssemblies =
@@ -215,7 +211,9 @@ try
 
     app.UseCors();
 
+    app.UseAuthentication();
     app.UseAuthorization();
+    app.UseOctoTenantAuthorization();
     app.UseOctoApiVersioningAndDocumentation();
 
     app.MapHub<AdapterHub>("/{tenantId:tenantId}/adapterHub");
