@@ -15,7 +15,7 @@ internal static class Constants
     public const string CommunicationControllerServiceEnabledKey = "CommunicationControllerServicesEnabled";
 
     public const string CommunicationControllerServiceIdentityDataVersionKey = "CommunicationControllerServicesIdentityData";
-    public const int CommunicationControllerServiceIdentityDataVersionValue = 2;
+    public const int CommunicationControllerServiceIdentityDataVersionValue = 3;
     
     /// <summary>
     ///     Policy for system api authorization
