@@ -385,10 +385,14 @@ Access tenant and adapter info from request context via extension methods in `Co
 ## API Structure
 
 Controllers are split by scope:
-- **System API** (`SystemApi/v1/Controllers/`): System-level operations (enable/disable tenants)
-- **Tenant API** (`TenantApi/v1/Controllers/`): Tenant-scoped operations for adapters, pools, pipelines
+- **System API** (`SystemApi/v1/Controllers/`): System-level operations (enable/disable tenants via query parameter, kept for backward compatibility)
+- **Tenant API** (`TenantApi/v1/Controllers/`): Tenant-scoped operations for adapters, pools, pipelines, and tenant enable/disable
 
 Routes follow pattern: `{tenantId:tenantId}/v{version:apiVersion}/[controller]`
+
+The `CommunicationController` exists in both System API and Tenant API:
+- **System API**: `system/v1/communication/enable?tenantId=X` (legacy, backward compatible)
+- **Tenant API**: `{tenantId}/v1/communication/enable` (preferred, tenant from route)
 
 ## Pipeline Execution Metrics
 
