@@ -1,0 +1,20 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+  - typeId: FinApiConfiguration
+    derivedFromCkTypeId: ${System}/Configuration
+    isFinal: true
+    description: "Configuration for the finAPI banking adapter connection."
+    attributes:
+      - id: ${this}/Host
+        name: BaseUrl
+      - id: ${this}/ClientId
+        name: ClientId
+      - id: ${this}/ClientSecret
+        name: ClientSecret
+      - id: ${this}/Username
+        name: Username
+      - id: ${this}/Password
+        name: Password
+      - id: ${this}/IsSandbox
+        name: IsSandbox
+        isOptional: true

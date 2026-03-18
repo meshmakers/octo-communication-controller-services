@@ -1,0 +1,20 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+  - typeId: EMailReceiverConfiguration
+    derivedFromCkTypeId: ${System}/Configuration
+    description: "IMAP email receiver configuration for polling a mailbox"
+    isFinal: true
+    attributes:
+      - id: ${this}/Host
+        name: Host
+      - id: ${this}/Port
+        name: Port
+      - id: ${this}/Username
+        name: Username
+      - id: ${this}/Password
+        name: Password
+      - id: ${this}/IsSslEnabled
+        name: IsSslEnabled
+      - id: ${this}/Folder
+        name: Folder
+        isOptional: true

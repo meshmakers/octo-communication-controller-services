@@ -1,0 +1,8 @@
+﻿$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+  - typeId: EdaConfiguration
+    derivedFromCkTypeId: ${System}/Configuration
+    description: "Configuration for EDA integration"
+    attributes:
+      - id: ${this}/NetworkPartnerId
+        name: PartnerId
