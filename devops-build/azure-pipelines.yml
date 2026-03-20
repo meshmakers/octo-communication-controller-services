@@ -52,6 +52,10 @@ stages:
               sshKeySecureFile: '$(SSHPrivateKeyFile)'
           - template: set-version.yml
           - template: download-ca.yml
+          - script: |
+              echo "Clearing CK catalog cache to ensure fresh model resolution"
+              rm -rf ~/.octo/ck-catalog/cache
+            displayName: 'Clear CK catalog cache'
           - task: DotNetCoreCLI@2
             displayName: 'Restore NuGet packages'
             inputs:
