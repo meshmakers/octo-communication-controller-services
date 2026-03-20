@@ -32,12 +32,19 @@ public class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOptions>
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        var claims = new[]
+        var claims = new List<Claim>
         {
-            new Claim(ClaimTypes.Name, "TestUser"),
-            new Claim(ClaimTypes.NameIdentifier, "test-user-id"),
-            new Claim(InfrastructureCommon.ClaimScope, CommonConstants.OctoApiFullAccess),
+            new(ClaimTypes.Name, "TestUser"),
+            new(ClaimTypes.NameIdentifier, "test-user-id"),
+            new(InfrastructureCommon.ClaimScope, CommonConstants.OctoApiFullAccess),
         };
+
+        // Add tenant_id claim from the route tenant so TenantAuthorizationMiddleware passes.
+        var pathSegments = Request.Path.Value?.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (pathSegments is { Length: > 0 })
+        {
+            claims.Add(new Claim("tenant_id", pathSegments[0]));
+        }
 
         var identity = new ClaimsIdentity(claims, SchemeName);
         var principal = new ClaimsPrincipal(identity);
