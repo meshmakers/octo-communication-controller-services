@@ -1,0 +1,20 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+attributes:
+  - id: GrafanaUrl
+    valueType: String
+    description: "Base URL of the Grafana instance."
+  - id: AdminUser
+    valueType: String
+    description: "Grafana Server Admin username for organization management API."
+  - id: AdminPassword
+    valueType: String
+    description: "Grafana Server Admin password."
+  - id: OctoMeshUrl
+    valueType: String
+    description: "URL of the OctoMesh Asset Repository for provisioned datasource configuration."
+  - id: IdentityServerUrl
+    valueType: String
+    description: "URL of the OctoMesh Identity Server for provisioned datasource OAuth configuration."
+  - id: OAuthClientId
+    valueType: String
+    description: "OAuth client ID for the Grafana datasource plugin."
