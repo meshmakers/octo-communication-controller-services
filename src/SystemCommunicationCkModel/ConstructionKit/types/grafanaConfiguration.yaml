@@ -1,0 +1,20 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+  - typeId: GrafanaConfiguration
+    derivedFromCkTypeId: ${System}/Configuration
+    isFinal: true
+    description: "Configuration for Grafana integration. Used by the GrafanaProvisionTenant and GrafanaDeprovisionTenant pipeline nodes."
+    attributes:
+      - id: ${this}/GrafanaUrl
+        name: GrafanaUrl
+      - id: ${this}/AdminUser
+        name: AdminUser
+      - id: ${this}/AdminPassword
+        name: AdminPassword
+      - id: ${this}/OctoMeshUrl
+        name: OctoMeshUrl
+      - id: ${this}/IdentityServerUrl
+        name: IdentityServerUrl
+      - id: ${this}/OAuthClientId
+        name: OAuthClientId
+        isOptional: true
