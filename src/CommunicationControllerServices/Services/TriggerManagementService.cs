@@ -3,7 +3,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Common.DistributionEventHub;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 
@@ -74,10 +74,10 @@ internal class TriggerManagementService(
         try
         {
             var r = await communicationRepository.GetTriggersAsync(tenantId);
-            foreach (var rtDataPipelineTrigger in r)
+            foreach (var rtPipelineTrigger in r)
             {
-                await communicationRepository.SetDataPipelineTriggerDeploymentStateAsync(tenantId,
-                    rtDataPipelineTrigger.RtId, RtDeploymentStateEnum.Pending);
+                await communicationRepository.SetPipelineTriggerDeploymentStateAsync(tenantId,
+                    rtPipelineTrigger.RtId, RtDeploymentStateEnum.Pending);
             }
 
             var scheduleGroup = CreateScheduleGroup(tenantId);
@@ -115,7 +115,7 @@ internal class TriggerManagementService(
                             tenantId, pipelineTrigger.RtId);
                         await eventService.StoreErrorEventAsync(tenantId,
                             $"Trigger '{pipelineTrigger.RtId}' has no associated pipelines and cannot be deployed.");
-                        await communicationRepository.SetDataPipelineTriggerDeploymentStateAsync(tenantId,
+                        await communicationRepository.SetPipelineTriggerDeploymentStateAsync(tenantId,
                             pipelineTrigger.RtId, RtDeploymentStateEnum.Error);
                         continue;
                     }
@@ -139,12 +139,12 @@ internal class TriggerManagementService(
                             address, recurringSchedulingOptions);
                     }
 
-                    await communicationRepository.SetDataPipelineTriggerDeploymentStateAsync(tenantId,
+                    await communicationRepository.SetPipelineTriggerDeploymentStateAsync(tenantId,
                         pipelineTrigger.RtId, RtDeploymentStateEnum.Deployed);
                 }
                 catch (Exception)
                 {
-                    await communicationRepository.SetDataPipelineTriggerDeploymentStateAsync(tenantId,
+                    await communicationRepository.SetPipelineTriggerDeploymentStateAsync(tenantId,
                         pipelineTrigger.RtId, RtDeploymentStateEnum.Error);
                     throw;
                 }

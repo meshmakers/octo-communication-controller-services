@@ -1,6 +1,5 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
-using RtDataFlow = Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3.RtDataFlow;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
@@ -584,7 +583,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task<IReadOnlyCollection<RtDataPipelineTrigger>> GetTriggersAsync(string tenantId)
+    public async Task<IReadOnlyCollection<RtPipelineTrigger>> GetTriggersAsync(string tenantId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -592,7 +591,7 @@ internal class CommunicationRepository : ICommunicationRepository
         try
         {
             var queryOptions = RtEntityQueryOptions.Create();
-            var r = await tenantRepository.GetRtEntitiesByTypeAsync<RtDataPipelineTrigger>(session, queryOptions);
+            var r = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineTrigger>(session, queryOptions);
 
             return r.Items.ToList();
         }
@@ -602,7 +601,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task<IDictionary<RtDataPipelineTrigger, IList<RtMeshPipeline>>> GetTriggersAndPipelinesAsync(
+    public async Task<IDictionary<RtPipelineTrigger, IList<RtPipeline>>> GetTriggersAndPipelinesAsync(
         string tenantId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
@@ -611,16 +610,16 @@ internal class CommunicationRepository : ICommunicationRepository
         try
         {
             var queryOptions = RtEntityQueryOptions.Create()
-                .FieldEquals(nameof(RtDataPipelineTrigger.Enabled), true);
+                .FieldEquals(nameof(RtPipelineTrigger.Enabled), true);
 
-            var r = await tenantRepository.GetRtEntitiesByTypeAsync<RtDataPipelineTrigger>(session, queryOptions);
+            var r = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineTrigger>(session, queryOptions);
 
             queryOptions = RtEntityQueryOptions.Create();
-            var a = await tenantRepository.GetRtAssociationTargetsAsync<RtDataPipelineTrigger, RtMeshPipeline>(session,
+            var a = await tenantRepository.GetRtAssociationTargetsAsync<RtPipelineTrigger, RtPipeline>(session,
                 r.Items.Select(x => x.RtId).ToList(),
                 SystemCommunicationCkIds.RtCkTriggersRoleId, GraphDirections.Inbound, null, queryOptions);
 
-            Dictionary<RtDataPipelineTrigger, IList<RtMeshPipeline>> list = new();
+            Dictionary<RtPipelineTrigger, IList<RtPipeline>> list = new();
             foreach (var pipelineTrigger in r.Items)
             {
                 if (a.TryGetValue(pipelineTrigger.ToRtEntityId(), out var resultSet))
@@ -637,7 +636,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task SetDataPipelineTriggerDeploymentStateAsync(string tenantId, OctoObjectId triggerRtId,
+    public async Task SetPipelineTriggerDeploymentStateAsync(string tenantId, OctoObjectId triggerRtId,
         RtDeploymentStateEnum deploymentState)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
@@ -647,15 +646,15 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             session.StartTransaction();
 
-            var pipelineTrigger = new RtDataPipelineTrigger
+            var pipelineTrigger = new RtPipelineTrigger
             {
                 DeploymentState = deploymentState
             };
 
-            var entityUpdateInfoList = new List<EntityUpdateInfo<RtDataPipelineTrigger>>
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtPipelineTrigger>>
             {
-                EntityUpdateInfo<RtDataPipelineTrigger>.CreateUpdate(
-                    new RtEntityId(SystemCommunicationCkIds.RtCkDataPipelineTriggerTypeId,
+                EntityUpdateInfo<RtPipelineTrigger>.CreateUpdate(
+                    new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTriggerTypeId,
                         triggerRtId),
                     pipelineTrigger)
             };

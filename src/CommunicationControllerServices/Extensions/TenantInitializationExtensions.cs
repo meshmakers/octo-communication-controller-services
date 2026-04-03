@@ -1,7 +1,7 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts.Services;
 using Meshmakers.Octo.ConstructionKit.Models.System.Bot.Generated.System.Bot.v3;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 

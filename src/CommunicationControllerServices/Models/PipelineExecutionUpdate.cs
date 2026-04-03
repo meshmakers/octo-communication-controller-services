@@ -1,4 +1,4 @@
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 

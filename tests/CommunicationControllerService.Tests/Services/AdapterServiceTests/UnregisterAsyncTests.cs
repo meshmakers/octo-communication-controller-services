@@ -3,7 +3,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.Runtime.Contracts;
 using NSubstitute;
 

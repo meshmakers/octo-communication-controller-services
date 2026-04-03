@@ -106,7 +106,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         // Without CK models registered at that point, types like RtPool cannot be deserialized.
         services.AddCkModelSystemV2();
         services.AddCkModelSystemBotV3();
-        services.AddCkModelSystemCommunicationV2();
+        services.AddCkModelSystemCommunicationV3();
         services.AddCkModelSystemNotificationV2();
 
         services.AddRuntimeEngine()

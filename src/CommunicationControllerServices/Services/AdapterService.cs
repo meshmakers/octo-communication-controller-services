@@ -6,8 +6,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Resources;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
-using SystemCommunicationV3 = Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Runtime.Contracts;
 using Microsoft.Extensions.Options;
@@ -501,7 +500,7 @@ internal class AdapterService(
 
         await eventService.StoreInformationEventAsync(tenantId,
             $"Undeploying data flow '{dataFlowRtId}' from adapters.",
-            new RtEntityId(SystemCommunicationV3.SystemCommunicationCkIds.RtCkDataFlowTypeId, dataFlowRtId));
+            new RtEntityId(SystemCommunicationCkIds.RtCkDataFlowTypeId, dataFlowRtId));
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
