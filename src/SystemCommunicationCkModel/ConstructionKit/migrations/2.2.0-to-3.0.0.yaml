@@ -1,0 +1,48 @@
+$schema: https://schemas.meshmakers.cloud/ck-migration.schema.json
+sourceVersion: "2.2.0"
+targetVersion: "3.0.0"
+description: |
+  Migration from System.Communication 2.2.0 to 3.0.0.
+
+  This migration renames the DataPipeline CK type to DataFlow.
+  The DataFlow concept represents a logical grouping of pipelines
+  with a shared topic exchange for inter-pipeline communication.
+
+  Breaking change: The CK type ID changes from
+  System.Communication/DataPipeline to System.Communication/DataFlow.
+
+preConditions:
+  - type: EntityExists
+    target:
+      ckTypeId: System.Communication/DataPipeline
+
+steps:
+  # Step 1: Change CkTypeId from DataPipeline to DataFlow for all existing entities
+  - stepId: migrate-data-pipeline-to-data-flow
+    description: "Change CkTypeId from DataPipeline to DataFlow for all existing DataPipeline entities"
+    action: Transform
+    target:
+      ckTypeId: System.Communication/DataPipeline
+      blueprintSourceOnly: false
+    transform:
+      type: ChangeCkType
+      newCkTypeId: System.Communication/DataFlow
+    onConflict: Skip
+    continueOnError: false
+
+postValidations:
+  # Verify no legacy DataPipeline entities remain
+  - validationId: no-legacy-data-pipelines-remain
+    description: "Ensure no entities with legacy DataPipeline type exist after migration"
+    type: NoEntitiesOfType
+    target:
+      ckTypeId: System.Communication/DataPipeline
+    severity: Warning
+
+  # Verify DataFlow entities exist
+  - validationId: data-flow-entities-exist
+    description: "Verify that DataFlow entities were created from migrated DataPipeline entities"
+    type: EntityExists
+    target:
+      ckTypeId: System.Communication/DataFlow
+    severity: Warning
