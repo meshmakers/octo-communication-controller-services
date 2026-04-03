@@ -687,6 +687,128 @@ internal class PipelineExecutionService(
         return await communicationRepository.GetAdapterSyncSequenceNumberAsync(tenantId, adapterRtEntityId);
     }
 
+    public async Task<DataFlowStatusDto> GetDataFlowStatusAsync(string tenantId, OctoObjectId dataFlowRtId)
+    {
+        Logger.Debug("[{TenantId}] Getting data flow status for '{DataFlowRtId}'", tenantId, dataFlowRtId);
+
+        try
+        {
+            // Get all child pipelines of the data flow
+            var pipelines = await communicationRepository.GetPipelinesAsync(tenantId, dataFlowRtId);
+
+            var pipelineStatuses = new List<PipelineStatusDto>();
+
+            foreach (var pipeline in pipelines)
+            {
+                var pipelineRtEntityId = new RtEntityId(pipeline.CkTypeId!, pipeline.RtId);
+
+                // Get the most recent execution to determine current state
+                var recentExecutions = await communicationRepository.GetPipelineExecutionsAsync(
+                    tenantId, pipelineRtEntityId, null, null, 1);
+
+                // Get statistics for summary
+                var statistics = await communicationRepository.GetPipelineStatisticsAsync(
+                    tenantId, pipelineRtEntityId);
+
+                var pipelineState = DeterminePipelineState(recentExecutions);
+
+                var statisticsSummary = statistics != null
+                    ? new PipelineStatisticsSummaryDto
+                    {
+                        LastHourSuccessCount = statistics.LastHourSuccessCount,
+                        LastHourFailureCount = statistics.LastHourFailureCount,
+                        LastHourAvgDurationMs = statistics.LastHourAvgDurationMs
+                    }
+                    : null;
+
+                pipelineStatuses.Add(new PipelineStatusDto
+                {
+                    PipelineRtEntityId = pipelineRtEntityId,
+                    PipelineType = pipeline.CkTypeId?.ToString() ?? "Unknown",
+                    State = pipelineState,
+                    LastExecutionAt = statistics?.LastExecutionAt,
+                    Statistics = statisticsSummary
+                });
+            }
+
+            var aggregatedState = AggregateDataFlowState(pipelineStatuses);
+
+            Logger.Debug("[{TenantId}] Data flow '{DataFlowRtId}' status: {State} ({PipelineCount} pipelines)",
+                tenantId, dataFlowRtId, aggregatedState, pipelineStatuses.Count);
+
+            return new DataFlowStatusDto
+            {
+                DataFlowRtId = dataFlowRtId,
+                State = aggregatedState,
+                Pipelines = pipelineStatuses
+            };
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e, "[{TenantId}] Failed to get data flow status for '{DataFlowRtId}'",
+                tenantId, dataFlowRtId);
+            throw PipelineExecutionServiceException.CommonFailedGetDataFlowStatus(tenantId, dataFlowRtId, e);
+        }
+    }
+
+    /// <summary>
+    /// Determines the execution state of a single pipeline based on its most recent execution
+    /// </summary>
+    internal static PipelineExecutionState DeterminePipelineState(IReadOnlyList<RtPipelineExecution> recentExecutions)
+    {
+        if (recentExecutions.Count == 0)
+        {
+            return PipelineExecutionState.Idle;
+        }
+
+        var latest = recentExecutions[0];
+        return latest.Status switch
+        {
+            RtPipelineExecutionStatusEnum.Running => PipelineExecutionState.Running,
+            RtPipelineExecutionStatusEnum.Completed => PipelineExecutionState.Completed,
+            RtPipelineExecutionStatusEnum.Failed => PipelineExecutionState.Failed,
+            RtPipelineExecutionStatusEnum.Interrupted => PipelineExecutionState.Failed,
+            RtPipelineExecutionStatusEnum.Cancelled => PipelineExecutionState.Idle,
+            _ => PipelineExecutionState.Idle
+        };
+    }
+
+    /// <summary>
+    /// Aggregates individual pipeline states into an overall data flow state
+    /// </summary>
+    internal static DataFlowExecutionState AggregateDataFlowState(IReadOnlyList<PipelineStatusDto> pipelineStatuses)
+    {
+        if (pipelineStatuses.Count == 0)
+        {
+            return DataFlowExecutionState.Idle;
+        }
+
+        // If any pipeline is running, the data flow is running
+        if (pipelineStatuses.Any(p => p.State == PipelineExecutionState.Running))
+        {
+            return DataFlowExecutionState.Running;
+        }
+
+        // If any pipeline failed (and none running), the data flow is failed
+        if (pipelineStatuses.Any(p => p.State == PipelineExecutionState.Failed))
+        {
+            return DataFlowExecutionState.Failed;
+        }
+
+        // If any pipeline completed (and none running/failed), the data flow is completed
+        if (pipelineStatuses.Any(p => p.State == PipelineExecutionState.Completed))
+        {
+            return DataFlowExecutionState.Completed;
+        }
+
+        // All pipelines are idle
+        return DataFlowExecutionState.Idle;
+    }
+
     private static bool IsStatisticsEmpty(RtPipelineStatistics statistics)
     {
         return statistics.LastExecutionAt == null &&

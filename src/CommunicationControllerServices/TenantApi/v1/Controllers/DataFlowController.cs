@@ -3,6 +3,8 @@ using System.Text;
 using Asp.Versioning;
 using IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -22,16 +24,20 @@ public class DataFlowController : ControllerBase
 {
     private readonly ILogger<DataFlowController> _logger;
     private readonly IAdapterService _adapterService;
+    private readonly IPipelineExecutionService _pipelineExecutionService;
 
     /// <summary>
     /// Constructor
     /// </summary>
     /// <param name="logger">Logging object</param>
     /// <param name="adapterService"></param>
-    public DataFlowController(ILogger<DataFlowController> logger, IAdapterService adapterService)
+    /// <param name="pipelineExecutionService"></param>
+    public DataFlowController(ILogger<DataFlowController> logger, IAdapterService adapterService,
+        IPipelineExecutionService pipelineExecutionService)
     {
         _logger = logger;
         _adapterService = adapterService;
+        _pipelineExecutionService = pipelineExecutionService;
     }
 
     /// <summary>
@@ -107,6 +113,39 @@ public class DataFlowController : ControllerBase
         catch (Exception e)
         {
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
+        }
+    }
+
+    /// <summary>
+    /// Gets the aggregated execution status of a data flow from all child pipeline executions
+    /// </summary>
+    /// <param name="dataFlowRtId">The id of the data flow</param>
+    /// <returns>Aggregated data flow status with per-pipeline details</returns>
+    [HttpGet("status")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(typeof(DataFlowStatusDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<DataFlowStatusDto>> GetDataFlowStatus([Required][FromQuery] OctoObjectId dataFlowRtId)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        try
+        {
+            var status = await _pipelineExecutionService.GetDataFlowStatusAsync(tenantId, dataFlowRtId);
+            return Ok(status);
+        }
+        catch (CommunicationRepositoryException e)
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = e.Message });
+        }
+        catch (Exception e)
+        {
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
         }
     }
 }

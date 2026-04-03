@@ -109,4 +109,12 @@ public interface IPipelineExecutionService
     /// <param name="adapterRtEntityId">Adapter identifier</param>
     /// <returns>Last synced sequence number</returns>
     Task<int> GetLastSyncedSequenceNumberAsync(string tenantId, RtEntityId adapterRtEntityId);
+
+    /// <summary>
+    /// Gets the aggregated execution status of a data flow by querying all child pipeline executions
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="dataFlowRtId">Runtime identifier of the data flow</param>
+    /// <returns>Aggregated data flow status with per-pipeline details</returns>
+    Task<DataFlowStatusDto> GetDataFlowStatusAsync(string tenantId, OctoObjectId dataFlowRtId);
 }
