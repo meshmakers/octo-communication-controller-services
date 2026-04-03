@@ -12,10 +12,10 @@ public interface ITriggerManagementService
     /// Execute the pipeline for the tenant
     /// </summary>
     /// <param name="tenantId">The tenant id</param>
-    /// <param name="dataFlowRtId">The runtime id of the data flow</param>
+    /// <param name="pipelineRtId">The runtime id of the data flow</param>
     /// <param name="pipelineInput">The input for the pipeline</param>
     /// <returns>The pipeline execution id, if the start of execution was successful</returns>
-    Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId, OctoObjectId dataFlowRtId, string? pipelineInput);
+    Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId, OctoObjectId pipelineRtId, string? pipelineInput);
     
     /// <summary>
     /// Remove the schedule for the triggers of the tenant
