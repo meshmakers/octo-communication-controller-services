@@ -124,26 +124,26 @@ public class PipelineController : ControllerBase
     /// <summary>
     /// Deploys the pipeline definition at the corresponding adapter
     /// </summary>
-    /// <param name="dataPipelineRtId">The runtime id of the data pipeline.</param>
+    /// <param name="dataFlowRtId">The runtime id of the data flow.</param>
     /// <returns>The pipeline execution id</returns>
     [HttpPost("execute")]
     [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> ExecutePipeline([Required][FromQuery] OctoObjectId dataPipelineRtId)
+    public async Task<IActionResult> ExecutePipeline([Required][FromQuery] OctoObjectId dataFlowRtId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
         {
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
-        
+
         try
         {
             using var reader = new StreamReader(Request.Body, Encoding.UTF8);
-            
+
             var pipelineInput = await reader.ReadToEndAsync();
-            var pipelineExecutionId = await _triggerManagementService.StartExecutePipelineAsync(tenantId, dataPipelineRtId,
+            var pipelineExecutionId = await _triggerManagementService.StartExecutePipelineAsync(tenantId, dataFlowRtId,
                 pipelineInput);
             return Ok(pipelineExecutionId);
         }

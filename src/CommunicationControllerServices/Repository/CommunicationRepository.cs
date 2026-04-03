@@ -1,5 +1,6 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using RtDataFlow = Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3.RtDataFlow;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
@@ -471,15 +472,15 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task<IReadOnlyCollection<RtPipeline>> GetPipelinesAsync(string tenantId, OctoObjectId dataPipelineRtId)
+    public async Task<IReadOnlyCollection<RtPipeline>> GetPipelinesAsync(string tenantId, OctoObjectId dataFlowRtId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
         using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            var originResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtDataPipeline, RtPipeline>(session,
-                [dataPipelineRtId],
+            var originResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtDataFlow, RtPipeline>(session,
+                [dataFlowRtId],
                 SystemCkIds.RtCkParentChildRoleId,
                 GraphDirections.Inbound, null, RtEntityQueryOptions.Create());
 
@@ -489,7 +490,7 @@ internal class CommunicationRepository : ICommunicationRepository
                 return pool.ToList();
             }
 
-            throw CommunicationRepositoryException.DataPipelineNotFound(tenantId, dataPipelineRtId);
+            throw CommunicationRepositoryException.DataFlowNotFound(tenantId, dataFlowRtId);
         }
         catch (CommunicationRepositoryException)
         {
@@ -497,7 +498,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw CommunicationRepositoryException.CommonFailedGettingByDataPipeline(tenantId, dataPipelineRtId, e);
+            throw CommunicationRepositoryException.CommonFailedGettingByDataFlow(tenantId, dataFlowRtId, e);
         }
     }
 
@@ -522,7 +523,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task<RtDataPipeline?> GetDataPipelineByPipelineAsync(string tenantId, OctoObjectId pipelineRtId)
+    public async Task<RtDataFlow?> GetDataFlowByPipelineAsync(string tenantId, OctoObjectId pipelineRtId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -530,7 +531,7 @@ internal class CommunicationRepository : ICommunicationRepository
         try
         {
             var multipleOriginResultSet =
-                await tenantRepository.GetRtAssociationTargetsAsync<RtPipeline, RtDataPipeline>(
+                await tenantRepository.GetRtAssociationTargetsAsync<RtPipeline, RtDataFlow>(
                     session,
                     [pipelineRtId],
                     SystemCkIds.RtCkParentChildRoleId,

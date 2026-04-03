@@ -10,21 +10,21 @@ using NSubstitute;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.AdapterServiceTests;
 
-internal class UndeployDataPipelineAsyncTests : AdapterServiceTestsBase
+internal class UndeployDataFlowAsyncTests : AdapterServiceTestsBase
 {
     [Test]
     [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]
-    public async Task UndeployDataPipelineAsync_TenantNotInCache_ThrowsException()
+    public async Task UndeployDataFlowAsync_TenantNotInCache_ThrowsException()
     {
         // Arrange
         AdapterCache.TryGetTenant("unknownTenant", out Arg.Any<AdapterTenant?>())
             .Returns(false);
 
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
 
         // Act & Assert
         var exception = await Assert.That(async () =>
-                await AdapterService.UndeployDataPipelineAsync("unknownTenant", rtDataPipeline.RtId))
+                await AdapterService.UndeployDataFlowAsync("unknownTenant", rtDataFlow.RtId))
             .Throws<AdapterServiceException>();
 
         await Assert.That(exception).IsNotNull()
@@ -32,17 +32,17 @@ internal class UndeployDataPipelineAsyncTests : AdapterServiceTestsBase
     }
 
     [Test]
-    public async Task UndeployDataPipelineAsync_NoPipelinesFound_ThrowsException()
+    public async Task UndeployDataFlowAsync_NoPipelinesFound_ThrowsException()
     {
         // Arrange
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
 
-        CommunicationRepository.GetPipelinesAsync(TenantId, rtDataPipeline.RtId)
+        CommunicationRepository.GetPipelinesAsync(TenantId, rtDataFlow.RtId)
             .Returns([]);
 
         // Act & Assert
         var exception = await Assert.That(async () =>
-                await AdapterService.UndeployDataPipelineAsync(TenantId, rtDataPipeline.RtId))
+                await AdapterService.UndeployDataFlowAsync(TenantId, rtDataFlow.RtId))
             .Throws<AdapterServiceException>();
 
         await Assert.That(exception).IsNotNull()
@@ -50,29 +50,29 @@ internal class UndeployDataPipelineAsyncTests : AdapterServiceTestsBase
     }
 
     [Test]
-    public async Task UndeployDataPipelineAsync_SinglePipelineOnAdapter_RemovesPipelineAndUpdatesState()
+    public async Task UndeployDataFlowAsync_SinglePipelineOnAdapter_RemovesPipelineAndUpdatesState()
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline = RtEntityCreator.CreatePipeline();
 
         AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
             rtAdapter.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline.ToRtEntityId(), false,
                     rtPipeline.PipelineDefinition, [])
             ]
         ));
 
-        CommunicationRepository.GetPipelinesAsync(TenantId, rtDataPipeline.RtId)
+        CommunicationRepository.GetPipelinesAsync(TenantId, rtDataFlow.RtId)
             .Returns([rtPipeline]);
         CommunicationRepository.GetAdapterByPipelineAsync(TenantId, rtPipeline.ToRtEntityId())
             .Returns(rtAdapter);
 
         // Act
-        await AdapterService.UndeployDataPipelineAsync(TenantId, rtDataPipeline.RtId);
+        await AdapterService.UndeployDataFlowAsync(TenantId, rtDataFlow.RtId);
 
         // Assert
         using var _ = Assert.Multiple();
@@ -87,21 +87,21 @@ internal class UndeployDataPipelineAsyncTests : AdapterServiceTestsBase
     }
 
     [Test]
-    public async Task UndeployDataPipelineAsync_AdapterNotInCache_ThrowsException()
+    public async Task UndeployDataFlowAsync_AdapterNotInCache_ThrowsException()
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline = RtEntityCreator.CreatePipeline();
 
-        CommunicationRepository.GetPipelinesAsync(TenantId, rtDataPipeline.RtId)
+        CommunicationRepository.GetPipelinesAsync(TenantId, rtDataFlow.RtId)
             .Returns([rtPipeline]);
         CommunicationRepository.GetAdapterByPipelineAsync(TenantId, rtPipeline.ToRtEntityId())
             .Returns(rtAdapter);
 
         // Act & Assert
         var exception = await Assert.That(async () =>
-                await AdapterService.UndeployDataPipelineAsync(TenantId, rtDataPipeline.RtId))
+                await AdapterService.UndeployDataFlowAsync(TenantId, rtDataFlow.RtId))
             .Throws<AdapterServiceException>();
 
         await Assert.That(exception).IsNotNull()
@@ -109,12 +109,12 @@ internal class UndeployDataPipelineAsyncTests : AdapterServiceTestsBase
     }
 
     [Test]
-    public async Task UndeployDataPipelineAsync_MultiplePipelinesOnAdapter_RemovesOnlySpecifiedDataPipeline()
+    public async Task UndeployDataFlowAsync_MultiplePipelinesOnAdapter_RemovesOnlySpecifiedDataPipeline()
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline1 = RtEntityCreator.CreateDataPipeline();
-        var rtDataPipeline2 = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow1 = RtEntityCreator.CreateDataFlow();
+        var rtDataFlow2 = RtEntityCreator.CreateDataFlow();
         var rtPipeline1 = RtEntityCreator.CreatePipeline();
         var rtPipeline2 = RtEntityCreator.CreatePipeline();
 
@@ -122,20 +122,20 @@ internal class UndeployDataPipelineAsyncTests : AdapterServiceTestsBase
             rtAdapter.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline1.RtId, rtPipeline1.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow1.RtId, rtPipeline1.ToRtEntityId(), false,
                     rtPipeline1.PipelineDefinition, []),
-                new PipelineConfigurationDto(rtDataPipeline2.RtId, rtPipeline2.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow2.RtId, rtPipeline2.ToRtEntityId(), false,
                     rtPipeline2.PipelineDefinition, [])
             ]
         ));
 
-        CommunicationRepository.GetPipelinesAsync(TenantId, rtDataPipeline1.RtId)
+        CommunicationRepository.GetPipelinesAsync(TenantId, rtDataFlow1.RtId)
             .Returns([rtPipeline1]);
         CommunicationRepository.GetAdapterByPipelineAsync(TenantId, rtPipeline1.ToRtEntityId())
             .Returns(rtAdapter);
 
         // Act
-        await AdapterService.UndeployDataPipelineAsync(TenantId, rtDataPipeline1.RtId);
+        await AdapterService.UndeployDataFlowAsync(TenantId, rtDataFlow1.RtId);
 
         // Assert
         using var _ = Assert.Multiple();
@@ -150,12 +150,12 @@ internal class UndeployDataPipelineAsyncTests : AdapterServiceTestsBase
     }
 
     [Test]
-    public async Task UndeployDataPipelineAsync_MultiplePipelinesMultipleAdapters_RemovesFromAllAdapters()
+    public async Task UndeployDataFlowAsync_MultiplePipelinesMultipleAdapters_RemovesFromAllAdapters()
     {
         // Arrange
         var rtAdapter1 = RtEntityCreator.CreateAdapter();
         var rtAdapter2 = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline1 = RtEntityCreator.CreatePipeline();
         var rtPipeline2 = RtEntityCreator.CreatePipeline();
 
@@ -163,7 +163,7 @@ internal class UndeployDataPipelineAsyncTests : AdapterServiceTestsBase
             rtAdapter1.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline1.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline1.ToRtEntityId(), false,
                     rtPipeline1.PipelineDefinition, [])
             ]
         ));
@@ -172,12 +172,12 @@ internal class UndeployDataPipelineAsyncTests : AdapterServiceTestsBase
             rtAdapter2.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline2.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline2.ToRtEntityId(), false,
                     rtPipeline2.PipelineDefinition, [])
             ]
         ));
 
-        CommunicationRepository.GetPipelinesAsync(TenantId, rtDataPipeline.RtId)
+        CommunicationRepository.GetPipelinesAsync(TenantId, rtDataFlow.RtId)
             .Returns([rtPipeline1, rtPipeline2]);
         CommunicationRepository.GetAdapterByPipelineAsync(TenantId, rtPipeline1.ToRtEntityId())
             .Returns(rtAdapter1);
@@ -185,7 +185,7 @@ internal class UndeployDataPipelineAsyncTests : AdapterServiceTestsBase
             .Returns(rtAdapter2);
 
         // Act
-        await AdapterService.UndeployDataPipelineAsync(TenantId, rtDataPipeline.RtId);
+        await AdapterService.UndeployDataFlowAsync(TenantId, rtDataFlow.RtId);
 
         // Assert
         using var _ = Assert.Multiple();
@@ -207,11 +207,11 @@ internal class UndeployDataPipelineAsyncTests : AdapterServiceTestsBase
     }
 
     [Test]
-    public async Task UndeployDataPipelineAsync_MultiplePipelinesSameDataPipelineOnSameAdapter_RemovesAllFromAdapter()
+    public async Task UndeployDataFlowAsync_MultiplePipelinesSameDataPipelineOnSameAdapter_RemovesAllFromAdapter()
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline1 = RtEntityCreator.CreatePipeline();
         var rtPipeline2 = RtEntityCreator.CreatePipeline();
 
@@ -219,14 +219,14 @@ internal class UndeployDataPipelineAsyncTests : AdapterServiceTestsBase
             rtAdapter.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline1.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline1.ToRtEntityId(), false,
                     rtPipeline1.PipelineDefinition, []),
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline2.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline2.ToRtEntityId(), false,
                     rtPipeline2.PipelineDefinition, [])
             ]
         ));
 
-        CommunicationRepository.GetPipelinesAsync(TenantId, rtDataPipeline.RtId)
+        CommunicationRepository.GetPipelinesAsync(TenantId, rtDataFlow.RtId)
             .Returns([rtPipeline1, rtPipeline2]);
         CommunicationRepository.GetAdapterByPipelineAsync(TenantId, rtPipeline1.ToRtEntityId())
             .Returns(rtAdapter);
@@ -234,7 +234,7 @@ internal class UndeployDataPipelineAsyncTests : AdapterServiceTestsBase
             .Returns(rtAdapter);
 
         // Act
-        await AdapterService.UndeployDataPipelineAsync(TenantId, rtDataPipeline.RtId);
+        await AdapterService.UndeployDataFlowAsync(TenantId, rtDataFlow.RtId);
 
         // Assert
         using var _ = Assert.Multiple();
@@ -251,13 +251,13 @@ internal class UndeployDataPipelineAsyncTests : AdapterServiceTestsBase
     }
 
    [Test]
-    public async Task UndeployDataPipelineAsync_AdapterWithOtherPipelines_PreservesOtherPipelines()
+    public async Task UndeployDataFlowAsync_AdapterWithOtherPipelines_PreservesOtherPipelines()
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline1 = RtEntityCreator.CreateDataPipeline();
-        var rtDataPipeline2 = RtEntityCreator.CreateDataPipeline();
-        var rtDataPipeline3 = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow1 = RtEntityCreator.CreateDataFlow();
+        var rtDataFlow2 = RtEntityCreator.CreateDataFlow();
+        var rtDataFlow3 = RtEntityCreator.CreateDataFlow();
         var rtPipeline1 = RtEntityCreator.CreatePipeline();
         var rtPipeline2 = RtEntityCreator.CreatePipeline();
         var rtPipeline3 = RtEntityCreator.CreatePipeline();
@@ -266,22 +266,22 @@ internal class UndeployDataPipelineAsyncTests : AdapterServiceTestsBase
             rtAdapter.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline1.RtId, rtPipeline1.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow1.RtId, rtPipeline1.ToRtEntityId(), false,
                     rtPipeline1.PipelineDefinition, []),
-                new PipelineConfigurationDto(rtDataPipeline2.RtId, rtPipeline2.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow2.RtId, rtPipeline2.ToRtEntityId(), false,
                     rtPipeline2.PipelineDefinition, []),
-                new PipelineConfigurationDto(rtDataPipeline3.RtId, rtPipeline3.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow3.RtId, rtPipeline3.ToRtEntityId(), false,
                     rtPipeline3.PipelineDefinition, [])
             ]
         ));
 
-        CommunicationRepository.GetPipelinesAsync(TenantId, rtDataPipeline2.RtId)
+        CommunicationRepository.GetPipelinesAsync(TenantId, rtDataFlow2.RtId)
             .Returns([rtPipeline2]);
         CommunicationRepository.GetAdapterByPipelineAsync(TenantId, rtPipeline2.ToRtEntityId())
             .Returns(rtAdapter);
 
         // Act
-        await AdapterService.UndeployDataPipelineAsync(TenantId, rtDataPipeline2.RtId);
+        await AdapterService.UndeployDataFlowAsync(TenantId, rtDataFlow2.RtId);
 
         // Assert
         using var _ = Assert.Multiple();

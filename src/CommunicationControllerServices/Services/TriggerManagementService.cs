@@ -19,15 +19,15 @@ internal class TriggerManagementService(
     : ITriggerManagementService
 {
     public async Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId,
-        OctoObjectId dataPipelineRtId, string? pipelineInput)
+        OctoObjectId dataFlowRtId, string? pipelineInput)
     {
-        logger.LogInformation("[{TenantId}] Executing pipeline '{DataPipelineRtId}'", tenantId, dataPipelineRtId);
+        logger.LogInformation("[{TenantId}] Executing pipeline '{DataFlowRtId}'", tenantId, dataFlowRtId);
 
         ExecuteMeshPipelineResponse? r;
         try
         {
             var address =
-                $"{QueueNames.ExecuteMeshPipelineCommand.ToLower()}-{tenantId.ToLower()}-data-pipeline-{dataPipelineRtId.ToString().ToLower()}";
+                $"{QueueNames.ExecuteMeshPipelineCommand.ToLower()}-{tenantId.ToLower()}-data-pipeline-{dataFlowRtId.ToString().ToLower()}";
 
             r = await executeMeshPipelineCommandClient.GetResponse<ExecuteMeshPipelineResponse>(address,
                 new ExecuteMeshPipelineRequest(tenantId, pipelineInput));
@@ -37,34 +37,34 @@ internal class TriggerManagementService(
                 if (r is { PipelineExecutionId: not null, ExecutionStartTime: not null })
                 {
                     logger.LogInformation(
-                        "[{TenantId}] Start execution of pipeline '{DataPipelineRtId}' (ExecutionId {PipelineExecutionId}) successful",
-                        tenantId, dataPipelineRtId, r.PipelineExecutionId);
+                        "[{TenantId}] Start execution of pipeline '{DataFlowRtId}' (ExecutionId {PipelineExecutionId}) successful",
+                        tenantId, dataFlowRtId, r.PipelineExecutionId);
 
                     await eventService.StoreInformationEventAsync(tenantId,
-                        $"Pipeline '{dataPipelineRtId}' execution started (ExecutionId: {r.PipelineExecutionId}).");
+                        $"Pipeline '{dataFlowRtId}' execution started (ExecutionId: {r.PipelineExecutionId}).");
 
                     return new PipelineExecutionDataDto
                                { Id = r.PipelineExecutionId.Value, DateTime = r.ExecutionStartTime.Value } ??
                            throw TriggerManagementServiceException.ExecutePipelineExecutionIdNull(tenantId,
-                               dataPipelineRtId);
+                               dataFlowRtId);
                 }
 
                 throw TriggerManagementServiceException.ExecutePipelineExecutionIdNull(tenantId,
-                    dataPipelineRtId);
+                    dataFlowRtId);
             }
         }
         catch (Exception e)
         {
             await eventService.StoreErrorEventAsync(tenantId,
-                $"Pipeline '{dataPipelineRtId}' execution failed: {e.Message}");
-            throw TriggerManagementServiceException.ExecutePipelineExecutionErrorFailed(tenantId, dataPipelineRtId, e);
+                $"Pipeline '{dataFlowRtId}' execution failed: {e.Message}");
+            throw TriggerManagementServiceException.ExecutePipelineExecutionErrorFailed(tenantId, dataFlowRtId, e);
         }
 
         await eventService.StoreErrorEventAsync(tenantId,
-            $"Pipeline '{dataPipelineRtId}' execution failed: {r.ErrorMessage}");
-        logger.LogError("[{TenantId}] Execution of pipeline '{DataPipelineRtId}' failed: {ErrorMessage}"
-            , tenantId, dataPipelineRtId, r.ErrorMessage);
-        throw TriggerManagementServiceException.ExecutePipelineFailed(tenantId, dataPipelineRtId, r.ErrorMessage);
+            $"Pipeline '{dataFlowRtId}' execution failed: {r.ErrorMessage}");
+        logger.LogError("[{TenantId}] Execution of pipeline '{DataFlowRtId}' failed: {ErrorMessage}"
+            , tenantId, dataFlowRtId, r.ErrorMessage);
+        throw TriggerManagementServiceException.ExecutePipelineFailed(tenantId, dataFlowRtId, r.ErrorMessage);
     }
 
     public async Task RemoveScheduleAsync(string tenantId)

@@ -1,5 +1,7 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using RtDataFlow = Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3.RtDataFlow;
+using SystemCommunicationV3 = Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.Runtime.Contracts;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
@@ -39,20 +41,20 @@ internal static class RtEntityCreator
     }
 
     /// <summary>
-    /// Creates an RtEntityId from an RtDataPipeline
+    /// Creates an RtEntityId from an RtDataFlow
     /// </summary>
-    public static RtEntityId ToRtEntityId(this RtDataPipeline entity)
+    public static RtEntityId ToRtEntityId(this RtDataFlow entity)
     {
         return new RtEntityId(entity.CkTypeId!, entity.RtId);
     }
 
-    public static RtDataPipeline CreateDataPipeline(string? id = null)
+    public static RtDataFlow CreateDataFlow(string? id = null)
     {
         id ??= OctoObjectId.GenerateNewId().ToString();
-        return new RtDataPipeline
+        return new RtDataFlow
         {
             RtId = new OctoObjectId(id),
-            CkTypeId = SystemCommunicationCkIds.RtCkDataPipelineTypeId
+            CkTypeId = SystemCommunicationV3.SystemCommunicationCkIds.RtCkDataFlowTypeId
         };
     }
 

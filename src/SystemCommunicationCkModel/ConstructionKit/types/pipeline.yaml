@@ -11,7 +11,7 @@ types:
         name: PipelineDefinition
     associations:
       - id: ${System}/ParentChild
-        targetCkTypeId: ${this}/DataPipeline
+        targetCkTypeId: ${this}/DataFlow
       - id: ${this}/Executes
         targetCkTypeId: ${this}/Adapter
       - id: ${this}/Uses

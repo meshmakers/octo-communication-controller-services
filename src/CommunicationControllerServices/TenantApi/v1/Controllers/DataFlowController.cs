@@ -12,15 +12,15 @@ using Microsoft.AspNetCore.Mvc;
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
 
 /// <summary>
-/// Manages data pipelines
+/// Manages data flows
 /// </summary>
 [Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
 [ApiController]
 [Route("{tenantId:tenantId}/v{version:apiVersion}/[controller]")]
 [ApiVersion("1.0")]
-public class DataPipelineController : ControllerBase
+public class DataFlowController : ControllerBase
 {
-    private readonly ILogger<DataPipelineController> _logger;
+    private readonly ILogger<DataFlowController> _logger;
     private readonly IAdapterService _adapterService;
 
     /// <summary>
@@ -28,16 +28,16 @@ public class DataPipelineController : ControllerBase
     /// </summary>
     /// <param name="logger">Logging object</param>
     /// <param name="adapterService"></param>
-    public DataPipelineController(ILogger<DataPipelineController> logger, IAdapterService adapterService)
+    public DataFlowController(ILogger<DataFlowController> logger, IAdapterService adapterService)
     {
         _logger = logger;
         _adapterService = adapterService;
     }
-    
+
     /// <summary>
     /// Updates the configuration at an adapter
     /// </summary>
-    /// <param name="dataPipelineRtId">The id of the data pipeline.</param>
+    /// <param name="dataFlowRtId">The id of the data flow.</param>
     /// <returns></returns>
     [HttpPost("deploy")]
     [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
@@ -45,17 +45,17 @@ public class DataPipelineController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> DeployDataPipeline([Required][FromQuery] OctoObjectId dataPipelineRtId)
+    public async Task<IActionResult> DeployDataFlow([Required][FromQuery] OctoObjectId dataFlowRtId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
         {
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
-        
+
         try
         {
-            await _adapterService.DeployDataPipelineAsync(tenantId, dataPipelineRtId);
+            await _adapterService.DeployDataFlowAsync(tenantId, dataFlowRtId);
             return NoContent();
         }
         catch (AdapterHubCallbackException e)
@@ -71,11 +71,11 @@ public class DataPipelineController : ControllerBase
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
         }
     }
-    
+
     /// <summary>
-    /// Undeploys a data pipeline from its adapters
+    /// Undeploys a data flow from its adapters
     /// </summary>
-    /// <param name="dataPipelineRtId">The id of the data pipeline</param>
+    /// <param name="dataFlowRtId">The id of the data flow</param>
     /// <returns></returns>
     [HttpPost("undeploy")]
     [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
@@ -83,17 +83,17 @@ public class DataPipelineController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> UndeployDataPipeline([Required][FromQuery] OctoObjectId dataPipelineRtId)
+    public async Task<IActionResult> UndeployDataFlow([Required][FromQuery] OctoObjectId dataFlowRtId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
         {
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
-        
+
         try
         {
-            await _adapterService.UndeployDataPipelineAsync(tenantId, dataPipelineRtId);
+            await _adapterService.UndeployDataFlowAsync(tenantId, dataFlowRtId);
             return NoContent();
         }
         catch (AdapterHubCallbackException e)

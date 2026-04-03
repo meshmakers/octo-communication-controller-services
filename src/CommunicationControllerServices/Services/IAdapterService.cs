@@ -126,20 +126,20 @@ public interface IAdapterService
     Task DeployPipelineAsync(string tenantId, RtEntityId adapterRtEntityId, RtEntityId pipelineRtEntityId, string? pipelineDefinition = null);
 
     /// <summary>
-    /// Deploys a data pipeline to its adapters
+    /// Deploys a data flow to its adapters
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="dataPipelineRtId">Runtime id of data pipeline</param>
+    /// <param name="dataFlowRtId">Runtime id of data flow</param>
     /// <returns></returns>
-    Task DeployDataPipelineAsync(string tenantId, OctoObjectId dataPipelineRtId);
-    
+    Task DeployDataFlowAsync(string tenantId, OctoObjectId dataFlowRtId);
+
     /// <summary>
-    /// Undeploys a data pipeline from its adapters
+    /// Undeploys a data flow from its adapters
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="dataPipelineRtId">Runtime id of data pipeline</param>
+    /// <param name="dataFlowRtId">Runtime id of data flow</param>
     /// <returns></returns>
-    Task UndeployDataPipelineAsync(string tenantId, OctoObjectId dataPipelineRtId);
+    Task UndeployDataFlowAsync(string tenantId, OctoObjectId dataFlowRtId);
 
     /// <summary>
     /// Updates the configuration state of an adapter

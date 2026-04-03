@@ -1,6 +1,7 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using RtDataFlow = Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3.RtDataFlow;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
@@ -138,12 +139,12 @@ public interface ICommunicationRepository
     Task<IReadOnlyCollection<RtPipeline>> GetPipelinesAsync(string tenantId, RtEntityId adapterRtEntityId);
 
     /// <summary>
-    /// Gets the pipelines of a data pipeline
+    /// Gets the pipelines of a data flow
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="dataPipelineRtId">Object identifier of data pipeline</param>
+    /// <param name="dataFlowRtId">Object identifier of data flow</param>
     /// <returns></returns>
-    Task<IReadOnlyCollection<RtPipeline>> GetPipelinesAsync(string tenantId, OctoObjectId dataPipelineRtId);
+    Task<IReadOnlyCollection<RtPipeline>> GetPipelinesAsync(string tenantId, OctoObjectId dataFlowRtId);
 
     /// <summary>
     /// Get the pipeline by id
@@ -154,12 +155,12 @@ public interface ICommunicationRepository
     Task<RtPipeline?> GetPipelineAsync(string tenantId, RtEntityId pipelineRtEntityId);
 
     /// <summary>
-    /// Get the data pipeline based on the child pipeline
+    /// Get the data flow based on the child pipeline
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="pipelineRtId">Object identifier of pipeline</param>
     /// <returns></returns>
-    Task<RtDataPipeline?> GetDataPipelineByPipelineAsync(string tenantId, OctoObjectId pipelineRtId);
+    Task<RtDataFlow?> GetDataFlowByPipelineAsync(string tenantId, OctoObjectId pipelineRtId);
 
     /// <summary>
     /// Get configurations of a pipeline

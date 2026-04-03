@@ -6,6 +6,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using RtDataFlow = Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3.RtDataFlow;
 using Meshmakers.Octo.Runtime.Contracts;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -71,7 +72,7 @@ internal abstract class AdapterServiceTestsBase
             });
     }
     
-    protected void InitAdapterConfiguration(RtAdapter rtAdapter, RtDataPipeline rtDataPipeline,
+    protected void InitAdapterConfiguration(RtAdapter rtAdapter, RtDataFlow rtDataFlow,
         List<RtPipeline> rtPipelines)
     {
         CommunicationRepository.GetAdapterAsync(TenantId, rtAdapter.ToRtEntityId())
@@ -80,8 +81,8 @@ internal abstract class AdapterServiceTestsBase
             .Returns(rtPipelines);
         foreach (var rtPipeline in rtPipelines)
         {
-            CommunicationRepository.GetDataPipelineByPipelineAsync(TenantId, rtPipeline.RtId)
-                .Returns(rtDataPipeline);
+            CommunicationRepository.GetDataFlowByPipelineAsync(TenantId, rtPipeline.RtId)
+                .Returns(rtDataFlow);
         }
     }
 }

@@ -7,6 +7,7 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using SystemCommunicationV3 = Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Runtime.Contracts;
 using Microsoft.Extensions.Options;
@@ -205,11 +206,11 @@ internal class AdapterService(
                     continue;
                 }
 
-                var dataPipeline =
-                    await communicationRepository.GetDataPipelineByPipelineAsync(tenantId, rtPipeline.RtId);
-                if (dataPipeline == null)
+                var dataFlow =
+                    await communicationRepository.GetDataFlowByPipelineAsync(tenantId, rtPipeline.RtId);
+                if (dataFlow == null)
                 {
-                    Logger.Warn("[{TenantId}] Data pipeline for pipeline '{PipelineRtId}' not found, skipping",
+                    Logger.Warn("[{TenantId}] Data flow for pipeline '{PipelineRtId}' not found, skipping",
                         tenantId, rtPipeline.ToRtEntityId());
                     continue;
                 }
@@ -218,7 +219,7 @@ internal class AdapterService(
                     rtPipeline.DeploymentState == RtDeploymentStateEnum.Deployed)
                 {
                     pipelineConfigurations.Add(
-                        await CreatePipelineConfigurationAsync(tenantId, dataPipeline.RtId, rtPipeline, false));
+                        await CreatePipelineConfigurationAsync(tenantId, dataFlow.RtId, rtPipeline, false));
                 }
             }
 
@@ -385,11 +386,11 @@ internal class AdapterService(
                     throw AdapterServiceException.PipelineNotFound(tenantId, pipelineRtEntityId);
                 }
 
-                var dataPipeline =
-                    await communicationRepository.GetDataPipelineByPipelineAsync(tenantId, pipeline.RtId);
-                if (dataPipeline == null)
+                var dataFlow =
+                    await communicationRepository.GetDataFlowByPipelineAsync(tenantId, pipeline.RtId);
+                if (dataFlow == null)
                 {
-                    throw AdapterServiceException.DataPipelineNotFound(tenantId, pipelineRtEntityId);
+                    throw AdapterServiceException.DataFlowNotFound(tenantId, pipelineRtEntityId);
                 }
 
                 var adapterConfiguration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId, true);
@@ -402,7 +403,7 @@ internal class AdapterService(
                 }
 
                 adapterConfiguration.Pipelines.Add(
-                    await CreatePipelineConfigurationAsync(tenantId, dataPipeline.RtId, pipeline, true,
+                    await CreatePipelineConfigurationAsync(tenantId, dataFlow.RtId, pipeline, true,
                         pipelineDefinition));
 
                 if (!adapterConfiguration.Equals(adapter.Configuration))
@@ -423,22 +424,22 @@ internal class AdapterService(
         throw AdapterServiceException.AdapterNotLoaded(tenantId, adapterRtEntityId);
     }
 
-    public async Task DeployDataPipelineAsync(string tenantId, OctoObjectId dataPipelineRtId)
+    public async Task DeployDataFlowAsync(string tenantId, OctoObjectId dataFlowRtId)
     {
         Logger.Info(
-            "[{TenantId}] DataPipelineRtId='{PipelineRtEntityId}' deploy edge and mesh pipeline to adapter",
-            tenantId, dataPipelineRtId);
+            "[{TenantId}] DataFlowRtId='{DataFlowRtId}' deploy edge and mesh pipeline to adapter",
+            tenantId, dataFlowRtId);
 
         await eventService.StoreInformationEventAsync(tenantId,
-            $"Deploying data pipeline '{dataPipelineRtId}' to adapters.");
+            $"Deploying data flow '{dataFlowRtId}' to adapters.");
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
             var adapterConfigurations = new Dictionary<RtEntityId, AdapterConfigurationDto>();
-            var rtDeployPipelines = await communicationRepository.GetPipelinesAsync(tenantId, dataPipelineRtId);
+            var rtDeployPipelines = await communicationRepository.GetPipelinesAsync(tenantId, dataFlowRtId);
             if (!rtDeployPipelines.Any())
             {
-                throw AdapterServiceException.DataPipelineHasNoPipelines(tenantId, dataPipelineRtId);
+                throw AdapterServiceException.DataFlowHasNoPipelines(tenantId, dataFlowRtId);
             }
 
             foreach (var rtDeployPipeline in rtDeployPipelines)
@@ -464,7 +465,7 @@ internal class AdapterService(
                     foreach (var deployedPipelineConfigurationDto in adapter.Configuration.Pipelines)
                     {
                         // If the pipeline is already deployed, we remove it so the new version can be added
-                        if (deployedPipelineConfigurationDto.DataPipelineRtId == dataPipelineRtId)
+                        if (deployedPipelineConfigurationDto.DataFlowRtId == dataFlowRtId)
                         {
                             adapterConfig.Pipelines.Remove(deployedPipelineConfigurationDto);
                         }
@@ -475,7 +476,7 @@ internal class AdapterService(
                     }
 
                     adapterConfig.Pipelines.Add(
-                        await CreatePipelineConfigurationAsync(tenantId, dataPipelineRtId, rtDeployPipeline,
+                        await CreatePipelineConfigurationAsync(tenantId, dataFlowRtId, rtDeployPipeline,
                             false));
                 }
                 else
@@ -492,24 +493,24 @@ internal class AdapterService(
         throw AdapterServiceException.TenantNotEnabled(tenantId);
     }
 
-    public async Task UndeployDataPipelineAsync(string tenantId, OctoObjectId dataPipelineRtId)
+    public async Task UndeployDataFlowAsync(string tenantId, OctoObjectId dataFlowRtId)
     {
         Logger.Info(
-            "[{TenantId}] DataPipelineRtId='{PipelineRtEntityId}' undeploy edge and mesh pipeline from adapter",
-            tenantId, dataPipelineRtId);
+            "[{TenantId}] DataFlowRtId='{DataFlowRtId}' undeploy edge and mesh pipeline from adapter",
+            tenantId, dataFlowRtId);
 
         await eventService.StoreInformationEventAsync(tenantId,
-            $"Undeploying data pipeline '{dataPipelineRtId}' from adapters.",
-            new RtEntityId(SystemCommunicationCkIds.RtCkDataPipelineTriggerTypeId, dataPipelineRtId));
+            $"Undeploying data flow '{dataFlowRtId}' from adapters.",
+            new RtEntityId(SystemCommunicationV3.SystemCommunicationCkIds.RtCkDataFlowTypeId, dataFlowRtId));
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
             var adapterConfigurations = new Dictionary<RtEntityId, AdapterConfigurationDto>();
 
-            var pipelines = await communicationRepository.GetPipelinesAsync(tenantId, dataPipelineRtId);
+            var pipelines = await communicationRepository.GetPipelinesAsync(tenantId, dataFlowRtId);
             if (!pipelines.Any())
             {
-                throw AdapterServiceException.DataPipelineHasNoPipelines(tenantId, dataPipelineRtId);
+                throw AdapterServiceException.DataFlowHasNoPipelines(tenantId, dataFlowRtId);
             }
 
             foreach (var rtUndeployPipeline in pipelines)
@@ -537,7 +538,7 @@ internal class AdapterService(
 
                     foreach (var deployedPipelineConfigurationDto in adapter.Configuration.Pipelines)
                     {
-                        if (deployedPipelineConfigurationDto.DataPipelineRtId != dataPipelineRtId &&
+                        if (deployedPipelineConfigurationDto.DataFlowRtId != dataFlowRtId &&
                             !adapterConfig.Pipelines.Contains(deployedPipelineConfigurationDto))
                         {
                             adapterConfig.Pipelines.Add(deployedPipelineConfigurationDto);
@@ -709,7 +710,7 @@ internal class AdapterService(
     }
 
     private async Task<PipelineConfigurationDto> CreatePipelineConfigurationAsync(string tenantId,
-        OctoObjectId dataPipelineRtId, RtPipeline rtPipeline, bool isDebuggingEnabled,
+        OctoObjectId dataFlowRtId, RtPipeline rtPipeline, bool isDebuggingEnabled,
         string? pipelineDefinition = null)
     {
         var pipelineConfigurations = await communicationRepository
@@ -721,7 +722,7 @@ internal class AdapterService(
             c.Serialize()));
 
         return new PipelineConfigurationDto(
-            dataPipelineRtId,
+            dataFlowRtId,
             rtPipeline.ToRtEntityId(),
             isDebuggingEnabled,
             pipelineDefinition ?? rtPipeline.PipelineDefinition,
