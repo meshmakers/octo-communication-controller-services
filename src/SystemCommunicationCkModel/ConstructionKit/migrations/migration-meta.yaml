@@ -1,5 +1,5 @@
 $schema: https://schemas.meshmakers.cloud/ck-migration-meta.schema.json
-ckModelId: System.Communication-3.1.0
+ckModelId: System.Communication-3.1.1
 migrations:
   - fromVersion: "3.0.1"
     toVersion: "3.0.2"
@@ -15,4 +15,9 @@ migrations:
     toVersion: "3.1.0"
     scriptPath: 3.0.3-to-3.1.0.yaml
     description: "Merge EdgeAdapter/MeshAdapter into Adapter, EdgePipeline/MeshPipeline into Pipeline"
+    breaking: true
+  - fromVersion: "3.1.0"
+    toVersion: "3.1.1"
+    scriptPath: 3.1.0-to-3.1.1.yaml
+    description: "Merge EdgeAdapter/MeshAdapter into Adapter, EdgePipeline/MeshPipeline into Pipeline (retry after engine fix)"
     breaking: true
