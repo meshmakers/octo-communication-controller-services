@@ -34,7 +34,7 @@ public record PipelineStatusDto
     public required RtEntityId PipelineRtEntityId { get; init; }
 
     /// <summary>
-    /// CK type of the pipeline (e.g. "System.Communication/MeshPipeline" or "System.Communication/EdgePipeline")
+    /// CK type of the pipeline (e.g. "System.Communication/Pipeline")
     /// </summary>
     public required string PipelineType { get; init; }
 

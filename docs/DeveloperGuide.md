@@ -153,7 +153,7 @@ For adapter connections, additional headers are required:
 | Header | Description | Example |
 |--------|-------------|---------|
 | `adapter-rtId` | MongoDB ObjectId of the adapter | `6789a00000000000000090a2` |
-| `adapter-ckTypeId` | Construction Kit Type ID | `System.Communication/EdgeAdapter` |
+| `adapter-ckTypeId` | Construction Kit Type ID | `System.Communication/Adapter` |
 
 For pool operator connections:
 
@@ -245,7 +245,7 @@ GET /{tenantId}/v1/adapter
 [
   {
     "rtId": "6789a00000000000000090a2",
-    "ckTypeId": "System.Communication/EdgeAdapter",
+    "ckTypeId": "System.Communication/Adapter",
     "communicationState": "Online",
     "configurationState": "Configured",
     "configuration": "..."
@@ -266,17 +266,17 @@ GET /{tenantId}/v1/adapter/{adapterRtEntityId}?adapterRtEntityId={adapterRtEntit
 **Parameters**:
 | Name | Type | Location | Required | Description |
 |------|------|----------|----------|-------------|
-| `adapterRtEntityId` | RtEntityId | query | Yes | Full adapter entity ID (e.g., `System.Communication/EdgeAdapter@6789a00000000000000090a2`) |
+| `adapterRtEntityId` | RtEntityId | query | Yes | Full adapter entity ID (e.g., `System.Communication/Adapter@6789a00000000000000090a2`) |
 
 **Response**: `200 OK`
 ```json
 {
-  "adapterRtEntityId": "System.Communication/EdgeAdapter@6789a00000000000000090a2",
+  "adapterRtEntityId": "System.Communication/Adapter@6789a00000000000000090a2",
   "configuration": "...",
   "pipelines": [
     {
       "dataPipelineRtId": "6789a00000000000000090b1",
-      "pipelineRtEntityId": "System.Communication/EdgePipeline@6789a00000000000000090b2",
+      "pipelineRtEntityId": "System.Communication/Pipeline@6789a00000000000000090b2",
       "isDebuggingEnabled": false,
       "pipelineDefinition": "...",
       "configurations": []
@@ -378,7 +378,7 @@ GET /{tenantId}/v1/pipeline/status?pipelineRtEntityId={pipelineRtEntityId}
 **Response**: `200 OK`
 ```json
 {
-  "rtEntityId": "System.Communication/EdgePipeline@6789a00000000000000090b2",
+  "rtEntityId": "System.Communication/Pipeline@6789a00000000000000090b2",
   "state": "Success",
   "statusMessage": null
 }
@@ -630,7 +630,7 @@ POST /{tenantId}/v1/datapipelinetrigger/undeploy
 | Header | Description |
 |--------|-------------|
 | `adapter-rtId` | MongoDB ObjectId of the adapter |
-| `adapter-ckTypeId` | CK Type ID (e.g., `System.Communication/EdgeAdapter`) |
+| `adapter-ckTypeId` | CK Type ID (e.g., `System.Communication/Adapter`) |
 
 #### Client-to-Server Methods
 
@@ -644,7 +644,7 @@ registerAdapterAsync(adapterRtEntityId: RtEntityId): Promise<AdapterConfiguratio
 
 // Example
 const config = await connection.invoke("RegisterAdapterAsync",
-    "System.Communication/EdgeAdapter@6789a00000000000000090a2");
+    "System.Communication/Adapter@6789a00000000000000090a2");
 ```
 
 **Returns**: `AdapterConfigurationDto` containing adapter configuration and pipelines.
@@ -671,7 +671,7 @@ sendDeploymentUpdateResultAsync(
 
 // Example
 await connection.invoke("SendDeploymentUpdateResultAsync",
-    "System.Communication/EdgeAdapter@6789a00000000000000090a2",
+    "System.Communication/Adapter@6789a00000000000000090a2",
     {
         isSuccess: true,
         errorMessages: []
@@ -834,9 +834,9 @@ A composite identifier consisting of a CK Type ID and a MongoDB ObjectId.
 **Format**: `{CkTypeId}@{RtId}`
 
 **Examples**:
-- `System.Communication/EdgeAdapter@6789a00000000000000090a2`
-- `System.Communication/MeshAdapter@6789a00000000000000090a3`
-- `System.Communication/EdgePipeline@6789a00000000000000090b1`
+- `System.Communication/Adapter@6789a00000000000000090a2`
+- `System.Communication/Adapter@6789a00000000000000090a3`
+- `System.Communication/Pipeline@6789a00000000000000090b1`
 
 ### OctoObjectId
 
@@ -848,10 +848,8 @@ A 24-character hexadecimal MongoDB ObjectId.
 
 | Type | CK Type ID |
 |------|------------|
-| Edge Adapter | `System.Communication/EdgeAdapter` |
-| Mesh Adapter | `System.Communication/MeshAdapter` |
-| Edge Pipeline | `System.Communication/EdgePipeline` |
-| Mesh Pipeline | `System.Communication/MeshPipeline` |
+| Adapter | `System.Communication/Adapter` |
+| Pipeline | `System.Communication/Pipeline` |
 | Pool | `System.Communication/Pool` |
 | Data Pipeline | `System.Communication/DataPipeline` |
 
@@ -1264,7 +1262,7 @@ connection.on('reconnected', (connectionId) => {
 **Solution**:
 - Verify adapter is connected (check logs for "adapter online" message)
 - Ensure `adapter-rtId` and `adapter-ckTypeId` headers match the database entry
-- Check that the full `RtEntityId` matches (e.g., `MeshAdapter@...` vs `EdgeAdapter@...`)
+- Check that the full `RtEntityId` matches (e.g., `Adapter@...`)
 
 #### "Tenant not enabled" Error
 
