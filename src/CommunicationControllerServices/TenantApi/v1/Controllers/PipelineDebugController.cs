@@ -72,7 +72,11 @@ public class PipelineDebugController : ControllerBase
                 var result = persistedExecutions.Select(e => new PipelineExecutionDataDto
                 {
                     Id = Guid.TryParse(e.ExecutionId, out var id) ? id : Guid.Empty,
-                    DateTime = e.StartedAt
+                    DateTime = e.StartedAt,
+                    Status = e.Status.ToString(),
+                    DurationMs = e.DurationMs,
+                    ErrorMessage = e.ErrorMessage,
+                    HasDebugData = false
                 });
                 return Ok(result);
             }
@@ -125,7 +129,11 @@ public class PipelineDebugController : ControllerBase
                     return Ok(new PipelineExecutionDataDto
                     {
                         Id = Guid.TryParse(latest.ExecutionId, out var id) ? id : Guid.Empty,
-                        DateTime = latest.StartedAt
+                        DateTime = latest.StartedAt,
+                        Status = latest.Status.ToString(),
+                        DurationMs = latest.DurationMs,
+                        ErrorMessage = latest.ErrorMessage,
+                        HasDebugData = false
                     });
                 }
                 return NotFound(new ErrorResponse { ErrorMessage = "No executions found" });

@@ -124,7 +124,7 @@ internal class PipelineDebugService : IPipelineDebugService
         public IEnumerable<PipelineExecutionDataDto> GetPipelineExecutionIds()
         {
             return _debugInfo.Values.Select(p => new PipelineExecutionDataDto
-                { Id = p.Id, DateTime = p.DateTime });
+                { Id = p.Id, DateTime = p.DateTime, HasDebugData = true });
         }
 
         public PipelineExecutionDataDto? GetLatestPipelineExecutionId()
@@ -139,7 +139,8 @@ internal class PipelineDebugService : IPipelineDebugService
             return new PipelineExecutionDataDto
             {
                 Id = latest.Key,
-                DateTime = latest.Value.DateTime
+                DateTime = latest.Value.DateTime,
+                HasDebugData = true
             };
         }
     }
