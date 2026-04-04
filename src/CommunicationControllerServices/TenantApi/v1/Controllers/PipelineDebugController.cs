@@ -1,6 +1,8 @@
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using IdentityModel;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -20,16 +22,20 @@ public class PipelineDebugController : ControllerBase
 {
     private readonly ILogger<PipelineDebugController> _logger;
     private readonly IPipelineDebugService _pipelineDebugService;
+    private readonly ICommunicationRepository _communicationRepository;
 
     /// <summary>
     /// Constructor
     /// </summary>
     /// <param name="logger">Logging object</param>
     /// <param name="pipelineDebugService"></param>
-    public PipelineDebugController(ILogger<PipelineDebugController> logger, IPipelineDebugService pipelineDebugService)
+    /// <param name="communicationRepository"></param>
+    public PipelineDebugController(ILogger<PipelineDebugController> logger, IPipelineDebugService pipelineDebugService,
+        ICommunicationRepository communicationRepository)
     {
         _logger = logger;
         _pipelineDebugService = pipelineDebugService;
+        _communicationRepository = communicationRepository;
     }
 
     /// <summary>
@@ -53,14 +59,28 @@ public class PipelineDebugController : ControllerBase
 
         try
         {
-            var guids = await _pipelineDebugService.GetPipelineExecutionsAsync(tenantId, pipelineRtEntityId);
-
-            return Ok(guids);
+            var executions = await _pipelineDebugService.GetPipelineExecutionsAsync(tenantId, pipelineRtEntityId);
+            return Ok(executions);
         }
-        catch (PipelineDebugInformationNotFoundException e)
+        catch (PipelineDebugInformationNotFoundException)
         {
-            _logger.LogError(e, "Pipeline debug information not found");
-            return NotFound(new ErrorResponse { ErrorMessage = e.Message});
+            // Fallback: query persisted execution history from MongoDB
+            try
+            {
+                var persistedExecutions = await _communicationRepository.GetPipelineExecutionsAsync(
+                    tenantId, pipelineRtEntityId, null, null, 0, 20);
+                var result = persistedExecutions.Select(e => new PipelineExecutionDataDto
+                {
+                    Id = Guid.TryParse(e.ExecutionId, out var id) ? id : Guid.Empty,
+                    DateTime = e.StartedAt
+                });
+                return Ok(result);
+            }
+            catch (Exception fallbackEx)
+            {
+                _logger.LogDebug(fallbackEx, "No execution history found for pipeline");
+                return Ok(Array.Empty<PipelineExecutionDataDto>());
+            }
         }
         catch (Exception e)
         {
