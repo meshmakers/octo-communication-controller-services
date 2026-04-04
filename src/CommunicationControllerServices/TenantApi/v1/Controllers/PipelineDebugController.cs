@@ -109,13 +109,31 @@ public class PipelineDebugController : ControllerBase
 
         try
         {
-            var guids = await _pipelineDebugService.GetLatestPipelineExecutionAsync(tenantId, pipelineRtEntityId);
-            return Ok(guids);
+            var execution = await _pipelineDebugService.GetLatestPipelineExecutionAsync(tenantId, pipelineRtEntityId);
+            return Ok(execution);
         }
-        catch (PipelineDebugInformationNotFoundException e)
+        catch (PipelineDebugInformationNotFoundException)
         {
-            _logger.LogError(e, "Pipeline debug information not found");
-            return NotFound(new ErrorResponse { ErrorMessage = e.Message});
+            // Fallback: get latest execution from MongoDB
+            try
+            {
+                var persistedExecutions = await _communicationRepository.GetPipelineExecutionsAsync(
+                    tenantId, pipelineRtEntityId, null, null, 0, 1);
+                var latest = persistedExecutions.FirstOrDefault();
+                if (latest != null)
+                {
+                    return Ok(new PipelineExecutionDataDto
+                    {
+                        Id = Guid.TryParse(latest.ExecutionId, out var id) ? id : Guid.Empty,
+                        DateTime = latest.StartedAt
+                    });
+                }
+                return NotFound(new ErrorResponse { ErrorMessage = "No executions found" });
+            }
+            catch
+            {
+                return NotFound(new ErrorResponse { ErrorMessage = "No executions found" });
+            }
         }
         catch (Exception e)
         {
@@ -152,10 +170,11 @@ public class PipelineDebugController : ControllerBase
 
             return Ok(debugPointNodes);
         }
-        catch (PipelineDebugInformationNotFoundException e)
+        catch (PipelineDebugInformationNotFoundException)
         {
-            _logger.LogError(e, "Pipeline debug information not found");
-            return NotFound(new ErrorResponse { ErrorMessage = e.Message});
+            // No debug points cached for this execution — return empty list
+            // This happens when execution was recorded in MongoDB but had no debug mode enabled
+            return Ok(Array.Empty<DebugPointNode>());
         }
         catch (Exception e)
         {
