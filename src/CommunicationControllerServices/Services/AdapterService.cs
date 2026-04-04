@@ -205,6 +205,12 @@ internal class AdapterService(
                     continue;
                 }
 
+                // Skip disabled pipelines
+                if (rtPipeline.Enabled == false)
+                {
+                    continue;
+                }
+
                 var dataFlow =
                     await communicationRepository.GetDataFlowByPipelineAsync(tenantId, rtPipeline.RtId);
                 if (dataFlow == null)
@@ -414,6 +420,10 @@ internal class AdapterService(
                     }
 
                     await SendConfigurationAndWaitForResultAsync(tenantId, adapterRtEntityId, adapterConfiguration);
+
+                    // Update the cached configuration so UpdateConfigurationStateAsync
+                    // sees the correct pipelines for deployment state updates
+                    adapter.UpdateConfiguration(tenantId, adapterConfiguration);
                 }
 
                 return;
@@ -443,6 +453,12 @@ internal class AdapterService(
 
             foreach (var rtDeployPipeline in rtDeployPipelines)
             {
+                // Skip disabled pipelines
+                if (rtDeployPipeline.Enabled == false)
+                {
+                    continue;
+                }
+
                 var rtAdapter = await communicationRepository
                     .GetAdapterByPipelineAsync(tenantId, rtDeployPipeline.ToRtEntityId());
 
