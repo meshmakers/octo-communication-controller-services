@@ -398,7 +398,20 @@ internal class AdapterService(
                     throw AdapterServiceException.DataFlowNotFound(tenantId, pipelineRtEntityId);
                 }
 
-                var adapterConfiguration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId, true);
+                // Start from the cached adapter configuration to preserve debug state
+                // of already-deployed pipelines. Fall back to DB if no cache exists.
+                AdapterConfigurationDto adapterConfiguration;
+                if (adapter.Configuration.Pipelines.Count > 0)
+                {
+                    adapterConfiguration = new AdapterConfigurationDto(
+                        adapter.Configuration.AdapterRtEntityId,
+                        adapter.Configuration.AdapterConfiguration,
+                        new List<PipelineConfigurationDto>(adapter.Configuration.Pipelines));
+                }
+                else
+                {
+                    adapterConfiguration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId, true);
+                }
 
                 var deployedPipeline =
                     adapterConfiguration.Pipelines.FirstOrDefault(p => p.PipelineRtEntityId == pipelineRtEntityId);
