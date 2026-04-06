@@ -32,7 +32,7 @@ internal class TriggerManagementService(
         try
         {
             var address =
-                $"{QueueNames.ExecuteMeshPipelineCommand.ToLower()}-{tenantId.ToLower()}-data-pipeline-{dataFlowRtId.ToString().ToLower()}";
+                $"{QueueNames.ExecuteMeshPipelineCommand.ToLower()}-{tenantId.ToLower()}-data-flow-{dataFlowRtId.ToString().ToLower()}";
 
             r = await executeMeshPipelineCommandClient.GetResponse<ExecuteMeshPipelineResponse>(address,
                 new ExecuteMeshPipelineRequest(tenantId, pipelineInput));
