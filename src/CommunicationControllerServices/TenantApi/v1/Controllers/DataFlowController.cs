@@ -1,9 +1,8 @@
 using System.ComponentModel.DataAnnotations;
-using System.Text;
 using Asp.Versioning;
 using IdentityModel;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
@@ -74,6 +73,7 @@ public class DataFlowController : ControllerBase
         }
         catch (Exception e)
         {
+            _logger.LogError(e, "Failed to deploy data flow '{DataFlowRtId}'", dataFlowRtId);
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
         }
     }
@@ -112,6 +112,7 @@ public class DataFlowController : ControllerBase
         }
         catch (Exception e)
         {
+            _logger.LogError(e, "Failed to undeploy data flow '{DataFlowRtId}'", dataFlowRtId);
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
         }
     }
@@ -145,6 +146,7 @@ public class DataFlowController : ControllerBase
         }
         catch (Exception e)
         {
+            _logger.LogError(e, "Failed to get data flow status for '{DataFlowRtId}'", dataFlowRtId);
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
         }
     }

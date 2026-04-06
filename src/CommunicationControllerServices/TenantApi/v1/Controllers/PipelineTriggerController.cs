@@ -55,10 +55,11 @@ public class PipelineTriggerController : ControllerBase
         }
         catch (Exception e)
         {
+            _logger.LogError(e, "Failed to deploy triggers for tenant");
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
         }
     }
-    
+
     /// <summary>
     /// Undeploy the trigger for the tenant
     /// </summary>
@@ -83,6 +84,7 @@ public class PipelineTriggerController : ControllerBase
         }
         catch (Exception e)
         {
+            _logger.LogError(e, "Failed to undeploy triggers for tenant");
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
         }
     }

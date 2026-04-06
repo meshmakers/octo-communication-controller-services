@@ -86,8 +86,9 @@ public class PipelineDebugController : ControllerBase
                     HasDebugData = false
                 });
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogWarning(ex, "Failed to load persisted executions from database for pipeline debug history");
                 persistedExecutions = [];
             }
 
@@ -152,8 +153,9 @@ public class PipelineDebugController : ControllerBase
                 }
                 return NotFound(new ErrorResponse { ErrorMessage = "No executions found" });
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogWarning(ex, "Failed to load latest execution from database for debug fallback");
                 return NotFound(new ErrorResponse { ErrorMessage = "No executions found" });
             }
         }

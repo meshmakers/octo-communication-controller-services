@@ -696,20 +696,20 @@ internal class PipelineExecutionService(
             // Get all child pipelines of the data flow
             var pipelines = await communicationRepository.GetPipelinesAsync(tenantId, dataFlowRtId);
 
-            var pipelineStatuses = new List<PipelineStatusDto>();
-
-            foreach (var pipeline in pipelines)
+            // Fetch execution and statistics data for all pipelines in parallel
+            var pipelineStatusTasks = pipelines.Select(async pipeline =>
             {
                 var pipelineRtEntityId = new RtEntityId(pipeline.CkTypeId!, pipeline.RtId);
 
-                // Get the most recent execution to determine current state
-                var recentExecutions = await communicationRepository.GetPipelineExecutionsAsync(
+                var recentExecutionsTask = communicationRepository.GetPipelineExecutionsAsync(
                     tenantId, pipelineRtEntityId, null, null, 1);
-
-                // Get statistics for summary
-                var statistics = await communicationRepository.GetPipelineStatisticsAsync(
+                var statisticsTask = communicationRepository.GetPipelineStatisticsAsync(
                     tenantId, pipelineRtEntityId);
 
+                await Task.WhenAll(recentExecutionsTask, statisticsTask);
+
+                var recentExecutions = await recentExecutionsTask;
+                var statistics = await statisticsTask;
                 var pipelineState = DeterminePipelineState(recentExecutions);
 
                 var statisticsSummary = statistics != null
@@ -721,15 +721,17 @@ internal class PipelineExecutionService(
                     }
                     : null;
 
-                pipelineStatuses.Add(new PipelineStatusDto
+                return new PipelineStatusDto
                 {
                     PipelineRtEntityId = pipelineRtEntityId,
                     PipelineType = pipeline.CkTypeId?.ToString() ?? "Unknown",
                     State = pipelineState,
                     LastExecutionAt = statistics?.LastExecutionAt,
                     Statistics = statisticsSummary
-                });
-            }
+                };
+            });
+
+            var pipelineStatuses = (await Task.WhenAll(pipelineStatusTasks)).ToList();
 
             var aggregatedState = AggregateDataFlowState(pipelineStatuses);
 

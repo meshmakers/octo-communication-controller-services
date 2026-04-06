@@ -617,7 +617,7 @@ internal class CommunicationRepository : ICommunicationRepository
             queryOptions = RtEntityQueryOptions.Create();
             var a = await tenantRepository.GetRtAssociationTargetsAsync<RtPipelineTrigger, RtPipeline>(session,
                 r.Items.Select(x => x.RtId).ToList(),
-                SystemCommunicationCkIds.RtCkTriggersRoleId, GraphDirections.Inbound, null, queryOptions);
+                SystemCommunicationCkIds.RtCkTriggersRoleId, GraphDirections.Outbound, null, queryOptions);
 
             Dictionary<RtPipelineTrigger, IList<RtPipeline>> list = new();
             foreach (var pipelineTrigger in r.Items)

@@ -23,14 +23,14 @@ internal class TriggerManagementService(
     {
         logger.LogInformation("[{TenantId}] Executing pipeline '{PipelineRtId}'", tenantId, pipelineRtId);
 
-        // Resolve the DataFlow that contains this pipeline — the FromExecutePipelineCommandNode
-        // listens on a queue keyed by DataFlowRtId, not PipelineRtId
-        var dataFlow = await communicationRepository.GetDataFlowByPipelineAsync(tenantId, pipelineRtId);
-        var dataFlowRtId = dataFlow?.RtId ?? pipelineRtId;
-
         ExecuteMeshPipelineResponse? r;
         try
         {
+            // Resolve the DataFlow that contains this pipeline — the FromExecutePipelineCommandNode
+            // listens on a queue keyed by DataFlowRtId, not PipelineRtId
+            var dataFlow = await communicationRepository.GetDataFlowByPipelineAsync(tenantId, pipelineRtId);
+            var dataFlowRtId = dataFlow?.RtId ?? pipelineRtId;
+
             var address =
                 $"{QueueNames.ExecuteMeshPipelineCommand.ToLower()}-{tenantId.ToLower()}-data-flow-{dataFlowRtId.ToString().ToLower()}";
 
@@ -42,7 +42,7 @@ internal class TriggerManagementService(
                 if (r is { PipelineExecutionId: not null, ExecutionStartTime: not null })
                 {
                     logger.LogInformation(
-                        "[{TenantId}] Start execution of pipeline '{DataFlowRtId}' (ExecutionId {PipelineExecutionId}) successful",
+                        "[{TenantId}] Start execution of pipeline '{PipelineRtId}' (ExecutionId {PipelineExecutionId}) successful",
                         tenantId, pipelineRtId, r.PipelineExecutionId);
 
                     await eventService.StoreInformationEventAsync(tenantId,
@@ -67,7 +67,7 @@ internal class TriggerManagementService(
 
         await eventService.StoreErrorEventAsync(tenantId,
             $"Pipeline '{pipelineRtId}' execution failed: {r.ErrorMessage}");
-        logger.LogError("[{TenantId}] Execution of pipeline '{DataFlowRtId}' failed: {ErrorMessage}"
+        logger.LogError("[{TenantId}] Execution of pipeline '{PipelineRtId}' failed: {ErrorMessage}"
             , tenantId, pipelineRtId, r.ErrorMessage);
         throw TriggerManagementServiceException.ExecutePipelineFailed(tenantId, pipelineRtId, r.ErrorMessage);
     }

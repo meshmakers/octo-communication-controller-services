@@ -79,7 +79,7 @@ internal class AdapterServiceException : Exception
     
     public static Exception DataFlowHasNoPipelines(string tenantId, OctoObjectId dataFlowRtId)
     {
-        return new AdapterServiceException($"[{tenantId}] Data flow '{dataFlowRtId}' has no edge or mesh pipeline assigned.");
+        return new AdapterServiceException($"[{tenantId}] Data flow '{dataFlowRtId}' has no pipelines assigned.");
     }
 
     public static Exception PipelineAdapterNotAssigned(string tenantId, RtEntityId pipelineRtEntityId)

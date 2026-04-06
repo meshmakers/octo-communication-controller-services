@@ -275,7 +275,7 @@ GET /{tenantId}/v1/adapter/{adapterRtEntityId}?adapterRtEntityId={adapterRtEntit
   "configuration": "...",
   "pipelines": [
     {
-      "dataPipelineRtId": "6789a00000000000000090b1",
+      "dataFlowRtId": "6789a00000000000000090b1",
       "pipelineRtEntityId": "System.Communication/Pipeline@6789a00000000000000090b2",
       "isDebuggingEnabled": false,
       "pipelineDefinition": "...",
@@ -318,7 +318,7 @@ POST /{tenantId}/v1/adapter/deployUpdate?adapterRtEntityId={adapterRtEntityId}
 Deploys a data pipeline to all associated adapters.
 
 ```http
-POST /{tenantId}/v1/datapipeline/deploy?dataPipelineRtId={dataPipelineRtId}
+POST /{tenantId}/v1/datapipeline/deploy?dataFlowRtId={dataFlowRtId}
 ```
 
 **Authorization**: `TenantCommunicationApiReadWritePolicy`
@@ -326,7 +326,7 @@ POST /{tenantId}/v1/datapipeline/deploy?dataPipelineRtId={dataPipelineRtId}
 **Parameters**:
 | Name | Type | Location | Required | Description |
 |------|------|----------|----------|-------------|
-| `dataPipelineRtId` | OctoObjectId | query | Yes | MongoDB ObjectId of the data pipeline |
+| `dataFlowRtId` | OctoObjectId | query | Yes | MongoDB ObjectId of the data pipeline |
 
 **Responses**:
 | Status | Description |
@@ -342,7 +342,7 @@ POST /{tenantId}/v1/datapipeline/deploy?dataPipelineRtId={dataPipelineRtId}
 Removes a data pipeline from all associated adapters.
 
 ```http
-POST /{tenantId}/v1/datapipeline/undeploy?dataPipelineRtId={dataPipelineRtId}
+POST /{tenantId}/v1/datapipeline/undeploy?dataFlowRtId={dataFlowRtId}
 ```
 
 **Authorization**: `TenantCommunicationApiReadWritePolicy`
@@ -350,7 +350,7 @@ POST /{tenantId}/v1/datapipeline/undeploy?dataPipelineRtId={dataPipelineRtId}
 **Parameters**:
 | Name | Type | Location | Required | Description |
 |------|------|----------|----------|-------------|
-| `dataPipelineRtId` | OctoObjectId | query | Yes | MongoDB ObjectId of the data pipeline |
+| `dataFlowRtId` | OctoObjectId | query | Yes | MongoDB ObjectId of the data pipeline |
 
 **Responses**:
 | Status | Description |
@@ -421,7 +421,7 @@ Content-Type: text/plain
 Manually triggers a pipeline execution.
 
 ```http
-POST /{tenantId}/v1/pipeline/execute?dataPipelineRtId={dataPipelineRtId}
+POST /{tenantId}/v1/pipeline/execute?dataFlowRtId={dataFlowRtId}
 Content-Type: text/plain
 
 {optional_input_json}
@@ -432,7 +432,7 @@ Content-Type: text/plain
 **Parameters**:
 | Name | Type | Location | Required | Description |
 |------|------|----------|----------|-------------|
-| `dataPipelineRtId` | OctoObjectId | query | Yes | Data pipeline MongoDB ObjectId |
+| `dataFlowRtId` | OctoObjectId | query | Yes | Data pipeline MongoDB ObjectId |
 
 **Body**: Optional JSON input for the pipeline
 
@@ -851,7 +851,7 @@ A 24-character hexadecimal MongoDB ObjectId.
 | Adapter | `System.Communication/Adapter` |
 | Pipeline | `System.Communication/Pipeline` |
 | Pool | `System.Communication/Pool` |
-| Data Pipeline | `System.Communication/DataPipeline` |
+| Data Flow | `System.Communication/DataFlow` |
 
 ### DTOs
 
@@ -869,7 +869,7 @@ interface AdapterConfigurationDto {
 
 ```typescript
 interface PipelineConfigurationDto {
-    dataPipelineRtId: OctoObjectId;
+    dataFlowRtId: OctoObjectId;
     pipelineRtEntityId: RtEntityId;
     isDebuggingEnabled: boolean;
     pipelineDefinition: string;
@@ -1101,7 +1101,7 @@ interface AdapterConfigurationDto {
 }
 
 interface PipelineConfigurationDto {
-    dataPipelineRtId: string;
+    dataFlowRtId: string;
     pipelineRtEntityId: string;
     isDebuggingEnabled: boolean;
     pipelineDefinition: string;
