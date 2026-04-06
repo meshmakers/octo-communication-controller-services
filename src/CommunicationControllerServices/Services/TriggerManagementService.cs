@@ -23,11 +23,16 @@ internal class TriggerManagementService(
     {
         logger.LogInformation("[{TenantId}] Executing pipeline '{PipelineRtId}'", tenantId, pipelineRtId);
 
+        // Resolve the DataFlow that contains this pipeline — the FromExecutePipelineCommandNode
+        // listens on a queue keyed by DataFlowRtId, not PipelineRtId
+        var dataFlow = await communicationRepository.GetDataFlowByPipelineAsync(tenantId, pipelineRtId);
+        var dataFlowRtId = dataFlow?.RtId ?? pipelineRtId;
+
         ExecuteMeshPipelineResponse? r;
         try
         {
             var address =
-                $"{QueueNames.ExecuteMeshPipelineCommand.ToLower()}-{tenantId.ToLower()}-data-pipeline-{pipelineRtId.ToString().ToLower()}";
+                $"{QueueNames.ExecuteMeshPipelineCommand.ToLower()}-{tenantId.ToLower()}-data-pipeline-{dataFlowRtId.ToString().ToLower()}";
 
             r = await executeMeshPipelineCommandClient.GetResponse<ExecuteMeshPipelineResponse>(address,
                 new ExecuteMeshPipelineRequest(tenantId, pipelineInput));
