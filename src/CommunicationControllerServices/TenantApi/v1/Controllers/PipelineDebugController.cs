@@ -59,17 +59,24 @@ public class PipelineDebugController : ControllerBase
 
         try
         {
-            var executions = await _pipelineDebugService.GetPipelineExecutionsAsync(tenantId, pipelineRtEntityId);
-            return Ok(executions);
-        }
-        catch (PipelineDebugInformationNotFoundException)
-        {
-            // Fallback: query persisted execution history from MongoDB
+            // Get debug executions from in-memory cache (if any)
+            IEnumerable<PipelineExecutionDataDto> debugExecutions;
             try
             {
-                var persistedExecutions = await _communicationRepository.GetPipelineExecutionsAsync(
+                debugExecutions = await _pipelineDebugService.GetPipelineExecutionsAsync(tenantId, pipelineRtEntityId);
+            }
+            catch (PipelineDebugInformationNotFoundException)
+            {
+                debugExecutions = [];
+            }
+
+            // Get persisted executions from MongoDB
+            IEnumerable<PipelineExecutionDataDto> persistedExecutions;
+            try
+            {
+                var dbExecutions = await _communicationRepository.GetPipelineExecutionsAsync(
                     tenantId, pipelineRtEntityId, null, null, 0, 20);
-                var result = persistedExecutions.Select(e => new PipelineExecutionDataDto
+                persistedExecutions = dbExecutions.Select(e => new PipelineExecutionDataDto
                 {
                     Id = Guid.TryParse(e.ExecutionId, out var id) ? id : Guid.Empty,
                     DateTime = e.StartedAt,
@@ -78,13 +85,20 @@ public class PipelineDebugController : ControllerBase
                     ErrorMessage = e.ErrorMessage,
                     HasDebugData = false
                 });
-                return Ok(result);
             }
-            catch (Exception fallbackEx)
+            catch
             {
-                _logger.LogDebug(fallbackEx, "No execution history found for pipeline");
-                return Ok(Array.Empty<PipelineExecutionDataDto>());
+                persistedExecutions = [];
             }
+
+            // Merge: debug executions take priority over persisted ones (by ID)
+            var debugIds = new HashSet<Guid>(debugExecutions.Select(d => d.Id));
+            var merged = debugExecutions
+                .Concat(persistedExecutions.Where(p => !debugIds.Contains(p.Id)))
+                .OrderByDescending(e => e.DateTime)
+                .Take(20);
+
+            return Ok(merged);
         }
         catch (Exception e)
         {
