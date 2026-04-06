@@ -1,5 +1,5 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.Runtime.Contracts;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
@@ -39,20 +39,20 @@ internal static class RtEntityCreator
     }
 
     /// <summary>
-    /// Creates an RtEntityId from an RtDataPipeline
+    /// Creates an RtEntityId from an RtDataFlow
     /// </summary>
-    public static RtEntityId ToRtEntityId(this RtDataPipeline entity)
+    public static RtEntityId ToRtEntityId(this RtDataFlow entity)
     {
         return new RtEntityId(entity.CkTypeId!, entity.RtId);
     }
 
-    public static RtDataPipeline CreateDataPipeline(string? id = null)
+    public static RtDataFlow CreateDataFlow(string? id = null)
     {
         id ??= OctoObjectId.GenerateNewId().ToString();
-        return new RtDataPipeline
+        return new RtDataFlow
         {
             RtId = new OctoObjectId(id),
-            CkTypeId = SystemCommunicationCkIds.RtCkDataPipelineTypeId
+            CkTypeId = SystemCommunicationCkIds.RtCkDataFlowTypeId
         };
     }
 
@@ -62,7 +62,7 @@ internal static class RtEntityCreator
         return new RtPipeline
         {
             RtId = new OctoObjectId(id),
-            CkTypeId = SystemCommunicationCkIds.RtCkMeshPipelineTypeId,
+            CkTypeId = SystemCommunicationCkIds.RtCkPipelineTypeId,
             PipelineDefinition = pipelineDefinition ?? "pipelineDefinition",
             DeploymentState = RtDeploymentStateEnum.Deployed
         };
@@ -74,7 +74,7 @@ internal static class RtEntityCreator
         return new RtAdapter
         {
             RtId = new OctoObjectId(id),
-            CkTypeId = SystemCommunicationCkIds.RtCkMeshAdapterTypeId
+            CkTypeId = SystemCommunicationCkIds.RtCkAdapterTypeId
         };
     }
 
@@ -120,39 +120,23 @@ internal static class RtEntityCreator
         };
     }
 
-    public static RtDataPipelineTrigger CreateDataPipelineTrigger(string? cronExpression = null,
+    public static RtPipelineTrigger CreatePipelineTrigger(string? cronExpression = null,
         string? name = null, string? id = null)
     {
         id ??= OctoObjectId.GenerateNewId().ToString();
-        return new RtDataPipelineTrigger
+        return new RtPipelineTrigger
         {
             RtId = new OctoObjectId(id),
-            CkTypeId = SystemCommunicationCkIds.RtCkDataPipelineTriggerTypeId,
+            CkTypeId = SystemCommunicationCkIds.RtCkPipelineTriggerTypeId,
             Enabled = true,
             CronExpression = cronExpression ?? "0 * * * *",
             Name = name ?? "Test Trigger"
         };
     }
 
-    public static RtEntityId ToRtEntityId(this RtDataPipelineTrigger entity)
+    public static RtEntityId ToRtEntityId(this RtPipelineTrigger entity)
     {
         return new RtEntityId(entity.CkTypeId!, entity.RtId);
     }
 
-    public static RtMeshPipeline CreateMeshPipeline(string? pipelineDefinition = null, string? id = null)
-    {
-        id ??= OctoObjectId.GenerateNewId().ToString();
-        return new RtMeshPipeline
-        {
-            RtId = new OctoObjectId(id),
-            CkTypeId = SystemCommunicationCkIds.RtCkMeshPipelineTypeId,
-            PipelineDefinition = pipelineDefinition ?? "pipelineDefinition",
-            DeploymentState = RtDeploymentStateEnum.Deployed
-        };
-    }
-
-    public static RtEntityId ToRtEntityId(this RtMeshPipeline entity)
-    {
-        return new RtEntityId(entity.CkTypeId!, entity.RtId);
-    }
 }

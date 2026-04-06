@@ -9,15 +9,15 @@ using Microsoft.AspNetCore.Mvc;
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
 
 /// <summary>
-/// Manages data pipeline trigger
+/// Manages pipeline trigger
 /// </summary>
 [Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
 [ApiController]
 [Route("{tenantId:tenantId}/v{version:apiVersion}/[controller]")]
 [ApiVersion("1.0")]
-public class DataPipelineTriggerController : ControllerBase
+public class PipelineTriggerController : ControllerBase
 {
-    private readonly ILogger<DataPipelineTriggerController> _logger;
+    private readonly ILogger<PipelineTriggerController> _logger;
     private readonly ITriggerManagementService _triggerManagementService;
 
     /// <summary>
@@ -25,7 +25,7 @@ public class DataPipelineTriggerController : ControllerBase
     /// </summary>
     /// <param name="logger">Logging object</param>
     /// <param name="triggerManagementService">Trigger management service</param>
-    public DataPipelineTriggerController(ILogger<DataPipelineTriggerController> logger, ITriggerManagementService triggerManagementService)
+    public PipelineTriggerController(ILogger<PipelineTriggerController> logger, ITriggerManagementService triggerManagementService)
     {
         _logger = logger;
         _triggerManagementService = triggerManagementService;
@@ -55,10 +55,11 @@ public class DataPipelineTriggerController : ControllerBase
         }
         catch (Exception e)
         {
+            _logger.LogError(e, "Failed to deploy triggers for tenant");
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
         }
     }
-    
+
     /// <summary>
     /// Undeploy the trigger for the tenant
     /// </summary>
@@ -83,6 +84,7 @@ public class DataPipelineTriggerController : ControllerBase
         }
         catch (Exception e)
         {
+            _logger.LogError(e, "Failed to undeploy triggers for tenant");
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
         }
     }

@@ -29,18 +29,18 @@ public class TriggerManagementServiceException : Exception
         return new TriggerManagementServiceException($"Failed to remove schedule for tenant {tenantId}", exception);
     }
 
-    internal static Exception ExecutePipelineFailed(string tenantId, OctoObjectId dataPipelineRtId, string? errorMessage)
+    internal static Exception ExecutePipelineFailed(string tenantId, OctoObjectId dataFlowRtId, string? errorMessage)
     {
-        throw new TriggerManagementServiceException($"Failed to execute data pipeline {dataPipelineRtId} for tenant {tenantId}: {errorMessage}");
+        throw new TriggerManagementServiceException($"Failed to execute data flow {dataFlowRtId} for tenant {tenantId}: {errorMessage}");
     }
 
-    internal static Exception ExecutePipelineExecutionErrorFailed(string tenantId, OctoObjectId dataPipelineRtId, Exception exception)
+    internal static Exception ExecutePipelineExecutionErrorFailed(string tenantId, OctoObjectId dataFlowRtId, Exception exception)
     {
-        return new TriggerManagementServiceException($"Failed to execute data pipeline {dataPipelineRtId} for tenant {tenantId}", exception);
+        return new TriggerManagementServiceException($"Failed to execute data flow {dataFlowRtId} for tenant {tenantId}", exception);
     }
 
-    internal static Exception ExecutePipelineExecutionIdNull(string tenantId, OctoObjectId dataPipelineRtId)
+    internal static Exception ExecutePipelineExecutionIdNull(string tenantId, OctoObjectId dataFlowRtId)
     {
-        return new TriggerManagementServiceException($"Pipeline execution id is null for data pipeline {dataPipelineRtId} for tenant {tenantId}, but the adapter indicate that the execution start was successful");
+        return new TriggerManagementServiceException($"Pipeline execution id is null for data flow {dataFlowRtId} for tenant {tenantId}, but the adapter indicate that the execution start was successful");
     }
 }

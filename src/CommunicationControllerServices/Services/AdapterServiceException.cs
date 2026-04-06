@@ -1,5 +1,5 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using MongoDB.Bson;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -47,9 +47,9 @@ internal class AdapterServiceException : Exception
         return new AdapterServiceException($"[{tenantId}] Pipeline '{pipelineRtEntityId}' not found."); 
     }
 
-    public static Exception DataPipelineNotFound(string tenantId, RtEntityId rtEntityId)
+    public static Exception DataFlowNotFound(string tenantId, RtEntityId rtEntityId)
     {
-        return new AdapterServiceException($"[{tenantId}] Data pipeline of pipeline '{rtEntityId}' not found.");
+        return new AdapterServiceException($"[{tenantId}] Data flow of pipeline '{rtEntityId}' not found.");
     }
 
     public static Exception PreUpdateTenantFailed(string tenantId, Exception exception)
@@ -77,9 +77,9 @@ internal class AdapterServiceException : Exception
         return new AdapterServiceException($"Deployment state '{rDeploymentState}' is not supported.");
     }
     
-    public static Exception DataPipelineHasNoPipelines(string tenantId, OctoObjectId dataPipelineRtId)
+    public static Exception DataFlowHasNoPipelines(string tenantId, OctoObjectId dataFlowRtId)
     {
-        return new AdapterServiceException($"[{tenantId}] Data pipeline '{dataPipelineRtId}' has no edge or mesh pipeline assigned.");
+        return new AdapterServiceException($"[{tenantId}] Data flow '{dataFlowRtId}' has no pipelines assigned.");
     }
 
     public static Exception PipelineAdapterNotAssigned(string tenantId, RtEntityId pipelineRtEntityId)

@@ -2,7 +2,6 @@ $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
 - typeId: Adapter
   derivedFromCkTypeId: ${this}/DeployableEntity
-  isAbstract: true
   attributes:
     - id: ${this}/CommunicationStateTimestamp
       name: CommunicationStateTimestamp
@@ -24,8 +23,4 @@ types:
       name: LastSyncedSequenceNumber
   associations:
   - id: ${this}/Manages
-    targetCkTypeId: ${this}/Pool    
-- typeId: EdgeAdapter
-  derivedFromCkTypeId: ${this}/Adapter
-- typeId: MeshAdapter
-  derivedFromCkTypeId: ${this}/Adapter
+    targetCkTypeId: ${this}/Pool

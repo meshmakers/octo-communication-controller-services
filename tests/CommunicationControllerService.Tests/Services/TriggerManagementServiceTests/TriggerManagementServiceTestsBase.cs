@@ -2,7 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
@@ -42,7 +42,7 @@ internal abstract class TriggerManagementServiceTestsBase
 
         // Default: RemoveScheduleAsync returns empty triggers and succeeds
         CommunicationRepository.GetTriggersAsync(TenantId)
-            .Returns(Array.Empty<RtDataPipelineTrigger>());
+            .Returns(Array.Empty<RtPipelineTrigger>());
         RemoveRecurringJobsCommandClient
             .GetResponse<GenericCommandResponse>(Arg.Any<RemoveRecurringJobsByScheduleGroupRequest>(),
                 Arg.Any<CancellationToken>(), Arg.Any<TimeSpan?>())

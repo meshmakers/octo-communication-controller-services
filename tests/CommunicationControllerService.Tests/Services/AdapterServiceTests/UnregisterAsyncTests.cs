@@ -3,7 +3,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.Runtime.Contracts;
 using NSubstitute;
 
@@ -89,14 +89,14 @@ internal class UnregisterAsyncTests : AdapterServiceTestsBase
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline = RtEntityCreator.CreatePipeline();
 
         AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
             rtAdapter.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline.ToRtEntityId(), false,
                     rtPipeline.PipelineDefinition, [])
             ]
         ));
@@ -124,8 +124,8 @@ internal class UnregisterAsyncTests : AdapterServiceTestsBase
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline1 = RtEntityCreator.CreateDataPipeline();
-        var rtDataPipeline2 = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow1 = RtEntityCreator.CreateDataFlow();
+        var rtDataFlow2 = RtEntityCreator.CreateDataFlow();
         var rtPipeline1 = RtEntityCreator.CreatePipeline();
         var rtPipeline2 = RtEntityCreator.CreatePipeline();
         var rtPipeline3 = RtEntityCreator.CreatePipeline();
@@ -134,11 +134,11 @@ internal class UnregisterAsyncTests : AdapterServiceTestsBase
             rtAdapter.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline1.RtId, rtPipeline1.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow1.RtId, rtPipeline1.ToRtEntityId(), false,
                     rtPipeline1.PipelineDefinition, []),
-                new PipelineConfigurationDto(rtDataPipeline1.RtId, rtPipeline2.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow1.RtId, rtPipeline2.ToRtEntityId(), false,
                     rtPipeline2.PipelineDefinition, []),
-                new PipelineConfigurationDto(rtDataPipeline2.RtId, rtPipeline3.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow2.RtId, rtPipeline3.ToRtEntityId(), false,
                     rtPipeline3.PipelineDefinition, [])
             ]
         ));
@@ -174,7 +174,7 @@ internal class UnregisterAsyncTests : AdapterServiceTestsBase
     {
         // Arrange - adapter is in cache with a newer connection
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline = RtEntityCreator.CreatePipeline();
         var staleConnectionId = "oldConnectionId";
 
@@ -182,7 +182,7 @@ internal class UnregisterAsyncTests : AdapterServiceTestsBase
             rtAdapter.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline.ToRtEntityId(), false,
                     rtPipeline.PipelineDefinition, [])
             ]
         ));

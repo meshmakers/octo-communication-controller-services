@@ -127,7 +127,7 @@ try
     builder.Services.AddRuntimeEngine()
         .AddMongoDbRuntimeRepository();
 
-    builder.Services.AddCkModelSystemCommunicationV2();
+    builder.Services.AddCkModelSystemCommunicationV3();
     builder.Services.AddOctoNotification();
 
     builder.Services.AddAuthentication().AddJwtBearer(jwt =>

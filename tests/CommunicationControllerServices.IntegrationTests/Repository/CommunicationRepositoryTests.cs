@@ -2,7 +2,7 @@ using FluentAssertions;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Xunit;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTests.Repository;
@@ -17,7 +17,7 @@ public class CommunicationRepositoryTests(CommunicationControllerFixture fixture
     public async Task GetAdapter_WhenNotExists_ShouldThrowException()
     {
         var repository = fixture.GetService<ICommunicationRepository>();
-        var adapterId = new RtEntityId(SystemCommunicationCkIds.RtCkEdgeAdapterTypeId, OctoObjectId.GenerateNewId());
+        var adapterId = new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, OctoObjectId.GenerateNewId());
 
         var act = async () => await repository.GetAdapterAsync(fixture.TestTenantId, adapterId);
 

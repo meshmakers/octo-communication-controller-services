@@ -5,7 +5,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.Runtime.Contracts;
 using NSubstitute;
 
@@ -56,7 +56,7 @@ internal class UpdateConfigurationStateAsyncTests : AdapterServiceTestsBase
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline1 = RtEntityCreator.CreatePipeline();
         var rtPipeline2 = RtEntityCreator.CreatePipeline();
 
@@ -64,9 +64,9 @@ internal class UpdateConfigurationStateAsyncTests : AdapterServiceTestsBase
             rtAdapter.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline1.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline1.ToRtEntityId(), false,
                     rtPipeline1.PipelineDefinition, []),
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline2.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline2.ToRtEntityId(), false,
                     rtPipeline2.PipelineDefinition, [])
             ]
         ));
@@ -94,14 +94,14 @@ internal class UpdateConfigurationStateAsyncTests : AdapterServiceTestsBase
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline = RtEntityCreator.CreatePipeline();
 
         AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
             rtAdapter.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline.ToRtEntityId(), false,
                     rtPipeline.PipelineDefinition, [])
             ]
         ));
@@ -128,7 +128,7 @@ internal class UpdateConfigurationStateAsyncTests : AdapterServiceTestsBase
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline1 = RtEntityCreator.CreatePipeline();
         var rtPipeline2 = RtEntityCreator.CreatePipeline();
 
@@ -136,9 +136,9 @@ internal class UpdateConfigurationStateAsyncTests : AdapterServiceTestsBase
             rtAdapter.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline1.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline1.ToRtEntityId(), false,
                     rtPipeline1.PipelineDefinition, []),
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline2.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline2.ToRtEntityId(), false,
                     rtPipeline2.PipelineDefinition, [])
             ]
         ));
@@ -180,7 +180,7 @@ internal class UpdateConfigurationStateAsyncTests : AdapterServiceTestsBase
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline1 = RtEntityCreator.CreatePipeline();
         var rtPipeline2 = RtEntityCreator.CreatePipeline();
 
@@ -188,9 +188,9 @@ internal class UpdateConfigurationStateAsyncTests : AdapterServiceTestsBase
             rtAdapter.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline1.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline1.ToRtEntityId(), false,
                     rtPipeline1.PipelineDefinition, []),
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline2.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline2.ToRtEntityId(), false,
                     rtPipeline2.PipelineDefinition, [])
             ]
         ));
