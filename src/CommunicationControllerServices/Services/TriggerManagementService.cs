@@ -3,7 +3,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Common.DistributionEventHub;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 
@@ -19,15 +19,20 @@ internal class TriggerManagementService(
     : ITriggerManagementService
 {
     public async Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId,
-        OctoObjectId dataPipelineRtId, string? pipelineInput)
+        OctoObjectId pipelineRtId, string? pipelineInput)
     {
-        logger.LogInformation("[{TenantId}] Executing pipeline '{DataPipelineRtId}'", tenantId, dataPipelineRtId);
+        logger.LogInformation("[{TenantId}] Executing pipeline '{PipelineRtId}'", tenantId, pipelineRtId);
 
         ExecuteMeshPipelineResponse? r;
         try
         {
+            // Resolve the DataFlow that contains this pipeline — the FromExecutePipelineCommandNode
+            // listens on a queue keyed by DataFlowRtId, not PipelineRtId
+            var dataFlow = await communicationRepository.GetDataFlowByPipelineAsync(tenantId, pipelineRtId);
+            var dataFlowRtId = dataFlow?.RtId ?? pipelineRtId;
+
             var address =
-                $"{QueueNames.ExecuteMeshPipelineCommand.ToLower()}-{tenantId.ToLower()}-data-pipeline-{dataPipelineRtId.ToString().ToLower()}";
+                $"{QueueNames.ExecuteMeshPipelineCommand.ToLower()}-{tenantId.ToLower()}-data-flow-{dataFlowRtId.ToString().ToLower()}";
 
             r = await executeMeshPipelineCommandClient.GetResponse<ExecuteMeshPipelineResponse>(address,
                 new ExecuteMeshPipelineRequest(tenantId, pipelineInput));
@@ -37,34 +42,34 @@ internal class TriggerManagementService(
                 if (r is { PipelineExecutionId: not null, ExecutionStartTime: not null })
                 {
                     logger.LogInformation(
-                        "[{TenantId}] Start execution of pipeline '{DataPipelineRtId}' (ExecutionId {PipelineExecutionId}) successful",
-                        tenantId, dataPipelineRtId, r.PipelineExecutionId);
+                        "[{TenantId}] Start execution of pipeline '{PipelineRtId}' (ExecutionId {PipelineExecutionId}) successful",
+                        tenantId, pipelineRtId, r.PipelineExecutionId);
 
                     await eventService.StoreInformationEventAsync(tenantId,
-                        $"Pipeline '{dataPipelineRtId}' execution started (ExecutionId: {r.PipelineExecutionId}).");
+                        $"Pipeline '{pipelineRtId}' execution started (ExecutionId: {r.PipelineExecutionId}).");
 
                     return new PipelineExecutionDataDto
                                { Id = r.PipelineExecutionId.Value, DateTime = r.ExecutionStartTime.Value } ??
                            throw TriggerManagementServiceException.ExecutePipelineExecutionIdNull(tenantId,
-                               dataPipelineRtId);
+                               pipelineRtId);
                 }
 
                 throw TriggerManagementServiceException.ExecutePipelineExecutionIdNull(tenantId,
-                    dataPipelineRtId);
+                    pipelineRtId);
             }
         }
         catch (Exception e)
         {
             await eventService.StoreErrorEventAsync(tenantId,
-                $"Pipeline '{dataPipelineRtId}' execution failed: {e.Message}");
-            throw TriggerManagementServiceException.ExecutePipelineExecutionErrorFailed(tenantId, dataPipelineRtId, e);
+                $"Pipeline '{pipelineRtId}' execution failed: {e.Message}");
+            throw TriggerManagementServiceException.ExecutePipelineExecutionErrorFailed(tenantId, pipelineRtId, e);
         }
 
         await eventService.StoreErrorEventAsync(tenantId,
-            $"Pipeline '{dataPipelineRtId}' execution failed: {r.ErrorMessage}");
-        logger.LogError("[{TenantId}] Execution of pipeline '{DataPipelineRtId}' failed: {ErrorMessage}"
-            , tenantId, dataPipelineRtId, r.ErrorMessage);
-        throw TriggerManagementServiceException.ExecutePipelineFailed(tenantId, dataPipelineRtId, r.ErrorMessage);
+            $"Pipeline '{pipelineRtId}' execution failed: {r.ErrorMessage}");
+        logger.LogError("[{TenantId}] Execution of pipeline '{PipelineRtId}' failed: {ErrorMessage}"
+            , tenantId, pipelineRtId, r.ErrorMessage);
+        throw TriggerManagementServiceException.ExecutePipelineFailed(tenantId, pipelineRtId, r.ErrorMessage);
     }
 
     public async Task RemoveScheduleAsync(string tenantId)
@@ -74,10 +79,10 @@ internal class TriggerManagementService(
         try
         {
             var r = await communicationRepository.GetTriggersAsync(tenantId);
-            foreach (var rtDataPipelineTrigger in r)
+            foreach (var rtPipelineTrigger in r)
             {
-                await communicationRepository.SetDataPipelineTriggerDeploymentStateAsync(tenantId,
-                    rtDataPipelineTrigger.RtId, RtDeploymentStateEnum.Pending);
+                await communicationRepository.SetPipelineTriggerDeploymentStateAsync(tenantId,
+                    rtPipelineTrigger.RtId, RtDeploymentStateEnum.Pending);
             }
 
             var scheduleGroup = CreateScheduleGroup(tenantId);
@@ -115,7 +120,7 @@ internal class TriggerManagementService(
                             tenantId, pipelineTrigger.RtId);
                         await eventService.StoreErrorEventAsync(tenantId,
                             $"Trigger '{pipelineTrigger.RtId}' has no associated pipelines and cannot be deployed.");
-                        await communicationRepository.SetDataPipelineTriggerDeploymentStateAsync(tenantId,
+                        await communicationRepository.SetPipelineTriggerDeploymentStateAsync(tenantId,
                             pipelineTrigger.RtId, RtDeploymentStateEnum.Error);
                         continue;
                     }
@@ -139,12 +144,12 @@ internal class TriggerManagementService(
                             address, recurringSchedulingOptions);
                     }
 
-                    await communicationRepository.SetDataPipelineTriggerDeploymentStateAsync(tenantId,
+                    await communicationRepository.SetPipelineTriggerDeploymentStateAsync(tenantId,
                         pipelineTrigger.RtId, RtDeploymentStateEnum.Deployed);
                 }
                 catch (Exception)
                 {
-                    await communicationRepository.SetDataPipelineTriggerDeploymentStateAsync(tenantId,
+                    await communicationRepository.SetPipelineTriggerDeploymentStateAsync(tenantId,
                         pipelineTrigger.RtId, RtDeploymentStateEnum.Error);
                     throw;
                 }

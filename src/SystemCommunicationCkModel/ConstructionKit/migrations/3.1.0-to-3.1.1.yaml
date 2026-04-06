@@ -1,0 +1,131 @@
+$schema: https://schemas.meshmakers.cloud/ck-migration.schema.json
+sourceVersion: "3.1.0"
+targetVersion: "3.1.1"
+description: |
+  Migration from System.Communication 3.1.0 to 3.1.1.
+
+  This migration unifies the adapter and pipeline type hierarchies:
+  - EdgeAdapter and MeshAdapter are merged into Adapter
+  - EdgePipeline and MeshPipeline are merged into Pipeline
+  - DataPipelineTrigger is renamed to PipelineTrigger
+
+  All existing EdgeAdapter/MeshAdapter entities become Adapter entities.
+  All existing EdgePipeline/MeshPipeline entities become Pipeline entities.
+  All existing DataPipelineTrigger entities become PipelineTrigger entities.
+
+steps:
+  # Step 1: Migrate EdgeAdapter to Adapter
+  - stepId: migrate-edge-adapter-to-adapter
+    description: "Change CkTypeId from EdgeAdapter to Adapter for all EdgeAdapter entities"
+    action: Transform
+    target:
+      ckTypeId: System.Communication/EdgeAdapter
+      blueprintSourceOnly: false
+    transform:
+      type: ChangeCkType
+      newCkTypeId: System.Communication/Adapter
+    onConflict: Skip
+    continueOnError: true
+
+  # Step 2: Migrate MeshAdapter to Adapter
+  - stepId: migrate-mesh-adapter-to-adapter
+    description: "Change CkTypeId from MeshAdapter to Adapter for all MeshAdapter entities"
+    action: Transform
+    target:
+      ckTypeId: System.Communication/MeshAdapter
+      blueprintSourceOnly: false
+    transform:
+      type: ChangeCkType
+      newCkTypeId: System.Communication/Adapter
+    onConflict: Skip
+    continueOnError: true
+
+  # Step 3: Migrate EdgePipeline to Pipeline
+  - stepId: migrate-edge-pipeline-to-pipeline
+    description: "Change CkTypeId from EdgePipeline to Pipeline for all EdgePipeline entities"
+    action: Transform
+    target:
+      ckTypeId: System.Communication/EdgePipeline
+      blueprintSourceOnly: false
+    transform:
+      type: ChangeCkType
+      newCkTypeId: System.Communication/Pipeline
+    onConflict: Skip
+    continueOnError: true
+
+  # Step 4: Migrate MeshPipeline to Pipeline
+  - stepId: migrate-mesh-pipeline-to-pipeline
+    description: "Change CkTypeId from MeshPipeline to Pipeline for all MeshPipeline entities"
+    action: Transform
+    target:
+      ckTypeId: System.Communication/MeshPipeline
+      blueprintSourceOnly: false
+    transform:
+      type: ChangeCkType
+      newCkTypeId: System.Communication/Pipeline
+    onConflict: Skip
+    continueOnError: true
+
+  # Step 5: Migrate DataPipelineTrigger to PipelineTrigger
+  - stepId: migrate-data-pipeline-trigger-to-pipeline-trigger
+    description: "Change CkTypeId from DataPipelineTrigger to PipelineTrigger"
+    action: Transform
+    target:
+      ckTypeId: System.Communication/DataPipelineTrigger
+      blueprintSourceOnly: false
+    transform:
+      type: ChangeCkType
+      newCkTypeId: System.Communication/PipelineTrigger
+    onConflict: Skip
+    continueOnError: true
+
+  # Step 6: Fix DataPipeline associations from earlier migration (3.0.3)
+  # The 3.0.3 migration renamed DataPipeline entities to DataFlow but did not
+  # update the association references. This step corrects the associations.
+  - stepId: fix-data-pipeline-associations
+    description: "Update association references from DataPipeline to DataFlow"
+    action: Transform
+    target:
+      ckTypeId: System.Communication/DataPipeline
+      blueprintSourceOnly: false
+    transform:
+      type: ChangeCkType
+      newCkTypeId: System.Communication/DataFlow
+    onConflict: Skip
+    continueOnError: true
+
+postValidations:
+  - validationId: no-legacy-edge-adapters
+    description: "Ensure no EdgeAdapter entities remain"
+    type: NoEntitiesOfType
+    target:
+      ckTypeId: System.Communication/EdgeAdapter
+    severity: Warning
+
+  - validationId: no-legacy-mesh-adapters
+    description: "Ensure no MeshAdapter entities remain"
+    type: NoEntitiesOfType
+    target:
+      ckTypeId: System.Communication/MeshAdapter
+    severity: Warning
+
+  - validationId: no-legacy-edge-pipelines
+    description: "Ensure no EdgePipeline entities remain"
+    type: NoEntitiesOfType
+    target:
+      ckTypeId: System.Communication/EdgePipeline
+    severity: Warning
+
+  - validationId: no-legacy-mesh-pipelines
+    description: "Ensure no MeshPipeline entities remain"
+    type: NoEntitiesOfType
+    target:
+      ckTypeId: System.Communication/MeshPipeline
+    severity: Warning
+
+  - validationId: no-legacy-data-pipeline-triggers
+    description: "Ensure no DataPipelineTrigger entities remain"
+    type: NoEntitiesOfType
+    target:
+      ckTypeId: System.Communication/DataPipelineTrigger
+    severity: Warning

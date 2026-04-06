@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Common.DistributionEventHub;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using NSubstitute;
 
@@ -15,11 +15,11 @@ internal class UpdateScheduleAsyncTests : TriggerManagementServiceTestsBase
     public async Task UpdateScheduleAsync_TriggerWithNoPipelines_SetsErrorStateAndStoresErrorEvent()
     {
         // Arrange
-        var trigger = RtEntityCreator.CreateDataPipelineTrigger(cronExpression: "0 * * * *");
+        var trigger = RtEntityCreator.CreatePipelineTrigger(cronExpression: "0 * * * *");
         var triggersAndPipelines =
-            new Dictionary<RtDataPipelineTrigger, IList<RtMeshPipeline>>
+            new Dictionary<RtPipelineTrigger, IList<RtPipeline>>
             {
-                { trigger, new List<RtMeshPipeline>() }
+                { trigger, new List<RtPipeline>() }
             };
 
         CommunicationRepository.GetTriggersAndPipelinesAsync(TenantId)
@@ -29,7 +29,7 @@ internal class UpdateScheduleAsyncTests : TriggerManagementServiceTestsBase
         await TriggerManagementService.UpdateScheduleAsync(TenantId);
 
         // Assert
-        await CommunicationRepository.Received(1).SetDataPipelineTriggerDeploymentStateAsync(
+        await CommunicationRepository.Received(1).SetPipelineTriggerDeploymentStateAsync(
             TenantId, trigger.RtId, RtDeploymentStateEnum.Error);
 
         await DistributionEventHubService.DidNotReceive()
@@ -44,12 +44,12 @@ internal class UpdateScheduleAsyncTests : TriggerManagementServiceTestsBase
     public async Task UpdateScheduleAsync_TriggerWithPipeline_SchedulesAndSetsDeployedState()
     {
         // Arrange
-        var trigger = RtEntityCreator.CreateDataPipelineTrigger(cronExpression: "0 * * * *");
-        var pipeline = RtEntityCreator.CreateMeshPipeline();
+        var trigger = RtEntityCreator.CreatePipelineTrigger(cronExpression: "0 * * * *");
+        var pipeline = RtEntityCreator.CreatePipeline();
         var triggersAndPipelines =
-            new Dictionary<RtDataPipelineTrigger, IList<RtMeshPipeline>>
+            new Dictionary<RtPipelineTrigger, IList<RtPipeline>>
             {
-                { trigger, new List<RtMeshPipeline> { pipeline } }
+                { trigger, new List<RtPipeline> { pipeline } }
             };
 
         CommunicationRepository.GetTriggersAndPipelinesAsync(TenantId)
@@ -63,7 +63,7 @@ internal class UpdateScheduleAsyncTests : TriggerManagementServiceTestsBase
             .ScheduleRecurringSendAsync(Arg.Any<PipelineTriggerSchedule>(), Arg.Any<string>(),
                 Arg.Any<RecurringSchedulingOptions>());
 
-        await CommunicationRepository.Received(1).SetDataPipelineTriggerDeploymentStateAsync(
+        await CommunicationRepository.Received(1).SetPipelineTriggerDeploymentStateAsync(
             TenantId, trigger.RtId, RtDeploymentStateEnum.Deployed);
     }
 
@@ -71,13 +71,13 @@ internal class UpdateScheduleAsyncTests : TriggerManagementServiceTestsBase
     public async Task UpdateScheduleAsync_TriggerWithMultiplePipelines_SchedulesAllPipelines()
     {
         // Arrange
-        var trigger = RtEntityCreator.CreateDataPipelineTrigger(cronExpression: "0 * * * *");
-        var pipeline1 = RtEntityCreator.CreateMeshPipeline();
-        var pipeline2 = RtEntityCreator.CreateMeshPipeline();
+        var trigger = RtEntityCreator.CreatePipelineTrigger(cronExpression: "0 * * * *");
+        var pipeline1 = RtEntityCreator.CreatePipeline();
+        var pipeline2 = RtEntityCreator.CreatePipeline();
         var triggersAndPipelines =
-            new Dictionary<RtDataPipelineTrigger, IList<RtMeshPipeline>>
+            new Dictionary<RtPipelineTrigger, IList<RtPipeline>>
             {
-                { trigger, new List<RtMeshPipeline> { pipeline1, pipeline2 } }
+                { trigger, new List<RtPipeline> { pipeline1, pipeline2 } }
             };
 
         CommunicationRepository.GetTriggersAndPipelinesAsync(TenantId)
@@ -91,7 +91,7 @@ internal class UpdateScheduleAsyncTests : TriggerManagementServiceTestsBase
             .ScheduleRecurringSendAsync(Arg.Any<PipelineTriggerSchedule>(), Arg.Any<string>(),
                 Arg.Any<RecurringSchedulingOptions>());
 
-        await CommunicationRepository.Received(1).SetDataPipelineTriggerDeploymentStateAsync(
+        await CommunicationRepository.Received(1).SetPipelineTriggerDeploymentStateAsync(
             TenantId, trigger.RtId, RtDeploymentStateEnum.Deployed);
     }
 
@@ -99,14 +99,14 @@ internal class UpdateScheduleAsyncTests : TriggerManagementServiceTestsBase
     public async Task UpdateScheduleAsync_MixedTriggers_HandlesEachCorrectly()
     {
         // Arrange
-        var triggerWithPipeline = RtEntityCreator.CreateDataPipelineTrigger(name: "Has Pipeline");
-        var triggerWithoutPipeline = RtEntityCreator.CreateDataPipelineTrigger(name: "No Pipeline");
-        var pipeline = RtEntityCreator.CreateMeshPipeline();
+        var triggerWithPipeline = RtEntityCreator.CreatePipelineTrigger(name: "Has Pipeline");
+        var triggerWithoutPipeline = RtEntityCreator.CreatePipelineTrigger(name: "No Pipeline");
+        var pipeline = RtEntityCreator.CreatePipeline();
         var triggersAndPipelines =
-            new Dictionary<RtDataPipelineTrigger, IList<RtMeshPipeline>>
+            new Dictionary<RtPipelineTrigger, IList<RtPipeline>>
             {
-                { triggerWithPipeline, new List<RtMeshPipeline> { pipeline } },
-                { triggerWithoutPipeline, new List<RtMeshPipeline>() }
+                { triggerWithPipeline, new List<RtPipeline> { pipeline } },
+                { triggerWithoutPipeline, new List<RtPipeline>() }
             };
 
         CommunicationRepository.GetTriggersAndPipelinesAsync(TenantId)
@@ -116,10 +116,10 @@ internal class UpdateScheduleAsyncTests : TriggerManagementServiceTestsBase
         await TriggerManagementService.UpdateScheduleAsync(TenantId);
 
         // Assert
-        await CommunicationRepository.Received(1).SetDataPipelineTriggerDeploymentStateAsync(
+        await CommunicationRepository.Received(1).SetPipelineTriggerDeploymentStateAsync(
             TenantId, triggerWithPipeline.RtId, RtDeploymentStateEnum.Deployed);
 
-        await CommunicationRepository.Received(1).SetDataPipelineTriggerDeploymentStateAsync(
+        await CommunicationRepository.Received(1).SetPipelineTriggerDeploymentStateAsync(
             TenantId, triggerWithoutPipeline.RtId, RtDeploymentStateEnum.Error);
 
         // Only one schedule call for the trigger with a pipeline
@@ -133,7 +133,7 @@ internal class UpdateScheduleAsyncTests : TriggerManagementServiceTestsBase
     {
         // Arrange
         CommunicationRepository.GetTriggersAndPipelinesAsync(TenantId)
-            .Returns(new Dictionary<RtDataPipelineTrigger, IList<RtMeshPipeline>>());
+            .Returns(new Dictionary<RtPipelineTrigger, IList<RtPipeline>>());
 
         // Act
         await TriggerManagementService.UpdateScheduleAsync(TenantId);

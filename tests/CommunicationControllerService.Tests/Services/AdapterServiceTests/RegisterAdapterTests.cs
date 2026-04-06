@@ -2,7 +2,7 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.Runtime.Contracts;
 using NSubstitute;
 
@@ -24,10 +24,10 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline = RtEntityCreator.CreatePipeline();
 
-        InitAdapterConfiguration(rtAdapter, rtDataPipeline, [rtPipeline]);
+        InitAdapterConfiguration(rtAdapter, rtDataFlow, [rtPipeline]);
 
         // Act
         var configuration =
@@ -40,7 +40,7 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
         await Assert.That(configuration.Pipelines).Count().IsEqualTo(1);
 
         var pipeline = configuration.Pipelines.First();
-        await Assert.That(pipeline.DataPipelineRtId).IsEqualTo(rtDataPipeline.RtId);
+        await Assert.That(pipeline.DataFlowRtId).IsEqualTo(rtDataFlow.RtId);
         await Assert.That(pipeline.PipelineRtEntityId).IsEqualTo(rtPipeline.ToRtEntityId());
         await Assert.That(pipeline.NodeConfiguration).IsEqualTo(rtPipeline.PipelineDefinition);
 
@@ -55,7 +55,7 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline = RtEntityCreator.CreatePipeline();
 
         AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto
@@ -63,12 +63,12 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
             rtAdapter.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline.ToRtEntityId(), false,
                     rtPipeline.PipelineDefinition, [])
             ]
         ));
 
-        InitAdapterConfiguration(rtAdapter, rtDataPipeline, [rtPipeline]);
+        InitAdapterConfiguration(rtAdapter, rtDataFlow, [rtPipeline]);
 
         // Act
         var configuration =
@@ -81,7 +81,7 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
         await Assert.That(configuration.Pipelines).Count().IsEqualTo(1);
 
         var pipeline = configuration.Pipelines.First();
-        await Assert.That(pipeline.DataPipelineRtId).IsEqualTo(rtDataPipeline.RtId);
+        await Assert.That(pipeline.DataFlowRtId).IsEqualTo(rtDataFlow.RtId);
         await Assert.That(pipeline.PipelineRtEntityId).IsEqualTo(rtPipeline.ToRtEntityId());
         await Assert.That(pipeline.NodeConfiguration).IsEqualTo(rtPipeline.PipelineDefinition);
 
@@ -95,7 +95,7 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline = RtEntityCreator.CreatePipeline();
 
         AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto
@@ -103,13 +103,13 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
             rtAdapter.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline.ToRtEntityId(), false,
                     rtPipeline.PipelineDefinition, [])
             ]
         ));
         
         rtPipeline.PipelineDefinition = "changedDefinition";
-        InitAdapterConfiguration(rtAdapter, rtDataPipeline, [rtPipeline]);
+        InitAdapterConfiguration(rtAdapter, rtDataFlow, [rtPipeline]);
 
         // Act
         var configuration =
@@ -122,7 +122,7 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
         await Assert.That(configuration.Pipelines).Count().IsEqualTo(1);
 
         var pipeline = configuration.Pipelines.First();
-        await Assert.That(pipeline.DataPipelineRtId).IsEqualTo(rtDataPipeline.RtId);
+        await Assert.That(pipeline.DataFlowRtId).IsEqualTo(rtDataFlow.RtId);
         await Assert.That(pipeline.PipelineRtEntityId).IsEqualTo(rtPipeline.ToRtEntityId());
         await Assert.That(pipeline.NodeConfiguration).IsEqualTo(rtPipeline.PipelineDefinition);
 
@@ -137,7 +137,7 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline = RtEntityCreator.CreatePipeline();
 
         AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto
@@ -145,13 +145,13 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
             rtAdapter.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline.ToRtEntityId(), false,
                     rtPipeline.PipelineDefinition, [])
             ]
         ));
         
         rtPipeline.PipelineDefinition = "changedDefinition";
-        InitAdapterConfiguration(rtAdapter, rtDataPipeline, []);
+        InitAdapterConfiguration(rtAdapter, rtDataFlow, []);
 
         // Act
         var configuration =
@@ -174,7 +174,7 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline = RtEntityCreator.CreatePipeline();
         var rtPipelineNew = RtEntityCreator.CreatePipeline();
 
@@ -183,13 +183,13 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
             rtAdapter.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline.ToRtEntityId(), false,
                     rtPipeline.PipelineDefinition, [])
             ]
         ));
         
         rtPipeline.PipelineDefinition = "changedDefinition";
-        InitAdapterConfiguration(rtAdapter, rtDataPipeline, [rtPipeline, rtPipelineNew]);
+        InitAdapterConfiguration(rtAdapter, rtDataFlow, [rtPipeline, rtPipelineNew]);
 
         // Act
         var configuration =

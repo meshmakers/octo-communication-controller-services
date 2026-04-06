@@ -1,17 +1,14 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
-  - typeId: Pipeline
+  - typeId: PipelineTrigger
     derivedFromCkTypeId: ${this}/DeployableEntity
     attributes:
       - id: ${System}/Enabled
         name: Enabled
-        isOptional: true
-      - id: ${this}/PipelineDefinition
-        name: PipelineDefinition
+      - id: ${System.Bot}/CronExpression
+        name: CronExpression
     associations:
       - id: ${System}/ParentChild
         targetCkTypeId: ${this}/DataFlow
-      - id: ${this}/Executes
-        targetCkTypeId: ${this}/Adapter
-      - id: ${this}/Uses
-        targetCkTypeId: ${System}/Configuration
+      - id: ${this}/Triggers
+        targetCkTypeId: ${this}/Pipeline

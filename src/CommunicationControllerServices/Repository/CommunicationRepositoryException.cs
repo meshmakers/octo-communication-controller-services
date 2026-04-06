@@ -1,5 +1,5 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 
@@ -53,11 +53,11 @@ internal class CommunicationRepositoryException : Exception
             $"[{tenantId}] Pipeline '{pipelineRtId}' is not associated with an adapter.");
     }
 
-    internal static Exception CommonGettingAdapterByDataPipeline(string tenantId, OctoObjectId pipelineRtId,
+    internal static Exception CommonGettingAdapterByDataFlow(string tenantId, OctoObjectId pipelineRtId,
         Exception exception)
     {
         return new CommunicationRepositoryException(
-            $"[{tenantId}] Failed to get associated adapter for data pipeline '{pipelineRtId}'", exception);
+            $"[{tenantId}] Failed to get associated adapter for data flow '{pipelineRtId}'", exception);
     }
 
     internal static Exception CommonFailedGettingPoolByName(string tenantId, string poolName, Exception exception)
@@ -170,15 +170,15 @@ internal class CommunicationRepositoryException : Exception
             exception);
     }
 
-    internal static Exception DataPipelineNotFound(string tenantId, OctoObjectId dataPipelineRtId)
+    internal static Exception DataFlowNotFound(string tenantId, OctoObjectId dataFlowRtId)
     {
-        return new CommunicationRepositoryException($"[{tenantId}] Data pipeline '{dataPipelineRtId}' does not exist");
+        return new CommunicationRepositoryException($"[{tenantId}] Data flow '{dataFlowRtId}' does not exist");
     }
 
-    internal static Exception CommonFailedGettingByDataPipeline(string tenantId, OctoObjectId dataPipelineRtId,
+    internal static Exception CommonFailedGettingByDataFlow(string tenantId, OctoObjectId dataFlowRtId,
         Exception exception)
     {
-        return new CommunicationRepositoryException($"[{tenantId}] Failed to get by data pipeline '{dataPipelineRtId}'",
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get by data flow '{dataFlowRtId}'",
             exception);
     }
 

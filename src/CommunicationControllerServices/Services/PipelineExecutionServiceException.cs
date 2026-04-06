@@ -70,4 +70,9 @@ internal class PipelineExecutionServiceException : Exception
     {
         return new PipelineExecutionServiceException($"[{tenantId}] Failed to timeout stale executions", exception);
     }
+
+    internal static Exception CommonFailedGetDataFlowStatus(string tenantId, OctoObjectId dataFlowRtId, Exception exception)
+    {
+        return new PipelineExecutionServiceException($"[{tenantId}] Failed to get data flow status for '{dataFlowRtId}'", exception);
+    }
 }

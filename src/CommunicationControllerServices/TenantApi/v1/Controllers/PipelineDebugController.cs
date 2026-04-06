@@ -1,6 +1,8 @@
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using IdentityModel;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -20,16 +22,20 @@ public class PipelineDebugController : ControllerBase
 {
     private readonly ILogger<PipelineDebugController> _logger;
     private readonly IPipelineDebugService _pipelineDebugService;
+    private readonly ICommunicationRepository _communicationRepository;
 
     /// <summary>
     /// Constructor
     /// </summary>
     /// <param name="logger">Logging object</param>
     /// <param name="pipelineDebugService"></param>
-    public PipelineDebugController(ILogger<PipelineDebugController> logger, IPipelineDebugService pipelineDebugService)
+    /// <param name="communicationRepository"></param>
+    public PipelineDebugController(ILogger<PipelineDebugController> logger, IPipelineDebugService pipelineDebugService,
+        ICommunicationRepository communicationRepository)
     {
         _logger = logger;
         _pipelineDebugService = pipelineDebugService;
+        _communicationRepository = communicationRepository;
     }
 
     /// <summary>
@@ -53,14 +59,47 @@ public class PipelineDebugController : ControllerBase
 
         try
         {
-            var guids = await _pipelineDebugService.GetPipelineExecutionsAsync(tenantId, pipelineRtEntityId);
+            // Get debug executions from in-memory cache (if any)
+            IEnumerable<PipelineExecutionDataDto> debugExecutions;
+            try
+            {
+                debugExecutions = await _pipelineDebugService.GetPipelineExecutionsAsync(tenantId, pipelineRtEntityId);
+            }
+            catch (PipelineDebugInformationNotFoundException)
+            {
+                debugExecutions = [];
+            }
 
-            return Ok(guids);
-        }
-        catch (PipelineDebugInformationNotFoundException e)
-        {
-            _logger.LogError(e, "Pipeline debug information not found");
-            return NotFound(new ErrorResponse { ErrorMessage = e.Message});
+            // Get persisted executions from MongoDB
+            IEnumerable<PipelineExecutionDataDto> persistedExecutions;
+            try
+            {
+                var dbExecutions = await _communicationRepository.GetPipelineExecutionsAsync(
+                    tenantId, pipelineRtEntityId, null, null, 0, 20);
+                persistedExecutions = dbExecutions.Select(e => new PipelineExecutionDataDto
+                {
+                    Id = Guid.TryParse(e.ExecutionId, out var id) ? id : Guid.Empty,
+                    DateTime = e.StartedAt,
+                    Status = e.Status.ToString(),
+                    DurationMs = e.DurationMs,
+                    ErrorMessage = e.ErrorMessage,
+                    HasDebugData = false
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load persisted executions from database for pipeline debug history");
+                persistedExecutions = [];
+            }
+
+            // Merge: debug executions take priority over persisted ones (by ID)
+            var debugIds = new HashSet<Guid>(debugExecutions.Select(d => d.Id));
+            var merged = debugExecutions
+                .Concat(persistedExecutions.Where(p => !debugIds.Contains(p.Id)))
+                .OrderByDescending(e => e.DateTime)
+                .Take(20);
+
+            return Ok(merged);
         }
         catch (Exception e)
         {
@@ -89,13 +128,36 @@ public class PipelineDebugController : ControllerBase
 
         try
         {
-            var guids = await _pipelineDebugService.GetLatestPipelineExecutionAsync(tenantId, pipelineRtEntityId);
-            return Ok(guids);
+            var execution = await _pipelineDebugService.GetLatestPipelineExecutionAsync(tenantId, pipelineRtEntityId);
+            return Ok(execution);
         }
-        catch (PipelineDebugInformationNotFoundException e)
+        catch (PipelineDebugInformationNotFoundException)
         {
-            _logger.LogError(e, "Pipeline debug information not found");
-            return NotFound(new ErrorResponse { ErrorMessage = e.Message});
+            // Fallback: get latest execution from MongoDB
+            try
+            {
+                var persistedExecutions = await _communicationRepository.GetPipelineExecutionsAsync(
+                    tenantId, pipelineRtEntityId, null, null, 0, 1);
+                var latest = persistedExecutions.FirstOrDefault();
+                if (latest != null)
+                {
+                    return Ok(new PipelineExecutionDataDto
+                    {
+                        Id = Guid.TryParse(latest.ExecutionId, out var id) ? id : Guid.Empty,
+                        DateTime = latest.StartedAt,
+                        Status = latest.Status.ToString(),
+                        DurationMs = latest.DurationMs,
+                        ErrorMessage = latest.ErrorMessage,
+                        HasDebugData = false
+                    });
+                }
+                return NotFound(new ErrorResponse { ErrorMessage = "No executions found" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load latest execution from database for debug fallback");
+                return NotFound(new ErrorResponse { ErrorMessage = "No executions found" });
+            }
         }
         catch (Exception e)
         {
@@ -132,10 +194,11 @@ public class PipelineDebugController : ControllerBase
 
             return Ok(debugPointNodes);
         }
-        catch (PipelineDebugInformationNotFoundException e)
+        catch (PipelineDebugInformationNotFoundException)
         {
-            _logger.LogError(e, "Pipeline debug information not found");
-            return NotFound(new ErrorResponse { ErrorMessage = e.Message});
+            // No debug points cached for this execution — return empty list
+            // This happens when execution was recorded in MongoDB but had no debug mode enabled
+            return Ok(Array.Empty<DebugPointNode>());
         }
         catch (Exception e)
         {

@@ -3,7 +3,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Runtime.Contracts;
 using NSubstitute;
@@ -39,7 +39,7 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipelineDeployed = RtEntityCreator.CreatePipeline();
         rtPipelineDeployed.DeploymentState = RtDeploymentStateEnum.Deployed;
 
@@ -50,10 +50,10 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
             .Returns(rtAdapter);
         CommunicationRepository.GetPipelinesAsync(TenantId, rtAdapter.ToRtEntityId())
             .Returns([rtPipelineDeployed, rtPipelinePending]);
-        CommunicationRepository.GetDataPipelineByPipelineAsync(TenantId, rtPipelineDeployed.RtId)
-            .Returns(rtDataPipeline);
-        CommunicationRepository.GetDataPipelineByPipelineAsync(TenantId, rtPipelinePending.RtId)
-            .Returns(rtDataPipeline);
+        CommunicationRepository.GetDataFlowByPipelineAsync(TenantId, rtPipelineDeployed.RtId)
+            .Returns(rtDataFlow);
+        CommunicationRepository.GetDataFlowByPipelineAsync(TenantId, rtPipelinePending.RtId)
+            .Returns(rtDataFlow);
         CommunicationRepository.GetConfigurationsByPipelineAsync(TenantId, Arg.Any<OctoObjectId>())
             .Returns([]);
 
@@ -73,7 +73,7 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipelineDeployed = RtEntityCreator.CreatePipeline();
         rtPipelineDeployed.DeploymentState = RtDeploymentStateEnum.Deployed;
 
@@ -84,10 +84,10 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
             .Returns(rtAdapter);
         CommunicationRepository.GetPipelinesAsync(TenantId, rtAdapter.ToRtEntityId())
             .Returns([rtPipelineDeployed, rtPipelinePending]);
-        CommunicationRepository.GetDataPipelineByPipelineAsync(TenantId, rtPipelineDeployed.RtId)
-            .Returns(rtDataPipeline);
-        CommunicationRepository.GetDataPipelineByPipelineAsync(TenantId, rtPipelinePending.RtId)
-            .Returns(rtDataPipeline);
+        CommunicationRepository.GetDataFlowByPipelineAsync(TenantId, rtPipelineDeployed.RtId)
+            .Returns(rtDataFlow);
+        CommunicationRepository.GetDataFlowByPipelineAsync(TenantId, rtPipelinePending.RtId)
+            .Returns(rtDataFlow);
         CommunicationRepository.GetConfigurationsByPipelineAsync(TenantId, Arg.Any<OctoObjectId>())
             .Returns([]);
 
@@ -134,7 +134,7 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipelineWithDefinition = RtEntityCreator.CreatePipeline();
         rtPipelineWithDefinition.DeploymentState = RtDeploymentStateEnum.Deployed;
 
@@ -146,8 +146,8 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
             .Returns(rtAdapter);
         CommunicationRepository.GetPipelinesAsync(TenantId, rtAdapter.ToRtEntityId())
             .Returns([rtPipelineWithDefinition, rtPipelineWithEmptyDefinition]);
-        CommunicationRepository.GetDataPipelineByPipelineAsync(TenantId, rtPipelineWithDefinition.RtId)
-            .Returns(rtDataPipeline);
+        CommunicationRepository.GetDataFlowByPipelineAsync(TenantId, rtPipelineWithDefinition.RtId)
+            .Returns(rtDataFlow);
         CommunicationRepository.GetConfigurationsByPipelineAsync(TenantId, rtPipelineWithDefinition.RtId)
             .Returns(Task.FromResult<IEnumerable<RtConfiguration>>([]));
 
@@ -163,7 +163,7 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
     }
 
     [Test]
-    public async Task GetAdapterConfigurationAsync_DataPipelineNotFound_SkipsPipeline()
+    public async Task GetAdapterConfigurationAsync_DataFlowNotFound_SkipsPipeline()
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
@@ -173,13 +173,13 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
             .Returns(rtAdapter);
         CommunicationRepository.GetPipelinesAsync(TenantId, rtAdapter.ToRtEntityId())
             .Returns([rtPipeline]);
-        CommunicationRepository.GetDataPipelineByPipelineAsync(TenantId, rtPipeline.RtId)
-            .Returns((RtDataPipeline?)null);
+        CommunicationRepository.GetDataFlowByPipelineAsync(TenantId, rtPipeline.RtId)
+            .Returns((RtDataFlow?)null);
 
         // Act
         var configuration = await AdapterService.GetAdapterConfigurationAsync(TenantId, rtAdapter.ToRtEntityId(), false);
 
-        // Assert - pipeline without DataPipeline should be skipped
+        // Assert - pipeline without DataFlow should be skipped
         await Assert.That(configuration).IsNotNull();
         await Assert.That(configuration.Pipelines).IsEmpty();
     }
@@ -211,7 +211,7 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline = RtEntityCreator.CreatePipeline();
 
         var configuration1 = new RtConfiguration
@@ -232,8 +232,8 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
             .Returns(rtAdapter);
         CommunicationRepository.GetPipelinesAsync(TenantId, rtAdapter.ToRtEntityId())
             .Returns([rtPipeline]);
-        CommunicationRepository.GetDataPipelineByPipelineAsync(TenantId, rtPipeline.RtId)
-            .Returns(rtDataPipeline);
+        CommunicationRepository.GetDataFlowByPipelineAsync(TenantId, rtPipeline.RtId)
+            .Returns(rtDataFlow);
         CommunicationRepository.GetConfigurationsByPipelineAsync(TenantId, rtPipeline.RtId)
             .Returns(Task.FromResult<IEnumerable<RtConfiguration>>([configuration1, configuration2]));
 

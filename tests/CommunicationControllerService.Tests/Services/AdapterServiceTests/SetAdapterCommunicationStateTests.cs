@@ -4,7 +4,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v2;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.Runtime.Contracts;
 using NSubstitute;
 
@@ -49,7 +49,7 @@ internal class SetAdapterCommunicationStateTests : AdapterServiceTestsBase
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline = RtEntityCreator.CreatePipeline();
 
         // Add adapter with connection, then remove it (simulates adapter in cache but disconnected)
@@ -57,7 +57,7 @@ internal class SetAdapterCommunicationStateTests : AdapterServiceTestsBase
             rtAdapter.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline.ToRtEntityId(), false,
                     rtPipeline.PipelineDefinition, [])
             ]
         ));
@@ -88,7 +88,7 @@ internal class SetAdapterCommunicationStateTests : AdapterServiceTestsBase
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline = RtEntityCreator.CreatePipeline();
 
         // Add adapter with existing connection (simulates adapter already online)
@@ -96,7 +96,7 @@ internal class SetAdapterCommunicationStateTests : AdapterServiceTestsBase
             rtAdapter.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline.ToRtEntityId(), false,
                     rtPipeline.PipelineDefinition, [])
             ]
         ));
@@ -158,14 +158,14 @@ internal class SetAdapterCommunicationStateTests : AdapterServiceTestsBase
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline = RtEntityCreator.CreatePipeline();
 
         AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
             rtAdapter.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline.ToRtEntityId(), false,
                     rtPipeline.PipelineDefinition, [])
             ]
         ));
@@ -188,7 +188,7 @@ internal class SetAdapterCommunicationStateTests : AdapterServiceTestsBase
     {
         // Arrange - adapter is in cache with a newer connection
         var rtAdapter = RtEntityCreator.CreateAdapter();
-        var rtDataPipeline = RtEntityCreator.CreateDataPipeline();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline = RtEntityCreator.CreatePipeline();
 
         var newConnectionId = "newConnectionId";
@@ -198,7 +198,7 @@ internal class SetAdapterCommunicationStateTests : AdapterServiceTestsBase
             rtAdapter.ToRtEntityId(),
             null,
             [
-                new PipelineConfigurationDto(rtDataPipeline.RtId, rtPipeline.ToRtEntityId(), false,
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline.ToRtEntityId(), false,
                     rtPipeline.PipelineDefinition, [])
             ]
         ));
