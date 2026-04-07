@@ -46,7 +46,7 @@ internal class UndeployDataFlowAsyncTests : AdapterServiceTestsBase
             .Throws<AdapterServiceException>();
 
         await Assert.That(exception).IsNotNull()
-            .And.Member(e => e.Message, msg => msg.Contains("has no edge or mesh pipeline assigned"));
+            .And.Member(e => e.Message, msg => msg.Contains("has no pipelines assigned"));
     }
 
     [Test]

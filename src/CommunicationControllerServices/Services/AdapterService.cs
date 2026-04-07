@@ -449,7 +449,7 @@ internal class AdapterService(
     public async Task DeployDataFlowAsync(string tenantId, OctoObjectId dataFlowRtId)
     {
         Logger.Info(
-            "[{TenantId}] DataFlowRtId='{DataFlowRtId}' deploy edge and mesh pipeline to adapter",
+            "[{TenantId}] DataFlowRtId='{DataFlowRtId}' deploy pipelines to adapter",
             tenantId, dataFlowRtId);
 
         await eventService.StoreInformationEventAsync(tenantId,
@@ -524,7 +524,7 @@ internal class AdapterService(
     public async Task UndeployDataFlowAsync(string tenantId, OctoObjectId dataFlowRtId)
     {
         Logger.Info(
-            "[{TenantId}] DataFlowRtId='{DataFlowRtId}' undeploy edge and mesh pipeline from adapter",
+            "[{TenantId}] DataFlowRtId='{DataFlowRtId}' undeploy pipelines from adapter",
             tenantId, dataFlowRtId);
 
         await eventService.StoreInformationEventAsync(tenantId,
