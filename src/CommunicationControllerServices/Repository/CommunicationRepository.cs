@@ -724,6 +724,47 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
+    public async Task SetPipelineDefinitionAsync(string tenantId, RtEntityId pipelineRtEntityId,
+        string pipelineDefinition)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var pipeline = new RtPipeline
+            {
+                PipelineDefinition = pipelineDefinition
+            };
+
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtPipeline>>
+            {
+                EntityUpdateInfo<RtPipeline>.CreateUpdate(
+                    pipelineRtEntityId,
+                    pipeline)
+            };
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedSetPipelineDefinition(tenantId, pipelineRtEntityId, e);
+        }
+    }
+
     public async Task SetAdapterConfigurationStateAsync(string tenantId, RtEntityId adapterRtEntityId,
         RtConfigurationStateEnum configurationState, string? stateMessage)
     {

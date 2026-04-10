@@ -398,6 +398,13 @@ internal class AdapterService(
                     throw AdapterServiceException.DataFlowNotFound(tenantId, pipelineRtEntityId);
                 }
 
+                // Persist the pipeline definition to the RT entity so it is visible in the UI
+                if (pipelineDefinition != null)
+                {
+                    await communicationRepository.SetPipelineDefinitionAsync(tenantId, pipelineRtEntityId,
+                        pipelineDefinition);
+                }
+
                 // Start from the cached adapter configuration to preserve debug state
                 // of already-deployed pipelines. Fall back to DB if no cache exists.
                 AdapterConfigurationDto adapterConfiguration;

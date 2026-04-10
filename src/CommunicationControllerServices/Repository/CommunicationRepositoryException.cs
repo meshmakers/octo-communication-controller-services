@@ -170,6 +170,14 @@ internal class CommunicationRepositoryException : Exception
             exception);
     }
 
+    internal static Exception CommonFailedSetPipelineDefinition(string tenantId, RtEntityId pipelineRtEntityId,
+        Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to set pipeline definition of pipeline '{pipelineRtEntityId}'",
+            exception);
+    }
+
     internal static Exception DataFlowNotFound(string tenantId, OctoObjectId dataFlowRtId)
     {
         return new CommunicationRepositoryException($"[{tenantId}] Data flow '{dataFlowRtId}' does not exist");
