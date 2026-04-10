@@ -1,4 +1,4 @@
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
