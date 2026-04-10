@@ -1,4 +1,4 @@
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Common.DistributionEventHub;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
