@@ -138,6 +138,10 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
                 config.Pipelines.Count == 1 &&
                 config.Pipelines.First().PipelineRtEntityId == rtPipeline.ToRtEntityId() &&
                 config.Pipelines.First().IsDebuggingEnabled == true));
+
+        // Should not persist pipeline definition when none is provided
+        await CommunicationRepository.DidNotReceiveWithAnyArgs()
+            .SetPipelineDefinitionAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<string>());
     }
 
     [Test]
@@ -177,6 +181,10 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
             Arg.Is<AdapterConfigurationDto>(config =>
                 config.Pipelines.First().NodeConfiguration == customDefinition &&
                 config.Pipelines.First().IsDebuggingEnabled == true));
+
+        // Should persist the custom pipeline definition to the RT entity
+        await CommunicationRepository.Received(1)
+            .SetPipelineDefinitionAsync(TenantId, rtPipeline.ToRtEntityId(), customDefinition);
     }
 
     [Test]

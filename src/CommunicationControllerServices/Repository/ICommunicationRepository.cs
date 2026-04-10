@@ -205,6 +205,16 @@ public interface ICommunicationRepository
         RtDeploymentStateEnum deploymentState, string? stateMessage);
 
     /// <summary>
+    /// Set the pipeline definition YAML of a pipeline
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="pipelineRtEntityId">Object id of the pipeline</param>
+    /// <param name="pipelineDefinition">Pipeline definition YAML</param>
+    /// <returns></returns>
+    Task SetPipelineDefinitionAsync(string tenantId, RtEntityId pipelineRtEntityId,
+        string pipelineDefinition);
+
+    /// <summary>
     /// Set the configuration state of an adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
