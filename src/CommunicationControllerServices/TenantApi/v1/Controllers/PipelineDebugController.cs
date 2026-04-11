@@ -79,7 +79,7 @@ public class PipelineDebugController : ControllerBase
                 {
                     Id = Guid.TryParse(e.ExecutionId, out var id) ? id : Guid.Empty,
                     DateTime = e.StartedAt,
-                    Status = e.Status.ToString(),
+                    Status = (PipelineExecutionStatus)(int)e.Status,
                     DurationMs = e.DurationMs,
                     ErrorMessage = e.ErrorMessage,
                     HasDebugData = false
@@ -144,7 +144,7 @@ public class PipelineDebugController : ControllerBase
                     {
                         Id = Guid.TryParse(latest.ExecutionId, out var id) ? id : Guid.Empty,
                         DateTime = latest.StartedAt,
-                        Status = latest.Status.ToString(),
+                        Status = (PipelineExecutionStatus)(int)latest.Status,
                         DurationMs = latest.DurationMs,
                         ErrorMessage = latest.ErrorMessage,
                         HasDebugData = false

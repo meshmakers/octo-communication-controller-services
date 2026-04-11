@@ -134,6 +134,13 @@ public interface IPoolService
     /// <param name="adapterRtEntityIds">The object id of the adapters</param>
     /// <param name="deploymentState">The new deployment state</param>
     /// <returns></returns>
-    Task SetAdapterDeploymentStateAsync(string tenantId, string poolName, ICollection<RtEntityId> adapterRtEntityIds, 
+    Task SetAdapterDeploymentStateAsync(string tenantId, string poolName, ICollection<RtEntityId> adapterRtEntityIds,
         RtDeploymentStateEnum deploymentState);
+
+    /// <summary>
+    /// Returns a summary list of all pools for a tenant with typed enum states.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <returns>List of pool summaries with typed communication, configuration, and deployment states</returns>
+    Task<IReadOnlyList<PoolSummaryDto>> GetPoolSummariesAsync(string tenantId);
 }
