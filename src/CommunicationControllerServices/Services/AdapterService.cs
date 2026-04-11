@@ -914,4 +914,22 @@ internal class AdapterService(
             throw AdapterServiceException.PipelineSchemaValidationFailed(tenantId, adapterRtEntityId, errors);
         }
     }
+
+    public async Task<IReadOnlyList<AdapterSummaryDto>> GetAdapterSummariesAsync(string tenantId)
+    {
+        var adapters = await communicationRepository.GetAdaptersAsync(tenantId);
+        return adapters.Select(a => new AdapterSummaryDto
+        {
+            RtId = a.RtId.ToString(),
+            Name = a.Name ?? string.Empty,
+            Description = a.Description,
+            CommunicationState = (CommunicationState)(int)a.CommunicationState,
+            ConfigurationState = (ConfigurationState)(int)a.ConfigurationState,
+            DeploymentState = (EntityDeploymentState)(int)a.DeploymentState,
+            CommunicationStateTimestamp = a.CommunicationStateTimestamp,
+            ImageName = a.ImageName,
+            ImageVersion = a.ImageVersion,
+            StatusMessage = a.StatusMessage
+        }).ToList();
+    }
 }

@@ -53,9 +53,9 @@ public class AdapterController : ControllerBase
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
 
-        var config = await _communicationRepository.GetAdaptersAsync(tenantId);
+        var adapters = await _adapterService.GetAdapterSummariesAsync(tenantId);
 
-        return Ok(config);
+        return Ok(adapters);
     }
 
     /// <summary>

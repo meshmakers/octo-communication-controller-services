@@ -453,4 +453,20 @@ internal class PoolService : IPoolService
             Version = rtAdapter.ImageVersion ?? throw PoolServiceException.ImageVersionNotSet(),
         };
     }
+
+    public async Task<IReadOnlyList<PoolSummaryDto>> GetPoolSummariesAsync(string tenantId)
+    {
+        var pools = await _communicationRepository.GetPoolsAsync(tenantId);
+        return pools.Select(p => new PoolSummaryDto
+        {
+            RtId = p.RtId.ToString(),
+            Name = p.Name ?? string.Empty,
+            Description = p.Description,
+            CommunicationState = (CommunicationState)(int)p.CommunicationState,
+            ConfigurationState = (ConfigurationState)(int)p.ConfigurationState,
+            DeploymentState = (EntityDeploymentState)(int)p.DeploymentState,
+            CommunicationStateTimestamp = p.CommunicationStateTimestamp,
+            StatusMessage = p.StatusMessage
+        }).ToList();
+    }
 }

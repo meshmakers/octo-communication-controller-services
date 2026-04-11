@@ -157,4 +157,11 @@ public interface IAdapterService
     /// <param name="pipelineRtEntityId">ID of the pipeline</param>
     /// <returns></returns>
     Task<DeploymentResultDto> GetPipelineDeploymentStateAsync(string tenantId, RtEntityId pipelineRtEntityId);
+
+    /// <summary>
+    /// Returns a summary list of all adapters for a tenant with typed enum states.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <returns>List of adapter summaries with typed communication, configuration, and deployment states</returns>
+    Task<IReadOnlyList<AdapterSummaryDto>> GetAdapterSummariesAsync(string tenantId);
 }
