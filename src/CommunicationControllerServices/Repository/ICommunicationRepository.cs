@@ -215,6 +215,16 @@ public interface ICommunicationRepository
         string pipelineDefinition);
 
     /// <summary>
+    /// Synchronizes the SendsDataTo associations for a pipeline based on ToPipelineDataEvent nodes
+    /// in its definition. Adds new associations and removes stale ones.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="pipelineRtEntityId">Object id of the pipeline</param>
+    /// <param name="pipelineDefinition">Pipeline definition YAML</param>
+    Task SyncPipelineDataConnectionsAsync(string tenantId, RtEntityId pipelineRtEntityId,
+        string pipelineDefinition);
+
+    /// <summary>
     /// Set the configuration state of an adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>

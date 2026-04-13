@@ -1,5 +1,6 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Microsoft.Extensions.Logging;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
@@ -14,14 +15,17 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 internal class CommunicationRepository : ICommunicationRepository
 {
     private readonly ISystemContext _systemContext;
+    private readonly ILogger<CommunicationRepository> _logger;
 
     /// <summary>
     /// Constructor
     /// </summary>
     /// <param name="systemContext">The root object of the persistence layer</param>
-    public CommunicationRepository(ISystemContext systemContext)
+    /// <param name="logger">Logger instance</param>
+    public CommunicationRepository(ISystemContext systemContext, ILogger<CommunicationRepository> logger)
     {
         _systemContext = systemContext;
+        _logger = logger;
     }
 
     /// <inheritdoc />
@@ -763,6 +767,139 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             throw CommunicationRepositoryException.CommonFailedSetPipelineDefinition(tenantId, pipelineRtEntityId, e);
         }
+
+        // Sync SendsDataTo associations based on ToPipelineDataEvent nodes in the definition
+        await SyncPipelineDataConnectionsAsync(tenantId, pipelineRtEntityId, pipelineDefinition);
+    }
+
+    /// <inheritdoc />
+    public async Task SyncPipelineDataConnectionsAsync(string tenantId, RtEntityId pipelineRtEntityId,
+        string pipelineDefinition)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            // Parse target pipeline RtIds from ToPipelineDataEvent nodes in the YAML definition
+            var targetPipelineRtIds = ParseTargetPipelineRtIds(pipelineDefinition);
+
+            // Get existing SendsDataTo associations for this pipeline
+            var existingTargets = await tenantRepository.GetRtAssociationTargetsAsync<RtPipeline, RtPipeline>(
+                session,
+                [pipelineRtEntityId.RtId],
+                SystemCommunicationCkIds.RtCkSendsDataToRoleId,
+                GraphDirections.Outbound,
+                null,
+                RtEntityQueryOptions.Create());
+
+            var existingTargetIds = new HashSet<string>();
+            if (existingTargets.TryGetValue(pipelineRtEntityId, out var existingResultSet))
+            {
+                foreach (var target in existingResultSet.Items)
+                {
+                    existingTargetIds.Add(target.RtId.ToString());
+                }
+            }
+
+            var desiredTargetIds = new HashSet<string>(targetPipelineRtIds);
+            var associations = new List<AssociationUpdateInfo>();
+
+            // Add new associations
+            foreach (var targetId in desiredTargetIds.Except(existingTargetIds))
+            {
+                if (OctoObjectId.TryParse(targetId, out var targetOid))
+                {
+                    var targetEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, targetOid);
+                    associations.Add(AssociationUpdateInfo.CreateInsert(
+                        pipelineRtEntityId, targetEntityId, SystemCommunicationCkIds.RtCkSendsDataToRoleId));
+                }
+            }
+
+            // Remove stale associations
+            foreach (var targetId in existingTargetIds.Except(desiredTargetIds))
+            {
+                if (OctoObjectId.TryParse(targetId, out var targetOid))
+                {
+                    var targetEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, targetOid);
+                    associations.Add(AssociationUpdateInfo.CreateDelete(
+                        pipelineRtEntityId, targetEntityId, SystemCommunicationCkIds.RtCkSendsDataToRoleId));
+                }
+            }
+
+            if (associations.Count > 0)
+            {
+                OperationResult operationResult = new();
+                await tenantRepository.ApplyChangesAsync(session, new List<EntityUpdateInfo<RtPipeline>>(),
+                    associations, operationResult);
+                if (operationResult.HasErrors || operationResult.HasFatalErrors)
+                {
+                    throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+                }
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            _logger.LogWarning(e, "Failed to sync pipeline data connections for {TenantId}/{PipelineRtId}",
+                tenantId, pipelineRtEntityId.RtId);
+        }
+    }
+
+    /// <summary>
+    /// Parses the pipeline definition YAML/JSON and extracts targetPipelineRtId values
+    /// from ToPipelineDataEvent transformation nodes.
+    /// </summary>
+    private static List<string> ParseTargetPipelineRtIds(string pipelineDefinition)
+    {
+        var result = new List<string>();
+        if (string.IsNullOrWhiteSpace(pipelineDefinition))
+            return result;
+
+        try
+        {
+            var deserializer = new YamlDotNet.Serialization.DeserializerBuilder().Build();
+            var yamlObject = deserializer.Deserialize<Dictionary<string, object>>(pipelineDefinition);
+            if (yamlObject == null)
+                return result;
+
+            // Check transformations array
+            if (yamlObject.TryGetValue("transformations", out var transformationsObj) &&
+                transformationsObj is List<object> transformations)
+            {
+                foreach (var transformation in transformations)
+                {
+                    if (transformation is not Dictionary<object, object> transformDict)
+                        continue;
+
+                    // Check if this is a ToPipelineDataEvent node
+                    if (transformDict.TryGetValue("type", out var typeObj) &&
+                        typeObj is string typeStr &&
+                        typeStr.StartsWith("ToPipelineDataEvent", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (transformDict.TryGetValue("targetPipelineRtId", out var targetIdObj) &&
+                            targetIdObj is string targetId &&
+                            !string.IsNullOrWhiteSpace(targetId))
+                        {
+                            result.Add(targetId);
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // If YAML parsing fails, return empty list — don't prevent the save operation
+        }
+
+        return result;
     }
 
     public async Task SetAdapterConfigurationStateAsync(string tenantId, RtEntityId adapterRtEntityId,

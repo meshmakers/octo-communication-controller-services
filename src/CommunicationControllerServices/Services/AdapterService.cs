@@ -401,8 +401,15 @@ internal class AdapterService(
                 // Persist the pipeline definition to the RT entity so it is visible in the UI
                 if (pipelineDefinition != null)
                 {
+                    // SetPipelineDefinitionAsync also syncs SendsDataTo associations
                     await communicationRepository.SetPipelineDefinitionAsync(tenantId, pipelineRtEntityId,
                         pipelineDefinition);
+                }
+                else if (!string.IsNullOrEmpty(pipeline.PipelineDefinition))
+                {
+                    // Sync SendsDataTo associations from existing definition (e.g. after import)
+                    await communicationRepository.SyncPipelineDataConnectionsAsync(tenantId, pipelineRtEntityId,
+                        pipeline.PipelineDefinition);
                 }
 
                 // Start from the cached adapter configuration to preserve debug state
