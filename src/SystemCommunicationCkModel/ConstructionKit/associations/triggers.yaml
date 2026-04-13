@@ -2,6 +2,6 @@ $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 associationRoles:
 - id: Triggers
   inboundName: Triggers
-  inboundMultiplicity: N
+  inboundMultiplicity: ZeroOrOne
   outboundName: TriggeredBy
-  outboundMultiplicity: ZeroOrOne
+  outboundMultiplicity: N
