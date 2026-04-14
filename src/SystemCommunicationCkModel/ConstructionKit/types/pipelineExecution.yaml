@@ -32,6 +32,9 @@ types:
     - id: ${this}/InputData
       name: InputData
       isOptional: true
+    - id: ${this}/OutputData
+      name: OutputData
+      isOptional: true
   associations:
     - id: ${this}/ExecutedPipeline
       targetCkTypeId: ${this}/Pipeline

@@ -255,8 +255,10 @@ public interface ICommunicationRepository
     /// <param name="completedAt">Completion timestamp</param>
     /// <param name="durationMs">Duration in milliseconds</param>
     /// <param name="errorMessage">Error message if failed</param>
+    /// <param name="outputData">Optional output data (JSON) from pipeline result</param>
     Task UpdatePipelineExecutionAsync(string tenantId, string executionId,
-        RtPipelineExecutionStatusEnum status, DateTime? completedAt, int? durationMs, string? errorMessage);
+        RtPipelineExecutionStatusEnum status, DateTime? completedAt, int? durationMs, string? errorMessage,
+        string? outputData = null);
 
     /// <summary>
     /// Gets a pipeline execution by its execution ID

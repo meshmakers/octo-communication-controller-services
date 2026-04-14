@@ -31,4 +31,9 @@ public record PipelineExecutionUpdate
     /// Error message if failed
     /// </summary>
     public string? ErrorMessage { get; init; }
+
+    /// <summary>
+    /// Optional output data (JSON string) from pipeline execution result
+    /// </summary>
+    public string? OutputData { get; init; }
 }
