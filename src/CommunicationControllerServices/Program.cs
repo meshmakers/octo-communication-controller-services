@@ -66,6 +66,7 @@ try
     builder.Services.AddSingleton<ICommunicationRepository, CommunicationRepository>();
     builder.Services.AddSingleton<ICommunicationEventService, CommunicationEventService>();
     builder.Services.AddSingleton<IPipelineSchemaValidator, PipelineSchemaValidator>();
+    builder.Services.AddSingleton<IPipelineDefinitionService, PipelineDefinitionService>();
     builder.Services.AddSingleton<IAdapterService, AdapterService>();
     builder.Services.AddSingleton<IPoolService, PoolService>();
     builder.Services.AddSingleton<IPipelineDebugService, PipelineDebugService>();
