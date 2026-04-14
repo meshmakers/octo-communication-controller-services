@@ -138,3 +138,8 @@ attributes:
   description: Last synced sequence number for offline sync
   defaultValues:
     - 0
+
+# Pipeline debugging
+- id: IsDebuggingEnabled
+  valueType: Boolean
+  description: 'Whether debugging is enabled for this pipeline'

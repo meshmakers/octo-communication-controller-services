@@ -773,6 +773,48 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
+    public async Task SetPipelineDebuggingEnabledAsync(string tenantId, RtEntityId pipelineRtEntityId,
+        bool isDebuggingEnabled)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var pipeline = new RtPipeline
+            {
+                IsDebuggingEnabled = isDebuggingEnabled
+            };
+
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtPipeline>>
+            {
+                EntityUpdateInfo<RtPipeline>.CreateUpdate(
+                    pipelineRtEntityId,
+                    pipeline)
+            };
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedSetPipelineDefinition(tenantId, pipelineRtEntityId, e);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task SyncPipelineDataConnectionsAsync(string tenantId, RtEntityId pipelineRtEntityId,
         string pipelineDefinition)
     {

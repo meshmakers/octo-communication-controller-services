@@ -215,6 +215,15 @@ public interface ICommunicationRepository
         string pipelineDefinition);
 
     /// <summary>
+    /// Sets the debugging enabled state of a pipeline
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="pipelineRtEntityId">Object id of the pipeline</param>
+    /// <param name="isDebuggingEnabled">Whether debugging is enabled</param>
+    Task SetPipelineDebuggingEnabledAsync(string tenantId, RtEntityId pipelineRtEntityId,
+        bool isDebuggingEnabled);
+
+    /// <summary>
     /// Synchronizes the SendsDataTo associations for a pipeline based on ToPipelineDataEvent nodes
     /// in its definition. Adds new associations and removes stale ones.
     /// </summary>
