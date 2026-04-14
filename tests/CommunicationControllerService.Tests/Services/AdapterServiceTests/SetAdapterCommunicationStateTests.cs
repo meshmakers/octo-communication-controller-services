@@ -216,4 +216,48 @@ internal class SetAdapterCommunicationStateTests : AdapterServiceTestsBase
         // Verify connection ID is still the new one
         await Assert.That(AdapterTenant.AdapterById[rtAdapter.ToRtEntityId()].ConnectionId).IsEqualTo(newConnectionId);
     }
+
+    [Test]
+    public async Task SetAdapterCommunicationStateOfflineAsync_AfterReconnect_OldConnectionIgnored()
+    {
+        // Arrange - simulate the race condition:
+        // 1. Adapter connects with old connection
+        // 2. Adapter reconnects with new connection (OnConnectedAsync fires first)
+        // 3. Old connection's OnDisconnectedAsync fires after new connection is already online
+        var rtAdapter = RtEntityCreator.CreateAdapter();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
+        var rtPipeline = RtEntityCreator.CreatePipeline();
+
+        var oldConnectionId = "oldConnectionId";
+        var newConnectionId = "newConnectionId";
+
+        // Step 1: Adapter initially connected with old connection
+        AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), oldConnectionId, new AdapterConfigurationDto(
+            rtAdapter.ToRtEntityId(),
+            null,
+            [
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline.ToRtEntityId(), false,
+                    rtPipeline.PipelineDefinition, [])
+            ]
+        ));
+
+        // Step 2: New connection comes in (reconnect)
+        await AdapterService.SetAdapterCommunicationStateOnlineAsync(TenantId, rtAdapter.ToRtEntityId(), newConnectionId);
+
+        CommunicationRepository.ClearReceivedCalls();
+
+        // Step 3: Old connection's disconnect fires AFTER new connection is established
+        await AdapterService.SetAdapterCommunicationStateOfflineAsync(TenantId, rtAdapter.ToRtEntityId(), oldConnectionId);
+
+        // Assert - the stale disconnect must be ignored
+        using var _ = Assert.Multiple();
+
+        // DB should NOT be updated to Offline
+        await CommunicationRepository.DidNotReceive()
+            .SetAdapterCommunicationStateAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(),
+                Arg.Any<RtCommunicationStateEnum>());
+
+        // Cache should still have the new connection
+        await Assert.That(AdapterTenant.AdapterById[rtAdapter.ToRtEntityId()].ConnectionId).IsEqualTo(newConnectionId);
+    }
 }

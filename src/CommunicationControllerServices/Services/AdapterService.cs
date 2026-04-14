@@ -257,10 +257,18 @@ internal class AdapterService(
         var wasAlreadyOnline = adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var existingAdapter)
                                && !string.IsNullOrWhiteSpace(existingAdapter.ConnectionId);
 
+        var oldConnectionId = existingAdapter?.ConnectionId;
+
+        // Update cache connection ID immediately BEFORE any async operations.
+        // This ensures that a concurrent OnDisconnectedAsync from the old connection
+        // will see the new connection ID in the cache and correctly identify itself
+        // as a stale disconnect, preventing it from overwriting the Online state.
+        adapterTenant.UpdateConnectionId(adapterRtEntityId, connectionId);
+
         if (wasAlreadyOnline)
         {
             Logger.Info("[{TenantId}] adapter rt id '{AdapterRtId}' reconnected (previous connection: '{OldConnectionId}', new connection: '{NewConnectionId}')",
-                tenantId, adapterRtEntityId, existingAdapter!.ConnectionId, connectionId);
+                tenantId, adapterRtEntityId, oldConnectionId, connectionId);
 
             await eventService.StoreInformationEventAsync(tenantId,
                 $"Adapter '{adapterRtEntityId}' reconnected (new connection id: '{connectionId}').",
@@ -275,8 +283,6 @@ internal class AdapterService(
                 $"Adapter '{adapterRtEntityId}' is now online.",
                 adapterRtEntityId);
         }
-
-        adapterTenant.UpdateConnectionId(adapterRtEntityId, connectionId);
 
         // Always update DB state, even if adapter is not in cache yet
         await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId,
