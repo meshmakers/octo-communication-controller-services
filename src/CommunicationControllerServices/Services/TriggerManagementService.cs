@@ -4,6 +4,7 @@ using Meshmakers.Octo.Common.DistributionEventHub;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 
@@ -13,7 +14,7 @@ internal class TriggerManagementService(
     ILogger<TriggerManagementService> logger,
     ICommunicationRepository communicationRepository,
     ICommandClient<RemoveRecurringJobsByScheduleGroupRequest> removeRecurringJobsByScheduleGroupCommandClient,
-    IRoutedCommandClient<ExecuteMeshPipelineRequest> executeMeshPipelineCommandClient,
+    IRoutedCommandClient<ExecutePipelineRequest> executeMeshPipelineCommandClient,
     IDistributionEventHubService distributionEventHubService,
     ICommunicationEventService eventService)
     : ITriggerManagementService
@@ -23,7 +24,7 @@ internal class TriggerManagementService(
     {
         logger.LogInformation("[{TenantId}] Executing pipeline '{PipelineRtId}'", tenantId, pipelineRtId);
 
-        ExecuteMeshPipelineResponse? r;
+        ExecutePipelineResponse? r;
         try
         {
             // Resolve the DataFlow that contains this pipeline — the FromExecutePipelineCommandNode
@@ -32,10 +33,10 @@ internal class TriggerManagementService(
             var dataFlowRtId = dataFlow?.RtId ?? pipelineRtId;
 
             var address =
-                $"{QueueNames.ExecuteMeshPipelineCommand.ToLower()}-{tenantId.ToLower()}-data-flow-{dataFlowRtId.ToString().ToLower()}";
+                $"{PipelineQueueNames.ExecutePipelineCommand.ToLower()}-{tenantId.ToLower()}-data-flow-{dataFlowRtId.ToString().ToLower()}";
 
-            r = await executeMeshPipelineCommandClient.GetResponse<ExecuteMeshPipelineResponse>(address,
-                new ExecuteMeshPipelineRequest(tenantId, pipelineInput));
+            r = await executeMeshPipelineCommandClient.GetResponse<ExecutePipelineResponse>(address,
+                new ExecutePipelineRequest(tenantId, pipelineInput));
 
             if (r.IsSuccessStartingExecution)
             {
