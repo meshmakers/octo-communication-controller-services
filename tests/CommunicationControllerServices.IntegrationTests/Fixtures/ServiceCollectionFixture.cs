@@ -9,6 +9,7 @@ using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Services;
 using Meshmakers.Octo.Runtime.Engine.MongoDb.Services.Defaults;
+using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
@@ -74,7 +75,7 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         // These are normally provided by the distribution event hub but are not needed for integration tests
         Services.AddSingleton(Substitute.For<ICommandClient<RemoveRecurringJobsByScheduleGroupRequest>>());
         Services.AddSingleton(Substitute.For<ICommandClient<CreateIdentityDataCommandRequest>>());
-        Services.AddSingleton(Substitute.For<IRoutedCommandClient<ExecuteMeshPipelineRequest>>());
+        Services.AddSingleton(Substitute.For<IRoutedCommandClient<ExecutePipelineRequest>>());
         Services.AddSingleton(Substitute.For<IDistributionEventHubService>());
 
         // Add mock SignalR hub contexts (required by hub callbacks)
