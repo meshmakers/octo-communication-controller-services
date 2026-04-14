@@ -995,7 +995,8 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     public async Task UpdatePipelineExecutionAsync(string tenantId, string executionId,
-        RtPipelineExecutionStatusEnum status, DateTime? completedAt, int? durationMs, string? errorMessage)
+        RtPipelineExecutionStatusEnum status, DateTime? completedAt, int? durationMs, string? errorMessage,
+        string? outputData = null)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -1021,7 +1022,8 @@ internal class CommunicationRepository : ICommunicationRepository
                 Status = status,
                 CompletedAt = completedAt,
                 DurationMs = durationMs,
-                ErrorMessage = errorMessage
+                ErrorMessage = errorMessage,
+                OutputData = outputData
             };
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtPipelineExecution>>
@@ -1087,7 +1089,8 @@ internal class CommunicationRepository : ICommunicationRepository
                     Status = update.Status,
                     CompletedAt = update.CompletedAt,
                     DurationMs = update.DurationMs,
-                    ErrorMessage = update.ErrorMessage
+                    ErrorMessage = update.ErrorMessage,
+                    OutputData = update.OutputData
                 };
 
                 entityUpdateInfoList.Add(

@@ -57,4 +57,9 @@ public record BufferedPipelineExecution
     /// Optional input data for debugging (JSON string)
     /// </summary>
     public string? InputData { get; init; }
+
+    /// <summary>
+    /// Optional output data (JSON string) from pipeline execution result
+    /// </summary>
+    public string? OutputData { get; init; }
 }

@@ -132,7 +132,8 @@ internal class PipelineExecutionService(
                 Status = ConvertExecutionStatus(dto.Status),
                 CompletedAt = dto.CompletedAt,
                 DurationMs = dto.DurationMs,
-                ErrorMessage = dto.ErrorMessage
+                ErrorMessage = dto.ErrorMessage,
+                OutputData = dto.OutputData
             }).ToList();
 
             var updatedCount = await communicationRepository.BulkUpdatePipelineExecutionsAsync(tenantId, updates);
@@ -197,7 +198,7 @@ internal class PipelineExecutionService(
 
             // Update the execution record
             await communicationRepository.UpdatePipelineExecutionAsync(tenantId, dto.ExecutionId,
-                ckStatus, dto.CompletedAt, dto.DurationMs, dto.ErrorMessage);
+                ckStatus, dto.CompletedAt, dto.DurationMs, dto.ErrorMessage, dto.OutputData);
 
             // Get the pipeline from the execution's association to clear current execution
             // Note: The CkTypeId should never be null for a valid execution
@@ -313,7 +314,7 @@ internal class PipelineExecutionService(
             var ckStatus = ConvertExecutionStatus(dto.Status);
 
             await communicationRepository.UpdatePipelineExecutionAsync(tenantId, dto.ExecutionId,
-                ckStatus, dto.CompletedAt, dto.DurationMs, dto.ErrorMessage);
+                ckStatus, dto.CompletedAt, dto.DurationMs, dto.ErrorMessage, dto.OutputData);
 
             await eventService.StoreInformationEventAsync(tenantId,
                 $"Interrupted execution '{dto.ExecutionId}' final result reported: {ckStatus}.");
@@ -639,7 +640,8 @@ internal class PipelineExecutionService(
                     CompletedAt = dto.CompletedAt,
                     DurationMs = dto.DurationMs,
                     ErrorMessage = dto.ErrorMessage,
-                    InputData = dto.InputData
+                    InputData = dto.InputData,
+                    OutputData = dto.OutputData
                 }).ToList();
 
                 await communicationRepository.BulkInsertPipelineExecutionsAsync(tenantId, executionsToInsert,

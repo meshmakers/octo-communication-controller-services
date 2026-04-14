@@ -61,6 +61,9 @@ attributes:
 - id: InputData
   valueType: String
   description: Optional input data (JSON) for debugging
+- id: OutputData
+  valueType: String
+  description: Optional output data (JSON) from pipeline execution result
 # Pipeline Statistics attributes
 - id: LastHourSuccessCount
   valueType: Int

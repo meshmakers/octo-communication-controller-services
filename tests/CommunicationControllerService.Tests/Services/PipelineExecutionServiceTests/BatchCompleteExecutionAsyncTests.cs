@@ -82,6 +82,38 @@ internal class BatchCompleteExecutionAsyncTests : PipelineExecutionServiceTestsB
     }
 
     [Test]
+    public async Task BatchCompleteExecutionsAsync_WithOutputData_IncludesOutputDataInUpdates()
+    {
+        // Arrange
+        var completedAt = DateTime.UtcNow;
+        var outputData = """{"result":"ok"}""";
+        var dtos = new List<PipelineExecutionEndDto>
+        {
+            new()
+            {
+                ExecutionId = Guid.NewGuid().ToString(),
+                Status = PipelineExecutionStatus.Completed,
+                CompletedAt = completedAt,
+                DurationMs = 100,
+                OutputData = outputData
+            }
+        };
+
+        CommunicationRepository.BulkUpdatePipelineExecutionsAsync(TenantId, Arg.Any<IReadOnlyList<PipelineExecutionUpdate>>())
+            .Returns(1);
+
+        // Act
+        await PipelineExecutionService.BatchCompleteExecutionsAsync(TenantId, dtos);
+
+        // Assert
+        await CommunicationRepository.Received(1).BulkUpdatePipelineExecutionsAsync(
+            TenantId,
+            Arg.Is<IReadOnlyList<PipelineExecutionUpdate>>(list =>
+                list.Count == 1 &&
+                list[0].OutputData == outputData));
+    }
+
+    [Test]
     public async Task BatchCompleteExecutionsAsync_WithFailures_StoresErrorEvents()
     {
         // Arrange

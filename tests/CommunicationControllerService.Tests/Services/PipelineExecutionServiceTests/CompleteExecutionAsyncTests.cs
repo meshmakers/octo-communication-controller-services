@@ -156,6 +156,41 @@ internal class CompleteExecutionAsyncTests : PipelineExecutionServiceTestsBase
     }
 
     [Test]
+    public async Task CompleteExecutionAsync_WithOutputData_PassesOutputDataToRepository()
+    {
+        // Arrange
+        var rtAdapter = RtEntityCreator.CreateAdapter();
+        var executionId = Guid.NewGuid().ToString();
+        var execution = RtEntityCreator.CreatePipelineExecution(executionId);
+        var completedAt = DateTime.UtcNow;
+        var outputData = """{"rooms":2,"controls":5}""";
+        var endDto = new PipelineExecutionEndDto
+        {
+            ExecutionId = executionId,
+            Status = PipelineExecutionStatus.Completed,
+            CompletedAt = completedAt,
+            DurationMs = 1500,
+            OutputData = outputData
+        };
+
+        CommunicationRepository.GetPipelineExecutionAsync(TenantId, executionId)
+            .Returns(execution);
+
+        // Act
+        await PipelineExecutionService.CompleteExecutionAsync(TenantId, rtAdapter.ToRtEntityId(), endDto);
+
+        // Assert
+        await CommunicationRepository.Received(1).UpdatePipelineExecutionAsync(
+            TenantId,
+            executionId,
+            RtPipelineExecutionStatusEnum.Completed,
+            completedAt,
+            1500,
+            null,
+            outputData);
+    }
+
+    [Test]
     public async Task CompleteExecutionAsync_RepositoryThrows_WrapsException()
     {
         // Arrange
