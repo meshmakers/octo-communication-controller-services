@@ -110,6 +110,10 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
         var rtPipeline = RtEntityCreator.CreatePipeline();
         rtPipeline.DeploymentState = RtDeploymentStateEnum.Deployed;
 
+        // After SetPipelineDebuggingEnabledAsync, the pipeline will have IsDebuggingEnabled = true
+        var rtPipelineAfterDebugSet = RtEntityCreator.CreatePipelineFrom(rtPipeline);
+        rtPipelineAfterDebugSet.IsDebuggingEnabled = true;
+
         AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
             rtAdapter.ToRtEntityId(),
             null,
@@ -117,7 +121,7 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
         ));
 
         CommunicationRepository.GetPipelineAsync(TenantId, rtPipeline.ToRtEntityId())
-            .Returns(rtPipeline);
+            .Returns(rtPipeline, rtPipelineAfterDebugSet);
         CommunicationRepository.GetDataFlowByPipelineAsync(TenantId, rtPipeline.RtId)
             .Returns(rtDataFlow);
         CommunicationRepository.GetAdapterAsync(TenantId, rtAdapter.ToRtEntityId())
@@ -139,6 +143,10 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
                 config.Pipelines.First().PipelineRtEntityId == rtPipeline.ToRtEntityId() &&
                 config.Pipelines.First().IsDebuggingEnabled == true));
 
+        // Should persist IsDebuggingEnabled on the entity
+        await CommunicationRepository.Received(1)
+            .SetPipelineDebuggingEnabledAsync(TenantId, rtPipeline.ToRtEntityId(), true);
+
         // Should not persist pipeline definition when none is provided
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
             .SetPipelineDefinitionAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<string>());
@@ -156,6 +164,9 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
 
         var customDefinition = "custom debug definition";
 
+        var rtPipelineAfterDebugSet = RtEntityCreator.CreatePipelineFrom(rtPipeline);
+        rtPipelineAfterDebugSet.IsDebuggingEnabled = true;
+
         AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
             rtAdapter.ToRtEntityId(),
             null,
@@ -163,7 +174,7 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
         ));
 
         CommunicationRepository.GetPipelineAsync(TenantId, rtPipeline.ToRtEntityId())
-            .Returns(rtPipeline);
+            .Returns(rtPipeline, rtPipelineAfterDebugSet);
         CommunicationRepository.GetDataFlowByPipelineAsync(TenantId, rtPipeline.RtId)
             .Returns(rtDataFlow);
         CommunicationRepository.GetAdapterAsync(TenantId, rtAdapter.ToRtEntityId())
@@ -197,6 +208,9 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
         rtPipeline.PipelineDefinition = "updated definition";
         rtPipeline.DeploymentState = RtDeploymentStateEnum.Deployed;
 
+        var rtPipelineAfterDebugSet = RtEntityCreator.CreatePipelineFrom(rtPipeline);
+        rtPipelineAfterDebugSet.IsDebuggingEnabled = true;
+
         // Start with existing pipeline (non-debug)
         AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
             rtAdapter.ToRtEntityId(),
@@ -208,7 +222,7 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
         ));
 
         CommunicationRepository.GetPipelineAsync(TenantId, rtPipeline.ToRtEntityId())
-            .Returns(rtPipeline);
+            .Returns(rtPipeline, rtPipelineAfterDebugSet);
         CommunicationRepository.GetDataFlowByPipelineAsync(TenantId, rtPipeline.RtId)
             .Returns(rtDataFlow);
         CommunicationRepository.GetAdapterAsync(TenantId, rtAdapter.ToRtEntityId())
@@ -247,6 +261,9 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
         rtPipeline1.DeploymentState = RtDeploymentStateEnum.Deployed;
         rtPipeline2.DeploymentState = RtDeploymentStateEnum.Deployed;
 
+        var rtPipeline1AfterDebugSet = RtEntityCreator.CreatePipelineFrom(rtPipeline1);
+        rtPipeline1AfterDebugSet.IsDebuggingEnabled = true;
+
         AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
             rtAdapter.ToRtEntityId(),
             null,
@@ -259,7 +276,7 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
         ));
 
         CommunicationRepository.GetPipelineAsync(TenantId, rtPipeline1.ToRtEntityId())
-            .Returns(rtPipeline1);
+            .Returns(rtPipeline1, rtPipeline1AfterDebugSet);
         CommunicationRepository.GetDataFlowByPipelineAsync(TenantId, rtPipeline1.RtId)
             .Returns(rtDataFlow);
         CommunicationRepository.GetDataFlowByPipelineAsync(TenantId, rtPipeline2.RtId)
@@ -298,6 +315,7 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
         var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline = RtEntityCreator.CreatePipeline();
         rtPipeline.DeploymentState = RtDeploymentStateEnum.Deployed;
+        rtPipeline.IsDebuggingEnabled = true; // Already enabled - no need to re-set
 
         // Already has the exact same configuration deployed with debugging enabled
         AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(

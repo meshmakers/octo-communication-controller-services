@@ -68,6 +68,18 @@ internal static class RtEntityCreator
         };
     }
 
+    public static RtPipeline CreatePipelineFrom(RtPipeline source)
+    {
+        return new RtPipeline
+        {
+            RtId = source.RtId,
+            CkTypeId = source.CkTypeId,
+            PipelineDefinition = source.PipelineDefinition,
+            DeploymentState = source.DeploymentState,
+            IsDebuggingEnabled = source.IsDebuggingEnabled
+        };
+    }
+
     public static RtAdapter CreateAdapter(string? id = null)
     {
         id = id ?? OctoObjectId.GenerateNewId().ToString();

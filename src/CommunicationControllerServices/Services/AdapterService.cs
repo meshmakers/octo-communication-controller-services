@@ -224,7 +224,7 @@ internal class AdapterService(
                     rtPipeline.DeploymentState == RtDeploymentStateEnum.Deployed)
                 {
                     pipelineConfigurations.Add(
-                        await CreatePipelineConfigurationAsync(tenantId, dataFlow.RtId, rtPipeline, false));
+                        await CreatePipelineConfigurationAsync(tenantId, dataFlow.RtId, rtPipeline));
                 }
             }
 
@@ -418,6 +418,15 @@ internal class AdapterService(
                         pipeline.PipelineDefinition);
                 }
 
+                // Enable debugging when deploying via the pipeline deploy endpoint.
+                // The IsDebuggingEnabled state is persisted on the RT entity so it survives page reloads.
+                if (pipeline.IsDebuggingEnabled != true)
+                {
+                    await communicationRepository.SetPipelineDebuggingEnabledAsync(tenantId, pipelineRtEntityId, true);
+                    pipeline = await communicationRepository.GetPipelineAsync(tenantId, pipelineRtEntityId)
+                               ?? throw AdapterServiceException.PipelineNotFound(tenantId, pipelineRtEntityId);
+                }
+
                 // Start from the cached adapter configuration to preserve debug state
                 // of already-deployed pipelines. Fall back to DB if no cache exists.
                 AdapterConfigurationDto adapterConfiguration;
@@ -441,7 +450,7 @@ internal class AdapterService(
                 }
 
                 adapterConfiguration.Pipelines.Add(
-                    await CreatePipelineConfigurationAsync(tenantId, dataFlow.RtId, pipeline, true,
+                    await CreatePipelineConfigurationAsync(tenantId, dataFlow.RtId, pipeline,
                         pipelineDefinition));
 
                 if (!adapterConfiguration.Equals(adapter.Configuration))
@@ -524,8 +533,7 @@ internal class AdapterService(
                     }
 
                     adapterConfig.Pipelines.Add(
-                        await CreatePipelineConfigurationAsync(tenantId, dataFlowRtId, rtDeployPipeline,
-                            false));
+                        await CreatePipelineConfigurationAsync(tenantId, dataFlowRtId, rtDeployPipeline));
                 }
                 else
                 {
@@ -758,7 +766,7 @@ internal class AdapterService(
     }
 
     private async Task<PipelineConfigurationDto> CreatePipelineConfigurationAsync(string tenantId,
-        OctoObjectId dataFlowRtId, RtPipeline rtPipeline, bool isDebuggingEnabled,
+        OctoObjectId dataFlowRtId, RtPipeline rtPipeline,
         string? pipelineDefinition = null)
     {
         var pipelineConfigurations = await communicationRepository
@@ -772,7 +780,7 @@ internal class AdapterService(
         return new PipelineConfigurationDto(
             dataFlowRtId,
             rtPipeline.ToRtEntityId(),
-            isDebuggingEnabled,
+            rtPipeline.IsDebuggingEnabled ?? false,
             pipelineDefinition ?? rtPipeline.PipelineDefinition,
             configurationsDto);
     }

@@ -8,6 +8,9 @@ types:
         isOptional: true
       - id: ${this}/PipelineDefinition
         name: PipelineDefinition
+      - id: ${this}/IsDebuggingEnabled
+        name: IsDebuggingEnabled
+        isOptional: true
     associations:
       - id: ${System}/ParentChild
         targetCkTypeId: ${this}/DataFlow
