@@ -175,7 +175,7 @@ public class PipelineDefinitionController : ControllerBase
                 });
             }
 
-            return Ok(result);
+            return Content(result, "text/plain");
         }
         catch (Exception e)
         {

@@ -1,0 +1,24 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+  - typeId: DataPointMapping
+    derivedFromCkTypeId: ${System}/Entity
+    description: Maps a source entity attribute to a target entity attribute with optional expression transformation
+    associations:
+      - id: ${this}/MapsFrom-1
+        targetCkTypeId: ${System}/Entity
+      - id: ${this}/MapsTo-1
+        targetCkTypeId: ${System}/Entity
+    attributes:
+      - id: ${System}/Name-1
+        name: Name
+        isOptional: true
+      - id: ${System}/Enabled-1
+        name: Enabled
+      - id: ${this}/SourceAttributePath-1
+        name: SourceAttributePath
+        isOptional: true
+      - id: ${this}/MappingExpression-1
+        name: MappingExpression
+        isOptional: true
+      - id: ${this}/TargetAttributePath-1
+        name: TargetAttributePath

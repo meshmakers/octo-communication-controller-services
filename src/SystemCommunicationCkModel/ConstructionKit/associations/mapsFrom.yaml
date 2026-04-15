@@ -1,0 +1,8 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+associationRoles:
+- id: MapsFrom
+  description: Links a DataPointMapping to its source data point entity
+  inboundName: MapsFrom
+  outboundName: MappedAsSource
+  inboundMultiplicity: One
+  outboundMultiplicity: N
