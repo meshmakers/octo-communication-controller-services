@@ -1,6 +1,6 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
-namespace CommunicationControllerService.Tests.Services;
+namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services;
 
 public class PipelineDefinitionServiceTests
 {
@@ -26,7 +26,7 @@ public class PipelineDefinitionServiceTests
         """;
 
     [Test]
-    public async TaskGetNodeProperties_ShouldFindFirstNode()
+    public async Task GetNodeProperties_ShouldFindFirstNode()
     {
         var result = _service.GetNodeProperties(SampleDefinition, "CreateUpdateInfo@1", 0);
 
@@ -37,7 +37,7 @@ public class PipelineDefinitionServiceTests
     }
 
     [Test]
-    public async TaskGetNodeProperties_ShouldFindNestedNode()
+    public async Task GetNodeProperties_ShouldFindNestedNode()
     {
         var result = _service.GetNodeProperties(SampleDefinition, "CreateUpdateInfo@1", 1);
 
@@ -47,7 +47,7 @@ public class PipelineDefinitionServiceTests
     }
 
     [Test]
-    public async TaskGetNodeProperties_ShouldReturnNullForMissingNode()
+    public async Task GetNodeProperties_ShouldReturnNullForMissingNode()
     {
         var result = _service.GetNodeProperties(SampleDefinition, "NonExistent@1", 0);
 
@@ -55,7 +55,7 @@ public class PipelineDefinitionServiceTests
     }
 
     [Test]
-    public async TaskGetAllNodes_ShouldReturnAllNodes()
+    public async Task GetAllNodes_ShouldReturnAllNodes()
     {
         var result = _service.GetAllNodes(SampleDefinition);
 
@@ -67,7 +67,7 @@ public class PipelineDefinitionServiceTests
     }
 
     [Test]
-    public async TaskUpdateNodeProperties_ShouldUpdateExistingProperty()
+    public async Task UpdateNodeProperties_ShouldUpdateExistingProperty()
     {
         var props = new Dictionary<string, object?> { ["description"] = "Updated entity" };
 
@@ -75,14 +75,13 @@ public class PipelineDefinitionServiceTests
 
         await Assert.That(result).IsNotNull();
 
-        // Verify the update took effect by parsing back
         var parsed = _service.GetNodeProperties(result!, "CreateUpdateInfo@1", 0);
         await Assert.That(parsed).IsNotNull();
         await Assert.That(parsed!.Properties["description"]?.ToString()).IsEqualTo("Updated entity");
     }
 
     [Test]
-    public async TaskUpdateNodeProperties_ShouldAddNewProperty()
+    public async Task UpdateNodeProperties_ShouldAddNewProperty()
     {
         var props = new Dictionary<string, object?> { ["generateRtId"] = true };
 
@@ -96,7 +95,7 @@ public class PipelineDefinitionServiceTests
     }
 
     [Test]
-    public async TaskUpdateNodeProperties_ShouldRemovePropertyWhenNull()
+    public async Task UpdateNodeProperties_ShouldRemovePropertyWhenNull()
     {
         var props = new Dictionary<string, object?> { ["description"] = null };
 
@@ -110,7 +109,7 @@ public class PipelineDefinitionServiceTests
     }
 
     [Test]
-    public async TaskUpdateNodeProperties_ShouldNotOverwriteTypeDiscriminator()
+    public async Task UpdateNodeProperties_ShouldNotOverwriteTypeDiscriminator()
     {
         var props = new Dictionary<string, object?> { ["type"] = "SomethingElse@1" };
 
@@ -118,13 +117,12 @@ public class PipelineDefinitionServiceTests
 
         await Assert.That(result).IsNotNull();
 
-        // type should still be CreateUpdateInfo@1
         var parsed = _service.GetNodeProperties(result!, "CreateUpdateInfo@1", 0);
         await Assert.That(parsed).IsNotNull();
     }
 
     [Test]
-    public async TaskUpdateNodeProperties_ShouldUpdateNestedNode()
+    public async Task UpdateNodeProperties_ShouldUpdateNestedNode()
     {
         var props = new Dictionary<string, object?> { ["description"] = "Updated nested" };
 
@@ -132,17 +130,15 @@ public class PipelineDefinitionServiceTests
 
         await Assert.That(result).IsNotNull();
 
-        // First node should be unchanged
         var first = _service.GetNodeProperties(result!, "CreateUpdateInfo@1", 0);
         await Assert.That(first!.Properties["description"]?.ToString()).IsEqualTo("Create entity");
 
-        // Second (nested) node should be updated
         var second = _service.GetNodeProperties(result!, "CreateUpdateInfo@1", 1);
         await Assert.That(second!.Properties["description"]?.ToString()).IsEqualTo("Updated nested");
     }
 
     [Test]
-    public async TaskUpdateNodeProperties_ShouldReturnNullForMissingNode()
+    public async Task UpdateNodeProperties_ShouldReturnNullForMissingNode()
     {
         var props = new Dictionary<string, object?> { ["description"] = "test" };
 
@@ -152,7 +148,7 @@ public class PipelineDefinitionServiceTests
     }
 
     [Test]
-    public async TaskUpdateNodeProperties_ShouldPreserveOtherNodes()
+    public async Task UpdateNodeProperties_ShouldPreserveOtherNodes()
     {
         var props = new Dictionary<string, object?> { ["description"] = "Changed" };
 
@@ -160,12 +156,10 @@ public class PipelineDefinitionServiceTests
 
         await Assert.That(result).IsNotNull();
 
-        // ForEach should still be there
         var forEach = _service.GetNodeProperties(result!, "ForEach@1", 0);
         await Assert.That(forEach).IsNotNull();
         await Assert.That(forEach!.Properties["iterationPath"]?.ToString()).IsEqualTo("$.items");
 
-        // Trigger should still be there
         var trigger = _service.GetNodeProperties(result!, "FromExecutePipelineCommand@1", 0);
         await Assert.That(trigger).IsNotNull();
     }
