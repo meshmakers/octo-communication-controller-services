@@ -145,9 +145,12 @@ attributes:
   description: 'Whether debugging is enabled for this pipeline'
 
 # Data point mapping
-- id: SourceAttributeName
+- id: SourceAttributePath
   valueType: String
-  description: Name of the source attribute to read from this entity (e.g., CurrentValue). If not set, the adapter determines the default.
-- id: TargetAttributeName
+  description: Path to the source attribute to read (e.g., CurrentValue, or nested record.field). If not set, the adapter determines the default.
+- id: TargetAttributePath
   valueType: String
-  description: Name of the target attribute to update on the mapped entity (e.g., Temperature, Humidity)
+  description: Path to the target attribute to update on the mapped entity (e.g., Temperature, Humidity, or nested record.field)
+- id: MappingExpression
+  valueType: String
+  description: 'Optional mXparser expression to transform the source value. Variable value contains the source value.'
