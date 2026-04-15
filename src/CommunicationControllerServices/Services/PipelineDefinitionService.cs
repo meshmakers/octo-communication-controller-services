@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
@@ -191,7 +192,8 @@ internal class PipelineDefinitionService : IPipelineDefinitionService
             }
             else
             {
-                targetNode[key] = kvp.Value;
+                // Convert JsonElement to primitive types for YAML serialization
+                targetNode[key] = UnwrapJsonElement(kvp.Value);
             }
         }
 
@@ -225,6 +227,31 @@ internal class PipelineDefinitionService : IPipelineDefinitionService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Recursively converts System.Text.Json.JsonElement values to YAML-friendly primitives.
+    /// ASP.NET Core deserializes Dictionary&lt;string, object?&gt; values as JsonElement,
+    /// which YamlDotNet would serialize as complex objects with valueKind metadata.
+    /// </summary>
+    private static object? UnwrapJsonElement(object? value)
+    {
+        if (value is not JsonElement element) return value;
+
+        return element.ValueKind switch
+        {
+            JsonValueKind.String => element.GetString(),
+            JsonValueKind.Number => element.TryGetInt64(out var l) ? l : element.GetDouble(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Null => null,
+            JsonValueKind.Array => element.EnumerateArray()
+                .Select(e => UnwrapJsonElement(e))
+                .ToList(),
+            JsonValueKind.Object => element.EnumerateObject()
+                .ToDictionary(p => (object)p.Name, p => UnwrapJsonElement(p.Value)),
+            _ => element.ToString()
+        };
     }
 
     private static string? GetNodeType(Dictionary<object, object> node)
