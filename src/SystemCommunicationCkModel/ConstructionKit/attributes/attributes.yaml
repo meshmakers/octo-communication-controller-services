@@ -145,6 +145,9 @@ attributes:
   description: 'Whether debugging is enabled for this pipeline'
 
 # Data point mapping
+- id: SourceAttributeName
+  valueType: String
+  description: Name of the source attribute to read from this entity (e.g., CurrentValue). If not set, the adapter determines the default.
 - id: TargetAttributeName
   valueType: String
   description: Name of the target attribute to update on the mapped entity (e.g., Temperature, Humidity)
