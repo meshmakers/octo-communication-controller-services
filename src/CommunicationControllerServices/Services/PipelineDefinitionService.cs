@@ -1,3 +1,4 @@
+using System.Text;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
@@ -14,11 +15,16 @@ internal class PipelineDefinitionService : IPipelineDefinitionService
     private const string TriggersKey = "triggers";
 
     private readonly IDeserializer _deserializer;
+    private readonly ISerializer _serializer;
 
     public PipelineDefinitionService()
     {
         _deserializer = new DeserializerBuilder()
             .WithNamingConvention(CamelCaseNamingConvention.Instance)
+            .Build();
+        _serializer = new SerializerBuilder()
+            .WithNamingConvention(CamelCaseNamingConvention.Instance)
+            .ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull)
             .Build();
     }
 
@@ -145,6 +151,80 @@ internal class PipelineDefinitionService : IPipelineDefinitionService
                 CollectAllNodes(children, result, typeCounters);
             }
         }
+    }
+
+    /// <inheritdoc />
+    public string? UpdateNodeProperties(string pipelineDefinition, string nodeType, int nodeIndex,
+        IDictionary<string, object?> properties)
+    {
+        var root = DeserializeDefinition(pipelineDefinition);
+        if (root == null) return null;
+
+        var matchIndex = 0;
+        Dictionary<object, object>? targetNode = null;
+
+        // Find the target node
+        if (root.TryGetValue(TriggersKey, out var triggersObj) && triggersObj is List<object> triggers)
+        {
+            targetNode = FindNodeDict(triggers, nodeType, nodeIndex, ref matchIndex);
+        }
+
+        if (targetNode == null && root.TryGetValue(TransformationsKey, out var transformationsObj) &&
+            transformationsObj is List<object> transformations)
+        {
+            targetNode = FindNodeDict(transformations, nodeType, nodeIndex, ref matchIndex);
+        }
+
+        if (targetNode == null) return null;
+
+        // Update properties on the found node
+        foreach (var kvp in properties)
+        {
+            var key = kvp.Key;
+            // Don't allow overwriting the type discriminator or child transformations
+            if (string.Equals(key, TypeKey, StringComparison.OrdinalIgnoreCase)) continue;
+            if (string.Equals(key, TransformationsKey, StringComparison.OrdinalIgnoreCase)) continue;
+
+            if (kvp.Value == null)
+            {
+                targetNode.Remove(key);
+            }
+            else
+            {
+                targetNode[key] = kvp.Value;
+            }
+        }
+
+        // Serialize back to YAML
+        return _serializer.Serialize(root);
+    }
+
+    /// <summary>
+    /// Recursively searches for a node dictionary by type and index (without creating PipelineNodeProperties).
+    /// </summary>
+    private static Dictionary<object, object>? FindNodeDict(
+        List<object> nodes, string nodeType, int targetIndex, ref int matchIndex)
+    {
+        foreach (var item in nodes)
+        {
+            if (item is not Dictionary<object, object> node) continue;
+
+            var type = GetNodeType(node);
+            if (type == nodeType)
+            {
+                if (matchIndex == targetIndex) return node;
+                matchIndex++;
+            }
+
+            // Recurse into nested transformations
+            if (node.TryGetValue(TransformationsKey, out var childObj) && childObj is List<object> children)
+            {
+                var result = FindNodeDict(children, nodeType, targetIndex, ref matchIndex);
+                if (result != null) return result;
+            }
+        }
+
+        return null;
     }
 
     private static string? GetNodeType(Dictionary<object, object> node)

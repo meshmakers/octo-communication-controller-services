@@ -42,4 +42,16 @@ public interface IPipelineDefinitionService
     /// <param name="pipelineDefinition">The YAML pipeline definition string</param>
     /// <returns>List of all nodes found in the definition</returns>
     IReadOnlyList<PipelineNodeProperties> GetAllNodes(string pipelineDefinition);
+
+    /// <summary>
+    /// Updates the properties of a specific node in a YAML pipeline definition.
+    /// Finds the node by type and occurrence index, then merges the provided properties.
+    /// </summary>
+    /// <param name="pipelineDefinition">The current YAML pipeline definition string</param>
+    /// <param name="nodeType">The node type to update (e.g., "ForEach@1")</param>
+    /// <param name="nodeIndex">Zero-based occurrence index of the node type</param>
+    /// <param name="properties">Property values to set on the node</param>
+    /// <returns>The updated YAML definition string, or null if the node was not found</returns>
+    string? UpdateNodeProperties(string pipelineDefinition, string nodeType, int nodeIndex,
+        IDictionary<string, object?> properties);
 }

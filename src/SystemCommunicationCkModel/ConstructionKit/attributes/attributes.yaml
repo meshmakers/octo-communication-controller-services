@@ -143,3 +143,8 @@ attributes:
 - id: IsDebuggingEnabled
   valueType: Boolean
   description: 'Whether debugging is enabled for this pipeline'
+
+# Data point mapping
+- id: TargetAttributeName
+  valueType: String
+  description: Name of the target attribute to update on the mapped entity (e.g., Temperature, Humidity)
