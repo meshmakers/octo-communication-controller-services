@@ -11,6 +11,38 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.C
 /// <summary>
 /// Request body for parsing a node from a pipeline definition.
 /// </summary>
+/// <summary>
+/// Request body for updating node properties in a pipeline definition.
+/// </summary>
+public class UpdateNodeRequest
+{
+    /// <summary>
+    /// The current YAML pipeline definition string.
+    /// </summary>
+    [Required]
+    public required string Definition { get; init; }
+
+    /// <summary>
+    /// The node type to update (e.g., "ForEach@1", "CreateUpdateInfoQ1").
+    /// </summary>
+    [Required]
+    public required string NodeType { get; init; }
+
+    /// <summary>
+    /// Zero-based occurrence index of this node type in the definition.
+    /// </summary>
+    public int NodeIndex { get; init; }
+
+    /// <summary>
+    /// Property values to set on the node. Null values remove the property.
+    /// </summary>
+    [Required]
+    public required Dictionary<string, object?> Properties { get; init; }
+}
+
+/// <summary>
+/// Request body for parsing a node from a pipeline definition.
+/// </summary>
 public class ParseNodeRequest
 {
     /// <summary>
@@ -101,6 +133,55 @@ public class PipelineDefinitionController : ControllerBase
             _logger.LogError(e, "Error parsing pipeline definition for node {NodeType}", request.NodeType);
             return StatusCode(StatusCodes.Status500InternalServerError,
                 new ErrorResponse { ErrorMessage = $"Failed to parse pipeline definition: {e.Message}" });
+        }
+    }
+
+    /// <summary>
+    /// Updates the properties of a specific node in a pipeline definition.
+    /// Finds the node by type and occurrence index, merges the provided properties,
+    /// and returns the updated YAML definition.
+    /// </summary>
+    /// <param name="request">The update request containing the definition, node identifier, and new property values</param>
+    /// <returns>The updated YAML definition string, or 404 if the node was not found</returns>
+    [HttpPut("update-node")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(typeof(string), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status500InternalServerError)]
+    public IActionResult UpdateNode([FromBody] [Required] UpdateNodeRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Definition))
+        {
+            return BadRequest(new ErrorResponse { ErrorMessage = "Pipeline definition is required" });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.NodeType))
+        {
+            return BadRequest(new ErrorResponse { ErrorMessage = "Node type is required" });
+        }
+
+        try
+        {
+            var result = _pipelineDefinitionService.UpdateNodeProperties(
+                request.Definition, request.NodeType, request.NodeIndex, request.Properties);
+
+            if (result == null)
+            {
+                return NotFound(new ErrorResponse
+                {
+                    ErrorMessage =
+                        $"Node '{request.NodeType}' at index {request.NodeIndex} not found in the definition"
+                });
+            }
+
+            return Ok(result);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Error updating node {NodeType} in pipeline definition", request.NodeType);
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                new ErrorResponse { ErrorMessage = $"Failed to update node: {e.Message}" });
         }
     }
 

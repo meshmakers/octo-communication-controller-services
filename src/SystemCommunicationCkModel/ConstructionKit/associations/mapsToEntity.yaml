@@ -1,0 +1,8 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+associationRoles:
+- id: MapsToEntity
+  description: Links a data source entity to a target domain entity for value propagation
+  inboundName: MapsTo
+  outboundName: MappedFrom
+  inboundMultiplicity: N
+  outboundMultiplicity: ZeroOrOne
