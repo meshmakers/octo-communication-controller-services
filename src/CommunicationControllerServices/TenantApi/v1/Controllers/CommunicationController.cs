@@ -1,5 +1,7 @@
+using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using IdentityModel;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -18,17 +20,18 @@ public class CommunicationController : ControllerBase
 {
     private readonly ILogger<CommunicationController> _logger;
     private readonly IConfigurationService _configurationService;
+    private readonly IExpressionValidationService _expressionValidationService;
 
     /// <summary>
     /// Constructor
     /// </summary>
-    /// <param name="logger"></param>
-    /// <param name="configurationService"></param>
     public CommunicationController(ILogger<CommunicationController> logger,
-        IConfigurationService configurationService)
+        IConfigurationService configurationService,
+        IExpressionValidationService expressionValidationService)
     {
         _logger = logger;
         _configurationService = configurationService;
+        _expressionValidationService = expressionValidationService;
     }
 
     /// <summary>
@@ -96,4 +99,29 @@ public class CommunicationController : ControllerBase
             return BadRequest(e.Message);
         }
     }
+
+    /// <summary>
+    /// Validates a mapping expression using the mXparser engine.
+    /// Uses the same evaluation path as ApplyDataPointMappingsNode in the Mesh Adapter.
+    /// </summary>
+    /// <param name="request">The expression and optional test value.</param>
+    /// <returns>Validation result with success/error state and evaluated result.</returns>
+    [HttpPost("validate-expression")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(typeof(ExpressionValidationResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public IActionResult ValidateExpression([FromBody] ValidateExpressionRequest request)
+    {
+        var result = _expressionValidationService.Validate(request.Expression, request.TestValue ?? 42.0);
+        return Ok(result);
+    }
 }
+
+/// <summary>
+/// Request body for expression validation.
+/// </summary>
+/// <param name="Expression">The mXparser expression to validate (e.g., "value &gt; 0 ? value : 0").</param>
+/// <param name="TestValue">Optional test value for the 'value' variable (default: 42.0).</param>
+public record ValidateExpressionRequest(
+    [Required] string Expression,
+    double? TestValue = null);
