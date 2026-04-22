@@ -1,0 +1,14 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+records:
+  - recordId: MappingTarget
+    description: Resolved mapping target for data acquisition. Built from DataPointMappings by the BuildMappingTargets node. Contains the source identifier, optional state name, and the external ID to poll/subscribe.
+    isFinal: true
+    isAbstract: false
+    attributes:
+      - id: ${this}/SourceIdentifier
+        name: SourceIdentifier
+      - id: ${System}/Name
+        name: Name
+        isOptional: true
+      - id: ${this}/ExternalId
+        name: ExternalId

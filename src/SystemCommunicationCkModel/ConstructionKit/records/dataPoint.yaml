@@ -1,0 +1,17 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+records:
+  - recordId: DataPoint
+    description: Generic data point record for adapter data acquisition. Used in RecordArray attributes to store multiple named data points with their external identifiers and current values.
+    isFinal: true
+    isAbstract: false
+    attributes:
+      - id: ${System}/Name
+        name: Name
+      - id: ${this}/ExternalId
+        name: ExternalId
+      - id: ${this}/CurrentValue
+        name: CurrentValue
+        isOptional: true
+      - id: ${this}/LastUpdate
+        name: LastUpdate
+        isOptional: true
