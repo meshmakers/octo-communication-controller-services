@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
 - typeId: Adapter
+  description: An external client that connects via SignalR to execute data pipelines. Adapters manage pools and receive pipeline configurations from the Communication Controller.
   derivedFromCkTypeId: ${this}/DeployableEntity
   attributes:
     - id: ${this}/CommunicationStateTimestamp

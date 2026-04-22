@@ -2,35 +2,45 @@ $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 attributes:
 - id: CommunicationStateTimestamp
   valueType: DateTime
+  description: Timestamp of the last communication state change (online/offline transition).
 - id: Deployment.ImageName
   valueType: String
+  description: Docker image name of the adapter container (e.g. octo-mesh-adapter).
 - id: Deployment.ImageVersion
   valueType: String
+  description: Docker image version tag of the adapter container.
 - id: CommunicationState
   valueType: Enum
   valueCkEnumId: ${this}/CommunicationState
+  description: Current SignalR connection state of the adapter or pool operator.
   defaultValues:
     - 0
 - id: ConfigurationState
   valueType: Enum
   valueCkEnumId: ${this}/ConfigurationState
+  description: Current configuration deployment state of the adapter or pool.
   defaultValues:
     - 0
 - id: DeploymentState
   valueType: Enum
   valueCkEnumId: ${this}/DeploymentState
+  description: Current deployment state of the entity (undeployed, pending, deployed, or error).
   defaultValues:
     - 0
 - id: AdapterConfiguration
   valueType: String
+  description: JSON-serialized adapter-specific configuration that is deployed to the adapter.
 - id: PipelineDefinition
   valueType: String
+  description: JSON-serialized pipeline node graph that defines the data processing logic.
   defaultValues:
     - ""
 - id: StatusMessage
   valueType: String
+  description: Human-readable status or error message from the last deployment or configuration attempt.
 - id: SenderEmail
   valueType: String
+  description: Email address used as the sender (From) for outgoing emails.
 
 # Pipeline Execution attributes
 - id: ExecutionId
@@ -39,11 +49,13 @@ attributes:
 - id: ExecutionStatus
   valueType: Enum
   valueCkEnumId: ${this}/PipelineExecutionStatus
+  description: Current status of the pipeline execution (Running, Completed, Failed, Interrupted, Cancelled).
   defaultValues:
     - 0
 - id: TriggerType
   valueType: Enum
   valueCkEnumId: ${this}/PipelineTriggerType
+  description: How this pipeline execution was initiated (Manual, Scheduled, Event, or Startup).
   defaultValues:
     - 0
 - id: StartedAt

@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 associationRoles:
   - id: ExecutedPipeline
+    description: Links a pipeline execution record to the pipeline that was executed.
     inboundName: ExecutedPipeline
     inboundMultiplicity: N
     outboundName: PipelineExecutions

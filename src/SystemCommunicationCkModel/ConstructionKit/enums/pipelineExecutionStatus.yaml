@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 enums:
 - enumId: PipelineExecutionStatus
+  description: Status of a pipeline execution lifecycle, from running through completion or failure.
   useFlags: false
   values:
   - key: 0

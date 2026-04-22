@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
   - typeId: EMailSenderConfiguration
+    description: SMTP email sender configuration for outgoing email delivery.
     derivedFromCkTypeId: ${System}/Configuration
     isFinal: true
     attributes:
