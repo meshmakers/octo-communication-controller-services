@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
   - typeId: Pipeline
+    description: A data processing pipeline that defines a sequence of processing nodes. Pipelines are deployed to adapters for execution and can be organized within data flows.
     derivedFromCkTypeId: ${this}/DeployableEntity
     attributes:
       - id: ${System}/Enabled

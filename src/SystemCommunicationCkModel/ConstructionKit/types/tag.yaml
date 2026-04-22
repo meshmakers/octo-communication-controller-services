@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
 - typeId: Tag
+  description: A label that can be associated with any entity for categorization and filtering purposes.
   derivedFromCkTypeId: ${System}/Entity
   isAbstract: false
   attributes:

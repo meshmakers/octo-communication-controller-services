@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
 - typeId: PipelineExecution
+  description: Records an individual pipeline execution with its status, timing, trigger type, and optional input/output data. Linked to the executed pipeline and the adapter that performed the execution.
   derivedFromCkTypeId: ${System}/Entity
   indexes:
   - indexType: "Ascending"

@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 enums:
 - enumId: ConfigurationState
+  description: Indicates whether a deployable entity has been successfully configured with its pipeline definitions and settings.
   values:
   - key: 0
     name: Unconfigured

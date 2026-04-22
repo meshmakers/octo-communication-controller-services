@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 associationRoles:
   - id: StatisticsForPipeline
+    description: Links a pipeline statistics record to the pipeline it aggregates metrics for. Each pipeline has at most one statistics record.
     inboundName: StatisticsForPipeline
     inboundMultiplicity: One
     outboundName: PipelineStatistics

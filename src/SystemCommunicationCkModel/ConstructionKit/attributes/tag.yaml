@@ -2,5 +2,7 @@ $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 attributes:
   - id: Tag
     valueType: String
+    description: The tag value used for categorization and filtering.
   - id: Name
     valueType: String
+    description: Optional display name for the tag.

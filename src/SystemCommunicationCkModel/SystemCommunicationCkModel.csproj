@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <Description>OctoMesh System communication contruction kit model</Description>
+        <Description>OctoMesh System communication construction kit model</Description>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
         <PackageId>Meshmakers.Octo.ConstructionKit.Models.System.Communication</PackageId>
         <AssemblyName>Meshmakers.Octo.ConstructionKit.Models.System.Communication</AssemblyName>

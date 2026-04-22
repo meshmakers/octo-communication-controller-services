@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 enums:
 - enumId: CommunicationState
+  description: Indicates the current SignalR connection state of an adapter or pool operator.
   useFlags: false
   values:
   - key: 0

@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
 - typeId: Pool
+  description: A group of managed devices or entities. Pool operators register via SignalR to handle device communication within the pool.
   derivedFromCkTypeId: ${this}/DeployableEntity
   isFinal: true
   attributes:

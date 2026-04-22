@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 associationRoles:
 - id: Executes
+  description: Links a pipeline to the adapter that executes it. Each pipeline is executed by exactly one adapter.
   inboundName: Executes
   inboundMultiplicity: N
   outboundName: ExecutedBy

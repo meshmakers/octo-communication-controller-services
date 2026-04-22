@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 associationRoles:
   - id: Tag
+    description: Links a tag to the entities it labels for categorization and filtering.
     inboundName: TaggedBy
     inboundMultiplicity: N
     outboundName: IsTagging

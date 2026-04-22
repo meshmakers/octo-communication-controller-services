@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
   - typeId: DataFlow
+    description: A logical grouping of pipelines and triggers that belong together. DataFlows organize the data integration logic within a tenant.
     derivedFromCkTypeId: ${System}/Entity
     attributes:
     - id: ${System}/Name

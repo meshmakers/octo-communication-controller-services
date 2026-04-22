@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 associationRoles:
   - id: Uses
+    description: Links a pipeline to the configurations it requires for execution (e.g. connection settings for external systems).
     inboundName: UsedBy
     inboundMultiplicity: N
     outboundName: IsUsing
