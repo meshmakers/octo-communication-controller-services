@@ -71,3 +71,9 @@ attributes:
     valueType: RecordArray
     valueCkRecordId: ${this}/MappingTarget
     description: 'Resolved mapping targets for data acquisition. Populated automatically by the BuildMappingTargets pipeline node from DataPointMappings.'
+  - id: BotToken
+    valueType: String
+    description: 'The bot token used as the `Authorization: Bot {token}` header when calling the Discord REST API.'
+  - id: GuildId
+    valueType: String
+    description: 'The Discord guild (server) snowflake ID. Reserved for future channel-name resolution; not read by the ToDiscord node in v1.'
