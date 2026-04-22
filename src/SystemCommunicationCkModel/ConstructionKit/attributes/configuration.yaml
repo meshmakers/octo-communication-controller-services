@@ -59,3 +59,15 @@ attributes:
   - id: AzureTenantId
     valueType: String
     description: 'The Azure Active Directory tenant ID (GUID) for OAuth2 authentication.'
+  - id: PollIntervalSeconds
+    valueType: Int
+    description: 'Interval in seconds between polling cycles.'
+    defaultValues:
+      - 30
+  - id: IssuerUri
+    valueType: String
+    description: 'URI of the OAuth2/OpenID Connect authorization server (e.g. https://identity.example.com)'
+  - id: MappingTargets
+    valueType: RecordArray
+    valueCkRecordId: ${this}/MappingTarget
+    description: 'Resolved mapping targets for data acquisition. Populated automatically by the BuildMappingTargets pipeline node from DataPointMappings.'

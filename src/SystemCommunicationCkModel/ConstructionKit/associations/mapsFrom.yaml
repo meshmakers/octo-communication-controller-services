@@ -4,5 +4,5 @@ associationRoles:
   description: Links a DataPointMapping to its source data point entity
   inboundName: MapsFrom
   outboundName: MappedAsSource
-  inboundMultiplicity: One
+  inboundMultiplicity: N
   outboundMultiplicity: N

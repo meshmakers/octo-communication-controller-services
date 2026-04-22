@@ -4,5 +4,5 @@ associationRoles:
   description: Links a DataPointMapping to its target domain entity
   inboundName: MapsTo
   outboundName: MappedAsTarget
-  inboundMultiplicity: One
+  inboundMultiplicity: N
   outboundMultiplicity: N

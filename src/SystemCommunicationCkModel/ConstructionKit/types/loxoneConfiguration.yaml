@@ -15,3 +15,9 @@ types:
         name: Password
       - id: ${this}/IsSslEnabled
         name: IsSslEnabled
+      - id: ${this}/PollIntervalSeconds
+        name: PollIntervalSeconds
+        isOptional: true
+      - id: ${this}/MappingTargets
+        name: MappingTargets
+        isOptional: true

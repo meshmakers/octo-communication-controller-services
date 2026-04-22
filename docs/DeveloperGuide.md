@@ -15,6 +15,7 @@ This document provides comprehensive technical documentation for developers inte
 - [Integration Examples](#integration-examples)
 - [Error Handling](#error-handling)
 - [Troubleshooting](#troubleshooting)
+- [Concept Documents](#concept-documents)
 
 ---
 
@@ -1324,6 +1325,14 @@ Enable trace logging for detailed diagnostics:
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2026-01 | Initial release |
+
+---
+
+## Concept Documents
+
+- [Data Point Mapping](concepts/DataPointMapping.md) — Architecture for mapping external data points to OctoMesh entities. Covers `DataPointMapping`, `DataPoint`, `MappingTarget` types/records, pipeline nodes (`BuildMappingTargets`, `ApplyDataPointMappings`, `MapToRecordArray`, `DeployPipeline`), expression support, and the end-to-end data flow.
+- [Pipeline Execution Metrics](concepts/PipelineExecutionMetrics.md) — Pipeline execution tracking and statistics.
+- [Testing Strategy](concepts/TestingStrategy.md) — Unit and integration testing approach.
 
 ---
 
