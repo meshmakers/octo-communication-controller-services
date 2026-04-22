@@ -16,6 +16,12 @@ internal class ConfigureJwtBearerOptions(
 
     public void Configure(string? name, JwtBearerOptions options)
     {
-        options.Authority = communicationControllerOptions.Value.AuthorityUrl.EnsureEndsWith("/");
+        var authorityUrl = communicationControllerOptions.Value.AuthorityUrl.EnsureEndsWith("/");
+        options.Authority = authorityUrl;
+
+        // Explicitly set the valid issuer so token validation does not depend on fetching
+        // the OIDC discovery document. This prevents IDX10204 errors when the identity
+        // service is temporarily unreachable (e.g. during rolling updates).
+        options.TokenValidationParameters.ValidIssuer = authorityUrl;
     }
 }
