@@ -1,0 +1,21 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+  - typeId: AiConfiguration
+    derivedFromCkTypeId: ${System}/Configuration
+    description: Configuration for AI services (e.g. Anthropic Claude API). Stores API credentials and default model settings. Referenced by pipeline nodes via ApiKeyConfigurationName.
+    isFinal: true
+    attributes:
+      - id: ${this}/ApiKey
+        name: ApiKey
+      - id: ${this}/AiModel
+        name: AiModel
+        isOptional: true
+      - id: ${this}/MaxTokens
+        name: MaxTokens
+        isOptional: true
+      - id: ${this}/Temperature
+        name: Temperature
+        isOptional: true
+      - id: ${this}/McpServerUrl
+        name: McpServerUrl
+        isOptional: true
