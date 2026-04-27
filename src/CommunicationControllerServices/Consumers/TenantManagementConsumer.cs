@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Common.DistributionEventHub.Consumers;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
@@ -7,35 +8,30 @@ using Meshmakers.Octo.Services.Infrastructure.Services;
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 
 /// <summary>
-///    Updates jobs for a tenant
+///    Handles tenant lifecycle events for communication management.
+///    Forwards tenant creation/deletion to connected operators via SignalR.
 /// </summary>
 internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>, IDistributedConsumer<PosUpdateTenant>,
-    IDistributedConsumer<PreDeleteTenant>
+    IDistributedConsumer<PreDeleteTenant>, IDistributedConsumer<PosCreateTenant>
 {
     private readonly ILogger<TenantManagementConsumer> _logger;
     private readonly IPoolService _poolService;
     private readonly IAdapterService _adapterService;
     private readonly IConfigurationService _configurationService;
     private readonly ICommunicationEventService _eventService;
+    private readonly IOperatorConnectionManager _operatorConnectionManager;
     private readonly ConcurrentDictionary<Guid, bool> _receivedPreUpdateTenant = new();
 
-    /// <summary>
-    ///     Constructor.
-    /// </summary>
-    /// <param name="logger"></param>
-    /// <param name="poolService"></param>
-    /// <param name="adapterService"></param>
-    /// <param name="configurationService"></param>
-    /// <param name="eventService"></param>
     public TenantManagementConsumer(ILogger<TenantManagementConsumer> logger, IPoolService poolService,
         IAdapterService adapterService, IConfigurationService configurationService,
-        ICommunicationEventService eventService)
+        ICommunicationEventService eventService, IOperatorConnectionManager operatorConnectionManager)
     {
         _logger = logger;
         _poolService = poolService;
         _adapterService = adapterService;
         _configurationService = configurationService;
         _eventService = eventService;
+        _operatorConnectionManager = operatorConnectionManager;
     }
 
 
@@ -116,6 +112,31 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
     }
 
 
+    public async Task ConsumeAsync(IDistributedContext<PosCreateTenant> context)
+    {
+        _logger.LogInformation("Pos create tenant received: {TenantId}", context.Message.TenantId);
+        try
+        {
+            if (context.Message.Timestamp < Constants.StartTime)
+            {
+                _logger.LogInformation("Ignoring old message");
+                return;
+            }
+
+            await _operatorConnectionManager.NotifyTenantCreatedAsync(context.Message.TenantId);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Pos create tenant failed: {TenantId}", context.Message.TenantId);
+            await _eventService.StoreErrorEventAsync(context.Message.TenantId,
+                $"Post-create tenant failed: {e.Message}");
+        }
+        finally
+        {
+            _logger.LogInformation("Pos create tenant finished: {TenantId}", context.Message.TenantId);
+        }
+    }
+
     public async Task ConsumeAsync(IDistributedContext<PreDeleteTenant> context)
     {
         _logger.LogInformation("Pre delete tenant received: {TenantId}", context.Message.TenantId);
@@ -127,6 +148,7 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
                 return;
             }
 
+            await _operatorConnectionManager.NotifyTenantDeletedAsync(context.Message.TenantId);
             await ExecutePreTenantUpdate(context.Message.TenantId);
         }
         catch (Exception e)
