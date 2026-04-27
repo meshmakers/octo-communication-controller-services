@@ -82,6 +82,7 @@ try
     builder.Services.AddSingletonMultipleInterfaces<AdapterCache, IAdapterCache, IAdapterCachePublish>();
 
     builder.Services.AddSingleton<IPoolHubCallbacks, PoolHubCallbacks>();
+    builder.Services.AddSingleton<IOperatorConnectionManager, OperatorConnectionManager>();
     builder.Services.AddSingleton<IAdapterHubCallbacks, AdapterHubCallbacks>();
 
     // Add background services for pipeline execution metrics
@@ -125,6 +126,7 @@ try
             c.AddBroadcastEventConsumer<TenantManagementConsumer, PreUpdateTenant>();
             c.AddBroadcastEventConsumer<TenantManagementConsumer, PosUpdateTenant>();
             c.AddBroadcastEventConsumer<TenantManagementConsumer, PreDeleteTenant>();
+            c.AddBroadcastEventConsumer<TenantManagementConsumer, PosCreateTenant>();
         });
 
     builder.Services.AddRuntimeEngine()
@@ -221,6 +223,7 @@ try
 
     app.MapHub<AdapterHub>("/{tenantId:tenantId}/adapterHub");
     app.MapHub<PoolHub>("/{tenantId:tenantId}/poolHub");
+    app.MapHub<OperatorHub>("/operatorHub");
     app.MapControllerRoute(name: "default",
         pattern: "{tenantId:tenantId}/system/v{version:apiVersion}/{controller}/{action}/{id?}");
 
