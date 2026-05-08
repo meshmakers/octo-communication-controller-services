@@ -81,6 +81,69 @@ public class PoolController : ControllerBase
     }
     
     /// <summary>
+    /// Deploys a pool. For Cloud-environment pools, this triggers the central
+    /// Communication Operator to provision the corresponding CommunicationPool
+    /// CR and broker secret. Edge-environment pools transition state without
+    /// any operator notification.
+    /// </summary>
+    /// <param name="poolRtId">The id of the pool.</param>
+    [HttpPost("deploy")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> DeployPoolAsync([Required][FromQuery] OctoObjectId poolRtId)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        try
+        {
+            await _poolService.DeployPoolAsync(tenantId, poolRtId);
+            return NoContent();
+        }
+        catch (PoolServiceException e)
+        {
+            _logger.LogError(e, "Error deploying pool");
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
+        }
+    }
+
+    /// <summary>
+    /// Undeploys a pool. For Cloud-environment pools, this notifies the
+    /// central Communication Operator to remove the CommunicationPool CR and
+    /// broker secret.
+    /// </summary>
+    /// <param name="poolRtId">The id of the pool.</param>
+    [HttpPost("undeploy")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> UndeployPoolAsync([Required][FromQuery] OctoObjectId poolRtId)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        try
+        {
+            await _poolService.UndeployPoolAsync(tenantId, poolRtId);
+            return NoContent();
+        }
+        catch (PoolServiceException e)
+        {
+            _logger.LogError(e, "Error undeploying pool");
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
+        }
+    }
+
+    /// <summary>
     /// Deploys all adapters of a pool
     /// </summary>
     /// <param name="poolRtId">The id of the pool.</param>

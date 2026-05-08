@@ -49,6 +49,36 @@ public interface IPoolService
     Task PosUpdateTenantAsync(string tenantId);
     
     /// <summary>
+    /// Deploys a pool: marks it as Deployed and, when the pool's
+    /// <c>Environment</c> attribute is <c>Cloud</c>, notifies the central
+    /// Communication Operator via the <c>/operatorHub</c> SignalR channel so
+    /// it provisions the corresponding CommunicationPool CR and broker secret.
+    /// Edge-environment pools transition state without any operator
+    /// notification — they are installed and run by an external operator.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="poolRtId">The object id of the pool</param>
+    Task DeployPoolAsync(string tenantId, OctoObjectId poolRtId);
+
+    /// <summary>
+    /// Undeploys a pool: marks it as Undeployed and, when the pool's
+    /// <c>Environment</c> is <c>Cloud</c>, notifies the operator to remove
+    /// its CommunicationPool CR and broker secret.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="poolRtId">The object id of the pool</param>
+    Task UndeployPoolAsync(string tenantId, OctoObjectId poolRtId);
+
+    /// <summary>
+    /// Undeploys every Cloud pool of a tenant. Used when a tenant is being
+    /// deleted/detached so that the central Communication Operator cleans up
+    /// all CommunicationPool CRs and broker secrets that were auto-managed
+    /// for the tenant.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    Task UndeployAllCloudPoolsAsync(string tenantId);
+
+    /// <summary>
     /// Deploys all adapters of a pool
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>

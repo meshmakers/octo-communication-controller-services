@@ -1,0 +1,10 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+- enumId: Environment
+  description: Where a pool's adapter workloads are hosted. Cloud pools are auto-deployed by the central Communication Operator into the OctoMesh cluster; Edge pools must be installed and run by an external operator outside the central cluster.
+  useFlags: false
+  values:
+  - key: 0
+    name: Edge
+  - key: 1
+    name: Cloud

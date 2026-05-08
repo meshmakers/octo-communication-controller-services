@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Common.DistributionEventHub.Consumers;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
@@ -9,7 +8,10 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 
 /// <summary>
 ///    Handles tenant lifecycle events for communication management.
-///    Forwards tenant creation/deletion to connected operators via SignalR.
+///    Tenant lifecycle no longer triggers operator-side actions — those are
+///    driven by pool deploy / undeploy events instead. This consumer keeps
+///    pre/post-update bookkeeping for adapters and pools so that disabling a
+///    tenant for communication tears down its pool/adapter caches cleanly.
 /// </summary>
 internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>, IDistributedConsumer<PosUpdateTenant>,
     IDistributedConsumer<PreDeleteTenant>, IDistributedConsumer<PosCreateTenant>
@@ -19,19 +21,17 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
     private readonly IAdapterService _adapterService;
     private readonly IConfigurationService _configurationService;
     private readonly ICommunicationEventService _eventService;
-    private readonly IOperatorConnectionManager _operatorConnectionManager;
     private readonly ConcurrentDictionary<Guid, bool> _receivedPreUpdateTenant = new();
 
     public TenantManagementConsumer(ILogger<TenantManagementConsumer> logger, IPoolService poolService,
         IAdapterService adapterService, IConfigurationService configurationService,
-        ICommunicationEventService eventService, IOperatorConnectionManager operatorConnectionManager)
+        ICommunicationEventService eventService)
     {
         _logger = logger;
         _poolService = poolService;
         _adapterService = adapterService;
         _configurationService = configurationService;
         _eventService = eventService;
-        _operatorConnectionManager = operatorConnectionManager;
     }
 
 
@@ -123,7 +123,8 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
                 return;
             }
 
-            await _operatorConnectionManager.NotifyTenantCreatedAsync(context.Message.TenantId);
+            // Tenant creation no longer triggers any operator-side action.
+            // Pool deploy events do.
         }
         catch (Exception e)
         {
@@ -148,7 +149,11 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
                 return;
             }
 
-            await _operatorConnectionManager.NotifyTenantDeletedAsync(context.Message.TenantId);
+            // Tell the central Communication Operator to clean up every Cloud
+            // pool of this tenant before the rest of the tenant data goes
+            // away. Edge pools are managed externally and stay untouched.
+            await _poolService.UndeployAllCloudPoolsAsync(context.Message.TenantId);
+
             await ExecutePreTenantUpdate(context.Message.TenantId);
         }
         catch (Exception e)

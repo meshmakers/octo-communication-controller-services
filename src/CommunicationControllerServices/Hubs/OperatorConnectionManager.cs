@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Microsoft.AspNetCore.SignalR;
 using NLog;
@@ -22,21 +23,27 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
         Logger.Info("Operator removed, total connected: {Count}", _connectedOperators.Count);
     }
 
-    public IEnumerable<string> GetEnabledTenants()
+    public IEnumerable<DeployedPoolDto> GetDeployedPools()
     {
-        return Enumerable.Empty<string>();
+        // TODO: enumerate all Cloud pools currently in DeploymentState=Deployed
+        // across every tenant. For now we return empty: live deploy/undeploy
+        // events still flow correctly; only operator-restart sync is missing.
+        return [];
     }
 
-    public async Task NotifyTenantCreatedAsync(string tenantId)
+    public async Task NotifyPoolDeployedAsync(DeployedPoolDto pool)
     {
         if (_connectedOperators.IsEmpty)
         {
-            Logger.Debug("No operators connected, skipping tenant created notification for '{TenantId}'", tenantId);
+            Logger.Debug(
+                "No operators connected, skipping pool-deployed notification for tenant '{TenantId}', pool '{PoolName}'",
+                pool.TenantId, pool.PoolName);
             return;
         }
 
-        Logger.Info("Notifying {Count} operator(s) of tenant creation: '{TenantId}'",
-            _connectedOperators.Count, tenantId);
+        Logger.Info(
+            "Notifying {Count} operator(s) of pool deployed: tenant '{TenantId}', pool '{PoolName}'",
+            _connectedOperators.Count, pool.TenantId, pool.PoolName);
 
         var connectionIds = _connectedOperators.Keys.ToList();
         foreach (var connectionId in connectionIds)
@@ -44,25 +51,30 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
             try
             {
                 await hubContext.Clients.Client(connectionId)
-                    .SendAsync(nameof(IOperatorHubCallbacks.TenantCreatedAsync), tenantId);
+                    .SendAsync(nameof(IOperatorHubCallbacks.PoolDeployedAsync), pool);
             }
             catch (Exception ex)
             {
-                Logger.Warn(ex, "Failed to notify operator {ConnectionId} of tenant creation", connectionId);
+                Logger.Warn(ex,
+                    "Failed to notify operator {ConnectionId} of pool deployment for tenant '{TenantId}', pool '{PoolName}'",
+                    connectionId, pool.TenantId, pool.PoolName);
             }
         }
     }
 
-    public async Task NotifyTenantDeletedAsync(string tenantId)
+    public async Task NotifyPoolUndeployedAsync(string tenantId, string poolName)
     {
         if (_connectedOperators.IsEmpty)
         {
-            Logger.Debug("No operators connected, skipping tenant deleted notification for '{TenantId}'", tenantId);
+            Logger.Debug(
+                "No operators connected, skipping pool-undeployed notification for tenant '{TenantId}', pool '{PoolName}'",
+                tenantId, poolName);
             return;
         }
 
-        Logger.Info("Notifying {Count} operator(s) of tenant deletion: '{TenantId}'",
-            _connectedOperators.Count, tenantId);
+        Logger.Info(
+            "Notifying {Count} operator(s) of pool undeployed: tenant '{TenantId}', pool '{PoolName}'",
+            _connectedOperators.Count, tenantId, poolName);
 
         var connectionIds = _connectedOperators.Keys.ToList();
         foreach (var connectionId in connectionIds)
@@ -70,11 +82,13 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
             try
             {
                 await hubContext.Clients.Client(connectionId)
-                    .SendAsync(nameof(IOperatorHubCallbacks.TenantDeletedAsync), tenantId);
+                    .SendAsync(nameof(IOperatorHubCallbacks.PoolUndeployedAsync), tenantId, poolName);
             }
             catch (Exception ex)
             {
-                Logger.Warn(ex, "Failed to notify operator {ConnectionId} of tenant deletion", connectionId);
+                Logger.Warn(ex,
+                    "Failed to notify operator {ConnectionId} of pool undeployment for tenant '{TenantId}', pool '{PoolName}'",
+                    connectionId, tenantId, poolName);
             }
         }
     }

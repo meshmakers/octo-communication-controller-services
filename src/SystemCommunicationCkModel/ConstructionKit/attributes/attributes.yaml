@@ -27,6 +27,12 @@ attributes:
   description: Current deployment state of the entity (undeployed, pending, deployed, or error).
   defaultValues:
     - 0
+- id: Environment
+  valueType: Enum
+  valueCkEnumId: ${this}/Environment
+  description: Where the pool's adapter workloads are hosted. Edge (default) means an external operator installs and runs the pool; Cloud means the central Communication Operator auto-deploys it into the OctoMesh cluster.
+  defaultValues:
+    - 0
 - id: AdapterConfiguration
   valueType: String
   description: JSON-serialized adapter-specific configuration that is deployed to the adapter.

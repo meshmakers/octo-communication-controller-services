@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Microsoft.AspNetCore.SignalR;
 using NLog;
@@ -38,11 +39,11 @@ public class OperatorHub : Hub, IOperatorHub
     }
 
     /// <inheritdoc />
-    public Task<IEnumerable<string>> RegisterOperatorAsync()
+    public Task<IEnumerable<DeployedPoolDto>> RegisterOperatorAsync()
     {
         Logger.Info("Operator registered with connection id '{ConnectionId}'", Context.ConnectionId);
         _connectionManager.AddOperator(Context.ConnectionId);
-        return Task.FromResult(_connectionManager.GetEnabledTenants());
+        return Task.FromResult(_connectionManager.GetDeployedPools());
     }
 
     /// <inheritdoc />
