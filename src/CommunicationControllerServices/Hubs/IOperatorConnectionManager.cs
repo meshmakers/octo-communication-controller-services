@@ -1,7 +1,10 @@
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 
 /// <summary>
-/// Manages connected operator instances and provides methods to notify them of tenant lifecycle events.
+/// Manages connected operator instances and provides methods to notify them of
+/// Cloud pool deploy / undeploy events.
 /// </summary>
 public interface IOperatorConnectionManager
 {
@@ -16,17 +19,20 @@ public interface IOperatorConnectionManager
     void RemoveOperator(string connectionId);
 
     /// <summary>
-    /// Returns the list of tenant IDs that currently have communication enabled.
+    /// Returns all currently-deployed Cloud pools across every tenant. Used as
+    /// the response to a freshly (re)connecting operator's
+    /// <c>RegisterOperatorAsync</c> call so it can synchronize its desired
+    /// state.
     /// </summary>
-    IEnumerable<string> GetEnabledTenants();
+    IEnumerable<DeployedPoolDto> GetDeployedPools();
 
     /// <summary>
-    /// Notifies all connected operators that a tenant was created.
+    /// Notifies all connected operators that a Cloud pool was deployed.
     /// </summary>
-    Task NotifyTenantCreatedAsync(string tenantId);
+    Task NotifyPoolDeployedAsync(DeployedPoolDto pool);
 
     /// <summary>
-    /// Notifies all connected operators that a tenant is being deleted.
+    /// Notifies all connected operators that a Cloud pool was undeployed.
     /// </summary>
-    Task NotifyTenantDeletedAsync(string tenantId);
+    Task NotifyPoolUndeployedAsync(string tenantId, string poolName);
 }

@@ -12,3 +12,5 @@ types:
     name: CommunicationState
   - id: ${this}/ConfigurationState
     name: ConfigurationState
+  - id: ${this}/Environment
+    name: Environment

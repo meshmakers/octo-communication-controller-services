@@ -1,4 +1,5 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
@@ -16,6 +17,7 @@ internal class PoolService : IPoolService
     private readonly IPoolCache _poolCache;
     private readonly IPoolHubCallbacks _poolHubCallbacks;
     private readonly ICommunicationEventService _eventService;
+    private readonly IOperatorConnectionManager _operatorConnectionManager;
 
     /// <summary>
     /// Constructor
@@ -24,13 +26,16 @@ internal class PoolService : IPoolService
     /// <param name="poolCache">Distributed and synchronized data between nodes</param>
     /// <param name="poolHubCallbacks">Callbacks to inform client of configuration changes</param>
     /// <param name="eventService">Service for storing system events</param>
+    /// <param name="operatorConnectionManager">Manages SignalR connections to central Communication Operators (for Cloud-pool deploy/undeploy notifications)</param>
     public PoolService(ICommunicationRepository communicationRepository, IPoolCache poolCache,
-        IPoolHubCallbacks poolHubCallbacks, ICommunicationEventService eventService)
+        IPoolHubCallbacks poolHubCallbacks, ICommunicationEventService eventService,
+        IOperatorConnectionManager operatorConnectionManager)
     {
         _communicationRepository = communicationRepository;
         _poolCache = poolCache;
         _poolHubCallbacks = poolHubCallbacks;
         _eventService = eventService;
+        _operatorConnectionManager = operatorConnectionManager;
     }
     
     /// <inheritdoc />
@@ -218,6 +223,103 @@ internal class PoolService : IPoolService
         {
             _semaphore.Release();
         }
+    }
+
+    /// <inheritdoc />
+    public async Task DeployPoolAsync(string tenantId, OctoObjectId poolRtId)
+    {
+        Logger.Info("[{TenantId}] Deploying pool '{PoolRtId}'", tenantId, poolRtId);
+
+        var rtPool = await GetPoolByRtIdAsync(tenantId, poolRtId);
+
+        await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolRtId,
+            RtDeploymentStateEnum.Deployed);
+
+        if (rtPool.Environment == RtEnvironmentEnum.Cloud)
+        {
+            Logger.Info(
+                "[{TenantId}] Pool '{PoolName}' is Cloud — notifying central Communication Operator",
+                tenantId, (rtPool.Name ?? string.Empty));
+            await _operatorConnectionManager.NotifyPoolDeployedAsync(new DeployedPoolDto
+            {
+                TenantId = tenantId,
+                PoolName = (rtPool.Name ?? string.Empty)
+            });
+        }
+        else
+        {
+            Logger.Info(
+                "[{TenantId}] Pool '{PoolName}' is Edge — operator notification skipped, install the pool externally",
+                tenantId, (rtPool.Name ?? string.Empty));
+        }
+
+        await _eventService.StoreInformationEventAsync(tenantId,
+            $"Pool '{(rtPool.Name ?? string.Empty)}' deployed (environment: {rtPool.Environment}).");
+    }
+
+    /// <inheritdoc />
+    public async Task UndeployPoolAsync(string tenantId, OctoObjectId poolRtId)
+    {
+        Logger.Info("[{TenantId}] Undeploying pool '{PoolRtId}'", tenantId, poolRtId);
+
+        var rtPool = await GetPoolByRtIdAsync(tenantId, poolRtId);
+
+        if (rtPool.Environment == RtEnvironmentEnum.Cloud)
+        {
+            Logger.Info(
+                "[{TenantId}] Pool '{PoolName}' is Cloud — notifying central Communication Operator to clean up",
+                tenantId, (rtPool.Name ?? string.Empty));
+            await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, (rtPool.Name ?? string.Empty));
+        }
+
+        await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolRtId,
+            RtDeploymentStateEnum.Undeployed);
+
+        await _eventService.StoreInformationEventAsync(tenantId,
+            $"Pool '{(rtPool.Name ?? string.Empty)}' undeployed (environment: {rtPool.Environment}).");
+    }
+
+    /// <inheritdoc />
+    public async Task UndeployAllCloudPoolsAsync(string tenantId)
+    {
+        Logger.Info("[{TenantId}] Undeploying all Cloud pools (tenant cleanup)", tenantId);
+
+        var pools = await _communicationRepository.GetPoolsAsync(tenantId);
+        var cloudPools = pools.Where(p => p.Environment == RtEnvironmentEnum.Cloud).ToArray();
+
+        if (cloudPools.Length == 0)
+        {
+            Logger.Info("[{TenantId}] No Cloud pools to clean up", tenantId);
+            return;
+        }
+
+        foreach (var pool in cloudPools)
+        {
+            try
+            {
+                await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, (pool.Name ?? string.Empty));
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn(ex,
+                    "[{TenantId}] Failed to notify operator of pool undeploy during tenant cleanup, pool '{PoolName}'",
+                    tenantId, (pool.Name ?? string.Empty));
+            }
+        }
+
+        await _eventService.StoreInformationEventAsync(tenantId,
+            $"Notified central Communication Operator to undeploy {cloudPools.Length} Cloud pool(s) for tenant cleanup.");
+    }
+
+    private async Task<RtPool> GetPoolByRtIdAsync(string tenantId, OctoObjectId poolRtId)
+    {
+        var pools = await _communicationRepository.GetPoolsAsync(tenantId);
+        var rtPool = pools.FirstOrDefault(p => p.RtId == poolRtId);
+        if (rtPool == null)
+        {
+            throw PoolServiceException.PoolNotFound(tenantId, poolRtId);
+        }
+        return rtPool;
     }
 
     /// <inheritdoc />
