@@ -1,5 +1,6 @@
 using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.Runtime.Contracts;
@@ -24,7 +25,7 @@ internal class PosUpdateTenantAsyncTests : AdapterServiceTestsBase
     }
 
     [Test]
-    public async Task PosUpdateTenantAsync_WithAdapters_ResetsAllAdapterCommunicationStatesToOffline()
+    public async Task PosUpdateTenantAsync_WithDisconnectedAdapters_ResetsAllAdapterCommunicationStatesToOffline()
     {
         // Arrange
         var adapter1 = RtEntityCreator.CreateAdapter();
@@ -47,6 +48,64 @@ internal class PosUpdateTenantAsyncTests : AdapterServiceTestsBase
 
         await CommunicationRepository.Received(1)
             .SetAdapterCommunicationStateAsync(TenantId, adapter2.ToRtEntityId(),
+                RtCommunicationStateEnum.Offline);
+    }
+
+    [Test]
+    public async Task PosUpdateTenantAsync_WithConnectedAdapter_DoesNotMarkConnectedAdapterOffline()
+    {
+        // Arrange — connected adapter is in the cache with a SignalR connection id; a
+        // post-update must not falsely flip its DB state to Offline.
+        var connectedAdapter = RtEntityCreator.CreateAdapter();
+        var disconnectedAdapter = RtEntityCreator.CreateAdapter();
+
+        AdapterTenant.AddAdapter(connectedAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
+            connectedAdapter.ToRtEntityId(),
+            null,
+            []
+        ));
+
+        CommunicationRepository.GetAdaptersAsync(TenantId)
+            .Returns(new[] { connectedAdapter, disconnectedAdapter });
+
+        // Act
+        await AdapterService.PosUpdateTenantAsync(TenantId);
+
+        // Assert
+        using var _ = Assert.Multiple();
+
+        await CommunicationRepository.DidNotReceive()
+            .SetAdapterCommunicationStateAsync(TenantId, connectedAdapter.ToRtEntityId(),
+                Arg.Any<RtCommunicationStateEnum>());
+
+        await CommunicationRepository.Received(1)
+            .SetAdapterCommunicationStateAsync(TenantId, disconnectedAdapter.ToRtEntityId(),
+                RtCommunicationStateEnum.Offline);
+    }
+
+    [Test]
+    public async Task PosUpdateTenantAsync_AdapterInCacheWithoutConnectionId_IsMarkedOffline()
+    {
+        // Arrange — adapter is known to the tenant cache but has no active SignalR
+        // connection (e.g. connection id was cleared on disconnect). It must be marked Offline.
+        var adapter = RtEntityCreator.CreateAdapter();
+
+        AdapterTenant.AddAdapter(adapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
+            adapter.ToRtEntityId(),
+            null,
+            []
+        ));
+        AdapterTenant.RemoveConnectionId(adapter.ToRtEntityId());
+
+        CommunicationRepository.GetAdaptersAsync(TenantId)
+            .Returns(new[] { adapter });
+
+        // Act
+        await AdapterService.PosUpdateTenantAsync(TenantId);
+
+        // Assert
+        await CommunicationRepository.Received(1)
+            .SetAdapterCommunicationStateAsync(TenantId, adapter.ToRtEntityId(),
                 RtCommunicationStateEnum.Offline);
     }
 

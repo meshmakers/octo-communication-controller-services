@@ -46,20 +46,19 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
                 return;
             }
 
-            // We check if already a pos update tenant message was received for this correlation id
-            if (_receivedPreUpdateTenant.TryGetValue(context.Message.CorrelationId, out bool receivedPreUpdateTenant))
+            // Pair Pre and Pos by correlation id. Whichever message arrives second
+            // triggers the actual tenant update — Pre first, then Pos — regardless of
+            // delivery order. This guarantees adapters are notified (Pre) before the
+            // cache is reinitialised (Pos), even when the broker delivers in normal order.
+            if (_receivedPreUpdateTenant.TryRemove(context.Message.CorrelationId, out _))
             {
-                if (!receivedPreUpdateTenant)
-                {
-                    _logger.LogInformation("Pos update tenant message was received before pos update tenant message");
-                    await ExecutePreTenantUpdate(context.Message.TenantId);
-                    await ExecutePosTenantUpdate(context.Message.TenantId);
-                    _receivedPreUpdateTenant.Remove(context.Message.CorrelationId, out _);
-                    return;
-                }
+                await ExecutePreTenantUpdate(context.Message.TenantId);
+                await ExecutePosTenantUpdate(context.Message.TenantId);
             }
-
-            _receivedPreUpdateTenant.AddOrUpdate(context.Message.CorrelationId, true, (_, oldValue) => oldValue);
+            else
+            {
+                _receivedPreUpdateTenant.TryAdd(context.Message.CorrelationId, true);
+            }
         }
         catch (Exception e)
         {
@@ -85,19 +84,15 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
                 return;
             }
 
-            // We check if already a pre update tenant message was received for this correlation id
-            if (_receivedPreUpdateTenant.TryGetValue(context.Message.CorrelationId, out bool receivedPreUpdateTenant))
+            if (_receivedPreUpdateTenant.TryRemove(context.Message.CorrelationId, out _))
             {
-                if (receivedPreUpdateTenant)
-                {
-                    _logger.LogInformation("Pre update tenant message was received before pos update tenant message");
-                    await ExecutePosTenantUpdate(context.Message.TenantId);
-                    _receivedPreUpdateTenant.Remove(context.Message.CorrelationId, out _);
-                    return;
-                }
+                await ExecutePreTenantUpdate(context.Message.TenantId);
+                await ExecutePosTenantUpdate(context.Message.TenantId);
             }
-
-            _receivedPreUpdateTenant.AddOrUpdate(context.Message.CorrelationId, false, (_, oldValue) => oldValue);
+            else
+            {
+                _receivedPreUpdateTenant.TryAdd(context.Message.CorrelationId, false);
+            }
         }
         catch (Exception e)
         {
