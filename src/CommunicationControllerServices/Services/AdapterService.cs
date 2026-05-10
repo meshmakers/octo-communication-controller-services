@@ -877,11 +877,24 @@ internal class AdapterService(
         {
             await _semaphore.WaitAsync();
             adapterCache.AddOrUpdateTenant(tenantId);
+            adapterCache.TryGetTenant(tenantId, out var adapterTenant);
 
             var adapters = await communicationRepository.GetAdaptersAsync(tenantId);
             foreach (var adapter in adapters)
             {
-                await communicationRepository.SetAdapterCommunicationStateAsync(tenantId, adapter.ToRtEntityId(),
+                var adapterRtEntityId = adapter.ToRtEntityId();
+
+                // Skip adapters that currently hold an active SignalR connection — marking
+                // a still-connected adapter Offline would leave the UI showing it as offline
+                // until the next reconnect, even though the adapter is healthy.
+                if (adapterTenant != null
+                    && adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var cachedAdapter)
+                    && !string.IsNullOrWhiteSpace(cachedAdapter.ConnectionId))
+                {
+                    continue;
+                }
+
+                await communicationRepository.SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId,
                     RtCommunicationStateEnum.Offline);
             }
 
