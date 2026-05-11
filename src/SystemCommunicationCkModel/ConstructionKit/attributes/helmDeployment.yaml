@@ -1,0 +1,38 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+attributes:
+- id: ChartName
+  valueType: String
+  description: 'Helm chart name within the repository (e.g. voest-app, octo-mesh-adapter).'
+- id: ChartVersion
+  valueType: String
+  description: 'Helm chart version (e.g. 1.2.3).'
+- id: ValuesYaml
+  valueType: String
+  description: 'Full values.yaml content as a YAML string. Edited in a code editor or uploaded as a file in the Studio. Acts as the base layer of Helm values; ValueOverrides are deep-merged on top.'
+- id: RepositoryUrl
+  valueType: String
+  description: 'HTTP(S) URL of a Helm repository index, e.g. https://meshmakers.github.io/octo-helm-core (public) or a private GitHub Pages site.'
+- id: Channel
+  valueType: Enum
+  valueCkEnumId: ${this}/HelmChannel
+  description: 'Helm chart distribution channel (Dev or Release). Pure label for UI colour-coding; the operator does not derive behavior from it.'
+  defaultValues:
+    - 0
+- id: Hostname
+  valueType: String
+  description: 'Optional public hostname for an Application (e.g. energy.prod-1.octo-mesh.com). When set the operator may surface it; the actual ingress configuration is owned by the Helm chart.'
+- id: Path
+  valueType: String
+  description: 'Dotted Helm values path for a ValueOverride entry (e.g. image.tag, service.port, oauth.clientId).'
+- id: Value
+  valueType: String
+  description: 'String value of a ValueOverride entry. Encrypted at rest when the entry is flagged IsSecret.'
+- id: IsSecret
+  valueType: Boolean
+  description: 'When true, the ValueOverride.Value is encrypted at rest in MongoDB and rendered as a Kubernetes Secret reference at deploy time.'
+  defaultValues:
+    - false
+- id: Values
+  valueType: RecordArray
+  valueCkRecordId: ${this}/ValueOverride
+  description: 'Structured Helm value overrides. Deep-merged on top of ValuesYaml during deploy. Entries flagged IsSecret are stored encrypted.'

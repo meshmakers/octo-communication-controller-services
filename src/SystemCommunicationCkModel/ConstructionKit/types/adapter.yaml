@@ -1,8 +1,8 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
 - typeId: Adapter
-  description: An external client that connects via SignalR to execute data pipelines. Adapters manage pools and receive pipeline configurations from the Communication Controller.
-  derivedFromCkTypeId: ${this}/DeployableEntity
+  description: An external client that connects via SignalR to execute data pipelines. Adapters manage pools and receive pipeline configurations from the Communication Controller. Deployed to Kubernetes by the Communication Operator via Helm (chart/values inherited from DeployableWorkload).
+  derivedFromCkTypeId: ${this}/DeployableWorkload
   attributes:
     - id: ${this}/CommunicationStateTimestamp
       name: CommunicationStateTimestamp
@@ -11,6 +11,10 @@ types:
       name: CommunicationState
     - id: ${this}/ConfigurationState
       name: ConfigurationState
+    # Deprecated — kept for backwards compatibility with existing Studio UI
+    # until the Phase-4 UI rewrite swaps them for Helm chart fields.
+    # The Communication Operator no longer reads these in the Helm-based
+    # deploy path.
     - id: ${this}/Deployment.ImageName
       name: ImageName
       isOptional: true
@@ -22,6 +26,6 @@ types:
       isOptional: true
     - id: ${this}/LastSyncedSequenceNumber
       name: LastSyncedSequenceNumber
-  associations:
-  - id: ${this}/Manages
-    targetCkTypeId: ${this}/Pool
+  # Manages → Pool moved up to DeployableWorkload, so Application inherits the
+  # same association. Existing runtime entities of type Adapter retain their
+  # Manages relations because the association role id is unchanged.
