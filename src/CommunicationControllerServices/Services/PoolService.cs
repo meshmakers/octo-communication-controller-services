@@ -101,6 +101,13 @@ internal class PoolService : IPoolService
         {
             if (tenantDescription.PoolsByName.TryGetValue(poolName, out var poolDescription))
             {
+                // Set communication state to Unregistered *before* removing from cache.
+                // After RemovePool, the OnDisconnectedAsync that follows the operator's
+                // graceful disconnect can no longer locate the pool, so any state write
+                // would silently no-op and the UI would keep showing Online forever.
+                await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, poolDescription.PoolRtId,
+                    RtCommunicationStateEnum.Unregistered);
+
                 tenantDescription.RemovePool(poolDescription.PoolRtId);
 
                 await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolDescription.PoolRtId,
