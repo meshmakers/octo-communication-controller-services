@@ -379,6 +379,66 @@ Tests:
   regression test that pins `ICommunicationRepository.GetPoolsAsync` is
   never called from this path.
 
+### Helm Workload Deploy (Phase 2)
+
+The Communication Operator no longer deploys Adapter pods directly — it
+runs `helm upgrade --install` for every Adapter and Application managed
+by a Cloud pool. CK model (3.15.0) provides the type hierarchy:
+`DeployableEntity → DeployableWorkload → Adapter | Application`.
+
+**`IWorkloadEncryptionService`** (`Services/WorkloadEncryptionService.cs`)
+provides AES-256-GCM encryption with a single instance-wide
+`InstanceSecretKey` configured via
+`OCTO_COMMUNICATIONCONTROLLER__INSTANCESECRETKEY` (Base64-encoded
+32-byte key). Ciphertext is `enc:v1:<base64(nonce||tag||ciphertext)>` —
+`Decrypt` is a no-op when no sentinel is present, so a single CK
+attribute can carry either a plaintext or an encrypted value. This same
+service is also used for `HelmRepositoryConfiguration.Password` and any
+future at-rest-encrypted attribute.
+
+**`PoolService.DeployPoolAsync`** (Cloud pools) now:
+1. Sets `DeploymentState = Deployed` on the pool.
+2. Notifies the operator via `IOperatorConnectionManager.NotifyPoolDeployedAsync`.
+3. Enumerates the pool's managed workloads through
+   `ICommunicationRepository.GetWorkloadsForPoolAsync` (polymorphic load of
+   `RtDeployableWorkload` via the `Manages` inbound association).
+4. For each workload: resolves its `HelmRepositoryConfiguration` via
+   `GetHelmRepositoryForWorkloadAsync`, decrypts secret-flagged
+   `ValueOverride.Value` entries and the repository password, then fires
+   `NotifyWorkloadDeployedAsync` with the assembled `WorkloadDeployedDto`.
+
+**`PoolService.UndeployPoolAsync`** mirrors deploy but in reverse order:
+workloads first (so the operator can `helm uninstall` while the pool
+namespace still exists), then the pool itself.
+
+**Tenant-delete cascade** (`UndeployAllCloudPoolsAsync`) reads tracked
+workloads from `OperatorConnectionManager.GetDeployedWorkloadsForTenant`
+and fires `NotifyWorkloadUndeployedAsync` for each, then notifies the
+pool undeploys — same in-memory-tracking pattern as for pools, same
+rationale (avoids racing with `PreUpdatePreDeleteTenantConsumer`'s
+cache unload).
+
+**`OperatorConnectionManager`** carries the workload tracking table:
+`tenantId → Map<{poolName}|{workloadName}, WorkloadUndeployedDto>`.
+`NotifyWorkloadDeployedAsync` adds, `NotifyWorkloadUndeployedAsync`
+removes. Same restart-survival caveat as the pool tracking: if the
+controller pod restarts between deploy and cascade, the in-memory state
+is gone. Reverse-sync from a freshly (re)connecting operator's
+`RegisterOperatorAsync` would close this gap (TODO).
+
+Phase-3 plan in `octo-communication-operator/docs/DEPLOYMENT-MANAGEMENT-CONCEPT.md`
+covers the operator-side helm CLI integration.
+
+Tests:
+- `Services/WorkloadEncryptionServiceTests` — round-trip, sentinel-skip,
+  tamper detection, key-mismatch, missing/invalid key handling.
+- `Hubs/OperatorConnectionManagerTests` — workload tracking add/remove,
+  tenant isolation, bucket cleanup when empty.
+- `Services/PoolServiceTests/DeployPoolAsyncTests` — Cloud/Edge branches,
+  workload fan-out, undeploy ordering, scoping workloads to the right pool.
+- `Services/PoolServiceTests/UndeployAllCloudPoolsAsyncTests` — extended
+  with workload-cascade tests.
+
 ## Project Structure Notes
 
 - Main service: `src/CommunicationControllerServices/`

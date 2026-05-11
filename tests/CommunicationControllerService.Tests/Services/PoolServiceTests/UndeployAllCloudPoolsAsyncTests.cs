@@ -68,4 +68,39 @@ internal class UndeployAllCloudPoolsAsyncTests : PoolServiceTestsBase
 
         await OperatorConnectionManager.Received(1).NotifyPoolUndeployedAsync(TenantId, "pool-ok");
     }
+
+    [Test]
+    public async Task UndeployAllCloudPoolsAsync_TrackedWorkloads_AlsoNotifiedBeforePools()
+    {
+        OperatorConnectionManager.GetDeployedPoolsForTenant(TenantId).Returns(["pool-one"]);
+        OperatorConnectionManager.GetDeployedWorkloadsForTenant(TenantId).Returns(new[]
+        {
+            new WorkloadUndeployedDto
+            {
+                TenantId = TenantId, PoolName = "pool-one",
+                WorkloadName = "wl-1", WorkloadType = WorkloadTypeDto.Adapter,
+            },
+        });
+
+        await PoolService.UndeployAllCloudPoolsAsync(TenantId);
+
+        await OperatorConnectionManager.Received(1).NotifyWorkloadUndeployedAsync(
+            Arg.Is<WorkloadUndeployedDto>(w => w.WorkloadName == "wl-1"));
+        await OperatorConnectionManager.Received(1).NotifyPoolUndeployedAsync(TenantId, "pool-one");
+    }
+
+    [Test]
+    public async Task UndeployAllCloudPoolsAsync_NeitherPoolsNorWorkloads_NoOp()
+    {
+        OperatorConnectionManager.GetDeployedPoolsForTenant(TenantId).Returns([]);
+        OperatorConnectionManager.GetDeployedWorkloadsForTenant(TenantId)
+            .Returns(Array.Empty<WorkloadUndeployedDto>());
+
+        await PoolService.UndeployAllCloudPoolsAsync(TenantId);
+
+        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
+            .NotifyPoolUndeployedAsync(Arg.Any<string>(), Arg.Any<string>());
+        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
+            .NotifyWorkloadUndeployedAsync(Arg.Any<WorkloadUndeployedDto>());
+    }
 }

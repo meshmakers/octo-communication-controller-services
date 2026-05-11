@@ -17,6 +17,13 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
     // with PreUpdatePreDeleteTenantConsumer's cache unload).
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _deployedPoolsByTenant = new();
 
+    // Tracks Cloud workloads (Adapters + Applications) deployed via the Helm
+    // path. Key inside the per-tenant bucket is "{poolName}|{workloadName}".
+    // The stored DTO carries pool name, workload name, and workload type — the
+    // tenant-delete cascade re-emits these via NotifyWorkloadUndeployedAsync
+    // so the operator runs helm uninstall before the tenant data is gone.
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, WorkloadUndeployedDto>> _deployedWorkloadsByTenant = new();
+
     public void AddOperator(string connectionId)
     {
         _connectedOperators.TryAdd(connectionId, true);
@@ -45,6 +52,16 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
             ? pools.Keys.ToArray()
             : [];
     }
+
+    public IReadOnlyCollection<WorkloadUndeployedDto> GetDeployedWorkloadsForTenant(string tenantId)
+    {
+        return _deployedWorkloadsByTenant.TryGetValue(tenantId, out var workloads)
+            ? workloads.Values.ToArray()
+            : [];
+    }
+
+    private static string WorkloadKey(string poolName, string workloadName) =>
+        poolName + "|" + workloadName;
 
     public async Task NotifyPoolDeployedAsync(DeployedPoolDto pool)
     {
@@ -120,6 +137,90 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
                 Logger.Warn(ex,
                     "Failed to notify operator {ConnectionId} of pool undeployment for tenant '{TenantId}', pool '{PoolName}'",
                     connectionId, tenantId, poolName);
+            }
+        }
+    }
+
+    public async Task NotifyWorkloadDeployedAsync(WorkloadDeployedDto workload)
+    {
+        // Track regardless of whether any operator is connected. Stored DTO is
+        // the minimal undeploy payload so the cascade can use it as-is.
+        var tenantWorkloads = _deployedWorkloadsByTenant.GetOrAdd(workload.TenantId,
+            _ => new ConcurrentDictionary<string, WorkloadUndeployedDto>());
+        tenantWorkloads[WorkloadKey(workload.PoolName, workload.WorkloadName)] = new WorkloadUndeployedDto
+        {
+            TenantId = workload.TenantId,
+            PoolName = workload.PoolName,
+            WorkloadName = workload.WorkloadName,
+            WorkloadType = workload.WorkloadType,
+        };
+
+        if (_connectedOperators.IsEmpty)
+        {
+            Logger.Debug(
+                "No operators connected, skipping workload-deployed notification for tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}'",
+                workload.TenantId, workload.PoolName, workload.WorkloadName);
+            return;
+        }
+
+        Logger.Info(
+            "Notifying {Count} operator(s) of workload deployed: tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}', chart '{ChartName}:{ChartVersion}'",
+            _connectedOperators.Count, workload.TenantId, workload.PoolName, workload.WorkloadName,
+            workload.ChartName, workload.ChartVersion);
+
+        var connectionIds = _connectedOperators.Keys.ToList();
+        foreach (var connectionId in connectionIds)
+        {
+            try
+            {
+                await hubContext.Clients.Client(connectionId)
+                    .SendAsync(nameof(IOperatorHubCallbacks.WorkloadDeployedAsync), workload);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn(ex,
+                    "Failed to notify operator {ConnectionId} of workload deployment for tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}'",
+                    connectionId, workload.TenantId, workload.PoolName, workload.WorkloadName);
+            }
+        }
+    }
+
+    public async Task NotifyWorkloadUndeployedAsync(WorkloadUndeployedDto workload)
+    {
+        if (_deployedWorkloadsByTenant.TryGetValue(workload.TenantId, out var tenantWorkloads))
+        {
+            tenantWorkloads.TryRemove(WorkloadKey(workload.PoolName, workload.WorkloadName), out _);
+            if (tenantWorkloads.IsEmpty)
+            {
+                _deployedWorkloadsByTenant.TryRemove(workload.TenantId, out _);
+            }
+        }
+
+        if (_connectedOperators.IsEmpty)
+        {
+            Logger.Debug(
+                "No operators connected, skipping workload-undeployed notification for tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}'",
+                workload.TenantId, workload.PoolName, workload.WorkloadName);
+            return;
+        }
+
+        Logger.Info(
+            "Notifying {Count} operator(s) of workload undeployed: tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}'",
+            _connectedOperators.Count, workload.TenantId, workload.PoolName, workload.WorkloadName);
+
+        var connectionIds = _connectedOperators.Keys.ToList();
+        foreach (var connectionId in connectionIds)
+        {
+            try
+            {
+                await hubContext.Clients.Client(connectionId)
+                    .SendAsync(nameof(IOperatorHubCallbacks.WorkloadUndeployedAsync), workload);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn(ex,
+                    "Failed to notify operator {ConnectionId} of workload undeployment for tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}'",
+                    connectionId, workload.TenantId, workload.PoolName, workload.WorkloadName);
             }
         }
     }

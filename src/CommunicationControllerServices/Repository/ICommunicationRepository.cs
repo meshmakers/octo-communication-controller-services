@@ -19,6 +19,25 @@ public interface ICommunicationRepository
     Task<IReadOnlyCollection<RtAdapter>> GetAdaptersAsync(string tenantId, OctoObjectId poolRtId);
 
     /// <summary>
+    /// Gets all deployable workloads (Adapters + Applications) managed by the
+    /// given pool. Returned as the abstract <c>RtDeployableWorkload</c> base
+    /// so callers can iterate uniformly; the concrete type is preserved in
+    /// each item's <c>CkTypeId</c>.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="poolRtId">Object id of pool</param>
+    Task<IReadOnlyCollection<RtDeployableWorkload>> GetWorkloadsForPoolAsync(string tenantId, OctoObjectId poolRtId);
+
+    /// <summary>
+    /// Resolves the <c>HelmRepositoryConfiguration</c> referenced by a
+    /// deployable workload via its <c>Uses</c> association. Returns
+    /// <c>null</c> when the workload does not yet have a repository
+    /// associated.
+    /// </summary>
+    Task<RtHelmRepositoryConfiguration?> GetHelmRepositoryForWorkloadAsync(string tenantId,
+        OctoObjectId workloadRtId);
+
+    /// <summary>
     /// Gets a list of initialized communication adapter of the given tenant
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>

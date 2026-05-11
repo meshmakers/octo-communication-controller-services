@@ -21,6 +21,7 @@ internal abstract class PoolServiceTestsBase
     protected readonly IPoolHubCallbacks PoolHubCallbacks;
     protected readonly ICommunicationEventService CommunicationEventService;
     protected readonly IOperatorConnectionManager OperatorConnectionManager;
+    protected readonly IWorkloadEncryptionService EncryptionService;
     protected readonly IPoolCachePublish PoolCachePublish;
     protected readonly PoolTenant PoolTenant;
     protected readonly PoolService PoolService;
@@ -33,6 +34,10 @@ internal abstract class PoolServiceTestsBase
         PoolHubCallbacks = Substitute.For<IPoolHubCallbacks>();
         CommunicationEventService = Substitute.For<ICommunicationEventService>();
         OperatorConnectionManager = Substitute.For<IOperatorConnectionManager>();
+        EncryptionService = Substitute.For<IWorkloadEncryptionService>();
+        // Default: Decrypt passes the value through unchanged (so non-secret
+        // tests don't have to set up Decrypt). Specific tests override this.
+        EncryptionService.Decrypt(Arg.Any<string>()).Returns(ci => ci.Arg<string>());
         PoolCachePublish = Substitute.For<IPoolCachePublish>();
         PoolTenant = new PoolTenant(PoolCachePublish, TenantId);
 
@@ -41,7 +46,8 @@ internal abstract class PoolServiceTestsBase
             PoolCache,
             PoolHubCallbacks,
             CommunicationEventService,
-            OperatorConnectionManager);
+            OperatorConnectionManager,
+            EncryptionService);
     }
 
     [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]

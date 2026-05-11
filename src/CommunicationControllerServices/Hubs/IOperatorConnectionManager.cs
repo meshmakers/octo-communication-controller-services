@@ -46,4 +46,26 @@ public interface IOperatorConnectionManager
     /// Notifies all connected operators that a Cloud pool was undeployed.
     /// </summary>
     Task NotifyPoolUndeployedAsync(string tenantId, string poolName);
+
+    /// <summary>
+    /// Returns the workloads this controller has notified operators of as
+    /// deployed for the given tenant. Same pattern as
+    /// <see cref="GetDeployedPoolsForTenant"/> — backed by in-memory tracking
+    /// driven by <c>NotifyWorkloadDeployedAsync</c> / <c>NotifyWorkloadUndeployedAsync</c>.
+    /// </summary>
+    IReadOnlyCollection<WorkloadUndeployedDto> GetDeployedWorkloadsForTenant(string tenantId);
+
+    /// <summary>
+    /// Notifies all connected operators that an Adapter or Application managed
+    /// by a Cloud pool was deployed. Secret-flagged value overrides on
+    /// <paramref name="workload"/> are expected to be decrypted by the caller
+    /// (controller side) before invocation — the wire is TLS-secured.
+    /// </summary>
+    Task NotifyWorkloadDeployedAsync(WorkloadDeployedDto workload);
+
+    /// <summary>
+    /// Notifies all connected operators that an Adapter or Application should
+    /// be undeployed (helm uninstall).
+    /// </summary>
+    Task NotifyWorkloadUndeployedAsync(WorkloadUndeployedDto workload);
 }

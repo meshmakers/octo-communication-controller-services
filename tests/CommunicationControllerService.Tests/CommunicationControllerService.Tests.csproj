@@ -4,6 +4,7 @@
         <OutputType>Exe</OutputType>
         <RootNamespace>Meshmakers.Octo.Backend.CommunicationControllerService.Tests</RootNamespace>
         <AssemblyName>Meshmakers.Octo.Backend.CommunicationControllerService.Tests</AssemblyName>
+        <Configurations>Debug;Release;DebugL</Configurations>
     </PropertyGroup>
 
     <ItemGroup>
