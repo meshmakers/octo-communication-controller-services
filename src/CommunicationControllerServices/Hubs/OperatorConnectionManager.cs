@@ -11,6 +11,12 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly ConcurrentDictionary<string, bool> _connectedOperators = new();
 
+    // Tracks Cloud pools that this controller has notified operators of as
+    // deployed but not yet undeployed. Source of truth for the PreDeleteTenant
+    // cascade so it doesn't have to query the tenant repository (which races
+    // with PreUpdatePreDeleteTenantConsumer's cache unload).
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _deployedPoolsByTenant = new();
+
     public void AddOperator(string connectionId)
     {
         _connectedOperators.TryAdd(connectionId, true);
@@ -25,14 +31,30 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
 
     public IEnumerable<DeployedPoolDto> GetDeployedPools()
     {
-        // TODO: enumerate all Cloud pools currently in DeploymentState=Deployed
-        // across every tenant. For now we return empty: live deploy/undeploy
-        // events still flow correctly; only operator-restart sync is missing.
-        return [];
+        return _deployedPoolsByTenant.SelectMany(tenant =>
+            tenant.Value.Keys.Select(poolName => new DeployedPoolDto
+            {
+                TenantId = tenant.Key,
+                PoolName = poolName
+            })).ToArray();
+    }
+
+    public IReadOnlyCollection<string> GetDeployedPoolsForTenant(string tenantId)
+    {
+        return _deployedPoolsByTenant.TryGetValue(tenantId, out var pools)
+            ? pools.Keys.ToArray()
+            : [];
     }
 
     public async Task NotifyPoolDeployedAsync(DeployedPoolDto pool)
     {
+        // Track regardless of whether any operator is connected — when one
+        // connects later, GetDeployedPools() / GetDeployedPoolsForTenant()
+        // must still return the pool.
+        var tenantPools = _deployedPoolsByTenant.GetOrAdd(pool.TenantId,
+            _ => new ConcurrentDictionary<string, byte>());
+        tenantPools[pool.PoolName] = 0;
+
         if (_connectedOperators.IsEmpty)
         {
             Logger.Debug(
@@ -64,6 +86,15 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
 
     public async Task NotifyPoolUndeployedAsync(string tenantId, string poolName)
     {
+        if (_deployedPoolsByTenant.TryGetValue(tenantId, out var tenantPools))
+        {
+            tenantPools.TryRemove(poolName, out _);
+            if (tenantPools.IsEmpty)
+            {
+                _deployedPoolsByTenant.TryRemove(tenantId, out _);
+            }
+        }
+
         if (_connectedOperators.IsEmpty)
         {
             Logger.Debug(

@@ -350,6 +350,35 @@ Tests for this state machine live in
 - `SetCommunicationStateOfflineAsyncTests` pins that the method only writes
   when the lookup key is a real pool name (not a SignalR connection id).
 
+### Cloud Pool Deploy Tracking (for the PreDeleteTenant cascade)
+
+The `OperatorConnectionManager` keeps an in-memory map
+`tenantId → Set<poolName>` of Cloud pools that have been notified to operators
+as deployed but not yet undeployed. `NotifyPoolDeployedAsync` adds an entry,
+`NotifyPoolUndeployedAsync` removes one.
+
+`PoolService.UndeployAllCloudPoolsAsync` reads from this map (via
+`GetDeployedPoolsForTenant`) rather than the tenant repository. Reason:
+`TenantManagementConsumer.ConsumeAsync(PreDeleteTenant)` fires in parallel
+with `PreUpdatePreDeleteTenantConsumer` (in `octo-common-services`), which
+unloads the CK-cache for the tenant. A repository-based lookup races with
+that unload and throws `CommunicationRepositoryException: Failed to get
+pools` — and the operator is never told to clean up, leaving the
+`CommunicationPool` CR and broker secret orphaned in the cluster.
+
+Caveat: the map is process-local, so it survives only as long as the
+controller pod. If the controller restarts between deploy and tenant delete,
+the cascade has nothing to undeploy. Tracking restart-survival via an
+operator-side `RegisterOperatorAsync` reverse-sync is the existing TODO on
+`OperatorConnectionManager.GetDeployedPools()`.
+
+Tests:
+- `Hubs/OperatorConnectionManagerTests` — tracking add/remove, tenant
+  isolation, bucket cleanup when empty.
+- `Services/PoolServiceTests/UndeployAllCloudPoolsAsyncTests` — including a
+  regression test that pins `ICommunicationRepository.GetPoolsAsync` is
+  never called from this path.
+
 ## Project Structure Notes
 
 - Main service: `src/CommunicationControllerServices/`
