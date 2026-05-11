@@ -1,0 +1,10 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+- enumId: HelmChannel
+  description: Distribution channel of a Helm chart repository. Used as a label so the UI can colour-code dev vs release sources; the operator does not derive behavior from this value.
+  useFlags: false
+  values:
+  - key: 0
+    name: Dev
+  - key: 1
+    name: Release

@@ -1,0 +1,27 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+- typeId: DeployableWorkload
+  description: 'Abstract base type for workloads that the Communication Operator deploys to Kubernetes via Helm. Carries the chart reference, base values.yaml, and structured value overrides shared by Adapter and Application.'
+  isAbstract: true
+  derivedFromCkTypeId: ${this}/DeployableEntity
+  attributes:
+    - id: ${this}/ChartName
+      name: ChartName
+      isOptional: true
+    - id: ${this}/ChartVersion
+      name: ChartVersion
+      isOptional: true
+    - id: ${this}/ValuesYaml
+      name: ValuesYaml
+      isOptional: true
+    - id: ${this}/Values
+      name: Values
+      isOptional: true
+  associations:
+    - id: ${this}/Uses
+      targetCkTypeId: ${this}/HelmRepositoryConfiguration
+    # The pool a workload belongs to. Inherited by Adapter and Application,
+    # so a Cloud pool deploys both kinds via the same association. Inbound
+    # role name on Pool is "Manages" (Pool.Manages -> N workloads).
+    - id: ${this}/Manages
+      targetCkTypeId: ${this}/Pool

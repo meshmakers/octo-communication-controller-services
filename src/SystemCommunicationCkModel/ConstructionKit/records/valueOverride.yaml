@@ -1,0 +1,13 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+records:
+  - recordId: ValueOverride
+    description: A single Helm value override entry. Path is a dotted Helm values path (e.g. image.tag). Value is the override string. When IsSecret is true, Value is stored encrypted at rest and surfaced as a Kubernetes Secret reference at deploy time.
+    isFinal: true
+    isAbstract: false
+    attributes:
+      - id: ${this}/Path
+        name: Path
+      - id: ${this}/Value
+        name: Value
+      - id: ${this}/IsSecret
+        name: IsSecret

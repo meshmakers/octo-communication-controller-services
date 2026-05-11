@@ -1,0 +1,17 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+  - typeId: HelmRepositoryConfiguration
+    derivedFromCkTypeId: ${System}/Configuration
+    isFinal: true
+    description: 'Configuration of a Helm chart repository (HTTP, typically GitHub Pages — public or private). Referenced by DeployableWorkload entities so the Communication Operator knows where to pull the chart from. Tenant-scoped.'
+    attributes:
+      - id: ${this}/RepositoryUrl
+        name: RepositoryUrl
+      - id: ${this}/Channel
+        name: Channel
+      - id: ${this}/Username
+        name: Username
+        isOptional: true
+      - id: ${this}/Password
+        name: Password
+        isOptional: true
