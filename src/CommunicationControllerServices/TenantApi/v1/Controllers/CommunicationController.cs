@@ -21,17 +21,20 @@ public class CommunicationController : ControllerBase
     private readonly ILogger<CommunicationController> _logger;
     private readonly IConfigurationService _configurationService;
     private readonly IExpressionValidationService _expressionValidationService;
+    private readonly IWorkloadEncryptionService _encryptionService;
 
     /// <summary>
     /// Constructor
     /// </summary>
     public CommunicationController(ILogger<CommunicationController> logger,
         IConfigurationService configurationService,
-        IExpressionValidationService expressionValidationService)
+        IExpressionValidationService expressionValidationService,
+        IWorkloadEncryptionService encryptionService)
     {
         _logger = logger;
         _configurationService = configurationService;
         _expressionValidationService = expressionValidationService;
+        _encryptionService = encryptionService;
     }
 
     /// <summary>
@@ -115,7 +118,55 @@ public class CommunicationController : ControllerBase
         var result = _expressionValidationService.Validate(request.Expression, request.TestValue ?? 42.0);
         return Ok(result);
     }
+
+    /// <summary>
+    /// Encrypts a plaintext value with the controller's at-rest encryption
+    /// key and returns the sentinel-prefixed ciphertext (<c>enc:v1:…</c>).
+    /// Used by the Studio to encrypt Helm value overrides flagged
+    /// <c>IsSecret</c> before storing them via the regular GraphQL mutations.
+    ///
+    /// Plaintext travels only over TLS and is never persisted on the
+    /// controller. The same response can be re-supplied as input — the
+    /// service is idempotent and tolerant of already-encrypted values
+    /// (they pass through unchanged).
+    /// </summary>
+    [HttpPost("encrypt-value")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(typeof(EncryptValueResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public IActionResult EncryptValue([FromBody] EncryptValueRequest request)
+    {
+        if (request.Plaintext is null)
+        {
+            return BadRequest("Plaintext is required.");
+        }
+
+        try
+        {
+            var ciphertext = _encryptionService.IsEncrypted(request.Plaintext)
+                ? request.Plaintext
+                : _encryptionService.Encrypt(request.Plaintext);
+            return Ok(new EncryptValueResponse(ciphertext));
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogError(ex, "Encrypt-value failed: instance key not configured");
+            return Problem(ex.Message, statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
 }
+
+/// <summary>
+/// Request body for the encrypt-value endpoint.
+/// </summary>
+/// <param name="Plaintext">The value to encrypt. May already be a ciphertext (<c>enc:v1:…</c>) — in that case it is returned unchanged.</param>
+public record EncryptValueRequest([Required] string Plaintext);
+
+/// <summary>
+/// Response body for the encrypt-value endpoint.
+/// </summary>
+/// <param name="Ciphertext">Sentinel-prefixed ciphertext (<c>enc:v1:…</c>) ready to be stored as a CK attribute.</param>
+public record EncryptValueResponse(string Ciphertext);
 
 /// <summary>
 /// Request body for expression validation.
