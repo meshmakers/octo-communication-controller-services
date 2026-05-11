@@ -101,4 +101,18 @@ public class CommunicationControllerOptions
     /// Gets or sets whether to validate pipeline definitions against the adapter's JSON Schema before deployment
     /// </summary>
     public bool EnablePipelineSchemaValidation { get; set; } = false;
+
+    /// <summary>
+    /// Symmetric AES-256-GCM master key used to encrypt secret attributes
+    /// at rest (e.g. <c>ValueOverride.Value</c> for secret-flagged Helm value
+    /// overrides, <c>HelmRepositoryConfiguration.Password</c>). Base64-encoded
+    /// 32-byte key. Loaded from configuration; in local dev typically
+    /// <c>OCTO_COMMUNICATIONCONTROLLER__INSTANCESECRETKEY</c>, in production
+    /// mounted as a Kubernetes Secret (recommended Vault path
+    /// <c>meshmakers/{cluster}/instance-secret-key</c>).
+    ///
+    /// Empty / unset is tolerated at startup but every attempt to use the
+    /// encryption service throws a clear configuration error.
+    /// </summary>
+    public string? InstanceSecretKey { get; set; }
 }

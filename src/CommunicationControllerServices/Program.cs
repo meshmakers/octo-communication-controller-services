@@ -66,6 +66,7 @@ try
 
     builder.Services.AddSingleton<ICommunicationRepository, CommunicationRepository>();
     builder.Services.AddSingleton<ICommunicationEventService, CommunicationEventService>();
+    builder.Services.AddSingleton<IWorkloadEncryptionService, WorkloadEncryptionService>();
     builder.Services.AddSingleton<IPipelineSchemaValidator, PipelineSchemaValidator>();
     builder.Services.AddSingleton<IExpressionValidationService, ExpressionValidationService>();
     builder.Services.AddSingleton<IPipelineDefinitionService, PipelineDefinitionService>();

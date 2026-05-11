@@ -18,6 +18,7 @@ internal class PoolService : IPoolService
     private readonly IPoolHubCallbacks _poolHubCallbacks;
     private readonly ICommunicationEventService _eventService;
     private readonly IOperatorConnectionManager _operatorConnectionManager;
+    private readonly IWorkloadEncryptionService _encryptionService;
 
     /// <summary>
     /// Constructor
@@ -27,15 +28,18 @@ internal class PoolService : IPoolService
     /// <param name="poolHubCallbacks">Callbacks to inform client of configuration changes</param>
     /// <param name="eventService">Service for storing system events</param>
     /// <param name="operatorConnectionManager">Manages SignalR connections to central Communication Operators (for Cloud-pool deploy/undeploy notifications)</param>
+    /// <param name="encryptionService">Decrypts secret-flagged ValueOverride values before they go on the SignalR wire</param>
     public PoolService(ICommunicationRepository communicationRepository, IPoolCache poolCache,
         IPoolHubCallbacks poolHubCallbacks, ICommunicationEventService eventService,
-        IOperatorConnectionManager operatorConnectionManager)
+        IOperatorConnectionManager operatorConnectionManager,
+        IWorkloadEncryptionService encryptionService)
     {
         _communicationRepository = communicationRepository;
         _poolCache = poolCache;
         _poolHubCallbacks = poolHubCallbacks;
         _eventService = eventService;
         _operatorConnectionManager = operatorConnectionManager;
+        _encryptionService = encryptionService;
     }
     
     /// <inheritdoc />
@@ -244,14 +248,20 @@ internal class PoolService : IPoolService
 
         if (rtPool.Environment == RtEnvironmentEnum.Cloud)
         {
+            var poolName = rtPool.Name ?? string.Empty;
             Logger.Info(
                 "[{TenantId}] Pool '{PoolName}' is Cloud — notifying central Communication Operator",
-                tenantId, (rtPool.Name ?? string.Empty));
+                tenantId, poolName);
             await _operatorConnectionManager.NotifyPoolDeployedAsync(new DeployedPoolDto
             {
                 TenantId = tenantId,
-                PoolName = (rtPool.Name ?? string.Empty)
+                PoolName = poolName,
             });
+
+            // Pool is up — fan out helm deploys for every managed workload.
+            // Failures per workload are logged but don't fail the pool deploy
+            // itself; the operator will retry on its next reconcile cycle.
+            await DeployManagedWorkloadsAsync(tenantId, poolRtId, poolName);
         }
         else
         {
@@ -273,10 +283,17 @@ internal class PoolService : IPoolService
 
         if (rtPool.Environment == RtEnvironmentEnum.Cloud)
         {
+            var poolName = rtPool.Name ?? string.Empty;
+
+            // Helm uninstall managed workloads before tearing down the pool
+            // itself — the operator removes the CommunicationPool CR last so
+            // it can still resolve the pool's namespace while uninstalling.
+            await UndeployManagedWorkloadsAsync(tenantId, poolName);
+
             Logger.Info(
                 "[{TenantId}] Pool '{PoolName}' is Cloud — notifying central Communication Operator to clean up",
-                tenantId, (rtPool.Name ?? string.Empty));
-            await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, (rtPool.Name ?? string.Empty));
+                tenantId, poolName);
+            await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, poolName);
         }
 
         await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolRtId,
@@ -284,6 +301,131 @@ internal class PoolService : IPoolService
 
         await _eventService.StoreInformationEventAsync(tenantId,
             $"Pool '{(rtPool.Name ?? string.Empty)}' undeployed (environment: {rtPool.Environment}).");
+    }
+
+    private async Task DeployManagedWorkloadsAsync(string tenantId, OctoObjectId poolRtId, string poolName)
+    {
+        IReadOnlyCollection<RtDeployableWorkload> workloads;
+        try
+        {
+            workloads = await _communicationRepository.GetWorkloadsForPoolAsync(tenantId, poolRtId);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn(ex,
+                "[{TenantId}] Failed to enumerate managed workloads of pool '{PoolName}'; pool is deployed but no workloads were fanned out",
+                tenantId, poolName);
+            return;
+        }
+
+        if (workloads.Count == 0)
+        {
+            Logger.Info("[{TenantId}] Pool '{PoolName}' has no managed workloads", tenantId, poolName);
+            return;
+        }
+
+        Logger.Info("[{TenantId}] Pool '{PoolName}' has {Count} managed workload(s) to deploy",
+            tenantId, poolName, workloads.Count);
+
+        foreach (var workload in workloads)
+        {
+            try
+            {
+                var dto = await BuildWorkloadDeployedDtoAsync(tenantId, poolName, workload);
+                if (dto == null)
+                {
+                    Logger.Warn(
+                        "[{TenantId}] Workload '{WorkloadName}' is incomplete — skipping deploy",
+                        tenantId, workload.Name ?? string.Empty);
+                    continue;
+                }
+
+                await _operatorConnectionManager.NotifyWorkloadDeployedAsync(dto);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn(ex,
+                    "[{TenantId}] Failed to deploy workload '{WorkloadName}' of pool '{PoolName}'",
+                    tenantId, workload.Name ?? string.Empty, poolName);
+            }
+        }
+    }
+
+    private async Task UndeployManagedWorkloadsAsync(string tenantId, string poolName)
+    {
+        // Read from in-memory tracking only — same rationale as
+        // UndeployAllCloudPoolsAsync, this path may run during tenant delete
+        // where the repository is already torn down.
+        var tracked = _operatorConnectionManager.GetDeployedWorkloadsForTenant(tenantId)
+            .Where(w => w.PoolName == poolName)
+            .ToArray();
+
+        if (tracked.Length == 0)
+        {
+            return;
+        }
+
+        Logger.Info("[{TenantId}] Undeploying {Count} workload(s) of pool '{PoolName}'",
+            tenantId, tracked.Length, poolName);
+
+        foreach (var workload in tracked)
+        {
+            try
+            {
+                await _operatorConnectionManager.NotifyWorkloadUndeployedAsync(workload);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn(ex,
+                    "[{TenantId}] Failed to undeploy workload '{WorkloadName}' of pool '{PoolName}'",
+                    tenantId, workload.WorkloadName, poolName);
+            }
+        }
+    }
+
+    private async Task<WorkloadDeployedDto?> BuildWorkloadDeployedDtoAsync(string tenantId, string poolName,
+        RtDeployableWorkload workload)
+    {
+        if (string.IsNullOrWhiteSpace(workload.ChartName) || string.IsNullOrWhiteSpace(workload.ChartVersion))
+        {
+            return null;
+        }
+
+        var repo = await _communicationRepository.GetHelmRepositoryForWorkloadAsync(tenantId, workload.RtId);
+        if (repo == null || string.IsNullOrWhiteSpace(repo.RepositoryUrl))
+        {
+            return null;
+        }
+
+        var overrides = (workload.Values ?? Enumerable.Empty<RtValueOverrideRecord>())
+            .Select(v => new ValueOverrideDto
+            {
+                Path = v.Path ?? string.Empty,
+                Value = v.IsSecret
+                    ? _encryptionService.Decrypt(v.Value ?? string.Empty)
+                    : v.Value ?? string.Empty,
+                IsSecret = v.IsSecret,
+            })
+            .ToArray();
+
+        return new WorkloadDeployedDto
+        {
+            TenantId = tenantId,
+            PoolName = poolName,
+            WorkloadName = workload.Name ?? string.Empty,
+            WorkloadType = workload is RtApplication
+                ? WorkloadTypeDto.Application
+                : WorkloadTypeDto.Adapter,
+            RepositoryUrl = repo.RepositoryUrl,
+            RepositoryUsername = repo.Username,
+            RepositoryPassword = string.IsNullOrEmpty(repo.Password)
+                ? null
+                : _encryptionService.Decrypt(repo.Password),
+            ChartName = workload.ChartName,
+            ChartVersion = workload.ChartVersion,
+            ValuesYaml = workload.ValuesYaml ?? string.Empty,
+            Values = overrides,
+        };
     }
 
     /// <inheritdoc />
@@ -299,11 +441,28 @@ internal class PoolService : IPoolService
         // told to clean up, leaving the CommunicationPool CR and broker
         // secret orphaned in the cluster.
         var poolNames = _operatorConnectionManager.GetDeployedPoolsForTenant(tenantId);
+        var trackedWorkloads = _operatorConnectionManager.GetDeployedWorkloadsForTenant(tenantId);
 
-        if (poolNames.Count == 0)
+        if (poolNames.Count == 0 && trackedWorkloads.Count == 0)
         {
-            Logger.Info("[{TenantId}] No Cloud pools to clean up", tenantId);
+            Logger.Info("[{TenantId}] No Cloud pools or workloads to clean up", tenantId);
             return;
+        }
+
+        // Tear down workloads first so the operator can helm uninstall while
+        // the pool namespace is still around.
+        foreach (var workload in trackedWorkloads)
+        {
+            try
+            {
+                await _operatorConnectionManager.NotifyWorkloadUndeployedAsync(workload);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn(ex,
+                    "[{TenantId}] Failed to notify operator of workload undeploy during tenant cleanup, workload '{WorkloadName}' of pool '{PoolName}'",
+                    tenantId, workload.WorkloadName, workload.PoolName);
+            }
         }
 
         foreach (var poolName in poolNames)
@@ -321,7 +480,7 @@ internal class PoolService : IPoolService
         }
 
         await _eventService.StoreInformationEventAsync(tenantId,
-            $"Notified central Communication Operator to undeploy {poolNames.Count} Cloud pool(s) for tenant cleanup.");
+            $"Notified central Communication Operator to undeploy {trackedWorkloads.Count} workload(s) and {poolNames.Count} Cloud pool(s) for tenant cleanup.");
     }
 
     private async Task<RtPool> GetPoolByRtIdAsync(string tenantId, OctoObjectId poolRtId)

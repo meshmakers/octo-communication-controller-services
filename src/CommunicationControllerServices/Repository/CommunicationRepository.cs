@@ -55,6 +55,61 @@ internal class CommunicationRepository : ICommunicationRepository
 
 
     /// <inheritdoc />
+    public async Task<IReadOnlyCollection<RtDeployableWorkload>> GetWorkloadsForPoolAsync(string tenantId,
+        OctoObjectId poolRtId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            // RtDeployableWorkload is abstract — the runtime engine returns the
+            // concrete RtAdapter / RtApplication instances polymorphically.
+            var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPool, RtDeployableWorkload>(session,
+                [poolRtId], SystemCommunicationCkIds.RtCkManagesRoleId,
+                GraphDirections.Inbound, null, RtEntityQueryOptions.Create());
+
+            if (!resultSet.Any())
+            {
+                return Array.Empty<RtDeployableWorkload>();
+            }
+
+            return resultSet.First().Value.Items.ToList();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingAdapters(tenantId, poolRtId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<RtHelmRepositoryConfiguration?> GetHelmRepositoryForWorkloadAsync(string tenantId,
+        OctoObjectId workloadRtId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            var resultSet = await tenantRepository
+                .GetRtAssociationTargetsAsync<RtDeployableWorkload, RtHelmRepositoryConfiguration>(session,
+                    [workloadRtId], SystemCommunicationCkIds.RtCkUsesRoleId,
+                    GraphDirections.Outbound, null, RtEntityQueryOptions.Create());
+
+            if (!resultSet.Any())
+            {
+                return null;
+            }
+
+            return resultSet.First().Value.Items.FirstOrDefault();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingAdapters(tenantId, workloadRtId, e);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyCollection<RtAdapter>> GetAdaptersAsync(string tenantId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
