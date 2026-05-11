@@ -57,7 +57,12 @@ public class PoolHub : Hub, IPoolHub
         {
             Logger.Info("[{TenantId}] Pool {PoolName} with connection id '{ConnectionId}' disconnected", tenantId, poolName, Context.ConnectionId);
 
-            await _poolService.SetCommunicationStateOfflineAsync(tenantId, Context.ConnectionId);
+            // The two-arg overload looks the pool up by name in the cache, so we must pass
+            // poolName, not Context.ConnectionId. If the operator unregistered cleanly, the
+            // pool is already gone from the cache (and its state was set to Unregistered
+            // there) and this is a no-op; if the connection dropped unexpectedly, this is
+            // the only path that flips the state to Offline.
+            await _poolService.SetCommunicationStateOfflineAsync(tenantId, poolName);
         }
         catch (Exception e)
         {

@@ -332,6 +332,24 @@ Adapters and Pools track deployment state:
 - `RtDeploymentStateEnum.Deployed` - active
 - Communication state tracked separately via `RtCommunicationStateEnum`
 
+### Pool Communication State Transitions
+
+The `CommunicationState` of an `RtPool` (`Unregistered` / `Online` / `Offline`)
+is written from two paths and the **write order vs. cache mutation matters**:
+
+| Trigger | Code path | State written | Notes |
+|---|---|---|---|
+| Operator's SignalR `OnConnectedAsync` | `PoolHub.OnConnectedAsync` → `PoolService.SetCommunicationStateOnlineAsync(tenantId, poolName, connectionId)` | `Online` | Adds the pool to `_poolCache` if missing. |
+| Operator's `RegisterPoolOperatorAsync` invocation | `PoolHub.RegisterPoolOperatorAsync` → `PoolService.RegisterPoolOperatorAsync` → `SetCommunicationStateOnlineAsync(tenantId, poolRtId)` | `Online` | Followed by `GetPoolConfigurationAsync` returning the adapter list. |
+| Operator's `UnregisterPoolOperatorAsync` invocation (graceful undeploy) | `PoolHub.UnregisterPoolOperatorAsync` → `PoolService.UnregisterPoolOperatorAsync` | `Unregistered` | **Must write the state before `PoolTenant.RemovePool`** — otherwise the `OnDisconnectedAsync` that follows finds nothing in the cache and silently no-ops. |
+| Operator's SignalR connection drops without an `UnregisterPoolOperatorAsync` (crash, network) | `PoolHub.OnDisconnectedAsync` → `PoolService.SetCommunicationStateOfflineAsync(tenantId, poolName)` | `Offline` | The hub must pass `poolName`, never `Context.ConnectionId` — the two-arg overload looks the pool up by name in `_poolCache.PoolsByName`. When `UnregisterPoolOperatorAsync` already ran, the pool is gone from the cache and this becomes a clean no-op. |
+
+Tests for this state machine live in
+`tests/CommunicationControllerService.Tests/Services/PoolServiceTests/`:
+- `UnregisterPoolOperatorAsyncTests` pins the write-before-remove ordering.
+- `SetCommunicationStateOfflineAsyncTests` pins that the method only writes
+  when the lookup key is a real pool name (not a SignalR connection id).
+
 ## Project Structure Notes
 
 - Main service: `src/CommunicationControllerServices/`
