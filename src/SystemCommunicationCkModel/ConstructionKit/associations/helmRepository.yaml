@@ -1,0 +1,8 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+associationRoles:
+  - id: HelmRepository
+    description: Links a deployable workload (Adapter / Application) to the Helm chart repository it pulls its chart from. Separate from the generic Uses role so the inverse view on HelmRepositoryConfiguration does not collide with Pipeline.Uses — keeping HelmRepositoryConfiguration as a regular SystemConfigurationInterface implementer in the generated GraphQL schema.
+    inboundName: HelmRepositoryUsedBy
+    inboundMultiplicity: N
+    outboundName: HelmRepository
+    outboundMultiplicity: ZeroOrOne

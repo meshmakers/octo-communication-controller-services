@@ -18,7 +18,13 @@ types:
       name: Values
       isOptional: true
   associations:
-    - id: ${this}/Uses
+    # Dedicated association role for the workload-to-Helm-repo link.
+    # Reusing the generic "Uses" role would override the inverse usedBy view
+    # on HelmRepositoryConfiguration (DeployableWorkload_UsedByUnionConnection
+    # instead of Pipeline_UsedByUnionConnection), which makes the CK-engine
+    # drop SystemConfigurationInterface from the generated schema for that
+    # subtype. The dedicated role keeps both inverse views distinct.
+    - id: ${this}/HelmRepository
       targetCkTypeId: ${this}/HelmRepositoryConfiguration
     # The pool a workload belongs to. Inherited by Adapter and Application,
     # so a Cloud pool deploys both kinds via the same association. Inbound

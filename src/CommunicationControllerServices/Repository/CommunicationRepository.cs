@@ -93,7 +93,7 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             var resultSet = await tenantRepository
                 .GetRtAssociationTargetsAsync<RtDeployableWorkload, RtHelmRepositoryConfiguration>(session,
-                    [workloadRtId], SystemCommunicationCkIds.RtCkUsesRoleId,
+                    [workloadRtId], SystemCommunicationCkIds.RtCkHelmRepositoryRoleId,
                     GraphDirections.Outbound, null, RtEntityQueryOptions.Create());
 
             if (!resultSet.Any())
