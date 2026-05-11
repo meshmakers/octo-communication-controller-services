@@ -10,7 +10,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 /// Ciphertext layout (after the <c>enc:v1:</c> sentinel and Base64 decode):
 /// <c>nonce(12) || tag(16) || ciphertext(N)</c>.
 /// </summary>
-internal sealed class WorkloadEncryptionService : IWorkloadEncryptionService
+public sealed class WorkloadEncryptionService : IWorkloadEncryptionService
 {
     internal const string SentinelV1 = "enc:v1:";
     internal const int KeyLength = 32;       // AES-256
@@ -20,6 +20,10 @@ internal sealed class WorkloadEncryptionService : IWorkloadEncryptionService
     private readonly byte[]? _key;
     private readonly string? _keyConfigurationError;
 
+    /// <summary>
+    /// Constructor — reads the master key once from
+    /// <see cref="CommunicationControllerOptions.InstanceSecretKey"/>.
+    /// </summary>
     public WorkloadEncryptionService(IOptions<CommunicationControllerOptions> options)
     {
         var raw = options.Value.InstanceSecretKey;
@@ -57,6 +61,7 @@ internal sealed class WorkloadEncryptionService : IWorkloadEncryptionService
         _key = decoded;
     }
 
+    /// <inheritdoc />
     public string Encrypt(string plaintext)
     {
         if (_key is null)
@@ -81,6 +86,7 @@ internal sealed class WorkloadEncryptionService : IWorkloadEncryptionService
         return SentinelV1 + Convert.ToBase64String(combined);
     }
 
+    /// <inheritdoc />
     public string Decrypt(string value)
     {
         if (!IsEncrypted(value))
@@ -129,6 +135,7 @@ internal sealed class WorkloadEncryptionService : IWorkloadEncryptionService
         return Encoding.UTF8.GetString(plaintext);
     }
 
+    /// <inheritdoc />
     public bool IsEncrypted(string value) =>
         !string.IsNullOrEmpty(value) && value.StartsWith("enc:", StringComparison.Ordinal);
 }

@@ -12,7 +12,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 /// migration path simple (and lets local dev work with plain values until
 /// secrets are actually filled in).
 /// </summary>
-internal interface IWorkloadEncryptionService
+public interface IWorkloadEncryptionService
 {
     /// <summary>
     /// Encrypts <paramref name="plaintext"/> and returns a string in
