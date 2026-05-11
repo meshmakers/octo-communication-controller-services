@@ -291,31 +291,37 @@ internal class PoolService : IPoolService
     {
         Logger.Info("[{TenantId}] Undeploying all Cloud pools (tenant cleanup)", tenantId);
 
-        var pools = await _communicationRepository.GetPoolsAsync(tenantId);
-        var cloudPools = pools.Where(p => p.Environment == RtEnvironmentEnum.Cloud).ToArray();
+        // Read from the operator connection manager's in-memory tracking
+        // rather than the tenant repository. PreDeleteTenant fires in parallel
+        // with PreUpdatePreDeleteTenantConsumer (octo-common-services), which
+        // unloads the CK-cache for the tenant. If we hit the repository here
+        // we race and get "Failed to get pools" — and the operator is never
+        // told to clean up, leaving the CommunicationPool CR and broker
+        // secret orphaned in the cluster.
+        var poolNames = _operatorConnectionManager.GetDeployedPoolsForTenant(tenantId);
 
-        if (cloudPools.Length == 0)
+        if (poolNames.Count == 0)
         {
             Logger.Info("[{TenantId}] No Cloud pools to clean up", tenantId);
             return;
         }
 
-        foreach (var pool in cloudPools)
+        foreach (var poolName in poolNames)
         {
             try
             {
-                await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, (pool.Name ?? string.Empty));
+                await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, poolName);
             }
             catch (Exception ex)
             {
                 Logger.Warn(ex,
                     "[{TenantId}] Failed to notify operator of pool undeploy during tenant cleanup, pool '{PoolName}'",
-                    tenantId, (pool.Name ?? string.Empty));
+                    tenantId, poolName);
             }
         }
 
         await _eventService.StoreInformationEventAsync(tenantId,
-            $"Notified central Communication Operator to undeploy {cloudPools.Length} Cloud pool(s) for tenant cleanup.");
+            $"Notified central Communication Operator to undeploy {poolNames.Count} Cloud pool(s) for tenant cleanup.");
     }
 
     private async Task<RtPool> GetPoolByRtIdAsync(string tenantId, OctoObjectId poolRtId)
