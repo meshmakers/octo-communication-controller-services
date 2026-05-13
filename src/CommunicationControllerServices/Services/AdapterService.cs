@@ -961,8 +961,6 @@ internal class AdapterService(
             ConfigurationState = (ConfigurationState)(int)a.ConfigurationState,
             DeploymentState = (EntityDeploymentState)(int)a.DeploymentState,
             CommunicationStateTimestamp = a.CommunicationStateTimestamp,
-            ImageName = a.ImageName,
-            ImageVersion = a.ImageVersion,
             StatusMessage = a.StatusMessage
         }).ToList();
     }

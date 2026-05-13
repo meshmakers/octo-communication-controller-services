@@ -5,7 +5,10 @@ using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.Syst
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
 /// <summary>
-/// Manages pools for all tenants and their state including configuration (adapters loaded in which pools).
+/// Manages pools for all tenants and their state. Workload (Adapter/Application) deploys
+/// are fanned out by <see cref="DeployPoolAsync"/> via the Helm-based workload path on
+/// the central Communication Operator — there is no legacy adapter-deploy callback path
+/// any more.
 /// </summary>
 public interface IPoolService
 {
@@ -17,7 +20,7 @@ public interface IPoolService
     /// <param name="connectionId">Connection id to client</param>
     /// <returns></returns>
     Task<OctoObjectId> RegisterPoolOperatorAsync(string tenantId, string poolName, string connectionId);
-    
+
     /// <summary>
     /// Unregisters a pool operator for a tenant
     /// </summary>
@@ -25,36 +28,29 @@ public interface IPoolService
     /// <param name="poolName">Name of pool</param>
     /// <returns></returns>
     Task UnregisterPoolOperatorAsync(string tenantId, string poolName);
-    
-    /// <summary>
-    /// Gets the current adapters in a pool
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="poolRtId">The object id of the pool runtime entity</param>
-    /// <returns></returns>
-    Task<PoolConfigurationDto> GetPoolConfigurationAsync(string tenantId, OctoObjectId poolRtId);
-    
+
     /// <summary>
     /// Updates an entire tenant before a tenant is deleted or disabled for communication.
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <returns></returns>
     Task PreUpdateTenantAsync(string tenantId);
-    
+
     /// <summary>
     /// Loads an entire tenant after a tenant has been created or enabled.
     /// </summary>
     /// <param name="tenantId"></param>
     /// <returns></returns>
     Task PosUpdateTenantAsync(string tenantId);
-    
+
     /// <summary>
     /// Deploys a pool: marks it as Deployed and, when the pool's
     /// <c>Environment</c> attribute is <c>Cloud</c>, notifies the central
     /// Communication Operator via the <c>/operatorHub</c> SignalR channel so
-    /// it provisions the corresponding CommunicationPool CR and broker secret.
-    /// Edge-environment pools transition state without any operator
-    /// notification — they are installed and run by an external operator.
+    /// it provisions the corresponding CommunicationPool CR and broker secret
+    /// and Helm-deploys every workload managed by the pool. Edge-environment
+    /// pools transition state without any operator notification — they are
+    /// installed and run by an external operator.
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolRtId">The object id of the pool</param>
@@ -79,47 +75,13 @@ public interface IPoolService
     Task UndeployAllCloudPoolsAsync(string tenantId);
 
     /// <summary>
-    /// Deploys all adapters of a pool
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="poolRtId">The object id of the pool</param>
-    /// <returns></returns>
-    Task DeployAdaptersAsync(string tenantId, OctoObjectId poolRtId);
-    
-    /// <summary>
-    /// Undeploys all adapters of a pool
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="poolRtId">The object id of the pool</param>
-    /// <returns></returns>
-    Task UndeployAdaptersAsync(string tenantId, OctoObjectId poolRtId);
-    
-    /// <summary>
-    /// Deploys a new adapter to a pool
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="poolRtId">The object id of the pool</param>
-    /// <param name="adapterRtEntityId">The object id of the adapter</param>
-    /// <returns></returns>
-    Task DeployAdapterAsync(string tenantId, OctoObjectId poolRtId, RtEntityId adapterRtEntityId);
-    
-    /// <summary>
-    /// Undeploy an adapter from a pool
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="poolRtId">The object id of the pool</param>
-    /// <param name="adapterRtEntityId">The object id of the adapter</param>
-    /// <returns></returns>
-    Task UndeployAdapterAsync(string tenantId, OctoObjectId poolRtId, RtEntityId adapterRtEntityId);
-
-    /// <summary>
     /// Sets a pool offline
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolRtId">Identifier of pool</param>
     /// <returns></returns>
     Task SetCommunicationStateOfflineAsync(string tenantId, OctoObjectId poolRtId);
-    
+
     /// <summary>
     /// Sets a pool offline using the connection id
     /// </summary>
@@ -127,7 +89,7 @@ public interface IPoolService
     /// <param name="poolName">Name of pool</param>
     /// <returns></returns>
     Task SetCommunicationStateOfflineAsync(string tenantId, string poolName);
-    
+
     /// <summary>
     /// Sets a pool online
     /// </summary>
@@ -144,7 +106,7 @@ public interface IPoolService
     /// <param name="connectionId">Connection id of pool</param>
     /// <returns></returns>
     Task SetCommunicationStateOnlineAsync(string tenantId, string poolName, string connectionId);
-    
+
     /// <summary>
     /// Updates the deployment state of an adapter in a pool
     /// </summary>
@@ -153,7 +115,7 @@ public interface IPoolService
     /// <param name="adapterRtEntityId">The object id of the adapter</param>
     /// <param name="deploymentState">The new deployment state</param>
     /// <returns></returns>
-    Task SetAdapterDeploymentStateAsync(string tenantId, string poolName, RtEntityId adapterRtEntityId, 
+    Task SetAdapterDeploymentStateAsync(string tenantId, string poolName, RtEntityId adapterRtEntityId,
         RtDeploymentStateEnum deploymentState);
 
     /// <summary>

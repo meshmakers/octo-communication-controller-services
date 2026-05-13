@@ -127,48 +127,6 @@ internal class PoolService : IPoolService
         }
     }
 
-    /// <inheritdoc />
-    public async Task<PoolConfigurationDto> GetPoolConfigurationAsync(string tenantId, OctoObjectId poolRtId)
-    {
-        Logger.Info("[{TenantId}] Getting current adapters for pool '{PoolRtId}'", tenantId, poolRtId);
-
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
-        {
-            throw PoolServiceException.TenantNotFoundOrNotEnabled(tenantId);
-        }
-
-        if (poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
-        {
-            poolTenant.RemoveAdapters(poolRtId);
-
-            var rtAdapters = await _communicationRepository.GetAdaptersAsync(tenantId, poolRtId);
-            Logger.Info("[{TenantId}] '{AdapterCount}' adapters found for Pool '{PoolRtId}'", tenantId,
-                rtAdapters.Count, poolRtId);
-            foreach (var rtAdapter in rtAdapters)
-            {
-                if (string.IsNullOrWhiteSpace(rtAdapter.ImageName) || string.IsNullOrWhiteSpace(rtAdapter.ImageVersion))
-                {
-                    await _communicationRepository.SetAdapterDeploymentStateAsync(tenantId, rtAdapter.ToRtEntityId(),
-                        RtDeploymentStateEnum.Error);
-                    continue;
-                }
-
-                poolTenant.AddAdapter(new Adapter(rtAdapter.ToRtEntityId(), poolRtId,
-                    CreatePoolAdapterDto(poolDescription.PoolName, rtAdapter)));
-            }
-
-            var result = new PoolConfigurationDto(
-                poolTenant.AdaptersById.Values.Where(p => p.PoolRtId == poolRtId).Select(p => p.AdapterDto)
-            );
-
-            Logger.Info("[{TenantId}] Current adapters for Pool '{PoolRtId}' retrieved (Adapter count: {AdapterCount})",
-                tenantId, poolRtId, result.CommunicationAdapterList.Count());
-            return result;
-        }
-
-        throw PoolServiceException.PoolNotFound(tenantId, poolRtId);
-    }
-    
     private readonly SemaphoreSlim _semaphore = new(1, 1);
 
     public async Task PreUpdateTenantAsync(string tenantId)
@@ -495,126 +453,6 @@ internal class PoolService : IPoolService
     }
 
     /// <inheritdoc />
-    public async Task DeployAdaptersAsync(string tenantId, OctoObjectId poolRtId)
-    {
-        Logger.Info("[{TenantId}] Deploying Adapters to pool '{PoolRtId}'", tenantId,
-            poolRtId);
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
-        {
-            throw PoolServiceException.TenantNotFoundOrNotEnabled(tenantId);
-        }
-
-        if (!poolTenant.PoolsById.ContainsKey(poolRtId))
-        {
-            throw PoolServiceException.PoolNotFound(tenantId, poolRtId);
-        }
-
-        var poolConfigurationDto = await GetPoolConfigurationAsync(tenantId, poolRtId);
-
-        // We have to find adapters that are deployed but not listed anymore in database
-        var adaptersToUndeploy = poolTenant.AdaptersById.Values
-            .Where(x => poolConfigurationDto.CommunicationAdapterList
-                            .All(y => y.AdapterRtEntityId != x.AdapterRtEntityId));
-
-        // Check which adapters need to be deployed or undeployed.
-        var adaptersToDeploy =
-            poolConfigurationDto.CommunicationAdapterList
-                .Where(x => poolTenant.AdaptersById.Values
-                    .Any(y => y.AdapterRtEntityId == x.AdapterRtEntityId));
-
-        // Undeploy adapters that are not listed anymore
-        foreach (var adapter in adaptersToUndeploy)
-        {
-            await UndeployAdapterAsync(tenantId, adapter.PoolRtId,
-                adapter.AdapterRtEntityId);
-        }
-
-        // Deploy adapters that are listed newly
-        foreach (var adapterDto in adaptersToDeploy)
-        {
-            await DeployAdapterAsync(tenantId, poolRtId, adapterDto.AdapterRtEntityId);
-        }
-    }
-
-    public async Task UndeployAdaptersAsync(string tenantId, OctoObjectId poolRtId)
-    {
-        Logger.Info("[{TenantId}] Undeploying Adapters to pool '{PoolRtId}'", tenantId,
-            poolRtId);
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
-        {
-            throw PoolServiceException.TenantNotFoundOrNotEnabled(tenantId);
-        }
-
-        if (!poolTenant.PoolsById.ContainsKey(poolRtId))
-        {
-            throw PoolServiceException.PoolNotFound(tenantId, poolRtId);
-        }
-
-        foreach (var adapter in poolTenant.AdaptersById.Values)
-        {
-            await UndeployAdapterAsync(tenantId, adapter.PoolRtId,
-                adapter.AdapterRtEntityId);
-        }
-    }
-
-    /// <inheritdoc />
-    public async Task DeployAdapterAsync(string tenantId, OctoObjectId poolRtId, RtEntityId adapterRtEntityId)
-    {
-        Logger.Info("[{TenantId}] Deploying Adapter '{AdapterRtEntityId}' to pool '{PoolRtId}'", tenantId,
-            adapterRtEntityId,
-            poolRtId);
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
-        {
-            throw PoolServiceException.TenantNotFoundOrNotEnabled(tenantId);
-        }
-
-        if (poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
-        {
-            var rtAdapter = await _communicationRepository.GetAdapterAsync(tenantId, adapterRtEntityId);
-            var adapterDto = CreatePoolAdapterDto(poolDescription.PoolName, rtAdapter);
-            await _poolHubCallbacks.DeployCommunicationAdapterAsync(tenantId, adapterDto);
-
-            poolTenant.AddAdapter(new Adapter(adapterRtEntityId, poolRtId, adapterDto));
-
-            await _eventService.StoreInformationEventAsync(tenantId,
-                $"Adapter '{adapterRtEntityId}' deployed to pool '{poolDescription.PoolName}'.", adapterRtEntityId);
-
-            Logger.Info("[{TenantId}] Adapter '{AdapterRtEntityId}' deployed", tenantId, adapterRtEntityId);
-            return;
-        }
-
-        throw PoolServiceException.PoolNotFound(tenantId, poolRtId);
-    }
-
-    /// <inheritdoc />
-    public async Task UndeployAdapterAsync(string tenantId, OctoObjectId poolRtId, RtEntityId adapterRtEntityId)
-    {
-        Logger.Info("[{TenantId}] Undeploying Adapter '{AdapterRtEntityId}' from pool '{PoolRtId}'", tenantId,
-            adapterRtEntityId,
-            poolRtId);
-
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
-        {
-            throw PoolServiceException.TenantNotFoundOrNotEnabled(tenantId);
-        }
-
-        if (poolTenant.AdaptersById.TryGetValue(adapterRtEntityId, out var adapterDescription))
-        {
-            await _poolHubCallbacks.UndeployCommunicationAdapterAsync(tenantId, adapterDescription.AdapterDto);
-
-            poolTenant.RemoveAdapter(adapterRtEntityId);
-
-            await _eventService.StoreInformationEventAsync(tenantId,
-                $"Adapter '{adapterRtEntityId}' undeployed from pool.", adapterRtEntityId);
-
-            Logger.Info("[{TenantId}] Adapter '{AdapterRtEntityId}' undeployed", tenantId, adapterRtEntityId);
-            return;
-        }
-
-        throw PoolServiceException.AdapterNotFound(tenantId, adapterRtEntityId);
-    }
-
-    /// <inheritdoc />
     public async Task SetCommunicationStateOfflineAsync(string tenantId, OctoObjectId poolRtId)
     {
         Logger.Info("[{TenantId}] Setting pool '{PoolRtId}' offline", tenantId, poolRtId);
@@ -714,18 +552,6 @@ internal class PoolService : IPoolService
 
         await _communicationRepository.SetAdapterDeploymentStateAsync(tenantId, adapterRtEntityIds,
             deploymentState);
-    }
-
-    private PoolCommunicationAdapterDto CreatePoolAdapterDto(string poolName,
-        RtAdapter rtAdapter)
-    {
-        return new PoolCommunicationAdapterDto
-        {
-            PoolName = poolName,
-            AdapterRtEntityId = rtAdapter.ToRtEntityId(),
-            ImageName = rtAdapter.ImageName ?? throw PoolServiceException.ImageNameNotSet(),
-            Version = rtAdapter.ImageVersion ?? throw PoolServiceException.ImageVersionNotSet(),
-        };
     }
 
     public async Task<IReadOnlyList<PoolSummaryDto>> GetPoolSummariesAsync(string tenantId)
