@@ -3,12 +3,6 @@ attributes:
 - id: CommunicationStateTimestamp
   valueType: DateTime
   description: Timestamp of the last communication state change (online/offline transition).
-- id: Deployment.ImageName
-  valueType: String
-  description: Docker image name of the adapter container (e.g. octo-mesh-adapter).
-- id: Deployment.ImageVersion
-  valueType: String
-  description: Docker image version tag of the adapter container.
 - id: CommunicationState
   valueType: Enum
   valueCkEnumId: ${this}/CommunicationState

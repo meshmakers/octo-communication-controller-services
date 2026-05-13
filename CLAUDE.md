@@ -340,7 +340,7 @@ is written from two paths and the **write order vs. cache mutation matters**:
 | Trigger | Code path | State written | Notes |
 |---|---|---|---|
 | Operator's SignalR `OnConnectedAsync` | `PoolHub.OnConnectedAsync` → `PoolService.SetCommunicationStateOnlineAsync(tenantId, poolName, connectionId)` | `Online` | Adds the pool to `_poolCache` if missing. |
-| Operator's `RegisterPoolOperatorAsync` invocation | `PoolHub.RegisterPoolOperatorAsync` → `PoolService.RegisterPoolOperatorAsync` → `SetCommunicationStateOnlineAsync(tenantId, poolRtId)` | `Online` | Followed by `GetPoolConfigurationAsync` returning the adapter list. |
+| Operator's `RegisterPoolOperatorAsync` invocation | `PoolHub.RegisterPoolOperatorAsync` → `PoolService.RegisterPoolOperatorAsync` → `SetCommunicationStateOnlineAsync(tenantId, poolRtId)` | `Online` | Workloads are deployed via the `WorkloadDeployedAsync` flow on the `/operatorHub`, not via the pool-hub adapter list (which no longer exists). |
 | Operator's `UnregisterPoolOperatorAsync` invocation (graceful undeploy) | `PoolHub.UnregisterPoolOperatorAsync` → `PoolService.UnregisterPoolOperatorAsync` | `Unregistered` | **Must write the state before `PoolTenant.RemovePool`** — otherwise the `OnDisconnectedAsync` that follows finds nothing in the cache and silently no-ops. |
 | Operator's SignalR connection drops without an `UnregisterPoolOperatorAsync` (crash, network) | `PoolHub.OnDisconnectedAsync` → `PoolService.SetCommunicationStateOfflineAsync(tenantId, poolName)` | `Offline` | The hub must pass `poolName`, never `Context.ConnectionId` — the two-arg overload looks the pool up by name in `_poolCache.PoolsByName`. When `UnregisterPoolOperatorAsync` already ran, the pool is gone from the cache and this becomes a clean no-op. |
 

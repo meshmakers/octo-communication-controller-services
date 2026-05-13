@@ -11,16 +11,6 @@ types:
       name: CommunicationState
     - id: ${this}/ConfigurationState
       name: ConfigurationState
-    # Deprecated — kept for backwards compatibility with existing Studio UI
-    # until the Phase-4 UI rewrite swaps them for Helm chart fields.
-    # The Communication Operator no longer reads these in the Helm-based
-    # deploy path.
-    - id: ${this}/Deployment.ImageName
-      name: ImageName
-      isOptional: true
-    - id: ${this}/Deployment.ImageVersion
-      name: ImageVersion
-      isOptional: true
     - id: ${this}/AdapterConfiguration
       name: Configuration
       isOptional: true

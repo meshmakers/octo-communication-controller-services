@@ -16,16 +16,6 @@ internal class PoolServiceException : Exception
     {
     }
 
-    internal static Exception ImageNameNotSet()
-    {
-        return new PoolServiceException("Image name not set");
-    }
-
-    internal static Exception ImageVersionNotSet()
-    {
-        return new PoolServiceException("Image version not set");
-    }
-
     internal static Exception TenantNotFoundOrNotEnabled(string tenantId)
     {
         return new PoolServiceException($"Tenant {tenantId} not found or communication service not enabled");
