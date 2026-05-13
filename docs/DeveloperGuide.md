@@ -106,9 +106,10 @@ The Communication Controller Service is a central coordination hub for managing 
 | Component | Responsibility |
 |-----------|----------------|
 | **AdapterHub** | SignalR endpoint for adapter connections, registration, and configuration updates |
-| **PoolHub** | SignalR endpoint for pool operator connections and adapter deployment coordination |
+| **PoolHub** | SignalR endpoint for pool operator (in-cluster broker proxy) connections |
+| **OperatorHub** | SignalR endpoint for the central Communication Operator — fans out `WorkloadDeployedAsync` / `WorkloadUndeployedAsync` for the Helm-based deploy flow |
 | **AdapterService** | Business logic for adapter lifecycle, pipeline deployment, and state management |
-| **PoolService** | Business logic for pool management and adapter-to-pool assignment |
+| **PoolService** | Business logic for pool management and Helm-based workload fan-out |
 | **TriggerManagementService** | Scheduled and manual pipeline execution triggers |
 | **PipelineDebugService** | Caching and retrieval of pipeline debug information |
 | **AdapterCache / PoolCache** | In-memory state management, synchronized across service instances |
@@ -750,14 +751,14 @@ connection.on("ExecutePipelineAsync",
 
 ##### RegisterPoolOperatorAsync
 
-Registers a pool operator and retrieves the pool configuration.
+Registers a pool operator. Workloads managed by the pool are not returned here — they are delivered as `WorkloadDeployedAsync` events on the `/operatorHub` connection that the central Communication Operator holds open.
 
 ```typescript
 // Signature
-registerPoolOperatorAsync(poolName: string): Promise<PoolConfigurationDto>
+registerPoolOperatorAsync(poolName: string): Promise<void>
 
 // Example
-const config = await connection.invoke("RegisterPoolOperatorAsync", "production-pool");
+await connection.invoke("RegisterPoolOperatorAsync", "production-pool");
 ```
 
 ##### UnregisterPoolOperatorAsync
@@ -771,7 +772,7 @@ unregisterPoolOperatorAsync(poolName: string): Promise<void>
 
 ##### UpdateAdapterDeploymentStateAsync
 
-Reports the deployment state of an adapter.
+Reports the deployment state of an adapter back to the controller (used by the in-cluster broker proxy).
 
 ```typescript
 // Signature
@@ -784,45 +785,17 @@ updateAdapterDeploymentStateAsync(
 
 #### Server-to-Client Methods
 
-##### PoolConfigurationUpdatedAsync
+##### PreUpdateTenantAsync
 
-Called when the pool configuration has been updated.
-
-```typescript
-connection.on("PoolConfigurationUpdatedAsync",
-    (configuration: PoolConfigurationDto) => {
-        // Apply new configuration
-        updatePoolConfiguration(configuration);
-    });
-```
-
-##### DeployAdapterAsync
-
-Called when an adapter should be deployed to the pool.
+Called when the tenant is about to be updated (e.g. CK model upgrade). The pool operator should disconnect and retry registration after some time.
 
 ```typescript
-connection.on("DeployAdapterAsync",
-    (poolRtId: OctoObjectId, adapterRtEntityId: RtEntityId) => {
-        // Deploy adapter
-        deployAdapter(adapterRtEntityId);
-
-        // Report success
-        connection.invoke("UpdateAdapterDeploymentStateAsync",
-            poolName, adapterRtEntityId, true);
-    });
+connection.on("PreUpdateTenantAsync", (tenantId: string) => {
+    // disconnect, schedule reconnect
+});
 ```
 
-##### UndeployAdapterAsync
-
-Called when an adapter should be undeployed from the pool.
-
-```typescript
-connection.on("UndeployAdapterAsync",
-    (poolRtId: OctoObjectId, adapterRtEntityId: RtEntityId) => {
-        // Undeploy adapter
-        undeployAdapter(adapterRtEntityId);
-    });
-```
+> **Note:** Adapter / Application deployment is no longer driven by `PoolHub` callbacks. The central Communication Operator subscribes to `WorkloadDeployedAsync` / `WorkloadUndeployedAsync` on `/operatorHub` and runs `helm upgrade --install` / `helm uninstall` per workload.
 
 ---
 
@@ -889,16 +862,6 @@ interface DeploymentResult {
 interface DeploymentErrorMessage {
     pipelineRtEntityId?: RtEntityId;
     errorMessage: string;
-}
-```
-
-#### PoolConfigurationDto
-
-```typescript
-interface PoolConfigurationDto {
-    poolRtId: OctoObjectId;
-    poolName: string;
-    communicationAdapterList: CommunicationAdapterDto[];
 }
 ```
 
