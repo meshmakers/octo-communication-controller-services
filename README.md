@@ -181,13 +181,13 @@ Manages adapter lifecycle and pipeline debugging.
 
 #### PoolHub (`/{tenantId}/poolHub`)
 
-Manages pool operator connections.
+Manages pool operator connections. Workloads (Adapters + Applications) are not pushed back through this hub — the Communication Operator subscribes to `WorkloadDeployedAsync` / `WorkloadUndeployedAsync` on `/operatorHub` for the Helm-based deploy flow.
 
 | Method | Description |
 |--------|-------------|
-| `RegisterPoolOperatorAsync` | Registers pool operator |
-| `UpdatePoolConfigurationAsync` | Updates pool configuration |
-| `SetAdapterDeploymentStateAsync` | Sets adapter deployment state in pool |
+| `RegisterPoolOperatorAsync` | Registers pool operator (returns `Task`) |
+| `UnregisterPoolOperatorAsync` | Unregisters pool operator |
+| `UpdateAdapterDeploymentStateAsync` | Reports adapter deployment state back to the controller |
 
 ### Services
 
@@ -210,14 +210,15 @@ public interface IAdapterService
 
 #### PoolService
 
-Business logic for pool management:
+Business logic for pool management. Workloads managed by the pool (Adapters + Applications) are fanned out as Helm deploys by `DeployPoolAsync` via the `/operatorHub` SignalR channel — no adapter list is returned to the operator on pool registration.
 
 ```csharp
 public interface IPoolService
 {
-    Task<PoolConfiguration> RegisterPoolOperatorAsync(string tenantId, string poolName, string connectionId);
-    Task UnregisterAsync(string tenantId, OctoObjectId poolRtId);
-    Task<PoolConfiguration> GetPoolConfigurationAsync(string tenantId, OctoObjectId poolRtId);
+    Task<OctoObjectId> RegisterPoolOperatorAsync(string tenantId, string poolName, string connectionId);
+    Task UnregisterPoolOperatorAsync(string tenantId, string poolName);
+    Task DeployPoolAsync(string tenantId, OctoObjectId poolRtId);
+    Task UndeployPoolAsync(string tenantId, OctoObjectId poolRtId);
     Task SetCommunicationStateOnlineAsync(string tenantId, OctoObjectId poolRtId);
     Task SetCommunicationStateOfflineAsync(string tenantId, OctoObjectId poolRtId);
 }
