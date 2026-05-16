@@ -29,6 +29,19 @@ public interface ICommunicationRepository
     Task<IReadOnlyCollection<RtDeployableWorkload>> GetWorkloadsForPoolAsync(string tenantId, OctoObjectId poolRtId);
 
     /// <summary>
+    /// Loads a single deployable workload by runtime id. Returns
+    /// <c>null</c> when no entity with that id exists.
+    /// </summary>
+    Task<RtDeployableWorkload?> GetWorkloadByRtIdAsync(string tenantId, OctoObjectId workloadRtId);
+
+    /// <summary>
+    /// Walks the <c>Manages</c> association from a workload back to its
+    /// parent <c>RtPool</c>. Returns <c>null</c> when the workload is not
+    /// currently in any pool.
+    /// </summary>
+    Task<RtPool?> GetPoolForWorkloadAsync(string tenantId, OctoObjectId workloadRtId);
+
+    /// <summary>
     /// Resolves the <c>HelmRepositoryConfiguration</c> referenced by a
     /// deployable workload via its <c>Uses</c> association. Returns
     /// <c>null</c> when the workload does not yet have a repository

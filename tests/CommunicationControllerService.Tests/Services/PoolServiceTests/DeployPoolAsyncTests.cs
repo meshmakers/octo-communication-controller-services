@@ -116,41 +116,70 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
     }
 
     [Test]
-    public async Task DeployPoolAsync_AdapterWithReceivesClusterSecretsTrue_PropagatesFlagToDto()
+    public async Task DeployPoolAsync_CloudPool_DoesNotFanOutWorkloads()
     {
+        // C decoupling: pool-deploy notifies the operator about the pool
+        // only; workloads are deployed via explicit DeployWorkloadAsync
+        // calls. This test pins the fan-out is gone.
         await GivenCloudPoolWithAdapter(receivesClusterSecrets: true);
 
         await PoolService.DeployPoolAsync(TenantId, PoolRtId);
+
+        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
+            .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
+    }
+
+    [Test]
+    public async Task DeployWorkloadAsync_AdapterWithReceivesClusterSecretsTrue_PropagatesFlagToDto()
+    {
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: true);
+
+        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(d => d.ReceivesClusterSecrets));
     }
 
     [Test]
-    public async Task DeployPoolAsync_AdapterWithReceivesClusterSecretsFalse_DefaultsDtoFlagToFalse()
+    public async Task DeployWorkloadAsync_AdapterWithReceivesClusterSecretsFalse_DefaultsDtoFlagToFalse()
     {
-        await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
 
-        await PoolService.DeployPoolAsync(TenantId, PoolRtId);
+        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(d => !d.ReceivesClusterSecrets));
     }
 
     [Test]
-    public async Task DeployPoolAsync_ApplicationWorkload_AlwaysDefaultsReceivesClusterSecretsToFalse()
+    public async Task DeployWorkloadAsync_ApplicationWorkload_AlwaysDefaultsReceivesClusterSecretsToFalse()
     {
         // ReceivesClusterSecrets lives on Adapter only. Applications do not
         // carry the attribute and must always come through as false.
-        await GivenCloudPoolWithApplication();
+        var (_, application) = await GivenCloudPoolWithApplication();
 
-        await PoolService.DeployPoolAsync(TenantId, PoolRtId);
+        await PoolService.DeployWorkloadAsync(TenantId, application.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(d => !d.ReceivesClusterSecrets));
     }
 
-    private async Task GivenCloudPoolWithAdapter(bool receivesClusterSecrets)
+    [Test]
+    public async Task UndeployWorkloadAsync_NotifiesOperator()
+    {
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+
+        await PoolService.UndeployWorkloadAsync(TenantId, adapter.RtId);
+
+        await OperatorConnectionManager.Received(1).NotifyWorkloadUndeployedAsync(
+            Arg.Is<WorkloadUndeployedDto>(w =>
+                w.TenantId == TenantId
+                && w.PoolName == PoolName
+                && w.WorkloadName == "test-adapter"
+                && w.WorkloadType == WorkloadTypeDto.Adapter));
+    }
+
+    private async Task<(RtPool Pool, RtAdapter Adapter)> GivenCloudPoolWithAdapter(bool receivesClusterSecrets)
     {
         var rtPool = new RtPool
         {
@@ -173,6 +202,10 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         };
         CommunicationRepository.GetWorkloadsForPoolAsync(TenantId, PoolRtId)
             .Returns(new RtDeployableWorkload[] { adapter });
+        CommunicationRepository.GetWorkloadByRtIdAsync(TenantId, adapter.RtId)
+            .Returns(adapter);
+        CommunicationRepository.GetPoolForWorkloadAsync(TenantId, adapter.RtId)
+            .Returns(rtPool);
 
         CommunicationRepository.GetHelmRepositoryForWorkloadAsync(TenantId, adapter.RtId)
             .Returns(new RtHelmRepositoryConfiguration
@@ -182,9 +215,10 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
                 RepositoryUrl = "https://example.test/charts",
             });
         await Task.CompletedTask;
+        return (rtPool, adapter);
     }
 
-    private async Task GivenCloudPoolWithApplication()
+    private async Task<(RtPool Pool, RtApplication Application)> GivenCloudPoolWithApplication()
     {
         var rtPool = new RtPool
         {
@@ -206,6 +240,10 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         };
         CommunicationRepository.GetWorkloadsForPoolAsync(TenantId, PoolRtId)
             .Returns(new RtDeployableWorkload[] { application });
+        CommunicationRepository.GetWorkloadByRtIdAsync(TenantId, application.RtId)
+            .Returns(application);
+        CommunicationRepository.GetPoolForWorkloadAsync(TenantId, application.RtId)
+            .Returns(rtPool);
 
         CommunicationRepository.GetHelmRepositoryForWorkloadAsync(TenantId, application.RtId)
             .Returns(new RtHelmRepositoryConfiguration
@@ -215,6 +253,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
                 RepositoryUrl = "https://example.test/charts",
             });
         await Task.CompletedTask;
+        return (rtPool, application);
     }
 
     [Test]

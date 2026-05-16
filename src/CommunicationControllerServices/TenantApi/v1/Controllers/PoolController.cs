@@ -117,4 +117,65 @@ public class PoolController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Deploys a single workload (Adapter or Application). Independent of
+    /// pool deploy — the workload's parent pool must already be deployed,
+    /// but this call only triggers the operator's helm-install for the
+    /// one workload.
+    /// </summary>
+    /// <param name="workloadRtId">The runtime id of the workload.</param>
+    [HttpPost("workloads/deploy")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> DeployWorkloadAsync([Required][FromQuery] OctoObjectId workloadRtId)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        try
+        {
+            await _poolService.DeployWorkloadAsync(tenantId, workloadRtId);
+            return NoContent();
+        }
+        catch (PoolServiceException e)
+        {
+            _logger.LogError(e, "Error deploying workload");
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
+        }
+    }
+
+    /// <summary>
+    /// Undeploys a single workload (Adapter or Application).
+    /// </summary>
+    /// <param name="workloadRtId">The runtime id of the workload.</param>
+    [HttpPost("workloads/undeploy")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> UndeployWorkloadAsync([Required][FromQuery] OctoObjectId workloadRtId)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        try
+        {
+            await _poolService.UndeployWorkloadAsync(tenantId, workloadRtId);
+            return NoContent();
+        }
+        catch (PoolServiceException e)
+        {
+            _logger.LogError(e, "Error undeploying workload");
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
+        }
+    }
+
 }
