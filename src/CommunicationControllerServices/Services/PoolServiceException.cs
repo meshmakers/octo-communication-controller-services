@@ -51,5 +51,21 @@ internal class PoolServiceException : Exception
         return new PoolServiceException($"[{tenantId}] Failed to pos update tenant", exception);
     }
 
+    internal static Exception WorkloadNotFound(string tenantId, OctoObjectId workloadRtId)
+    {
+        return new PoolServiceException($"[{tenantId}] Workload '{workloadRtId}' not found");
+    }
+
+    internal static Exception WorkloadNotInPool(string tenantId, OctoObjectId workloadRtId)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Workload '{workloadRtId}' is not currently in any pool — assign it to a pool before deploying");
+    }
+
+    internal static Exception WorkloadIncomplete(string tenantId, OctoObjectId workloadRtId)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Workload '{workloadRtId}' is incomplete (missing chart name / chart version / helm repository) — fix the entity and try again");
+    }
 }
 

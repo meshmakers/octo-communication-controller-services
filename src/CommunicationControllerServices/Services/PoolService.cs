@@ -215,10 +215,11 @@ internal class PoolService : IPoolService
                 PoolName = poolName,
             });
 
-            // Pool is up — fan out helm deploys for every managed workload.
-            // Failures per workload are logged but don't fail the pool deploy
-            // itself; the operator will retry on its next reconcile cycle.
-            await DeployManagedWorkloadsAsync(tenantId, poolRtId, poolName);
+            // Note: workloads are NOT auto-deployed here. Users (or callers)
+            // trigger DeployWorkloadAsync per workload explicitly — this lets
+            // the pool's CommunicationState turn Online first, so any issue
+            // with the pool itself is visible before any helm install runs.
+            // Use case: smoke-test a fresh pool, then phase adapter deploys.
         }
         else
         {
@@ -229,6 +230,77 @@ internal class PoolService : IPoolService
 
         await _eventService.StoreInformationEventAsync(tenantId,
             $"Pool '{(rtPool.Name ?? string.Empty)}' deployed (environment: {rtPool.Environment}).");
+    }
+
+    /// <inheritdoc />
+    public async Task DeployWorkloadAsync(string tenantId, OctoObjectId workloadRtId)
+    {
+        Logger.Info("[{TenantId}] Deploying workload '{WorkloadRtId}'", tenantId, workloadRtId);
+
+        var workload = await _communicationRepository.GetWorkloadByRtIdAsync(tenantId, workloadRtId);
+        if (workload == null)
+        {
+            throw PoolServiceException.WorkloadNotFound(tenantId, workloadRtId);
+        }
+
+        var poolName = await ResolvePoolNameForWorkloadAsync(tenantId, workload);
+        if (poolName == null)
+        {
+            throw PoolServiceException.WorkloadNotInPool(tenantId, workloadRtId);
+        }
+
+        var dto = await BuildWorkloadDeployedDtoAsync(tenantId, poolName, workload);
+        if (dto == null)
+        {
+            throw PoolServiceException.WorkloadIncomplete(tenantId, workloadRtId);
+        }
+
+        await _operatorConnectionManager.NotifyWorkloadDeployedAsync(dto);
+
+        await _eventService.StoreInformationEventAsync(tenantId,
+            $"Workload '{workload.Name}' deploy requested.");
+    }
+
+    /// <inheritdoc />
+    public async Task UndeployWorkloadAsync(string tenantId, OctoObjectId workloadRtId)
+    {
+        Logger.Info("[{TenantId}] Undeploying workload '{WorkloadRtId}'", tenantId, workloadRtId);
+
+        var workload = await _communicationRepository.GetWorkloadByRtIdAsync(tenantId, workloadRtId);
+        if (workload == null)
+        {
+            throw PoolServiceException.WorkloadNotFound(tenantId, workloadRtId);
+        }
+
+        var poolName = await ResolvePoolNameForWorkloadAsync(tenantId, workload);
+        if (poolName == null)
+        {
+            throw PoolServiceException.WorkloadNotInPool(tenantId, workloadRtId);
+        }
+
+        await _operatorConnectionManager.NotifyWorkloadUndeployedAsync(new WorkloadUndeployedDto
+        {
+            TenantId = tenantId,
+            PoolName = poolName,
+            WorkloadName = workload.Name ?? string.Empty,
+            WorkloadType = workload is RtApplication
+                ? WorkloadTypeDto.Application
+                : WorkloadTypeDto.Adapter,
+        });
+
+        await _eventService.StoreInformationEventAsync(tenantId,
+            $"Workload '{workload.Name}' undeploy requested.");
+    }
+
+    /// <summary>
+    /// Resolves the pool name for a workload by walking the <c>Manages</c>
+    /// association back to its parent <c>RtPool</c>. Returns null when the
+    /// workload isn't currently in any pool.
+    /// </summary>
+    private async Task<string?> ResolvePoolNameForWorkloadAsync(string tenantId, RtDeployableWorkload workload)
+    {
+        var pool = await _communicationRepository.GetPoolForWorkloadAsync(tenantId, workload.RtId);
+        return pool?.Name;
     }
 
     /// <inheritdoc />

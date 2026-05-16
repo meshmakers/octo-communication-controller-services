@@ -83,6 +83,51 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
+    public async Task<RtDeployableWorkload?> GetWorkloadByRtIdAsync(string tenantId, OctoObjectId workloadRtId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            // RtDeployableWorkload is abstract; the runtime engine returns
+            // the concrete RtAdapter / RtApplication.
+            return await tenantRepository.GetRtEntityByRtIdAsync<RtDeployableWorkload>(session, workloadRtId);
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingAdapters(tenantId, workloadRtId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<RtPool?> GetPoolForWorkloadAsync(string tenantId, OctoObjectId workloadRtId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            // Workload's outbound Manages association points at the parent pool.
+            var resultSet = await tenantRepository
+                .GetRtAssociationTargetsAsync<RtDeployableWorkload, RtPool>(session,
+                    [workloadRtId], SystemCommunicationCkIds.RtCkManagesRoleId,
+                    GraphDirections.Outbound, null, RtEntityQueryOptions.Create());
+
+            if (!resultSet.Any())
+            {
+                return null;
+            }
+
+            return resultSet.First().Value.Items.FirstOrDefault();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingAdapters(tenantId, workloadRtId, e);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<RtHelmRepositoryConfiguration?> GetHelmRepositoryForWorkloadAsync(string tenantId,
         OctoObjectId workloadRtId)
     {

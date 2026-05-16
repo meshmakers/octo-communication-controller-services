@@ -66,6 +66,20 @@ public interface IPoolService
     Task UndeployPoolAsync(string tenantId, OctoObjectId poolRtId);
 
     /// <summary>
+    /// Deploys a single workload (Adapter or Application). Resolves the
+    /// workload's parent pool, builds the deploy DTO from the entity's
+    /// chart reference + values, and fires <c>NotifyWorkloadDeployedAsync</c>
+    /// on the operator hub. Independent of <see cref="DeployPoolAsync"/>:
+    /// the pool must already be deployed, but no fan-out happens here.
+    /// </summary>
+    Task DeployWorkloadAsync(string tenantId, OctoObjectId workloadRtId);
+
+    /// <summary>
+    /// Undeploys a single workload (Adapter or Application).
+    /// </summary>
+    Task UndeployWorkloadAsync(string tenantId, OctoObjectId workloadRtId);
+
+    /// <summary>
     /// Undeploys every Cloud pool of a tenant. Used when a tenant is being
     /// deleted/detached so that the central Communication Operator cleans up
     /// all CommunicationPool CRs and broker secrets that were auto-managed
