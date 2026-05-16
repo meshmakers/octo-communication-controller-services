@@ -376,6 +376,7 @@ internal class PoolService : IPoolService
             TenantId = tenantId,
             PoolName = poolName,
             WorkloadName = workload.Name ?? string.Empty,
+            WorkloadRtId = workload.RtId.ToString(),
             WorkloadType = workload is RtApplication
                 ? WorkloadTypeDto.Application
                 : WorkloadTypeDto.Adapter,
