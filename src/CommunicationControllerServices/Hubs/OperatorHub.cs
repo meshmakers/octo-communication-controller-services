@@ -1,4 +1,5 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -10,23 +11,28 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 
 /// <summary>
 /// Hub for operator management connections.
-/// Operators register here to receive tenant lifecycle notifications.
-/// Not tenant-scoped - operators connect once and receive events for all tenants.
+/// Operators register here to receive tenant lifecycle notifications,
+/// register / unregister pools they own, and report workload deploy
+/// outcomes. Not tenant-scoped — one operator process keeps one
+/// connection regardless of how many pools / tenants it manages.
 /// </summary>
 public class OperatorHub : Hub, IOperatorHub
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly IOperatorConnectionManager _connectionManager;
     private readonly ICommunicationRepository _communicationRepository;
+    private readonly IPoolService _poolService;
 
     /// <summary>
     /// Constructor
     /// </summary>
     public OperatorHub(IOperatorConnectionManager connectionManager,
-        ICommunicationRepository communicationRepository)
+        ICommunicationRepository communicationRepository,
+        IPoolService poolService)
     {
         _connectionManager = connectionManager;
         _communicationRepository = communicationRepository;
+        _poolService = poolService;
     }
 
     /// <inheritdoc />
@@ -37,11 +43,27 @@ public class OperatorHub : Hub, IOperatorHub
     }
 
     /// <inheritdoc />
-    public override Task OnDisconnectedAsync(Exception? exception)
+    public override async Task OnDisconnectedAsync(Exception? exception)
     {
         Logger.Info("Operator disconnected with connection id '{ConnectionId}'", Context.ConnectionId);
-        _connectionManager.RemoveOperator(Context.ConnectionId);
-        return base.OnDisconnectedAsync(exception);
+        // Drop the connection-level entry and reset every pool it claimed.
+        // Same call site whether the disconnect was graceful (operator
+        // shutdown) or a crash — the hub guarantees this fires exactly once.
+        var orphaned = _connectionManager.RemoveOperator(Context.ConnectionId);
+        foreach (var (tenantId, poolName) in orphaned)
+        {
+            try
+            {
+                await _poolService.SetCommunicationStateOfflineAsync(tenantId, poolName);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn(ex,
+                    "Failed to mark pool '{PoolName}' offline after operator disconnect (tenant '{TenantId}')",
+                    poolName, tenantId);
+            }
+        }
+        await base.OnDisconnectedAsync(exception);
     }
 
     /// <inheritdoc />
@@ -53,11 +75,68 @@ public class OperatorHub : Hub, IOperatorHub
     }
 
     /// <inheritdoc />
-    public Task UnregisterOperatorAsync()
+    public async Task UnregisterOperatorAsync()
     {
         Logger.Info("Operator unregistered with connection id '{ConnectionId}'", Context.ConnectionId);
-        _connectionManager.RemoveOperator(Context.ConnectionId);
-        return Task.CompletedTask;
+        var orphaned = _connectionManager.RemoveOperator(Context.ConnectionId);
+        foreach (var (tenantId, poolName) in orphaned)
+        {
+            try
+            {
+                await _poolService.SetCommunicationStateOfflineAsync(tenantId, poolName);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn(ex,
+                    "Failed to mark pool '{PoolName}' offline on operator unregister (tenant '{TenantId}')",
+                    poolName, tenantId);
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task RegisterPoolAsync(string tenantId, string poolName)
+    {
+        Logger.Info(
+            "Operator '{ConnectionId}' claims pool '{PoolName}' for tenant '{TenantId}'",
+            Context.ConnectionId, poolName, tenantId);
+
+        // Track the (connection, tenant, pool) tuple before flipping state —
+        // if state-write fails we still want OnDisconnectedAsync to clean
+        // up so the entity doesn't stay stuck on Online.
+        _connectionManager.RegisterPoolForConnection(Context.ConnectionId, tenantId, poolName);
+
+        try
+        {
+            await _poolService.SetCommunicationStateOnlineAsync(tenantId, poolName, Context.ConnectionId);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex,
+                "Failed to mark pool '{PoolName}' online (tenant '{TenantId}')", poolName, tenantId);
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task UnregisterPoolAsync(string tenantId, string poolName)
+    {
+        Logger.Info(
+            "Operator '{ConnectionId}' releases pool '{PoolName}' for tenant '{TenantId}'",
+            Context.ConnectionId, poolName, tenantId);
+
+        _connectionManager.UnregisterPoolForConnection(Context.ConnectionId, tenantId, poolName);
+
+        try
+        {
+            await _poolService.UnregisterPoolOperatorAsync(tenantId, poolName);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn(ex,
+                "Failed to unregister pool '{PoolName}' (tenant '{TenantId}'); state may stay Online until disconnect",
+                poolName, tenantId);
+        }
     }
 
     /// <inheritdoc />

@@ -18,7 +18,6 @@ internal abstract class PoolServiceTestsBase
 
     protected readonly ICommunicationRepository CommunicationRepository;
     protected readonly IPoolCache PoolCache;
-    protected readonly IPoolHubCallbacks PoolHubCallbacks;
     protected readonly ICommunicationEventService CommunicationEventService;
     protected readonly IOperatorConnectionManager OperatorConnectionManager;
     protected readonly IWorkloadEncryptionService EncryptionService;
@@ -31,7 +30,6 @@ internal abstract class PoolServiceTestsBase
     {
         CommunicationRepository = Substitute.For<ICommunicationRepository>();
         PoolCache = Substitute.For<IPoolCache>();
-        PoolHubCallbacks = Substitute.For<IPoolHubCallbacks>();
         CommunicationEventService = Substitute.For<ICommunicationEventService>();
         OperatorConnectionManager = Substitute.For<IOperatorConnectionManager>();
         EncryptionService = Substitute.For<IWorkloadEncryptionService>();
@@ -44,7 +42,6 @@ internal abstract class PoolServiceTestsBase
         PoolService = new PoolService(
             CommunicationRepository,
             PoolCache,
-            PoolHubCallbacks,
             CommunicationEventService,
             OperatorConnectionManager,
             EncryptionService);

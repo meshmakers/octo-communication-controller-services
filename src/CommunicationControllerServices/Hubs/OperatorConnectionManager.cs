@@ -11,6 +11,13 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly ConcurrentDictionary<string, bool> _connectedOperators = new();
 
+    // For each connected operator (by connectionId), the (tenant, pool) tuples
+    // it has claimed via RegisterPoolForConnection. On disconnect we hand
+    // these back to PoolService so the corresponding pool entities' state
+    // can be flipped to Offline.
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<(string TenantId, string PoolName), byte>>
+        _poolsByConnection = new();
+
     // Tracks Cloud pools that this controller has notified operators of as
     // deployed but not yet undeployed. Source of truth for the PreDeleteTenant
     // cascade so it doesn't have to query the tenant repository (which races
@@ -30,10 +37,35 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
         Logger.Info("Operator added, total connected: {Count}", _connectedOperators.Count);
     }
 
-    public void RemoveOperator(string connectionId)
+    public IReadOnlyCollection<(string TenantId, string PoolName)> RemoveOperator(string connectionId)
     {
         _connectedOperators.TryRemove(connectionId, out _);
-        Logger.Info("Operator removed, total connected: {Count}", _connectedOperators.Count);
+        var orphaned = _poolsByConnection.TryRemove(connectionId, out var bucket)
+            ? bucket.Keys.ToArray()
+            : [];
+        Logger.Info(
+            "Operator removed, total connected: {Count}, orphaned pools: {OrphanCount}",
+            _connectedOperators.Count, orphaned.Length);
+        return orphaned;
+    }
+
+    public void RegisterPoolForConnection(string connectionId, string tenantId, string poolName)
+    {
+        var bucket = _poolsByConnection.GetOrAdd(connectionId,
+            _ => new ConcurrentDictionary<(string TenantId, string PoolName), byte>());
+        bucket[(tenantId, poolName)] = 0;
+    }
+
+    public void UnregisterPoolForConnection(string connectionId, string tenantId, string poolName)
+    {
+        if (_poolsByConnection.TryGetValue(connectionId, out var bucket))
+        {
+            bucket.TryRemove((tenantId, poolName), out _);
+            if (bucket.IsEmpty)
+            {
+                _poolsByConnection.TryRemove(connectionId, out _);
+            }
+        }
     }
 
     public IEnumerable<DeployedPoolDto> GetDeployedPools()
@@ -181,6 +213,34 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
                 Logger.Warn(ex,
                     "Failed to notify operator {ConnectionId} of workload deployment for tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}'",
                     connectionId, workload.TenantId, workload.PoolName, workload.WorkloadName);
+            }
+        }
+    }
+
+    public async Task NotifyPreUpdateTenantAsync(string tenantId)
+    {
+        if (_connectedOperators.IsEmpty)
+        {
+            Logger.Debug("No operators connected, skipping pre-update notification for tenant '{TenantId}'", tenantId);
+            return;
+        }
+
+        Logger.Info("Notifying {Count} operator(s) of pre-update for tenant '{TenantId}'",
+            _connectedOperators.Count, tenantId);
+
+        var connectionIds = _connectedOperators.Keys.ToList();
+        foreach (var connectionId in connectionIds)
+        {
+            try
+            {
+                await hubContext.Clients.Client(connectionId)
+                    .SendAsync(nameof(IOperatorHubCallbacks.PreUpdateTenantAsync), tenantId);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn(ex,
+                    "Failed to notify operator {ConnectionId} of pre-update for tenant '{TenantId}'",
+                    connectionId, tenantId);
             }
         }
     }

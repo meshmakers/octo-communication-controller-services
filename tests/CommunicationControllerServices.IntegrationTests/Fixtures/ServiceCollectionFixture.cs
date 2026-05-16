@@ -63,7 +63,9 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         Services.AddSingletonMultipleInterfaces<PoolHubCache, IPoolCache, IPoolCachePublish>();
         Services.AddSingletonMultipleInterfaces<AdapterCache, IAdapterCache, IAdapterCachePublish>();
 
-        Services.AddSingleton<IPoolHubCallbacks, PoolHubCallbacks>();
+        // Legacy IPoolHubCallbacks/PoolHubCallbacks were removed when /poolHub
+        // collapsed into /operatorHub — tenant pre-update fan-out now flows
+        // through IOperatorConnectionManager.
         Services.AddSingleton<IAdapterHubCallbacks, AdapterHubCallbacks>();
 
         // Add notification services
@@ -79,9 +81,10 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         Services.AddSingleton(Substitute.For<IRoutedCommandClient<ExecutePipelineRequest>>());
         Services.AddSingleton(Substitute.For<IDistributionEventHubService>());
 
-        // Add mock SignalR hub contexts (required by hub callbacks)
-        Services.AddSingleton(Substitute.For<IHubContext<PoolHub>>());
+        // Add mock SignalR hub contexts (required by hub callbacks). PoolHub
+        // is gone — its responsibilities collapsed into OperatorHub.
         Services.AddSingleton(Substitute.For<IHubContext<AdapterHub>>());
+        Services.AddSingleton(Substitute.For<IHubContext<OperatorHub>>());
 
         // Add logging with xUnit output
         Services.AddLogging(loggingBuilder =>

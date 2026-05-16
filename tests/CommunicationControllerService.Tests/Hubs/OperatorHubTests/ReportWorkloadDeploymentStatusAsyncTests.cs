@@ -1,5 +1,6 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
@@ -17,11 +18,13 @@ internal class ReportWorkloadDeploymentStatusAsyncTests : IDisposable
         Substitute.For<IOperatorConnectionManager>();
     private readonly ICommunicationRepository _repository =
         Substitute.For<ICommunicationRepository>();
+    private readonly IPoolService _poolService =
+        Substitute.For<IPoolService>();
     private readonly OperatorHub _hub;
 
     public ReportWorkloadDeploymentStatusAsyncTests()
     {
-        _hub = new OperatorHub(_connectionManager, _repository);
+        _hub = new OperatorHub(_connectionManager, _repository, _poolService);
     }
 
     public void Dispose()

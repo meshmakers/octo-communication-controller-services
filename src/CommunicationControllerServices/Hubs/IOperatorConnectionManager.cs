@@ -14,9 +14,28 @@ public interface IOperatorConnectionManager
     void AddOperator(string connectionId);
 
     /// <summary>
-    /// Removes an operator connection.
+    /// Removes an operator connection and returns the (tenant, pool) tuples
+    /// that connection had registered via
+    /// <see cref="RegisterPoolForConnection"/>. The caller is expected to
+    /// flip every returned pool's <c>CommunicationState</c> to
+    /// <c>Offline</c> — this happens on every operator disconnect, planned
+    /// or otherwise.
     /// </summary>
-    void RemoveOperator(string connectionId);
+    IReadOnlyCollection<(string TenantId, string PoolName)> RemoveOperator(string connectionId);
+
+    /// <summary>
+    /// Records that the given operator connection now hosts the named pool.
+    /// Used by <c>OperatorHub.RegisterPoolAsync</c> so the controller can
+    /// reset the pool's state when the SignalR connection drops.
+    /// </summary>
+    void RegisterPoolForConnection(string connectionId, string tenantId, string poolName);
+
+    /// <summary>
+    /// Removes a single (connection, tenant, pool) tuple — called on a
+    /// graceful <c>UnregisterPoolAsync</c> while the operator keeps the
+    /// connection open for other pools.
+    /// </summary>
+    void UnregisterPoolForConnection(string connectionId, string tenantId, string poolName);
 
     /// <summary>
     /// Returns all currently-deployed Cloud pools across every tenant. Used as
@@ -68,4 +87,12 @@ public interface IOperatorConnectionManager
     /// be undeployed (helm uninstall).
     /// </summary>
     Task NotifyWorkloadUndeployedAsync(WorkloadUndeployedDto workload);
+
+    /// <summary>
+    /// Server→client fanout of the tenant pre-update signal. Operators use
+    /// this to let in-flight work settle before the CK-cache is unloaded.
+    /// Replaces the legacy <c>IPoolHubCallbacks.PreUpdateTenantAsync</c>
+    /// which was tied to the now-defunct per-pool connection.
+    /// </summary>
+    Task NotifyPreUpdateTenantAsync(string tenantId);
 }
