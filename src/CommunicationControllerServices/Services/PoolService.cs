@@ -366,6 +366,11 @@ internal class PoolService : IPoolService
             })
             .ToArray();
 
+        // Only Adapter carries the ReceivesClusterSecrets flag — Application
+        // workloads keep the default (false). If we ever want apps to receive
+        // cluster credentials, move the attribute up to DeployableWorkload.
+        var receivesClusterSecrets = workload is RtAdapter adapter && adapter.ReceivesClusterSecrets;
+
         return new WorkloadDeployedDto
         {
             TenantId = tenantId,
@@ -383,6 +388,7 @@ internal class PoolService : IPoolService
             ChartVersion = workload.ChartVersion,
             ValuesYaml = workload.ValuesYaml ?? string.Empty,
             Values = overrides,
+            ReceivesClusterSecrets = receivesClusterSecrets,
         };
     }
 

@@ -116,6 +116,108 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
     }
 
     [Test]
+    public async Task DeployPoolAsync_AdapterWithReceivesClusterSecretsTrue_PropagatesFlagToDto()
+    {
+        await GivenCloudPoolWithAdapter(receivesClusterSecrets: true);
+
+        await PoolService.DeployPoolAsync(TenantId, PoolRtId);
+
+        await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
+            Arg.Is<WorkloadDeployedDto>(d => d.ReceivesClusterSecrets));
+    }
+
+    [Test]
+    public async Task DeployPoolAsync_AdapterWithReceivesClusterSecretsFalse_DefaultsDtoFlagToFalse()
+    {
+        await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+
+        await PoolService.DeployPoolAsync(TenantId, PoolRtId);
+
+        await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
+            Arg.Is<WorkloadDeployedDto>(d => !d.ReceivesClusterSecrets));
+    }
+
+    [Test]
+    public async Task DeployPoolAsync_ApplicationWorkload_AlwaysDefaultsReceivesClusterSecretsToFalse()
+    {
+        // ReceivesClusterSecrets lives on Adapter only. Applications do not
+        // carry the attribute and must always come through as false.
+        await GivenCloudPoolWithApplication();
+
+        await PoolService.DeployPoolAsync(TenantId, PoolRtId);
+
+        await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
+            Arg.Is<WorkloadDeployedDto>(d => !d.ReceivesClusterSecrets));
+    }
+
+    private async Task GivenCloudPoolWithAdapter(bool receivesClusterSecrets)
+    {
+        var rtPool = new RtPool
+        {
+            RtId = PoolRtId,
+            CkTypeId = SystemCommunicationCkIds.RtCkPoolTypeId,
+            Name = PoolName,
+            Environment = RtEnvironmentEnum.Cloud,
+        };
+        CommunicationRepository.GetPoolsAsync(TenantId).Returns(new[] { rtPool });
+
+        var adapter = new RtAdapter
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            CkTypeId = SystemCommunicationCkIds.RtCkAdapterTypeId,
+            Name = "test-adapter",
+            ChartName = "octo-mesh-adapter",
+            ChartVersion = "0.1.1",
+            ValuesYaml = string.Empty,
+            ReceivesClusterSecrets = receivesClusterSecrets,
+        };
+        CommunicationRepository.GetWorkloadsForPoolAsync(TenantId, PoolRtId)
+            .Returns(new RtDeployableWorkload[] { adapter });
+
+        CommunicationRepository.GetHelmRepositoryForWorkloadAsync(TenantId, adapter.RtId)
+            .Returns(new RtHelmRepositoryConfiguration
+            {
+                RtId = OctoObjectId.GenerateNewId(),
+                CkTypeId = SystemCommunicationCkIds.RtCkHelmRepositoryConfigurationTypeId,
+                RepositoryUrl = "https://example.test/charts",
+            });
+        await Task.CompletedTask;
+    }
+
+    private async Task GivenCloudPoolWithApplication()
+    {
+        var rtPool = new RtPool
+        {
+            RtId = PoolRtId,
+            CkTypeId = SystemCommunicationCkIds.RtCkPoolTypeId,
+            Name = PoolName,
+            Environment = RtEnvironmentEnum.Cloud,
+        };
+        CommunicationRepository.GetPoolsAsync(TenantId).Returns(new[] { rtPool });
+
+        var application = new RtApplication
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            CkTypeId = SystemCommunicationCkIds.RtCkApplicationTypeId,
+            Name = "test-app",
+            ChartName = "test-app",
+            ChartVersion = "0.0.1",
+            ValuesYaml = string.Empty,
+        };
+        CommunicationRepository.GetWorkloadsForPoolAsync(TenantId, PoolRtId)
+            .Returns(new RtDeployableWorkload[] { application });
+
+        CommunicationRepository.GetHelmRepositoryForWorkloadAsync(TenantId, application.RtId)
+            .Returns(new RtHelmRepositoryConfiguration
+            {
+                RtId = OctoObjectId.GenerateNewId(),
+                CkTypeId = SystemCommunicationCkIds.RtCkHelmRepositoryConfigurationTypeId,
+                RepositoryUrl = "https://example.test/charts",
+            });
+        await Task.CompletedTask;
+    }
+
+    [Test]
     public async Task UndeployPoolAsync_CloudPool_OnlyUndeploysWorkloadsOfThisPool()
     {
         await GivenCloudPool();
