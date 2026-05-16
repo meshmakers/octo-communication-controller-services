@@ -581,18 +581,37 @@ internal class PoolService : IPoolService
     /// <inheritdoc />
     public async Task SetCommunicationStateOnlineAsync(string tenantId, string poolName, string connectionId)
     {
+        Logger.Info("[{TenantId}] Setting pool '{PoolName}' online (connection '{ConnectionId}')",
+            tenantId, poolName, connectionId);
+
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
             throw PoolServiceException.TenantNotFoundOrNotEnabled(tenantId);
         }
 
-        poolTenant.PoolsByName.TryGetValue(poolName, out var poolDescription);
-        if (poolDescription != null)
+        // Lazy-load the pool into the cache on first sight. The legacy /poolHub
+        // path relied on RegisterPoolOperatorAsync (which also touched the
+        // pool's DeploymentState) to populate the cache; the new /operatorHub
+        // RegisterPoolAsync is purely about CommunicationState, so we just
+        // ensure the cache is populated here without touching DeploymentState.
+        if (!poolTenant.PoolsByName.TryGetValue(poolName, out var poolDescription))
+        {
+            var poolList = await _communicationRepository.GetPoolByNameAsync(tenantId, poolName);
+            var rtPool = poolList.FirstOrDefault();
+            if (rtPool == null)
+            {
+                Logger.Warn("[{TenantId}] Cannot set pool '{PoolName}' online — not found in repository",
+                    tenantId, poolName);
+                return;
+            }
+            poolDescription = poolTenant.AddPool(poolName, rtPool.RtId, connectionId);
+        }
+        else
         {
             poolDescription.UpdateConnectionId(tenantId, connectionId);
-
-            await SetCommunicationStateOnlineAsync(tenantId, poolDescription.PoolRtId);
         }
+
+        await SetCommunicationStateOnlineAsync(tenantId, poolDescription.PoolRtId);
     }
 
     /// <inheritdoc />
