@@ -15,7 +15,6 @@ internal class PoolService : IPoolService
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly ICommunicationRepository _communicationRepository;
     private readonly IPoolCache _poolCache;
-    private readonly IPoolHubCallbacks _poolHubCallbacks;
     private readonly ICommunicationEventService _eventService;
     private readonly IOperatorConnectionManager _operatorConnectionManager;
     private readonly IWorkloadEncryptionService _encryptionService;
@@ -25,18 +24,16 @@ internal class PoolService : IPoolService
     /// </summary>
     /// <param name="communicationRepository">Communication repository</param>
     /// <param name="poolCache">Distributed and synchronized data between nodes</param>
-    /// <param name="poolHubCallbacks">Callbacks to inform client of configuration changes</param>
     /// <param name="eventService">Service for storing system events</param>
-    /// <param name="operatorConnectionManager">Manages SignalR connections to central Communication Operators (for Cloud-pool deploy/undeploy notifications)</param>
+    /// <param name="operatorConnectionManager">Manages SignalR connections to central Communication Operators (for Cloud-pool deploy/undeploy notifications and PreUpdateTenant fan-out)</param>
     /// <param name="encryptionService">Decrypts secret-flagged ValueOverride values before they go on the SignalR wire</param>
     public PoolService(ICommunicationRepository communicationRepository, IPoolCache poolCache,
-        IPoolHubCallbacks poolHubCallbacks, ICommunicationEventService eventService,
+        ICommunicationEventService eventService,
         IOperatorConnectionManager operatorConnectionManager,
         IWorkloadEncryptionService encryptionService)
     {
         _communicationRepository = communicationRepository;
         _poolCache = poolCache;
-        _poolHubCallbacks = poolHubCallbacks;
         _eventService = eventService;
         _operatorConnectionManager = operatorConnectionManager;
         _encryptionService = encryptionService;
@@ -139,8 +136,10 @@ internal class PoolService : IPoolService
 
             if (_poolCache.TryGetTenant(tenantId, out var poolTenant))
             {
-                // Inform all pools that tenant is going to be updated
-                await _poolHubCallbacks.PreUpdateTenantAsync(tenantId);
+                // Inform all connected operators that the tenant is about to
+                // be updated. Replaces the per-pool /poolHub fan-out — every
+                // operator multiplexes through its single /operatorHub channel.
+                await _operatorConnectionManager.NotifyPreUpdateTenantAsync(tenantId);
                 // Remove all pools from cache, so we skip the possibility to communicate with them
                 _poolCache.RemoveTenant(tenantId);
 

@@ -82,7 +82,6 @@ try
     builder.Services.AddSingletonMultipleInterfaces<PoolHubCache, IPoolCache, IPoolCachePublish>();
     builder.Services.AddSingletonMultipleInterfaces<AdapterCache, IAdapterCache, IAdapterCachePublish>();
 
-    builder.Services.AddSingleton<IPoolHubCallbacks, PoolHubCallbacks>();
     builder.Services.AddSingleton<IOperatorConnectionManager, OperatorConnectionManager>();
     builder.Services.AddSingleton<IAdapterHubCallbacks, AdapterHubCallbacks>();
 
@@ -221,7 +220,6 @@ try
     app.UseOctoApiVersioningAndDocumentation();
 
     app.MapHub<AdapterHub>("/{tenantId:tenantId}/adapterHub");
-    app.MapHub<PoolHub>("/{tenantId:tenantId}/poolHub");
     app.MapHub<OperatorHub>("/operatorHub");
     app.MapControllerRoute(name: "default",
         pattern: "{tenantId:tenantId}/system/v{version:apiVersion}/{controller}/{action}/{id?}");
