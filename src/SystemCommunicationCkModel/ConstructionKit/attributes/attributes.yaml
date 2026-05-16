@@ -156,6 +156,13 @@ attributes:
   valueType: Boolean
   description: 'Whether debugging is enabled for this pipeline'
 
+# Workload security
+- id: ReceivesClusterSecrets
+  valueType: Boolean
+  description: 'When true, the Communication Operator injects cluster-internal credentials (MongoDB user/admin passwords, CrateDB password, RabbitMQ password) into the Adapter''s Helm release as secret-flagged value overrides. Defaults to false so untrusted or edge adapters do not receive cluster credentials by accident; enable only for adapters that run in the same cluster as the OctoMesh core services and need to talk to them directly.'
+  defaultValues:
+    - false
+
 # DataPoint / MappingTarget record attributes
 - id: SourceIdentifier
   valueType: String

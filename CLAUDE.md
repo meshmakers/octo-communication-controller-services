@@ -406,6 +406,12 @@ future at-rest-encrypted attribute.
    `GetHelmRepositoryForWorkloadAsync`, decrypts secret-flagged
    `ValueOverride.Value` entries and the repository password, then fires
    `NotifyWorkloadDeployedAsync` with the assembled `WorkloadDeployedDto`.
+   When the workload is an `RtAdapter`, the entity's
+   `ReceivesClusterSecrets` attribute is copied onto the DTO so the
+   operator can decide whether to inject cluster credentials (MongoDB,
+   CrateDB, RabbitMQ passwords) as secret-flagged value overrides at
+   deploy time. The attribute defaults to false; the operator's
+   secret-injection path runs only when set explicitly.
 
 **`PoolService.UndeployPoolAsync`** mirrors deploy but in reverse order:
 workloads first (so the operator can `helm uninstall` while the pool
