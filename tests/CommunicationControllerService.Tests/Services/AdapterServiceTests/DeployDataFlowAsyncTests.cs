@@ -103,7 +103,7 @@ internal class DeployDataFlowAsyncTests : AdapterServiceTestsBase
             .Throws<AdapterServiceException>();
 
         await Assert.That(exception).IsNotNull()
-            .And.Member(e => e.Message, msg => msg.Contains("Adapter").And.Contains("not loaded"));
+            .And.Member(e => e.Message, msg => msg.Contains("Adapter").And.Contains("no live SignalR connection"));
     }
 
     [Test]

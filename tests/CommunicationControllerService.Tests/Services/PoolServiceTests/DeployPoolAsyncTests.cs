@@ -165,6 +165,71 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
     }
 
     [Test]
+    public async Task DeployWorkloadAsync_AdapterMissingChartName_ThrowsWithSpecificMessage()
+    {
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        adapter.ChartName = string.Empty;
+
+        var ex = await Assert.ThrowsAsync<Exception>(
+            async () => await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId));
+
+        await Assert.That(ex!.Message).Contains("Chart Name");
+        await Assert.That(ex!.Message).Contains("test-adapter");
+        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
+            .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
+    }
+
+    [Test]
+    public async Task DeployWorkloadAsync_AdapterMissingChartVersion_ThrowsWithSpecificMessage()
+    {
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        adapter.ChartVersion = string.Empty;
+
+        var ex = await Assert.ThrowsAsync<Exception>(
+            async () => await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId));
+
+        await Assert.That(ex!.Message).Contains("Chart Version");
+        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
+            .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
+    }
+
+    [Test]
+    public async Task DeployWorkloadAsync_AdapterWithoutLinkedHelmRepository_ThrowsWithSpecificMessage()
+    {
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        CommunicationRepository.GetHelmRepositoryForWorkloadAsync(TenantId, adapter.RtId)
+            .Returns((RtHelmRepositoryConfiguration?)null);
+
+        var ex = await Assert.ThrowsAsync<Exception>(
+            async () => await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId));
+
+        await Assert.That(ex!.Message).Contains("Helm repository");
+        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
+            .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
+    }
+
+    [Test]
+    public async Task DeployWorkloadAsync_AdapterHelmRepositoryUrlEmpty_ThrowsWithSpecificMessage()
+    {
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        CommunicationRepository.GetHelmRepositoryForWorkloadAsync(TenantId, adapter.RtId)
+            .Returns(new RtHelmRepositoryConfiguration
+            {
+                RtId = OctoObjectId.GenerateNewId(),
+                CkTypeId = SystemCommunicationCkIds.RtCkHelmRepositoryConfigurationTypeId,
+                RepositoryUrl = string.Empty,
+            });
+
+        var ex = await Assert.ThrowsAsync<Exception>(
+            async () => await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId));
+
+        await Assert.That(ex!.Message).Contains("Repository URL");
+        await Assert.That(ex!.Message).Contains("test-adapter");
+        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
+            .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
+    }
+
+    [Test]
     public async Task UndeployWorkloadAsync_NotifiesOperator()
     {
         var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);

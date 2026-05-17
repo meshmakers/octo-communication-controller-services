@@ -62,10 +62,35 @@ internal class PoolServiceException : Exception
             $"[{tenantId}] Workload '{workloadRtId}' is not currently in any pool — assign it to a pool before deploying");
     }
 
-    internal static Exception WorkloadIncomplete(string tenantId, OctoObjectId workloadRtId)
+    internal static Exception WorkloadMissingChartName(string tenantId, OctoObjectId workloadRtId, string? workloadName)
     {
         return new PoolServiceException(
-            $"[{tenantId}] Workload '{workloadRtId}' is incomplete (missing chart name / chart version / helm repository) — fix the entity and try again");
+            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': " +
+            "the 'Chart Name' field is empty. Open the workload in the Refinery Studio and set a Helm chart name " +
+            "(e.g. 'octo-modbus-adapter') before deploying.");
+    }
+
+    internal static Exception WorkloadMissingChartVersion(string tenantId, OctoObjectId workloadRtId, string? workloadName)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': " +
+            "the 'Chart Version' field is empty. Set the version of the Helm chart to deploy (e.g. '0.1.2').");
+    }
+
+    internal static Exception WorkloadMissingHelmRepository(string tenantId, OctoObjectId workloadRtId, string? workloadName)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': " +
+            "no Helm repository is linked. Associate the workload with a HelmRepositoryConfiguration in the Studio " +
+            "(workload form → 'Helm Repository' field) so the operator knows where to pull the chart from.");
+    }
+
+    internal static Exception WorkloadHelmRepositoryUrlEmpty(string tenantId, OctoObjectId workloadRtId, string? workloadName)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': " +
+            "the linked Helm repository has an empty 'Repository URL'. Open the HelmRepositoryConfiguration " +
+            "entity in the Studio and set a chart-repository URL (e.g. 'https://charts.meshmakers.cloud').");
     }
 }
 
