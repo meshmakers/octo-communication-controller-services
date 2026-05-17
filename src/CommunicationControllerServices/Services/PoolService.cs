@@ -140,17 +140,21 @@ internal class PoolService : IPoolService
                 // be updated. Replaces the per-pool /poolHub fan-out — every
                 // operator multiplexes through its single /operatorHub channel.
                 await _operatorConnectionManager.NotifyPreUpdateTenantAsync(tenantId);
-                // Remove all pools from cache, so we skip the possibility to communicate with them
+                // Remove all pools from cache so we skip the possibility to
+                // communicate with them while the CK-cache is unloaded.
                 _poolCache.RemoveTenant(tenantId);
 
-                foreach (var pool in poolTenant.PoolsByName.Values)
-                {
-                    await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, pool.PoolRtId,
-                        RtCommunicationStateEnum.Unregistered);
-                }
+                // Note: we do NOT touch CommunicationState in the database here.
+                // The legacy /poolHub design had to mark every pool Unregistered
+                // because the per-pool SignalR connection died on cache flush
+                // and only re-registered after the operator reconnected. With
+                // the new /operatorHub model the operator's connection survives
+                // tenant cache reloads entirely — pools stay Online unless the
+                // operator actually disconnects, in which case OnDisconnectedAsync
+                // sets them Offline.
 
                 await _eventService.StoreInformationEventAsync(tenantId,
-                    $"Tenant pre-update completed. {poolTenant.PoolsByName.Count} pool(s) disconnected.");
+                    $"Tenant pre-update completed. {poolTenant.PoolsByName.Count} pool(s) flushed from cache.");
             }
         }
         catch (Exception e)
@@ -173,12 +177,11 @@ internal class PoolService : IPoolService
 
             _poolCache.AddOrUpdateTenant(tenantId);
 
-            var pools = await _communicationRepository.GetPoolsAsync(tenantId);
-            foreach (var pool in pools)
-            {
-                await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, pool.RtId,
-                    RtCommunicationStateEnum.Unregistered);
-            }
+            // Note: pool CommunicationState is intentionally NOT reset here.
+            // See PreUpdateTenantAsync above for the full rationale — the
+            // operator-hub model decouples connection lifecycle from tenant
+            // cache lifecycle, so the on-disk state is authoritative and
+            // should be preserved across cache reloads.
 
             await _eventService.StoreInformationEventAsync(tenantId,
                 "Tenant post-update completed. Pool cache re-initialized.");
