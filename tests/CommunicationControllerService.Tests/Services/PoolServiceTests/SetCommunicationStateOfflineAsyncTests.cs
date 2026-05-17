@@ -73,4 +73,53 @@ internal class SetCommunicationStateOfflineAsyncTests : PoolServiceTestsBase
             .SetPoolCommunicationStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
                 Arg.Any<RtCommunicationStateEnum>());
     }
+
+    [Test]
+    public async Task SetCommunicationStateOfflineAsync_OtherConnectionStillClaimsPool_NoOp()
+    {
+        // Regression for the multi-claimer bug: when two operator connections
+        // claim the same pool (e.g. central operator with 2 replicas, or a
+        // rolling restart with brief overlap), the disconnect of ONE claimer
+        // must not flip the pool Offline as long as the other connection is
+        // still hosting it. The PoolDescription cache only carries the LAST
+        // claim's ConnectionId — without this guard the OperatorHub's
+        // OnDisconnectedAsync orphan-flip would mark the pool Offline even
+        // though the surviving operator is still connected. By the time we
+        // get here OperatorConnectionManager.RemoveOperator has already
+        // removed the disconnecting connection's tracking entry, so any
+        // results from GetConnectionsForPool are surviving operators.
+        GivenTenantInCache();
+        AddPoolToTenant();
+        OperatorConnectionManager
+            .GetConnectionsForPool(TenantId, PoolName)
+            .Returns(new[] { "surviving-connection-id" });
+
+        await PoolService.SetCommunicationStateOfflineAsync(TenantId, PoolName,
+            "disconnecting-connection-id");
+
+        await CommunicationRepository.DidNotReceiveWithAnyArgs()
+            .SetPoolCommunicationStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
+                Arg.Any<RtCommunicationStateEnum>());
+    }
+
+    [Test]
+    public async Task SetCommunicationStateOfflineAsync_OtherConnectionStillClaimsPool_RewiresCachedConnectionId()
+    {
+        // Same scenario as the previous test, plus pinning the side effect:
+        // when the disconnecting connection was the one in the cache, the
+        // cache must be rewired to a surviving connection so the stale-
+        // disconnect guard catches it when that surviving connection eventually
+        // disconnects (rather than the cached id being a dead connection
+        // and the guard then refusing to write Offline forever).
+        GivenTenantInCache();
+        var pool = AddPoolToTenant(connectionId: "disconnecting-connection-id");
+        OperatorConnectionManager
+            .GetConnectionsForPool(TenantId, PoolName)
+            .Returns(new[] { "surviving-connection-id" });
+
+        await PoolService.SetCommunicationStateOfflineAsync(TenantId, PoolName,
+            "disconnecting-connection-id");
+
+        await Assert.That(pool.ConnectionId).IsEqualTo("surviving-connection-id");
+    }
 }

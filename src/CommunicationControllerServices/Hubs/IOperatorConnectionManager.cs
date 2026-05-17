@@ -95,4 +95,15 @@ public interface IOperatorConnectionManager
     /// which was tied to the now-defunct per-pool connection.
     /// </summary>
     Task NotifyPreUpdateTenantAsync(string tenantId);
+
+    /// <summary>
+    /// Returns the SignalR connection ids of every operator that currently
+    /// claims the <c>(tenantId, poolName)</c> tuple via
+    /// <see cref="RegisterPoolForConnection"/>. Used by
+    /// <c>PoolService.SetCommunicationStateOfflineAsync</c> to detect that a
+    /// disconnect should NOT flip the pool offline because another operator
+    /// connection (e.g. a still-alive replica or the surviving end of a
+    /// rolling restart with brief overlap) is still hosting it.
+    /// </summary>
+    IReadOnlyList<string> GetConnectionsForPool(string tenantId, string poolName);
 }

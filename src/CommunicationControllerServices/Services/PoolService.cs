@@ -600,6 +600,35 @@ internal class PoolService : IPoolService
             return;
         }
 
+        // Multi-claim guard: more than one operator connection can claim the
+        // same pool at the same time — central operator with replicas, or a
+        // brief rolling-upgrade overlap where the new pod has registered but
+        // the old pod's SignalR connection has not yet timed out. The
+        // PoolDescription cache only remembers the LAST claim's ConnectionId,
+        // so the disconnect of one claimer would silently flip the pool
+        // Offline even though another connection is still hosting it
+        // (caller passed RemoveOperator's orphan list, which only filters
+        // claims made by the disconnecting connection, not all live claims).
+        //
+        // OperatorConnectionManager.RemoveOperator has already cleared the
+        // disconnecting connection's tracking entry by the time we get here,
+        // so any results from GetConnectionsForPool are surviving operators.
+        var stillClaiming = _operatorConnectionManager.GetConnectionsForPool(tenantId, poolName);
+        if (stillClaiming.Count > 0)
+        {
+            // Keep the pool Online and rewire the cache to a surviving
+            // connection so the stale-disconnect guard below works correctly
+            // when THAT one eventually disconnects too.
+            poolDescription.UpdateConnectionId(tenantId, stillClaiming[0]);
+            Logger.Info(
+                "[{TenantId}] pool '{PoolName}' stays online after disconnect of " +
+                "'{OldConnectionId}': {Count} other operator connection(s) still claim it; " +
+                "cache rewired to '{NewConnectionId}'",
+                tenantId, poolName, disconnectingConnectionId, stillClaiming.Count,
+                stillClaiming[0]);
+            return;
+        }
+
         // Stale-disconnect guard: if a newer connection has already taken over this
         // pool (e.g. the operator reconnected after a controller restart and the old
         // connection's OnDisconnectedAsync is only now firing), we must not flip
