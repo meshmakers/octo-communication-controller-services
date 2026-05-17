@@ -48,7 +48,7 @@ internal class PreUpdateTenantAsyncTests : AdapterServiceTestsBase
     }
 
     [Test]
-    public async Task PreUpdateTenantAsync_TenantWithSingleAdapter_RemovesTenantAndUpdatesAdapterState()
+    public async Task PreUpdateTenantAsync_TenantWithSingleAdapter_RemovesTenantAndPreservesAdapterState()
     {
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
@@ -67,12 +67,16 @@ internal class PreUpdateTenantAsyncTests : AdapterServiceTestsBase
 
         await AdapterHubCallbacks.Received(1).PreUpdateTenantAsync(TenantId);
         AdapterCache.Received(1).RemoveTenant(TenantId);
-        await CommunicationRepository.Received(1)
-            .SetAdapterCommunicationStateAsync(TenantId, rtAdapter.ToRtEntityId(), RtCommunicationStateEnum.Unregistered);
+        // Pre/PosUpdate no longer mass-resets CommunicationState; live
+        // adapter pods keep their SignalR connection through the tenant
+        // cache reload and would have their Online state clobbered if we
+        // wrote Unregistered here.
+        await CommunicationRepository.DidNotReceive()
+            .SetAdapterCommunicationStateAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<RtCommunicationStateEnum>());
     }
 
     [Test]
-    public async Task PreUpdateTenantAsync_TenantWithMultipleAdapters_RemovesTenantAndUpdatesAllAdapterStates()
+    public async Task PreUpdateTenantAsync_TenantWithMultipleAdapters_RemovesTenantAndPreservesAllAdapterStates()
     {
         // Arrange
         var rtAdapter1 = RtEntityCreator.CreateAdapter();
@@ -105,12 +109,11 @@ internal class PreUpdateTenantAsyncTests : AdapterServiceTestsBase
 
         await AdapterHubCallbacks.Received(1).PreUpdateTenantAsync(TenantId);
         AdapterCache.Received(1).RemoveTenant(TenantId);
-        await CommunicationRepository.Received(1)
-            .SetAdapterCommunicationStateAsync(TenantId, rtAdapter1.ToRtEntityId(), RtCommunicationStateEnum.Unregistered);
-        await CommunicationRepository.Received(1)
-            .SetAdapterCommunicationStateAsync(TenantId, rtAdapter2.ToRtEntityId(), RtCommunicationStateEnum.Unregistered);
-        await CommunicationRepository.Received(1)
-            .SetAdapterCommunicationStateAsync(TenantId, rtAdapter3.ToRtEntityId(), RtCommunicationStateEnum.Unregistered);
+        // CommunicationState is never touched here regardless of how many
+        // adapters the tenant has — see the single-adapter test above for
+        // the rationale.
+        await CommunicationRepository.DidNotReceive()
+            .SetAdapterCommunicationStateAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<RtCommunicationStateEnum>());
     }
 
     [Test]
@@ -134,9 +137,12 @@ internal class PreUpdateTenantAsyncTests : AdapterServiceTestsBase
     }
 
     [Test]
-    public async Task PreUpdateTenantAsync_RepositoryThrowsException_WrapsInAdapterServiceException()
+    public async Task PreUpdateTenantAsync_CallbackThrowsAfterCacheFlush_WrapsInAdapterServiceException()
     {
-        // Arrange
+        // Arrange — there's no mass-reset of CommunicationState any more,
+        // so the only repo-touching call left is via the AdapterHubCallbacks
+        // path. Reuse the same exception-propagation contract via the
+        // callback fault path instead.
         var rtAdapter = RtEntityCreator.CreateAdapter();
 
         AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
@@ -145,8 +151,8 @@ internal class PreUpdateTenantAsyncTests : AdapterServiceTestsBase
             []
         ));
 
-        var expectedException = new InvalidOperationException("Repository failed");
-        CommunicationRepository.SetAdapterCommunicationStateAsync(TenantId, rtAdapter.ToRtEntityId(), RtCommunicationStateEnum.Unregistered)
+        var expectedException = new InvalidOperationException("Callback failed");
+        AdapterHubCallbacks.PreUpdateTenantAsync(TenantId)
             .Returns(Task.FromException(expectedException));
 
         // Act & Assert
@@ -154,15 +160,11 @@ internal class PreUpdateTenantAsyncTests : AdapterServiceTestsBase
                 await AdapterService.PreUpdateTenantAsync(TenantId))
             .Throws<AdapterServiceException>();
 
-        using var _ = Assert.Multiple();
-
         await Assert.That(exception).IsNotNull()
             .And.Member(e => e.Message, msg => msg.Contains("Pre update tenant failed"));
 
-        var innerEx = exception?.InnerException;
-        await Assert.That(innerEx).IsNotNull();
-        await Assert.That(innerEx!.InnerException).IsNotNull();
-        await Assert.That(innerEx.InnerException).IsEqualTo(expectedException);
+        await Assert.That(exception).IsNotNull()
+            .And.Member(e => e.InnerException, inner => inner.IsEqualTo(expectedException));
     }
 
     [Test]
@@ -188,20 +190,15 @@ internal class PreUpdateTenantAsyncTests : AdapterServiceTestsBase
         AdapterCache.When(x => x.RemoveTenant(TenantId))
             .Do(_ => callOrder.Add("RemoveTenant"));
 
-        CommunicationRepository.SetAdapterCommunicationStateAsync(TenantId, rtAdapter.ToRtEntityId(), RtCommunicationStateEnum.Unregistered)
-            .Returns(_ =>
-            {
-                callOrder.Add("SetAdapterCommunicationState");
-                return Task.CompletedTask;
-            });
-
         // Act
         await AdapterService.PreUpdateTenantAsync(TenantId);
 
-        // Assert
-        await Assert.That(callOrder).Count().IsEqualTo(3);
+        // Assert — callback must run before the cache flush so adapters
+        // get one last "tenant is going down" signal while the cache still
+        // lets us reach them. The repo-write step that used to follow was
+        // removed; CommunicationState is owned by the (dis)connect handlers.
+        await Assert.That(callOrder).Count().IsEqualTo(2);
         await Assert.That(callOrder[0]).IsEqualTo("PreUpdateTenantCallback");
         await Assert.That(callOrder[1]).IsEqualTo("RemoveTenant");
-        await Assert.That(callOrder[2]).IsEqualTo("SetAdapterCommunicationState");
     }
 }

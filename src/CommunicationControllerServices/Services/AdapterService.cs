@@ -845,17 +845,24 @@ internal class AdapterService(
             {
                 // Inform all adapters that tenant is going to be updated
                 await adapterHubCallbacks.PreUpdateTenantAsync(tenantId);
-                // Remove all adapters from cache, so we skip the possibility to communicate with them
+                // Remove all adapters from cache so we skip any communication
+                // attempts while the CK-cache is unloaded. The SignalR
+                // connections to adapter pods themselves are not torn down by
+                // this — they sit on the hub independently of the CK cache.
                 adapterCache.RemoveTenant(tenantId);
 
-                foreach (var adapter in adapterTenant.AdapterById.Values)
-                {
-                    await SetAdapterCommunicationStateAsync(tenantId, adapter.AdapterRtEntityId,
-                        RtCommunicationStateEnum.Unregistered);
-                }
+                // Note: we do NOT touch CommunicationState in the database
+                // here. The legacy code marked every adapter Unregistered on
+                // the assumption that the cache flush also dropped the
+                // SignalR connection — it doesn't. Live adapter pods stayed
+                // connected through the nightly tenant pre-update, so any
+                // state reset here just produced bogus "Unregistered"
+                // entries that flipped back to Online seconds later via the
+                // heartbeat. State in DB is authoritative; OnDisconnected
+                // / OnConnected callbacks own all CommunicationState writes.
 
                 await eventService.StoreInformationEventAsync(tenantId,
-                    $"Tenant pre-update completed. {adapterTenant.AdapterById.Count} adapter(s) disconnected.");
+                    $"Tenant pre-update completed. {adapterTenant.AdapterById.Count} adapter(s) flushed from cache.");
             }
         }
         catch (Exception e)
@@ -877,26 +884,14 @@ internal class AdapterService(
         {
             await _semaphore.WaitAsync();
             adapterCache.AddOrUpdateTenant(tenantId);
-            adapterCache.TryGetTenant(tenantId, out var adapterTenant);
 
-            var adapters = await communicationRepository.GetAdaptersAsync(tenantId);
-            foreach (var adapter in adapters)
-            {
-                var adapterRtEntityId = adapter.ToRtEntityId();
-
-                // Skip adapters that currently hold an active SignalR connection — marking
-                // a still-connected adapter Offline would leave the UI showing it as offline
-                // until the next reconnect, even though the adapter is healthy.
-                if (adapterTenant != null
-                    && adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var cachedAdapter)
-                    && !string.IsNullOrWhiteSpace(cachedAdapter.ConnectionId))
-                {
-                    continue;
-                }
-
-                await communicationRepository.SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId,
-                    RtCommunicationStateEnum.Offline);
-            }
+            // Note: adapter CommunicationState is intentionally NOT reset
+            // here — see PreUpdateTenantAsync above for the full rationale.
+            // The previous "Offline-if-not-in-cache" loop relied on the
+            // adapter cache having an accurate snapshot of currently-
+            // connected pods, but PreUpdate had just wiped it; the check
+            // therefore always reported "not connected" and reset every
+            // adapter's state regardless of its real connection status.
 
             await eventService.StoreInformationEventAsync(tenantId,
                 "Tenant post-update completed. Adapter cache re-initialized.");
