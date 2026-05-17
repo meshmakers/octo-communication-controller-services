@@ -436,6 +436,23 @@ controller pod restarts between deploy and cascade, the in-memory state
 is gone. Reverse-sync from a freshly (re)connecting operator's
 `RegisterOperatorAsync` would close this gap (TODO).
 
+**Workload event routing.** `NotifyWorkloadDeployedAsync` and
+`NotifyWorkloadUndeployedAsync` route only to the SignalR connection(s)
+that have registered the target `(tenantId, poolName)` via
+`RegisterPoolForConnection` — looked up through the
+`GetConnectionsForPool` helper. Pool-level events (`PoolDeployedAsync`,
+`PreUpdateTenantAsync`) still broadcast to every connected operator,
+because the central operator with `AutoManagePools=true` decides
+whether to create CRs based on the broadcast; edge operators just
+ignore it. Workload events used to broadcast too — that meant a
+central operator and an edge operator connected to the same controller
+both received every workload-deploy event. The central operator would
+happily helm-install the chart into its own namespace and report
+success, overwriting the edge operator's `success=false` on the runtime
+entity, leaving a stray release on the wrong cluster while the Studio
+showed `DeploymentState=Deployed`. The routing fix scopes workload
+events to the one operator that actually owns the target pool.
+
 Phase-3 plan in `octo-communication-operator/docs/DEPLOYMENT-MANAGEMENT-CONCEPT.md`
 covers the operator-side helm CLI integration.
 

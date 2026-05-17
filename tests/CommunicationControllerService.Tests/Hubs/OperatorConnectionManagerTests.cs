@@ -1,5 +1,6 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Microsoft.AspNetCore.SignalR;
 using NSubstitute;
 
@@ -216,5 +217,101 @@ internal class OperatorConnectionManagerTests
     {
         var sut = CreateSut();
         await Assert.That(sut.GetDeployedWorkloadsForTenant(TenantA)).IsEmpty();
+    }
+
+    // ---- Workload routing (regression for cross-cluster broadcast bug) ----
+
+    private const string ConnCentral = "conn-central";
+    private const string ConnEdge = "conn-edge";
+
+    private static (OperatorConnectionManager Sut, IHubContext<OperatorHub> Hub,
+        ISingleClientProxy CentralProxy, ISingleClientProxy EdgeProxy) CreateRoutingSut()
+    {
+        var hub = Substitute.For<IHubContext<OperatorHub>>();
+        var centralProxy = Substitute.For<ISingleClientProxy>();
+        var edgeProxy = Substitute.For<ISingleClientProxy>();
+        hub.Clients.Client(ConnCentral).Returns(centralProxy);
+        hub.Clients.Client(ConnEdge).Returns(edgeProxy);
+        return (new OperatorConnectionManager(hub), hub, centralProxy, edgeProxy);
+    }
+
+    [Test]
+    public async Task NotifyWorkloadDeployedAsync_RoutesOnlyToOperatorOwningTheTargetPool()
+    {
+        // Regression: deploying a workload assigned to an edge pool while a
+        // central operator is also connected used to fan the event out to
+        // both operators. The central operator would happily helm-install
+        // the chart in its own namespace and report success, overwriting
+        // the edge operator's failure on the runtime entity. Now workload
+        // events must hit only the operator that registered the pool.
+        var (sut, _, centralProxy, edgeProxy) = CreateRoutingSut();
+        sut.AddOperator(ConnCentral);
+        sut.AddOperator(ConnEdge);
+        sut.RegisterPoolForConnection(ConnCentral, TenantA, "cloud");
+        sut.RegisterPoolForConnection(ConnEdge, TenantA, "edge-001");
+
+        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, "edge-001", "modbus-pv"));
+
+        await edgeProxy.Received(1).SendCoreAsync(
+            nameof(IOperatorHubCallbacks.WorkloadDeployedAsync),
+            Arg.Any<object?[]>(),
+            Arg.Any<CancellationToken>());
+        await centralProxy.DidNotReceiveWithAnyArgs().SendCoreAsync(
+            default!, default!, default);
+    }
+
+    [Test]
+    public async Task NotifyWorkloadDeployedAsync_NoOperatorOwnsPool_DoesNotSend()
+    {
+        var (sut, _, centralProxy, edgeProxy) = CreateRoutingSut();
+        sut.AddOperator(ConnCentral);
+        sut.AddOperator(ConnEdge);
+        // Neither operator has claimed pool-orphan — must not fan out.
+        sut.RegisterPoolForConnection(ConnCentral, TenantA, "cloud");
+        sut.RegisterPoolForConnection(ConnEdge, TenantA, "edge-001");
+
+        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, "pool-orphan", "wl-1"));
+
+        await centralProxy.DidNotReceiveWithAnyArgs().SendCoreAsync(default!, default!, default);
+        await edgeProxy.DidNotReceiveWithAnyArgs().SendCoreAsync(default!, default!, default);
+    }
+
+    [Test]
+    public async Task NotifyWorkloadUndeployedAsync_RoutesOnlyToOperatorOwningTheTargetPool()
+    {
+        var (sut, _, centralProxy, edgeProxy) = CreateRoutingSut();
+        sut.AddOperator(ConnCentral);
+        sut.AddOperator(ConnEdge);
+        sut.RegisterPoolForConnection(ConnCentral, TenantA, "cloud");
+        sut.RegisterPoolForConnection(ConnEdge, TenantA, "edge-001");
+
+        await sut.NotifyWorkloadUndeployedAsync(new WorkloadUndeployedDto
+        {
+            TenantId = TenantA,
+            PoolName = "edge-001",
+            WorkloadName = "modbus-pv",
+            WorkloadType = WorkloadTypeDto.Adapter,
+        });
+
+        await edgeProxy.Received(1).SendCoreAsync(
+            nameof(IOperatorHubCallbacks.WorkloadUndeployedAsync),
+            Arg.Any<object?[]>(),
+            Arg.Any<CancellationToken>());
+        await centralProxy.DidNotReceiveWithAnyArgs().SendCoreAsync(
+            default!, default!, default);
+    }
+
+    [Test]
+    public async Task NotifyWorkloadDeployedAsync_TracksWorkloadEvenWhenNoOperatorRegistered()
+    {
+        // Tracking is the source of truth for the tenant-delete cascade;
+        // it must happen even when no operator currently owns the pool
+        // (e.g. the operator disconnected between deploy and cascade).
+        var sut = CreateSut();
+
+        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, PoolX, "wl-1"));
+
+        var tracked = sut.GetDeployedWorkloadsForTenant(TenantA);
+        await Assert.That(tracked.Count).IsEqualTo(1);
     }
 }
