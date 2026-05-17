@@ -97,12 +97,15 @@ public interface IPoolService
     Task SetCommunicationStateOfflineAsync(string tenantId, OctoObjectId poolRtId);
 
     /// <summary>
-    /// Sets a pool offline using the connection id
+    /// Sets a pool offline, but only if the cached pool's current connection id still
+    /// matches the supplied <paramref name="disconnectingConnectionId"/>. This guards
+    /// against stale <c>OnDisconnectedAsync</c> handlers from a previous operator
+    /// connection overwriting Online state that a newer operator has already written.
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolName">Name of pool</param>
-    /// <returns></returns>
-    Task SetCommunicationStateOfflineAsync(string tenantId, string poolName);
+    /// <param name="disconnectingConnectionId">SignalR connection id whose disconnect triggered this call</param>
+    Task SetCommunicationStateOfflineAsync(string tenantId, string poolName, string disconnectingConnectionId);
 
     /// <summary>
     /// Sets a pool online

@@ -45,16 +45,22 @@ public class OperatorHub : Hub, IOperatorHub
     /// <inheritdoc />
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
-        Logger.Info("Operator disconnected with connection id '{ConnectionId}'", Context.ConnectionId);
+        var disconnectingConnectionId = Context.ConnectionId;
+        Logger.Info("Operator disconnected with connection id '{ConnectionId}'", disconnectingConnectionId);
         // Drop the connection-level entry and reset every pool it claimed.
         // Same call site whether the disconnect was graceful (operator
         // shutdown) or a crash — the hub guarantees this fires exactly once.
-        var orphaned = _connectionManager.RemoveOperator(Context.ConnectionId);
+        // The disconnecting connection id is passed to PoolService so a stale
+        // disconnect (a previous connection's handler firing late, after a
+        // newer connection has already taken over) does not overwrite the
+        // Online state written by the newer connection.
+        var orphaned = _connectionManager.RemoveOperator(disconnectingConnectionId);
         foreach (var (tenantId, poolName) in orphaned)
         {
             try
             {
-                await _poolService.SetCommunicationStateOfflineAsync(tenantId, poolName);
+                await _poolService.SetCommunicationStateOfflineAsync(tenantId, poolName,
+                    disconnectingConnectionId);
             }
             catch (Exception ex)
             {
@@ -77,13 +83,15 @@ public class OperatorHub : Hub, IOperatorHub
     /// <inheritdoc />
     public async Task UnregisterOperatorAsync()
     {
-        Logger.Info("Operator unregistered with connection id '{ConnectionId}'", Context.ConnectionId);
-        var orphaned = _connectionManager.RemoveOperator(Context.ConnectionId);
+        var disconnectingConnectionId = Context.ConnectionId;
+        Logger.Info("Operator unregistered with connection id '{ConnectionId}'", disconnectingConnectionId);
+        var orphaned = _connectionManager.RemoveOperator(disconnectingConnectionId);
         foreach (var (tenantId, poolName) in orphaned)
         {
             try
             {
-                await _poolService.SetCommunicationStateOfflineAsync(tenantId, poolName);
+                await _poolService.SetCommunicationStateOfflineAsync(tenantId, poolName,
+                    disconnectingConnectionId);
             }
             catch (Exception ex)
             {

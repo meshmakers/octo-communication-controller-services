@@ -551,17 +551,36 @@ internal class PoolService : IPoolService
     }
 
     /// <inheritdoc />
-    public async Task SetCommunicationStateOfflineAsync(string tenantId, string poolName)
+    public async Task SetCommunicationStateOfflineAsync(string tenantId, string poolName,
+        string disconnectingConnectionId)
     {
-        if (_poolCache.TryGetTenant(tenantId, out var poolTenant))
+        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
-            poolTenant.PoolsByName.TryGetValue(poolName, out var poolDescription);
-            if (poolDescription != null)
-            {
-                poolDescription.RemoveConnectionId(tenantId);
-                await SetCommunicationStateOfflineAsync(tenantId, poolDescription.PoolRtId);
-            }
+            return;
         }
+
+        if (!poolTenant.PoolsByName.TryGetValue(poolName, out var poolDescription))
+        {
+            return;
+        }
+
+        // Stale-disconnect guard: if a newer connection has already taken over this
+        // pool (e.g. the operator reconnected after a controller restart and the old
+        // connection's OnDisconnectedAsync is only now firing), we must not flip
+        // Online → Offline. Mirrors the adapter pattern in
+        // AdapterService.SetAdapterCommunicationStateOfflineAsync.
+        if (!string.IsNullOrWhiteSpace(poolDescription.ConnectionId) &&
+            poolDescription.ConnectionId != disconnectingConnectionId)
+        {
+            Logger.Warn(
+                "[{TenantId}] ignoring stale disconnect for pool '{PoolName}': cached connection " +
+                "'{CurrentConnectionId}' has replaced disconnecting connection '{OldConnectionId}'",
+                tenantId, poolName, poolDescription.ConnectionId, disconnectingConnectionId);
+            return;
+        }
+
+        poolDescription.RemoveConnectionId(tenantId);
+        await SetCommunicationStateOfflineAsync(tenantId, poolDescription.PoolRtId);
     }
 
     /// <inheritdoc />
