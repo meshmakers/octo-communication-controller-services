@@ -95,6 +95,24 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
     private static string WorkloadKey(string poolName, string workloadName) =>
         poolName + "|" + workloadName;
 
+    /// <summary>
+    /// Returns the SignalR connection ids of every operator that has claimed
+    /// the (tenantId, poolName) tuple via <see cref="RegisterPoolForConnection"/>.
+    /// Used to route workload deploy / undeploy events to the single operator
+    /// that actually manages the target pool — central and edge operators
+    /// can both be connected to the same controller, but only one of them
+    /// owns any given pool. Broadcasting workload events to every connected
+    /// operator was the cause of stray Helm releases on the central cluster
+    /// when an edge-pool workload was deployed.
+    /// </summary>
+    private IReadOnlyList<string> GetConnectionsForPool(string tenantId, string poolName)
+    {
+        return _poolsByConnection
+            .Where(kvp => kvp.Value.ContainsKey((tenantId, poolName)))
+            .Select(kvp => kvp.Key)
+            .ToArray();
+    }
+
     public async Task NotifyPoolDeployedAsync(DeployedPoolDto pool)
     {
         // Track regardless of whether any operator is connected — when one
@@ -187,21 +205,30 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
             WorkloadType = workload.WorkloadType,
         };
 
-        if (_connectedOperators.IsEmpty)
+        // Route only to the operator(s) that actually own this pool. Workload
+        // deploys are pool-scoped: a central operator and an edge operator
+        // can both be connected to the same controller, but the workload
+        // must only be deployed by the one that manages the target pool.
+        // Broadcasting to every connected operator caused a stray Helm
+        // release on the central cluster whenever a workload assigned to an
+        // edge pool was deployed (the central operator happily ran the
+        // helm-install against its own namespace and reported success, which
+        // then overwrote the edge operator's failure on the runtime entity).
+        var targetConnections = GetConnectionsForPool(workload.TenantId, workload.PoolName);
+        if (targetConnections.Count == 0)
         {
-            Logger.Debug(
-                "No operators connected, skipping workload-deployed notification for tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}'",
-                workload.TenantId, workload.PoolName, workload.WorkloadName);
+            Logger.Warn(
+                "No operator currently owns pool '{PoolName}' for tenant '{TenantId}'; skipping workload-deployed notification for '{WorkloadName}'",
+                workload.PoolName, workload.TenantId, workload.WorkloadName);
             return;
         }
 
         Logger.Info(
             "Notifying {Count} operator(s) of workload deployed: tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}', chart '{ChartName}:{ChartVersion}'",
-            _connectedOperators.Count, workload.TenantId, workload.PoolName, workload.WorkloadName,
+            targetConnections.Count, workload.TenantId, workload.PoolName, workload.WorkloadName,
             workload.ChartName, workload.ChartVersion);
 
-        var connectionIds = _connectedOperators.Keys.ToList();
-        foreach (var connectionId in connectionIds)
+        foreach (var connectionId in targetConnections)
         {
             try
             {
@@ -256,20 +283,21 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
             }
         }
 
-        if (_connectedOperators.IsEmpty)
+        // Same pool-scoped routing as NotifyWorkloadDeployedAsync.
+        var targetConnections = GetConnectionsForPool(workload.TenantId, workload.PoolName);
+        if (targetConnections.Count == 0)
         {
-            Logger.Debug(
-                "No operators connected, skipping workload-undeployed notification for tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}'",
-                workload.TenantId, workload.PoolName, workload.WorkloadName);
+            Logger.Warn(
+                "No operator currently owns pool '{PoolName}' for tenant '{TenantId}'; skipping workload-undeployed notification for '{WorkloadName}'",
+                workload.PoolName, workload.TenantId, workload.WorkloadName);
             return;
         }
 
         Logger.Info(
             "Notifying {Count} operator(s) of workload undeployed: tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}'",
-            _connectedOperators.Count, workload.TenantId, workload.PoolName, workload.WorkloadName);
+            targetConnections.Count, workload.TenantId, workload.PoolName, workload.WorkloadName);
 
-        var connectionIds = _connectedOperators.Keys.ToList();
-        foreach (var connectionId in connectionIds)
+        foreach (var connectionId in targetConnections)
         {
             try
             {
