@@ -25,9 +25,14 @@ internal class PosUpdateTenantAsyncTests : AdapterServiceTestsBase
     }
 
     [Test]
-    public async Task PosUpdateTenantAsync_WithDisconnectedAdapters_ResetsAllAdapterCommunicationStatesToOffline()
+    public async Task PosUpdateTenantAsync_DoesNotResetAdapterCommunicationState()
     {
-        // Arrange
+        // The previous behaviour iterated every adapter in the tenant and
+        // flipped its DB state to Offline. That clobbered the Online state of
+        // pods that kept their SignalR connection across the cache flush —
+        // see PreUpdateTenantAsync for the full rationale. PosUpdate now only
+        // re-initialises the in-memory cache; CommunicationState writes are
+        // owned exclusively by the (dis)connect handlers.
         var adapter1 = RtEntityCreator.CreateAdapter();
         var adapter2 = RtEntityCreator.CreateAdapter();
         adapter1.CommunicationState = RtCommunicationStateEnum.Online;
@@ -36,77 +41,11 @@ internal class PosUpdateTenantAsyncTests : AdapterServiceTestsBase
         CommunicationRepository.GetAdaptersAsync(TenantId)
             .Returns(new[] { adapter1, adapter2 });
 
-        // Act
         await AdapterService.PosUpdateTenantAsync(TenantId);
-
-        // Assert
-        using var _ = Assert.Multiple();
-
-        await CommunicationRepository.Received(1)
-            .SetAdapterCommunicationStateAsync(TenantId, adapter1.ToRtEntityId(),
-                RtCommunicationStateEnum.Offline);
-
-        await CommunicationRepository.Received(1)
-            .SetAdapterCommunicationStateAsync(TenantId, adapter2.ToRtEntityId(),
-                RtCommunicationStateEnum.Offline);
-    }
-
-    [Test]
-    public async Task PosUpdateTenantAsync_WithConnectedAdapter_DoesNotMarkConnectedAdapterOffline()
-    {
-        // Arrange — connected adapter is in the cache with a SignalR connection id; a
-        // post-update must not falsely flip its DB state to Offline.
-        var connectedAdapter = RtEntityCreator.CreateAdapter();
-        var disconnectedAdapter = RtEntityCreator.CreateAdapter();
-
-        AdapterTenant.AddAdapter(connectedAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
-            connectedAdapter.ToRtEntityId(),
-            null,
-            []
-        ));
-
-        CommunicationRepository.GetAdaptersAsync(TenantId)
-            .Returns(new[] { connectedAdapter, disconnectedAdapter });
-
-        // Act
-        await AdapterService.PosUpdateTenantAsync(TenantId);
-
-        // Assert
-        using var _ = Assert.Multiple();
 
         await CommunicationRepository.DidNotReceive()
-            .SetAdapterCommunicationStateAsync(TenantId, connectedAdapter.ToRtEntityId(),
+            .SetAdapterCommunicationStateAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(),
                 Arg.Any<RtCommunicationStateEnum>());
-
-        await CommunicationRepository.Received(1)
-            .SetAdapterCommunicationStateAsync(TenantId, disconnectedAdapter.ToRtEntityId(),
-                RtCommunicationStateEnum.Offline);
-    }
-
-    [Test]
-    public async Task PosUpdateTenantAsync_AdapterInCacheWithoutConnectionId_IsMarkedOffline()
-    {
-        // Arrange — adapter is known to the tenant cache but has no active SignalR
-        // connection (e.g. connection id was cleared on disconnect). It must be marked Offline.
-        var adapter = RtEntityCreator.CreateAdapter();
-
-        AdapterTenant.AddAdapter(adapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
-            adapter.ToRtEntityId(),
-            null,
-            []
-        ));
-        AdapterTenant.RemoveConnectionId(adapter.ToRtEntityId());
-
-        CommunicationRepository.GetAdaptersAsync(TenantId)
-            .Returns(new[] { adapter });
-
-        // Act
-        await AdapterService.PosUpdateTenantAsync(TenantId);
-
-        // Assert
-        await CommunicationRepository.Received(1)
-            .SetAdapterCommunicationStateAsync(TenantId, adapter.ToRtEntityId(),
-                RtCommunicationStateEnum.Offline);
     }
 
     [Test]
