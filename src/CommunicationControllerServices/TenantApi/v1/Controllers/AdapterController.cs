@@ -167,10 +167,18 @@ public class AdapterController : ControllerBase
             await _adapterService.DeployAdapterConfigurationAsync(tenantId, adapterRtEntityId);
             return NoContent();
         }
+        catch (AdapterServiceException e)
+        {
+            // Includes AdapterNotLoaded (adapter pod not deployed/connected),
+            // PipelineNotFound, etc. Surface the specific service message to the
+            // client so the Studio can show the real cause instead of a generic 500.
+            _logger.LogError(e, "Error deploying adapter configuration");
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
+        }
         catch (AdapterHubCallbackException e)
         {
             _logger.LogError(e, "Error deploying adapter configuration");
-            return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
         }
     }
 }

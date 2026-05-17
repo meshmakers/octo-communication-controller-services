@@ -252,16 +252,52 @@ internal class PoolService : IPoolService
             throw PoolServiceException.WorkloadNotInPool(tenantId, workloadRtId);
         }
 
+        // Validate the workload's Helm fields up-front so we can throw a precise
+        // exception telling the user exactly what to fix. BuildWorkloadDeployedDtoAsync
+        // intentionally returns null for any missing field (silently skipped by the
+        // pool fan-out), but for an explicit user-triggered single-workload deploy
+        // the user deserves to know which field is missing.
+        await EnsureWorkloadIsHelmDeployableAsync(tenantId, workload);
+
         var dto = await BuildWorkloadDeployedDtoAsync(tenantId, poolName, workload);
         if (dto == null)
         {
-            throw PoolServiceException.WorkloadIncomplete(tenantId, workloadRtId);
+            // Should be unreachable after EnsureWorkloadIsHelmDeployableAsync, but
+            // keep the fallback so the call can never silently no-op.
+            throw PoolServiceException.WorkloadMissingChartName(tenantId, workloadRtId, workload.Name);
         }
 
         await _operatorConnectionManager.NotifyWorkloadDeployedAsync(dto);
 
         await _eventService.StoreInformationEventAsync(tenantId,
             $"Workload '{workload.Name}' deploy requested.");
+    }
+
+    /// <summary>
+    /// Throws a precise <see cref="PoolServiceException"/> when the workload is
+    /// missing any of the fields required for a Helm-based deploy: chart name,
+    /// chart version, linked HelmRepositoryConfiguration, or repository URL.
+    /// </summary>
+    private async Task EnsureWorkloadIsHelmDeployableAsync(string tenantId, RtDeployableWorkload workload)
+    {
+        if (string.IsNullOrWhiteSpace(workload.ChartName))
+        {
+            throw PoolServiceException.WorkloadMissingChartName(tenantId, workload.RtId, workload.Name);
+        }
+        if (string.IsNullOrWhiteSpace(workload.ChartVersion))
+        {
+            throw PoolServiceException.WorkloadMissingChartVersion(tenantId, workload.RtId, workload.Name);
+        }
+
+        var repo = await _communicationRepository.GetHelmRepositoryForWorkloadAsync(tenantId, workload.RtId);
+        if (repo == null)
+        {
+            throw PoolServiceException.WorkloadMissingHelmRepository(tenantId, workload.RtId, workload.Name);
+        }
+        if (string.IsNullOrWhiteSpace(repo.RepositoryUrl))
+        {
+            throw PoolServiceException.WorkloadHelmRepositoryUrlEmpty(tenantId, workload.RtId, workload.Name);
+        }
     }
 
     /// <inheritdoc />

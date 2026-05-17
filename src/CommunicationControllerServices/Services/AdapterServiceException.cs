@@ -34,7 +34,11 @@ internal class AdapterServiceException : Exception
 
     internal static Exception AdapterNotLoaded(string tenantId, RtEntityId adapterRtEntityId)
     {
-        return new AdapterServiceException($"[{tenantId}] Adapter '{adapterRtEntityId}' not loaded.");
+        return new AdapterServiceException(
+            $"[{tenantId}] Adapter '{adapterRtEntityId}' has no live SignalR connection. " +
+            "The adapter pod must be deployed and online before its pipeline configuration can be pushed. " +
+            "Deploy the adapter first via the 'Deploy Adapter' action (or 'Pool → Deploy Workload' on the API), " +
+            "then retry 'Update Configuration'.");
     }
 
     internal static Exception TenantNotEnabled(string tenantId)
