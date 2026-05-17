@@ -105,7 +105,7 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
     /// operator was the cause of stray Helm releases on the central cluster
     /// when an edge-pool workload was deployed.
     /// </summary>
-    private IReadOnlyList<string> GetConnectionsForPool(string tenantId, string poolName)
+    public IReadOnlyList<string> GetConnectionsForPool(string tenantId, string poolName)
     {
         return _poolsByConnection
             .Where(kvp => kvp.Value.ContainsKey((tenantId, poolName)))

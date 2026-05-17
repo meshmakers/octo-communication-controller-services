@@ -32,6 +32,13 @@ internal abstract class PoolServiceTestsBase
         PoolCache = Substitute.For<IPoolCache>();
         CommunicationEventService = Substitute.For<ICommunicationEventService>();
         OperatorConnectionManager = Substitute.For<IOperatorConnectionManager>();
+        // Default: no other operator connection is still claiming any pool.
+        // The multi-claim guard in SetCommunicationStateOfflineAsync needs a
+        // non-null IReadOnlyList<string> back from this call; tests that
+        // exercise the multi-claim path override the return value.
+        OperatorConnectionManager
+            .GetConnectionsForPool(Arg.Any<string>(), Arg.Any<string>())
+            .Returns(Array.Empty<string>());
         EncryptionService = Substitute.For<IWorkloadEncryptionService>();
         // Default: Decrypt passes the value through unchanged (so non-secret
         // tests don't have to set up Decrypt). Specific tests override this.
