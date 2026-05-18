@@ -373,16 +373,22 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             session.StartTransaction();
 
+            // Capture the timestamp once; the same value goes into the entity (so it lands
+            // in the DB) AND into the guard (so a stale write with an older timestamp from
+            // a parallel writer — e.g. a controller pod mid-shutdown — is rejected at the
+            // MongoDB filter level).
+            var newTimestamp = DateTime.UtcNow;
             var rtPool = new RtPool
             {
                 RtId = poolRtId,
                 CommunicationState = communicationState,
-                CommunicationStateTimestamp = DateTime.UtcNow
+                CommunicationStateTimestamp = newTimestamp
             };
 
+            var guard = new AttributeNewerThanGuard("attributes.communicationStateTimestamp", newTimestamp);
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtPool>>
             {
-                EntityUpdateInfo<RtPool>.CreateUpdate(rtPool.ToRtEntityId(), rtPool)
+                EntityUpdateInfo<RtPool>.CreateConditionalUpdate(rtPool.ToRtEntityId(), rtPool, guard)
             };
 
             OperationResult operationResult = new();
@@ -463,15 +469,22 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             session.StartTransaction();
 
+            // Capture the timestamp once; the same value goes into the entity (so it lands
+            // in the DB) AND into the guard (so a stale write with an older timestamp from
+            // a parallel writer — e.g. a controller pod mid-shutdown whose OnDisconnectedAsync
+            // commits late, after the replacement pod has already written Online — is
+            // rejected at the MongoDB filter level instead of clobbering the newer state).
+            var newTimestamp = DateTime.UtcNow;
             var rtAdapter = new RtAdapter
             {
                 CommunicationState = communicationState,
-                CommunicationStateTimestamp = DateTime.UtcNow
+                CommunicationStateTimestamp = newTimestamp
             };
 
+            var guard = new AttributeNewerThanGuard("attributes.communicationStateTimestamp", newTimestamp);
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtAdapter>>
             {
-                EntityUpdateInfo<RtAdapter>.CreateUpdate(adapterRtEntityId, rtAdapter)
+                EntityUpdateInfo<RtAdapter>.CreateConditionalUpdate(adapterRtEntityId, rtAdapter, guard)
             };
 
             OperationResult operationResult = new();
