@@ -1,7 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 enums:
 - enumId: DeploymentState
-  description: Tracks whether a deployable entity (adapter, pipeline, pool, or trigger) is currently deployed and active.
+  description: 'Tracks whether a deployable entity (adapter, application, pipeline, pool, or trigger) is currently deployed and active. Disabled means the entity cannot be deployed at all: Edge pools (no central operator CR), workloads missing Helm chart/version/repository, or pipelines/triggers whose adapter is Disabled. Deploy/Undeploy actions are rejected on Disabled entities.'
   useFlags: false
   values:
   - key: 0
@@ -12,4 +12,6 @@ enums:
     name: Deployed
   - key: 3
     name: Error
+  - key: 4
+    name: Disabled
    

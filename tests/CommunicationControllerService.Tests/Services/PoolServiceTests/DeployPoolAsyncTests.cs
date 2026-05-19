@@ -59,20 +59,151 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
     }
 
     [Test]
-    public async Task DeployPoolAsync_EdgePool_DoesNotEnumerateWorkloads()
+    public async Task DeployPoolAsync_EdgePool_ThrowsAndLeavesStateUntouched()
     {
-        // Edge pools are deployed externally; the operator must not be told to
-        // do anything for either the pool or its workloads.
+        // Edge pools cannot be Deploy-ed via this controller. The DB state
+        // must NOT be flipped to Disabled here — DeploymentState reflects
+        // physical operator state (a pool that was previously Cloud-deployed
+        // and then switched to Edge is still physically Deployed until the
+        // user runs Undeploy). The reject is precise: "EdgePoolNotDeployable",
+        // independent of current DeploymentState.
         await GivenEdgePool();
 
-        await PoolService.DeployPoolAsync(TenantId, PoolRtId);
+        var ex = await Assert.ThrowsAsync<Exception>(
+            async () => await PoolService.DeployPoolAsync(TenantId, PoolRtId));
+        await Assert.That(ex!.Message).Contains("Edge");
 
+        await CommunicationRepository.DidNotReceiveWithAnyArgs()
+            .SetPoolDeploymentStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
+                Arg.Any<RtDeploymentStateEnum>());
         await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
             .NotifyPoolDeployedAsync(Arg.Any<DeployedPoolDto>());
         await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
             .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
+    }
+
+    [Test]
+    public async Task UndeployPoolAsync_EdgePoolPreviouslyDeployed_CleansUpAndRestsAtDisabled()
+    {
+        // Cloud→Edge transition without an intermediate Undeploy leaves the
+        // pool physically Deployed in the central cluster. Undeploy must
+        // still work — notify the operator to clean up, then set the
+        // resting state to Disabled (since Environment is now Edge).
+        await GivenEdgePool();
+        var pool = (await CommunicationRepository.GetPoolsAsync(TenantId)).Single();
+        pool.DeploymentState = RtDeploymentStateEnum.Deployed;
+
+        await PoolService.UndeployPoolAsync(TenantId, PoolRtId);
+
+        await OperatorConnectionManager.Received(1)
+            .NotifyPoolUndeployedAsync(TenantId, PoolName);
+        await CommunicationRepository.Received(1).SetPoolDeploymentStateAsync(TenantId, PoolRtId,
+            RtDeploymentStateEnum.Disabled);
+    }
+
+    [Test]
+    public async Task UndeployPoolAsync_AlreadyUndeployed_ThrowsAlreadyNotDeployed()
+    {
+        // Nothing to clean up — both Undeployed and Disabled are terminal
+        // resting states.
+        await GivenCloudPool();
+        var pool = (await CommunicationRepository.GetPoolsAsync(TenantId)).Single();
+        pool.DeploymentState = RtDeploymentStateEnum.Undeployed;
+
+        var ex = await Assert.ThrowsAsync<Exception>(
+            async () => await PoolService.UndeployPoolAsync(TenantId, PoolRtId));
+        await Assert.That(ex!.Message).Contains("nothing to undeploy");
+
+        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
+            .NotifyPoolUndeployedAsync(Arg.Any<string>(), Arg.Any<string>());
+    }
+
+    [Test]
+    public async Task UndeployPoolAsync_AlreadyDisabled_ThrowsAlreadyNotDeployed()
+    {
+        await GivenEdgePool();
+        var pool = (await CommunicationRepository.GetPoolsAsync(TenantId)).Single();
+        pool.DeploymentState = RtDeploymentStateEnum.Disabled;
+
+        var ex = await Assert.ThrowsAsync<Exception>(
+            async () => await PoolService.UndeployPoolAsync(TenantId, PoolRtId));
+        await Assert.That(ex!.Message).Contains("nothing to undeploy");
+
+        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
+            .NotifyPoolUndeployedAsync(Arg.Any<string>(), Arg.Any<string>());
+    }
+
+    [Test]
+    public async Task DeployWorkloadAsync_AdapterInEdgePool_ThrowsAndLeavesStateUntouched()
+    {
+        // Same rule as for the pool itself: an Edge-pool workload may be
+        // physically Deployed from a prior valid Cloud deploy; don't lie
+        // about it. The reject is "EdgePoolNotDeployable" against the parent
+        // pool.
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        var pool = (await CommunicationRepository.GetPoolsAsync(TenantId)).Single();
+        pool.Environment = RtEnvironmentEnum.Edge;
+
+        var ex = await Assert.ThrowsAsync<Exception>(
+            async () => await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId));
+        await Assert.That(ex!.Message).Contains("Edge");
+
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
-            .GetWorkloadsForPoolAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>());
+            .SetAdapterDeploymentStateAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(),
+                Arg.Any<RtDeploymentStateEnum>(), Arg.Any<string?>());
+        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
+            .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
+    }
+
+    [Test]
+    public async Task UndeployWorkloadAsync_AdapterPreviouslyDeployedInEdgePool_CleansUpAndRestsAtDisabled()
+    {
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        var pool = (await CommunicationRepository.GetPoolsAsync(TenantId)).Single();
+        pool.Environment = RtEnvironmentEnum.Edge;
+        adapter.DeploymentState = RtDeploymentStateEnum.Deployed;
+
+        await PoolService.UndeployWorkloadAsync(TenantId, adapter.RtId);
+
+        await OperatorConnectionManager.Received(1).NotifyWorkloadUndeployedAsync(
+            Arg.Is<WorkloadUndeployedDto>(w =>
+                w.TenantId == TenantId
+                && w.PoolName == PoolName
+                && w.WorkloadName == "test-adapter"));
+        // Resting state: Disabled (Environment is Edge).
+        await CommunicationRepository.Received(1).SetAdapterDeploymentStateAsync(TenantId,
+            Arg.Is<RtEntityId>(id => id.RtId == adapter.RtId),
+            RtDeploymentStateEnum.Disabled, Arg.Any<string?>());
+    }
+
+    [Test]
+    public async Task UndeployWorkloadAsync_AdapterAlreadyUndeployed_Throws()
+    {
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        adapter.DeploymentState = RtDeploymentStateEnum.Undeployed;
+
+        var ex = await Assert.ThrowsAsync<Exception>(
+            async () => await PoolService.UndeployWorkloadAsync(TenantId, adapter.RtId));
+        await Assert.That(ex!.Message).Contains("nothing to undeploy");
+
+        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
+            .NotifyWorkloadUndeployedAsync(Arg.Any<WorkloadUndeployedDto>());
+    }
+
+    [Test]
+    public async Task UndeployWorkloadAsync_AdapterCloud_RestsAtUndeployed()
+    {
+        // Normal Cloud-pool undeploy: notify operator, rest at Undeployed.
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        adapter.DeploymentState = RtDeploymentStateEnum.Deployed;
+
+        await PoolService.UndeployWorkloadAsync(TenantId, adapter.RtId);
+
+        await OperatorConnectionManager.Received(1).NotifyWorkloadUndeployedAsync(
+            Arg.Any<WorkloadUndeployedDto>());
+        await CommunicationRepository.Received(1).SetAdapterDeploymentStateAsync(TenantId,
+            Arg.Is<RtEntityId>(id => id.RtId == adapter.RtId),
+            RtDeploymentStateEnum.Undeployed, Arg.Any<string?>());
     }
 
     [Test]
@@ -90,6 +221,10 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
     public async Task UndeployPoolAsync_CloudPool_NotifiesWorkloadsBeforePool()
     {
         await GivenCloudPool();
+        // UndeployPool requires the pool to be in a deployable state (the
+        // controller would otherwise throw PoolAlreadyNotDeployed).
+        (await CommunicationRepository.GetPoolsAsync(TenantId)).Single().DeploymentState =
+            RtDeploymentStateEnum.Deployed;
         // Pretend two workloads were tracked from an earlier deploy.
         OperatorConnectionManager.GetDeployedWorkloadsForTenant(TenantId).Returns(new[]
         {
@@ -233,6 +368,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
     public async Task UndeployWorkloadAsync_NotifiesOperator()
     {
         var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        adapter.DeploymentState = RtDeploymentStateEnum.Deployed;
 
         await PoolService.UndeployWorkloadAsync(TenantId, adapter.RtId);
 
@@ -325,6 +461,8 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
     public async Task UndeployPoolAsync_CloudPool_OnlyUndeploysWorkloadsOfThisPool()
     {
         await GivenCloudPool();
+        (await CommunicationRepository.GetPoolsAsync(TenantId)).Single().DeploymentState =
+            RtDeploymentStateEnum.Deployed;
         // Two workloads, one in a different pool — must not be undeployed here.
         OperatorConnectionManager.GetDeployedWorkloadsForTenant(TenantId).Returns(new[]
         {

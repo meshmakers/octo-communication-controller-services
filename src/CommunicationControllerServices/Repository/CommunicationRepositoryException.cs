@@ -126,6 +126,14 @@ internal class CommunicationRepositoryException : Exception
             $"[{tenantId}] Failed to set communication state of adapter '{adapterRtEntityId}' to '{state}'", exception);
     }
 
+    internal static Exception CommonFailedSetApplicationDeploymentState(string tenantId,
+        IEnumerable<RtEntityId> applicationRtEntityIds, RtDeploymentStateEnum state, Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to set deployment state of applications '{string.Join(", ", applicationRtEntityIds)}' to '{state}'",
+            exception);
+    }
+
     internal static Exception CommonFailedIsTenantExisting(string tenantId, Exception exception)
     {
         return new CommunicationRepositoryException($"[{tenantId}] Failed to check if tenant exists", exception);
