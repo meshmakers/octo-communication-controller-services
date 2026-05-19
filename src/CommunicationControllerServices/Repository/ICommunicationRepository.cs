@@ -149,6 +149,28 @@ public interface ICommunicationRepository
         RtCommunicationStateEnum communicationState);
 
     /// <summary>
+    /// Set the deployment state of an application
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="applicationRtEntityId">Object id of application</param>
+    /// <param name="deploymentState">State of application</param>
+    /// <param name="stateMessage">Optional human-readable status message, written to <c>StatusMessage</c>.</param>
+    /// <returns></returns>
+    Task SetApplicationDeploymentStateAsync(string tenantId, RtEntityId applicationRtEntityId,
+        RtDeploymentStateEnum deploymentState, string? stateMessage = null);
+
+    /// <summary>
+    /// Set the deployment state of one or more applications in a single transaction.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="applicationRtEntityIds">Object ids of applications</param>
+    /// <param name="deploymentState">State of applications</param>
+    /// <param name="stateMessage">Optional human-readable status message, written to <c>StatusMessage</c>.</param>
+    /// <returns></returns>
+    Task SetApplicationDeploymentStateAsync(string tenantId, ICollection<RtEntityId> applicationRtEntityIds,
+        RtDeploymentStateEnum deploymentState, string? stateMessage = null);
+
+    /// <summary>
     /// Gets the pool of a communication adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>

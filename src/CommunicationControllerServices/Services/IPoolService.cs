@@ -152,4 +152,22 @@ public interface IPoolService
     /// <param name="tenantId">Tenant identifier</param>
     /// <returns>List of pool summaries with typed communication, configuration, and deployment states</returns>
     Task<IReadOnlyList<PoolSummaryDto>> GetPoolSummariesAsync(string tenantId);
+
+    /// <summary>
+    /// Walks every Pool, Workload (Adapter/Application), Pipeline, and PipelineTrigger of a
+    /// tenant and recomputes their DeploymentState according to the Disabled rules:
+    /// <list type="bullet">
+    /// <item>Edge pools → Disabled (Edge pools are managed externally)</item>
+    /// <item>Workloads in Edge pools → Disabled</item>
+    /// <item>Workloads missing Helm chart name/version, Helm-repository association, or
+    /// repository URL → Disabled</item>
+    /// <item>Pipelines whose parent adapter is Disabled or missing → Disabled</item>
+    /// <item>Triggers whose triggered pipelines are all Disabled or missing → Disabled</item>
+    /// </list>
+    /// When an entity is currently Disabled but the rules no longer apply (e.g. Helm
+    /// fields were filled in), it is moved to Undeployed so the normal deploy lifecycle
+    /// can resume. Idempotent — safe to run repeatedly.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    Task RecomputeAllDeploymentStatesAsync(string tenantId);
 }

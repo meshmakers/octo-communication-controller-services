@@ -50,6 +50,12 @@ internal class PoolService : IPoolService
             throw PoolServiceException.TenantNotFoundOrNotEnabled(tenantId);
         }
 
+        // Always read the pool from the repository so we can derive the
+        // DeploymentState from its Environment (Edge → Disabled, Cloud →
+        // Deployed) regardless of whether the pool was already in cache.
+        var poolList = await _communicationRepository.GetPoolByNameAsync(tenantId, poolName);
+        var rtPool = poolList.FirstOrDefault();
+
         if (poolTenant.PoolsByName.TryGetValue(poolName, out var poolDescription))
         {
             Logger.Info("[{TenantId}] Pool '{PoolName}' already registered",
@@ -59,8 +65,6 @@ internal class PoolService : IPoolService
         }
         else
         {
-            var poolList = await _communicationRepository.GetPoolByNameAsync(tenantId, poolName);
-            var rtPool = poolList.FirstOrDefault();
             if (rtPool == null)
             {
                 Logger.Info("[{TenantId}] Creating pool '{PoolName}'",
@@ -79,9 +83,14 @@ internal class PoolService : IPoolService
             poolDescription = poolTenant.AddPool(poolName, rtPool.RtId, connectionId);
         }
 
-        // Update status in asset repository
+        // Edge pools keep their Disabled DeploymentState even when an operator
+        // connects — the external Edge operator owns the workload lifecycle
+        // and the Studio Deploy/Undeploy actions must stay greyed out.
+        var targetState = rtPool?.Environment == RtEnvironmentEnum.Edge
+            ? RtDeploymentStateEnum.Disabled
+            : RtDeploymentStateEnum.Deployed;
         await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolDescription.PoolRtId,
-            RtDeploymentStateEnum.Deployed);
+            targetState);
 
         await _eventService.StoreInformationEventAsync(tenantId,
             $"Pool operator for pool '{poolName}' registered with connection id '{connectionId}'.",
@@ -111,8 +120,17 @@ internal class PoolService : IPoolService
 
                 tenantDescription.RemovePool(poolDescription.PoolRtId);
 
+                // Edge pools stay Disabled regardless of operator presence;
+                // only Cloud pools flip back to Pending until a new operator
+                // re-registers (RegisterPoolOperatorAsync will flip them back
+                // to Deployed).
+                var poolList = await _communicationRepository.GetPoolByNameAsync(tenantId, poolName);
+                var rtPool = poolList.FirstOrDefault();
+                var targetState = rtPool?.Environment == RtEnvironmentEnum.Edge
+                    ? RtDeploymentStateEnum.Disabled
+                    : RtDeploymentStateEnum.Pending;
                 await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolDescription.PoolRtId,
-                    RtDeploymentStateEnum.Pending);
+                    targetState);
 
                 await _eventService.StoreInformationEventAsync(tenantId,
                     $"Pool operator for pool '{poolName}' unregistered.",
@@ -194,6 +212,22 @@ internal class PoolService : IPoolService
         {
             _semaphore.Release();
         }
+
+        // Outside the semaphore: recompute DeploymentState across all pools /
+        // workloads / pipelines / triggers. This is the catch-all backfill that
+        // keeps the DB in sync with the Disabled rules whenever a tenant is
+        // (re-)enabled or its CK model updated. Runs after PosUpdate so the
+        // pool cache is already re-initialised.
+        try
+        {
+            await RecomputeAllDeploymentStatesAsync(tenantId);
+        }
+        catch (Exception e)
+        {
+            // Backfill is best-effort — log but don't fail the PosUpdate handler.
+            Logger.Warn(e,
+                "[{TenantId}] DeploymentState recompute after PosUpdateTenant failed", tenantId);
+        }
     }
 
     /// <inheritdoc />
@@ -203,36 +237,39 @@ internal class PoolService : IPoolService
 
         var rtPool = await GetPoolByRtIdAsync(tenantId, poolRtId);
 
+        if (rtPool.Environment == RtEnvironmentEnum.Edge)
+        {
+            // We never ask the central operator to deploy an Edge pool. The
+            // entity's DeploymentState is left untouched here — it reflects
+            // whatever the operator last reported (e.g. Deployed if the pool
+            // was Cloud-deployed before the user switched it to Edge; the
+            // user must call Undeploy to clean those resources up). The
+            // backfill takes care of moving Undeployed Edge pools to
+            // Disabled separately.
+            throw PoolServiceException.EdgePoolNotDeployable(tenantId, poolRtId, rtPool.Name);
+        }
+
+        var poolName = rtPool.Name ?? string.Empty;
+        Logger.Info(
+            "[{TenantId}] Pool '{PoolName}' is Cloud — notifying central Communication Operator",
+            tenantId, poolName);
+        await _operatorConnectionManager.NotifyPoolDeployedAsync(new DeployedPoolDto
+        {
+            TenantId = tenantId,
+            PoolName = poolName,
+        });
+
         await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolRtId,
             RtDeploymentStateEnum.Deployed);
 
-        if (rtPool.Environment == RtEnvironmentEnum.Cloud)
-        {
-            var poolName = rtPool.Name ?? string.Empty;
-            Logger.Info(
-                "[{TenantId}] Pool '{PoolName}' is Cloud — notifying central Communication Operator",
-                tenantId, poolName);
-            await _operatorConnectionManager.NotifyPoolDeployedAsync(new DeployedPoolDto
-            {
-                TenantId = tenantId,
-                PoolName = poolName,
-            });
-
-            // Note: workloads are NOT auto-deployed here. Users (or callers)
-            // trigger DeployWorkloadAsync per workload explicitly — this lets
-            // the pool's CommunicationState turn Online first, so any issue
-            // with the pool itself is visible before any helm install runs.
-            // Use case: smoke-test a fresh pool, then phase adapter deploys.
-        }
-        else
-        {
-            Logger.Info(
-                "[{TenantId}] Pool '{PoolName}' is Edge — operator notification skipped, install the pool externally",
-                tenantId, (rtPool.Name ?? string.Empty));
-        }
+        // Note: workloads are NOT auto-deployed here. Users (or callers)
+        // trigger DeployWorkloadAsync per workload explicitly — this lets
+        // the pool's CommunicationState turn Online first, so any issue
+        // with the pool itself is visible before any helm install runs.
+        // Use case: smoke-test a fresh pool, then phase adapter deploys.
 
         await _eventService.StoreInformationEventAsync(tenantId,
-            $"Pool '{(rtPool.Name ?? string.Empty)}' deployed (environment: {rtPool.Environment}).");
+            $"Pool '{poolName}' deployed.");
     }
 
     /// <inheritdoc />
@@ -246,10 +283,19 @@ internal class PoolService : IPoolService
             throw PoolServiceException.WorkloadNotFound(tenantId, workloadRtId);
         }
 
-        var poolName = await ResolvePoolNameForWorkloadAsync(tenantId, workload);
-        if (poolName == null)
+        var pool = await _communicationRepository.GetPoolForWorkloadAsync(tenantId, workload.RtId);
+        if (pool == null)
         {
             throw PoolServiceException.WorkloadNotInPool(tenantId, workloadRtId);
+        }
+
+        if (pool.Environment == RtEnvironmentEnum.Edge)
+        {
+            // Edge-pool workloads are deployed by the external Edge operator,
+            // not the central one — reject without touching DeploymentState
+            // (which may legitimately be Deployed from a prior Cloud deploy
+            // that has not been cleaned up yet).
+            throw PoolServiceException.EdgePoolNotDeployable(tenantId, pool.RtId, pool.Name);
         }
 
         // Validate the workload's Helm fields up-front so we can throw a precise
@@ -259,6 +305,7 @@ internal class PoolService : IPoolService
         // the user deserves to know which field is missing.
         await EnsureWorkloadIsHelmDeployableAsync(tenantId, workload);
 
+        var poolName = pool.Name ?? string.Empty;
         var dto = await BuildWorkloadDeployedDtoAsync(tenantId, poolName, workload);
         if (dto == null)
         {
@@ -269,8 +316,45 @@ internal class PoolService : IPoolService
 
         await _operatorConnectionManager.NotifyWorkloadDeployedAsync(dto);
 
+        // Set Pending immediately so a re-deploy is visible in the UI — e.g.
+        // the user updates the chart version on a currently-Deployed adapter
+        // and clicks Deploy: without this write the state would stay Deployed
+        // throughout and the user would see no feedback that the helm-upgrade
+        // actually ran. The operator's ReportWorkloadDeploymentStatusAsync
+        // round-trip flips this to Deployed (success) or Error (failure)
+        // within a few seconds.
+        await SetWorkloadDeploymentStateAsync(tenantId, workload, RtDeploymentStateEnum.Pending);
+
         await _eventService.StoreInformationEventAsync(tenantId,
             $"Workload '{workload.Name}' deploy requested.");
+    }
+
+    private async Task SetWorkloadDeploymentStateAsync(string tenantId, RtDeployableWorkload workload,
+        RtDeploymentStateEnum deploymentState)
+    {
+        switch (workload)
+        {
+            case RtAdapter:
+                {
+                    var rtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, workload.RtId);
+                    await _communicationRepository.SetAdapterDeploymentStateAsync(tenantId, rtEntityId, deploymentState);
+                    break;
+                }
+            case RtApplication:
+                {
+                    var rtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkApplicationTypeId, workload.RtId);
+                    await _communicationRepository.SetApplicationDeploymentStateAsync(tenantId, rtEntityId, deploymentState);
+                    break;
+                }
+            default:
+                // Defensive — if a new DeployableWorkload subtype is added without a
+                // dedicated setter, we'd silently skip the write. Make that visible
+                // in the log instead of looking like the write succeeded.
+                Logger.Warn(
+                    "[{TenantId}] No DeploymentState setter for workload of type '{Type}' (RtId '{RtId}'); skipping",
+                    tenantId, workload.GetType().Name, workload.RtId);
+                break;
+        }
     }
 
     /// <summary>
@@ -311,24 +395,47 @@ internal class PoolService : IPoolService
             throw PoolServiceException.WorkloadNotFound(tenantId, workloadRtId);
         }
 
-        var poolName = await ResolvePoolNameForWorkloadAsync(tenantId, workload);
-        if (poolName == null)
+        var pool = await _communicationRepository.GetPoolForWorkloadAsync(tenantId, workload.RtId);
+        if (pool == null)
         {
             throw PoolServiceException.WorkloadNotInPool(tenantId, workloadRtId);
         }
 
+        // Reject when there's nothing to undeploy. Both Undeployed and
+        // Disabled are terminal resting states — no helm release to remove.
+        if (workload.DeploymentState == RtDeploymentStateEnum.Undeployed ||
+            workload.DeploymentState == RtDeploymentStateEnum.Disabled)
+        {
+            throw PoolServiceException.WorkloadAlreadyNotDeployed(tenantId, workloadRtId, workload.Name,
+                workload.DeploymentState);
+        }
+
+        // Always go through the central-operator cleanup path even when
+        // Environment is now Edge or Helm fields have since been cleared —
+        // a helm release may still exist from a prior valid Deploy that
+        // has not been cleaned up yet.
         await _operatorConnectionManager.NotifyWorkloadUndeployedAsync(new WorkloadUndeployedDto
         {
             TenantId = tenantId,
-            PoolName = poolName,
+            PoolName = pool.Name ?? string.Empty,
             WorkloadName = workload.Name ?? string.Empty,
             WorkloadType = workload is RtApplication
                 ? WorkloadTypeDto.Application
                 : WorkloadTypeDto.Adapter,
         });
 
+        // Compute resting state. If the workload can no longer be deployed
+        // (Edge or missing Helm fields), park it at Disabled; otherwise
+        // Undeployed so a fresh deploy can be triggered.
+        var ruleSaysDisabled = pool.Environment == RtEnvironmentEnum.Edge
+                               || !await IsWorkloadHelmDeployableAsync(tenantId, workload);
+        var restingState = ruleSaysDisabled
+            ? RtDeploymentStateEnum.Disabled
+            : RtDeploymentStateEnum.Undeployed;
+        await SetWorkloadDeploymentStateAsync(tenantId, workload, restingState);
+
         await _eventService.StoreInformationEventAsync(tenantId,
-            $"Workload '{workload.Name}' undeploy requested.");
+            $"Workload '{workload.Name}' undeploy requested (resting state: {restingState}).");
     }
 
     /// <summary>
@@ -349,26 +456,41 @@ internal class PoolService : IPoolService
 
         var rtPool = await GetPoolByRtIdAsync(tenantId, poolRtId);
 
-        if (rtPool.Environment == RtEnvironmentEnum.Cloud)
+        // Reject when there's nothing to undeploy. Both Undeployed and
+        // Disabled are terminal resting states — the operator has no CR /
+        // broker secret to remove.
+        if (rtPool.DeploymentState == RtDeploymentStateEnum.Undeployed ||
+            rtPool.DeploymentState == RtDeploymentStateEnum.Disabled)
         {
-            var poolName = rtPool.Name ?? string.Empty;
-
-            // Helm uninstall managed workloads before tearing down the pool
-            // itself — the operator removes the CommunicationPool CR last so
-            // it can still resolve the pool's namespace while uninstalling.
-            await UndeployManagedWorkloadsAsync(tenantId, poolName);
-
-            Logger.Info(
-                "[{TenantId}] Pool '{PoolName}' is Cloud — notifying central Communication Operator to clean up",
-                tenantId, poolName);
-            await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, poolName);
+            throw PoolServiceException.PoolAlreadyNotDeployed(tenantId, poolRtId, rtPool.Name,
+                rtPool.DeploymentState);
         }
 
-        await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolRtId,
-            RtDeploymentStateEnum.Undeployed);
+        var poolName = rtPool.Name ?? string.Empty;
+
+        // Helm uninstall managed workloads before tearing down the pool
+        // itself — the operator removes the CommunicationPool CR last so
+        // it can still resolve the pool's namespace while uninstalling.
+        // We always go through the central-operator cleanup path even when
+        // Environment is now Edge: the user may have switched a Cloud pool
+        // to Edge without first undeploying, and the CR/secret still exists
+        // in the central cluster and must be removed.
+        await UndeployManagedWorkloadsAsync(tenantId, poolName);
+
+        Logger.Info(
+            "[{TenantId}] Pool '{PoolName}': notifying central Communication Operator to clean up (Environment={Environment})",
+            tenantId, poolName, rtPool.Environment);
+        await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, poolName);
+
+        // Resting state after undeploy: Disabled when the pool can no longer
+        // be deployed via this controller (Edge), else Undeployed.
+        var restingState = rtPool.Environment == RtEnvironmentEnum.Edge
+            ? RtDeploymentStateEnum.Disabled
+            : RtDeploymentStateEnum.Undeployed;
+        await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolRtId, restingState);
 
         await _eventService.StoreInformationEventAsync(tenantId,
-            $"Pool '{(rtPool.Name ?? string.Empty)}' undeployed (environment: {rtPool.Environment}).");
+            $"Pool '{poolName}' undeployed (resting state: {restingState}).");
     }
 
     private async Task DeployManagedWorkloadsAsync(string tenantId, OctoObjectId poolRtId, string poolName)
@@ -752,5 +874,244 @@ internal class PoolService : IPoolService
             CommunicationStateTimestamp = p.CommunicationStateTimestamp,
             StatusMessage = p.StatusMessage
         }).ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task RecomputeAllDeploymentStatesAsync(string tenantId)
+    {
+        Logger.Info("[{TenantId}] Recomputing all deployment states", tenantId);
+
+        var poolsUpdated = 0;
+        var workloadsUpdated = 0;
+        var pipelinesUpdated = 0;
+        var triggersUpdated = 0;
+
+        // 1) Pools: Edge → Disabled, Cloud → leave (controller-managed lifecycle)
+        IReadOnlyCollection<RtPool> pools;
+        try
+        {
+            pools = await _communicationRepository.GetPoolsAsync(tenantId);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn(ex, "[{TenantId}] Failed to enumerate pools during deployment-state recompute", tenantId);
+            return;
+        }
+
+        // Track adapter Disabled state so pipelines can inherit it without an extra DB hit per pipeline.
+        var disabledAdapterRtIds = new HashSet<OctoObjectId>();
+
+        foreach (var pool in pools)
+        {
+            try
+            {
+                // Only flip resting states. A pool currently Deployed/Pending/Error
+                // owns real operator resources (CommunicationPool CR, broker secret)
+                // and must stay until an explicit Undeploy. The user who switches a
+                // Cloud pool to Edge while it is Deployed sees Deployed correctly
+                // and can clean up via the Undeploy command.
+                if (pool.DeploymentState == RtDeploymentStateEnum.Undeployed ||
+                    pool.DeploymentState == RtDeploymentStateEnum.Disabled)
+                {
+                    var poolTarget = pool.Environment == RtEnvironmentEnum.Edge
+                        ? RtDeploymentStateEnum.Disabled
+                        : RtDeploymentStateEnum.Undeployed;
+                    if (poolTarget != pool.DeploymentState)
+                    {
+                        await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, pool.RtId, poolTarget);
+                        poolsUpdated++;
+                    }
+                }
+
+                // 2) Workloads in this pool
+                var workloads = await _communicationRepository.GetWorkloadsForPoolAsync(tenantId, pool.RtId);
+                foreach (var workload in workloads)
+                {
+                    var target = await ComputeWorkloadTargetStateAsync(tenantId, workload, pool);
+                    if (target.HasValue && target.Value != workload.DeploymentState)
+                    {
+                        await SetWorkloadDeploymentStateAsync(tenantId, workload, target.Value);
+                        workloadsUpdated++;
+                    }
+
+                    // Track adapters that ended up (or stayed) Disabled so pipelines
+                    // can inherit. A Deployed adapter — even one in an Edge pool
+                    // post-env-switch — is still physically running, so its pipelines
+                    // are not inherited-Disabled.
+                    var endStateIsDisabled = (target ?? workload.DeploymentState) == RtDeploymentStateEnum.Disabled;
+                    if (workload is RtAdapter && endStateIsDisabled)
+                    {
+                        disabledAdapterRtIds.Add(workload.RtId);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn(ex,
+                    "[{TenantId}] Failed to recompute deployment state for pool '{PoolName}' or its workloads",
+                    tenantId, pool.Name ?? pool.RtId.ToString());
+            }
+        }
+
+        // 3) Pipelines: Disabled if no adapter or adapter is Disabled
+        IReadOnlyCollection<RtPipeline> pipelines;
+        try
+        {
+            pipelines = await _communicationRepository.GetAllPipelinesAsync(tenantId);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn(ex, "[{TenantId}] Failed to enumerate pipelines during deployment-state recompute", tenantId);
+            pipelines = Array.Empty<RtPipeline>();
+        }
+
+        var disabledPipelineRtIds = new HashSet<OctoObjectId>();
+        foreach (var pipeline in pipelines)
+        {
+            try
+            {
+                var pipelineRtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipeline.RtId);
+                var adapter = await _communicationRepository.GetAdapterByPipelineAsync(tenantId, pipelineRtEntityId);
+
+                var ruleSaysDisabled = adapter == null || disabledAdapterRtIds.Contains(adapter.RtId);
+
+                // Only touch resting states — a Deployed pipeline is physically pushed
+                // to a running adapter and must be Undeployed via the proper command,
+                // not silently flipped.
+                if (pipeline.DeploymentState == RtDeploymentStateEnum.Undeployed ||
+                    pipeline.DeploymentState == RtDeploymentStateEnum.Disabled)
+                {
+                    var target = ruleSaysDisabled
+                        ? RtDeploymentStateEnum.Disabled
+                        : RtDeploymentStateEnum.Undeployed;
+                    if (target != pipeline.DeploymentState)
+                    {
+                        await _communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
+                            pipelineRtEntityId, target, null);
+                        pipelinesUpdated++;
+                    }
+                }
+
+                // Pipeline is treated as "currently effectively disabled" for trigger
+                // inheritance only when it actually ended up Disabled.
+                var endState = pipeline.DeploymentState == RtDeploymentStateEnum.Undeployed ||
+                               pipeline.DeploymentState == RtDeploymentStateEnum.Disabled
+                    ? (ruleSaysDisabled ? RtDeploymentStateEnum.Disabled : RtDeploymentStateEnum.Undeployed)
+                    : pipeline.DeploymentState;
+                if (endState == RtDeploymentStateEnum.Disabled)
+                {
+                    disabledPipelineRtIds.Add(pipeline.RtId);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn(ex,
+                    "[{TenantId}] Failed to recompute deployment state for pipeline '{PipelineRtId}'",
+                    tenantId, pipeline.RtId);
+            }
+        }
+
+        // 4) Triggers: Disabled if no pipelines or every triggered pipeline is Disabled
+        IDictionary<RtPipelineTrigger, IList<RtPipeline>> triggersAndPipelines;
+        try
+        {
+            triggersAndPipelines = await _communicationRepository.GetTriggersAndPipelinesAsync(tenantId);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn(ex, "[{TenantId}] Failed to enumerate triggers during deployment-state recompute", tenantId);
+            triggersAndPipelines = new Dictionary<RtPipelineTrigger, IList<RtPipeline>>();
+        }
+
+        foreach (var (trigger, triggeredPipelines) in triggersAndPipelines)
+        {
+            try
+            {
+                // Only flip resting states — a Deployed trigger has its cron schedule
+                // live in the trigger management service and must be removed via the
+                // proper Undeploy path.
+                if (trigger.DeploymentState != RtDeploymentStateEnum.Undeployed &&
+                    trigger.DeploymentState != RtDeploymentStateEnum.Disabled)
+                {
+                    continue;
+                }
+
+                var hasRunnablePipeline = triggeredPipelines.Any(p =>
+                    !disabledPipelineRtIds.Contains(p.RtId));
+                var ruleSaysDisabled = triggeredPipelines.Count == 0 || !hasRunnablePipeline;
+
+                var target = ruleSaysDisabled
+                    ? RtDeploymentStateEnum.Disabled
+                    : RtDeploymentStateEnum.Undeployed;
+                if (target != trigger.DeploymentState)
+                {
+                    await _communicationRepository.SetPipelineTriggerDeploymentStateAsync(tenantId, trigger.RtId,
+                        target);
+                    triggersUpdated++;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn(ex,
+                    "[{TenantId}] Failed to recompute deployment state for trigger '{TriggerRtId}'",
+                    tenantId, trigger.RtId);
+            }
+        }
+
+        if (poolsUpdated + workloadsUpdated + pipelinesUpdated + triggersUpdated > 0)
+        {
+            await _eventService.StoreInformationEventAsync(tenantId,
+                $"DeploymentState recompute: pools {poolsUpdated}, workloads {workloadsUpdated}, " +
+                $"pipelines {pipelinesUpdated}, triggers {triggersUpdated} updated.");
+        }
+
+        Logger.Info(
+            "[{TenantId}] Deployment-state recompute done: pools {Pools}, workloads {Workloads}, " +
+            "pipelines {Pipelines}, triggers {Triggers}",
+            tenantId, poolsUpdated, workloadsUpdated, pipelinesUpdated, triggersUpdated);
+    }
+
+    /// <summary>
+    /// Computes the target DeploymentState for a workload at backfill time. Returns
+    /// <c>null</c> when the current state must be left untouched — most notably for
+    /// any operator-managed state (Deployed / Pending / Error), which reflects actual
+    /// physical state and must not be silently overwritten. Only <c>Undeployed ↔
+    /// Disabled</c> flips are allowed at backfill time. Anything operator-managed
+    /// transitions to Disabled only via the Undeploy command path.
+    /// </summary>
+    private async Task<RtDeploymentStateEnum?> ComputeWorkloadTargetStateAsync(string tenantId,
+        RtDeployableWorkload workload, RtPool pool)
+    {
+        // Only touch resting states. Deployed/Pending/Error must stay — those reflect
+        // real operator-managed resources in the cluster, regardless of whether the
+        // Edge / missing-Helm rules currently say "should be Disabled".
+        if (workload.DeploymentState != RtDeploymentStateEnum.Undeployed &&
+            workload.DeploymentState != RtDeploymentStateEnum.Disabled)
+        {
+            return null;
+        }
+
+        var ruleSaysDisabled = pool.Environment == RtEnvironmentEnum.Edge
+                               || !await IsWorkloadHelmDeployableAsync(tenantId, workload);
+
+        return ruleSaysDisabled
+            ? RtDeploymentStateEnum.Disabled
+            : RtDeploymentStateEnum.Undeployed;
+    }
+
+    /// <summary>
+    /// Non-throwing companion to <see cref="EnsureWorkloadIsHelmDeployableAsync"/>: returns
+    /// <c>true</c> iff the workload has all Helm fields (ChartName, ChartVersion, an associated
+    /// HelmRepositoryConfiguration with a non-empty RepositoryUrl). Used by the backfill to
+    /// classify entities without throwing.
+    /// </summary>
+    private async Task<bool> IsWorkloadHelmDeployableAsync(string tenantId, RtDeployableWorkload workload)
+    {
+        if (string.IsNullOrWhiteSpace(workload.ChartName)) return false;
+        if (string.IsNullOrWhiteSpace(workload.ChartVersion)) return false;
+
+        var repo = await _communicationRepository.GetHelmRepositoryForWorkloadAsync(tenantId, workload.RtId);
+        if (repo == null) return false;
+        return !string.IsNullOrWhiteSpace(repo.RepositoryUrl);
     }
 }

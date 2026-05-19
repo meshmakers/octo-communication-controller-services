@@ -160,19 +160,49 @@ public class OperatorHub : Hub, IOperatorHub
             return;
         }
 
-        // The hub currently only carries Adapter workloads (Applications use
-        // the same flow but their CK type isn't routed through this method
-        // yet — see Phase-3 plan). Build the entity id as RtAdapter.
-        var rtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId,
-            new OctoObjectId(status.WorkloadRtId));
         var newState = status.Success
             ? RtDeploymentStateEnum.Deployed
             : RtDeploymentStateEnum.Error;
 
         try
         {
-            await _communicationRepository.SetAdapterDeploymentStateAsync(
-                status.TenantId, rtEntityId, newState, status.StatusMessage);
+            // The DTO doesn't carry the workload's CK type, so we read the
+            // entity to discover whether it's an Adapter or Application and
+            // route to the matching repository setter. (Earlier this method
+            // always wrote to the Adapter setter — Application status reports
+            // never landed in MongoDB and the UI stayed stuck at Pending.)
+            var workloadRtId = new OctoObjectId(status.WorkloadRtId);
+            var workload = await _communicationRepository.GetWorkloadByRtIdAsync(status.TenantId, workloadRtId);
+            if (workload == null)
+            {
+                Logger.Warn(
+                    "Workload '{WorkloadRtId}' (tenant '{TenantId}') reported deployment status but no entity exists in the repository; skipping",
+                    status.WorkloadRtId, status.TenantId);
+                return;
+            }
+
+            switch (workload)
+            {
+                case RtApplication:
+                    {
+                        var rtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkApplicationTypeId, workloadRtId);
+                        await _communicationRepository.SetApplicationDeploymentStateAsync(
+                            status.TenantId, rtEntityId, newState, status.StatusMessage);
+                        break;
+                    }
+                case RtAdapter:
+                    {
+                        var rtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, workloadRtId);
+                        await _communicationRepository.SetAdapterDeploymentStateAsync(
+                            status.TenantId, rtEntityId, newState, status.StatusMessage);
+                        break;
+                    }
+                default:
+                    Logger.Warn(
+                        "Workload '{WorkloadRtId}' (tenant '{TenantId}') is of unsupported type '{Type}'; skipping status persist",
+                        status.WorkloadRtId, status.TenantId, workload.GetType().Name);
+                    break;
+            }
         }
         catch (Exception ex)
         {

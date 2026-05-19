@@ -459,6 +459,54 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
+    public async Task SetApplicationDeploymentStateAsync(string tenantId, RtEntityId applicationRtEntityId,
+        RtDeploymentStateEnum deploymentState, string? stateMessage = null)
+    {
+        await SetApplicationDeploymentStateAsync(tenantId, [applicationRtEntityId], deploymentState, stateMessage);
+    }
+
+    public async Task SetApplicationDeploymentStateAsync(string tenantId, ICollection<RtEntityId> applicationRtEntityIds,
+        RtDeploymentStateEnum deploymentState, string? stateMessage = null)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var rtApplication = new RtApplication
+            {
+                DeploymentState = deploymentState,
+                StatusMessage = stateMessage
+            };
+
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtApplication>>();
+            foreach (var applicationRtEntityId in applicationRtEntityIds)
+            {
+                entityUpdateInfoList.Add(EntityUpdateInfo<RtApplication>.CreateUpdate(applicationRtEntityId, rtApplication));
+            }
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedSetApplicationDeploymentState(tenantId,
+                applicationRtEntityIds, deploymentState, e);
+        }
+    }
+
     public async Task SetAdapterCommunicationStateAsync(string tenantId, RtEntityId adapterRtEntityId,
         RtCommunicationStateEnum communicationState)
     {

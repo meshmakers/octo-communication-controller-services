@@ -33,9 +33,33 @@ internal class ReportWorkloadDeploymentStatusAsyncTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    [Test]
-    public async Task Success_WritesDeployedStateAndNoMessage()
+    private void GivenAdapterInRepository()
     {
+        var adapter = new RtAdapter
+        {
+            RtId = new OctoObjectId(WorkloadRtId),
+            CkTypeId = SystemCommunicationCkIds.RtCkAdapterTypeId,
+        };
+        _repository.GetWorkloadByRtIdAsync(TenantId, Arg.Is<OctoObjectId>(id => id.ToString() == WorkloadRtId))
+            .Returns(adapter);
+    }
+
+    private void GivenApplicationInRepository()
+    {
+        var application = new RtApplication
+        {
+            RtId = new OctoObjectId(WorkloadRtId),
+            CkTypeId = SystemCommunicationCkIds.RtCkApplicationTypeId,
+        };
+        _repository.GetWorkloadByRtIdAsync(TenantId, Arg.Is<OctoObjectId>(id => id.ToString() == WorkloadRtId))
+            .Returns(application);
+    }
+
+    [Test]
+    public async Task Success_OnAdapter_WritesDeployedStateAndNoMessage()
+    {
+        GivenAdapterInRepository();
+
         await _hub.ReportWorkloadDeploymentStatusAsync(new WorkloadDeploymentStatusDto
         {
             TenantId = TenantId,
@@ -55,8 +79,38 @@ internal class ReportWorkloadDeploymentStatusAsyncTests : IDisposable
     }
 
     [Test]
+    public async Task Success_OnApplication_RoutesToApplicationSetter()
+    {
+        // Regression test: previously every status report was unconditionally
+        // routed to SetAdapterDeploymentStateAsync — Application status reports
+        // never landed in MongoDB and the Studio UI stayed Pending forever.
+        GivenApplicationInRepository();
+
+        await _hub.ReportWorkloadDeploymentStatusAsync(new WorkloadDeploymentStatusDto
+        {
+            TenantId = TenantId,
+            PoolName = "cloud",
+            WorkloadName = "meshtest-app",
+            WorkloadRtId = WorkloadRtId,
+            Success = true,
+        });
+
+        await _repository.Received(1).SetApplicationDeploymentStateAsync(
+            TenantId,
+            Arg.Is<RtEntityId>(id =>
+                id.CkTypeId == SystemCommunicationCkIds.RtCkApplicationTypeId
+                && id.RtId.ToString() == WorkloadRtId),
+            RtDeploymentStateEnum.Deployed,
+            null);
+        await _repository.DidNotReceiveWithAnyArgs().SetAdapterDeploymentStateAsync(
+            Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<RtDeploymentStateEnum>(), Arg.Any<string?>());
+    }
+
+    [Test]
     public async Task Failure_WritesErrorStateAndForwardsMessage()
     {
+        GivenAdapterInRepository();
+
         await _hub.ReportWorkloadDeploymentStatusAsync(new WorkloadDeploymentStatusDto
         {
             TenantId = TenantId,
@@ -96,8 +150,28 @@ internal class ReportWorkloadDeploymentStatusAsyncTests : IDisposable
     }
 
     [Test]
+    public async Task WorkloadEntityNotFound_SkipsRepositoryWrite()
+    {
+        // Repository returns null (default) — the entity has been deleted
+        // between the operator's deploy and the status report. Nothing to
+        // persist; log a warning and move on.
+        await _hub.ReportWorkloadDeploymentStatusAsync(new WorkloadDeploymentStatusDto
+        {
+            TenantId = TenantId,
+            WorkloadRtId = WorkloadRtId,
+            Success = true,
+        });
+
+        await _repository.DidNotReceiveWithAnyArgs().SetAdapterDeploymentStateAsync(
+            Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<RtDeploymentStateEnum>(), Arg.Any<string?>());
+        await _repository.DidNotReceiveWithAnyArgs().SetApplicationDeploymentStateAsync(
+            Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<RtDeploymentStateEnum>(), Arg.Any<string?>());
+    }
+
+    [Test]
     public async Task RepositoryThrows_SwallowsException()
     {
+        GivenAdapterInRepository();
         _repository
             .SetAdapterDeploymentStateAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(),
                 Arg.Any<RtDeploymentStateEnum>(), Arg.Any<string?>())

@@ -1,4 +1,5 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
@@ -91,6 +92,30 @@ internal class PoolServiceException : Exception
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': " +
             "the linked Helm repository has an empty 'Repository URL'. Open the HelmRepositoryConfiguration " +
             "entity in the Studio and set a chart-repository URL (e.g. 'https://charts.meshmakers.cloud').");
+    }
+
+    internal static Exception EdgePoolNotDeployable(string tenantId, OctoObjectId poolRtId, string? poolName)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Pool '{poolName ?? poolRtId.ToString()}' has Environment=Edge — Deploy is not available. " +
+            "Edge pools are installed and run by an external operator outside the central cluster; only Cloud pools " +
+            "can be deployed from this controller.");
+    }
+
+    internal static Exception PoolAlreadyNotDeployed(string tenantId, OctoObjectId poolRtId, string? poolName,
+        RtDeploymentStateEnum currentState)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Pool '{poolName ?? poolRtId.ToString()}' is '{currentState}' — there is nothing to undeploy. " +
+            "Undeploy is only valid when the pool is Deployed, Pending, or in Error.");
+    }
+
+    internal static Exception WorkloadAlreadyNotDeployed(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName, RtDeploymentStateEnum currentState)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Workload '{workloadName ?? workloadRtId.ToString()}' is '{currentState}' — there is nothing to undeploy. " +
+            "Undeploy is only valid when the workload is Deployed, Pending, or in Error.");
     }
 }
 
