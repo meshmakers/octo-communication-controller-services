@@ -289,14 +289,12 @@ internal class PoolService : IPoolService
             throw PoolServiceException.WorkloadNotInPool(tenantId, workloadRtId);
         }
 
-        if (pool.Environment == RtEnvironmentEnum.Edge)
-        {
-            // Edge-pool workloads are deployed by the external Edge operator,
-            // not the central one — reject without touching DeploymentState
-            // (which may legitimately be Deployed from a prior Cloud deploy
-            // that has not been cleaned up yet).
-            throw PoolServiceException.EdgePoolNotDeployable(tenantId, pool.RtId, pool.Name);
-        }
+        // Workloads in Edge pools are deployable: NotifyWorkloadDeployedAsync
+        // routes via RegisterPoolForConnection to whichever operator (central
+        // or edge) registered the pool, and OperatorHubService.WorkloadDeployedAsync
+        // runs the same helm upgrade --install path in either mode. Only the
+        // pool itself (CR + broker secret) is central-cluster-only and rejected
+        // in DeployPoolAsync.
 
         // Validate the workload's Helm fields up-front so we can throw a precise
         // exception telling the user exactly what to fix. BuildWorkloadDeployedDtoAsync
@@ -425,13 +423,12 @@ internal class PoolService : IPoolService
         });
 
         // Compute resting state. If the workload can no longer be deployed
-        // (Edge or missing Helm fields), park it at Disabled; otherwise
-        // Undeployed so a fresh deploy can be triggered.
-        var ruleSaysDisabled = pool.Environment == RtEnvironmentEnum.Edge
-                               || !await IsWorkloadHelmDeployableAsync(tenantId, workload);
-        var restingState = ruleSaysDisabled
-            ? RtDeploymentStateEnum.Disabled
-            : RtDeploymentStateEnum.Undeployed;
+        // (missing Helm fields), park it at Disabled; otherwise Undeployed so a
+        // fresh deploy can be triggered. Edge pools are NOT a disabling rule —
+        // an edge operator deploys workloads via the same helm path as central.
+        var restingState = await IsWorkloadHelmDeployableAsync(tenantId, workload)
+            ? RtDeploymentStateEnum.Undeployed
+            : RtDeploymentStateEnum.Disabled;
         await SetWorkloadDeploymentStateAsync(tenantId, workload, restingState);
 
         await _eventService.StoreInformationEventAsync(tenantId,
@@ -1084,19 +1081,21 @@ internal class PoolService : IPoolService
     {
         // Only touch resting states. Deployed/Pending/Error must stay — those reflect
         // real operator-managed resources in the cluster, regardless of whether the
-        // Edge / missing-Helm rules currently say "should be Disabled".
+        // missing-Helm rule currently says "should be Disabled".
         if (workload.DeploymentState != RtDeploymentStateEnum.Undeployed &&
             workload.DeploymentState != RtDeploymentStateEnum.Disabled)
         {
             return null;
         }
 
-        var ruleSaysDisabled = pool.Environment == RtEnvironmentEnum.Edge
-                               || !await IsWorkloadHelmDeployableAsync(tenantId, workload);
+        // Edge pools are NOT a disabling rule for workloads (only for the pool
+        // itself) — an edge operator deploys workloads via the same helm path
+        // as the central operator. Only missing Helm fields disable a workload.
+        _ = pool;
 
-        return ruleSaysDisabled
-            ? RtDeploymentStateEnum.Disabled
-            : RtDeploymentStateEnum.Undeployed;
+        return await IsWorkloadHelmDeployableAsync(tenantId, workload)
+            ? RtDeploymentStateEnum.Undeployed
+            : RtDeploymentStateEnum.Disabled;
     }
 
     /// <summary>

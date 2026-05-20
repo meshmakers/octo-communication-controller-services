@@ -134,30 +134,35 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
     }
 
     [Test]
-    public async Task DeployWorkloadAsync_AdapterInEdgePool_ThrowsAndLeavesStateUntouched()
+    public async Task DeployWorkloadAsync_AdapterInEdgePool_NotifiesOperatorAndFlipsToPending()
     {
-        // Same rule as for the pool itself: an Edge-pool workload may be
-        // physically Deployed from a prior valid Cloud deploy; don't lie
-        // about it. The reject is "EdgePoolNotDeployable" against the parent
-        // pool.
+        // Edge pools are deployable at the workload level — the edge operator
+        // receives WorkloadDeployedAsync via RegisterPoolForConnection routing
+        // and runs the same helm upgrade --install path as the central operator.
+        // Only the pool itself (CR + broker secret) is central-cluster-only.
         var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
         var pool = (await CommunicationRepository.GetPoolsAsync(TenantId)).Single();
         pool.Environment = RtEnvironmentEnum.Edge;
 
-        var ex = await Assert.ThrowsAsync<Exception>(
-            async () => await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId));
-        await Assert.That(ex!.Message).Contains("Edge");
+        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
-        await CommunicationRepository.DidNotReceiveWithAnyArgs()
-            .SetAdapterDeploymentStateAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(),
-                Arg.Any<RtDeploymentStateEnum>(), Arg.Any<string?>());
-        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
-            .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
+        await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
+            Arg.Is<WorkloadDeployedDto>(d =>
+                d.TenantId == TenantId
+                && d.PoolName == PoolName
+                && d.WorkloadName == "test-adapter"));
+        await CommunicationRepository.Received(1).SetAdapterDeploymentStateAsync(TenantId,
+            Arg.Is<RtEntityId>(id => id.RtId == adapter.RtId),
+            RtDeploymentStateEnum.Pending, Arg.Any<string?>());
     }
 
     [Test]
-    public async Task UndeployWorkloadAsync_AdapterPreviouslyDeployedInEdgePool_CleansUpAndRestsAtDisabled()
+    public async Task UndeployWorkloadAsync_AdapterPreviouslyDeployedInEdgePool_CleansUpAndRestsAtUndeployed()
     {
+        // Edge alone is no longer a disabling rule for workloads — the edge
+        // operator deploys workloads via the same helm path as central, so
+        // a re-deploy is possible. Resting state is Undeployed (the workload
+        // still has its Helm fields), not Disabled.
         var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
         var pool = (await CommunicationRepository.GetPoolsAsync(TenantId)).Single();
         pool.Environment = RtEnvironmentEnum.Edge;
@@ -170,10 +175,9 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
                 w.TenantId == TenantId
                 && w.PoolName == PoolName
                 && w.WorkloadName == "test-adapter"));
-        // Resting state: Disabled (Environment is Edge).
         await CommunicationRepository.Received(1).SetAdapterDeploymentStateAsync(TenantId,
             Arg.Is<RtEntityId>(id => id.RtId == adapter.RtId),
-            RtDeploymentStateEnum.Disabled, Arg.Any<string?>());
+            RtDeploymentStateEnum.Undeployed, Arg.Any<string?>());
     }
 
     [Test]

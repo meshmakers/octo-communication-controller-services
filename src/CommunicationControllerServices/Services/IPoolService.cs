@@ -158,9 +158,10 @@ public interface IPoolService
     /// tenant and recomputes their DeploymentState according to the Disabled rules:
     /// <list type="bullet">
     /// <item>Edge pools → Disabled (Edge pools are managed externally)</item>
-    /// <item>Workloads in Edge pools → Disabled</item>
     /// <item>Workloads missing Helm chart name/version, Helm-repository association, or
-    /// repository URL → Disabled</item>
+    /// repository URL → Disabled (independent of pool Environment — edge operators
+    /// deploy workloads via the same helm path as central, so Edge alone does not
+    /// disable a workload)</item>
     /// <item>Pipelines whose parent adapter is Disabled or missing → Disabled</item>
     /// <item>Triggers whose triggered pipelines are all Disabled or missing → Disabled</item>
     /// </list>
