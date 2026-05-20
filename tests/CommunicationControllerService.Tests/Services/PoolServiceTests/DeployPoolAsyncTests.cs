@@ -291,16 +291,28 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
     }
 
     [Test]
-    public async Task DeployWorkloadAsync_ApplicationWorkload_AlwaysDefaultsReceivesClusterSecretsToFalse()
+    public async Task DeployWorkloadAsync_ApplicationWithReceivesClusterSecretsFalse_DefaultsDtoFlagToFalse()
     {
-        // ReceivesClusterSecrets lives on Adapter only. Applications do not
-        // carry the attribute and must always come through as false.
-        var (_, application) = await GivenCloudPoolWithApplication();
+        var (_, application) = await GivenCloudPoolWithApplication(receivesClusterSecrets: false);
 
         await PoolService.DeployWorkloadAsync(TenantId, application.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(d => !d.ReceivesClusterSecrets));
+    }
+
+    [Test]
+    public async Task DeployWorkloadAsync_ApplicationWithReceivesClusterSecretsTrue_PropagatesFlagToDto()
+    {
+        // Applications with a backend (e.g. energy-community, voest-app) opt
+        // in to cluster-credential injection via the same flag as adapters —
+        // the attribute lives on DeployableWorkload so both types carry it.
+        var (_, application) = await GivenCloudPoolWithApplication(receivesClusterSecrets: true);
+
+        await PoolService.DeployWorkloadAsync(TenantId, application.RtId);
+
+        await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
+            Arg.Is<WorkloadDeployedDto>(d => d.ReceivesClusterSecrets));
     }
 
     [Test]
@@ -423,7 +435,8 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         return (rtPool, adapter);
     }
 
-    private async Task<(RtPool Pool, RtApplication Application)> GivenCloudPoolWithApplication()
+    private async Task<(RtPool Pool, RtApplication Application)> GivenCloudPoolWithApplication(
+        bool receivesClusterSecrets = false)
     {
         var rtPool = new RtPool
         {
@@ -442,6 +455,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
             ChartName = "test-app",
             ChartVersion = "0.0.1",
             ValuesYaml = string.Empty,
+            ReceivesClusterSecrets = receivesClusterSecrets,
         };
         CommunicationRepository.GetWorkloadsForPoolAsync(TenantId, PoolRtId)
             .Returns(new RtDeployableWorkload[] { application });

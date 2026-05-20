@@ -16,8 +16,6 @@ types:
       isOptional: true
     - id: ${this}/LastSyncedSequenceNumber
       name: LastSyncedSequenceNumber
-    - id: ${this}/ReceivesClusterSecrets
-      name: ReceivesClusterSecrets
   # Manages → Pool moved up to DeployableWorkload, so Application inherits the
   # same association. Existing runtime entities of type Adapter retain their
   # Manages relations because the association role id is unchanged.

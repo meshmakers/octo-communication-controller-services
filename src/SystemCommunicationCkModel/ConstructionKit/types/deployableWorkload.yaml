@@ -17,6 +17,8 @@ types:
     - id: ${this}/Values
       name: Values
       isOptional: true
+    - id: ${this}/ReceivesClusterSecrets
+      name: ReceivesClusterSecrets
   associations:
     # Dedicated association role for the workload-to-Helm-repo link.
     # Reusing the generic "Uses" role would override the inverse usedBy view
