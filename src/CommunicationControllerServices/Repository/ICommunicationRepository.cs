@@ -51,6 +51,24 @@ public interface ICommunicationRepository
         OctoObjectId workloadRtId);
 
     /// <summary>
+    /// Lists every <see cref="RtDeployableWorkload"/> in the tenant whose
+    /// <c>ChartName</c> equals <paramref name="chartName"/>. Returns an
+    /// empty collection when the chart is not used in this tenant — the
+    /// CI/CD rollout flow (Epic 3054) uses this to skip tenants silently.
+    /// </summary>
+    Task<IReadOnlyCollection<RtDeployableWorkload>> GetWorkloadsByChartNameAsync(string tenantId,
+        string chartName);
+
+    /// <summary>
+    /// Sets <c>ChartVersion</c> on a single workload. Returns the previous
+    /// version so callers can log a meaningful audit event. Throws when
+    /// the workload does not exist.
+    /// </summary>
+    /// <returns>The chart version the workload had before the update.</returns>
+    Task<string?> UpdateWorkloadChartVersionAsync(string tenantId, OctoObjectId workloadRtId,
+        string newChartVersion);
+
+    /// <summary>
     /// Gets a list of initialized communication adapter of the given tenant
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>

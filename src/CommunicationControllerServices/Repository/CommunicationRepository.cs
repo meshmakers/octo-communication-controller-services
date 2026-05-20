@@ -155,6 +155,65 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyCollection<RtDeployableWorkload>> GetWorkloadsByChartNameAsync(string tenantId,
+        string chartName)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            // RtDeployableWorkload is abstract; the runtime engine returns
+            // the concrete RtAdapter / RtApplication polymorphically. CI/CD
+            // callers don't care about the subtype — they just need ChartName +
+            // ChartVersion + RtId, all of which are on the base type.
+            var queryOptions = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtDeployableWorkload.ChartName), FieldFilterOperator.Equals, chartName);
+            var resultSet = await tenantRepository
+                .GetRtEntitiesByTypeAsync<RtDeployableWorkload>(session, queryOptions);
+            return resultSet.Items.ToList();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingAdapters(tenantId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<string?> UpdateWorkloadChartVersionAsync(string tenantId, OctoObjectId workloadRtId,
+        string newChartVersion)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            // Load → mutate → replace. ReplaceOne preserves the concrete CK type
+            // (RtAdapter vs RtApplication) since we operate on the polymorphic
+            // base. No transactional commit needed — single-document write.
+            var workload = await tenantRepository.GetRtEntityByRtIdAsync<RtDeployableWorkload>(session, workloadRtId);
+            if (workload == null)
+            {
+                throw CommunicationRepositoryException.CommonFailedGettingAdapters(tenantId, workloadRtId,
+                    new InvalidOperationException($"Workload '{workloadRtId}' not found"));
+            }
+
+            var previousVersion = workload.ChartVersion;
+            workload.ChartVersion = newChartVersion;
+            await tenantRepository.ReplaceOneRtEntityByIdAsync(session, workloadRtId, workload);
+            return previousVersion;
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingAdapters(tenantId, workloadRtId, e);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyCollection<RtAdapter>> GetAdaptersAsync(string tenantId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
