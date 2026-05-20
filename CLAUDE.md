@@ -498,6 +498,34 @@ throw AdapterServiceException.TenantNotEnabled(tenantId);
 
 Each service has a dedicated exception class: `AdapterServiceException`, `PoolServiceException`, `PipelineDebugServiceException`, `TriggerManagementServiceException`, `PipelineExecutionServiceException`, `CommunicationRepositoryException`.
 
+## Workload Chart Management (Phase 2 — Epic 3054 / #4052)
+
+`TenantApi/v1/Controllers/WorkloadController.cs` exposes two endpoints used
+by the CI/CD rollout flow described in
+`docs/concepts/cicd-workload-deployment.md`:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET`   | `{tenantId}/v1/workload?chartName=…` | Returns `WorkloadSummaryDto[]` — every `RtDeployableWorkload` (Adapter or Application) whose `ChartName` matches. Empty array means "this tenant has no exposure to the chart", which CI scripts use as the silent-skip signal. |
+| `PATCH` | `{tenantId}/v1/workload/{workloadRtId}/chart-version` body `{ "chartVersion": "1.2.3" }` | Validates the version is a non-empty SemVer (`MAJOR.MINOR.PATCH[-prerelease][+build]`), updates the entity through `ICommunicationRepository.UpdateWorkloadChartVersionAsync`, and writes an `Information` event via `ICommunicationEventService` with the source tag `(source: CI/CD)`. |
+
+Auth: read-only / read-write tenant communication policies (same as
+`PoolController`).
+
+**Deploy is intentionally a separate call.** `WorkloadController` writes the
+chart version into MongoDB but never triggers a Helm rollout. The CI pipeline
+calls `POST /pool/workloads/deploy?workloadRtId=…` (existing) after the PATCH
+when it wants the operator to pick up the change. Splitting the two lets
+operators stage version writes across many tenants before flipping the deploy
+switch.
+
+**Repository surface** (`ICommunicationRepository`):
+- `GetWorkloadsByChartNameAsync(tenantId, chartName)` — polymorphic
+  `RtDeployableWorkload` lookup by `ChartName` field filter.
+- `UpdateWorkloadChartVersionAsync(tenantId, workloadRtId, newChartVersion)`
+  — load-mutate-replace; returns the previous version so the audit event
+  can include the before/after.
+
 ## Cache Architecture
 
 Caches use a dual-interface pattern for separation of concerns:
