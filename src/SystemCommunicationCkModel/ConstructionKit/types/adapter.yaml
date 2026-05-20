@@ -11,6 +11,12 @@ types:
       name: CommunicationState
     - id: ${this}/ConfigurationState
       name: ConfigurationState
+    - id: ${this}/LastConfigurationError
+      name: LastConfigurationError
+      isOptional: true
+    - id: ${this}/LastConfigurationErrorTimestamp
+      name: LastConfigurationErrorTimestamp
+      isOptional: true
     - id: ${this}/AdapterConfiguration
       name: Configuration
       isOptional: true

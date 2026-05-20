@@ -16,3 +16,9 @@ types:
   - id: ${this}/StatusMessage
     name: StatusMessage
     isOptional: true
+  - id: ${this}/LastDeploymentError
+    name: LastDeploymentError
+    isOptional: true
+  - id: ${this}/LastDeploymentErrorTimestamp
+    name: LastDeploymentErrorTimestamp
+    isOptional: true
