@@ -491,6 +491,7 @@ internal class CommunicationRepository : ICommunicationRepository
                 DeploymentState = deploymentState,
                 StatusMessage = stateMessage
             };
+            ApplyDeploymentErrorTracking(rtAdapter, deploymentState, stateMessage);
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtAdapter>>();
             foreach (var adapterRtEntityId in adapterRtEntityIds)
@@ -539,6 +540,7 @@ internal class CommunicationRepository : ICommunicationRepository
                 DeploymentState = deploymentState,
                 StatusMessage = stateMessage
             };
+            ApplyDeploymentErrorTracking(rtApplication, deploymentState, stateMessage);
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtApplication>>();
             foreach (var applicationRtEntityId in applicationRtEntityIds)
@@ -921,6 +923,7 @@ internal class CommunicationRepository : ICommunicationRepository
                 DeploymentState = deploymentState,
                 StatusMessage = stateMessage
             };
+            ApplyDeploymentErrorTracking(pipeline, deploymentState, stateMessage);
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtPipeline>>
             {
@@ -1180,6 +1183,7 @@ internal class CommunicationRepository : ICommunicationRepository
                 ConfigurationState = configurationState,
                 StatusMessage = stateMessage
             };
+            ApplyConfigurationErrorTracking(rtAdapter, configurationState, stateMessage);
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtAdapter>>
             {
@@ -1984,6 +1988,69 @@ internal class CommunicationRepository : ICommunicationRepository
         catch (Exception e)
         {
             throw CommunicationRepositoryException.CommonFailedGetAllPipelines(tenantId, e);
+        }
+    }
+
+    #endregion
+
+    #region Last-error tracking helpers
+
+    /// <summary>
+    /// Applies the persistent last-deployment-error policy to <paramref name="entity"/>.
+    /// <para>
+    /// Behaviour by target state:
+    /// <list type="bullet">
+    ///   <item>Error      → write LastDeploymentError = message (or "(no message)") and timestamp = now.</item>
+    ///   <item>Deployed   → clear both fields (the deploy has succeeded; the previous failure is resolved).</item>
+    ///   <item>Other      → leave fields untouched so the user keeps seeing the failure context across
+    ///                      transient intermediate states like Pending or operator-driven Undeployed /
+    ///                      Disabled transitions.</item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// This is the persistent counterpart to <c>StatusMessage</c>, which the existing call sites
+    /// still overwrite on every state change. The split was introduced because the operator
+    /// reports a successful redeploy with a null status message — silently wiping any previous
+    /// error context from the UI.
+    /// </para>
+    /// </summary>
+    private static void ApplyDeploymentErrorTracking(RtDeployableEntity entity,
+        RtDeploymentStateEnum deploymentState, string? stateMessage)
+    {
+        if (deploymentState == RtDeploymentStateEnum.Error)
+        {
+            entity.LastDeploymentError = string.IsNullOrWhiteSpace(stateMessage)
+                ? "(no message)"
+                : stateMessage;
+            entity.LastDeploymentErrorTimestamp = DateTime.UtcNow;
+        }
+        else if (deploymentState == RtDeploymentStateEnum.Deployed)
+        {
+            entity.LastDeploymentError = null;
+            entity.LastDeploymentErrorTimestamp = null;
+        }
+    }
+
+    /// <summary>
+    /// Mirrors <see cref="ApplyDeploymentErrorTracking"/> for an adapter's configuration state.
+    /// Configuration and deployment failures are tracked on independent fields so a successful
+    /// deploy never masks an unrelated configuration error (and vice versa) — the conflation of
+    /// the two on a single <c>StatusMessage</c> field was the original UX bug this split fixes.
+    /// </summary>
+    private static void ApplyConfigurationErrorTracking(RtAdapter adapter,
+        RtConfigurationStateEnum configurationState, string? stateMessage)
+    {
+        if (configurationState == RtConfigurationStateEnum.Error)
+        {
+            adapter.LastConfigurationError = string.IsNullOrWhiteSpace(stateMessage)
+                ? "(no message)"
+                : stateMessage;
+            adapter.LastConfigurationErrorTimestamp = DateTime.UtcNow;
+        }
+        else if (configurationState == RtConfigurationStateEnum.Configured)
+        {
+            adapter.LastConfigurationError = null;
+            adapter.LastConfigurationErrorTimestamp = null;
         }
     }
 
