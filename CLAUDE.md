@@ -498,6 +498,16 @@ throw AdapterServiceException.TenantNotEnabled(tenantId);
 
 Each service has a dedicated exception class: `AdapterServiceException`, `PoolServiceException`, `PipelineDebugServiceException`, `TriggerManagementServiceException`, `PipelineExecutionServiceException`, `CommunicationRepositoryException`.
 
+## CI/CD Workload Rollout E2E
+
+Manual end-to-end validation of the Epic 3054 rollout flow on the
+`test-2` cluster lives at `docs/E2E-CICD-WORKLOAD-ROLLOUT.md`. Run after
+non-trivial changes in `WorkloadController`, `ICommunicationRepository`'s
+workload methods, `octo-cli` workload commands, or the deploy-workload
+pipeline template. Companion to the operator-side smoke test
+(`octo-communication-operator/docs/E2E-SMOKE-TEST.md`); the two together
+cover the whole pool→workload deploy path.
+
 ## Workload Chart Management (Phase 2 — Epic 3054 / #4052)
 
 `TenantApi/v1/Controllers/WorkloadController.cs` exposes two endpoints used
