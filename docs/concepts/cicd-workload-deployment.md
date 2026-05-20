@@ -624,6 +624,10 @@ and trigger independently from their own CI.
 - Verify a deliberately broken chart version fails only the affected
   tenant.
 
+**Runbook**: `octo-communication-controller-services/docs/E2E-CICD-WORKLOAD-ROLLOUT.md`
+captures the full manual procedure (prerequisites, four steps with
+expected output, sign-off checklist).
+
 ## Open questions (for the CI/CD phases)
 
 - **Nested customer sub-tenants**: `GetChildTenantsAsync` is one level deep.
