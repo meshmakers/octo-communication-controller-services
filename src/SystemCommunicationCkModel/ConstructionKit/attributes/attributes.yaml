@@ -37,7 +37,19 @@ attributes:
     - ""
 - id: StatusMessage
   valueType: String
-  description: Human-readable status or error message from the last deployment or configuration attempt.
+  description: Human-readable status or error message from the last deployment or configuration attempt. Reflects the current/live status — overwritten on every state change including successful transitions. For persistent error history, use LastDeploymentError / LastConfigurationError.
+- id: LastDeploymentError
+  valueType: String
+  description: Last deployment error message. Set when DeploymentState transitions to Error, cleared automatically when DeploymentState transitions to Deployed. Other state transitions (Pending, Undeployed) leave this field untouched so the user can see the most recent deployment failure cause until a successful deploy resolves it.
+- id: LastDeploymentErrorTimestamp
+  valueType: DateTime
+  description: Timestamp of the LastDeploymentError. Set when LastDeploymentError is set, cleared when LastDeploymentError is cleared.
+- id: LastConfigurationError
+  valueType: String
+  description: Last configuration error message. Set when ConfigurationState transitions to Error, cleared automatically when ConfigurationState transitions to Configured. Other state transitions (Pending, Unconfigured) leave this field untouched. Tracked separately from LastDeploymentError because configuration and deployment errors have independent root causes and must not mask each other.
+- id: LastConfigurationErrorTimestamp
+  valueType: DateTime
+  description: Timestamp of the LastConfigurationError. Set when LastConfigurationError is set, cleared when LastConfigurationError is cleared.
 - id: SenderEmail
   valueType: String
   description: Email address used as the sender (From) for outgoing emails.
