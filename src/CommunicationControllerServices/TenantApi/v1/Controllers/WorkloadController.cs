@@ -145,22 +145,3 @@ public class WorkloadController : ControllerBase
             @"^\d+\.\d+\.\d+(?:-[0-9A-Za-z\.-]+)?(?:\+[0-9A-Za-z\.-]+)?$");
     }
 }
-
-/// <summary>
-/// Body for <see cref="WorkloadController.UpdateChartVersion"/>.
-/// </summary>
-public sealed record UpdateChartVersionDto(string ChartVersion);
-
-/// <summary>
-/// Subset of <see cref="RtDeployableWorkload"/> exposed by
-/// <see cref="WorkloadController.Get"/>. Carries the fields a CI script needs
-/// to drive a rollout — enough to skip the tenant when empty, or to PATCH the
-/// chart version and POST the deploy when present.
-/// </summary>
-public sealed record WorkloadSummaryDto(
-    string RtId,
-    string Name,
-    string CkTypeId,
-    string ChartName,
-    string CurrentChartVersion,
-    string DeploymentState);
