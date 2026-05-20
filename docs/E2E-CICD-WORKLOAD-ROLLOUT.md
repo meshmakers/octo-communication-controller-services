@@ -48,7 +48,7 @@ mirror provisioning).
 | Epic 3054 Phase 2 (#4052) deployed | Communication Controller version with `WorkloadController` (`GET /workload?chartName=…` returns 200 / empty array, not 404) |
 | CI deploy client mirrored in every test-2 sub-tenant | `octo-cli -c GetClientMirrors -id ci-deploy-test-2` lists all expected sub-tenants |
 | Vault entries | `secret/meshmakers/test-2/octomesh` has `ci_deploy_client_id` + `ci_deploy_client_secret` |
-| ADO variable group `OctoDefault` | Has `IDENTITY_URL_test-2` / `ASSET_URL_test-2` / `COMM_URL_test-2` |
+| ADO variable group `OctoWorkloadRollout` | Has `IDENTITY_URL_test-2` / `ASSET_URL_test-2` / `COMM_URL_test-2` |
 | `octo-cli-CI` pipeline artifact `octo-cli-linux-x64` | Latest run on `main` published the zip (the deploy-workload template downloads from there) |
 | Per-chart wrappers imported in ADO | `deploy-adapter-chart-octo-mesh-adapter` and `deploy-app-energy-community` exist as ADO pipelines and have completed one successful manual run (required for ADO to activate resource triggers) |
 | At least one Adapter using `octo-mesh-adapter` chart in `acme` and `voest` test tenants | Studio: open each tenant → Adapters → confirm `ChartName=octo-mesh-adapter` |
