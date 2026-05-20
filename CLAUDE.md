@@ -453,6 +453,16 @@ entity, leaving a stray release on the wrong cluster while the Studio
 showed `DeploymentState=Deployed`. The routing fix scopes workload
 events to the one operator that actually owns the target pool.
 
+**Edge vs. Cloud at the workload layer.** `DeployPoolAsync` rejects Edge
+pools (the central operator does not create the CR / broker secret on the
+edge cluster), but `DeployWorkloadAsync` and `UndeployWorkloadAsync` are
+Environment-agnostic. The edge operator runs `OperatorHubService.WorkloadDeployedAsync`
+through the same `WorkloadReconciler.DeployAsync` helm path as central —
+only the pool-level CR/secret side effect is central-only (`AutoManagePools`
+on the operator). The Recompute / Undeploy resting-state rules therefore
+consider only missing Helm fields when deciding Disabled vs. Undeployed
+for a workload, never the parent pool's Environment.
+
 Phase-3 plan in `octo-communication-operator/docs/DEPLOYMENT-MANAGEMENT-CONCEPT.md`
 covers the operator-side helm CLI integration.
 
