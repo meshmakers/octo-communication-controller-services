@@ -6,7 +6,8 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Resources;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Contracts.BlueprintCatalogs;
+using Meshmakers.Octo.Runtime.Contracts.Blueprints;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
@@ -29,7 +30,8 @@ internal class DefaultConfigurationCreatorService(
     IAdapterCachePublish adapterCachePublish,
     IAdapterService adapterService,
     FailedTenantRegistry failedTenantRegistry,
-    ICommunicationEventService communicationEventService)
+    ICommunicationEventService communicationEventService,
+    IBlueprintService blueprintService)
     : DefaultConfigurationCreatorServiceStandardized(logger, systemContext, createIdentityDataCommandClient,
         Constants.CommunicationControllerServiceIdentityDataVersionKey,
         Constants.CommunicationControllerServiceIdentityDataVersionValue,
@@ -50,15 +52,21 @@ internal class DefaultConfigurationCreatorService(
 
     protected override async Task ImportCkModelAsync(IOctoAdminSession session, ITenantContext tenantContext)
     {
-        if (!await tenantContext.IsCkModelExistingAsync(SystemCommunicationCkIds.CkModelId))
+        // The Communication CK model + initial Pool/Adapter seed entities are now packaged together
+        // in the Communication-1.0.0 blueprint. Applying the blueprint resolves the
+        // `ckModelDependencies` (System.Communication-[3.0,4.0)) and imports the CK model first,
+        // then upserts the seed entities — so the explicit ImportCkModelAsync that used to live
+        // here is no longer needed. The blueprint runner is idempotent: re-apply on a tenant that
+        // already has the same version is a no-op (unless `force` is set).
+        var blueprintId = new BlueprintId("Communication-1.0.0");
+
+        var result = await blueprintService.ApplyBlueprintAsync(tenantContext.TenantId, blueprintId);
+        if (!result.IsSuccess)
         {
-            OperationResult operationResult = new();
-            await tenantContext.ImportCkModelAsync(SystemCommunicationCkIds.CkModelId, operationResult);
-            if (operationResult.HasErrors || operationResult.HasFatalErrors)
-            {
-                throw InitializationException.ImportCkModelFailed(tenantContext.TenantId,
-                    operationResult.GetMessages());
-            }
+            // Surface every error as a single InitializationException; the tenant-lifecycle layer
+            // will route this through OnTenantStartFailedAsync and into the audit log.
+            throw InitializationException.ImportCkModelFailed(tenantContext.TenantId,
+                result.OperationResult.GetMessages());
         }
     }
 
