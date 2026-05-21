@@ -1,0 +1,21 @@
+$schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
+blueprintId: HelloCommunication-1.0.0
+description: |
+  Optional demo blueprint that adds a single-node hello-world Pipeline to the
+  Adapter shipped by the service-managed System.Communication blueprint. Apply
+  this on top of System.Communication to get an immediate, plakativ end-to-end
+  signal — trigger the pipeline manually and the Logger node writes a hello
+  banner to the adapter log. Install only on demo or training tenants; not
+  intended for production.
+
+  This blueprint is admin-installable: it lives outside the embedded service
+  package so it can be picked up by a regular catalog (LocalFileSystem, GitHub).
+  Drop this folder into a catalog's blueprint root to publish it.
+
+blueprintDependencies:
+  - System.Communication-[1.0,2.0)
+
+# CK model dependencies are inherited via the System.Communication dependency;
+# the engine resolves the transitive closure on apply.
+
+seedDataPath: seed-data/entities.yaml

@@ -1,0 +1,15 @@
+$schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
+blueprintId: System.Communication-1.0.0
+description: |
+  Service-managed base blueprint for the Communication module. Seeds a Cloud-environment
+  Pool and one managed Adapter on the active tenant so a freshly enabled tenant has a
+  working deployment target without manually wiring the two entities. The OctoMesh
+  convention "System.* = service-managed" applies: this blueprint is auto-applied by
+  the Communication Controller on tenant enable / startup, and Studio surfaces it as
+  read-only. The optional HelloCommunication blueprint (shipped through regular
+  catalogs, not embedded) sits on top and adds a hello-world Pipeline for demos.
+
+ckModelDependencies:
+  - System.Communication-[3.0,4.0)
+
+seedDataPath: seed-data/entities.yaml
