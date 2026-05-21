@@ -128,7 +128,13 @@ try
         });
 
     builder.Services.AddRuntimeEngine()
-        .AddMongoDbRuntimeRepository();
+        .AddMongoDbRuntimeRepository()
+        // Persist blueprint installations + history as System.BlueprintInstallation /
+        // System.BlueprintHistory CK entities in the tenant database. Without this the engine
+        // defaults to in-memory stores — the apply succeeds and Mongo gets the seed entities,
+        // but no installation row is recorded, so Studio can't list the tenant's blueprints and
+        // the per-startup auto-update can't detect "already applied at this version".
+        .AddMongoBlueprintSupport();
 
     builder.Services.AddCkModelSystemCommunicationV3();
 
