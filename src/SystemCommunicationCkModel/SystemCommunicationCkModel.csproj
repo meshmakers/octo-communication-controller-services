@@ -36,4 +36,15 @@
     <ItemGroup>
         <ConstructionKitFolder Visible="false" Include="$(MSBuildProjectDirectory)\ConstructionKit"/>
     </ItemGroup>
+
+    <ItemGroup>
+        <!--
+            Blueprints shipped with this CK-model package. The BlueprintEmbed MSBuild task picks
+            up every subdirectory and embeds the files as manifest resources; the
+            BlueprintSourceGenerator then emits IBlueprintEmbeddedSource + AddBlueprint<Name>V<Major>
+            extensions so consuming services only need to call the generated DI extensions and the
+            engine's EmbeddedResourceBlueprintCatalog handles the rest.
+        -->
+        <BlueprintFolder Visible="false" Include="$(MSBuildProjectDirectory)\Blueprints"/>
+    </ItemGroup>
 </Project>

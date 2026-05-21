@@ -1,0 +1,49 @@
+$schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+dependencies:
+  - System.Communication-3.0.0
+entities:
+  # ---------------------------------------------------------------------------
+  # Pipeline — Hello-world pipeline that logs a single message when triggered.
+  # Uses FromPipelineTriggerEvent@1 as the trigger so it can be fired manually
+  # from the Studio's pipeline detail page (or via the
+  # TriggerManagementService API) without any external HTTP setup. The Logger@1
+  # transformation writes the message to the adapter log; check the adapter
+  # logs after a manual trigger to see the hello message.
+  #
+  # Targets the MeshAdapter (rtId 670000000000000000000002) seeded by the base
+  # Communication blueprint. This blueprint declares Communication as a
+  # dependency, so the engine applies that one first and the Adapter exists by
+  # the time this seed runs.
+  # ---------------------------------------------------------------------------
+  - rtId: 670000000000000000000003
+    ckTypeId: System.Communication/Pipeline
+    rtWellKnownName: HelloWorldPipeline
+    associations:
+      # Pipeline → Adapter. The adapter executes the pipeline once deployed.
+      - roleId: System.Communication/Executes
+        targetRtId: 670000000000000000000002
+        targetCkTypeId: System.Communication/Adapter
+    attributes:
+      - id: System/Name
+        value: Hello World Pipeline
+      - id: System/Description
+        value: >-
+          Single-node logging pipeline created by the HelloCommunication
+          blueprint. Trigger it manually from the Studio to verify the adapter
+          is connected and executing — the Logger node writes a hello message
+          to the adapter log on every run.
+      - id: System/Enabled
+        value: true
+      - id: System.Communication/DeploymentState
+        value: 0   # Undeployed — deploy the adapter first, then the pipeline
+      - id: System.Communication/IsDebuggingEnabled
+        value: false
+      - id: System.Communication/PipelineDefinition
+        value: >-
+          triggers:
+            - type: FromPipelineTriggerEvent@1
+              description: Manual trigger — fire from Studio or the TriggerManagementService API.
+          transformations:
+            - type: Logger@1
+              message: "Hello from the OctoMesh Communication Controller! The HelloWorld pipeline ran successfully — your adapter is connected and your pool is wired up. Find this message in the adapter log to verify the round-trip."
+              description: Writes the hello-world banner to the adapter log.
