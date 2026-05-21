@@ -131,6 +131,15 @@ try
         .AddMongoDbRuntimeRepository();
 
     builder.Services.AddCkModelSystemCommunicationV3();
+
+    // Register the embedded Communication blueprint sources shipped with the CK-model package.
+    // - Communication-1.0.0: production base (Pool + managed Adapter); applied automatically on
+    //   tenant enable / startup.
+    // - HelloCommunication-1.0.0: optional demo (Hello-World pipeline); registered so Studio can
+    //   display it as service-managed, but not auto-applied — admins opt in per tenant.
+    builder.Services.AddBlueprintCommunicationV1();
+    builder.Services.AddBlueprintHelloCommunicationV1();
+
     builder.Services.AddOctoNotification();
 
     builder.Services.AddAuthentication().AddJwtBearer(jwt =>
