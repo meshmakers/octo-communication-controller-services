@@ -31,7 +31,8 @@ internal class DefaultConfigurationCreatorService(
     IAdapterService adapterService,
     FailedTenantRegistry failedTenantRegistry,
     ICommunicationEventService communicationEventService,
-    IBlueprintService blueprintService)
+    IBlueprintService blueprintService,
+    IEnumerable<IBlueprintEmbeddedSource> embeddedBlueprintSources)
     : DefaultConfigurationCreatorServiceStandardized(logger, systemContext, createIdentityDataCommandClient,
         Constants.CommunicationControllerServiceIdentityDataVersionKey,
         Constants.CommunicationControllerServiceIdentityDataVersionValue,
@@ -42,6 +43,14 @@ internal class DefaultConfigurationCreatorService(
         failedTenantRegistry: failedTenantRegistry
         )
 {
+    /// <summary>
+    /// Blueprint names this service owns and auto-applies on tenant Enable / startup. Only the
+    /// production base is in here — demo blueprints like HelloCommunication are still registered
+    /// (so Studio shows them) but admins install them explicitly.
+    /// </summary>
+    private static readonly string[] AutoAppliedBlueprintNames = ["Communication"];
+
+
     public override async Task InitializeAsync()
     {
         // Reconfigure the log level based on the configuration
@@ -52,22 +61,13 @@ internal class DefaultConfigurationCreatorService(
 
     protected override async Task ImportCkModelAsync(IOctoAdminSession session, ITenantContext tenantContext)
     {
-        // The Communication CK model + initial Pool/Adapter seed entities are now packaged together
-        // in the Communication-1.0.0 blueprint. Applying the blueprint resolves the
-        // `ckModelDependencies` (System.Communication-[3.0,4.0)) and imports the CK model first,
-        // then upserts the seed entities — so the explicit ImportCkModelAsync that used to live
-        // here is no longer needed. The blueprint runner is idempotent: re-apply on a tenant that
-        // already has the same version is a no-op (unless `force` is set).
-        var blueprintId = new BlueprintId("Communication-1.0.0");
-
-        var result = await blueprintService.ApplyBlueprintAsync(tenantContext.TenantId, blueprintId);
-        if (!result.IsSuccess)
-        {
-            // Surface every error as a single InitializationException; the tenant-lifecycle layer
-            // will route this through OnTenantStartFailedAsync and into the audit log.
-            throw InitializationException.ImportCkModelFailed(tenantContext.TenantId,
-                result.OperationResult.GetMessages());
-        }
+        // The Communication CK model + initial Pool/Adapter seed entities are now packaged
+        // together in the Communication-<x.y.z> blueprint. Applying the blueprint resolves the
+        // ckModelDependencies (System.Communication-[3.0,4.0)) and upserts the seed entities, so
+        // the explicit ImportCkModelAsync that used to live here is no longer needed. The runner
+        // is idempotent: re-applying the same version is a no-op (unless `force` is set), so the
+        // same call is safe to make from Enable and from per-tenant startup.
+        await ApplyServiceManagedBlueprintsAsync(tenantContext.TenantId, throwOnFailure: true);
     }
 
 
@@ -80,6 +80,12 @@ internal class DefaultConfigurationCreatorService(
             return;
         }
 
+        // Auto-roll forward any service-managed blueprint whose embedded version is newer than
+        // the one currently installed for this tenant. Mirrors how ICkModelUpgradeService is
+        // designed to run on tenant start for CK models — the runner short-circuits on
+        // already-current versions, so the cost when nothing changed is minimal.
+        await ApplyServiceManagedBlueprintsAsync(tenantId, throwOnFailure: false);
+
         // try to load the configuration from the cache
         await adapterCachePublish.LoadConfigurationAsync(tenantId);
 
@@ -87,6 +93,51 @@ internal class DefaultConfigurationCreatorService(
         await poolService.PosUpdateTenantAsync(tenantId);
 
         await triggerManagementService.UpdateScheduleAsync(tenantId);
+    }
+
+    /// <summary>
+    /// Applies (or re-applies) every blueprint that this service owns and ships embedded. The
+    /// <paramref name="throwOnFailure"/> switch lets Enable surface failures as
+    /// <see cref="InitializationException"/> (so the tenant doesn't end up half-initialised),
+    /// while the startup path tolerates failures (the next startup retries; meanwhile the tenant
+    /// can still serve traffic on whatever version it already has).
+    /// </summary>
+    private async Task ApplyServiceManagedBlueprintsAsync(string tenantId, bool throwOnFailure)
+    {
+        foreach (var name in AutoAppliedBlueprintNames)
+        {
+            var latest = embeddedBlueprintSources
+                .Where(s => s.BlueprintId.Name == name)
+                .OrderByDescending(s => s.BlueprintId.Version)
+                .FirstOrDefault();
+
+            if (latest == null)
+            {
+                logger.LogWarning(
+                    "Auto-applied blueprint '{Name}' is configured but no embedded source is registered.",
+                    name);
+                continue;
+            }
+
+            var result = await blueprintService.ApplyBlueprintAsync(tenantId, latest.BlueprintId);
+            if (result.IsSuccess)
+            {
+                continue;
+            }
+
+            if (throwOnFailure)
+            {
+                throw InitializationException.ImportCkModelFailed(tenantId,
+                    result.OperationResult.GetMessages());
+            }
+
+            logger.LogError(
+                "Failed to auto-apply service-managed blueprint {BlueprintId} on tenant {TenantId}: {Messages}",
+                latest.BlueprintId.FullName, tenantId,
+                string.Join("; ", result.OperationResult.GetMessages()));
+            await communicationEventService.StoreErrorEventAsync(tenantId,
+                $"Auto-update of blueprint {latest.BlueprintId.FullName} failed: {string.Join("; ", result.OperationResult.GetMessages())}");
+        }
     }
 
     protected override async Task StopTenantAsync(string tenantId)
