@@ -1,0 +1,64 @@
+$schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+dependencies:
+  - System.Communication-3.20.0
+entities:
+  # ---------------------------------------------------------------------------
+  # Pool — Cloud-environment pool that the central Communication Operator owns.
+  # The pool is the deployment target for the Adapter workload below.
+  # ---------------------------------------------------------------------------
+  - rtId: '670000000000000000000001'
+    ckTypeId: System.Communication/Pool
+    rtWellKnownName: CommunicationPool
+    attributes:
+      - id: System/Name
+        value: Communication Pool
+      - id: System/Description
+        value: >-
+          Cloud-environment pool created by the Communication blueprint.
+          Cloud pools are auto-deployed by the central Communication Operator —
+          the pool's Adapter is rolled out via Helm into the OctoMesh cluster on
+          'Deploy'.
+      - id: System.Communication/Environment
+        value: 1   # Cloud
+      - id: System.Communication/DeploymentState
+        value: 0   # Undeployed — operator confirms on first Deploy
+      - id: System.Communication/CommunicationState
+        value: 0   # Unregistered — no pool operator connected yet
+      - id: System.Communication/ConfigurationState
+        value: 0   # Unconfigured
+
+  # ---------------------------------------------------------------------------
+  # Adapter — Mesh-style adapter managed by the Cloud pool above. Carries the
+  # Helm chart reference so the operator knows what to install; both the chart
+  # name and version are intentionally left blank in the seed so the deployment
+  # team can fill them in once they decide on the published chart coordinates.
+  # ---------------------------------------------------------------------------
+  - rtId: '670000000000000000000002'
+    ckTypeId: System.Communication/Adapter
+    rtWellKnownName: MeshAdapter
+    associations:
+      # Workload → Pool (inherited association on DeployableWorkload). The
+      # operator uses this link to decide which Helm release the workload
+      # belongs to.
+      - roleId: System.Communication/Manages
+        targetRtId: '670000000000000000000001'
+        targetCkTypeId: System.Communication/Pool
+    attributes:
+      - id: System/Name
+        value: Mesh Adapter
+      - id: System/Description
+        value: >-
+          Mesh adapter created by the Communication blueprint. Runs in the
+          Communication Pool and hosts pipelines that the Communication
+          Controller deploys. Connects to the AdapterHub via SignalR once
+          deployed; while still Unregistered, no pipeline executions can run.
+      - id: System.Communication/DeploymentState
+        value: 0   # Undeployed
+      - id: System.Communication/CommunicationState
+        value: 0   # Unregistered
+      - id: System.Communication/ConfigurationState
+        value: 0   # Unconfigured
+      - id: System.Communication/LastSyncedSequenceNumber
+        value: 0
+      - id: System.Communication/ReceivesClusterSecrets
+        value: false

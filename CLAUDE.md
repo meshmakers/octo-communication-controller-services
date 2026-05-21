@@ -163,6 +163,30 @@ Model definitions are in `src/SystemCommunicationCkModel/ConstructionKit/`:
 - `enums/` - enumeration definitions
 - `attributes/` - attribute definitions
 
+### Service-Managed Blueprint (System.Communication)
+
+`SystemCommunicationCkModel` also ships an embedded blueprint that seeds a tenant with a default Cloud `Pool` + managed `Adapter`. The pattern mirrors the embedded CK-model packaging — see `octo-construction-kit-engine/docs/blueprints.md` for the engine side.
+
+```
+src/SystemCommunicationCkModel/
+├── ConstructionKit/                 # CK model YAML
+└── Blueprints/
+    └── System.Communication-1.0.0/  # embedded blueprint (System.* = service-managed)
+        ├── blueprint.yaml
+        └── seed-data/entities.yaml
+```
+
+Flow:
+
+1. `<BlueprintFolder>` in `SystemCommunicationCkModel.csproj` triggers the `BlueprintEmbed` MSBuild task. The task validates `blueprint.yaml`, embeds the files as manifest resources, and emits `obj/.../blueprints-cache.json`. The `BlueprintSourceGenerator` then generates `AddBlueprintSystemCommunicationV1(this IServiceCollection)` plus an `IBlueprintEmbeddedSource` implementation.
+2. `Program.cs` registers the embedded source with that one DI extension. The engine's `EmbeddedResourceBlueprintCatalog` (auto-registered by `AddConstructionKit()`) discovers it.
+3. `DefaultConfigurationCreatorService.ImportCkModelAsync` (Enable path) and `StartTenantAsync` (every tenant load) both call `ApplyServiceManagedBlueprintsAsync`, which picks the newest registered version per name in `AutoAppliedBlueprintNames = ["System.Communication"]` and invokes `IBlueprintService.ApplyBlueprintAsync`. The blueprint runner is idempotent at the same version, so the cost of the per-startup call is near-zero unless the embedded version actually bumped.
+4. Bumping `System.Communication-1.0.0` → `System.Communication-1.0.1` and shipping a new NuGet rolls every tenant forward on the next service restart — no per-tenant migration script required.
+
+The `System.` name prefix tells Refinery Studio (`BlueprintIdExtensions.IsServiceManaged`) to hide Install / Re-apply controls — the service owns this blueprint and admins shouldn't fight it.
+
+The optional `HelloCommunication-1.0.0` demo blueprint lives in `samples/Blueprints/` (not embedded). It's admin-installable: drop the folder into a `LocalFileSystemBlueprintCatalog` root or publish it via a GitHub catalog. Its `blueprintDependencies` reference `System.Communication-[1.0,2.0)` so it can be applied on top of the service-managed baseline.
+
 ### Docker
 
 ```bash
