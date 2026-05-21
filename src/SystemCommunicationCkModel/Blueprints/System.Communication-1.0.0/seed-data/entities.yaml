@@ -1,12 +1,12 @@
 $schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
 dependencies:
-  - System.Communication-3.0.0
+  - System.Communication-3.20.0
 entities:
   # ---------------------------------------------------------------------------
   # Pool — Cloud-environment pool that the central Communication Operator owns.
   # The pool is the deployment target for the Adapter workload below.
   # ---------------------------------------------------------------------------
-  - rtId: 670000000000000000000001
+  - rtId: '670000000000000000000001'
     ckTypeId: System.Communication/Pool
     rtWellKnownName: CommunicationPool
     attributes:
@@ -33,7 +33,7 @@ entities:
   # name and version are intentionally left blank in the seed so the deployment
   # team can fill them in once they decide on the published chart coordinates.
   # ---------------------------------------------------------------------------
-  - rtId: 670000000000000000000002
+  - rtId: '670000000000000000000002'
     ckTypeId: System.Communication/Adapter
     rtWellKnownName: MeshAdapter
     associations:
@@ -41,7 +41,7 @@ entities:
       # operator uses this link to decide which Helm release the workload
       # belongs to.
       - roleId: System.Communication/Manages
-        targetRtId: 670000000000000000000001
+        targetRtId: '670000000000000000000001'
         targetCkTypeId: System.Communication/Pool
     attributes:
       - id: System/Name

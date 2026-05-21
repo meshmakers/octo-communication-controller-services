@@ -10,6 +10,10 @@ description: |
   catalogs, not embedded) sits on top and adds a hello-world Pipeline for demos.
 
 ckModelDependencies:
-  - System.Communication-[3.0,4.0)
+  # Range floor must match the CK model version this blueprint ships with — the engine's
+  # CkModelUpgradeService picks MinVersion as the install target. We ship the blueprint embedded
+  # in the same NuGet as System.Communication-3.20.0, so the floor and the on-disk CK model
+  # are always in lockstep. Bump both together when the CK model version moves forward.
+  - System.Communication-[3.20.0,4.0)
 
 seedDataPath: seed-data/entities.yaml
