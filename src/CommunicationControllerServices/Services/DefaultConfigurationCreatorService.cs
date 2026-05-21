@@ -44,11 +44,12 @@ internal class DefaultConfigurationCreatorService(
         )
 {
     /// <summary>
-    /// Blueprint names this service owns and auto-applies on tenant Enable / startup. Only the
-    /// production base is in here — demo blueprints like HelloCommunication are still registered
-    /// (so Studio shows them) but admins install them explicitly.
+    /// Blueprint names this service owns and auto-applies on tenant Enable / startup. By
+    /// OctoMesh convention these are <c>System.*</c> blueprints — they're service-managed,
+    /// Studio hides install / uninstall actions for them, and the runtime trusts that the owning
+    /// service keeps them in sync per tenant.
     /// </summary>
-    private static readonly string[] AutoAppliedBlueprintNames = ["Communication"];
+    private static readonly string[] AutoAppliedBlueprintNames = ["System.Communication"];
 
 
     public override async Task InitializeAsync()

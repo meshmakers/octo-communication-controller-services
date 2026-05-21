@@ -132,13 +132,13 @@ try
 
     builder.Services.AddCkModelSystemCommunicationV3();
 
-    // Register the embedded Communication blueprint sources shipped with the CK-model package.
-    // - Communication-1.0.0: production base (Pool + managed Adapter); applied automatically on
-    //   tenant enable / startup.
-    // - HelloCommunication-1.0.0: optional demo (Hello-World pipeline); registered so Studio can
-    //   display it as service-managed, but not auto-applied — admins opt in per tenant.
-    builder.Services.AddBlueprintCommunicationV1();
-    builder.Services.AddBlueprintHelloCommunicationV1();
+    // Register the System.Communication blueprint embedded with the CK-model package. OctoMesh
+    // convention: blueprints named "System.*" are service-managed (BlueprintId.IsServiceManaged
+    // returns true) — the Communication Controller auto-applies this on tenant enable / startup,
+    // Studio surfaces it as read-only. The optional HelloCommunication demo lives in
+    // samples/Blueprints/ and is admin-installable through a regular catalog (LocalFileSystem,
+    // GitHub) — not embedded here.
+    builder.Services.AddBlueprintSystemCommunicationV1();
 
     builder.Services.AddOctoNotification();
 
