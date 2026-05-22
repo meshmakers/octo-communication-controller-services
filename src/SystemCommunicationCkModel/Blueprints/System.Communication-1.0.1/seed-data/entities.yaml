@@ -11,7 +11,7 @@ entities:
     rtWellKnownName: CommunicationPool
     attributes:
       - id: System/Name
-        value: Communication Pool
+        value: Default Cloud
       - id: System/Description
         value: >-
           Cloud-environment pool created by the Communication blueprint.
