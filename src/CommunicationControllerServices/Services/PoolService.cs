@@ -40,106 +40,45 @@ internal class PoolService : IPoolService
     }
     
     /// <inheritdoc />
-    public async Task<OctoObjectId> RegisterPoolOperatorAsync(string tenantId, string poolName, string connectionId)
+    public async Task UnregisterPoolOperatorAsync(string tenantId, OctoObjectId poolRtId)
     {
-        Logger.Info("[{TenantId}] Registering operator for pool '{PoolName}'",
-            tenantId, poolName);
+        Logger.Info("[{TenantId}] Unregistering operator for pool '{PoolRtId}'",
+            tenantId, poolRtId);
 
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
+        if (!_poolCache.TryGetTenant(tenantId, out var tenantDescription))
         {
-            throw PoolServiceException.TenantNotFoundOrNotEnabled(tenantId);
+            return;
+        }
+        if (!tenantDescription.PoolsById.TryGetValue(poolRtId, out var poolDescription))
+        {
+            return;
         }
 
-        // Always read the pool from the repository so we can derive the
-        // DeploymentState from its Environment (Edge → Disabled, Cloud →
-        // Deployed) regardless of whether the pool was already in cache.
-        var poolList = await _communicationRepository.GetPoolByNameAsync(tenantId, poolName);
-        var rtPool = poolList.FirstOrDefault();
+        // Set communication state to Unregistered *before* removing from cache.
+        // After RemovePool, the OnDisconnectedAsync that follows the operator's
+        // graceful disconnect can no longer locate the pool, so any state write
+        // would silently no-op and the UI would keep showing Online forever.
+        await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, poolDescription.PoolRtId,
+            RtCommunicationStateEnum.Unregistered);
 
-        if (poolTenant.PoolsByName.TryGetValue(poolName, out var poolDescription))
-        {
-            Logger.Info("[{TenantId}] Pool '{PoolName}' already registered",
-                tenantId, poolName);
+        var poolName = poolDescription.PoolName;
+        tenantDescription.RemovePool(poolDescription.PoolRtId);
 
-            poolDescription.UpdateConnectionId(tenantId, connectionId);
-        }
-        else
-        {
-            if (rtPool == null)
-            {
-                Logger.Info("[{TenantId}] Creating pool '{PoolName}'",
-                    tenantId, poolName);
-                await _communicationRepository.CreatePoolAsync(tenantId, poolName);
-
-                poolList = await _communicationRepository.GetPoolByNameAsync(tenantId, poolName);
-                rtPool = poolList.FirstOrDefault();
-
-                if (rtPool == null)
-                {
-                    throw PoolServiceException.CannotCreatePool(tenantId, poolName);
-                }
-            }
-
-            poolDescription = poolTenant.AddPool(poolName, rtPool.RtId, connectionId);
-        }
-
-        // Edge pools keep their Disabled DeploymentState even when an operator
-        // connects — the external Edge operator owns the workload lifecycle
-        // and the Studio Deploy/Undeploy actions must stay greyed out.
+        // Edge pools stay Disabled regardless of operator presence; only Cloud
+        // pools flip back to Pending until a new operator re-registers.
+        var pools = await _communicationRepository.GetPoolsAsync(tenantId);
+        var rtPool = pools.FirstOrDefault(p => p.RtId == poolRtId);
         var targetState = rtPool?.Environment == RtEnvironmentEnum.Edge
             ? RtDeploymentStateEnum.Disabled
-            : RtDeploymentStateEnum.Deployed;
+            : RtDeploymentStateEnum.Pending;
         await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolDescription.PoolRtId,
             targetState);
 
         await _eventService.StoreInformationEventAsync(tenantId,
-            $"Pool operator for pool '{poolName}' registered with connection id '{connectionId}'.",
+            $"Pool operator for pool '{poolName}' unregistered.",
             new RtEntityId(SystemCommunicationCkIds.RtCkPoolTypeId, poolDescription.PoolRtId));
 
-        Logger.Info("[{TenantId}] Operator for pool '{PoolName}' registered",
-            tenantId, poolName);
-        return poolDescription.PoolRtId;
-    }
-
-    /// <inheritdoc />
-    public async Task UnregisterPoolOperatorAsync(string tenantId, string poolName)
-    {
-        Logger.Info("[{TenantId}] Unregistering operator for pool '{PoolName}'",
-            tenantId, poolName);
-
-        if (_poolCache.TryGetTenant(tenantId, out var tenantDescription))
-        {
-            if (tenantDescription.PoolsByName.TryGetValue(poolName, out var poolDescription))
-            {
-                // Set communication state to Unregistered *before* removing from cache.
-                // After RemovePool, the OnDisconnectedAsync that follows the operator's
-                // graceful disconnect can no longer locate the pool, so any state write
-                // would silently no-op and the UI would keep showing Online forever.
-                await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, poolDescription.PoolRtId,
-                    RtCommunicationStateEnum.Unregistered);
-
-                tenantDescription.RemovePool(poolDescription.PoolRtId);
-
-                // Edge pools stay Disabled regardless of operator presence;
-                // only Cloud pools flip back to Pending until a new operator
-                // re-registers (RegisterPoolOperatorAsync will flip them back
-                // to Deployed).
-                var poolList = await _communicationRepository.GetPoolByNameAsync(tenantId, poolName);
-                var rtPool = poolList.FirstOrDefault();
-                var targetState = rtPool?.Environment == RtEnvironmentEnum.Edge
-                    ? RtDeploymentStateEnum.Disabled
-                    : RtDeploymentStateEnum.Pending;
-                await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolDescription.PoolRtId,
-                    targetState);
-
-                await _eventService.StoreInformationEventAsync(tenantId,
-                    $"Pool operator for pool '{poolName}' unregistered.",
-                    new RtEntityId(SystemCommunicationCkIds.RtCkPoolTypeId, poolDescription.PoolRtId));
-
-                Logger.Info("[{TenantId}] Operator for pool '{PoolName}' unregistered",
-                    tenantId, poolName);
-            }
-        }
+        Logger.Info("[{TenantId}] Operator for pool '{PoolRtId}' unregistered", tenantId, poolRtId);
     }
 
     private readonly SemaphoreSlim _semaphore = new(1, 1);
@@ -251,11 +190,12 @@ internal class PoolService : IPoolService
 
         var poolName = rtPool.Name ?? string.Empty;
         Logger.Info(
-            "[{TenantId}] Pool '{PoolName}' is Cloud — notifying central Communication Operator",
-            tenantId, poolName);
+            "[{TenantId}] Pool '{PoolName}' (rtId {PoolRtId}) is Cloud — notifying central Communication Operator",
+            tenantId, poolName, poolRtId);
         await _operatorConnectionManager.NotifyPoolDeployedAsync(new DeployedPoolDto
         {
             TenantId = tenantId,
+            PoolRtId = poolRtId.ToString(),
             PoolName = poolName,
         });
 
@@ -304,7 +244,7 @@ internal class PoolService : IPoolService
         await EnsureWorkloadIsHelmDeployableAsync(tenantId, workload);
 
         var poolName = pool.Name ?? string.Empty;
-        var dto = await BuildWorkloadDeployedDtoAsync(tenantId, poolName, workload);
+        var dto = await BuildWorkloadDeployedDtoAsync(tenantId, pool.RtId, poolName, workload);
         if (dto == null)
         {
             // Should be unreachable after EnsureWorkloadIsHelmDeployableAsync, but
@@ -415,7 +355,9 @@ internal class PoolService : IPoolService
         await _operatorConnectionManager.NotifyWorkloadUndeployedAsync(new WorkloadUndeployedDto
         {
             TenantId = tenantId,
+            PoolRtId = pool.RtId.ToString(),
             PoolName = pool.Name ?? string.Empty,
+            WorkloadRtId = workload.RtId.ToString(),
             WorkloadName = workload.Name ?? string.Empty,
             WorkloadType = workload is RtApplication
                 ? WorkloadTypeDto.Application
@@ -472,12 +414,12 @@ internal class PoolService : IPoolService
         // Environment is now Edge: the user may have switched a Cloud pool
         // to Edge without first undeploying, and the CR/secret still exists
         // in the central cluster and must be removed.
-        await UndeployManagedWorkloadsAsync(tenantId, poolName);
+        await UndeployManagedWorkloadsAsync(tenantId, poolRtId, poolName);
 
         Logger.Info(
-            "[{TenantId}] Pool '{PoolName}': notifying central Communication Operator to clean up (Environment={Environment})",
-            tenantId, poolName, rtPool.Environment);
-        await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, poolName);
+            "[{TenantId}] Pool '{PoolName}' (rtId {PoolRtId}): notifying central Communication Operator to clean up (Environment={Environment})",
+            tenantId, poolName, poolRtId, rtPool.Environment);
+        await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, poolRtId.ToString(), poolName);
 
         // Resting state after undeploy: Disabled when the pool can no longer
         // be deployed via this controller (Edge), else Undeployed.
@@ -518,7 +460,7 @@ internal class PoolService : IPoolService
         {
             try
             {
-                var dto = await BuildWorkloadDeployedDtoAsync(tenantId, poolName, workload);
+                var dto = await BuildWorkloadDeployedDtoAsync(tenantId, poolRtId, poolName, workload);
                 if (dto == null)
                 {
                     Logger.Warn(
@@ -538,13 +480,14 @@ internal class PoolService : IPoolService
         }
     }
 
-    private async Task UndeployManagedWorkloadsAsync(string tenantId, string poolName)
+    private async Task UndeployManagedWorkloadsAsync(string tenantId, OctoObjectId poolRtId, string poolName)
     {
         // Read from in-memory tracking only — same rationale as
         // UndeployAllCloudPoolsAsync, this path may run during tenant delete
         // where the repository is already torn down.
+        var poolRtIdString = poolRtId.ToString();
         var tracked = _operatorConnectionManager.GetDeployedWorkloadsForTenant(tenantId)
-            .Where(w => w.PoolName == poolName)
+            .Where(w => w.PoolRtId == poolRtIdString)
             .ToArray();
 
         if (tracked.Length == 0)
@@ -570,8 +513,8 @@ internal class PoolService : IPoolService
         }
     }
 
-    private async Task<WorkloadDeployedDto?> BuildWorkloadDeployedDtoAsync(string tenantId, string poolName,
-        RtDeployableWorkload workload)
+    private async Task<WorkloadDeployedDto?> BuildWorkloadDeployedDtoAsync(string tenantId,
+        OctoObjectId poolRtId, string poolName, RtDeployableWorkload workload)
     {
         if (string.IsNullOrWhiteSpace(workload.ChartName) || string.IsNullOrWhiteSpace(workload.ChartVersion))
         {
@@ -598,6 +541,7 @@ internal class PoolService : IPoolService
         return new WorkloadDeployedDto
         {
             TenantId = tenantId,
+            PoolRtId = poolRtId.ToString(),
             PoolName = poolName,
             WorkloadName = workload.Name ?? string.Empty,
             WorkloadRtId = workload.RtId.ToString(),
@@ -632,10 +576,10 @@ internal class PoolService : IPoolService
         // we race and get "Failed to get pools" — and the operator is never
         // told to clean up, leaving the CommunicationPool CR and broker
         // secret orphaned in the cluster.
-        var poolNames = _operatorConnectionManager.GetDeployedPoolsForTenant(tenantId);
+        var deployedPools = _operatorConnectionManager.GetDeployedPoolsForTenant(tenantId);
         var trackedWorkloads = _operatorConnectionManager.GetDeployedWorkloadsForTenant(tenantId);
 
-        if (poolNames.Count == 0 && trackedWorkloads.Count == 0)
+        if (deployedPools.Count == 0 && trackedWorkloads.Count == 0)
         {
             Logger.Info("[{TenantId}] No Cloud pools or workloads to clean up", tenantId);
             return;
@@ -657,22 +601,22 @@ internal class PoolService : IPoolService
             }
         }
 
-        foreach (var poolName in poolNames)
+        foreach (var (poolRtId, poolName) in deployedPools)
         {
             try
             {
-                await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, poolName);
+                await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, poolRtId, poolName);
             }
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "[{TenantId}] Failed to notify operator of pool undeploy during tenant cleanup, pool '{PoolName}'",
-                    tenantId, poolName);
+                    "[{TenantId}] Failed to notify operator of pool undeploy during tenant cleanup, pool '{PoolName}' (rtId {PoolRtId})",
+                    tenantId, poolName, poolRtId);
             }
         }
 
         await _eventService.StoreInformationEventAsync(tenantId,
-            $"Notified central Communication Operator to undeploy {trackedWorkloads.Count} workload(s) and {poolNames.Count} Cloud pool(s) for tenant cleanup.");
+            $"Notified central Communication Operator to undeploy {trackedWorkloads.Count} workload(s) and {deployedPools.Count} Cloud pool(s) for tenant cleanup.");
     }
 
     private async Task<RtPool> GetPoolByRtIdAsync(string tenantId, OctoObjectId poolRtId)
@@ -704,7 +648,7 @@ internal class PoolService : IPoolService
     }
 
     /// <inheritdoc />
-    public async Task SetCommunicationStateOfflineAsync(string tenantId, string poolName,
+    public async Task SetCommunicationStateOfflineAsync(string tenantId, OctoObjectId poolRtId,
         string disconnectingConnectionId)
     {
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
@@ -712,7 +656,7 @@ internal class PoolService : IPoolService
             return;
         }
 
-        if (!poolTenant.PoolsByName.TryGetValue(poolName, out var poolDescription))
+        if (!poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
         {
             return;
         }
@@ -730,7 +674,7 @@ internal class PoolService : IPoolService
         // OperatorConnectionManager.RemoveOperator has already cleared the
         // disconnecting connection's tracking entry by the time we get here,
         // so any results from GetConnectionsForPool are surviving operators.
-        var stillClaiming = _operatorConnectionManager.GetConnectionsForPool(tenantId, poolName);
+        var stillClaiming = _operatorConnectionManager.GetConnectionsForPool(tenantId, poolRtId.ToString());
         if (stillClaiming.Count > 0)
         {
             // Keep the pool Online and rewire the cache to a surviving
@@ -738,10 +682,10 @@ internal class PoolService : IPoolService
             // when THAT one eventually disconnects too.
             poolDescription.UpdateConnectionId(tenantId, stillClaiming[0]);
             Logger.Info(
-                "[{TenantId}] pool '{PoolName}' stays online after disconnect of " +
+                "[{TenantId}] pool '{PoolRtId}' stays online after disconnect of " +
                 "'{OldConnectionId}': {Count} other operator connection(s) still claim it; " +
                 "cache rewired to '{NewConnectionId}'",
-                tenantId, poolName, disconnectingConnectionId, stillClaiming.Count,
+                tenantId, poolRtId, disconnectingConnectionId, stillClaiming.Count,
                 stillClaiming[0]);
             return;
         }
@@ -755,9 +699,9 @@ internal class PoolService : IPoolService
             poolDescription.ConnectionId != disconnectingConnectionId)
         {
             Logger.Warn(
-                "[{TenantId}] ignoring stale disconnect for pool '{PoolName}': cached connection " +
+                "[{TenantId}] ignoring stale disconnect for pool '{PoolRtId}': cached connection " +
                 "'{CurrentConnectionId}' has replaced disconnecting connection '{OldConnectionId}'",
-                tenantId, poolName, poolDescription.ConnectionId, disconnectingConnectionId);
+                tenantId, poolRtId, poolDescription.ConnectionId, disconnectingConnectionId);
             return;
         }
 
@@ -783,10 +727,10 @@ internal class PoolService : IPoolService
     }
 
     /// <inheritdoc />
-    public async Task SetCommunicationStateOnlineAsync(string tenantId, string poolName, string connectionId)
+    public async Task SetCommunicationStateOnlineAsync(string tenantId, OctoObjectId poolRtId, string connectionId)
     {
-        Logger.Info("[{TenantId}] Setting pool '{PoolName}' online (connection '{ConnectionId}')",
-            tenantId, poolName, connectionId);
+        Logger.Info("[{TenantId}] Setting pool '{PoolRtId}' online (connection '{ConnectionId}')",
+            tenantId, poolRtId, connectionId);
 
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
@@ -798,17 +742,17 @@ internal class PoolService : IPoolService
         // pool's DeploymentState) to populate the cache; the new /operatorHub
         // RegisterPoolAsync is purely about CommunicationState, so we just
         // ensure the cache is populated here without touching DeploymentState.
-        if (!poolTenant.PoolsByName.TryGetValue(poolName, out var poolDescription))
+        if (!poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
         {
-            var poolList = await _communicationRepository.GetPoolByNameAsync(tenantId, poolName);
-            var rtPool = poolList.FirstOrDefault();
+            var pools = await _communicationRepository.GetPoolsAsync(tenantId);
+            var rtPool = pools.FirstOrDefault(p => p.RtId == poolRtId);
             if (rtPool == null)
             {
-                Logger.Warn("[{TenantId}] Cannot set pool '{PoolName}' online — not found in repository",
-                    tenantId, poolName);
+                Logger.Warn("[{TenantId}] Cannot set pool '{PoolRtId}' online — not found in repository",
+                    tenantId, poolRtId);
                 return;
             }
-            poolDescription = poolTenant.AddPool(poolName, rtPool.RtId, connectionId);
+            poolDescription = poolTenant.AddPool(rtPool.Name ?? string.Empty, rtPool.RtId, connectionId);
         }
         else
         {

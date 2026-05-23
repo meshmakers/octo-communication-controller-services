@@ -96,7 +96,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         await PoolService.UndeployPoolAsync(TenantId, PoolRtId);
 
         await OperatorConnectionManager.Received(1)
-            .NotifyPoolUndeployedAsync(TenantId, PoolName);
+            .NotifyPoolUndeployedAsync(TenantId, PoolRtId.ToString(), PoolName);
         await CommunicationRepository.Received(1).SetPoolDeploymentStateAsync(TenantId, PoolRtId,
             RtDeploymentStateEnum.Disabled);
     }
@@ -115,7 +115,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         await Assert.That(ex!.Message).Contains("nothing to undeploy");
 
         await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
-            .NotifyPoolUndeployedAsync(Arg.Any<string>(), Arg.Any<string>());
+            .NotifyPoolUndeployedAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>());
     }
 
     [Test]
@@ -130,7 +130,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         await Assert.That(ex!.Message).Contains("nothing to undeploy");
 
         await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
-            .NotifyPoolUndeployedAsync(Arg.Any<string>(), Arg.Any<string>());
+            .NotifyPoolUndeployedAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>());
     }
 
     [Test]
@@ -234,12 +234,12 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         {
             new WorkloadUndeployedDto
             {
-                TenantId = TenantId, PoolName = PoolName,
+                TenantId = TenantId, PoolRtId = PoolRtId.ToString(), PoolName = PoolName,
                 WorkloadName = "wl-a", WorkloadType = WorkloadTypeDto.Adapter,
             },
             new WorkloadUndeployedDto
             {
-                TenantId = TenantId, PoolName = PoolName,
+                TenantId = TenantId, PoolRtId = PoolRtId.ToString(), PoolName = PoolName,
                 WorkloadName = "wl-b", WorkloadType = WorkloadTypeDto.Application,
             },
         });
@@ -251,7 +251,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
             Arg.Is<WorkloadUndeployedDto>(w => w.WorkloadName == "wl-a"));
         await OperatorConnectionManager.Received(1).NotifyWorkloadUndeployedAsync(
             Arg.Is<WorkloadUndeployedDto>(w => w.WorkloadName == "wl-b"));
-        await OperatorConnectionManager.Received(1).NotifyPoolUndeployedAsync(TenantId, PoolName);
+        await OperatorConnectionManager.Received(1).NotifyPoolUndeployedAsync(TenantId, PoolRtId.ToString(), PoolName);
     }
 
     [Test]
@@ -486,12 +486,12 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         {
             new WorkloadUndeployedDto
             {
-                TenantId = TenantId, PoolName = PoolName,
+                TenantId = TenantId, PoolRtId = PoolRtId.ToString(), PoolName = PoolName,
                 WorkloadName = "wl-here", WorkloadType = WorkloadTypeDto.Adapter,
             },
             new WorkloadUndeployedDto
             {
-                TenantId = TenantId, PoolName = "other-pool",
+                TenantId = TenantId, PoolRtId = "65d5c447b420da3fb12381cc", PoolName = "other-pool",
                 WorkloadName = "wl-elsewhere", WorkloadType = WorkloadTypeDto.Adapter,
             },
         });
