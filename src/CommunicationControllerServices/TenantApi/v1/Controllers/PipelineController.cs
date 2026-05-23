@@ -3,9 +3,11 @@ using System.Text;
 using Asp.Versioning;
 using IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -23,19 +25,23 @@ public class PipelineController : ControllerBase
     private readonly ILogger<PipelineController> _logger;
     private readonly ITriggerManagementService _triggerManagementService;
     private readonly IAdapterService _adapterService;
+    private readonly ICommunicationRepository _communicationRepository;
+    private readonly ICommunicationEventService _eventService;
 
     /// <summary>
     /// Constructor
     /// </summary>
-    /// <param name="logger">Logging object</param>
-    /// <param name="triggerManagementService"></param>
-    /// <param name="adapterService"></param>
-    public PipelineController(ILogger<PipelineController> logger, 
-        ITriggerManagementService triggerManagementService, IAdapterService adapterService)
+    public PipelineController(ILogger<PipelineController> logger,
+        ITriggerManagementService triggerManagementService,
+        IAdapterService adapterService,
+        ICommunicationRepository communicationRepository,
+        ICommunicationEventService eventService)
     {
         _logger = logger;
         _triggerManagementService = triggerManagementService;
         _adapterService = adapterService;
+        _communicationRepository = communicationRepository;
+        _eventService = eventService;
     }
 
     /// <summary>
@@ -152,5 +158,107 @@ public class PipelineController : ControllerBase
             _logger.LogError(e, "Error during execution of pipeline");
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
         }
+    }
+
+    /// <summary>
+    ///     Reassigns one or more pipelines from their current adapter to a new
+    ///     target adapter (bulk). Each pipeline is moved atomically in its own
+    ///     repository call; failures on one pipeline do not abort the rest of
+    ///     the batch. When <c>Redeploy</c> is set, the controller re-deploys
+    ///     every successfully moved pipeline onto the target adapter — that
+    ///     deploy may still fail (target adapter offline, definition rejected,
+    ///     …), in which case the move stays committed and the failure is
+    ///     reported via <c>ErrorMessage</c> as a warning. Audit events are
+    ///     written per pipeline regardless of redeploy outcome.
+    /// </summary>
+    [HttpPatch("move-to-adapter")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(typeof(MovePipelinesToAdapterResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> MovePipelinesToAdapter(
+        [Required] [FromBody] MovePipelinesToAdapterRequestDto body)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        if (body.PipelineRtIds == null || body.PipelineRtIds.Count == 0)
+        {
+            return BadRequest(new ErrorResponse
+                { ErrorMessage = "PipelineRtIds must contain at least one entry" });
+        }
+
+        if (!OctoObjectId.TryParse(body.TargetAdapterRtId, out var targetAdapterRtId))
+        {
+            return BadRequest(new ErrorResponse
+                { ErrorMessage = $"TargetAdapterRtId '{body.TargetAdapterRtId}' is not a valid id" });
+        }
+
+        var results = new List<MovePipelineResultDto>(body.PipelineRtIds.Count);
+
+        foreach (var pipelineRtIdStr in body.PipelineRtIds)
+        {
+            if (!OctoObjectId.TryParse(pipelineRtIdStr, out var pipelineRtId))
+            {
+                results.Add(new MovePipelineResultDto(pipelineRtIdStr, false, null, null,
+                    $"PipelineRtId '{pipelineRtIdStr}' is not a valid id"));
+                continue;
+            }
+
+            try
+            {
+                var moveResult = await _communicationRepository.MovePipelineToAdapterAsync(
+                    tenantId, pipelineRtId, targetAdapterRtId);
+
+                // Redeploy is best-effort: a failure here does NOT roll the
+                // move back. The pipeline already points at the new adapter
+                // — the operator can hit "Deploy" manually once the adapter
+                // is reachable again.
+                string? warnMessage = null;
+                var movedToDifferentAdapter =
+                    !moveResult.OldAdapterRtEntityId.Equals(moveResult.NewAdapterRtEntityId);
+                if (body.Redeploy && movedToDifferentAdapter)
+                {
+                    try
+                    {
+                        var pipelineRtEntityId =
+                            new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipelineRtId);
+                        await _adapterService.DeployPipelineAsync(tenantId,
+                            moveResult.NewAdapterRtEntityId, pipelineRtEntityId);
+                    }
+                    catch (Exception e)
+                    {
+                        _logger.LogWarning(e,
+                            "Pipeline {PipelineRtId} moved to {Adapter} but redeploy failed",
+                            pipelineRtId, moveResult.NewAdapterRtEntityId);
+                        warnMessage = $"Move OK; redeploy on new adapter failed: {e.Message}";
+                    }
+                }
+
+                var auditMessage = movedToDifferentAdapter
+                    ? $"Pipeline {pipelineRtId} moved from adapter {moveResult.OldAdapterRtEntityId.RtId} to {moveResult.NewAdapterRtEntityId.RtId} (source: User)."
+                    : $"Pipeline {pipelineRtId} move requested but already pointed at adapter {moveResult.NewAdapterRtEntityId.RtId} (source: User, no-op).";
+                await _eventService.StoreInformationEventAsync(tenantId, auditMessage);
+
+                results.Add(new MovePipelineResultDto(
+                    pipelineRtIdStr,
+                    true,
+                    moveResult.OldAdapterRtEntityId.RtId.ToString(),
+                    moveResult.NewAdapterRtEntityId.RtId.ToString(),
+                    warnMessage));
+            }
+            catch (CommunicationRepositoryException e)
+            {
+                _logger.LogWarning(e,
+                    "Failed to move pipeline {PipelineRtId} to adapter {TargetAdapterRtId} in tenant {TenantId}",
+                    pipelineRtId, targetAdapterRtId, tenantId);
+                results.Add(new MovePipelineResultDto(pipelineRtIdStr, false, null, null, e.Message));
+            }
+        }
+
+        return Ok(new MovePipelinesToAdapterResponseDto(results));
     }
 }

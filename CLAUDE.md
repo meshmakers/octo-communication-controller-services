@@ -603,6 +603,52 @@ The `CommunicationController` exists in both System API and Tenant API:
 - **System API**: `system/v1/communication/enable?tenantId=X` (legacy, backward compatible)
 - **Tenant API**: `{tenantId}/v1/communication/enable` (preferred, tenant from route)
 
+## Pipeline Reassignment (`PATCH /pipeline/move-to-adapter`)
+
+When a new adapter (e.g. one provisioned from a fresh Blueprint) replaces
+an older adapter, the existing `RtPipeline` entities can be re-pointed at
+the new adapter without recreating them. `PipelineController.MovePipelinesToAdapter`
+takes a bulk list of pipeline ids plus a target adapter id and walks each
+one through `ICommunicationRepository.MovePipelineToAdapterAsync`.
+
+Repository semantics (`MovePipelineToAdapterAsync`):
+- Atomic per pipeline: in a single transaction, the outbound `Pipeline.Executes`
+  edge to the source adapter is deleted and the equivalent edge to the
+  target adapter is inserted via `AssociationUpdateInfo.CreateDelete` /
+  `CreateInsert` + `ApplyChangesAsync`.
+- **Source and target adapter must have the exact same `CkTypeId`.** A
+  pipeline only knows how to run nodes its adapter implementation
+  understands, so moving a pipeline onto an adapter of a different concrete
+  subtype is rejected (`AdapterTypeMismatchForMove`). If you want a wider
+  policy (allow any `Adapter`-derived subtype), loosen the equality check
+  here — but mind that the operator's helm path will not magically
+  reinterpret incompatible node configurations.
+- Refuses to move a pipeline that currently has no `Executes` edge
+  (`PipelineHasNoAdapter`) — moving an unassigned pipeline would silently
+  assign it, which is too easy to misuse.
+- No-op when the pipeline already points at the target — returns success
+  with old==new so the caller does not need to special-case it.
+
+Controller wraps the repository for bulk + best-effort redeploy:
+- One repository call per pipeline; per-pipeline failures collected and
+  reported as `MovePipelineResultDto { Success=false, ErrorMessage=... }`
+  without aborting the rest of the batch.
+- When `Redeploy=true` and the pipeline actually moved (i.e. not a
+  no-op), the controller fires `IAdapterService.DeployPipelineAsync` on
+  the new adapter immediately afterwards. A redeploy failure does **not**
+  roll the move back — the pipeline already points at the new adapter
+  and the operator can hit "Deploy" manually once the adapter is back
+  online. The redeploy error surfaces in `ErrorMessage` as a warning
+  while `Success` stays `true`.
+- Writes one audit event per pipeline via `ICommunicationEventService`
+  with the source tag `(source: User)`.
+
+Tests:
+- `Controllers/PipelineControllerMoveToAdapterTests` (TUnit) — empty
+  list, invalid target id, single happy path, redeploy success,
+  redeploy failure (warning path), no-op when already on target,
+  repository exception, mixed bulk batch.
+
 ## Pipeline Execution Metrics
 
 The `PipelineExecutionService` tracks pipeline execution metrics reported by adapters via SignalR. This enables real-time monitoring and historical analysis of pipeline performance.

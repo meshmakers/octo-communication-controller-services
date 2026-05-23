@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Microsoft.Extensions.Logging;
@@ -297,6 +298,98 @@ internal class CommunicationRepository : ICommunicationRepository
         catch (Exception e)
         {
             throw CommunicationRepositoryException.CommonFailedGettingAdapterByPipeline(tenantId, pipelineRtEntityId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<PipelineMoveResult> MovePipelineToAdapterAsync(string tenantId, OctoObjectId pipelineRtId,
+        OctoObjectId targetAdapterRtId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            var pipeline = await tenantRepository.GetRtEntityByRtIdAsync<RtPipeline>(session, pipelineRtId);
+            if (pipeline == null)
+            {
+                throw CommunicationRepositoryException.PipelineNotFound(tenantId, pipelineRtId);
+            }
+
+            // The source adapter is whatever currently sits on the outbound
+            // Pipeline.Executes edge. Pipelines must have exactly one such
+            // edge — refuse to "move" an orphan because that would silently
+            // mutate it from "unassigned" to "assigned to target".
+            var sourceAdapterResultSet =
+                await tenantRepository.GetRtAssociationTargetsAsync<RtPipeline, RtAdapter>(
+                    session,
+                    [pipelineRtId], SystemCommunicationCkIds.RtCkExecutesRoleId,
+                    GraphDirections.Outbound, null, RtEntityQueryOptions.Create());
+            var sourceAdapter = sourceAdapterResultSet.Any()
+                ? sourceAdapterResultSet.First().Value.Items.FirstOrDefault()
+                : null;
+            if (sourceAdapter == null)
+            {
+                throw CommunicationRepositoryException.PipelineHasNoAdapter(tenantId, pipelineRtId);
+            }
+
+            var targetAdapter =
+                await tenantRepository.GetRtEntityByRtIdAsync<RtAdapter>(session, targetAdapterRtId);
+            if (targetAdapter == null)
+            {
+                throw CommunicationRepositoryException.AdapterNotFound(tenantId,
+                    new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, targetAdapterRtId));
+            }
+
+            if (sourceAdapter.CkTypeId == null || targetAdapter.CkTypeId == null ||
+                !sourceAdapter.CkTypeId.Equals(targetAdapter.CkTypeId))
+            {
+                throw CommunicationRepositoryException.AdapterTypeMismatchForMove(tenantId, pipelineRtId,
+                    sourceAdapter.CkTypeId!, targetAdapter.CkTypeId!);
+            }
+
+            var sourceAdapterRtEntityId = new RtEntityId(sourceAdapter.CkTypeId!, sourceAdapter.RtId);
+            var targetAdapterRtEntityId = new RtEntityId(targetAdapter.CkTypeId!, targetAdapter.RtId);
+
+            // No-op when the pipeline already points at the target. Return
+            // success so the caller sees a deterministic outcome without
+            // having to special-case "already there".
+            if (sourceAdapter.RtId.Equals(targetAdapter.RtId))
+            {
+                return new PipelineMoveResult(pipelineRtId, sourceAdapterRtEntityId, targetAdapterRtEntityId);
+            }
+
+            var pipelineRtEntityId =
+                new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipelineRtId);
+
+            var associations = new List<AssociationUpdateInfo>
+            {
+                AssociationUpdateInfo.CreateDelete(pipelineRtEntityId, sourceAdapterRtEntityId,
+                    SystemCommunicationCkIds.RtCkExecutesRoleId),
+                AssociationUpdateInfo.CreateInsert(pipelineRtEntityId, targetAdapterRtEntityId,
+                    SystemCommunicationCkIds.RtCkExecutesRoleId)
+            };
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, new List<EntityUpdateInfo<RtPipeline>>(),
+                associations, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+
+            return new PipelineMoveResult(pipelineRtId, sourceAdapterRtEntityId, targetAdapterRtEntityId);
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedMovePipeline(tenantId, pipelineRtId,
+                targetAdapterRtId, e);
         }
     }
 

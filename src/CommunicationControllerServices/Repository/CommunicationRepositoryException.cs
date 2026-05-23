@@ -225,6 +225,29 @@ internal class CommunicationRepositoryException : Exception
         return new CommunicationRepositoryException($"[{tenantId}] Adapter type is missing for adapter '{adapterRtEntityId}'");
     }
 
+    internal static Exception PipelineHasNoAdapter(string tenantId, OctoObjectId pipelineRtId)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Pipeline '{pipelineRtId}' has no current adapter — refuse to move an unassigned pipeline");
+    }
+
+    internal static Exception AdapterTypeMismatchForMove(string tenantId, OctoObjectId pipelineRtId,
+        RtCkId<CkTypeId> sourceCkTypeId, RtCkId<CkTypeId> targetCkTypeId)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Cannot move pipeline '{pipelineRtId}': source adapter CkTypeId '{sourceCkTypeId}' " +
+            $"differs from target adapter CkTypeId '{targetCkTypeId}'. Pipelines may only be moved between " +
+            "adapters of the exact same subtype so the node configuration remains executable.");
+    }
+
+    internal static Exception CommonFailedMovePipeline(string tenantId, OctoObjectId pipelineRtId,
+        OctoObjectId targetAdapterRtId, Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to move pipeline '{pipelineRtId}' to adapter '{targetAdapterRtId}'",
+            exception);
+    }
+
     #region Pipeline Execution Exceptions
 
     internal static Exception ExecutionNotFound(string tenantId, string? executionId)
