@@ -92,6 +92,25 @@ public interface ICommunicationRepository
     Task<RtAdapter?> GetAdapterByPipelineAsync(string tenantId, RtEntityId pipelineRtEntityId);
 
     /// <summary>
+    ///     Reassigns a pipeline from its current adapter to <paramref name="targetAdapterRtId"/>
+    ///     by swapping the <c>Pipeline.Executes</c> association atomically
+    ///     (delete + insert in a single transaction).
+    ///
+    ///     Validates that the current and target adapters carry the exact
+    ///     same <c>CkTypeId</c> — moving a pipeline onto an adapter of a
+    ///     different concrete subtype is rejected to avoid landing nodes on
+    ///     an adapter that cannot execute them. When the pipeline already
+    ///     points at <paramref name="targetAdapterRtId"/>, the call is a
+    ///     no-op and returns the unchanged state.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="pipelineRtId">Runtime id of the pipeline to move</param>
+    /// <param name="targetAdapterRtId">Runtime id of the new owning adapter</param>
+    /// <returns>The pipeline id together with the old and new adapter ids.</returns>
+    Task<PipelineMoveResult> MovePipelineToAdapterAsync(string tenantId, OctoObjectId pipelineRtId,
+        OctoObjectId targetAdapterRtId);
+
+    /// <summary>
     /// Get pools for a tenant
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
