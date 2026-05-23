@@ -11,7 +11,7 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
     {
         GivenTenantNotInCache();
 
-        await PoolService.UnregisterPoolOperatorAsync(TenantId, PoolName);
+        await PoolService.UnregisterPoolOperatorAsync(TenantId, PoolRtId);
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
             .SetPoolCommunicationStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
@@ -27,7 +27,7 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
         GivenTenantInCache();
         // Don't add the pool
 
-        await PoolService.UnregisterPoolOperatorAsync(TenantId, PoolName);
+        await PoolService.UnregisterPoolOperatorAsync(TenantId, PoolRtId);
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
             .SetPoolCommunicationStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
@@ -54,7 +54,7 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
                 receivedStateAtRepoCall.Unregistered = PoolTenant.PoolsById.ContainsKey(PoolRtId);
             }));
 
-        await PoolService.UnregisterPoolOperatorAsync(TenantId, PoolName);
+        await PoolService.UnregisterPoolOperatorAsync(TenantId, PoolRtId);
 
         using var _ = Assert.Multiple();
         await CommunicationRepository.Received(1)
@@ -69,7 +69,7 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
         GivenTenantInCache();
         AddPoolToTenant();
 
-        await PoolService.UnregisterPoolOperatorAsync(TenantId, PoolName);
+        await PoolService.UnregisterPoolOperatorAsync(TenantId, PoolRtId);
 
         await CommunicationRepository.Received(1)
             .SetPoolDeploymentStateAsync(TenantId, PoolRtId, RtDeploymentStateEnum.Pending);
@@ -81,7 +81,7 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
         GivenTenantInCache();
         AddPoolToTenant();
 
-        await PoolService.UnregisterPoolOperatorAsync(TenantId, PoolName);
+        await PoolService.UnregisterPoolOperatorAsync(TenantId, PoolRtId);
 
         await CommunicationEventService.Received(1)
             .StoreInformationEventAsync(TenantId,

@@ -55,18 +55,18 @@ public class OperatorHub : Hub, IOperatorHub
         // newer connection has already taken over) does not overwrite the
         // Online state written by the newer connection.
         var orphaned = _connectionManager.RemoveOperator(disconnectingConnectionId);
-        foreach (var (tenantId, poolName) in orphaned)
+        foreach (var (tenantId, poolRtId, poolName) in orphaned)
         {
             try
             {
-                await _poolService.SetCommunicationStateOfflineAsync(tenantId, poolName,
-                    disconnectingConnectionId);
+                await _poolService.SetCommunicationStateOfflineAsync(tenantId,
+                    new OctoObjectId(poolRtId), disconnectingConnectionId);
             }
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "Failed to mark pool '{PoolName}' offline after operator disconnect (tenant '{TenantId}')",
-                    poolName, tenantId);
+                    "Failed to mark pool '{PoolName}' (rtId {PoolRtId}) offline after operator disconnect (tenant '{TenantId}')",
+                    poolName, poolRtId, tenantId);
             }
         }
         await base.OnDisconnectedAsync(exception);
@@ -86,64 +86,66 @@ public class OperatorHub : Hub, IOperatorHub
         var disconnectingConnectionId = Context.ConnectionId;
         Logger.Info("Operator unregistered with connection id '{ConnectionId}'", disconnectingConnectionId);
         var orphaned = _connectionManager.RemoveOperator(disconnectingConnectionId);
-        foreach (var (tenantId, poolName) in orphaned)
+        foreach (var (tenantId, poolRtId, poolName) in orphaned)
         {
             try
             {
-                await _poolService.SetCommunicationStateOfflineAsync(tenantId, poolName,
-                    disconnectingConnectionId);
+                await _poolService.SetCommunicationStateOfflineAsync(tenantId,
+                    new OctoObjectId(poolRtId), disconnectingConnectionId);
             }
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "Failed to mark pool '{PoolName}' offline on operator unregister (tenant '{TenantId}')",
-                    poolName, tenantId);
+                    "Failed to mark pool '{PoolName}' (rtId {PoolRtId}) offline on operator unregister (tenant '{TenantId}')",
+                    poolName, poolRtId, tenantId);
             }
         }
     }
 
     /// <inheritdoc />
-    public async Task RegisterPoolAsync(string tenantId, string poolName)
+    public async Task RegisterPoolAsync(string tenantId, string poolRtId, string poolName)
     {
         Logger.Info(
-            "Operator '{ConnectionId}' claims pool '{PoolName}' for tenant '{TenantId}'",
-            Context.ConnectionId, poolName, tenantId);
+            "Operator '{ConnectionId}' claims pool '{PoolName}' (rtId {PoolRtId}) for tenant '{TenantId}'",
+            Context.ConnectionId, poolName, poolRtId, tenantId);
 
         // Track the (connection, tenant, pool) tuple before flipping state —
         // if state-write fails we still want OnDisconnectedAsync to clean
         // up so the entity doesn't stay stuck on Online.
-        _connectionManager.RegisterPoolForConnection(Context.ConnectionId, tenantId, poolName);
+        _connectionManager.RegisterPoolForConnection(Context.ConnectionId, tenantId, poolRtId, poolName);
 
         try
         {
-            await _poolService.SetCommunicationStateOnlineAsync(tenantId, poolName, Context.ConnectionId);
+            await _poolService.SetCommunicationStateOnlineAsync(tenantId,
+                new OctoObjectId(poolRtId), Context.ConnectionId);
         }
         catch (Exception ex)
         {
             Logger.Error(ex,
-                "Failed to mark pool '{PoolName}' online (tenant '{TenantId}')", poolName, tenantId);
+                "Failed to mark pool '{PoolName}' (rtId {PoolRtId}) online (tenant '{TenantId}')",
+                poolName, poolRtId, tenantId);
             throw;
         }
     }
 
     /// <inheritdoc />
-    public async Task UnregisterPoolAsync(string tenantId, string poolName)
+    public async Task UnregisterPoolAsync(string tenantId, string poolRtId, string poolName)
     {
         Logger.Info(
-            "Operator '{ConnectionId}' releases pool '{PoolName}' for tenant '{TenantId}'",
-            Context.ConnectionId, poolName, tenantId);
+            "Operator '{ConnectionId}' releases pool '{PoolName}' (rtId {PoolRtId}) for tenant '{TenantId}'",
+            Context.ConnectionId, poolName, poolRtId, tenantId);
 
-        _connectionManager.UnregisterPoolForConnection(Context.ConnectionId, tenantId, poolName);
+        _connectionManager.UnregisterPoolForConnection(Context.ConnectionId, tenantId, poolRtId);
 
         try
         {
-            await _poolService.UnregisterPoolOperatorAsync(tenantId, poolName);
+            await _poolService.UnregisterPoolOperatorAsync(tenantId, new OctoObjectId(poolRtId));
         }
         catch (Exception ex)
         {
             Logger.Warn(ex,
-                "Failed to unregister pool '{PoolName}' (tenant '{TenantId}'); state may stay Online until disconnect",
-                poolName, tenantId);
+                "Failed to unregister pool '{PoolName}' (rtId {PoolRtId}); state may stay Online until disconnect (tenant '{TenantId}')",
+                poolName, poolRtId, tenantId);
         }
     }
 

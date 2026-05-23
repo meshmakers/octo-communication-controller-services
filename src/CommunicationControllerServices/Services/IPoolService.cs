@@ -13,21 +13,11 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 public interface IPoolService
 {
     /// <summary>
-    /// Registers a pool operator for a tenant
+    /// Unregisters a pool operator for a tenant. Called by
+    /// <c>OperatorHub.UnregisterPoolAsync</c> when the operator releases
+    /// a pool while keeping the hub connection open.
     /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="poolName">Name of pool</param>
-    /// <param name="connectionId">Connection id to client</param>
-    /// <returns></returns>
-    Task<OctoObjectId> RegisterPoolOperatorAsync(string tenantId, string poolName, string connectionId);
-
-    /// <summary>
-    /// Unregisters a pool operator for a tenant
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="poolName">Name of pool</param>
-    /// <returns></returns>
-    Task UnregisterPoolOperatorAsync(string tenantId, string poolName);
+    Task UnregisterPoolOperatorAsync(string tenantId, OctoObjectId poolRtId);
 
     /// <summary>
     /// Updates an entire tenant before a tenant is deleted or disabled for communication.
@@ -89,11 +79,8 @@ public interface IPoolService
     Task UndeployAllCloudPoolsAsync(string tenantId);
 
     /// <summary>
-    /// Sets a pool offline
+    /// Sets a pool offline unconditionally.
     /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="poolRtId">Identifier of pool</param>
-    /// <returns></returns>
     Task SetCommunicationStateOfflineAsync(string tenantId, OctoObjectId poolRtId);
 
     /// <summary>
@@ -102,27 +89,19 @@ public interface IPoolService
     /// against stale <c>OnDisconnectedAsync</c> handlers from a previous operator
     /// connection overwriting Online state that a newer operator has already written.
     /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="poolName">Name of pool</param>
-    /// <param name="disconnectingConnectionId">SignalR connection id whose disconnect triggered this call</param>
-    Task SetCommunicationStateOfflineAsync(string tenantId, string poolName, string disconnectingConnectionId);
+    Task SetCommunicationStateOfflineAsync(string tenantId, OctoObjectId poolRtId,
+        string disconnectingConnectionId);
 
     /// <summary>
-    /// Sets a pool online
+    /// Sets a pool online unconditionally.
     /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="poolRtId">Identifier of pool</param>
-    /// <returns></returns>
     Task SetCommunicationStateOnlineAsync(string tenantId, OctoObjectId poolRtId);
 
     /// <summary>
-    /// Sets a pool online using the connection id
+    /// Sets a pool online and records the connection id that owns it.
+    /// Lazy-loads the pool into the cache when it isn't there yet.
     /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="poolName">Name of pool</param>
-    /// <param name="connectionId">Connection id of pool</param>
-    /// <returns></returns>
-    Task SetCommunicationStateOnlineAsync(string tenantId, string poolName, string connectionId);
+    Task SetCommunicationStateOnlineAsync(string tenantId, OctoObjectId poolRtId, string connectionId);
 
     /// <summary>
     /// Updates the deployment state of an adapter in a pool
