@@ -592,6 +592,21 @@ internal class CommunicationRepository : ICommunicationRepository
             };
             ApplyDeploymentErrorTracking(rtAdapter, deploymentState, stateMessage);
 
+            // Invariant: ConfigurationState == Configured implies DeploymentState == Deployed.
+            // When the workload has no running pod (Undeployed / Disabled) or its deploy failed
+            // (Error), the previously-pushed config is no longer in effect — force-reset
+            // ConfigurationState so the UI badge follows reality. We keep ConfigurationState
+            // alone during Deployed (the pod is back, config still applies until proven
+            // otherwise) and Pending (a redeploy is in flight — the config window has not
+            // closed yet). LastConfigurationError is preserved by Unconfigured so any prior
+            // configuration failure stays visible.
+            if (deploymentState == RtDeploymentStateEnum.Undeployed ||
+                deploymentState == RtDeploymentStateEnum.Disabled ||
+                deploymentState == RtDeploymentStateEnum.Error)
+            {
+                rtAdapter.ConfigurationState = RtConfigurationStateEnum.Unconfigured;
+            }
+
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtAdapter>>();
             foreach (var adapterRtEntityId in adapterRtEntityIds)
             {
@@ -688,6 +703,18 @@ internal class CommunicationRepository : ICommunicationRepository
                 CommunicationState = communicationState,
                 CommunicationStateTimestamp = newTimestamp
             };
+
+            // Invariant: ConfigurationState == Configured implies CommunicationState == Online.
+            // A pod that is Offline / Unregistered cannot still be running the pushed config —
+            // surfacing "Configured" in the UI while the adapter is unreachable misleads the
+            // user. Force-reset to Unconfigured so the badge follows reality. The persistent
+            // LastConfigurationError is NOT cleared (Unconfigured doesn't trigger the clear
+            // branch in ApplyConfigurationErrorTracking), so any prior error context stays
+            // visible across the offline window.
+            if (communicationState != RtCommunicationStateEnum.Online)
+            {
+                rtAdapter.ConfigurationState = RtConfigurationStateEnum.Unconfigured;
+            }
 
             var guard = new AttributeNewerThanGuard("attributes.communicationStateTimestamp", newTimestamp);
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtAdapter>>
@@ -2100,9 +2127,17 @@ internal class CommunicationRepository : ICommunicationRepository
     /// Behaviour by target state:
     /// <list type="bullet">
     ///   <item>Error      → write LastDeploymentError = message (or "(no message)") and timestamp = now.</item>
+    ///   <item>Pending    → clear both fields. A Pending transition is always driven by an active
+    ///                      retry (user-triggered deploy, controller-driven redeploy, operator
+    ///                      reconnect), and showing the previous failure on top of a fresh attempt
+    ///                      is confusing: the user can no longer tell whether their fix actually
+    ///                      changed anything. The window before a Deployed / Error round-trip
+    ///                      lands is brief (seconds), so dropping the error here trades a tiny bit
+    ///                      of context for "click Deploy → banner disappears → wait → see fresh
+    ///                      result".</item>
     ///   <item>Deployed   → clear both fields (the deploy has succeeded; the previous failure is resolved).</item>
     ///   <item>Other      → leave fields untouched so the user keeps seeing the failure context across
-    ///                      transient intermediate states like Pending or operator-driven Undeployed /
+    ///                      transient intermediate states like operator-driven Undeployed /
     ///                      Disabled transitions.</item>
     /// </list>
     /// </para>
@@ -2123,7 +2158,8 @@ internal class CommunicationRepository : ICommunicationRepository
                 : stateMessage;
             entity.LastDeploymentErrorTimestamp = DateTime.UtcNow;
         }
-        else if (deploymentState == RtDeploymentStateEnum.Deployed)
+        else if (deploymentState == RtDeploymentStateEnum.Deployed ||
+                 deploymentState == RtDeploymentStateEnum.Pending)
         {
             entity.LastDeploymentError = null;
             entity.LastDeploymentErrorTimestamp = null;
@@ -2135,6 +2171,8 @@ internal class CommunicationRepository : ICommunicationRepository
     /// Configuration and deployment failures are tracked on independent fields so a successful
     /// deploy never masks an unrelated configuration error (and vice versa) — the conflation of
     /// the two on a single <c>StatusMessage</c> field was the original UX bug this split fixes.
+    /// Pending is treated like a fresh attempt and clears the previous error, matching the
+    /// deployment-side behaviour.
     /// </summary>
     private static void ApplyConfigurationErrorTracking(RtAdapter adapter,
         RtConfigurationStateEnum configurationState, string? stateMessage)
@@ -2146,7 +2184,8 @@ internal class CommunicationRepository : ICommunicationRepository
                 : stateMessage;
             adapter.LastConfigurationErrorTimestamp = DateTime.UtcNow;
         }
-        else if (configurationState == RtConfigurationStateEnum.Configured)
+        else if (configurationState == RtConfigurationStateEnum.Configured ||
+                 configurationState == RtConfigurationStateEnum.Pending)
         {
             adapter.LastConfigurationError = null;
             adapter.LastConfigurationErrorTimestamp = null;
