@@ -308,6 +308,12 @@ internal class CommunicationRepository : ICommunicationRepository
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
         using var session = await tenantRepository.GetSessionAsync();
+        // The association swap is a write — start a transaction before any
+        // call to ApplyChangesAsync so the CommitTransactionAsync below has
+        // something to commit. Without this, CommitTransactionAsync throws
+        // "There is no transaction started" and we surface the generic
+        // CommonFailedMovePipeline error to the UI.
+        session.StartTransaction();
         try
         {
             var pipeline = await tenantRepository.GetRtEntityByRtIdAsync<RtPipeline>(session, pipelineRtId);
