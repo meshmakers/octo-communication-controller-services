@@ -109,6 +109,25 @@ public class OperatorHub : Hub, IOperatorHub
             "Operator '{ConnectionId}' claims pool '{PoolName}' (rtId {PoolRtId}) for tenant '{TenantId}'",
             Context.ConnectionId, poolName, poolRtId, tenantId);
 
+        // Validate poolRtId up-front. An empty / malformed value used to
+        // surface as a FormatException from `new OctoObjectId(poolRtId)`
+        // a few lines down, which SignalR then wrapped in a generic
+        // HubException ("'' is not a valid 24 digit hex string"). The
+        // operator could not act on that — it just kept retrying the
+        // same broken CR. Failing here returns a typed HubException with
+        // a message that names the offending field, so the operator log
+        // immediately points at the misconfigured CR spec.
+        if (!OctoObjectId.TryParse(poolRtId, out var poolObjectId))
+        {
+            Logger.Warn(
+                "Rejecting RegisterPool: poolRtId '{PoolRtId}' is not a valid 24-character hex ObjectId " +
+                "(pool '{PoolName}', tenant '{TenantId}', connection '{ConnectionId}')",
+                poolRtId, poolName, tenantId, Context.ConnectionId);
+            throw new HubException(
+                $"Invalid poolRtId '{poolRtId}' for pool '{poolName}' (tenant '{tenantId}'): " +
+                "must be a 24-character hex ObjectId. Check the CommunicationPool CR spec.");
+        }
+
         // Track the (connection, tenant, pool) tuple before flipping state —
         // if state-write fails we still want OnDisconnectedAsync to clean
         // up so the entity doesn't stay stuck on Online.
@@ -117,7 +136,7 @@ public class OperatorHub : Hub, IOperatorHub
         try
         {
             await _poolService.SetCommunicationStateOnlineAsync(tenantId,
-                new OctoObjectId(poolRtId), Context.ConnectionId);
+                poolObjectId, Context.ConnectionId);
         }
         catch (Exception ex)
         {
@@ -135,11 +154,26 @@ public class OperatorHub : Hub, IOperatorHub
             "Operator '{ConnectionId}' releases pool '{PoolName}' (rtId {PoolRtId}) for tenant '{TenantId}'",
             Context.ConnectionId, poolName, poolRtId, tenantId);
 
+        // Validate up-front (same rationale as RegisterPoolAsync). Bad
+        // input here used to surface as FormatException from
+        // `new OctoObjectId(poolRtId)`, swallowed by the catch below as
+        // a generic warning that obscured the actual cause.
+        if (!OctoObjectId.TryParse(poolRtId, out var poolObjectId))
+        {
+            Logger.Warn(
+                "Rejecting UnregisterPool: poolRtId '{PoolRtId}' is not a valid 24-character hex ObjectId " +
+                "(pool '{PoolName}', tenant '{TenantId}', connection '{ConnectionId}')",
+                poolRtId, poolName, tenantId, Context.ConnectionId);
+            throw new HubException(
+                $"Invalid poolRtId '{poolRtId}' for pool '{poolName}' (tenant '{tenantId}'): " +
+                "must be a 24-character hex ObjectId.");
+        }
+
         _connectionManager.UnregisterPoolForConnection(Context.ConnectionId, tenantId, poolRtId);
 
         try
         {
-            await _poolService.UnregisterPoolOperatorAsync(tenantId, new OctoObjectId(poolRtId));
+            await _poolService.UnregisterPoolOperatorAsync(tenantId, poolObjectId);
         }
         catch (Exception ex)
         {
