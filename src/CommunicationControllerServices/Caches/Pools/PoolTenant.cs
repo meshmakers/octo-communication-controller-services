@@ -9,10 +9,8 @@ internal class PoolTenant
     public string TenantId { get; }
 
     private readonly ConcurrentDictionary<OctoObjectId, Pool> _poolsById;
-    private readonly ConcurrentDictionary<string, Pool> _poolsByName;
 
     public IReadOnlyDictionary<OctoObjectId, Pool> PoolsById => _poolsById;
-    public IReadOnlyDictionary<string, Pool> PoolsByName => _poolsByName;
 
     public PoolTenant(IPoolCachePublish poolCachePublish, string tenantId)
     {
@@ -20,15 +18,12 @@ internal class PoolTenant
 
         TenantId = tenantId;
         _poolsById = new ConcurrentDictionary<OctoObjectId, Pool>();
-        _poolsByName = new ConcurrentDictionary<string, Pool>();
     }
 
     public Pool AddPool(string poolName, OctoObjectId poolRtId, string connectionId)
     {
         var pool = new Pool(_poolCachePublish, poolRtId, poolName, connectionId);
         _poolsById.AddOrUpdate(poolRtId, _ => pool,
-            (_, _) => pool);
-        _poolsByName.AddOrUpdate(poolName, _ => pool,
             (_, _) => pool);
         _poolCachePublish.PublishConfigurationAsync(TenantId);
 
@@ -37,19 +32,15 @@ internal class PoolTenant
 
     public void RemovePool(OctoObjectId poolRtId)
     {
-        if (_poolsById.TryRemove(poolRtId, out var adapterHubPool))
+        if (_poolsById.TryRemove(poolRtId, out _))
         {
-            if (_poolsByName.TryRemove(adapterHubPool.PoolName, out _))
-            {
-                _poolCachePublish.PublishConfigurationAsync(TenantId);
-            }
+            _poolCachePublish.PublishConfigurationAsync(TenantId);
         }
     }
 
     public void Clear()
     {
         _poolsById.Clear();
-        _poolsByName.Clear();
 
         _poolCachePublish.PublishConfigurationAsync(TenantId);
     }
