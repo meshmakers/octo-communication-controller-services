@@ -14,15 +14,14 @@ public interface IOperatorConnectionManager
     void AddOperator(string connectionId);
 
     /// <summary>
-    /// Removes an operator connection and returns the (tenant, poolRtId,
-    /// poolName) tuples that connection had registered via
+    /// Removes an operator connection and returns the (tenant, poolRtId)
+    /// tuples that connection had registered via
     /// <see cref="RegisterPoolForConnection"/>. The caller is expected to
     /// flip every returned pool's <c>CommunicationState</c> to
     /// <c>Offline</c> — this happens on every operator disconnect, planned
-    /// or otherwise. <c>PoolName</c> is the user-facing name retained for
-    /// log lines; <c>PoolRtId</c> is the lookup key.
+    /// or otherwise.
     /// </summary>
-    IReadOnlyCollection<(string TenantId, string PoolRtId, string PoolName)> RemoveOperator(string connectionId);
+    IReadOnlyCollection<(string TenantId, string PoolRtId)> RemoveOperator(string connectionId);
 
     /// <summary>
     /// Records that the given operator connection now hosts the pool
@@ -30,7 +29,7 @@ public interface IOperatorConnectionManager
     /// <c>OperatorHub.RegisterPoolAsync</c> so the controller can reset
     /// the pool's state when the SignalR connection drops.
     /// </summary>
-    void RegisterPoolForConnection(string connectionId, string tenantId, string poolRtId, string poolName);
+    void RegisterPoolForConnection(string connectionId, string tenantId, string poolRtId);
 
     /// <summary>
     /// Removes a single (connection, tenant, poolRtId) tuple — called on a
@@ -48,16 +47,15 @@ public interface IOperatorConnectionManager
     IEnumerable<DeployedPoolDto> GetDeployedPools();
 
     /// <summary>
-    /// Returns the pool RtIds (with their user-facing names) that this
-    /// controller has notified operators of as deployed for the given
-    /// tenant. Backed by in-memory tracking that is updated whenever
-    /// <c>NotifyPoolDeployedAsync</c> or <c>NotifyPoolUndeployedAsync</c>
-    /// is invoked. The cascade in <c>PreDeleteTenant</c> reads from here
-    /// instead of the tenant repository because the CK-cache for the
-    /// tenant may already be torn down by the parallel
-    /// <c>PreUpdatePreDeleteTenantConsumer</c>.
+    /// Returns the pool RtIds that this controller has notified operators
+    /// of as deployed for the given tenant. Backed by in-memory tracking
+    /// that is updated whenever <c>NotifyPoolDeployedAsync</c> or
+    /// <c>NotifyPoolUndeployedAsync</c> is invoked. The cascade in
+    /// <c>PreDeleteTenant</c> reads from here instead of the tenant
+    /// repository because the CK-cache for the tenant may already be torn
+    /// down by the parallel <c>PreUpdatePreDeleteTenantConsumer</c>.
     /// </summary>
-    IReadOnlyCollection<(string PoolRtId, string PoolName)> GetDeployedPoolsForTenant(string tenantId);
+    IReadOnlyCollection<string> GetDeployedPoolsForTenant(string tenantId);
 
     /// <summary>
     /// Notifies all connected operators that a Cloud pool was deployed.
@@ -67,7 +65,7 @@ public interface IOperatorConnectionManager
     /// <summary>
     /// Notifies all connected operators that a Cloud pool was undeployed.
     /// </summary>
-    Task NotifyPoolUndeployedAsync(string tenantId, string poolRtId, string poolName);
+    Task NotifyPoolUndeployedAsync(string tenantId, string poolRtId);
 
     /// <summary>
     /// Returns the workloads this controller has notified operators of as

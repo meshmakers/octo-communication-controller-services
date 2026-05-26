@@ -55,7 +55,7 @@ public class OperatorHub : Hub, IOperatorHub
         // newer connection has already taken over) does not overwrite the
         // Online state written by the newer connection.
         var orphaned = _connectionManager.RemoveOperator(disconnectingConnectionId);
-        foreach (var (tenantId, poolRtId, poolName) in orphaned)
+        foreach (var (tenantId, poolRtId) in orphaned)
         {
             try
             {
@@ -65,8 +65,8 @@ public class OperatorHub : Hub, IOperatorHub
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "Failed to mark pool '{PoolName}' (rtId {PoolRtId}) offline after operator disconnect (tenant '{TenantId}')",
-                    poolName, poolRtId, tenantId);
+                    "Failed to mark pool (rtId {PoolRtId}) offline after operator disconnect (tenant '{TenantId}')",
+                    poolRtId, tenantId);
             }
         }
         await base.OnDisconnectedAsync(exception);
@@ -86,7 +86,7 @@ public class OperatorHub : Hub, IOperatorHub
         var disconnectingConnectionId = Context.ConnectionId;
         Logger.Info("Operator unregistered with connection id '{ConnectionId}'", disconnectingConnectionId);
         var orphaned = _connectionManager.RemoveOperator(disconnectingConnectionId);
-        foreach (var (tenantId, poolRtId, poolName) in orphaned)
+        foreach (var (tenantId, poolRtId) in orphaned)
         {
             try
             {
@@ -96,18 +96,18 @@ public class OperatorHub : Hub, IOperatorHub
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "Failed to mark pool '{PoolName}' (rtId {PoolRtId}) offline on operator unregister (tenant '{TenantId}')",
-                    poolName, poolRtId, tenantId);
+                    "Failed to mark pool (rtId {PoolRtId}) offline on operator unregister (tenant '{TenantId}')",
+                    poolRtId, tenantId);
             }
         }
     }
 
     /// <inheritdoc />
-    public async Task RegisterPoolAsync(string tenantId, string poolRtId, string poolName)
+    public async Task RegisterPoolAsync(string tenantId, string poolRtId)
     {
         Logger.Info(
-            "Operator '{ConnectionId}' claims pool '{PoolName}' (rtId {PoolRtId}) for tenant '{TenantId}'",
-            Context.ConnectionId, poolName, poolRtId, tenantId);
+            "Operator '{ConnectionId}' claims pool (rtId {PoolRtId}) for tenant '{TenantId}'",
+            Context.ConnectionId, poolRtId, tenantId);
 
         // Validate poolRtId up-front. An empty / malformed value used to
         // surface as a FormatException from `new OctoObjectId(poolRtId)`
@@ -121,17 +121,17 @@ public class OperatorHub : Hub, IOperatorHub
         {
             Logger.Warn(
                 "Rejecting RegisterPool: poolRtId '{PoolRtId}' is not a valid 24-character hex ObjectId " +
-                "(pool '{PoolName}', tenant '{TenantId}', connection '{ConnectionId}')",
-                poolRtId, poolName, tenantId, Context.ConnectionId);
+                "(tenant '{TenantId}', connection '{ConnectionId}')",
+                poolRtId, tenantId, Context.ConnectionId);
             throw new HubException(
-                $"Invalid poolRtId '{poolRtId}' for pool '{poolName}' (tenant '{tenantId}'): " +
+                $"Invalid poolRtId '{poolRtId}' (tenant '{tenantId}'): " +
                 "must be a 24-character hex ObjectId. Check the CommunicationPool CR spec.");
         }
 
         // Track the (connection, tenant, pool) tuple before flipping state —
         // if state-write fails we still want OnDisconnectedAsync to clean
         // up so the entity doesn't stay stuck on Online.
-        _connectionManager.RegisterPoolForConnection(Context.ConnectionId, tenantId, poolRtId, poolName);
+        _connectionManager.RegisterPoolForConnection(Context.ConnectionId, tenantId, poolRtId);
 
         try
         {
@@ -141,18 +141,18 @@ public class OperatorHub : Hub, IOperatorHub
         catch (Exception ex)
         {
             Logger.Error(ex,
-                "Failed to mark pool '{PoolName}' (rtId {PoolRtId}) online (tenant '{TenantId}')",
-                poolName, poolRtId, tenantId);
+                "Failed to mark pool (rtId {PoolRtId}) online (tenant '{TenantId}')",
+                poolRtId, tenantId);
             throw;
         }
     }
 
     /// <inheritdoc />
-    public async Task UnregisterPoolAsync(string tenantId, string poolRtId, string poolName)
+    public async Task UnregisterPoolAsync(string tenantId, string poolRtId)
     {
         Logger.Info(
-            "Operator '{ConnectionId}' releases pool '{PoolName}' (rtId {PoolRtId}) for tenant '{TenantId}'",
-            Context.ConnectionId, poolName, poolRtId, tenantId);
+            "Operator '{ConnectionId}' releases pool (rtId {PoolRtId}) for tenant '{TenantId}'",
+            Context.ConnectionId, poolRtId, tenantId);
 
         // Validate up-front (same rationale as RegisterPoolAsync). Bad
         // input here used to surface as FormatException from
@@ -162,10 +162,10 @@ public class OperatorHub : Hub, IOperatorHub
         {
             Logger.Warn(
                 "Rejecting UnregisterPool: poolRtId '{PoolRtId}' is not a valid 24-character hex ObjectId " +
-                "(pool '{PoolName}', tenant '{TenantId}', connection '{ConnectionId}')",
-                poolRtId, poolName, tenantId, Context.ConnectionId);
+                "(tenant '{TenantId}', connection '{ConnectionId}')",
+                poolRtId, tenantId, Context.ConnectionId);
             throw new HubException(
-                $"Invalid poolRtId '{poolRtId}' for pool '{poolName}' (tenant '{tenantId}'): " +
+                $"Invalid poolRtId '{poolRtId}' (tenant '{tenantId}'): " +
                 "must be a 24-character hex ObjectId.");
         }
 
@@ -178,8 +178,8 @@ public class OperatorHub : Hub, IOperatorHub
         catch (Exception ex)
         {
             Logger.Warn(ex,
-                "Failed to unregister pool '{PoolName}' (rtId {PoolRtId}); state may stay Online until disconnect (tenant '{TenantId}')",
-                poolName, poolRtId, tenantId);
+                "Failed to unregister pool (rtId {PoolRtId}); state may stay Online until disconnect (tenant '{TenantId}')",
+                poolRtId, tenantId);
         }
     }
 
@@ -187,8 +187,8 @@ public class OperatorHub : Hub, IOperatorHub
     public async Task ReportWorkloadDeploymentStatusAsync(WorkloadDeploymentStatusDto status)
     {
         Logger.Info(
-            "Workload deployment status report: tenant '{TenantId}', pool '{PoolName}', workload '{WorkloadName}', success={Success}",
-            status.TenantId, status.PoolName, status.WorkloadName, status.Success);
+            "Workload deployment status report: tenant '{TenantId}', workload '{WorkloadName}' (rtId {WorkloadRtId}), success={Success}",
+            status.TenantId, status.WorkloadName, status.WorkloadRtId, status.Success);
 
         if (string.IsNullOrWhiteSpace(status.TenantId) || string.IsNullOrWhiteSpace(status.WorkloadRtId))
         {

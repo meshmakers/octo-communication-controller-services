@@ -11,21 +11,20 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly ConcurrentDictionary<string, bool> _connectedOperators = new();
 
-    // For each connected operator (by connectionId), the (tenant, poolRtId,
-    // poolName) tuples it has claimed via RegisterPoolForConnection. On
-    // disconnect we hand these back to PoolService so the corresponding pool
-    // entities' state can be flipped to Offline. PoolRtId is the lookup key;
-    // PoolName is retained for human-readable log output only.
-    private readonly ConcurrentDictionary<string, ConcurrentDictionary<(string TenantId, string PoolRtId), string>>
+    // For each connected operator (by connectionId), the (tenant, poolRtId)
+    // tuples it has claimed via RegisterPoolForConnection. On disconnect we
+    // hand these back to PoolService so the corresponding pool entities'
+    // state can be flipped to Offline. The dictionary value is unused —
+    // ConcurrentHashSet does not exist, so a bool sentinel emulates a set.
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<(string TenantId, string PoolRtId), bool>>
         _poolsByConnection = new();
 
     // Tracks Cloud pools that this controller has notified operators of as
     // deployed but not yet undeployed. Source of truth for the PreDeleteTenant
     // cascade so it doesn't have to query the tenant repository (which races
     // with PreUpdatePreDeleteTenantConsumer's cache unload). Keyed by poolRtId
-    // (DNS-safe, stable across CK pool renames); the value carries the
-    // user-facing poolName for log output and event payloads.
-    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, string>> _deployedPoolsByTenant = new();
+    // (DNS-safe, stable across CK pool renames).
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, bool>> _deployedPoolsByTenant = new();
 
     // Tracks Cloud workloads (Adapters + Applications) deployed via the Helm
     // path. Key inside the per-tenant bucket is the workload RtId — also
@@ -40,11 +39,11 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
         Logger.Info("Operator added, total connected: {Count}", _connectedOperators.Count);
     }
 
-    public IReadOnlyCollection<(string TenantId, string PoolRtId, string PoolName)> RemoveOperator(string connectionId)
+    public IReadOnlyCollection<(string TenantId, string PoolRtId)> RemoveOperator(string connectionId)
     {
         _connectedOperators.TryRemove(connectionId, out _);
         var orphaned = _poolsByConnection.TryRemove(connectionId, out var bucket)
-            ? bucket.Select(kvp => (kvp.Key.TenantId, kvp.Key.PoolRtId, PoolName: kvp.Value)).ToArray()
+            ? bucket.Keys.ToArray()
             : [];
         Logger.Info(
             "Operator removed, total connected: {Count}, orphaned pools: {OrphanCount}",
@@ -52,11 +51,11 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
         return orphaned;
     }
 
-    public void RegisterPoolForConnection(string connectionId, string tenantId, string poolRtId, string poolName)
+    public void RegisterPoolForConnection(string connectionId, string tenantId, string poolRtId)
     {
         var bucket = _poolsByConnection.GetOrAdd(connectionId,
-            _ => new ConcurrentDictionary<(string TenantId, string PoolRtId), string>());
-        bucket[(tenantId, poolRtId)] = poolName;
+            _ => new ConcurrentDictionary<(string TenantId, string PoolRtId), bool>());
+        bucket[(tenantId, poolRtId)] = true;
     }
 
     public void UnregisterPoolForConnection(string connectionId, string tenantId, string poolRtId)
@@ -78,14 +77,13 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
             {
                 TenantId = tenant.Key,
                 PoolRtId = pool.Key,
-                PoolName = pool.Value,
             })).ToArray();
     }
 
-    public IReadOnlyCollection<(string PoolRtId, string PoolName)> GetDeployedPoolsForTenant(string tenantId)
+    public IReadOnlyCollection<string> GetDeployedPoolsForTenant(string tenantId)
     {
         return _deployedPoolsByTenant.TryGetValue(tenantId, out var pools)
-            ? pools.Select(kvp => (PoolRtId: kvp.Key, PoolName: kvp.Value)).ToArray()
+            ? pools.Keys.ToArray()
             : [];
     }
 
@@ -120,20 +118,20 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
         // connects later, GetDeployedPools() / GetDeployedPoolsForTenant()
         // must still return the pool.
         var tenantPools = _deployedPoolsByTenant.GetOrAdd(pool.TenantId,
-            _ => new ConcurrentDictionary<string, string>());
-        tenantPools[pool.PoolRtId] = pool.PoolName;
+            _ => new ConcurrentDictionary<string, bool>());
+        tenantPools[pool.PoolRtId] = true;
 
         if (_connectedOperators.IsEmpty)
         {
             Logger.Debug(
-                "No operators connected, skipping pool-deployed notification for tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId})",
-                pool.TenantId, pool.PoolName, pool.PoolRtId);
+                "No operators connected, skipping pool-deployed notification for tenant '{TenantId}', pool rtId {PoolRtId}",
+                pool.TenantId, pool.PoolRtId);
             return;
         }
 
         Logger.Info(
-            "Notifying {Count} operator(s) of pool deployed: tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId})",
-            _connectedOperators.Count, pool.TenantId, pool.PoolName, pool.PoolRtId);
+            "Notifying {Count} operator(s) of pool deployed: tenant '{TenantId}', pool rtId {PoolRtId}",
+            _connectedOperators.Count, pool.TenantId, pool.PoolRtId);
 
         var connectionIds = _connectedOperators.Keys.ToList();
         foreach (var connectionId in connectionIds)
@@ -146,13 +144,13 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "Failed to notify operator {ConnectionId} of pool deployment for tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId})",
-                    connectionId, pool.TenantId, pool.PoolName, pool.PoolRtId);
+                    "Failed to notify operator {ConnectionId} of pool deployment for tenant '{TenantId}', pool rtId {PoolRtId}",
+                    connectionId, pool.TenantId, pool.PoolRtId);
             }
         }
     }
 
-    public async Task NotifyPoolUndeployedAsync(string tenantId, string poolRtId, string poolName)
+    public async Task NotifyPoolUndeployedAsync(string tenantId, string poolRtId)
     {
         if (_deployedPoolsByTenant.TryGetValue(tenantId, out var tenantPools))
         {
@@ -166,14 +164,14 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
         if (_connectedOperators.IsEmpty)
         {
             Logger.Debug(
-                "No operators connected, skipping pool-undeployed notification for tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId})",
-                tenantId, poolName, poolRtId);
+                "No operators connected, skipping pool-undeployed notification for tenant '{TenantId}', pool rtId {PoolRtId}",
+                tenantId, poolRtId);
             return;
         }
 
         Logger.Info(
-            "Notifying {Count} operator(s) of pool undeployed: tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId})",
-            _connectedOperators.Count, tenantId, poolName, poolRtId);
+            "Notifying {Count} operator(s) of pool undeployed: tenant '{TenantId}', pool rtId {PoolRtId}",
+            _connectedOperators.Count, tenantId, poolRtId);
 
         var connectionIds = _connectedOperators.Keys.ToList();
         foreach (var connectionId in connectionIds)
@@ -181,13 +179,13 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
             try
             {
                 await hubContext.Clients.Client(connectionId)
-                    .SendAsync(nameof(IOperatorHubCallbacks.PoolUndeployedAsync), tenantId, poolRtId, poolName);
+                    .SendAsync(nameof(IOperatorHubCallbacks.PoolUndeployedAsync), tenantId, poolRtId);
             }
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "Failed to notify operator {ConnectionId} of pool undeployment for tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId})",
-                    connectionId, tenantId, poolName, poolRtId);
+                    "Failed to notify operator {ConnectionId} of pool undeployment for tenant '{TenantId}', pool rtId {PoolRtId}",
+                    connectionId, tenantId, poolRtId);
             }
         }
     }
@@ -202,7 +200,6 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
         {
             TenantId = workload.TenantId,
             PoolRtId = workload.PoolRtId,
-            PoolName = workload.PoolName,
             WorkloadRtId = workload.WorkloadRtId,
             WorkloadName = workload.WorkloadName,
             WorkloadType = workload.WorkloadType,
@@ -221,14 +218,14 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
         if (targetConnections.Count == 0)
         {
             Logger.Warn(
-                "No operator currently owns pool '{PoolName}' (rtId {PoolRtId}) for tenant '{TenantId}'; skipping workload-deployed notification for '{WorkloadName}'",
-                workload.PoolName, workload.PoolRtId, workload.TenantId, workload.WorkloadName);
+                "No operator currently owns pool rtId {PoolRtId} for tenant '{TenantId}'; skipping workload-deployed notification for '{WorkloadName}'",
+                workload.PoolRtId, workload.TenantId, workload.WorkloadName);
             return;
         }
 
         Logger.Info(
-            "Notifying {Count} operator(s) of workload deployed: tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId}), workload '{WorkloadName}' (rtId {WorkloadRtId}), chart '{ChartName}:{ChartVersion}'",
-            targetConnections.Count, workload.TenantId, workload.PoolName, workload.PoolRtId,
+            "Notifying {Count} operator(s) of workload deployed: tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}' (rtId {WorkloadRtId}), chart '{ChartName}:{ChartVersion}'",
+            targetConnections.Count, workload.TenantId, workload.PoolRtId,
             workload.WorkloadName, workload.WorkloadRtId, workload.ChartName, workload.ChartVersion);
 
         foreach (var connectionId in targetConnections)
@@ -241,8 +238,8 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "Failed to notify operator {ConnectionId} of workload deployment for tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId}), workload '{WorkloadName}'",
-                    connectionId, workload.TenantId, workload.PoolName, workload.PoolRtId, workload.WorkloadName);
+                    "Failed to notify operator {ConnectionId} of workload deployment for tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}'",
+                    connectionId, workload.TenantId, workload.PoolRtId, workload.WorkloadName);
             }
         }
     }
@@ -291,14 +288,14 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
         if (targetConnections.Count == 0)
         {
             Logger.Warn(
-                "No operator currently owns pool '{PoolName}' (rtId {PoolRtId}) for tenant '{TenantId}'; skipping workload-undeployed notification for '{WorkloadName}'",
-                workload.PoolName, workload.PoolRtId, workload.TenantId, workload.WorkloadName);
+                "No operator currently owns pool rtId {PoolRtId} for tenant '{TenantId}'; skipping workload-undeployed notification for '{WorkloadName}'",
+                workload.PoolRtId, workload.TenantId, workload.WorkloadName);
             return;
         }
 
         Logger.Info(
-            "Notifying {Count} operator(s) of workload undeployed: tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId}), workload '{WorkloadName}' (rtId {WorkloadRtId})",
-            targetConnections.Count, workload.TenantId, workload.PoolName, workload.PoolRtId,
+            "Notifying {Count} operator(s) of workload undeployed: tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}' (rtId {WorkloadRtId})",
+            targetConnections.Count, workload.TenantId, workload.PoolRtId,
             workload.WorkloadName, workload.WorkloadRtId);
 
         foreach (var connectionId in targetConnections)
@@ -311,8 +308,8 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "Failed to notify operator {ConnectionId} of workload undeployment for tenant '{TenantId}', pool '{PoolName}' (rtId {PoolRtId}), workload '{WorkloadName}'",
-                    connectionId, workload.TenantId, workload.PoolName, workload.PoolRtId, workload.WorkloadName);
+                    "Failed to notify operator {ConnectionId} of workload undeployment for tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}'",
+                    connectionId, workload.TenantId, workload.PoolRtId, workload.WorkloadName);
             }
         }
     }
