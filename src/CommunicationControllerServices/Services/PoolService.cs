@@ -196,7 +196,6 @@ internal class PoolService : IPoolService
         {
             TenantId = tenantId,
             PoolRtId = poolRtId.ToString(),
-            PoolName = poolName,
         });
 
         await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolRtId,
@@ -356,7 +355,6 @@ internal class PoolService : IPoolService
         {
             TenantId = tenantId,
             PoolRtId = pool.RtId.ToString(),
-            PoolName = pool.Name ?? string.Empty,
             WorkloadRtId = workload.RtId.ToString(),
             WorkloadName = workload.Name ?? string.Empty,
             WorkloadType = workload is RtApplication
@@ -419,7 +417,7 @@ internal class PoolService : IPoolService
         Logger.Info(
             "[{TenantId}] Pool '{PoolName}' (rtId {PoolRtId}): notifying central Communication Operator to clean up (Environment={Environment})",
             tenantId, poolName, poolRtId, rtPool.Environment);
-        await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, poolRtId.ToString(), poolName);
+        await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, poolRtId.ToString());
 
         // Resting state after undeploy: Disabled when the pool can no longer
         // be deployed via this controller (Edge), else Undeployed.
@@ -542,7 +540,6 @@ internal class PoolService : IPoolService
         {
             TenantId = tenantId,
             PoolRtId = poolRtId.ToString(),
-            PoolName = poolName,
             WorkloadName = workload.Name ?? string.Empty,
             WorkloadRtId = workload.RtId.ToString(),
             WorkloadType = workload is RtApplication
@@ -596,22 +593,22 @@ internal class PoolService : IPoolService
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "[{TenantId}] Failed to notify operator of workload undeploy during tenant cleanup, workload '{WorkloadName}' of pool '{PoolName}'",
-                    tenantId, workload.WorkloadName, workload.PoolName);
+                    "[{TenantId}] Failed to notify operator of workload undeploy during tenant cleanup, workload '{WorkloadName}' (rtId {WorkloadRtId}, pool rtId {PoolRtId})",
+                    tenantId, workload.WorkloadName, workload.WorkloadRtId, workload.PoolRtId);
             }
         }
 
-        foreach (var (poolRtId, poolName) in deployedPools)
+        foreach (var poolRtId in deployedPools)
         {
             try
             {
-                await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, poolRtId, poolName);
+                await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, poolRtId);
             }
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "[{TenantId}] Failed to notify operator of pool undeploy during tenant cleanup, pool '{PoolName}' (rtId {PoolRtId})",
-                    tenantId, poolName, poolRtId);
+                    "[{TenantId}] Failed to notify operator of pool undeploy during tenant cleanup, pool rtId {PoolRtId}",
+                    tenantId, poolRtId);
             }
         }
 

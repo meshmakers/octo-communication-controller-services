@@ -63,7 +63,6 @@ internal class ReportWorkloadDeploymentStatusAsyncTests : IDisposable
         await _hub.ReportWorkloadDeploymentStatusAsync(new WorkloadDeploymentStatusDto
         {
             TenantId = TenantId,
-            PoolName = "cloud",
             WorkloadName = "meshtest-adapter",
             WorkloadRtId = WorkloadRtId,
             Success = true,
@@ -89,7 +88,6 @@ internal class ReportWorkloadDeploymentStatusAsyncTests : IDisposable
         await _hub.ReportWorkloadDeploymentStatusAsync(new WorkloadDeploymentStatusDto
         {
             TenantId = TenantId,
-            PoolName = "cloud",
             WorkloadName = "meshtest-app",
             WorkloadRtId = WorkloadRtId,
             Success = true,
@@ -114,7 +112,6 @@ internal class ReportWorkloadDeploymentStatusAsyncTests : IDisposable
         await _hub.ReportWorkloadDeploymentStatusAsync(new WorkloadDeploymentStatusDto
         {
             TenantId = TenantId,
-            PoolName = "cloud",
             WorkloadName = "meshtest-adapter",
             WorkloadRtId = WorkloadRtId,
             Success = false,
