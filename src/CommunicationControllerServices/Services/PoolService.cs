@@ -111,7 +111,7 @@ internal class PoolService : IPoolService
                 // sets them Offline.
 
                 await _eventService.StoreInformationEventAsync(tenantId,
-                    $"Tenant pre-update completed. {poolTenant.PoolsByName.Count} pool(s) flushed from cache.");
+                    $"Tenant pre-update completed. {poolTenant.PoolsById.Count} pool(s) flushed from cache.");
             }
         }
         catch (Exception e)
@@ -760,43 +760,6 @@ internal class PoolService : IPoolService
         }
 
         await SetCommunicationStateOnlineAsync(tenantId, poolDescription.PoolRtId);
-    }
-
-    /// <inheritdoc />
-    public async Task SetAdapterDeploymentStateAsync(string tenantId, string poolName, RtEntityId adapterRtEntityId,
-        RtDeploymentStateEnum deploymentState)
-    {
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
-        {
-            throw PoolServiceException.TenantNotFoundOrNotEnabled(tenantId);
-        }
-
-        if (!poolTenant.PoolsByName.ContainsKey(poolName))
-        {
-            throw PoolServiceException.PoolNotFound(tenantId, poolName);
-        }
-
-        await _communicationRepository.SetAdapterDeploymentStateAsync(tenantId, adapterRtEntityId,
-            deploymentState);
-    }
-
-    /// <inheritdoc />
-    public async Task SetAdapterDeploymentStateAsync(string tenantId, string poolName,
-        ICollection<RtEntityId> adapterRtEntityIds,
-        RtDeploymentStateEnum deploymentState)
-    {
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
-        {
-            throw PoolServiceException.TenantNotFoundOrNotEnabled(tenantId);
-        }
-
-        if (!poolTenant.PoolsByName.ContainsKey(poolName))
-        {
-            throw PoolServiceException.PoolNotFound(tenantId, poolName);
-        }
-
-        await _communicationRepository.SetAdapterDeploymentStateAsync(tenantId, adapterRtEntityIds,
-            deploymentState);
     }
 
     public async Task<IReadOnlyList<PoolSummaryDto>> GetPoolSummariesAsync(string tenantId)

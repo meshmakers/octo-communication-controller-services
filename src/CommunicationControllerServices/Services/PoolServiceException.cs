@@ -26,11 +26,6 @@ internal class PoolServiceException : Exception
     {
         return new PoolServiceException($"[{tenantId}] Pool '{poolRtId}' not found");
     }
-    
-    internal static Exception PoolNotFound(string tenantId, string poolName)
-    {
-        return new PoolServiceException($"[{tenantId}] Pool '{poolName}' not found");
-    }
 
     internal static Exception AdapterNotFound(string tenantId, RtEntityId adapterRtEntityId)
     {

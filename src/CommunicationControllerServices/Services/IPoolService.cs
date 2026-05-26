@@ -104,28 +104,6 @@ public interface IPoolService
     Task SetCommunicationStateOnlineAsync(string tenantId, OctoObjectId poolRtId, string connectionId);
 
     /// <summary>
-    /// Updates the deployment state of an adapter in a pool
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="poolName">Name of pool</param>
-    /// <param name="adapterRtEntityId">The object id of the adapter</param>
-    /// <param name="deploymentState">The new deployment state</param>
-    /// <returns></returns>
-    Task SetAdapterDeploymentStateAsync(string tenantId, string poolName, RtEntityId adapterRtEntityId,
-        RtDeploymentStateEnum deploymentState);
-
-    /// <summary>
-    /// Updates the deployment state of an adapter in a pool
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="poolName">Name of pool</param>
-    /// <param name="adapterRtEntityIds">The object id of the adapters</param>
-    /// <param name="deploymentState">The new deployment state</param>
-    /// <returns></returns>
-    Task SetAdapterDeploymentStateAsync(string tenantId, string poolName, ICollection<RtEntityId> adapterRtEntityIds,
-        RtDeploymentStateEnum deploymentState);
-
-    /// <summary>
     /// Returns a summary list of all pools for a tenant with typed enum states.
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
