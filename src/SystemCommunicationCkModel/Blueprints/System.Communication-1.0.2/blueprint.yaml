@@ -1,5 +1,5 @@
 $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
-blueprintId: System.Communication-1.0.1
+blueprintId: System.Communication-1.0.2
 description: |
   Service-managed base blueprint for the Communication module. Seeds a Cloud-environment
   Pool and one managed Adapter on the active tenant so a freshly enabled tenant has a
