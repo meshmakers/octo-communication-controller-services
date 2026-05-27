@@ -16,6 +16,7 @@ using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.Blueprints;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Extensions;
 using Meshmakers.Octo.Communication.Contracts.MessageObjects;
@@ -51,6 +52,11 @@ try
         builder.Configuration.GetSection("System").Bind(options));
     builder.Services.Configure<CommunicationControllerOptions>(options =>
         builder.Configuration.GetSection("CommunicationController").Bind(options));
+    // Bind blueprint variable context (octo.version/environment/systemTenantId) so the
+    // default IBlueprintVariableProvider surfaces values from helm-injected
+    // OCTO_BLUEPRINTS__* environment variables instead of falling back to defaults.
+    builder.Services.Configure<OctoBlueprintVariablesOptions>(options =>
+        builder.Configuration.GetSection(OctoBlueprintVariablesOptions.SectionName).Bind(options));
     builder.Services.Configure<RouteOptions>(options =>
         options.ConstraintMap.Add("tenantId", typeof(TenantIdRouteConstraint)));
 
