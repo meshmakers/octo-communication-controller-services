@@ -13,11 +13,15 @@ entities:
       - id: System/Name
         value: Default Cloud
       - id: System/Description
+        # ${octo.environment} resolves to the deployment environment (dev/test/staging/
+        # production) via OCTO_BLUEPRINTS__ENVIRONMENT — the blueprint runner interpolates
+        # the placeholder at apply time, so the same seed yields environment-specific
+        # descriptions without a per-environment blueprint variant.
         value: >-
-          Cloud-environment pool created by the Communication blueprint.
-          Cloud pools are auto-deployed by the central Communication Operator —
-          the pool's Adapter is rolled out via Helm into the OctoMesh cluster on
-          'Deploy'.
+          Cloud-environment pool created by the Communication blueprint
+          (${octo.environment} environment). Cloud pools are auto-deployed by the
+          central Communication Operator — the pool's Adapter is rolled out via Helm
+          into the OctoMesh cluster on 'Deploy'.
       - id: System.Communication/Environment
         value: 1   # Cloud
       - id: System.Communication/DeploymentState
@@ -29,9 +33,12 @@ entities:
 
   # ---------------------------------------------------------------------------
   # Adapter — Mesh-style adapter managed by the Cloud pool above. Carries the
-  # Helm chart reference so the operator knows what to install; both the chart
-  # name and version are intentionally left blank in the seed so the deployment
-  # team can fill them in once they decide on the published chart coordinates.
+  # Helm chart coordinates so the operator knows what to install. ChartName is
+  # pinned to "octo-mesh-adapter" (the chart published from octo-mesh-adapter/
+  # src/charts/octo-mesh-adapter); ChartVersion stays blank so the deployment
+  # team can pin it explicitly per release until chart-version alignment with
+  # the OctoMesh appVersion is decided (at which point ChartVersion can move to
+  # "${octo.version}" the same way Description below uses the variable).
   # ---------------------------------------------------------------------------
   - rtId: '670000000000000000000002'
     ckTypeId: System.Communication/Adapter
@@ -47,11 +54,18 @@ entities:
       - id: System/Name
         value: Mesh Adapter
       - id: System/Description
+        # ${octo.version} resolves to the OctoMesh release the blueprint was applied
+        # under via OCTO_BLUEPRINTS__OCTOVERSION (helm: .Chart.AppVersion). Stamps a
+        # human-readable provenance hint onto the entity that survives independently
+        # of the rtBlueprintAppliedAt audit attribute.
         value: >-
-          Mesh adapter created by the Communication blueprint. Runs in the
-          Communication Pool and hosts pipelines that the Communication
-          Controller deploys. Connects to the AdapterHub via SignalR once
-          deployed; while still Unregistered, no pipeline executions can run.
+          Mesh adapter created by the Communication blueprint (OctoMesh
+          ${octo.version}). Runs in the Communication Pool and hosts pipelines that
+          the Communication Controller deploys. Connects to the AdapterHub via
+          SignalR once deployed; while still Unregistered, no pipeline executions
+          can run.
+      - id: System.Communication/ChartName
+        value: octo-mesh-adapter
       - id: System.Communication/DeploymentState
         value: 0   # Undeployed
       - id: System.Communication/CommunicationState
