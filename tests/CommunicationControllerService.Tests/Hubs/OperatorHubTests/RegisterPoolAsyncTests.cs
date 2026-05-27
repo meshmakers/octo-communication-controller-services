@@ -19,11 +19,13 @@ internal class RegisterPoolAsyncTests : IDisposable
         Substitute.For<ICommunicationRepository>();
     private readonly IPoolService _poolService =
         Substitute.For<IPoolService>();
+    private readonly IShutdownState _shutdownState =
+        Substitute.For<IShutdownState>();
     private readonly OperatorHub _hub;
 
     public RegisterPoolAsyncTests()
     {
-        _hub = new OperatorHub(_connectionManager, _repository, _poolService);
+        _hub = new OperatorHub(_connectionManager, _repository, _poolService, _shutdownState);
 
         var context = Substitute.For<HubCallerContext>();
         context.ConnectionId.Returns(ConnectionId);

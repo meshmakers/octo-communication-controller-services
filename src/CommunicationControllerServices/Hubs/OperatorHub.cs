@@ -22,17 +22,20 @@ public class OperatorHub : Hub, IOperatorHub
     private readonly IOperatorConnectionManager _connectionManager;
     private readonly ICommunicationRepository _communicationRepository;
     private readonly IPoolService _poolService;
+    private readonly IShutdownState _shutdownState;
 
     /// <summary>
     /// Constructor
     /// </summary>
     public OperatorHub(IOperatorConnectionManager connectionManager,
         ICommunicationRepository communicationRepository,
-        IPoolService poolService)
+        IPoolService poolService,
+        IShutdownState shutdownState)
     {
         _connectionManager = connectionManager;
         _communicationRepository = communicationRepository;
         _poolService = poolService;
+        _shutdownState = shutdownState;
     }
 
     /// <inheritdoc />
@@ -47,6 +50,30 @@ public class OperatorHub : Hub, IOperatorHub
     {
         var disconnectingConnectionId = Context.ConnectionId;
         Logger.Info("Operator disconnected with connection id '{ConnectionId}'", disconnectingConnectionId);
+
+        // Rolling-upgrade race guard: during this pod's own shutdown the
+        // operator has already (or is about to) reconnect to a surviving
+        // controller pod, which writes Online for every pool it manages.
+        // If we still ran the Offline-on-disconnect path here, our write
+        // would land in MongoDB AFTER the new pod's Online write (later
+        // timestamp wins the AttributeNewerThanGuard), and the UI would
+        // stay stuck at Offline for the rest of the new pod's lifetime.
+        // The new pod is the authoritative state holder once we're
+        // stopping — skip the writes entirely.
+        if (_shutdownState.IsShuttingDown)
+        {
+            Logger.Info(
+                "App is stopping; skipping Offline writes for connection '{ConnectionId}'. " +
+                "Surviving pod will reconcile pool CommunicationState.",
+                disconnectingConnectionId);
+            // Drop the connection-level entry locally so any late hub
+            // method calls don't see a stale connection, but skip the
+            // per-pool state writes.
+            _connectionManager.RemoveOperator(disconnectingConnectionId);
+            await base.OnDisconnectedAsync(exception);
+            return;
+        }
+
         // Drop the connection-level entry and reset every pool it claimed.
         // Same call site whether the disconnect was graceful (operator
         // shutdown) or a crash — the hub guarantees this fires exactly once.
