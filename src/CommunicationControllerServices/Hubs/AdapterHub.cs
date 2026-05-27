@@ -21,6 +21,7 @@ internal class AdapterHub : Hub, IAdapterHub
     private readonly ICommunicationEventService _eventService;
     private readonly IPipelineExecutionService _pipelineExecutionService;
     private readonly IPipelineExecutionReportQueue _executionReportQueue;
+    private readonly IShutdownState _shutdownState;
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
     /// <summary>
@@ -31,15 +32,18 @@ internal class AdapterHub : Hub, IAdapterHub
     /// <param name="eventService">Service for storing system events</param>
     /// <param name="pipelineExecutionService">Service for managing pipeline execution metrics</param>
     /// <param name="executionReportQueue">Queue for background processing of execution reports</param>
+    /// <param name="shutdownState">Reports whether the controller is mid-shutdown — gates the Offline write in <see cref="OnDisconnectedAsync"/></param>
     public AdapterHub(IAdapterService adapterService, IPipelineDebugService pipelineDebugService,
         ICommunicationEventService eventService, IPipelineExecutionService pipelineExecutionService,
-        IPipelineExecutionReportQueue executionReportQueue)
+        IPipelineExecutionReportQueue executionReportQueue,
+        IShutdownState shutdownState)
     {
         _adapterService = adapterService;
         _pipelineDebugService = pipelineDebugService;
         _eventService = eventService;
         _pipelineExecutionService = pipelineExecutionService;
         _executionReportQueue = executionReportQueue;
+        _shutdownState = shutdownState;
     }
 
     /// <inheritdoc />
@@ -64,6 +68,26 @@ internal class AdapterHub : Hub, IAdapterHub
     /// <inheritdoc />
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
+        // Rolling-upgrade race guard: during this pod's own shutdown the
+        // adapter has already (or is about to) reconnect to a surviving
+        // controller pod, which writes Online. Running the Offline path
+        // here would land in MongoDB with a later timestamp than the new
+        // pod's Online write (AttributeNewerThanGuard accepts newer
+        // writes), leaving the UI stuck at Offline. The new pod is the
+        // authoritative state holder once we're stopping. Same fix as
+        // OperatorHub.OnDisconnectedAsync. Checked before GetTenantId /
+        // GetAdapterRtEntityId so the shutdown path stays valid even if
+        // the HttpContext has already been torn down.
+        if (_shutdownState.IsShuttingDown)
+        {
+            Logger.Info(
+                "App is stopping; skipping Offline write for adapter on connection '{ConnectionId}'. " +
+                "Surviving pod will reconcile adapter CommunicationState.",
+                Context.ConnectionId);
+            await base.OnDisconnectedAsync(exception);
+            return;
+        }
+
         var tenantId = GetTenantId();
         var adapterRtEntityId = GetAdapterRtEntityId();
 

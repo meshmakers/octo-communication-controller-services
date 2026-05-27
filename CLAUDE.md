@@ -378,6 +378,52 @@ Tests for this state machine live in
   written by the new connection), and (c) that the lookup key is a real
   pool name, not a SignalR connection id.
 
+### Rolling-Upgrade Race Guard (`IShutdownState`)
+
+The intra-process stale-disconnect guard above only works **within one
+controller pod**. During a Kubernetes rolling upgrade two pods overlap for
+a few seconds, and the old pod's `OperatorHub.OnDisconnectedAsync` /
+`AdapterHub.OnDisconnectedAsync` handlers fire as the operator and adapters
+reconnect to the new pod. Observed sequence on `test-2`:
+
+1. New controller pod starts, `RegisterPoolAsync` from the reconnected
+   operator writes `Online` at T+0.
+2. Old controller pod (still mid-shutdown) finally processes its dropped
+   SignalR connection; its `OnDisconnectedAsync` calls
+   `SetCommunicationStateOfflineAsync` with the OLD connection id.
+3. The OLD pod's cache still has that connection id, so the stale-disconnect
+   guard does **not** reject — both pods think they're the authority.
+4. Old pod writes `Offline` at T+1s. `CommunicationRepository.SetPoolCommunicationStateAsync`
+   uses `AttributeNewerThanGuard` to reject writes with timestamps OLDER
+   than the current value; T+1s is newer than T+0, so the write succeeds.
+5. UI shows the pool Offline until something else triggers an Online write
+   (e.g. a second operator claiming the same pool, or an operator restart).
+
+The fix is `IShutdownState` (`Services/IShutdownState.cs`,
+`Services/HostApplicationShutdownState.cs`), a tiny singleton wrapper around
+`IHostApplicationLifetime.ApplicationStopping.IsCancellationRequested`.
+Both `OperatorHub.OnDisconnectedAsync` and `AdapterHub.OnDisconnectedAsync`
+check it at the top of the handler and bail out before any
+`SetCommunicationStateOfflineAsync` call — the surviving pod is the
+authoritative state holder once shutdown starts. Local cache cleanup
+(`OperatorConnectionManager.RemoveOperator`) still runs so any straggler
+hub invocations on this pod don't see a stale connection.
+
+The graceful `UnregisterPoolOperatorAsync` path is **not** gated by
+`IShutdownState`: it represents an explicit user/operator decision to take
+the pool offline (e.g. tenant undeploy) and must persist that state
+regardless of pod lifecycle.
+
+Tests:
+- `Hubs/OperatorHubTests/OnDisconnectedAsyncTests` — `NormalDisconnect_WritesOfflineForEveryOrphanedPool`
+  pins the existing happy path; `ShuttingDown_SkipsOfflineWritesButStillRemovesOperator`
+  pins the shutdown-guard regression.
+- `Hubs/AdapterHubTests/OnDisconnectedAsyncTests/ShuttingDown_SkipsOfflineWriteAndInterruptedMark`
+  pins the equivalent guard on the adapter hub. The guard runs **before**
+  `GetTenantId()` / `GetAdapterRtEntityId()` so the shutdown path stays valid
+  even if the `HttpContext` has already been torn down (and so the test
+  doesn't need to mock one).
+
 ### Cloud Pool Deploy Tracking (for the PreDeleteTenant cascade)
 
 The `OperatorConnectionManager` keeps an in-memory map
