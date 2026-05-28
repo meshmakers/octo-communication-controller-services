@@ -22,11 +22,14 @@ internal class ReportWorkloadDeploymentStatusAsyncTests : IDisposable
         Substitute.For<IPoolService>();
     private readonly IShutdownState _shutdownState =
         Substitute.For<IShutdownState>();
+    private readonly ICommunicationEventService _eventService =
+        Substitute.For<ICommunicationEventService>();
     private readonly OperatorHub _hub;
 
     public ReportWorkloadDeploymentStatusAsyncTests()
     {
-        _hub = new OperatorHub(_connectionManager, _repository, _poolService, _shutdownState);
+        _hub = new OperatorHub(_connectionManager, _repository, _poolService, _shutdownState,
+            _eventService);
     }
 
     public void Dispose()

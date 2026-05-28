@@ -526,6 +526,25 @@ entity, leaving a stray release on the wrong cluster while the Studio
 showed `DeploymentState=Deployed`. The routing fix scopes workload
 events to the one operator that actually owns the target pool.
 
+**Operator-mode enforcement at registration.** `IOperatorHub.RegisterOperatorAsync(bool? autoManagePools)`
+carries the calling operator's mode (true = central / Cloud-only,
+false = edge / Edge-only, null = legacy build pre-dating the
+parameter). `OperatorConnectionManager` stores it per connection via
+`SetOperatorMode` / `GetOperatorMode`. `OperatorHub.RegisterPoolAsync`
+then looks up `RtPool.Environment` and rejects with a typed
+`HubException` + writes an Error event via `ICommunicationEventService`
+when an edge operator tries to claim a Cloud pool (or vice versa). A
+legacy operator without a declared mode is allowed through but logged
++ audit-recorded as an Information event so the trail still shows the
+registration. This is the controller-side complement to the
+operator's `AutoManagePools` gate (which prevents the edge operator
+from materializing CRs in the first place); together they keep
+workload-deploy events from routing to the wrong cluster even if a
+stale CR materialises on the wrong side. Tests in
+`Hubs/OperatorHubTests/RegisterPoolAsyncTests` cover the four matrix
+cells (central+Cloud, edge+Edge, central+Edge, edge+Cloud), legacy
+fall-through, and the pool-not-found path.
+
 **Edge vs. Cloud at the workload layer.** `DeployPoolAsync` rejects Edge
 pools (the central operator does not create the CR / broker secret on the
 edge cluster), but `DeployWorkloadAsync` and `UndeployWorkloadAsync` are

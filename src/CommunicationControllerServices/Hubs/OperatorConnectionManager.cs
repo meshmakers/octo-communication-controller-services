@@ -11,6 +11,15 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly ConcurrentDictionary<string, bool> _connectedOperators = new();
 
+    // Per-connection AutoManagePools mode declared via RegisterOperatorAsync.
+    // Used by OperatorHub.RegisterPoolAsync to reject a pool whose Environment
+    // does not match the calling operator's mode (a Cloud pool claimed by an
+    // edge operator, or an Edge pool claimed by the central operator). A
+    // missing entry means the operator did not declare a mode (legacy build
+    // or never called RegisterOperatorAsync) — enforcement is skipped in
+    // that case to keep rolling upgrades safe.
+    private readonly ConcurrentDictionary<string, bool> _operatorModeByConnection = new();
+
     // For each connected operator (by connectionId), the (tenant, poolRtId)
     // tuples it has claimed via RegisterPoolForConnection. On disconnect we
     // hand these back to PoolService so the corresponding pool entities'
@@ -42,6 +51,7 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
     public IReadOnlyCollection<(string TenantId, string PoolRtId)> RemoveOperator(string connectionId)
     {
         _connectedOperators.TryRemove(connectionId, out _);
+        _operatorModeByConnection.TryRemove(connectionId, out _);
         var orphaned = _poolsByConnection.TryRemove(connectionId, out var bucket)
             ? bucket.Keys.ToArray()
             : [];
@@ -49,6 +59,27 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
             "Operator removed, total connected: {Count}, orphaned pools: {OrphanCount}",
             _connectedOperators.Count, orphaned.Length);
         return orphaned;
+    }
+
+    public void SetOperatorMode(string connectionId, bool? autoManagePools)
+    {
+        if (autoManagePools.HasValue)
+        {
+            _operatorModeByConnection[connectionId] = autoManagePools.Value;
+        }
+        else
+        {
+            // Legacy operator: leave the entry absent so GetOperatorMode
+            // returns null and OperatorHub.RegisterPoolAsync skips enforcement.
+            _operatorModeByConnection.TryRemove(connectionId, out _);
+        }
+    }
+
+    public bool? GetOperatorMode(string connectionId)
+    {
+        return _operatorModeByConnection.TryGetValue(connectionId, out var mode)
+            ? mode
+            : null;
     }
 
     public void RegisterPoolForConnection(string connectionId, string tenantId, string poolRtId)
