@@ -330,4 +330,61 @@ internal class OperatorConnectionManagerTests
         var tracked = sut.GetDeployedWorkloadsForTenant(TenantA);
         await Assert.That(tracked.Count).IsEqualTo(1);
     }
+
+    [Test]
+    public async Task GetOperatorMode_NeverSet_ReturnsNull()
+    {
+        var sut = CreateSut();
+
+        await Assert.That(sut.GetOperatorMode("conn-1")).IsNull();
+    }
+
+    [Test]
+    public async Task SetOperatorMode_True_Roundtrips()
+    {
+        var sut = CreateSut();
+
+        sut.SetOperatorMode("conn-1", true);
+
+        // Wrap bool? comparison in an expression to dodge the TUnit
+        // .IsEqualTo(true)/.IsEqualTo(false) analyzer.
+        await Assert.That(sut.GetOperatorMode("conn-1") == true).IsTrue();
+    }
+
+    [Test]
+    public async Task SetOperatorMode_False_Roundtrips()
+    {
+        var sut = CreateSut();
+
+        sut.SetOperatorMode("conn-1", false);
+
+        await Assert.That(sut.GetOperatorMode("conn-1") == false).IsTrue();
+    }
+
+    [Test]
+    public async Task SetOperatorMode_Null_ClearsPriorValue()
+    {
+        // Legacy operator: setting null must remove any prior entry so
+        // GetOperatorMode returns null and the hub skips enforcement.
+        var sut = CreateSut();
+        sut.SetOperatorMode("conn-1", true);
+
+        sut.SetOperatorMode("conn-1", null);
+
+        await Assert.That(sut.GetOperatorMode("conn-1")).IsNull();
+    }
+
+    [Test]
+    public async Task RemoveOperator_ClearsOperatorMode()
+    {
+        // Same connection id reused after a reconnect must not inherit the
+        // previous incarnation's mode.
+        var sut = CreateSut();
+        sut.AddOperator("conn-1");
+        sut.SetOperatorMode("conn-1", false);
+
+        sut.RemoveOperator("conn-1");
+
+        await Assert.That(sut.GetOperatorMode("conn-1")).IsNull();
+    }
 }

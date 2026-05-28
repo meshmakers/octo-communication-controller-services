@@ -23,6 +23,7 @@ public class OperatorHub : Hub, IOperatorHub
     private readonly ICommunicationRepository _communicationRepository;
     private readonly IPoolService _poolService;
     private readonly IShutdownState _shutdownState;
+    private readonly ICommunicationEventService _eventService;
 
     /// <summary>
     /// Constructor
@@ -30,12 +31,14 @@ public class OperatorHub : Hub, IOperatorHub
     public OperatorHub(IOperatorConnectionManager connectionManager,
         ICommunicationRepository communicationRepository,
         IPoolService poolService,
-        IShutdownState shutdownState)
+        IShutdownState shutdownState,
+        ICommunicationEventService eventService)
     {
         _connectionManager = connectionManager;
         _communicationRepository = communicationRepository;
         _poolService = poolService;
         _shutdownState = shutdownState;
+        _eventService = eventService;
     }
 
     /// <inheritdoc />
@@ -100,10 +103,16 @@ public class OperatorHub : Hub, IOperatorHub
     }
 
     /// <inheritdoc />
-    public Task<IEnumerable<DeployedPoolDto>> RegisterOperatorAsync()
+    public Task<IEnumerable<DeployedPoolDto>> RegisterOperatorAsync(bool? autoManagePools = null)
     {
-        Logger.Info("Operator registered with connection id '{ConnectionId}'", Context.ConnectionId);
+        Logger.Info(
+            "Operator registered with connection id '{ConnectionId}' (mode: {Mode})",
+            Context.ConnectionId,
+            autoManagePools.HasValue
+                ? (autoManagePools.Value ? "central (AutoManagePools=true)" : "edge (AutoManagePools=false)")
+                : "legacy (unknown)");
         _connectionManager.AddOperator(Context.ConnectionId);
+        _connectionManager.SetOperatorMode(Context.ConnectionId, autoManagePools);
         return Task.FromResult(_connectionManager.GetDeployedPools());
     }
 
@@ -153,6 +162,63 @@ public class OperatorHub : Hub, IOperatorHub
             throw new HubException(
                 $"Invalid poolRtId '{poolRtId}' (tenant '{tenantId}'): " +
                 "must be a 24-character hex ObjectId. Check the CommunicationPool CR spec.");
+        }
+
+        // Validate that the calling operator's mode matches the pool's
+        // Environment before flipping state Online. This blocks an edge
+        // operator that picked up a CR for a Cloud pool (e.g. one materialized
+        // by the now-fixed reconnect bug, or by a misfired
+        // deploy-edge-pool.yml run) from claiming ownership and receiving
+        // workload deploy events. A legacy operator that did not declare a
+        // mode is logged + audited but allowed through, so rolling upgrades
+        // do not break existing connections.
+        var operatorMode = _connectionManager.GetOperatorMode(Context.ConnectionId);
+        if (operatorMode.HasValue)
+        {
+            var rtPool = (await _communicationRepository.GetPoolsAsync(tenantId))
+                .FirstOrDefault(p => p.RtId == poolObjectId);
+            if (rtPool == null)
+            {
+                Logger.Warn(
+                    "Rejecting RegisterPool: no RtPool with rtId {PoolRtId} for tenant '{TenantId}' " +
+                    "(connection '{ConnectionId}')",
+                    poolRtId, tenantId, Context.ConnectionId);
+                await _eventService.StoreErrorEventAsync(tenantId,
+                    $"Operator (connection '{Context.ConnectionId}', AutoManagePools={operatorMode.Value}) " +
+                    $"attempted to register pool rtId {poolRtId} but no such pool exists.");
+                throw new HubException(
+                    $"Pool rtId {poolRtId} does not exist for tenant '{tenantId}'.");
+            }
+
+            var poolIsCloud = rtPool.Environment == RtEnvironmentEnum.Cloud;
+            var operatorIsCentral = operatorMode.Value;
+            if (poolIsCloud != operatorIsCentral)
+            {
+                var operatorRole = operatorIsCentral ? "central (AutoManagePools=true)" : "edge (AutoManagePools=false)";
+                var poolEnv = poolIsCloud ? "Cloud" : "Edge";
+                Logger.Warn(
+                    "Rejecting RegisterPool: operator is {OperatorRole} but pool '{PoolName}' (rtId {PoolRtId}) " +
+                    "is {PoolEnv} (tenant '{TenantId}', connection '{ConnectionId}')",
+                    operatorRole, rtPool.Name, poolRtId, poolEnv, tenantId, Context.ConnectionId);
+                await _eventService.StoreErrorEventAsync(tenantId,
+                    $"Rejected pool registration: pool '{rtPool.Name}' (rtId {poolRtId}) " +
+                    $"is {poolEnv} but operator (connection '{Context.ConnectionId}') is {operatorRole}. " +
+                    "Check the CommunicationPool CR and the operator's deployment mode.");
+                throw new HubException(
+                    $"Pool '{rtPool.Name}' (rtId {poolRtId}) is {poolEnv}; " +
+                    $"a {operatorRole} operator cannot claim it. " +
+                    "Check the operator's AutoManagePools setting and the pool's Environment.");
+            }
+        }
+        else
+        {
+            Logger.Info(
+                "Operator '{ConnectionId}' registered without mode declaration (legacy); skipping " +
+                "Environment/mode check for pool rtId {PoolRtId} (tenant '{TenantId}')",
+                Context.ConnectionId, poolRtId, tenantId);
+            await _eventService.StoreInformationEventAsync(tenantId,
+                $"Legacy operator (connection '{Context.ConnectionId}') registered pool rtId {poolRtId} " +
+                "without declaring a mode; Environment/mode enforcement skipped.");
         }
 
         // Track the (connection, tenant, pool) tuple before flipping state —

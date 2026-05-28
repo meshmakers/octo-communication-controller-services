@@ -14,6 +14,24 @@ public interface IOperatorConnectionManager
     void AddOperator(string connectionId);
 
     /// <summary>
+    /// Records the operator's declared <c>AutoManagePools</c> mode for this
+    /// connection. <c>true</c> = central operator (Cloud pools only),
+    /// <c>false</c> = edge operator (Edge pools only), <c>null</c> = legacy
+    /// operator that did not declare a mode (no enforcement). Read back by
+    /// <c>OperatorHub.RegisterPoolAsync</c> via <see cref="GetOperatorMode"/>
+    /// to validate pool ownership against <c>RtPool.Environment</c>.
+    /// </summary>
+    void SetOperatorMode(string connectionId, bool? autoManagePools);
+
+    /// <summary>
+    /// Returns the operator's declared <c>AutoManagePools</c> mode for this
+    /// connection, or <c>null</c> if none was declared (legacy operator) or
+    /// the connection is not known. <see cref="SetOperatorMode"/> for the
+    /// semantics.
+    /// </summary>
+    bool? GetOperatorMode(string connectionId);
+
+    /// <summary>
     /// Removes an operator connection and returns the (tenant, poolRtId)
     /// tuples that connection had registered via
     /// <see cref="RegisterPoolForConnection"/>. The caller is expected to
