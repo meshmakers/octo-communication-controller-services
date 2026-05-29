@@ -44,12 +44,21 @@ internal class DefaultConfigurationCreatorService(
         )
 {
     /// <summary>
-    /// Blueprint names this service owns and auto-applies on tenant Enable / startup. By
-    /// OctoMesh convention these are <c>System.*</c> blueprints — they're service-managed,
-    /// Studio hides install / uninstall actions for them, and the runtime trusts that the owning
-    /// service keeps them in sync per tenant.
+    /// Prefix used to recognise blueprints this service owns. Every embedded blueprint whose
+    /// name starts with <c>System.Communication.</c> is auto-applied on tenant Enable /
+    /// startup; each blueprint's <c>requires:</c> block decides whether it actually runs on
+    /// the given tenant. By OctoMesh convention these are <c>System.*</c> blueprints —
+    /// service-managed, Studio hides install / uninstall actions for them, and the runtime
+    /// trusts that the owning service keeps them in sync per tenant.
     /// </summary>
-    private static readonly string[] AutoAppliedBlueprintNames = ["System.Communication"];
+    /// <remarks>
+    /// Note the trailing dot: only <c>System.Communication.&lt;Variant&gt;-x.y.z</c> matches,
+    /// not the legacy unnamed <c>System.Communication-x.y.z</c> blueprint (whose folder was
+    /// retired in favour of the Release / MainLatest variants). The trailing dot keeps the
+    /// match anchored so a future foreign embedded source named e.g.
+    /// <c>System.CommunicationOps-1.0.0</c> wouldn't accidentally get applied here.
+    /// </remarks>
+    private const string ServiceManagedBlueprintPrefix = "System.Communication.";
 
 
     public override async Task InitializeAsync()
@@ -97,32 +106,41 @@ internal class DefaultConfigurationCreatorService(
     }
 
     /// <summary>
-    /// Applies (or re-applies) every blueprint that this service owns and ships embedded. The
-    /// <paramref name="throwOnFailure"/> switch lets Enable surface failures as
-    /// <see cref="InitializationException"/> (so the tenant doesn't end up half-initialised),
-    /// while the startup path tolerates failures (the next startup retries; meanwhile the tenant
-    /// can still serve traffic on whatever version it already has).
+    /// Applies (or re-applies) every embedded blueprint whose name starts with
+    /// <see cref="ServiceManagedBlueprintPrefix"/>, picking the newest registered version per
+    /// blueprint name. Each blueprint's <c>requires:</c> block decides whether it actually
+    /// applies to the given tenant — non-matching blueprints return
+    /// <see cref="BlueprintApplicationResult.WasSkipped"/>=true, which is logged at debug
+    /// level and otherwise treated as success.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="throwOnFailure"/> lets Enable surface failures as
+    /// <see cref="InitializationException"/> (so the tenant doesn't end up half-initialised),
+    /// while the startup path tolerates failures (the next startup retries; meanwhile the
+    /// tenant can still serve traffic on whatever version it already has).
+    /// </remarks>
     private async Task ApplyServiceManagedBlueprintsAsync(string tenantId, bool throwOnFailure)
     {
-        foreach (var name in AutoAppliedBlueprintNames)
-        {
-            var latest = embeddedBlueprintSources
-                .Where(s => s.BlueprintId.Name == name)
-                .OrderByDescending(s => s.BlueprintId.Version)
-                .FirstOrDefault();
+        var blueprintsByName = embeddedBlueprintSources
+            .Where(s => s.BlueprintId.Name.StartsWith(ServiceManagedBlueprintPrefix, StringComparison.Ordinal))
+            .GroupBy(s => s.BlueprintId.Name, StringComparer.Ordinal);
 
-            if (latest == null)
-            {
-                logger.LogWarning(
-                    "Auto-applied blueprint '{Name}' is configured but no embedded source is registered.",
-                    name);
-                continue;
-            }
+        foreach (var grouping in blueprintsByName)
+        {
+            var latest = grouping
+                .OrderByDescending(s => s.BlueprintId.Version)
+                .First();
 
             var result = await blueprintService.ApplyBlueprintAsync(tenantId, latest.BlueprintId);
+
             if (result.IsSuccess)
             {
+                if (result.WasSkipped)
+                {
+                    logger.LogDebug(
+                        "Service-managed blueprint {BlueprintId} skipped for tenant {TenantId}: {Reason}",
+                        latest.BlueprintId.FullName, tenantId, result.SkipReason);
+                }
                 continue;
             }
 

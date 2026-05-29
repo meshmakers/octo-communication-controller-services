@@ -4,7 +4,9 @@ dependencies:
 entities:
   # ---------------------------------------------------------------------------
   # Pool — Cloud-environment pool that the central Communication Operator owns.
-  # The pool is the deployment target for the Adapter workload below.
+  # The pool is the deployment target for the Adapter workload below. Shares its
+  # rtId with the System.Communication.MainLatest variant so a tenant moving
+  # between channels keeps the same Pool entity.
   # ---------------------------------------------------------------------------
   - rtId: '670000000000000000000001'
     ckTypeId: System.Communication/Pool
@@ -13,10 +15,9 @@ entities:
       - id: System/Name
         value: Default Cloud
       - id: System/Description
-        # ${octo.environment} resolves to the deployment environment (dev/test/staging/
-        # production) via OCTO_BLUEPRINTS__ENVIRONMENT — the blueprint runner interpolates
-        # the placeholder at apply time, so the same seed yields environment-specific
-        # descriptions without a per-environment blueprint variant.
+        # ${octo.environment} resolves to "staging" or "production" here (requires
+        # gates this blueprint to those two values), so the description annotates
+        # the channel without needing a separate string per environment.
         value: >-
           Cloud-environment pool created by the Communication blueprint
           (${octo.environment} environment). Cloud pools are auto-deployed by the
@@ -32,21 +33,17 @@ entities:
         value: 0   # Unconfigured
 
   # ---------------------------------------------------------------------------
-  # Adapter — Mesh-style adapter managed by the Cloud pool above. Carries the
-  # Helm chart coordinates so the operator knows what to install. ChartName is
-  # pinned to "octo-mesh-adapter" (the chart published from octo-mesh-adapter/
-  # src/charts/octo-mesh-adapter); ChartVersion stays blank so the deployment
-  # team can pin it explicitly per release until chart-version alignment with
-  # the OctoMesh appVersion is decided (at which point ChartVersion can move to
-  # "${octo.version}" the same way Description below uses the variable).
+  # Adapter — Mesh-style adapter managed by the Cloud pool above. ChartVersion
+  # is pinned to ${octo.version} on this variant — the release-channel chart's
+  # version matches OctoMesh's appVersion 1:1 (both derived from the same r-tag),
+  # so the first Deploy on a freshly attached tenant lands a working chart pull.
+  # The CD pipeline (deploy-adapter-chart-octo-mesh-adapter-*) continues rolling
+  # the version forward on every release.
   # ---------------------------------------------------------------------------
   - rtId: '670000000000000000000002'
     ckTypeId: System.Communication/Adapter
     rtWellKnownName: MeshAdapter
     associations:
-      # Workload → Pool (inherited association on DeployableWorkload). The
-      # operator uses this link to decide which Helm release the workload
-      # belongs to.
       - roleId: System.Communication/Manages
         targetRtId: '670000000000000000000001'
         targetCkTypeId: System.Communication/Pool
@@ -54,10 +51,6 @@ entities:
       - id: System/Name
         value: Mesh Adapter
       - id: System/Description
-        # ${octo.version} resolves to the OctoMesh release the blueprint was applied
-        # under via OCTO_BLUEPRINTS__OCTOVERSION (helm: .Chart.AppVersion). Stamps a
-        # human-readable provenance hint onto the entity that survives independently
-        # of the rtBlueprintAppliedAt audit attribute.
         value: >-
           Mesh adapter created by the Communication blueprint (OctoMesh
           ${octo.version}). Runs in the Communication Pool and hosts pipelines that
@@ -66,6 +59,8 @@ entities:
           can run.
       - id: System.Communication/ChartName
         value: octo-mesh-adapter
+      - id: System.Communication/ChartVersion
+        value: "${octo.version}"
       - id: System.Communication/DeploymentState
         value: 0   # Undeployed
       - id: System.Communication/CommunicationState

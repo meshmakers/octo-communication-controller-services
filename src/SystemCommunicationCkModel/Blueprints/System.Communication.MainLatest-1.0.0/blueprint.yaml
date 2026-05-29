@@ -1,0 +1,33 @@
+$schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
+blueprintId: System.Communication.MainLatest-1.0.0
+description: |
+  Service-managed Communication seed for dev and test clusters. Seeds the default
+  Cloud Pool and the managed Mesh Adapter with an empty ChartVersion — the
+  Communication Operator's HelmRunner skips the --version argument when the value
+  is empty, so the first Deploy on a freshly attached tenant pulls the newest chart
+  from the configured Helm repository (dev/test clusters wire their adapter's
+  HelmRepository to the rolling dev channel).
+
+  The CD pipeline deploy-adapter-chart-octo-mesh-adapter-test-2 (triggered on every
+  octo-mesh-adapter-CI run on main) then overwrites ChartVersion with the concrete
+  dev-channel version (0.1.<yyMMDDxxx>) on every subsequent rollout, so the empty
+  placeholder only ever exists in the short window between tenant attach and the
+  next CD run.
+
+  Picks the right variant via requires.octo.environment. The companion blueprint
+  System.Communication.Release covers staging/production with ChartVersion pinned
+  to ${octo.version} (which matches the release-channel chart version).
+
+  Following the OctoMesh "System.* = service-managed" convention this blueprint is
+  auto-applied by the Communication Controller on tenant Enable / startup and Studio
+  surfaces it as read-only.
+
+ckModelDependencies:
+  - System.Communication-[3.20.0,4.0)
+
+seedDataPath: seed-data/entities.yaml
+
+requires:
+  octo.environment:
+    - dev
+    - test

@@ -1,0 +1,74 @@
+$schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+dependencies:
+  - System.Communication-3.20.0
+entities:
+  # ---------------------------------------------------------------------------
+  # Pool — Cloud-environment pool that the central Communication Operator owns.
+  # Shares its rtId with the System.Communication.Release variant so a tenant
+  # moving between channels keeps the same Pool entity.
+  # ---------------------------------------------------------------------------
+  - rtId: '670000000000000000000001'
+    ckTypeId: System.Communication/Pool
+    rtWellKnownName: CommunicationPool
+    attributes:
+      - id: System/Name
+        value: Default Cloud
+      - id: System/Description
+        # ${octo.environment} resolves to "dev" or "test" here (requires gates
+        # this blueprint to those two values), so the description annotates the
+        # channel without needing a separate string per environment.
+        value: >-
+          Cloud-environment pool created by the Communication blueprint
+          (${octo.environment} environment). Cloud pools are auto-deployed by the
+          central Communication Operator — the pool's Adapter is rolled out via Helm
+          into the OctoMesh cluster on 'Deploy'.
+      - id: System.Communication/Environment
+        value: 1   # Cloud
+      - id: System.Communication/DeploymentState
+        value: 0   # Undeployed — operator confirms on first Deploy
+      - id: System.Communication/CommunicationState
+        value: 0   # Unregistered — no pool operator connected yet
+      - id: System.Communication/ConfigurationState
+        value: 0   # Unconfigured
+
+  # ---------------------------------------------------------------------------
+  # Adapter — Mesh-style adapter managed by the Cloud pool above. ChartVersion
+  # is left empty: HelmRunner skips the --version arg in that case and helm
+  # pulls the newest chart from the configured repo. On dev/test clusters the
+  # workload's HelmRepository points at the rolling dev channel
+  # (helm-chart-build's gh-pages catalog) so "newest" = latest main-build chart
+  # (0.1.<yyMMDDxxx>). The CD pipeline deploy-adapter-chart-octo-mesh-adapter-*
+  # writes a concrete version into this attribute on every rollout.
+  # ---------------------------------------------------------------------------
+  - rtId: '670000000000000000000002'
+    ckTypeId: System.Communication/Adapter
+    rtWellKnownName: MeshAdapter
+    associations:
+      - roleId: System.Communication/Manages
+        targetRtId: '670000000000000000000001'
+        targetCkTypeId: System.Communication/Pool
+    attributes:
+      - id: System/Name
+        value: Mesh Adapter
+      - id: System/Description
+        value: >-
+          Mesh adapter created by the Communication blueprint (${octo.environment}
+          channel, OctoMesh ${octo.version}). Runs in the Communication Pool and
+          hosts pipelines that the Communication Controller deploys. ChartVersion
+          starts empty so the first Deploy uses the newest chart from the
+          configured dev-channel Helm repository; the CD pipeline updates this
+          attribute on each main-branch rollout.
+      - id: System.Communication/ChartName
+        value: octo-mesh-adapter
+      - id: System.Communication/ChartVersion
+        value: ""
+      - id: System.Communication/DeploymentState
+        value: 0   # Undeployed
+      - id: System.Communication/CommunicationState
+        value: 0   # Unregistered
+      - id: System.Communication/ConfigurationState
+        value: 0   # Unconfigured
+      - id: System.Communication/LastSyncedSequenceNumber
+        value: 0
+      - id: System.Communication/ReceivesClusterSecrets
+        value: false
