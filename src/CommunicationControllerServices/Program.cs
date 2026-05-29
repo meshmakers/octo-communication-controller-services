@@ -151,7 +151,10 @@ try
     // Studio surfaces it as read-only. The optional HelloCommunication demo lives in
     // samples/Blueprints/ and is admin-installable through a regular catalog (LocalFileSystem,
     // GitHub) — not embedded here.
-    builder.Services.AddBlueprintSystemCommunicationV1();
+    // Embedded blueprints — both registered, DefaultConfigurationCreatorService picks
+    // the right one per tenant via each blueprint's requires.octo.environment block.
+    builder.Services.AddBlueprintSystemCommunicationReleaseV1();
+    builder.Services.AddBlueprintSystemCommunicationMainLatestV1();
 
     builder.Services.AddOctoNotification();
 

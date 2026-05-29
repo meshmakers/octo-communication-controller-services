@@ -1,0 +1,28 @@
+$schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
+blueprintId: System.Communication.Release-1.0.0
+description: |
+  Service-managed Communication seed for staging and production clusters. Seeds the
+  default Cloud Pool and the managed Mesh Adapter with ChartVersion pinned to
+  ${octo.version} — on a release build that matches the chart published from the same
+  r-tag (the release channel chart version is identical to OctoMesh's appVersion), so
+  the first Deploy on a freshly attached tenant works out of the box.
+
+  Picks the right variant via requires.octo.environment. The companion blueprint
+  System.Communication.MainLatest covers dev/test clusters where the dev-channel
+  chart is versioned 0.1.<yyMMDDxxx> instead of matching ${octo.version}; both
+  blueprints seed the same rtIds so a tenant migrating between channels (rare,
+  staging→prod hand-over) ends up with the right version without manual cleanup.
+
+  Following the OctoMesh "System.* = service-managed" convention this blueprint is
+  auto-applied by the Communication Controller on tenant Enable / startup and Studio
+  surfaces it as read-only.
+
+ckModelDependencies:
+  - System.Communication-[3.20.0,4.0)
+
+seedDataPath: seed-data/entities.yaml
+
+requires:
+  octo.environment:
+    - staging
+    - production
