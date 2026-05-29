@@ -297,17 +297,17 @@ internal class PoolService : IPoolService
     /// <summary>
     /// Throws a precise <see cref="PoolServiceException"/> when the workload is
     /// missing any of the fields required for a Helm-based deploy: chart name,
-    /// chart version, linked HelmRepositoryConfiguration, or repository URL.
+    /// linked HelmRepositoryConfiguration, or repository URL. <c>ChartVersion</c>
+    /// is intentionally NOT required — an empty value is the explicit "use the
+    /// newest chart in the configured repository" opt-in (the operator's
+    /// HelmRunner omits <c>--version</c> in that case, matching the dev/test
+    /// rollout pattern seeded by the System.Communication.MainLatest blueprint).
     /// </summary>
     private async Task EnsureWorkloadIsHelmDeployableAsync(string tenantId, RtDeployableWorkload workload)
     {
         if (string.IsNullOrWhiteSpace(workload.ChartName))
         {
             throw PoolServiceException.WorkloadMissingChartName(tenantId, workload.RtId, workload.Name);
-        }
-        if (string.IsNullOrWhiteSpace(workload.ChartVersion))
-        {
-            throw PoolServiceException.WorkloadMissingChartVersion(tenantId, workload.RtId, workload.Name);
         }
 
         var repo = await _communicationRepository.GetHelmRepositoryForWorkloadAsync(tenantId, workload.RtId);
@@ -514,7 +514,10 @@ internal class PoolService : IPoolService
     private async Task<WorkloadDeployedDto?> BuildWorkloadDeployedDtoAsync(string tenantId,
         OctoObjectId poolRtId, string poolName, RtDeployableWorkload workload)
     {
-        if (string.IsNullOrWhiteSpace(workload.ChartName) || string.IsNullOrWhiteSpace(workload.ChartVersion))
+        // ChartName is the minimal Helm identity we need to talk to a repository;
+        // ChartVersion is optional and means "latest" when empty (see
+        // EnsureWorkloadIsHelmDeployableAsync for the contract).
+        if (string.IsNullOrWhiteSpace(workload.ChartName))
         {
             return null;
         }
@@ -551,7 +554,11 @@ internal class PoolService : IPoolService
                 ? null
                 : _encryptionService.Decrypt(repo.Password),
             ChartName = workload.ChartName,
-            ChartVersion = workload.ChartVersion,
+            // Coalesce a null/missing ChartVersion to empty string — the DTO is
+            // non-nullable on the operator side and an empty value carries the
+            // "use latest from configured repo" contract (the operator's
+            // HelmRunner omits --version when blank).
+            ChartVersion = workload.ChartVersion ?? string.Empty,
             ValuesYaml = workload.ValuesYaml ?? string.Empty,
             Values = overrides,
             // Lives on DeployableWorkload so both Adapter and Application can
@@ -1002,14 +1009,14 @@ internal class PoolService : IPoolService
 
     /// <summary>
     /// Non-throwing companion to <see cref="EnsureWorkloadIsHelmDeployableAsync"/>: returns
-    /// <c>true</c> iff the workload has all Helm fields (ChartName, ChartVersion, an associated
-    /// HelmRepositoryConfiguration with a non-empty RepositoryUrl). Used by the backfill to
-    /// classify entities without throwing.
+    /// <c>true</c> iff the workload has all required Helm fields (ChartName, an associated
+    /// HelmRepositoryConfiguration with a non-empty RepositoryUrl). <c>ChartVersion</c> is
+    /// optional and an empty value is valid (= "use latest"), so it does not gate this check.
+    /// Used by the backfill to classify entities without throwing.
     /// </summary>
     private async Task<bool> IsWorkloadHelmDeployableAsync(string tenantId, RtDeployableWorkload workload)
     {
         if (string.IsNullOrWhiteSpace(workload.ChartName)) return false;
-        if (string.IsNullOrWhiteSpace(workload.ChartVersion)) return false;
 
         var repo = await _communicationRepository.GetHelmRepositoryForWorkloadAsync(tenantId, workload.RtId);
         if (repo == null) return false;

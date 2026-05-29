@@ -72,11 +72,15 @@ public class WorkloadController : ControllerBase
     }
 
     /// <summary>
-    /// Sets <c>ChartVersion</c> on a single workload. Validates that the
-    /// supplied value is non-empty and parseable as a SemVer triple — anything
-    /// else is rejected at the controller boundary so a bad CI input never
-    /// lands in MongoDB. <strong>Does not trigger a deploy</strong>; the caller
-    /// hits <c>POST /pool/workloads/deploy</c> for that, typically right after.
+    /// Sets <c>ChartVersion</c> on a single workload. An empty value is the
+    /// explicit opt-in for "use the newest chart in the configured Helm
+    /// repository" — the operator's HelmRunner omits <c>--version</c> when the
+    /// value is blank, matching the dev/test channel rollout pattern seeded by
+    /// the System.Communication.MainLatest blueprint. A non-empty value must
+    /// parse as a SemVer triple, otherwise it is rejected at the controller
+    /// boundary so a bad CI input never lands in MongoDB.
+    /// <strong>Does not trigger a deploy</strong>; the caller hits
+    /// <c>POST /pool/workloads/deploy</c> for that, typically right after.
     /// </summary>
     [HttpPatch("{workloadRtId}/chart-version")]
     [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
@@ -93,31 +97,42 @@ public class WorkloadController : ControllerBase
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
         }
 
-        if (string.IsNullOrWhiteSpace(body.ChartVersion))
-        {
-            return BadRequest(new ErrorResponse { ErrorMessage = "ChartVersion is required" });
-        }
-
-        if (!IsValidSemVer(body.ChartVersion))
+        // An empty / whitespace value is the explicit "use latest chart in the
+        // configured repository" signal — see the doc-comment above. Non-empty
+        // values still have to parse as SemVer so a bad CI input doesn't
+        // silently land in Mongo.
+        var normalisedChartVersion = body.ChartVersion?.Trim() ?? string.Empty;
+        if (normalisedChartVersion.Length > 0 && !IsValidSemVer(normalisedChartVersion))
         {
             return BadRequest(new ErrorResponse
             {
                 ErrorMessage =
-                    $"ChartVersion '{body.ChartVersion}' is not a valid SemVer (expected e.g. '1.2.3' or '1.2.3-beta.1')"
+                    $"ChartVersion '{body.ChartVersion}' is not a valid SemVer (expected e.g. '1.2.3' or '1.2.3-beta.1'). Leave empty to deploy the latest chart in the configured repository."
             });
         }
 
         try
         {
             var previousVersion = await _communicationRepository
-                .UpdateWorkloadChartVersionAsync(tenantId, workloadRtId, body.ChartVersion);
+                .UpdateWorkloadChartVersionAsync(tenantId, workloadRtId, normalisedChartVersion);
 
             // Audit trail: operators inspect this in the event log when a CI
             // rollout misbehaves. Source tag distinguishes CI/CD-driven changes
-            // from manual Studio edits.
-            var auditMessage = previousVersion is null
-                ? $"Chart version for workload {workloadRtId} set to {body.ChartVersion} (source: CI/CD)."
-                : $"Chart version for workload {workloadRtId} updated from {previousVersion} to {body.ChartVersion} (source: CI/CD).";
+            // from manual Studio edits. "(latest)" is rendered for the empty
+            // sentinel so a CI/CD log line stays readable when the deploy
+            // pipeline pins MainLatest tenants to chase the rolling channel.
+            var newVersionLabel = normalisedChartVersion.Length == 0
+                ? "(latest)"
+                : normalisedChartVersion;
+            var previousVersionLabel = previousVersion switch
+            {
+                null => null,
+                "" => "(latest)",
+                _ => previousVersion,
+            };
+            var auditMessage = previousVersionLabel is null
+                ? $"Chart version for workload {workloadRtId} set to {newVersionLabel} (source: CI/CD)."
+                : $"Chart version for workload {workloadRtId} updated from {previousVersionLabel} to {newVersionLabel} (source: CI/CD).";
             await _eventService.StoreInformationEventAsync(tenantId, auditMessage);
 
             return NoContent();

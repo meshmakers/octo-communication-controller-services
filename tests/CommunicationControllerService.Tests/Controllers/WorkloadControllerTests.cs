@@ -81,16 +81,40 @@ internal class WorkloadControllerTests
     // ----- PATCH chart-version ----------------------------------------------
 
     [Test]
-    public async Task UpdateChartVersion_EmptyVersion_Returns400()
+    public async Task UpdateChartVersion_EmptyVersion_UpdatesAndLogsLatestMarker()
     {
+        // Empty is the explicit "use latest from configured repo" signal — the
+        // operator's HelmRunner omits --version in that case. The repository
+        // stores the empty string; the audit log renders "(latest)" so a CI/CD
+        // operator inspecting events sees what actually went into Mongo.
         var (sut, repo, events) = CreateSut();
+        var workloadId = OctoObjectId.GenerateNewId();
+        repo.UpdateWorkloadChartVersionAsync(TenantId, workloadId, string.Empty).Returns("1.2.2");
 
-        var result = await sut.UpdateChartVersion(OctoObjectId.GenerateNewId(),
+        var result = await sut.UpdateChartVersion(workloadId,
             new UpdateChartVersionDto(""));
 
-        await Assert.That(result).IsTypeOf<BadRequestObjectResult>();
-        await repo.DidNotReceiveWithAnyArgs().UpdateWorkloadChartVersionAsync(default!, default!, default!);
-        await events.DidNotReceiveWithAnyArgs().StoreInformationEventAsync(default!, default!);
+        await Assert.That(result).IsTypeOf<NoContentResult>();
+        await repo.Received(1).UpdateWorkloadChartVersionAsync(TenantId, workloadId, string.Empty);
+        await events.Received(1).StoreInformationEventAsync(TenantId,
+            Arg.Is<string>(m => m.Contains("1.2.2") && m.Contains("(latest)") && m.Contains("CI/CD")));
+    }
+
+    [Test]
+    public async Task UpdateChartVersion_WhitespaceVersion_TreatedAsEmpty()
+    {
+        // Defensive: a trimmed-down whitespace input behaves the same as empty
+        // so accidental padding from a CI script doesn't surface as a SemVer
+        // failure.
+        var (sut, repo, _) = CreateSut();
+        var workloadId = OctoObjectId.GenerateNewId();
+        repo.UpdateWorkloadChartVersionAsync(TenantId, workloadId, string.Empty).Returns((string?)null);
+
+        var result = await sut.UpdateChartVersion(workloadId,
+            new UpdateChartVersionDto("   "));
+
+        await Assert.That(result).IsTypeOf<NoContentResult>();
+        await repo.Received(1).UpdateWorkloadChartVersionAsync(TenantId, workloadId, string.Empty);
     }
 
     [Test]

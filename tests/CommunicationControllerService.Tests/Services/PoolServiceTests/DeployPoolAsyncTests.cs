@@ -331,17 +331,19 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
     }
 
     [Test]
-    public async Task DeployWorkloadAsync_AdapterMissingChartVersion_ThrowsWithSpecificMessage()
+    public async Task DeployWorkloadAsync_AdapterEmptyChartVersion_DeploysAsLatest()
     {
+        // Empty ChartVersion is the explicit "use latest from configured repo"
+        // signal — see EnsureWorkloadIsHelmDeployableAsync. Deploy continues
+        // through to NotifyWorkloadDeployedAsync; the operator's HelmRunner
+        // omits --version downstream and helm picks the newest chart.
         var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
         adapter.ChartVersion = string.Empty;
 
-        var ex = await Assert.ThrowsAsync<Exception>(
-            async () => await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId));
+        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
-        await Assert.That(ex!.Message).Contains("Chart Version");
-        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
-            .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
+        await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
+            Arg.Is<WorkloadDeployedDto>(w => w.ChartVersion == string.Empty));
     }
 
     [Test]
