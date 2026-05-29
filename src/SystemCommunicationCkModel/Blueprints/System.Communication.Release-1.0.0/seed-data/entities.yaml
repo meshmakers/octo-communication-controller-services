@@ -93,4 +93,4 @@ entities:
       - id: System.Communication/LastSyncedSequenceNumber
         value: 0
       - id: System.Communication/ReceivesClusterSecrets
-        value: false
+        value: true
