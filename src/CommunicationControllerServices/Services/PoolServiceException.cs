@@ -66,13 +66,6 @@ internal class PoolServiceException : Exception
             "(e.g. 'octo-modbus-adapter') before deploying.");
     }
 
-    internal static Exception WorkloadMissingChartVersion(string tenantId, OctoObjectId workloadRtId, string? workloadName)
-    {
-        return new PoolServiceException(
-            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': " +
-            "the 'Chart Version' field is empty. Set the version of the Helm chart to deploy (e.g. '0.1.2').");
-    }
-
     internal static Exception WorkloadMissingHelmRepository(string tenantId, OctoObjectId workloadRtId, string? workloadName)
     {
         return new PoolServiceException(
