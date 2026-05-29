@@ -3,6 +3,26 @@ dependencies:
   - System.Communication-3.20.0
 entities:
   # ---------------------------------------------------------------------------
+  # HelmRepositoryConfiguration — meshmakers public release channel. The
+  # Adapter below pulls its chart from this repo. The MainLatest variant
+  # uses a different repo (meshmakers-dev) under a different rtId, so a
+  # tenant migrating staging→prod will land here with meshmakers-public and
+  # the Adapter relinked to it.
+  # ---------------------------------------------------------------------------
+  - rtId: '670000000000000000000004'
+    ckTypeId: System.Communication/HelmRepositoryConfiguration
+    rtWellKnownName: meshmakers-public
+    attributes:
+      - id: System.Communication/RepositoryUrl
+        value: https://meshmakers.github.io/charts
+      - id: System.Communication/Channel
+        value: 1   # Release
+      - id: System.Communication/Username
+        value: ""
+      - id: System.Communication/Password
+        value: ""
+
+  # ---------------------------------------------------------------------------
   # Pool — Cloud-environment pool that the central Communication Operator owns.
   # The pool is the deployment target for the Adapter workload below. Shares its
   # rtId with the System.Communication.MainLatest variant so a tenant moving
@@ -47,6 +67,9 @@ entities:
       - roleId: System.Communication/Manages
         targetRtId: '670000000000000000000001'
         targetCkTypeId: System.Communication/Pool
+      - roleId: System.Communication/HelmRepository
+        targetRtId: '670000000000000000000004'
+        targetCkTypeId: System.Communication/HelmRepositoryConfiguration
     attributes:
       - id: System/Name
         value: Mesh Adapter

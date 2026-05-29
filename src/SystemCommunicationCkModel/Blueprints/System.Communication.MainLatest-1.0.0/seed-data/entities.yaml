@@ -3,6 +3,28 @@ dependencies:
   - System.Communication-3.20.0
 entities:
   # ---------------------------------------------------------------------------
+  # HelmRepositoryConfiguration — meshmakers dev channel (gh-pages of
+  # helm-chart-build). This blueprint is gated to dev/test by
+  # requires.octo.environment, so the dev repo is only seeded — and only
+  # available as a workload target — on those clusters. The Adapter below
+  # pulls its chart from here. The Release variant uses meshmakers-public
+  # under a different rtId, so a tenant migrating dev/test→staging will
+  # land on meshmakers-public.
+  # ---------------------------------------------------------------------------
+  - rtId: '670000000000000000000003'
+    ckTypeId: System.Communication/HelmRepositoryConfiguration
+    rtWellKnownName: meshmakers-dev
+    attributes:
+      - id: System.Communication/RepositoryUrl
+        value: https://meshmakers.github.io/helm-chart-build/
+      - id: System.Communication/Channel
+        value: 0   # Dev
+      - id: System.Communication/Username
+        value: ""
+      - id: System.Communication/Password
+        value: ""
+
+  # ---------------------------------------------------------------------------
   # Pool — Cloud-environment pool that the central Communication Operator owns.
   # Shares its rtId with the System.Communication.Release variant so a tenant
   # moving between channels keeps the same Pool entity.
@@ -47,6 +69,9 @@ entities:
       - roleId: System.Communication/Manages
         targetRtId: '670000000000000000000001'
         targetCkTypeId: System.Communication/Pool
+      - roleId: System.Communication/HelmRepository
+        targetRtId: '670000000000000000000003'
+        targetCkTypeId: System.Communication/HelmRepositoryConfiguration
     attributes:
       - id: System/Name
         value: Mesh Adapter
