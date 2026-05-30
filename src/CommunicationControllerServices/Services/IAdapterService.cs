@@ -134,6 +134,17 @@ public interface IAdapterService
     Task DeployDataFlowAsync(string tenantId, OctoObjectId dataFlowRtId);
 
     /// <summary>
+    /// Enables or disables debug capture for a single pipeline. Persists the flag on the pipeline
+    /// RT entity and, when the owning adapter is online, re-pushes the data flow configuration so the
+    /// change takes effect on the running adapter (without altering the deploy force-enable behavior).
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="pipelineRtEntityId">Object id of pipeline</param>
+    /// <param name="isEnabled">true to enable debug capture, false to disable</param>
+    /// <returns>true if the change was applied to a live adapter; false if only persisted.</returns>
+    Task<bool> SetPipelineDebuggingAsync(string tenantId, RtEntityId pipelineRtEntityId, bool isEnabled);
+
+    /// <summary>
     /// Undeploys a data flow from its adapters
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>

@@ -549,6 +549,39 @@ internal class AdapterService(
         throw AdapterServiceException.TenantNotEnabled(tenantId);
     }
 
+    public async Task<bool> SetPipelineDebuggingAsync(string tenantId, RtEntityId pipelineRtEntityId, bool isEnabled)
+    {
+        Logger.Info("[{TenantId}] PipelineRtEntityId='{PipelineRtEntityId}' set debugging to {IsEnabled}",
+            tenantId, pipelineRtEntityId, isEnabled);
+
+        // Validate the pipeline exists (throws PipelineNotFound otherwise).
+        _ = await communicationRepository.GetPipelineAsync(tenantId, pipelineRtEntityId)
+            ?? throw AdapterServiceException.PipelineNotFound(tenantId, pipelineRtEntityId);
+
+        // Persist on the RT entity: survives restarts and is honored by the next deploy/execution.
+        await communicationRepository.SetPipelineDebuggingEnabledAsync(tenantId, pipelineRtEntityId, isEnabled);
+
+        var dataFlow = await communicationRepository.GetDataFlowByPipelineAsync(tenantId, pipelineRtEntityId.RtId)
+                       ?? throw AdapterServiceException.DataFlowNotFound(tenantId, pipelineRtEntityId);
+
+        try
+        {
+            // Re-push via the data-flow deploy path, which rebuilds config from the persisted entity and
+            // honors IsDebuggingEnabled as-is (no force-enable). This makes both enable AND disable effective
+            // on the running adapter -- mirroring how Refinery Studio disables debug.
+            await DeployDataFlowAsync(tenantId, dataFlow.RtId);
+            return true;
+        }
+        catch (AdapterServiceException e)
+        {
+            // Owning adapter offline / not loaded: the flag is persisted and applies on the next deploy.
+            Logger.Warn(e,
+                "[{TenantId}] Pipeline '{PipelineRtEntityId}' debugging persisted to {IsEnabled} but not applied to a live adapter; will apply on next deploy",
+                tenantId, pipelineRtEntityId, isEnabled);
+            return false;
+        }
+    }
+
     public async Task UndeployDataFlowAsync(string tenantId, OctoObjectId dataFlowRtId)
     {
         Logger.Info(

@@ -261,4 +261,87 @@ public class PipelineController : ControllerBase
 
         return Ok(new MovePipelinesToAdapterResponseDto(results));
     }
+
+    /// <summary>
+    /// Enables or disables debug capture for a pipeline. Persists the flag and, when the owning
+    /// adapter is online, re-pushes its configuration so the change is effective immediately.
+    /// </summary>
+    /// <param name="pipelineRtId">The runtime id of the pipeline.</param>
+    /// <param name="body">The desired debug state.</param>
+    [HttpPatch("{pipelineRtId}/debug")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(typeof(SetPipelineDebugResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> SetPipelineDebugging(
+        [Required] OctoObjectId pipelineRtId,
+        [Required] [FromBody] SetPipelineDebugRequestDto body)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        var pipelineRtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipelineRtId);
+
+        try
+        {
+            var state = body.Enabled ? "enabled" : "disabled";
+            var appliedToRunningAdapter =
+                await _adapterService.SetPipelineDebuggingAsync(tenantId, pipelineRtEntityId, body.Enabled);
+
+            var auditMessage = appliedToRunningAdapter
+                ? $"Pipeline {pipelineRtId} debugging {state} and applied to the running adapter (source: User)."
+                : $"Pipeline {pipelineRtId} debugging {state}; adapter offline, will apply on next deploy (source: User).";
+            await _eventService.StoreInformationEventAsync(tenantId, auditMessage);
+
+            return Ok(new SetPipelineDebugResultDto(body.Enabled, appliedToRunningAdapter));
+        }
+        catch (AdapterHubCallbackException e)
+        {
+            _logger.LogError(e, "Pipeline debug toggle failed (UnprocessableEntity) for pipeline {PipelineRtId} in tenant {TenantId}",
+                pipelineRtId, tenantId);
+            return UnprocessableEntity(new ErrorResponse { ErrorMessage = e.Message });
+        }
+        catch (AdapterServiceException e)
+        {
+            _logger.LogError(e, "Failed to set debugging for pipeline {PipelineRtId} in tenant {TenantId}",
+                pipelineRtId, tenantId);
+            return NotFound(new ErrorResponse { ErrorMessage = e.Message });
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Error setting debugging for pipeline {PipelineRtId} in tenant {TenantId}",
+                pipelineRtId, tenantId);
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
+        }
+    }
+
+    /// <summary>
+    /// Gets the persisted debug state of a pipeline.
+    /// </summary>
+    /// <param name="pipelineRtId">The runtime id of the pipeline.</param>
+    [HttpGet("{pipelineRtId}/debug")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(typeof(PipelineDebugStateDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetPipelineDebugging([Required] OctoObjectId pipelineRtId)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        var pipelineRtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipelineRtId);
+        var pipeline = await _communicationRepository.GetPipelineAsync(tenantId, pipelineRtEntityId);
+        if (pipeline == null)
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = $"Pipeline '{pipelineRtId}' not found" });
+        }
+
+        return Ok(new PipelineDebugStateDto(pipeline.IsDebuggingEnabled ?? false));
+    }
 }

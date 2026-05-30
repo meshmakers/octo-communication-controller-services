@@ -714,6 +714,36 @@ Tests:
   redeploy failure (warning path), no-op when already on target,
   repository exception, mixed bulk batch.
 
+## Pipeline Debug Toggle (`PATCH`/`GET /pipeline/{id}/debug`)
+
+`PipelineController` exposes explicit control of per-pipeline debug capture
+(the `RtPipeline.IsDebuggingEnabled` flag), used by `octo-cli`
+(`SetPipelineDebug` / `GetPipelineDebug`).
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `PATCH` | `{tenantId}/v1/pipeline/{pipelineRtId}/debug` body `{ "enabled": true|false }` | read-write | Persists `IsDebuggingEnabled` and, when the owning adapter is online, re-pushes config so it takes effect immediately. Returns `SetPipelineDebugResultDto { Enabled, AppliedToRunningAdapter }`. |
+| `GET`   | `{tenantId}/v1/pipeline/{pipelineRtId}/debug` | read-only | Returns the persisted `PipelineDebugStateDto { Enabled }`. |
+
+**Implementation:** `IAdapterService.SetPipelineDebuggingAsync` persists via
+`ICommunicationRepository.SetPipelineDebuggingEnabledAsync`, then re-pushes the
+owning data flow with `DeployDataFlowAsync` (the **non-force-enable** path —
+`DeployPipelineAsync` force-enables debug, so it is deliberately NOT used here).
+If the adapter is offline, `DeployDataFlowAsync` throws `AdapterServiceException`
+(`AdapterNotLoaded`); the service swallows it, leaving the flag persisted
+(`AppliedToRunningAdapter = false`, applies on next deploy). An `Information`
+audit event tagged `(source: User)` is written per toggle.
+
+**Why deploy still force-enables debug:** Refinery Studio's editor "Deploy" and
+"Enable Debug" buttons rely on `POST /pipeline/deploy` force-enabling debug, and
+its "Disable Debug" uses a GraphQL `isDebuggingEnabled=false` write + a
+`POST /dataflow/deploy` (no force-enable). This feature mirrors the disable path
+and does not change deploy behavior, so the UI is unaffected.
+
+Tests: `Services/AdapterServiceTests/SetPipelineDebuggingAsyncTests` (online
+enable/disable, offline persist-only, not-found paths) and
+`Controllers/PipelineControllerDebugTests`.
+
 ## Pipeline Execution Metrics
 
 The `PipelineExecutionService` tracks pipeline execution metrics reported by adapters via SignalR. This enables real-time monitoring and historical analysis of pipeline performance.
