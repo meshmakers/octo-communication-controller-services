@@ -82,6 +82,15 @@ internal class PoolServiceException : Exception
             "entity in the Studio and set a chart-repository URL (e.g. 'https://charts.meshmakers.cloud').");
     }
 
+    internal static Exception WorkloadIngressEnabledButHostnameEmpty(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': " +
+            "'Ingress Enabled' is on but the 'Hostname' field is empty. Open the workload in the Refinery Studio and " +
+            "set a public hostname (e.g. 'adapter.staging.octo-mesh.com') or disable 'Ingress Enabled' before deploying.");
+    }
+
     internal static Exception EdgePoolNotDeployable(string tenantId, OctoObjectId poolRtId, string? poolName)
     {
         return new PoolServiceException(

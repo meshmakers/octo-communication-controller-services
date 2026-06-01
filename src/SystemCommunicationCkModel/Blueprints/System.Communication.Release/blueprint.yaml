@@ -1,5 +1,5 @@
 $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
-blueprintId: System.Communication.Release-1.1.0
+blueprintId: System.Communication.Release-1.2.0
 description: |
   Service-managed Communication seed for staging and production clusters. Seeds the
   default Cloud Pool and the managed Mesh Adapter with ChartVersion pinned to
@@ -18,7 +18,7 @@ description: |
   surfaces it as read-only.
 
 ckModelDependencies:
-  - System.Communication-[3.20.0,4.0)
+  - System.Communication-[3.21.0,4.0)
 
 seedDataPath: seed-data/entities.yaml
 

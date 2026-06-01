@@ -505,4 +505,96 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         await OperatorConnectionManager.DidNotReceive().NotifyWorkloadUndeployedAsync(
             Arg.Is<WorkloadUndeployedDto>(w => w.WorkloadName == "wl-elsewhere"));
     }
+
+    [Test]
+    public async Task DeployWorkloadAsync_AdapterIngressEnabledWithHostname_PropagatesFieldsToDto()
+    {
+        // Public-ingress opt-in is a typed attribute on DeployableWorkload (so
+        // both Adapter and Application carry it). The controller copies it
+        // straight onto the DTO; the operator then projects ingress.enabled +
+        // publicUri into the workload's Helm values.
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        adapter.IngressEnabled = true;
+        adapter.Hostname = "adapter.staging.octo-mesh.com";
+
+        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+
+        await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
+            Arg.Is<WorkloadDeployedDto>(d =>
+                d.IngressEnabled
+                && d.Hostname == "adapter.staging.octo-mesh.com"));
+    }
+
+    [Test]
+    public async Task DeployWorkloadAsync_AdapterIngressDisabled_HostnameKeptOnDtoButDisabledFlagWins()
+    {
+        // IngressEnabled=false → operator emits no ingress.enabled overlay
+        // regardless of Hostname. The DTO still carries the hostname for
+        // diagnostics / future re-enable; the operator just ignores it.
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        adapter.IngressEnabled = false;
+        adapter.Hostname = "adapter.staging.octo-mesh.com";
+
+        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+
+        await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
+            Arg.Is<WorkloadDeployedDto>(d =>
+                !d.IngressEnabled
+                && d.Hostname == "adapter.staging.octo-mesh.com"));
+    }
+
+    [Test]
+    public async Task DeployWorkloadAsync_AdapterIngressEnabledNoHostname_ThrowsBeforeNotify()
+    {
+        // The chart's templates/ingress.yaml would render an Ingress with an
+        // empty host rule (k8s admission rejects it). Fail fast at Deploy time
+        // with an actionable message instead of letting the helm release fail
+        // mid-rollout.
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        adapter.IngressEnabled = true;
+        adapter.Hostname = string.Empty;
+
+        var ex = await Assert.ThrowsAsync<Exception>(
+            async () => await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId));
+
+        await Assert.That(ex!.Message).Contains("Hostname");
+        await Assert.That(ex!.Message).Contains("Ingress Enabled");
+        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
+            .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
+    }
+
+    [Test]
+    public async Task DeployWorkloadAsync_ApplicationIngressEnabledWithHostname_PropagatesFieldsToDto()
+    {
+        // Same contract on Application — the attributes were moved up onto
+        // DeployableWorkload, so this is the no-regression test for the
+        // Application path.
+        var (_, application) = await GivenCloudPoolWithApplication(receivesClusterSecrets: false);
+        application.IngressEnabled = true;
+        application.Hostname = "energy.prod-1.octo-mesh.com";
+
+        await PoolService.DeployWorkloadAsync(TenantId, application.RtId);
+
+        await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
+            Arg.Is<WorkloadDeployedDto>(d =>
+                d.IngressEnabled
+                && d.Hostname == "energy.prod-1.octo-mesh.com"));
+    }
+
+    [Test]
+    public async Task DeployWorkloadAsync_AdapterIngressDisabledNoHostname_DtoHostnameIsNull()
+    {
+        // Default values: IngressEnabled=false, Hostname is blank. Controller
+        // normalises blank to null on the DTO so the operator sees "absent",
+        // not an empty string. Pins the contract for the operator-side
+        // string.IsNullOrWhiteSpace check.
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        adapter.IngressEnabled = false;
+        adapter.Hostname = string.Empty;
+
+        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+
+        await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
+            Arg.Is<WorkloadDeployedDto>(d => !d.IngressEnabled && d.Hostname == null));
+    }
 }
