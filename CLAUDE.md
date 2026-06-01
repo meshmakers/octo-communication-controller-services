@@ -549,6 +549,24 @@ controller pod restarts between deploy and cascade, the in-memory state
 is gone. Reverse-sync from a freshly (re)connecting operator's
 `RegisterOperatorAsync` would close this gap (TODO).
 
+**Public ingress per workload.** `RtDeployableWorkload` carries two
+typed attributes on the base type so Adapter and Application share them:
+`IngressEnabled` (bool, default false) and `Hostname` (optional string).
+`BuildWorkloadDeployedDtoAsync` copies them onto `WorkloadDeployedDto`
+(normalising blank Hostname to null). `EnsureWorkloadIsHelmDeployableAsync`
+rejects `IngressEnabled=true` + empty Hostname at Deploy time
+(`PoolServiceException.WorkloadIngressEnabledButHostnameEmpty`) — the chart
+templates build host rules from `publicUri`, and an empty host would fail
+k8s admission mid-helm-rollout. The operator's
+`WorkloadContextValuesBuilder` then projects `ingress.enabled=true` plus
+top-level `publicUri=https://<Hostname>` only when both conditions hold,
+layering on top of the cluster-wide `ingress.*` defaults (className,
+cert-manager cluster-issuer, TLS) from operator config; those defaults
+are not overridable per workload by design. The chart's
+`templates/ingress.yaml` builds the tenant-scoped path (`/{tenantId}`) for
+adapter charts itself, so the operator only needs to supply hostname +
+enabled — no chart change required.
+
 **Workload event routing.** `NotifyWorkloadDeployedAsync` and
 `NotifyWorkloadUndeployedAsync` route only to the SignalR connection(s)
 that have registered the target `(tenantId, poolName)` via

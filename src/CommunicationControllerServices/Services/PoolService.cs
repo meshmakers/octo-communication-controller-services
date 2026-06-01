@@ -319,6 +319,17 @@ internal class PoolService : IPoolService
         {
             throw PoolServiceException.WorkloadHelmRepositoryUrlEmpty(tenantId, workload.RtId, workload.Name);
         }
+
+        // Ingress contract: when IngressEnabled is true we project ingress.enabled=true
+        // + publicUri into the chart values. The chart's templates/ingress.yaml builds
+        // host rules from publicUri, so an empty Hostname produces an Ingress with an
+        // empty host — k8s admission rejects it and the helm release would fail
+        // mid-rollout. Surface the misconfiguration as an actionable Deploy-time error
+        // instead. ChartName / repo checks above mirror the same fail-fast pattern.
+        if (workload.IngressEnabled && string.IsNullOrWhiteSpace(workload.Hostname))
+        {
+            throw PoolServiceException.WorkloadIngressEnabledButHostnameEmpty(tenantId, workload.RtId, workload.Name);
+        }
     }
 
     /// <inheritdoc />
@@ -565,6 +576,14 @@ internal class PoolService : IPoolService
             // opt in. Applications with a backend (e.g. energy-community,
             // voest-app) need cluster credentials just like in-cluster adapters.
             ReceivesClusterSecrets = workload.ReceivesClusterSecrets,
+            // Public-ingress opt-in. The operator projects ingress.enabled=true
+            // and publicUri into the workload's Helm values when this is set —
+            // cluster-wide ingress defaults (className, cluster-issuer, TLS)
+            // come from operator config. Hostname is normalised to null when
+            // blank so the DTO matches the operator-side "set or absent"
+            // contract on the chart values.
+            IngressEnabled = workload.IngressEnabled,
+            Hostname = string.IsNullOrWhiteSpace(workload.Hostname) ? null : workload.Hostname,
         };
     }
 

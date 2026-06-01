@@ -19,6 +19,11 @@ types:
       isOptional: true
     - id: ${this}/ReceivesClusterSecrets
       name: ReceivesClusterSecrets
+    - id: ${this}/IngressEnabled
+      name: IngressEnabled
+    - id: ${this}/Hostname
+      name: Hostname
+      isOptional: true
   associations:
     # Dedicated association role for the workload-to-Helm-repo link.
     # Reusing the generic "Uses" role would override the inverse usedBy view
