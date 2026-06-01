@@ -163,29 +163,69 @@ Model definitions are in `src/SystemCommunicationCkModel/ConstructionKit/`:
 - `enums/` - enumeration definitions
 - `attributes/` - attribute definitions
 
-### Service-Managed Blueprint (System.Communication)
+### Service-Managed Blueprints (System.Communication.*)
 
-`SystemCommunicationCkModel` also ships an embedded blueprint that seeds a tenant with a default Cloud `Pool` + managed `Adapter`. The pattern mirrors the embedded CK-model packaging — see `octo-construction-kit-engine/docs/blueprints.md` for the engine side.
+`SystemCommunicationCkModel` ships two embedded blueprints that seed a tenant with a
+default Cloud `Pool` + managed `Adapter`. The variants are picked per cluster via
+`requires.octo.environment`, sharing the same rtIds so a tenant moving channels
+(staging→prod hand-over) keeps its entities. The pattern mirrors the embedded
+CK-model packaging — see `octo-construction-kit-engine/docs/blueprints.md` for the
+engine side.
 
 ```
 src/SystemCommunicationCkModel/
-├── ConstructionKit/                 # CK model YAML
-└── Blueprints/
-    └── System.Communication-1.0.0/  # embedded blueprint (System.* = service-managed)
-        ├── blueprint.yaml
-        └── seed-data/entities.yaml
+├── ConstructionKit/                          # CK model YAML
+└── Blueprints/                               # System.* = service-managed
+    ├── System.Communication.Release/         # requires.octo.environment: [staging, production]
+    │   ├── blueprint.yaml                    #   blueprintId: System.Communication.Release-1.0.0
+    │   └── seed-data/entities.yaml           #   ChartVersion: "${octo.version}"
+    └── System.Communication.MainLatest/      # requires.octo.environment: [dev, test]
+        ├── blueprint.yaml                    #   blueprintId: System.Communication.MainLatest-1.0.0
+        └── seed-data/entities.yaml           #   ChartVersion: ""
 ```
+
+The folder name carries only the blueprint **Name**; the version lives exclusively
+in the manifest's `blueprintId`. Bumping the version is a manifest-only edit — no
+folder rename required. The `BlueprintEmbed` MSBuild task validates that the folder
+name equals `blueprintId.Name`.
+
+| Variant                                | ChartVersion seed                | Use case |
+|----------------------------------------|----------------------------------|----------|
+| `System.Communication.Release`         | `"${octo.version}"`              | staging / production — matches the release-channel chart 1:1 (both derived from the same r-tag), so the first Deploy on a freshly attached tenant lands a working chart pull. |
+| `System.Communication.MainLatest`      | `""` (empty)                     | dev / test — the operator's `HelmRunner` omits `--version` when blank and helm picks the newest chart from the dev channel. CD pipeline `deploy-adapter-chart-octo-mesh-adapter-*` then writes a concrete `0.1.<yyMMDDxxx>` version on the next main-CI rollout. |
 
 Flow:
 
-1. `<BlueprintFolder>` in `SystemCommunicationCkModel.csproj` triggers the `BlueprintEmbed` MSBuild task. The task validates `blueprint.yaml`, embeds the files as manifest resources, and emits `obj/.../blueprints-cache.json`. The `BlueprintSourceGenerator` then generates `AddBlueprintSystemCommunicationV1(this IServiceCollection)` plus an `IBlueprintEmbeddedSource` implementation.
-2. `Program.cs` registers the embedded source with that one DI extension. The engine's `EmbeddedResourceBlueprintCatalog` (auto-registered by `AddConstructionKit()`) discovers it.
-3. `DefaultConfigurationCreatorService.ImportCkModelAsync` (Enable path) and `StartTenantAsync` (every tenant load) both call `ApplyServiceManagedBlueprintsAsync`, which picks the newest registered version per name in `AutoAppliedBlueprintNames = ["System.Communication"]` and invokes `IBlueprintService.ApplyBlueprintAsync`. The blueprint runner is idempotent at the same version, so the cost of the per-startup call is near-zero unless the embedded version actually bumped.
-4. Bumping `System.Communication-1.0.0` → `System.Communication-1.0.1` and shipping a new NuGet rolls every tenant forward on the next service restart — no per-tenant migration script required.
+1. `<BlueprintFolder>` in `SystemCommunicationCkModel.csproj` triggers the `BlueprintEmbed` MSBuild task. The task validates each `blueprint.yaml`, embeds the files as manifest resources, and emits `obj/.../blueprints-cache.json`. The `BlueprintSourceGenerator` generates one DI extension per blueprint (`AddBlueprintSystemCommunicationReleaseV1`, `AddBlueprintSystemCommunicationMainLatestV1`) plus their `IBlueprintEmbeddedSource` implementations.
+2. `Program.cs` registers every embedded source via the generated `AddBlueprint…V1()` extensions. The engine's `EmbeddedResourceBlueprintCatalog` (auto-registered by `AddConstructionKit()`) discovers them.
+3. `DefaultConfigurationCreatorService.ImportCkModelAsync` (Enable path) and `StartTenantAsync` (every tenant load) both call `ApplyServiceManagedBlueprintsAsync`, which iterates every embedded blueprint whose name starts with `ServiceManagedBlueprintPrefix = "System.Communication."` (trailing dot anchors the match), picks the newest version per name, and invokes `IBlueprintService.ApplyBlueprintAsync`. Each blueprint's `requires:` decides whether it actually runs on the given tenant — non-matching ones return `BlueprintApplicationResult.Skipped` (success no-op, no install row, no seed). The blueprint runner is idempotent at the same version, so the cost of the per-startup call is near-zero unless the embedded version bumped.
+4. Bumping any variant (e.g. `System.Communication.Release-1.0.0` → `…-1.0.1`) and shipping a new NuGet rolls every applicable tenant forward on the next service restart — no per-tenant migration script required.
 
-The `System.` name prefix tells Refinery Studio (`BlueprintIdExtensions.IsServiceManaged`) to hide Install / Re-apply controls — the service owns this blueprint and admins shouldn't fight it.
+The `System.` name prefix tells Refinery Studio (`BlueprintIdExtensions.IsServiceManaged`) to hide Install / Re-apply controls — the service owns these blueprints and admins shouldn't fight them.
+
+> **Migration note**: tenants previously seeded with `System.Communication-1.0.2` keep that installation row as an orphan after the split — the new blueprints overwrite the Pool/Adapter entities by shared rtId (functional behaviour preserved), but the old install row still shows up in Studio. A one-time `mutation { blueprints { uninstall(blueprintName: "System.Communication", cascade: false) { success entitiesDeleted } } }` removes it per tenant.
 
 The optional `HelloCommunication-1.0.0` demo blueprint lives in `samples/Blueprints/` (not embedded). It's admin-installable: drop the folder into a `LocalFileSystemBlueprintCatalog` root or publish it via a GitHub catalog. Its `blueprintDependencies` reference `System.Communication-[1.0,2.0)` so it can be applied on top of the service-managed baseline.
+
+### Empty ChartVersion ("use latest")
+
+`WorkloadController.UpdateChartVersion` accepts a blank value as the explicit
+opt-in for "deploy the newest chart in the configured Helm repository"; non-empty
+values must still parse as SemVer. The audit-event message renders `(latest)` for
+the empty sentinel so CI/CD inspection stays readable.
+
+`PoolService.EnsureWorkloadIsHelmDeployableAsync` /
+`BuildWorkloadDeployedDtoAsync` / `IsWorkloadHelmDeployableAsync` only require
+`ChartName` and a linked `HelmRepositoryConfiguration` with a non-empty
+`RepositoryUrl` — `ChartVersion` is optional. The `WorkloadDeployedDto` sent to
+the operator coalesces a null `ChartVersion` to `""`; the operator's `HelmRunner`
+then omits the `--version` argument when blank and helm picks the newest tag in
+the repo.
+
+This is the rollout contract for `System.Communication.MainLatest` — dev/test
+tenants ship with empty `ChartVersion` and the CD pipeline overwrites it on every
+main-CI run. The same path works for any workload whose operator wants to track a
+channel instead of pinning a specific version.
 
 ### Docker
 
