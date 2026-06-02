@@ -128,4 +128,28 @@ public interface IPoolService
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     Task RecomputeAllDeploymentStatesAsync(string tenantId);
+
+    /// <summary>
+    /// Reverse-sync handshake from a freshly (re)connected Cloud operator:
+    /// every reported pool whose <c>DeploymentState</c> is not already
+    /// <c>Deployed</c> is restored to <c>Deployed</c>, and the operator's
+    /// SignalR connection is wired back into the per-pool tracking so
+    /// undeploy fan-out (<c>UndeployAllCloudPoolsAsync</c>) keeps working
+    /// after an operator restart. Same treatment for the workloads listed
+    /// inside each pool report.
+    ///
+    /// Cloud-only: callers must ensure the operator's
+    /// <c>AutoManagePools</c> mode is <c>true</c> before invoking
+    /// (<c>OperatorHub.ReportDeployedStateAsync</c> enforces this with a
+    /// <c>HubException</c>). Per-pool guard rejects entries whose
+    /// <c>Environment</c> is not Cloud so a misbehaving operator cannot
+    /// revive Edge state via this path.
+    /// </summary>
+    /// <param name="operatorConnectionId">The SignalR connection id of the
+    /// reporting operator. Used to re-register pool ownership for the new
+    /// connection.</param>
+    /// <param name="deployedPools">The operator's view of which pools and
+    /// workloads currently have a healthy helm release.</param>
+    Task RestoreDeployedStateAsync(string operatorConnectionId,
+        IReadOnlyList<OperatorDeployedPoolReportDto> deployedPools);
 }

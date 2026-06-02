@@ -125,4 +125,22 @@ public interface IOperatorConnectionManager
     /// rolling restart with brief overlap) is still hosting it.
     /// </summary>
     IReadOnlyList<string> GetConnectionsForPool(string tenantId, string poolRtId);
+
+    /// <summary>
+    /// Adds <paramref name="pool"/> to the deployed-pool tracking map WITHOUT
+    /// firing a SignalR notification. Used by the reverse-sync handshake
+    /// (<c>OperatorHub.ReportDeployedStateAsync</c>) so a reconnecting Cloud
+    /// operator can rebuild the per-tenant tracking the controller lost when
+    /// the previous connection dropped — keeping <c>PreDeleteTenant</c>
+    /// cascade and undeploy fan-out working after an operator restart.
+    /// </summary>
+    void TrackDeployedPool(DeployedPoolDto pool);
+
+    /// <summary>
+    /// Adds <paramref name="workload"/> to the deployed-workload tracking
+    /// map WITHOUT firing a SignalR notification. Companion to
+    /// <see cref="TrackDeployedPool"/> for the workload tracking surface
+    /// (<see cref="GetDeployedWorkloadsForTenant"/>).
+    /// </summary>
+    void TrackDeployedWorkload(WorkloadUndeployedDto workload);
 }

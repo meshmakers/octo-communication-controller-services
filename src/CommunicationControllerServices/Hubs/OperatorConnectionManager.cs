@@ -143,6 +143,25 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
             .ToArray();
     }
 
+    public void TrackDeployedPool(DeployedPoolDto pool)
+    {
+        // Mirror NotifyPoolDeployedAsync's tracking write but skip the SignalR
+        // fan-out — the operator is reporting state it already owns, no need
+        // to echo a PoolDeployedAsync back at it.
+        var tenantPools = _deployedPoolsByTenant.GetOrAdd(pool.TenantId,
+            _ => new ConcurrentDictionary<string, bool>());
+        tenantPools[pool.PoolRtId] = true;
+    }
+
+    public void TrackDeployedWorkload(WorkloadUndeployedDto workload)
+    {
+        // Companion to TrackDeployedPool — the stored DTO is the minimal
+        // undeploy payload, same shape NotifyWorkloadDeployedAsync writes.
+        var tenantWorkloads = _deployedWorkloadsByTenant.GetOrAdd(workload.TenantId,
+            _ => new ConcurrentDictionary<string, WorkloadUndeployedDto>());
+        tenantWorkloads[workload.WorkloadRtId] = workload;
+    }
+
     public async Task NotifyPoolDeployedAsync(DeployedPoolDto pool)
     {
         // Track regardless of whether any operator is connected — when one
