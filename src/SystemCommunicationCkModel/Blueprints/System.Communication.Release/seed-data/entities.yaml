@@ -23,6 +23,28 @@ entities:
         value: ""
 
   # ---------------------------------------------------------------------------
+  # HelmRepositoryConfiguration — meshmakers public apps catalog. Seeded
+  # alongside meshmakers-public so admins can attach Application workloads
+  # (e.g. dashboards, demo apps) to this release-channel apps repo without
+  # having to register it manually. No service-managed workload links here:
+  # the Mesh Adapter stays on meshmakers-public (its chart lives there).
+  # Admins point their own Application entities at this rtId via the
+  # HelmRepository association.
+  # ---------------------------------------------------------------------------
+  - rtId: '670000000000000000000005'
+    ckTypeId: System.Communication/HelmRepositoryConfiguration
+    rtWellKnownName: meshmakers-apps
+    attributes:
+      - id: System.Communication/RepositoryUrl
+        value: https://meshmakers.github.io/apps
+      - id: System.Communication/Channel
+        value: 1   # Release
+      - id: System.Communication/Username
+        value: ""
+      - id: System.Communication/Password
+        value: ""
+
+  # ---------------------------------------------------------------------------
   # Pool — Cloud-environment pool that the central Communication Operator owns.
   # The pool is the deployment target for the Adapter workload below. Shares its
   # rtId with the System.Communication.MainLatest variant so a tenant moving
