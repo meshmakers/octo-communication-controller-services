@@ -21,11 +21,14 @@ internal abstract class PoolServiceTestsBase
     protected readonly ICommunicationEventService CommunicationEventService;
     protected readonly IOperatorConnectionManager OperatorConnectionManager;
     protected readonly IWorkloadEncryptionService EncryptionService;
+    protected readonly IHostnameTemplateResolver HostnameTemplateResolver;
     protected readonly IPoolCachePublish PoolCachePublish;
     protected readonly PoolTenant PoolTenant;
     protected readonly PoolService PoolService;
 
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
+    [SuppressMessage("Argument matchers", "NS3003:Multiple matchers of same type",
+        Justification = "TryResolve has three string? params (template + two outs); the matchers are unambiguous by position.")]
     protected PoolServiceTestsBase()
     {
         CommunicationRepository = Substitute.For<ICommunicationRepository>();
@@ -43,6 +46,23 @@ internal abstract class PoolServiceTestsBase
         // Default: Decrypt passes the value through unchanged (so non-secret
         // tests don't have to set up Decrypt). Specific tests override this.
         EncryptionService.Decrypt(Arg.Any<string>()).Returns(ci => ci.Arg<string>());
+        HostnameTemplateResolver = Substitute.For<IHostnameTemplateResolver>();
+        // Default: literal pass-through (no domains configured). Tests that
+        // exercise template behaviour override TryResolve explicitly.
+        HostnameTemplateResolver.AvailableDomains
+            .Returns(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+        HostnameTemplateResolver
+            .TryResolve(Arg.Any<string?>(), out Arg.Any<string?>(), out Arg.Any<string?>())
+            .Returns(ci =>
+            {
+                // Default behaviour: pass the input through unchanged so tests
+                // that don't touch the resolver see literal hostnames. Use
+                // positional ci.ArgAt<T> here (not ci.Arg<T>) because three
+                // string? params would make Arg<string?> ambiguous at runtime.
+                ci[1] = ci.ArgAt<string?>(0);
+                ci[2] = (string?)null;
+                return true;
+            });
         PoolCachePublish = Substitute.For<IPoolCachePublish>();
         PoolTenant = new PoolTenant(PoolCachePublish, TenantId);
 
@@ -51,7 +71,8 @@ internal abstract class PoolServiceTestsBase
             PoolCache,
             CommunicationEventService,
             OperatorConnectionManager,
-            EncryptionService);
+            EncryptionService,
+            HostnameTemplateResolver);
     }
 
     [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]

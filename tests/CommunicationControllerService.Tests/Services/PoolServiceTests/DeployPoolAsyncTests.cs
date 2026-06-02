@@ -597,4 +597,61 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(d => !d.IngressEnabled && d.Hostname == null));
     }
+
+    [Test]
+    public async Task DeployWorkloadAsync_HostnameWithKnownDomainTemplate_ResolvesBeforeNotify()
+    {
+        // Late-binding contract: the Hostname attribute carries a template like
+        // "adapter.{{domain.default}}"; the controller resolves it against its
+        // configured named domains at deploy time and sends the concrete host
+        // to the operator. The workload entity itself stays cluster-portable.
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        adapter.IngressEnabled = true;
+        adapter.Hostname = "adapter.{{domain.default}}";
+
+        HostnameTemplateResolver
+            .TryResolve("adapter.{{domain.default}}", out Arg.Any<string?>(), out Arg.Any<string?>())
+            .Returns(ci =>
+            {
+                ci[1] = "adapter.staging.octo-mesh.com";
+                ci[2] = null;
+                return true;
+            });
+
+        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+
+        await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
+            Arg.Is<WorkloadDeployedDto>(d =>
+                d.IngressEnabled
+                && d.Hostname == "adapter.staging.octo-mesh.com"));
+    }
+
+    [Test]
+    public async Task DeployWorkloadAsync_HostnameWithUnknownDomainTemplate_ThrowsBeforeNotify()
+    {
+        // Unknown domain name in the template fails fast with an actionable
+        // message that names the offending key — same shape as the
+        // IngressEnabled+empty-hostname guard above. The operator must NOT be
+        // notified (no helm release attempt with a literal '{{domain.X}}' host).
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        adapter.IngressEnabled = true;
+        adapter.Hostname = "adapter.{{domain.does-not-exist}}";
+
+        HostnameTemplateResolver
+            .TryResolve("adapter.{{domain.does-not-exist}}", out Arg.Any<string?>(), out Arg.Any<string?>())
+            .Returns(ci =>
+            {
+                ci[1] = null;
+                ci[2] = "does-not-exist";
+                return false;
+            });
+
+        var ex = await Assert.ThrowsAsync<Exception>(
+            async () => await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId));
+
+        await Assert.That(ex!.Message).Contains("does-not-exist");
+        await Assert.That(ex!.Message).Contains("Hostname");
+        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
+            .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
+    }
 }

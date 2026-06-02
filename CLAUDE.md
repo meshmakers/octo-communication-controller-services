@@ -626,6 +626,61 @@ Tests:
 - `Services/PoolServiceTests/UndeployAllCloudPoolsAsyncTests` — extended
   with workload-cascade tests.
 
+### Hostname Template Resolution
+
+Workloads' `Hostname` attribute may carry `{{domain.NAME}}` placeholders that
+are resolved at **deploy time**, not at blueprint-apply time, against the
+controller's configured named domains. Late binding keeps workload runtime
+entities portable: moving a tenant between clusters picks up the destination
+cluster's domain config without re-seeding entities.
+
+- **Options:** `CommunicationControllerOptions.Domains` — `Dictionary<string,string>`
+  bound from `OCTO_COMMUNICATIONCONTROLLER__DOMAINS__{NAME}={baseDomain}`
+  env vars. Helm chart emits one env var per `services.communication.domains`
+  map key (`octo-helm-core/src/octo-mesh/templates/_env.tpl`, communication
+  branch).
+- **Resolver:** `IHostnameTemplateResolver` / `HostnameTemplateResolver`
+  (`Services/HostnameTemplateResolver.cs`). Singleton, regex-based, lookup is
+  case-insensitive. `TryResolve(template, out resolved, out unknownDomainName)`
+  returns `false` on the first unknown NAME so callers get a stable,
+  actionable error.
+- **Hook points in `PoolService`:**
+  - `EnsureWorkloadIsHelmDeployableAsync` validates the template up-front and
+    throws `PoolServiceException.WorkloadHostnameUnknownDomain` so misconfigured
+    workloads fail at Deploy with an actionable message instead of producing
+    an Ingress with the literal `{{domain.X}}` host (which k8s admission would
+    reject mid-rollout).
+  - `BuildWorkloadDeployedDtoAsync` calls `ResolveHostname` before assigning
+    to `WorkloadDeployedDto.Hostname` — by this point the template has already
+    been validated, so the resolver call cannot fail in practice.
+- **API:** `GET {tenantId}/v1/communication/domains` returns the configured
+  domains as `IEnumerable<DomainConfigurationDto>` so the Studio's workload
+  editor can populate a dropdown instead of forcing free-text Hostname entry.
+  Read-only policy (`TenantCommunicationApiReadOnlyPolicy`); result is
+  identical per tenant.
+- **Per-cluster wiring** lives in `octo-mesh-deployment/clusters/*/values-octo-mesh.yaml`
+  under `services.communication.domains`. The base chart's
+  `services.communication.domains: {}` default means a helm install without
+  per-cluster overrides simply has no named domains — workloads with literal
+  hostnames keep working unchanged.
+- **Why `{{ }}` and not `${ }`:** Blueprint variables already use `${name}`
+  (`BlueprintVariableInterpolator` in `octo-construction-kit-engine`) and are
+  resolved at blueprint-apply time. Reusing that syntax for deploy-time
+  substitution would either pollute the blueprint warning log (the engine's
+  default provider warns on unknown vars) or require a cross-layer
+  skip-prefix coupling. Double-brace `{{domain.NAME}}` keeps the two
+  resolution layers visually distinct in YAML and decoupled in code.
+
+Tests:
+- `Services/HostnameTemplateResolverTests` — literal pass-through, single +
+  multiple placeholder substitution, case-insensitive name match, unknown
+  domain reports first offender, single-brace `${...}` is ignored, whitespace
+  inside `{{ }}` tolerated.
+- `Services/PoolServiceTests/DeployPoolAsyncTests` —
+  `DeployWorkloadAsync_HostnameWithKnownDomainTemplate_ResolvesBeforeNotify`
+  and `DeployWorkloadAsync_HostnameWithUnknownDomainTemplate_ThrowsBeforeNotify`
+  pin the resolver wiring in the deploy path.
+
 ## Project Structure Notes
 
 - Main service: `src/CommunicationControllerServices/`
