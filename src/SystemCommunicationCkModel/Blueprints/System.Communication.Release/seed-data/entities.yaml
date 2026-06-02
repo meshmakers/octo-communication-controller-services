@@ -94,3 +94,13 @@ entities:
         value: 0
       - id: System.Communication/ReceivesClusterSecrets
         value: true
+      # Pre-fill the public Hostname with the {{domain.NAME}} template syntax
+      # so administrators can flip IngressEnabled later without having to type
+      # the FQDN. The Communication Controller resolves {{domain.default}} at
+      # Deploy time against its configured named domains (see
+      # CommunicationControllerOptions.Domains) — on prod-1 this becomes
+      # "adapter.prod-1.octo-mesh.com", on prod-2 "adapter.prod-2.octo-mesh.com",
+      # etc. IngressEnabled stays false (default) so the Mesh Adapter remains
+      # cluster-internal until an admin explicitly opts in.
+      - id: System.Communication/Hostname
+        value: "adapter.{{domain.default}}"
