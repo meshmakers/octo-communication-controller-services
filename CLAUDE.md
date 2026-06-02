@@ -482,9 +482,12 @@ pools` — and the operator is never told to clean up, leaving the
 
 Caveat: the map is process-local, so it survives only as long as the
 controller pod. If the controller restarts between deploy and tenant delete,
-the cascade has nothing to undeploy. Tracking restart-survival via an
-operator-side `RegisterOperatorAsync` reverse-sync is the existing TODO on
-`OperatorConnectionManager.GetDeployedPools()`.
+the cascade has nothing to undeploy. Restart-survival is closed by the
+operator-side reverse-sync (see "Operator Reverse-Sync" below) — a Cloud
+operator reconnecting after either pod's restart calls
+`ReportDeployedStateAsync` with the set of pools / workloads it currently
+manages, and the controller rebuilds the tracking through
+`TrackDeployedPool` / `TrackDeployedWorkload`.
 
 Tests:
 - `Hubs/OperatorConnectionManagerTests` — tracking add/remove, tenant
@@ -544,10 +547,11 @@ cache unload).
 **`OperatorConnectionManager`** carries the workload tracking table:
 `tenantId → Map<{poolName}|{workloadName}, WorkloadUndeployedDto>`.
 `NotifyWorkloadDeployedAsync` adds, `NotifyWorkloadUndeployedAsync`
-removes. Same restart-survival caveat as the pool tracking: if the
-controller pod restarts between deploy and cascade, the in-memory state
-is gone. Reverse-sync from a freshly (re)connecting operator's
-`RegisterOperatorAsync` would close this gap (TODO).
+removes. Restart-survival is closed by the operator-side reverse-sync
+(see "Operator Reverse-Sync" below) — a Cloud operator reconnecting
+after either pod's restart calls `ReportDeployedStateAsync`, which
+restores both `DeploymentState=Deployed` and the per-tenant tracking
+maps so the `PreDeleteTenant` cascade still has the entries it needs.
 
 **Public ingress per workload.** `RtDeployableWorkload` carries two
 typed attributes on the base type so Adapter and Application share them:
@@ -625,6 +629,53 @@ Tests:
   workload fan-out, undeploy ordering, scoping workloads to the right pool.
 - `Services/PoolServiceTests/UndeployAllCloudPoolsAsyncTests` — extended
   with workload-cascade tests.
+
+### Operator Reverse-Sync
+
+Closes the restart-survival gap on the controller-side in-memory tracking
+maps and on `DeploymentState` drift. The flow:
+
+1. Operator pod restarts (or controller pod restarts).
+2. Operator reconnects and calls `RegisterOperatorAsync(autoManagePools=true)`
+   — controller returns the currently-tracked Cloud pools (forward sync).
+3. Operator follows up with `ReportDeployedStateAsync(pools)` — for every
+   pool / workload it currently has a healthy helm release for, it sends an
+   `OperatorDeployedPoolReportDto` carrying `{TenantId, PoolRtId, PoolName,
+   WorkloadRtIds[]}`.
+4. Controller's `OperatorHub.ReportDeployedStateAsync` rejects the call with
+   a typed `HubException` when the operator's declared mode is anything
+   other than Cloud (edge or legacy/unknown) and writes an error audit event
+   before throwing — defense in depth, prevents an edge cluster from
+   reviving central-cluster state.
+5. `PoolService.RestoreDeployedStateAsync` runs the per-pool work:
+   - Loads `RtPool` by rtId; skips when missing.
+   - Per-pool `Environment != Cloud` guard skips Edge pools silently —
+     a second line of defense against a Cloud operator reporting cross-mode
+     entities.
+   - Writes `DeploymentState=Deployed` **only when the current state would
+     change** (avoids no-op audit events).
+   - Calls `OperatorConnectionManager.TrackDeployedPool` + `RegisterPoolForConnection`
+     so undeploy fan-out + `OnDisconnected` offline-write keep working on the
+     new connection.
+   - Same restore-only-when-changed rule for each `WorkloadRtId` in the
+     report; uses `SetWorkloadDeploymentStateAsync` (polymorphic over Adapter /
+     Application) + `TrackDeployedWorkload`.
+6. Empty report is a valid no-op (operator owns nothing yet).
+
+**Why not extend `RegisterOperatorAsync` to take the list?** Keeping the
+two contracts separate lets the operator stage the calls — fast register +
+synchronous deploy-pool list first, then the larger workload-aware reverse-sync
+catches up. It also keeps the SDK contract additive: existing operator builds
+that don't know about `ReportDeployedStateAsync` keep working (they just won't
+self-heal the tracking, which is the prior behaviour).
+
+Tests:
+- `Hubs/OperatorHubTests/ReportDeployedStateAsyncTests` — Cloud delegates,
+  edge / legacy reject with HubException + audit, empty list still delegates.
+- `Services/PoolServiceTests/RestoreDeployedStateAsyncTests` — Pending →
+  Deployed restore, already-Deployed write-skip but track, Edge silently
+  skipped, unknown pool silently skipped, workload restore + tracking,
+  malformed rtId silently skipped.
 
 ### Hostname Template Resolution
 

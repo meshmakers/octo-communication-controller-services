@@ -1069,4 +1069,120 @@ internal class PoolService : IPoolService
         if (repo == null) return false;
         return !string.IsNullOrWhiteSpace(repo.RepositoryUrl);
     }
+
+    /// <inheritdoc />
+    public async Task RestoreDeployedStateAsync(string operatorConnectionId,
+        IReadOnlyList<OperatorDeployedPoolReportDto> deployedPools)
+    {
+        // Defensive: an empty list is a valid no-op (operator just restarted
+        // and currently owns nothing). Don't log noise.
+        if (deployedPools.Count == 0)
+        {
+            return;
+        }
+
+        Logger.Info(
+            "Reverse-sync from operator connection '{ConnectionId}': {Count} pool report(s)",
+            operatorConnectionId, deployedPools.Count);
+
+        foreach (var report in deployedPools)
+        {
+            // Load by repository — the pool may or may not be in the local
+            // cache yet (operator can call ReportDeployedStateAsync before
+            // any RegisterPoolAsync for the same pool has been processed).
+            var pools = await _communicationRepository.GetPoolsAsync(report.TenantId);
+            var rtPool = pools.FirstOrDefault(p => p.RtId.ToString() == report.PoolRtId);
+            if (rtPool == null)
+            {
+                Logger.Warn(
+                    "[{TenantId}] Reverse-sync: pool rtId '{PoolRtId}' reported by operator does not exist; skipping",
+                    report.TenantId, report.PoolRtId);
+                continue;
+            }
+
+            // Per-pool environment guard: a Cloud operator (mode check ran in
+            // OperatorHub) must not be able to revive Edge-pool state via this
+            // path. Mirrors the same enforcement on RegisterPoolAsync.
+            if (rtPool.Environment != RtEnvironmentEnum.Cloud)
+            {
+                Logger.Warn(
+                    "[{TenantId}] Reverse-sync: pool '{PoolName}' has Environment={Environment} (not Cloud); skipping",
+                    report.TenantId, rtPool.Name, rtPool.Environment);
+                continue;
+            }
+
+            // Only write when state would actually change — avoids no-op
+            // SetState calls firing audit events for every report.
+            if (rtPool.DeploymentState != RtDeploymentStateEnum.Deployed)
+            {
+                await _communicationRepository.SetPoolDeploymentStateAsync(report.TenantId, rtPool.RtId,
+                    RtDeploymentStateEnum.Deployed);
+                await _eventService.StoreInformationEventAsync(report.TenantId,
+                    $"Pool '{rtPool.Name}' DeploymentState restored to Deployed by operator reverse-sync " +
+                    $"(was {rtPool.DeploymentState}).",
+                    new RtEntityId(SystemCommunicationCkIds.RtCkPoolTypeId, rtPool.RtId));
+                Logger.Info(
+                    "[{TenantId}] Reverse-sync: pool '{PoolName}' restored to Deployed (was {OldState})",
+                    report.TenantId, rtPool.Name, rtPool.DeploymentState);
+            }
+
+            // Always rebuild the tracking + per-connection pool registration —
+            // they're keyed on the new connection id, and the previous
+            // connection's entries were dropped on disconnect. Idempotent if
+            // the connection is already registered (ConcurrentDictionary set).
+            _operatorConnectionManager.TrackDeployedPool(new DeployedPoolDto
+            {
+                TenantId = report.TenantId,
+                PoolRtId = report.PoolRtId,
+            });
+            _operatorConnectionManager.RegisterPoolForConnection(operatorConnectionId, report.TenantId,
+                report.PoolRtId);
+
+            // Workloads inside the pool — same restore-only-when-changed rule.
+            foreach (var workloadRtIdString in report.WorkloadRtIds)
+            {
+                if (!OctoObjectId.TryParse(workloadRtIdString, out var workloadRtId))
+                {
+                    Logger.Warn(
+                        "[{TenantId}] Reverse-sync: workload rtId '{RtId}' under pool '{PoolName}' is not a valid OctoObjectId; skipping",
+                        report.TenantId, workloadRtIdString, rtPool.Name);
+                    continue;
+                }
+
+                var workload = await _communicationRepository.GetWorkloadByRtIdAsync(report.TenantId, workloadRtId);
+                if (workload == null)
+                {
+                    Logger.Warn(
+                        "[{TenantId}] Reverse-sync: workload rtId '{RtId}' reported by operator under pool '{PoolName}' does not exist; skipping",
+                        report.TenantId, workloadRtIdString, rtPool.Name);
+                    continue;
+                }
+
+                if (workload.DeploymentState != RtDeploymentStateEnum.Deployed)
+                {
+                    await SetWorkloadDeploymentStateAsync(report.TenantId, workload, RtDeploymentStateEnum.Deployed);
+                    await _eventService.StoreInformationEventAsync(report.TenantId,
+                        $"Workload '{workload.Name}' DeploymentState restored to Deployed by operator reverse-sync " +
+                        $"(was {workload.DeploymentState}).");
+                    Logger.Info(
+                        "[{TenantId}] Reverse-sync: workload '{WorkloadName}' restored to Deployed (was {OldState})",
+                        report.TenantId, workload.Name, workload.DeploymentState);
+                }
+
+                // Rebuild workload tracking so PreDeleteTenant cascade can fan
+                // out undeploy events for restored workloads. Same minimal
+                // DTO shape NotifyWorkloadDeployedAsync stores.
+                _operatorConnectionManager.TrackDeployedWorkload(new WorkloadUndeployedDto
+                {
+                    TenantId = report.TenantId,
+                    PoolRtId = report.PoolRtId,
+                    WorkloadRtId = workloadRtIdString,
+                    WorkloadName = workload.Name ?? string.Empty,
+                    WorkloadType = workload is RtApplication
+                        ? WorkloadTypeDto.Application
+                        : WorkloadTypeDto.Adapter,
+                });
+            }
+        }
+    }
 }

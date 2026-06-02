@@ -117,6 +117,33 @@ public class OperatorHub : Hub, IOperatorHub
     }
 
     /// <inheritdoc />
+    public async Task ReportDeployedStateAsync(IReadOnlyList<OperatorDeployedPoolReportDto> deployedPools)
+    {
+        var operatorMode = _connectionManager.GetOperatorMode(Context.ConnectionId);
+        if (operatorMode != true)
+        {
+            // Edge operators and legacy (mode==null) operators must not
+            // restore state via this path — their helm releases live on a
+            // different cluster than the controller-managed Cloud pools.
+            // Throw a typed HubException so the SDK surfaces a useful
+            // error message instead of a generic SignalR failure.
+            var modeLabel = operatorMode == false ? "edge (AutoManagePools=false)" : "legacy (unknown)";
+            await _eventService.StoreErrorEventAsync(string.Empty,
+                $"ReportDeployedStateAsync rejected: operator connection '{Context.ConnectionId}' is in {modeLabel} mode. " +
+                "Only Cloud operators (AutoManagePools=true) may reverse-sync deployed state.");
+            throw new HubException(
+                $"ReportDeployedStateAsync is only allowed for Cloud operators (AutoManagePools=true); " +
+                $"this connection declared mode: {modeLabel}.");
+        }
+
+        Logger.Info(
+            "Operator '{ConnectionId}' reverse-syncs deployed state: {Count} pool report(s)",
+            Context.ConnectionId, deployedPools.Count);
+
+        await _poolService.RestoreDeployedStateAsync(Context.ConnectionId, deployedPools);
+    }
+
+    /// <inheritdoc />
     public async Task UnregisterOperatorAsync()
     {
         var disconnectingConnectionId = Context.ConnectionId;
