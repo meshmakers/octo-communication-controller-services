@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -22,6 +23,7 @@ public class CommunicationController : ControllerBase
     private readonly IConfigurationService _configurationService;
     private readonly IExpressionValidationService _expressionValidationService;
     private readonly IWorkloadEncryptionService _encryptionService;
+    private readonly IHostnameTemplateResolver _hostnameTemplateResolver;
 
     /// <summary>
     /// Constructor
@@ -29,12 +31,14 @@ public class CommunicationController : ControllerBase
     public CommunicationController(ILogger<CommunicationController> logger,
         IConfigurationService configurationService,
         IExpressionValidationService expressionValidationService,
-        IWorkloadEncryptionService encryptionService)
+        IWorkloadEncryptionService encryptionService,
+        IHostnameTemplateResolver hostnameTemplateResolver)
     {
         _logger = logger;
         _configurationService = configurationService;
         _expressionValidationService = expressionValidationService;
         _encryptionService = encryptionService;
+        _hostnameTemplateResolver = hostnameTemplateResolver;
     }
 
     /// <summary>
@@ -153,6 +157,28 @@ public class CommunicationController : ControllerBase
             _logger.LogError(ex, "Encrypt-value failed: instance key not configured");
             return Problem(ex.Message, statusCode: StatusCodes.Status500InternalServerError);
         }
+    }
+
+    /// <summary>
+    /// Returns the named public base domains configured on this Communication
+    /// Controller instance. Workload editors in the Refinery Studio use the
+    /// result to populate the choice list behind the <c>Hostname</c> template
+    /// syntax — a user picks <c>default</c> and the editor inserts
+    /// <c>{{domain.default}}</c>, which the controller resolves at deploy time
+    /// against the same map.
+    ///
+    /// Read-only; result is identical for every tenant on the instance.
+    /// </summary>
+    [HttpGet("domains")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(typeof(IEnumerable<DomainConfigurationDto>), StatusCodes.Status200OK)]
+    public IActionResult GetDomains()
+    {
+        var dtos = _hostnameTemplateResolver.AvailableDomains
+            .Select(kvp => new DomainConfigurationDto(kvp.Key, kvp.Value))
+            .OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return Ok(dtos);
     }
 }
 

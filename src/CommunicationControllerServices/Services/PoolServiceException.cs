@@ -91,6 +91,17 @@ internal class PoolServiceException : Exception
             "set a public hostname (e.g. 'adapter.staging.octo-mesh.com') or disable 'Ingress Enabled' before deploying.");
     }
 
+    internal static Exception WorkloadHostnameUnknownDomain(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName, string hostnameTemplate, string unknownDomainName)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': " +
+            $"the 'Hostname' template '{hostnameTemplate}' references domain '{unknownDomainName}', " +
+            "which is not configured on this Communication Controller instance. Either pick one of the " +
+            "domains exposed by GET /v1/communication/domains, or extend the controller's Domains " +
+            $"option (OCTO_COMMUNICATIONCONTROLLER__DOMAINS__{unknownDomainName.ToUpperInvariant()}).");
+    }
+
     internal static Exception EdgePoolNotDeployable(string tenantId, OctoObjectId poolRtId, string? poolName)
     {
         return new PoolServiceException(

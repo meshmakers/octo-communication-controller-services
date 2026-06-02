@@ -18,6 +18,7 @@ internal class PoolService : IPoolService
     private readonly ICommunicationEventService _eventService;
     private readonly IOperatorConnectionManager _operatorConnectionManager;
     private readonly IWorkloadEncryptionService _encryptionService;
+    private readonly IHostnameTemplateResolver _hostnameTemplateResolver;
 
     /// <summary>
     /// Constructor
@@ -27,16 +28,19 @@ internal class PoolService : IPoolService
     /// <param name="eventService">Service for storing system events</param>
     /// <param name="operatorConnectionManager">Manages SignalR connections to central Communication Operators (for Cloud-pool deploy/undeploy notifications and PreUpdateTenant fan-out)</param>
     /// <param name="encryptionService">Decrypts secret-flagged ValueOverride values before they go on the SignalR wire</param>
+    /// <param name="hostnameTemplateResolver">Resolves <c>{{domain.NAME}}</c> placeholders in workload <c>Hostname</c> attributes against the controller's configured named domains at deploy time</param>
     public PoolService(ICommunicationRepository communicationRepository, IPoolCache poolCache,
         ICommunicationEventService eventService,
         IOperatorConnectionManager operatorConnectionManager,
-        IWorkloadEncryptionService encryptionService)
+        IWorkloadEncryptionService encryptionService,
+        IHostnameTemplateResolver hostnameTemplateResolver)
     {
         _communicationRepository = communicationRepository;
         _poolCache = poolCache;
         _eventService = eventService;
         _operatorConnectionManager = operatorConnectionManager;
         _encryptionService = encryptionService;
+        _hostnameTemplateResolver = hostnameTemplateResolver;
     }
     
     /// <inheritdoc />
@@ -330,6 +334,17 @@ internal class PoolService : IPoolService
         {
             throw PoolServiceException.WorkloadIngressEnabledButHostnameEmpty(tenantId, workload.RtId, workload.Name);
         }
+
+        // Validate {{domain.NAME}} placeholders up-front so misconfigured workloads
+        // fail with an actionable Deploy-time error instead of producing an Ingress
+        // with the literal '{{domain.X}}' as host (k8s admission rejects mid-rollout).
+        // Workloads that don't use the template syntax pass through unchanged.
+        if (!string.IsNullOrWhiteSpace(workload.Hostname) &&
+            !_hostnameTemplateResolver.TryResolve(workload.Hostname, out _, out var unknownDomain))
+        {
+            throw PoolServiceException.WorkloadHostnameUnknownDomain(
+                tenantId, workload.RtId, workload.Name, workload.Hostname, unknownDomain!);
+        }
     }
 
     /// <inheritdoc />
@@ -581,10 +596,23 @@ internal class PoolService : IPoolService
             // cluster-wide ingress defaults (className, cluster-issuer, TLS)
             // come from operator config. Hostname is normalised to null when
             // blank so the DTO matches the operator-side "set or absent"
-            // contract on the chart values.
+            // contract on the chart values. Any {{domain.NAME}} placeholder is
+            // resolved at this point against the controller's configured named
+            // domains; EnsureWorkloadIsHelmDeployableAsync has already validated
+            // that every referenced NAME exists, so TryResolve cannot fail here.
             IngressEnabled = workload.IngressEnabled,
-            Hostname = string.IsNullOrWhiteSpace(workload.Hostname) ? null : workload.Hostname,
+            Hostname = ResolveHostname(workload.Hostname),
         };
+    }
+
+    private string? ResolveHostname(string? hostname)
+    {
+        if (string.IsNullOrWhiteSpace(hostname))
+        {
+            return null;
+        }
+        _hostnameTemplateResolver.TryResolve(hostname, out var resolved, out _);
+        return string.IsNullOrWhiteSpace(resolved) ? null : resolved;
     }
 
     /// <inheritdoc />

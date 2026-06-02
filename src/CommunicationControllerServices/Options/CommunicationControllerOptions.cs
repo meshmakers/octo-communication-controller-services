@@ -103,6 +103,26 @@ public class CommunicationControllerOptions
     public bool EnablePipelineSchemaValidation { get; set; } = false;
 
     /// <summary>
+    /// Named public base domains available to workloads as <c>{{domain.NAME}}</c>
+    /// placeholders in their <c>Hostname</c> attribute. Resolved by
+    /// <c>IHostnameTemplateResolver</c> at deploy time (not at blueprint-apply
+    /// time) so workload entities stay portable across clusters.
+    ///
+    /// Bound from <c>OCTO_COMMUNICATIONCONTROLLER__DOMAINS__{NAME}={baseDomain}</c>
+    /// env vars (helm chart emits one entry per <c>services.communication.domains</c>
+    /// map key). NAME is case-insensitive at lookup; baseDomain is the raw value
+    /// (no scheme, no trailing dot). Example: a workload with
+    /// <c>Hostname="adapter.{{domain.default}}"</c> and the option
+    /// <c>Domains["default"]="staging.octo-mesh.com"</c> deploys with
+    /// <c>publicUri=https://adapter.staging.octo-mesh.com</c>.
+    ///
+    /// Empty / missing is tolerated; only workloads that reference a non-existent
+    /// domain key fail at deploy time with
+    /// <c>PoolServiceException.WorkloadHostnameUnknownDomain</c>.
+    /// </summary>
+    public Dictionary<string, string> Domains { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Symmetric AES-256-GCM master key used to encrypt secret attributes
     /// at rest (e.g. <c>ValueOverride.Value</c> for secret-flagged Helm value
     /// overrides, <c>HelmRepositoryConfiguration.Password</c>). Base64-encoded
