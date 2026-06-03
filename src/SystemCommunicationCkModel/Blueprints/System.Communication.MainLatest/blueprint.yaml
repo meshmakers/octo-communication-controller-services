@@ -1,5 +1,5 @@
 $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
-blueprintId: System.Communication.MainLatest-1.3.0
+blueprintId: System.Communication.MainLatest-1.4.0
 description: |
   Service-managed Communication seed for dev and test clusters. Seeds the default
   Cloud Pool and the managed Mesh Adapter with an empty ChartVersion — the
@@ -22,8 +22,15 @@ description: |
   auto-applied by the Communication Controller on tenant Enable / startup and Studio
   surfaces it as read-only.
 
+  1.4.0 picks up System.Communication-3.22.0, which marks the volatile state
+  attributes (DeploymentState, CommunicationState, ConfigurationState, the Last*Error
+  / Last*ErrorTimestamp pairs, StatusMessage, LastSyncedSequenceNumber,
+  CommunicationStateTimestamp) as `isRuntimeState: true`. The blueprint engine now
+  preserves their existing values on re-apply, so bumping this blueprint no longer
+  resets a Deployed adapter back to Undeployed.
+
 ckModelDependencies:
-  - System.Communication-[3.21.0,4.0)
+  - System.Communication-[3.22.0,4.0)
 
 seedDataPath: seed-data/entities.yaml
 

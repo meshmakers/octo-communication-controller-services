@@ -207,6 +207,47 @@ The `System.` name prefix tells Refinery Studio (`BlueprintIdExtensions.IsServic
 
 The optional `HelloCommunication-1.0.0` demo blueprint lives in `samples/Blueprints/` (not embedded). It's admin-installable: drop the folder into a `LocalFileSystemBlueprintCatalog` root or publish it via a GitHub catalog. Its `blueprintDependencies` reference `System.Communication-[1.0,2.0)` so it can be applied on top of the service-managed baseline.
 
+#### Runtime-State Attributes (do NOT reset on blueprint re-apply)
+
+`System.Communication-3.22.0` (paired with blueprints
+`System.Communication.Release-1.5.0` and `System.Communication.MainLatest-1.4.0`)
+marks the volatile state attributes on `Adapter` / `Pool` as
+`isRuntimeState: true` in `attributes.yaml`. The blueprint engine reads
+that marker (see `octo-construction-kit-engine/CLAUDE.md` → "Runtime-State
+Preservation on Re-Apply") and preserves the existing runtime value when
+the blueprint is re-applied for a version bump — instead of overwriting
+it with whatever the seed YAML happens to declare as the
+fresh-tenant default.
+
+| Attribute | Why it's runtime state |
+|---|---|
+| `DeploymentState` | Driven by `PoolService.Deploy/UndeployPoolAsync` + the reverse-sync from `ReportDeployedStateAsync`. Reset to 0 by a seed import flips a Deployed entity back to Undeployed in Studio. |
+| `CommunicationState` + `CommunicationStateTimestamp` | Written by the `OperatorHub` / `AdapterHub` connect & disconnect handlers and the rolling-upgrade shutdown guard. Seed-managed reset would mark an online operator as Unregistered. |
+| `ConfigurationState` | Toggled by `AdapterService` on configuration deploy / failure. |
+| `StatusMessage` | Live status text overwritten on every state transition — pure runtime breadcrumb. |
+| `LastDeploymentError` + `LastDeploymentErrorTimestamp` | Persistent error history written when a deploy fails; cleared on the next successful deploy. The blueprint must never silently clear these. |
+| `LastConfigurationError` + `LastConfigurationErrorTimestamp` | Same contract as the deployment-error pair, scoped to the configuration state machine. |
+| `LastSyncedSequenceNumber` | Adapter offline-sync cursor — wiping it would replay every queued event. |
+
+Before this marker landed (CK model 3.21.0 and earlier), bumping a
+service-managed blueprint silently reset all of these on the next
+controller restart. The first observed regression was the
+1.3.0 → 1.4.0 bump on `System.Communication.Release` (commit
+`80cd9422`, adding the `meshmakers-apps` HelmRepository entity): every
+tenant whose `MeshAdapter` had been `Deployed` flipped back to
+`Undeployed` even though the helm release was still healthy and the
+operator was still connected. Recovery for that incident is documented
+in `docs/runbooks/recover-mesh-adapter-state.md`. Any future
+service-managed-blueprint bump on 3.22.0+ should not need a runbook
+companion for this class of failure.
+
+When adding a new attribute on `Adapter` / `Pool` / similar entities,
+decide at creation time: is the value driven by the blueprint author
+(configuration → leave `isRuntimeState` unset), or by services /
+operators / users at runtime (status / counters / error history →
+mark `isRuntimeState: true`). Once shipped, downgrading from `true` to
+`false` is a behaviour-breaking change.
+
 ### Empty ChartVersion ("use latest")
 
 `WorkloadController.UpdateChartVersion` accepts a blank value as the explicit
