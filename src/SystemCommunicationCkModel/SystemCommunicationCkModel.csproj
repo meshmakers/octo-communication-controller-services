@@ -8,8 +8,11 @@
         <RootNamespace>Meshmakers.Octo.ConstructionKit.Models.System.Communication</RootNamespace>
         <Configurations>Debug;Release;DebugL</Configurations>
         <Platforms>AnyCPU</Platforms>
-        <OctoPublishCkModel Condition="'$(TargetFramework)' == 'net10.0'">true</OctoPublishCkModel>
-        <OctoGenerateCkDocumentation Condition="'$(TargetFramework)' == 'net10.0'">true</OctoGenerateCkDocumentation>
+        <!-- Only publish/generate-docs during the primary build, not during the nested MSBuild call that
+             GeneratePackageOnBuild's Pack target makes — otherwise the CK compile+publish runs twice and the
+             second run hits remote catalogs again, which has hung CI builds for the full HttpClient timeout. -->
+        <OctoPublishCkModel Condition="'$(TargetFramework)' == 'net10.0' AND '$(_IsPacking)' != 'true'">true</OctoPublishCkModel>
+        <OctoGenerateCkDocumentation Condition="'$(TargetFramework)' == 'net10.0' AND '$(_IsPacking)' != 'true'">true</OctoGenerateCkDocumentation>
     </PropertyGroup>
 
     <ItemGroup>
