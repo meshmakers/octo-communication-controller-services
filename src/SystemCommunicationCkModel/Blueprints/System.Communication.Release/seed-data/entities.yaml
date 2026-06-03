@@ -1,6 +1,6 @@
 $schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
 dependencies:
-  - System.Communication-3.21.0
+  - System.Communication-3.22.0
 entities:
   # ---------------------------------------------------------------------------
   # HelmRepositoryConfiguration — meshmakers public release channel. The
