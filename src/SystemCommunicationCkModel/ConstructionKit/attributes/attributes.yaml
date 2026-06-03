@@ -176,6 +176,7 @@ attributes:
 # Pipeline debugging
 - id: IsDebuggingEnabled
   valueType: Boolean
+  isRuntimeState: true
   description: 'Whether debugging is enabled for this pipeline'
 
 # Workload security
@@ -194,9 +195,11 @@ attributes:
   description: External identifier of the data point (e.g. Loxone State UUID, MQTT Topic, OPC-UA NodeId, Modbus Register)
 - id: CurrentValue
   valueType: String
+  isRuntimeState: true
   description: Current value of the data point as a string (numeric conversion happens during mapping evaluation)
 - id: LastUpdate
   valueType: DateTime
+  isRuntimeState: true
   description: Timestamp of the last value update for this data point
 
 # Data point mapping
