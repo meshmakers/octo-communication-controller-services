@@ -1,6 +1,8 @@
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using NSubstitute;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.PoolServiceTests;
@@ -609,12 +611,13 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         adapter.IngressEnabled = true;
         adapter.Hostname = "adapter.{{domain.default}}";
 
-        HostnameTemplateResolver
-            .TryResolve("adapter.{{domain.default}}", out Arg.Any<string?>(), out Arg.Any<string?>())
+        TemplateResolver
+            .TryResolve("adapter.{{domain.default}}", Arg.Any<WorkloadTemplateContext>(),
+                out Arg.Any<string?>(), out Arg.Any<string?>())
             .Returns(ci =>
             {
-                ci[1] = "adapter.staging.octo-mesh.com";
-                ci[2] = null;
+                ci[2] = "adapter.staging.octo-mesh.com";
+                ci[3] = null;
                 return true;
             });
 
@@ -637,12 +640,13 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         adapter.IngressEnabled = true;
         adapter.Hostname = "adapter.{{domain.does-not-exist}}";
 
-        HostnameTemplateResolver
-            .TryResolve("adapter.{{domain.does-not-exist}}", out Arg.Any<string?>(), out Arg.Any<string?>())
+        TemplateResolver
+            .TryResolve("adapter.{{domain.does-not-exist}}", Arg.Any<WorkloadTemplateContext>(),
+                out Arg.Any<string?>(), out Arg.Any<string?>())
             .Returns(ci =>
             {
-                ci[1] = null;
-                ci[2] = "does-not-exist";
+                ci[2] = null;
+                ci[3] = "domain.does-not-exist";
                 return false;
             });
 
@@ -651,6 +655,164 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
 
         await Assert.That(ex!.Message).Contains("does-not-exist");
         await Assert.That(ex!.Message).Contains("Hostname");
+        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
+            .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
+    }
+
+    [Test]
+    public async Task DeployWorkloadAsync_NonSecretValueOverrideWithTemplate_ResolvesBeforeNotify()
+    {
+        // Per-tenant URL constructed at deploy time from {{context.tenantId}}
+        // and the cluster's Identity-Service authority. Pins the resolver
+        // wiring on the ValueOverride path.
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        adapter.Values = new AttributeRecordValueList<RtValueOverrideRecord>
+        {
+            new RtValueOverrideRecord
+            {
+                Path = "oauth.callbackUrl",
+                Value = "{{service.authority}}/{{context.tenantId}}/callback",
+                IsSecret = false,
+            },
+        };
+        TemplateResolver
+            .TryResolve("{{service.authority}}/{{context.tenantId}}/callback",
+                Arg.Any<WorkloadTemplateContext>(),
+                out Arg.Any<string?>(), out Arg.Any<string?>())
+            .Returns(ci =>
+            {
+                ci[2] = "https://identity.staging.octo-mesh.com/tenantId/callback";
+                ci[3] = null;
+                return true;
+            });
+
+        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+
+        await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
+            Arg.Is<WorkloadDeployedDto>(d =>
+                d.Values.Count == 1
+                && d.Values[0].Path == "oauth.callbackUrl"
+                && d.Values[0].Value == "https://identity.staging.octo-mesh.com/tenantId/callback"
+                && !d.Values[0].IsSecret));
+    }
+
+    [Test]
+    public async Task DeployWorkloadAsync_SecretValueOverride_NotSubstituted()
+    {
+        // Regression guard: the encryption/sentinel layer owns secret values.
+        // The resolver must NOT see them — running TryResolve over decrypted
+        // secret material would mix two contracts and could leak placeholder
+        // text into the chart secret. The DTO carries the Decrypt() result
+        // verbatim.
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        adapter.Values = new AttributeRecordValueList<RtValueOverrideRecord>
+        {
+            new RtValueOverrideRecord
+            {
+                Path = "oauth.clientSecret",
+                Value = "enc:v1:cipher",
+                IsSecret = true,
+            },
+        };
+        EncryptionService.Decrypt("enc:v1:cipher").Returns("plain-{{context.tenantId}}");
+
+        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+
+        // The Decrypt output reaches the DTO with the placeholder text intact —
+        // proves the resolver did NOT run over secret material. Running templating
+        // over decrypted secret material would mix the encryption-sentinel layer
+        // with the templating contract.
+        await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
+            Arg.Is<WorkloadDeployedDto>(d =>
+                d.Values.Count == 1
+                && d.Values[0].IsSecret
+                && d.Values[0].Value == "plain-{{context.tenantId}}"));
+    }
+
+    [Test]
+    public async Task DeployWorkloadAsync_ValuesYamlWithTemplate_ResolvesBeforeNotify()
+    {
+        // ValuesYaml is treated as one opaque string and resolved as a whole
+        // before being passed to the operator. The operator writes it to a
+        // -f file unchanged after that point.
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        adapter.ValuesYaml = "oauth.authority: {{service.authority}}";
+        // Predicate-based match so we don't have to thread an exact-string mock
+        // through two consecutive resolver calls (EnsureWorkloadIsHelmDeployableAsync
+        // + BuildWorkloadDeployedDtoAsync).
+        TemplateResolver
+            .TryResolve(Arg.Is<string?>(s => s != null && s.Contains("{{service.authority}}")),
+                Arg.Any<WorkloadTemplateContext>(),
+                out Arg.Any<string?>(), out Arg.Any<string?>())
+            .Returns(ci =>
+            {
+                ci[2] = "oauth.authority: https://identity.staging.octo-mesh.com";
+                ci[3] = null;
+                return true;
+            });
+
+        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+
+        await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
+            Arg.Is<WorkloadDeployedDto>(d =>
+                d.ValuesYaml == "oauth.authority: https://identity.staging.octo-mesh.com"));
+    }
+
+    [Test]
+    public async Task DeployWorkloadAsync_ValueOverrideUnknownPlaceholder_ThrowsBeforeNotify()
+    {
+        // Unknown placeholder inside a ValueOverride fails fast with a
+        // message that names the offending field path. Operator must NOT
+        // be notified.
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        adapter.Values = new AttributeRecordValueList<RtValueOverrideRecord>
+        {
+            new RtValueOverrideRecord
+            {
+                Path = "oauth.callbackUrl",
+                Value = "{{service.nope}}",
+                IsSecret = false,
+            },
+        };
+        TemplateResolver
+            .TryResolve("{{service.nope}}", Arg.Any<WorkloadTemplateContext>(),
+                out Arg.Any<string?>(), out Arg.Any<string?>())
+            .Returns(ci =>
+            {
+                ci[2] = null;
+                ci[3] = "service.nope";
+                return false;
+            });
+
+        var ex = await Assert.ThrowsAsync<Exception>(
+            async () => await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId));
+
+        await Assert.That(ex!.Message).Contains("service.nope");
+        await Assert.That(ex!.Message).Contains("ValueOverride[oauth.callbackUrl]");
+        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
+            .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
+    }
+
+    [Test]
+    public async Task DeployWorkloadAsync_ValuesYamlUnknownPlaceholder_ThrowsBeforeNotify()
+    {
+        var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
+        adapter.ValuesYaml = "x: {{domain.missing}}";
+        TemplateResolver
+            .TryResolve("x: {{domain.missing}}", Arg.Any<WorkloadTemplateContext>(),
+                out Arg.Any<string?>(), out Arg.Any<string?>())
+            .Returns(ci =>
+            {
+                ci[2] = null;
+                ci[3] = "domain.missing";
+                return false;
+            });
+
+        var ex = await Assert.ThrowsAsync<Exception>(
+            async () => await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId));
+
+        await Assert.That(ex!.Message).Contains("domain.missing");
+        await Assert.That(ex!.Message).Contains("ValuesYaml");
         await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
             .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
     }

@@ -91,15 +91,17 @@ internal class PoolServiceException : Exception
             "set a public hostname (e.g. 'adapter.staging.octo-mesh.com') or disable 'Ingress Enabled' before deploying.");
     }
 
-    internal static Exception WorkloadHostnameUnknownDomain(string tenantId, OctoObjectId workloadRtId,
-        string? workloadName, string hostnameTemplate, string unknownDomainName)
+    internal static Exception WorkloadTemplateUnknownPlaceholder(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName, string fieldName, string template, string unknownPlaceholder)
     {
+        var hint = unknownPlaceholder.StartsWith("domain.", StringComparison.OrdinalIgnoreCase)
+            ? $"Either pick one of the values exposed by GET /v1/communication/workload-variables, or extend the controller's Domains option (OCTO_COMMUNICATIONCONTROLLER__DOMAINS__{unknownPlaceholder["domain.".Length..].ToUpperInvariant()})."
+            : unknownPlaceholder.StartsWith("service.", StringComparison.OrdinalIgnoreCase)
+                ? $"Either pick one of the values exposed by GET /v1/communication/workload-variables, or extend the controller's ServiceUrls option (OCTO_COMMUNICATIONCONTROLLER__SERVICEURLS__{unknownPlaceholder["service.".Length..].ToUpperInvariant()})."
+                : "Available placeholders: {{context.tenantId}}, {{domain.NAME}}, {{service.NAME}}; see GET /v1/communication/workload-variables for configured NAMEs.";
         return new PoolServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': " +
-            $"the 'Hostname' template '{hostnameTemplate}' references domain '{unknownDomainName}', " +
-            "which is not configured on this Communication Controller instance. Either pick one of the " +
-            "domains exposed by GET /v1/communication/domains, or extend the controller's Domains " +
-            $"option (OCTO_COMMUNICATIONCONTROLLER__DOMAINS__{unknownDomainName.ToUpperInvariant()}).");
+            $"the '{fieldName}' template '{template}' references unknown placeholder '{{{{{unknownPlaceholder}}}}}'. {hint}");
     }
 
     internal static Exception EdgePoolNotDeployable(string tenantId, OctoObjectId poolRtId, string? poolName)

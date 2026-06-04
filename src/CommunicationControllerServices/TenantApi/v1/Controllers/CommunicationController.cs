@@ -23,7 +23,7 @@ public class CommunicationController : ControllerBase
     private readonly IConfigurationService _configurationService;
     private readonly IExpressionValidationService _expressionValidationService;
     private readonly IWorkloadEncryptionService _encryptionService;
-    private readonly IHostnameTemplateResolver _hostnameTemplateResolver;
+    private readonly IWorkloadTemplateResolver _templateResolver;
 
     /// <summary>
     /// Constructor
@@ -32,13 +32,13 @@ public class CommunicationController : ControllerBase
         IConfigurationService configurationService,
         IExpressionValidationService expressionValidationService,
         IWorkloadEncryptionService encryptionService,
-        IHostnameTemplateResolver hostnameTemplateResolver)
+        IWorkloadTemplateResolver templateResolver)
     {
         _logger = logger;
         _configurationService = configurationService;
         _expressionValidationService = expressionValidationService;
         _encryptionService = encryptionService;
-        _hostnameTemplateResolver = hostnameTemplateResolver;
+        _templateResolver = templateResolver;
     }
 
     /// <summary>
@@ -174,10 +174,47 @@ public class CommunicationController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<DomainConfigurationDto>), StatusCodes.Status200OK)]
     public IActionResult GetDomains()
     {
-        var dtos = _hostnameTemplateResolver.AvailableDomains
+        var dtos = _templateResolver.AvailableDomains
             .Select(kvp => new DomainConfigurationDto(kvp.Key, kvp.Value))
             .OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        return Ok(dtos);
+    }
+
+    /// <summary>
+    /// Returns every template placeholder a workload can reference in its
+    /// <c>Hostname</c>, non-secret <c>ValueOverride.Value</c> or
+    /// <c>ValuesYaml</c>. Spans all three families:
+    /// <list type="bullet">
+    ///   <item><description><c>{{domain.NAME}}</c> — one entry per configured named domain.</description></item>
+    ///   <item><description><c>{{service.NAME}}</c> — one entry per configured public service URL.</description></item>
+    ///   <item><description><c>{{context.tenantId}}</c> — single per-deploy placeholder, <c>SampleValue</c> is <c>null</c>.</description></item>
+    /// </list>
+    /// Read-only; result is identical for every tenant on the instance.
+    /// </summary>
+    [HttpGet("workload-variables")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(typeof(IEnumerable<WorkloadVariableDto>), StatusCodes.Status200OK)]
+    public IActionResult GetWorkloadVariables()
+    {
+        var dtos = new List<WorkloadVariableDto>
+        {
+            new("{{context.tenantId}}",
+                "The tenant id of the deploying tenant. Substituted at deploy time.",
+                SampleValue: null),
+        };
+        dtos.AddRange(_templateResolver.AvailableDomains
+            .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(kvp => new WorkloadVariableDto(
+                $"{{{{domain.{kvp.Key}}}}}",
+                $"Named public base domain '{kvp.Key}' configured on this Communication Controller instance.",
+                kvp.Value)));
+        dtos.AddRange(_templateResolver.AvailableServiceUrls
+            .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(kvp => new WorkloadVariableDto(
+                $"{{{{service.{kvp.Key}}}}}",
+                $"Public URI of service '{kvp.Key}' configured on this Communication Controller instance.",
+                kvp.Value)));
         return Ok(dtos);
     }
 }
