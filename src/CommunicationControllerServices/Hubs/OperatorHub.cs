@@ -370,4 +370,72 @@ public class OperatorHub : Hub, IOperatorHub
                 status.WorkloadName, status.TenantId);
         }
     }
+
+    /// <inheritdoc />
+    public async Task ReportWorkloadDeploymentProgressAsync(WorkloadDeploymentProgressDto progress)
+    {
+        Logger.Debug(
+            "Workload deployment progress report: tenant '{TenantId}', workload '{WorkloadName}' (rtId {WorkloadRtId})",
+            progress.TenantId, progress.WorkloadName, progress.WorkloadRtId);
+
+        if (string.IsNullOrWhiteSpace(progress.TenantId) || string.IsNullOrWhiteSpace(progress.WorkloadRtId))
+        {
+            Logger.Warn("Ignoring deployment progress report with missing tenant id or workload rt id");
+            return;
+        }
+
+        try
+        {
+            // Same routing logic as ReportWorkloadDeploymentStatusAsync (above):
+            // look up the entity to discover whether it's an Adapter or
+            // Application and dispatch to the matching repository setter.
+            var workloadRtId = new OctoObjectId(progress.WorkloadRtId);
+            var workload = await _communicationRepository.GetWorkloadByRtIdAsync(progress.TenantId, workloadRtId);
+            if (workload == null)
+            {
+                Logger.Warn(
+                    "Workload '{WorkloadRtId}' (tenant '{TenantId}') reported deployment progress but no entity exists in the repository; skipping",
+                    progress.WorkloadRtId, progress.TenantId);
+                return;
+            }
+
+            // Stays Pending — helm may still recover. The terminal
+            // ReportWorkloadDeploymentStatusAsync is the only path that
+            // writes Deployed / Error. ApplyDeploymentErrorTracking clears
+            // LastDeploymentError for Pending which is correct here:
+            // we're still inside a single attempt, the message belongs on
+            // StatusMessage (live), not LastDeploymentError (persistent).
+            switch (workload)
+            {
+                case RtApplication:
+                    {
+                        var rtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkApplicationTypeId, workloadRtId);
+                        await _communicationRepository.SetApplicationDeploymentStateAsync(
+                            progress.TenantId, rtEntityId, RtDeploymentStateEnum.Pending, progress.Message);
+                        break;
+                    }
+                case RtAdapter:
+                    {
+                        var rtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, workloadRtId);
+                        await _communicationRepository.SetAdapterDeploymentStateAsync(
+                            progress.TenantId, rtEntityId, RtDeploymentStateEnum.Pending, progress.Message);
+                        break;
+                    }
+                default:
+                    Logger.Warn(
+                        "Workload '{WorkloadRtId}' (tenant '{TenantId}') is of unsupported type '{Type}'; skipping progress persist",
+                        progress.WorkloadRtId, progress.TenantId, workload.GetType().Name);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            // Same rationale as ReportWorkloadDeploymentStatusAsync: progress
+            // is best-effort, a transient write failure must not break the
+            // hub for the rest of this connection's traffic.
+            Logger.Error(ex,
+                "Failed to persist deployment progress for workload '{WorkloadName}' (tenant '{TenantId}')",
+                progress.WorkloadName, progress.TenantId);
+        }
+    }
 }
