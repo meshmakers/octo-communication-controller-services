@@ -104,8 +104,9 @@ public class CommunicationControllerOptions
 
     /// <summary>
     /// Named public base domains available to workloads as <c>{{domain.NAME}}</c>
-    /// placeholders in their <c>Hostname</c> attribute. Resolved by
-    /// <c>IHostnameTemplateResolver</c> at deploy time (not at blueprint-apply
+    /// placeholders in <c>Hostname</c>, non-secret <c>ValueOverride.Value</c>
+    /// entries and <c>ValuesYaml</c>. Resolved by
+    /// <c>IWorkloadTemplateResolver</c> at deploy time (not at blueprint-apply
     /// time) so workload entities stay portable across clusters.
     ///
     /// Bound from <c>OCTO_COMMUNICATIONCONTROLLER__DOMAINS__{NAME}={baseDomain}</c>
@@ -118,9 +119,29 @@ public class CommunicationControllerOptions
     ///
     /// Empty / missing is tolerated; only workloads that reference a non-existent
     /// domain key fail at deploy time with
-    /// <c>PoolServiceException.WorkloadHostnameUnknownDomain</c>.
+    /// <c>PoolServiceException.WorkloadTemplateUnknownPlaceholder</c>.
     /// </summary>
     public Dictionary<string, string> Domains { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Named public service URIs available to workloads as <c>{{service.NAME}}</c>
+    /// placeholders in <c>Hostname</c>, non-secret <c>ValueOverride.Value</c>
+    /// entries and <c>ValuesYaml</c>. Mirrors the <see cref="Domains"/> shape:
+    /// late-bound at deploy time so workload entities stay cluster-portable.
+    ///
+    /// Bound from <c>OCTO_COMMUNICATIONCONTROLLER__SERVICEURLS__{NAME}={url}</c>
+    /// env vars (helm chart emits one entry per known
+    /// <c>services.&lt;name&gt;.publicUri</c>). NAME is case-insensitive at lookup;
+    /// the value is substituted verbatim, including scheme. The semantic key
+    /// <c>authority</c> maps to the Identity Service's public URI; other keys
+    /// follow the helm-section name (<c>assetRepository</c>, <c>bot</c>,
+    /// <c>communication</c>, <c>adminPanel</c>, <c>studio</c>).
+    ///
+    /// Empty / missing is tolerated; only workloads that reference a
+    /// non-existent service key fail at deploy time with
+    /// <c>PoolServiceException.WorkloadTemplateUnknownPlaceholder</c>.
+    /// </summary>
+    public Dictionary<string, string> ServiceUrls { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Symmetric AES-256-GCM master key used to encrypt secret attributes

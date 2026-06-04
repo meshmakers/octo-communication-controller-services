@@ -73,7 +73,7 @@ try
     builder.Services.AddSingleton<ICommunicationRepository, CommunicationRepository>();
     builder.Services.AddSingleton<ICommunicationEventService, CommunicationEventService>();
     builder.Services.AddSingleton<IWorkloadEncryptionService, WorkloadEncryptionService>();
-    builder.Services.AddSingleton<IHostnameTemplateResolver, HostnameTemplateResolver>();
+    builder.Services.AddSingleton<IWorkloadTemplateResolver, WorkloadTemplateResolver>();
     builder.Services.AddSingleton<IShutdownState, HostApplicationShutdownState>();
     builder.Services.AddSingleton<IPipelineSchemaValidator, PipelineSchemaValidator>();
     builder.Services.AddSingleton<IExpressionValidationService, ExpressionValidationService>();

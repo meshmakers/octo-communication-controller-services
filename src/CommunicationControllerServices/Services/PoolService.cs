@@ -18,7 +18,7 @@ internal class PoolService : IPoolService
     private readonly ICommunicationEventService _eventService;
     private readonly IOperatorConnectionManager _operatorConnectionManager;
     private readonly IWorkloadEncryptionService _encryptionService;
-    private readonly IHostnameTemplateResolver _hostnameTemplateResolver;
+    private readonly IWorkloadTemplateResolver _templateResolver;
 
     /// <summary>
     /// Constructor
@@ -28,19 +28,19 @@ internal class PoolService : IPoolService
     /// <param name="eventService">Service for storing system events</param>
     /// <param name="operatorConnectionManager">Manages SignalR connections to central Communication Operators (for Cloud-pool deploy/undeploy notifications and PreUpdateTenant fan-out)</param>
     /// <param name="encryptionService">Decrypts secret-flagged ValueOverride values before they go on the SignalR wire</param>
-    /// <param name="hostnameTemplateResolver">Resolves <c>{{domain.NAME}}</c> placeholders in workload <c>Hostname</c> attributes against the controller's configured named domains at deploy time</param>
+    /// <param name="templateResolver">Resolves <c>{{domain.NAME}}</c>, <c>{{service.NAME}}</c> and <c>{{context.tenantId}}</c> placeholders in workload <c>Hostname</c>, non-secret <c>ValueOverride.Value</c> and <c>ValuesYaml</c> at deploy time</param>
     public PoolService(ICommunicationRepository communicationRepository, IPoolCache poolCache,
         ICommunicationEventService eventService,
         IOperatorConnectionManager operatorConnectionManager,
         IWorkloadEncryptionService encryptionService,
-        IHostnameTemplateResolver hostnameTemplateResolver)
+        IWorkloadTemplateResolver templateResolver)
     {
         _communicationRepository = communicationRepository;
         _poolCache = poolCache;
         _eventService = eventService;
         _operatorConnectionManager = operatorConnectionManager;
         _encryptionService = encryptionService;
-        _hostnameTemplateResolver = hostnameTemplateResolver;
+        _templateResolver = templateResolver;
     }
     
     /// <inheritdoc />
@@ -335,15 +335,43 @@ internal class PoolService : IPoolService
             throw PoolServiceException.WorkloadIngressEnabledButHostnameEmpty(tenantId, workload.RtId, workload.Name);
         }
 
-        // Validate {{domain.NAME}} placeholders up-front so misconfigured workloads
-        // fail with an actionable Deploy-time error instead of producing an Ingress
-        // with the literal '{{domain.X}}' as host (k8s admission rejects mid-rollout).
-        // Workloads that don't use the template syntax pass through unchanged.
+        // Validate template placeholders up-front so misconfigured workloads
+        // fail with an actionable Deploy-time error instead of producing an
+        // Ingress with the literal '{{...}}' as host (k8s admission rejects
+        // mid-rollout) or a helm values file with unresolved placeholders.
+        // Workloads that don't use template syntax pass through unchanged.
+        var ctx = new WorkloadTemplateContext(tenantId);
+
         if (!string.IsNullOrWhiteSpace(workload.Hostname) &&
-            !_hostnameTemplateResolver.TryResolve(workload.Hostname, out _, out var unknownDomain))
+            !_templateResolver.TryResolve(workload.Hostname, ctx, out _, out var unknownInHostname))
         {
-            throw PoolServiceException.WorkloadHostnameUnknownDomain(
-                tenantId, workload.RtId, workload.Name, workload.Hostname, unknownDomain!);
+            throw PoolServiceException.WorkloadTemplateUnknownPlaceholder(
+                tenantId, workload.RtId, workload.Name, "Hostname", workload.Hostname, unknownInHostname!);
+        }
+
+        // Non-secret ValueOverrides flow through the resolver. Secret-flagged
+        // entries are NOT validated/substituted here — the encryption layer
+        // owns those values, and running templating over decrypted secret
+        // material would mix two contracts.
+        foreach (var v in workload.Values ?? Enumerable.Empty<RtValueOverrideRecord>())
+        {
+            if (v.IsSecret || string.IsNullOrEmpty(v.Value))
+            {
+                continue;
+            }
+            if (!_templateResolver.TryResolve(v.Value, ctx, out _, out var unknownInOverride))
+            {
+                throw PoolServiceException.WorkloadTemplateUnknownPlaceholder(
+                    tenantId, workload.RtId, workload.Name,
+                    $"ValueOverride[{v.Path ?? string.Empty}]", v.Value, unknownInOverride!);
+            }
+        }
+
+        if (!string.IsNullOrEmpty(workload.ValuesYaml) &&
+            !_templateResolver.TryResolve(workload.ValuesYaml, ctx, out _, out var unknownInYaml))
+        {
+            throw PoolServiceException.WorkloadTemplateUnknownPlaceholder(
+                tenantId, workload.RtId, workload.Name, "ValuesYaml", workload.ValuesYaml, unknownInYaml!);
         }
     }
 
@@ -554,13 +582,20 @@ internal class PoolService : IPoolService
             return null;
         }
 
+        var ctx = new WorkloadTemplateContext(tenantId);
         var overrides = (workload.Values ?? Enumerable.Empty<RtValueOverrideRecord>())
             .Select(v => new ValueOverrideDto
             {
                 Path = v.Path ?? string.Empty,
+                // Secret values flow through Decrypt only; template substitution
+                // is deliberately skipped so encryption-sentinel and template
+                // layers stay decoupled (see EnsureWorkloadIsHelmDeployableAsync).
+                // Non-secret values are substituted; EnsureWorkloadIsHelmDeployableAsync
+                // has already validated every placeholder, so TryResolve cannot
+                // fail here.
                 Value = v.IsSecret
                     ? _encryptionService.Decrypt(v.Value ?? string.Empty)
-                    : v.Value ?? string.Empty,
+                    : ResolveTemplate(v.Value, ctx) ?? string.Empty,
                 IsSecret = v.IsSecret,
             })
             .ToArray();
@@ -585,7 +620,9 @@ internal class PoolService : IPoolService
             // "use latest from configured repo" contract (the operator's
             // HelmRunner omits --version when blank).
             ChartVersion = workload.ChartVersion ?? string.Empty,
-            ValuesYaml = workload.ValuesYaml ?? string.Empty,
+            // Same template resolution as for non-secret ValueOverrides — already
+            // validated by EnsureWorkloadIsHelmDeployableAsync.
+            ValuesYaml = ResolveTemplate(workload.ValuesYaml, ctx) ?? string.Empty,
             Values = overrides,
             // Lives on DeployableWorkload so both Adapter and Application can
             // opt in. Applications with a backend (e.g. energy-community,
@@ -601,18 +638,28 @@ internal class PoolService : IPoolService
             // domains; EnsureWorkloadIsHelmDeployableAsync has already validated
             // that every referenced NAME exists, so TryResolve cannot fail here.
             IngressEnabled = workload.IngressEnabled,
-            Hostname = ResolveHostname(workload.Hostname),
+            Hostname = ResolveHostname(workload.Hostname, ctx),
         };
     }
 
-    private string? ResolveHostname(string? hostname)
+    private string? ResolveHostname(string? hostname, WorkloadTemplateContext ctx)
     {
         if (string.IsNullOrWhiteSpace(hostname))
         {
             return null;
         }
-        _hostnameTemplateResolver.TryResolve(hostname, out var resolved, out _);
+        _templateResolver.TryResolve(hostname, ctx, out var resolved, out _);
         return string.IsNullOrWhiteSpace(resolved) ? null : resolved;
+    }
+
+    private string? ResolveTemplate(string? template, WorkloadTemplateContext ctx)
+    {
+        if (string.IsNullOrEmpty(template))
+        {
+            return template;
+        }
+        _templateResolver.TryResolve(template, ctx, out var resolved, out _);
+        return resolved;
     }
 
     /// <inheritdoc />
