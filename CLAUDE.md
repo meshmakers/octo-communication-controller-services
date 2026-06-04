@@ -437,6 +437,31 @@ Adapters and Pools track deployment state:
 - `RtDeploymentStateEnum.Deployed` - active
 - Communication state tracked separately via `RtCommunicationStateEnum`
 
+### Workload Deployment Progress (live signal)
+
+`IOperatorHub.ReportWorkloadDeploymentProgressAsync(WorkloadDeploymentProgressDto)`
+is a second hub channel parallel to `ReportWorkloadDeploymentStatusAsync`.
+The operator pushes diagnostic snapshots while `helm upgrade --install` is
+still in flight, so the UI surfaces ImagePullBackOff / FailedScheduling /
+CrashLoopBackOff within seconds instead of waiting for helm's atomic
+timeout (default 5 min) to elapse.
+
+`OperatorHub.ReportWorkloadDeploymentProgressAsync` (mirrors the validation
+and entity-routing of `ReportWorkloadDeploymentStatusAsync`) writes
+`DeploymentState=Pending` + `StatusMessage=progress.Message` via
+`Set{Adapter,Application}DeploymentStateAsync`. **Never writes Deployed
+or Error** — those states are the exclusive output of the terminal
+`ReportWorkloadDeploymentStatusAsync` path, since helm may still recover
+(transient registry outage, image becomes available, etc.). The
+`ApplyDeploymentErrorTracking` helper clears `LastDeploymentError` for
+`Pending` which is correct: progress is in-flight context belonging on
+the live `StatusMessage`, not the persistent error-history pair.
+
+Repository exceptions are swallowed (same contract as
+`ReportWorkloadDeploymentStatusAsync`) — progress is best-effort, a
+write failure must not break the hub for the rest of the connection's
+traffic.
+
 ### Pool Communication State Transitions
 
 The `CommunicationState` of an `RtPool` (`Unregistered` / `Online` / `Offline`)
