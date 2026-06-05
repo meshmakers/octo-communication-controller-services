@@ -10,6 +10,13 @@ internal class Adapter(
     string? connectionId,
     AdapterConfigurationDto configuration)
 {
+    // 30 minutes at the SDK's default 10s sampling interval. The buffer is
+    // process-local and not propagated across controller pods — Phase 1 of
+    // the adapter telemetry feature accepts loss of history on restart.
+    private const int MetricsCapacity = 180;
+
+    private readonly AdapterMetricsRingBuffer _metricsBuffer = new(MetricsCapacity);
+
     public Adapter(IAdapterCachePublish adapterCachePublish, AdapterDescription adapterHubPoolDescription)
         : this(adapterCachePublish, adapterHubPoolDescription.AdapterRtEntityId, adapterHubPoolDescription.ConnectionId, adapterHubPoolDescription.Configuration)
     {
@@ -57,5 +64,25 @@ internal class Adapter(
     public void SetConnectionId(string? connectionId)
     {
         ConnectionId = connectionId;
+    }
+
+    /// <summary>
+    /// Appends a resource-utilisation sample to the in-memory ring buffer.
+    /// Old samples are dropped once the buffer is full.
+    /// </summary>
+    public void AddMetricsSample(AdapterMetricsSampleDto sample)
+    {
+        _metricsBuffer.Add(sample);
+    }
+
+    /// <summary>
+    /// Returns the buffered metrics samples in chronological order. When
+    /// <paramref name="since"/> is provided, only samples with a strictly later
+    /// timestamp are returned (used by the REST endpoint to support incremental
+    /// polling from the UI).
+    /// </summary>
+    public IReadOnlyList<AdapterMetricsSampleDto> GetMetricsSamples(DateTime? since = null)
+    {
+        return _metricsBuffer.Snapshot(since);
     }
 }

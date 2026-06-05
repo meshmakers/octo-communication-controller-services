@@ -145,6 +145,38 @@ public class AdapterController : ControllerBase
     }
 
     /// <summary>
+    /// Returns the recent CPU / memory / thread samples buffered by the controller for
+    /// the given adapter. Used by the UI to render live sparklines without persisting
+    /// telemetry to MongoDB / CrateDB.
+    /// </summary>
+    /// <param name="adapterRtEntityId">The adapter entity object id</param>
+    /// <param name="since">When provided (UTC), only samples with a strictly later timestamp are returned — used for incremental polling.</param>
+    [HttpGet("{adapterRtEntityId}/metrics")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(typeof(IReadOnlyList<AdapterMetricsSampleDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    public IActionResult GetMetrics([Required][FromRoute] RtEntityId adapterRtEntityId,
+        [FromQuery] DateTime? since)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        try
+        {
+            var samples = _adapterService.GetMetricsSamples(tenantId, adapterRtEntityId, since);
+            return Ok(samples);
+        }
+        catch (AdapterServiceException e)
+        {
+            _logger.LogDebug(e, "Adapter metrics requested for unknown tenant/adapter");
+            return NotFound(new ErrorResponse { ErrorMessage = e.Message });
+        }
+    }
+
+    /// <summary>
     /// Updates the configuration at an adapter
     /// </summary>
     /// <param name="adapterRtEntityId">The id of the adapter.</param>

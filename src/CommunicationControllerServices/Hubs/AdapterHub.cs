@@ -295,6 +295,27 @@ internal class AdapterHub : Hub, IAdapterHub
     }
 
     /// <summary>
+    /// Records a resource-utilisation sample reported by the adapter into the
+    /// in-memory ring buffer. Fire-and-forget on the wire; failures are logged
+    /// and swallowed so the next sample succeeds.
+    /// </summary>
+    /// <param name="sample">The metrics sample</param>
+    public Task ReportAdapterMetricsAsync(AdapterMetricsSampleDto sample)
+    {
+        try
+        {
+            var tenantId = GetTenantId();
+            _adapterService.RecordMetricsSample(tenantId, sample);
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e, "Failed to record adapter metrics sample.");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
     /// Gets the list of execution IDs that were marked as interrupted for this adapter
     /// </summary>
     /// <returns>List of interrupted execution IDs</returns>
