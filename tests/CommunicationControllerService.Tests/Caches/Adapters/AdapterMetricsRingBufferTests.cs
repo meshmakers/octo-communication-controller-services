@@ -102,11 +102,20 @@ internal class AdapterMetricsRingBufferTests
         // holds under contention.
         var buffer = new AdapterMetricsRingBuffer(capacity: 64);
         var baseTime = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+
+        // Pre-populate so the final assertion is deterministic even on a
+        // slow CI runner where Task.Run schedules the writer body too late
+        // (the 200ms token may fire before the writer's first iteration).
+        for (var seed = 0; seed < 10; seed++)
+        {
+            buffer.Add(Sample(baseTime.AddMilliseconds(seed), cpu: seed));
+        }
+
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
 
         var writer = Task.Run(() =>
         {
-            var i = 0;
+            var i = 10;
             while (!cts.IsCancellationRequested)
             {
                 buffer.Add(Sample(baseTime.AddMilliseconds(i++), cpu: i % 100));
