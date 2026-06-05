@@ -175,4 +175,24 @@ public interface IAdapterService
     /// <param name="tenantId">Tenant identifier</param>
     /// <returns>List of adapter summaries with typed communication, configuration, and deployment states</returns>
     Task<IReadOnlyList<AdapterSummaryDto>> GetAdapterSummariesAsync(string tenantId);
+
+    /// <summary>
+    /// Appends a resource-utilisation sample reported by the adapter to the in-memory
+    /// ring buffer. Silently no-ops if the tenant or adapter is not currently cached
+    /// (e.g. mid-reconnect) — the next sample will succeed.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="sample">The metrics sample from the adapter</param>
+    void RecordMetricsSample(string tenantId, AdapterMetricsSampleDto sample);
+
+    /// <summary>
+    /// Returns the buffered metrics samples for an adapter in chronological order.
+    /// Throws <see cref="AdapterServiceException"/> when the tenant or adapter is not
+    /// known so the REST controller can surface a 404.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="adapterRtEntityId">Object Id of adapter</param>
+    /// <param name="since">When provided, only samples newer than this UTC timestamp are returned.</param>
+    /// <returns>The list of samples, oldest first.</returns>
+    IReadOnlyList<AdapterMetricsSampleDto> GetMetricsSamples(string tenantId, RtEntityId adapterRtEntityId, DateTime? since);
 }

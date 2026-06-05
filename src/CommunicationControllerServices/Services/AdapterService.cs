@@ -993,4 +993,40 @@ internal class AdapterService(
             StatusMessage = a.StatusMessage
         }).ToList();
     }
+
+    public void RecordMetricsSample(string tenantId, AdapterMetricsSampleDto sample)
+    {
+        if (!adapterCache.TryGetTenant(tenantId, out var adapterTenant))
+        {
+            // Tenant cache may be transiently absent during enable/disable; drop the
+            // sample silently so the SignalR caller is not impacted.
+            Logger.Debug("[{TenantId}] Dropping metrics sample for unknown tenant.", tenantId);
+            return;
+        }
+
+        if (!adapterTenant.AdapterById.TryGetValue(sample.AdapterRtEntityId, out var adapter))
+        {
+            Logger.Debug("[{TenantId}] Dropping metrics sample for unknown adapter '{AdapterRtId}'.",
+                tenantId, sample.AdapterRtEntityId);
+            return;
+        }
+
+        adapter.AddMetricsSample(sample);
+    }
+
+    public IReadOnlyList<AdapterMetricsSampleDto> GetMetricsSamples(string tenantId, RtEntityId adapterRtEntityId,
+        DateTime? since)
+    {
+        if (!adapterCache.TryGetTenant(tenantId, out var adapterTenant))
+        {
+            throw AdapterServiceException.TenantNotEnabled(tenantId);
+        }
+
+        if (!adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
+        {
+            throw AdapterServiceException.AdapterNotLoaded(tenantId, adapterRtEntityId);
+        }
+
+        return adapter.GetMetricsSamples(since);
+    }
 }
