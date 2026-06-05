@@ -342,31 +342,32 @@ internal class AdapterService(
                 var configuration =
                     await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId, false);
 
-                if (!configuration.Equals(adapter.Configuration))
+                // Always push: the user-initiated "Update Configuration" must
+                // reach the live adapter pod, even when the controller-side
+                // cache matches the persisted DB state. The cache can drift
+                // from the pod (e.g. a previous push that threw after we had
+                // already optimistically written to the cache, or a pod that
+                // restarted without the controller noticing) — gating on
+                // cache-equality silently swallows the retry the user
+                // explicitly requested via the button.
+                await communicationRepository.SetAdapterConfigurationStateAsync(tenantId, adapterRtEntityId,
+                    RtConfigurationStateEnum.Pending, null);
+                foreach (var pipelineConfigurationDto in configuration.Pipelines)
                 {
-                    Logger.Info("[{TenantId}] AdapterRtId='{AdapterRtId}' configuration is outdated, updating",
-                        tenantId, adapterRtEntityId);
-                    adapter.UpdateConfiguration(tenantId, configuration);
-
-                    await communicationRepository.SetAdapterConfigurationStateAsync(tenantId, adapterRtEntityId,
-                        RtConfigurationStateEnum.Pending, null);
-                    foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
-                    {
-                        await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
-                            pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending, null);
-                    }
-
-                    await SendConfigurationAndWaitForResultAsync(tenantId, adapterRtEntityId, configuration);
-
-                    await eventService.StoreInformationEventAsync(tenantId,
-                        $"Configuration deployed to adapter '{adapterRtEntityId}' with {configuration.Pipelines.Count} pipeline(s).",
-                        adapterRtEntityId);
+                    await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
+                        pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending, null);
                 }
-                else
-                {
-                    Logger.Info("[{TenantId}] AdapterRtId='{AdapterRtId}' configuration is up to date",
-                        tenantId, adapterRtEntityId);
-                }
+
+                await SendConfigurationAndWaitForResultAsync(tenantId, adapterRtEntityId, configuration);
+
+                // Update the cache only after the SignalR push succeeded so
+                // the cached config tracks the pod's actual state. A failed
+                // push throws above and leaves the cache untouched.
+                adapter.UpdateConfiguration(tenantId, configuration);
+
+                await eventService.StoreInformationEventAsync(tenantId,
+                    $"Configuration deployed to adapter '{adapterRtEntityId}' with {configuration.Pipelines.Count} pipeline(s).",
+                    adapterRtEntityId);
 
                 return;
             }
