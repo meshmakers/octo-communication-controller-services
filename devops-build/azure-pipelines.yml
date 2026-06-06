@@ -97,14 +97,14 @@ stages:
                 **/*Tests.csproj
                 !**/*IntegrationTests.csproj
                 !**/*SystemTests.csproj
-              publishTestResults: false
+              testRunTitle: 'Unit Tests'
           - task: DotNetCoreCLI@2
             displayName: 'Integration Tests (xUnit)'
             inputs:
               command: 'test'
               arguments: '--configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false'
               projects: '**/*IntegrationTests.csproj'
-              publishTestResults: false
+              testRunTitle: 'Integration Tests'
             env:
               DOCKER_HOST: unix:///var/run/docker.sock
           - template: build-and-push-docker-image.yml
