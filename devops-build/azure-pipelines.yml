@@ -104,7 +104,11 @@ stages:
               command: 'test'
               arguments: '--configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false'
               projects: '**/*IntegrationTests.csproj'
-              testRunTitle: 'Integration Tests'
+              # publishTestResults disabled: xunit.v3 3.2.2 targets MTP v1 and the
+              # private NuGet feed only carries Microsoft.Testing.Extensions.TrxReport 2.x
+              # (MTP v2). Without the extension, the --report-trx flag the Azure DevOps
+              # task appends fails with "Unknown option".
+              publishTestResults: false
             env:
               DOCKER_HOST: unix:///var/run/docker.sock
           - template: build-and-push-docker-image.yml
