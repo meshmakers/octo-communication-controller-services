@@ -1,0 +1,23 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+attributes:
+  - id: Url
+    valueType: String
+    description: 'Base URL of the MCP server. Used by the Sse and Http transports. For Stdio, leave empty and set Command + Arguments instead. The LlmQuery@1 node may append the tenant id at resolution time if the URL contains a {tenantId} placeholder.'
+  - id: Transport
+    valueType: Enum
+    valueCkEnumId: ${this}/McpTransport
+    description: 'MCP transport protocol: Stdio (local subprocess), Sse (Server-Sent Events over HTTPS) or Http (streamable HTTPS).'
+  - id: Command
+    valueType: String
+    description: 'Stdio transport only: command to spawn the MCP server subprocess (e.g. "dotnet", "npx", "/usr/local/bin/my-mcp"). Ignored for Sse and Http.'
+  - id: Arguments
+    valueType: String
+    description: 'Stdio transport only: command-line arguments for the spawned MCP server. One argument per line, or a JSON array. Ignored for Sse and Http.'
+  - id: BearerToken
+    valueType: String
+    description: 'Optional bearer token for HTTP-style MCP server authentication. Sent as the `Authorization: Bearer {token}` header. Stored as a configuration attribute, not exposed in the pipeline data context.'
+  - id: DefaultTimeoutSeconds
+    valueType: Int
+    defaultValues:
+      - 30
+    description: 'Default request timeout for tool calls against this MCP server, in seconds. The LlmQuery@1 node-level Timeout may override.'
