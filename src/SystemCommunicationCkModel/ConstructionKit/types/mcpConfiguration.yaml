@@ -25,6 +25,3 @@ types:
       - id: ${this}/BearerToken
         name: BearerToken
         isOptional: true
-      - id: ${this}/DefaultTimeoutSeconds
-        name: DefaultTimeoutSeconds
-        isOptional: true

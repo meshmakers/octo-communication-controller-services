@@ -16,8 +16,3 @@ attributes:
   - id: BearerToken
     valueType: String
     description: 'Optional bearer token for HTTP-style MCP server authentication. Sent as the `Authorization: Bearer {token}` header. Stored as a configuration attribute, not exposed in the pipeline data context.'
-  - id: DefaultTimeoutSeconds
-    valueType: Int
-    defaultValues:
-      - 30
-    description: 'Default request timeout for tool calls against this MCP server, in seconds. The LlmQuery@1 node-level Timeout may override.'
