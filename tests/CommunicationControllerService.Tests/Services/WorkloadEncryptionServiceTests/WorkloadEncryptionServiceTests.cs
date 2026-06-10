@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Meshmakers.Octo.Sdk.Common.Encryption;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 
@@ -8,6 +9,10 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 
 internal class WorkloadEncryptionServiceTests
 {
+    private const string SentinelV1 = "enc:v1:";
+
+    private static readonly IInstanceSecretCrypto Crypto = new InstanceSecretCrypto();
+
     private static string ValidKeyBase64()
     {
         var key = new byte[WorkloadEncryptionService.KeyLength];
@@ -23,7 +28,7 @@ internal class WorkloadEncryptionServiceTests
         {
             InstanceSecretKey = keyBase64 ?? ValidKeyBase64()
         });
-        return new WorkloadEncryptionService(options);
+        return new WorkloadEncryptionService(options, Crypto);
     }
 
     [Test]
@@ -33,7 +38,7 @@ internal class WorkloadEncryptionServiceTests
 
         var cipher = sut.Encrypt("hello-world");
 
-        await Assert.That(cipher).StartsWith(WorkloadEncryptionService.SentinelV1);
+        await Assert.That(cipher).StartsWith(SentinelV1);
         await Assert.That(sut.Decrypt(cipher)).IsEqualTo("hello-world");
     }
 
@@ -70,8 +75,8 @@ internal class WorkloadEncryptionServiceTests
         var cipher = sut.Encrypt("important");
 
         // Flip one base64 character in the payload, keeping it well-formed base64.
-        var payload = cipher[WorkloadEncryptionService.SentinelV1.Length..];
-        var corrupt = WorkloadEncryptionService.SentinelV1
+        var payload = cipher[SentinelV1.Length..];
+        var corrupt = SentinelV1
             + (payload[0] == 'A' ? 'B' : 'A') + payload[1..];
 
         await Assert.That(() => sut.Decrypt(corrupt)).Throws<CryptographicException>();
@@ -121,7 +126,7 @@ internal class WorkloadEncryptionServiceTests
         var sut = CreateSut(keyBase64: string.Empty);
 
         await Assert.That(sut.Decrypt("plain")).IsEqualTo("plain");
-        await Assert.That(() => sut.Decrypt(WorkloadEncryptionService.SentinelV1 + "abc"))
+        await Assert.That(() => sut.Decrypt(SentinelV1 + "abc"))
             .Throws<InvalidOperationException>();
     }
 

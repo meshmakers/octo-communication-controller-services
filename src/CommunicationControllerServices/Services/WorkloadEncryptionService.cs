@@ -1,31 +1,42 @@
-using System.Security.Cryptography;
-using System.Text;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
+using Meshmakers.Octo.Sdk.Common.Encryption;
 using Microsoft.Extensions.Options;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
 /// <summary>
-/// AES-256-GCM symmetric encryption with a single instance-wide key.
-/// Ciphertext layout (after the <c>enc:v1:</c> sentinel and Base64 decode):
-/// <c>nonce(12) || tag(16) || ciphertext(N)</c>.
+/// Communication Controller binding to the shared
+/// <see cref="IInstanceSecretCrypto" /> primitive. Reads the per-service key from
+/// <see cref="CommunicationControllerOptions" /> (env var
+/// <c>OCTO_COMMUNICATIONCONTROLLER__INSTANCESECRETKEY</c>), Base64-decodes it once at
+/// construction, then delegates every encrypt/decrypt to the cross-service primitive.
 /// </summary>
+/// <remarks>
+/// Wire format (<c>enc:v1:</c> sentinel, AES-256-GCM,
+/// <c>nonce(12) ‖ tag(16) ‖ ciphertext</c>) is defined and tested in
+/// <see cref="InstanceSecretCrypto" /> in <c>Meshmakers.Octo.Sdk.Common</c>. With the
+/// cluster-wide <c>global.instanceSecretKey</c> Helm value materialised into both
+/// <c>OCTO_COMMUNICATIONCONTROLLER__INSTANCESECRETKEY</c> and the AI Adapter's
+/// <c>OCTO_AIENCRYPTION__INSTANCESECRETKEY</c>, either service can decrypt ciphertext
+/// produced by the other.
+/// </remarks>
 public sealed class WorkloadEncryptionService : IWorkloadEncryptionService
 {
-    internal const string SentinelV1 = "enc:v1:";
     internal const int KeyLength = 32;       // AES-256
-    internal const int NonceLength = 12;     // GCM standard
-    internal const int TagLength = 16;       // GCM standard
 
+    private readonly IInstanceSecretCrypto _crypto;
     private readonly byte[]? _key;
     private readonly string? _keyConfigurationError;
 
     /// <summary>
     /// Constructor — reads the master key once from
-    /// <see cref="CommunicationControllerOptions.InstanceSecretKey"/>.
+    /// <see cref="CommunicationControllerOptions.InstanceSecretKey"/> and decodes it Base64.
     /// </summary>
-    public WorkloadEncryptionService(IOptions<CommunicationControllerOptions> options)
+    public WorkloadEncryptionService(
+        IOptions<CommunicationControllerOptions> options,
+        IInstanceSecretCrypto crypto)
     {
+        _crypto = crypto;
         var raw = options.Value.InstanceSecretKey;
         if (string.IsNullOrWhiteSpace(raw))
         {
@@ -69,21 +80,7 @@ public sealed class WorkloadEncryptionService : IWorkloadEncryptionService
             throw new InvalidOperationException(_keyConfigurationError);
         }
 
-        var plaintextBytes = Encoding.UTF8.GetBytes(plaintext);
-        var nonce = RandomNumberGenerator.GetBytes(NonceLength);
-        var ciphertext = new byte[plaintextBytes.Length];
-        var tag = new byte[TagLength];
-
-        using var aes = new AesGcm(_key, TagLength);
-        aes.Encrypt(nonce, plaintextBytes, ciphertext, tag);
-
-        // Layout: nonce || tag || ciphertext
-        var combined = new byte[NonceLength + TagLength + ciphertext.Length];
-        Buffer.BlockCopy(nonce, 0, combined, 0, NonceLength);
-        Buffer.BlockCopy(tag, 0, combined, NonceLength, TagLength);
-        Buffer.BlockCopy(ciphertext, 0, combined, NonceLength + TagLength, ciphertext.Length);
-
-        return SentinelV1 + Convert.ToBase64String(combined);
+        return _crypto.Encrypt(_key, plaintext);
     }
 
     /// <inheritdoc />
@@ -94,48 +91,14 @@ public sealed class WorkloadEncryptionService : IWorkloadEncryptionService
             return value;
         }
 
-        if (!value.StartsWith(SentinelV1, StringComparison.Ordinal))
-        {
-            throw new CryptographicException(
-                $"Unsupported encryption version. Expected sentinel '{SentinelV1}'.");
-        }
-
         if (_key is null)
         {
             throw new InvalidOperationException(_keyConfigurationError);
         }
 
-        var payload = value[SentinelV1.Length..];
-        byte[] combined;
-        try
-        {
-            combined = Convert.FromBase64String(payload);
-        }
-        catch (FormatException e)
-        {
-            throw new CryptographicException("Encrypted value is not valid base64.", e);
-        }
-
-        if (combined.Length < NonceLength + TagLength)
-        {
-            throw new CryptographicException("Encrypted value is truncated.");
-        }
-
-        var nonce = new byte[NonceLength];
-        var tag = new byte[TagLength];
-        var ciphertext = new byte[combined.Length - NonceLength - TagLength];
-        Buffer.BlockCopy(combined, 0, nonce, 0, NonceLength);
-        Buffer.BlockCopy(combined, NonceLength, tag, 0, TagLength);
-        Buffer.BlockCopy(combined, NonceLength + TagLength, ciphertext, 0, ciphertext.Length);
-
-        var plaintext = new byte[ciphertext.Length];
-        using var aes = new AesGcm(_key, TagLength);
-        aes.Decrypt(nonce, ciphertext, tag, plaintext);
-
-        return Encoding.UTF8.GetString(plaintext);
+        return _crypto.Decrypt(_key, value);
     }
 
     /// <inheritdoc />
-    public bool IsEncrypted(string value) =>
-        !string.IsNullOrEmpty(value) && value.StartsWith("enc:", StringComparison.Ordinal);
+    public bool IsEncrypted(string value) => _crypto.IsEncrypted(value);
 }
