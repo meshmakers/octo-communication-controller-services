@@ -12,6 +12,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Resources;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Routing;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Meshmakers.Octo.Sdk.Common.Encryption;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
@@ -72,6 +73,7 @@ try
 
     builder.Services.AddSingleton<ICommunicationRepository, CommunicationRepository>();
     builder.Services.AddSingleton<ICommunicationEventService, CommunicationEventService>();
+    builder.Services.AddSingleton<IInstanceSecretCrypto, InstanceSecretCrypto>();
     builder.Services.AddSingleton<IWorkloadEncryptionService, WorkloadEncryptionService>();
     builder.Services.AddSingleton<IWorkloadTemplateResolver, WorkloadTemplateResolver>();
     builder.Services.AddSingleton<IShutdownState, HostApplicationShutdownState>();

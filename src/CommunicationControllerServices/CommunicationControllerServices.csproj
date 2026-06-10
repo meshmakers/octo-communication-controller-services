@@ -35,6 +35,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\CommunicationControllerServices.Resources\CommunicationControllerServices.Resources.csproj" />
+        <PackageReference Include="Meshmakers.Octo.Sdk.Common" Version="$(OctoVersion)" />
         <PackageReference Include="Meshmakers.Octo.Services.Swagger" Version="$(OctoVersion)" />
         <PackageReference Include="Meshmakers.Octo.Services.Infrastructure" Version="$(OctoVersion)" />
         <PackageReference Include="Meshmakers.Octo.Services.Observability" Version="$(OctoVersion)" />
