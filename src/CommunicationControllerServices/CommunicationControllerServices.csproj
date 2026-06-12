@@ -35,12 +35,12 @@
 
     <ItemGroup>
         <ProjectReference Include="..\CommunicationControllerServices.Resources\CommunicationControllerServices.Resources.csproj" />
-        <PackageReference Include="Meshmakers.Octo.Sdk.Common" Version="$(OctoVersion)" />
-        <PackageReference Include="Meshmakers.Octo.Services.Swagger" Version="$(OctoVersion)" />
-        <PackageReference Include="Meshmakers.Octo.Services.Infrastructure" Version="$(OctoVersion)" />
-        <PackageReference Include="Meshmakers.Octo.Services.Observability" Version="$(OctoVersion)" />
-        <PackageReference Include="Meshmakers.Octo.Services.Notifications" Version="$(OctoVersion)" />
-        <PackageReference Include="Meshmakers.Octo.Runtime.Engine.MongoDb" Version="$(OctoVersion)" />
+        <PackageReference Include="Meshmakers.Octo.Sdk.Common" Version="$(OctoCoreLibVersion)" />
+        <PackageReference Include="Meshmakers.Octo.Services.Swagger" Version="$(OctoCoreLibVersion)" />
+        <PackageReference Include="Meshmakers.Octo.Services.Infrastructure" Version="$(OctoCoreLibVersion)" />
+        <PackageReference Include="Meshmakers.Octo.Services.Observability" Version="$(OctoCoreLibVersion)" />
+        <PackageReference Include="Meshmakers.Octo.Services.Notifications" Version="$(OctoCoreLibVersion)" />
+        <PackageReference Include="Meshmakers.Octo.Runtime.Engine.MongoDb" Version="$(OctoCoreLibVersion)" />
 
         <ProjectReference Include="..\SystemCommunicationCkModel\SystemCommunicationCkModel.csproj" />
     </ItemGroup>
