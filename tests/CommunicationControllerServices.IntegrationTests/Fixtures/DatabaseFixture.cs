@@ -6,7 +6,13 @@ using Testcontainers.MongoDb;
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTests.Fixtures;
 
 /// <summary>
-/// Fixture that starts MongoDB Testcontainer.
+///     Fixture that starts a MongoDB Testcontainer with a replica set (required for transactions).
+///
+///     Container-bringup pattern matches octo-construction-kit-engine-mongodb /
+///     octo-ai-services — Testcontainers' rs.initiate() handshake and mongo's keyfile-init
+///     entrypoint race with port binding on CI agents under load (build 34386 hung 40+ min
+///     in a sibling service due to exit-48 on 27017 inside the entrypoint restart). The
+///     retry loop with a *fresh* container per attempt is the proven fix.
 /// </summary>
 public class DatabaseFixture : ConfigurationFixture
 {
@@ -20,45 +26,70 @@ public class DatabaseFixture : ConfigurationFixture
 
     protected override async Task InitializeServicesAsync()
     {
-        // Write to stderr for immediate output (stdout is buffered)
-        Console.Error.WriteLine($"[DatabaseFixture] Starting MongoDB container with image: {Options.MongoDbImage}");
-        Console.Error.Flush();
+        await Console.Error.WriteLineAsync($"[DatabaseFixture] Starting MongoDB container with image: {Options.MongoDbImage}");
+        await Console.Error.FlushAsync();
 
-        // Start MongoDB Testcontainer with replica set (required for transactions)
-        _mongoDbContainer = new MongoDbBuilder(Options.MongoDbImage)
-            .WithReplicaSet()
-            .WithName($"mongodb-commcontroller-test-{Guid.NewGuid():N}")
-            .WithUsername(Options.AdminUser)
-            .WithPassword(Options.AdminUserPassword)
-            .WithCleanUp(true)
-            .Build();
+        const int maxAttempts = 3;
+        var perAttemptTimeout = TimeSpan.FromMinutes(2);
 
-        // Use explicit timeout for container startup (2 minutes)
-        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-        var startTime = DateTime.UtcNow;
-
-        try
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            await _mongoDbContainer.StartAsync(cts.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            Console.Error.WriteLine("[DatabaseFixture] ERROR: Container startup timed out after 2 minutes!");
-            Console.Error.Flush();
-            throw new TimeoutException("MongoDB container startup timed out after 2 minutes");
+            await Console.Error.WriteLineAsync($"[DatabaseFixture] StartAsync attempt {attempt}/{maxAttempts}");
+            await Console.Error.FlushAsync();
+
+            // No WithCleanUp(true) — Ryuk's TCP handshake blocks silently on the self-hosted
+            // DinD agent; DisposeServicesAsync handles cleanup explicitly.
+            _mongoDbContainer = new MongoDbBuilder(Options.MongoDbImage)
+                .WithReplicaSet()
+                .WithName($"mongodb-commcontroller-test-{Guid.NewGuid():N}")
+                .WithUsername(Options.AdminUser)
+                .WithPassword(Options.AdminUserPassword)
+                .Build();
+
+            using var startCts = new CancellationTokenSource(perAttemptTimeout);
+            var startTime = DateTime.UtcNow;
+
+            try
+            {
+                await _mongoDbContainer.StartAsync(startCts.Token);
+                var elapsed = DateTime.UtcNow - startTime;
+                await Console.Error.WriteLineAsync($"[DatabaseFixture] Container started in {elapsed.TotalSeconds:F1}s");
+                await Console.Error.FlushAsync();
+                break;
+            }
+            catch (Exception ex)
+            {
+                await Console.Error.WriteLineAsync(
+                    $"[DatabaseFixture] StartAsync attempt {attempt}/{maxAttempts} failed: {ex.GetType().Name}: {ex.Message}");
+                await Console.Error.FlushAsync();
+
+                try
+                {
+                    await _mongoDbContainer.DisposeAsync();
+                }
+                catch (Exception disposeEx)
+                {
+                    await Console.Error.WriteLineAsync($"[DatabaseFixture]   Disposal of failed container also threw: {disposeEx.Message}");
+                    await Console.Error.FlushAsync();
+                }
+
+                _mongoDbContainer = null;
+
+                if (attempt == maxAttempts)
+                {
+                    throw;
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(2 * attempt));
+            }
         }
 
-        var elapsed = DateTime.UtcNow - startTime;
-        Console.Error.WriteLine($"[DatabaseFixture] Container started in {elapsed.TotalSeconds:F1}s");
-        Console.Error.Flush();
-
-        var mappedPort = _mongoDbContainer.GetMappedPublicPort();
+        var mappedPort = _mongoDbContainer!.GetMappedPublicPort();
         var databaseHost = $"localhost:{mappedPort}";
 
-        Console.Error.WriteLine($"[DatabaseFixture] MongoDB connection: {databaseHost}");
-        Console.Error.Flush();
+        await Console.Error.WriteLineAsync($"[DatabaseFixture] MongoDB connection: {databaseHost}");
+        await Console.Error.FlushAsync();
 
-        // Configure MongoDB connection
         Services.Configure<OctoSystemConfiguration>(t =>
         {
             t.SystemDatabaseName = SystemDatabaseName;
