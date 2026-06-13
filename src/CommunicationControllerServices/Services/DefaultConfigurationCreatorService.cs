@@ -40,16 +40,19 @@ internal class DefaultConfigurationCreatorService(
         null, // ckModelUpgradeService - we don't need CK model migrations in this service
         null, // runtimeRepositoryProvider - not needed without CK model migrations
         Constants.CommunicationControllerServiceEnabledKey, // the service can be enabled/disabled
-        failedTenantRegistry: failedTenantRegistry
+        failedTenantRegistry: failedTenantRegistry,
+        blueprintService: blueprintService,
+        embeddedBlueprintSources: embeddedBlueprintSources
         )
 {
     /// <summary>
     /// Prefix used to recognise blueprints this service owns. Every embedded blueprint whose
     /// name starts with <c>System.Communication.</c> is auto-applied on tenant Enable /
-    /// startup; each blueprint's <c>requires:</c> block decides whether it actually runs on
-    /// the given tenant. By OctoMesh convention these are <c>System.*</c> blueprints —
-    /// service-managed, Studio hides install / uninstall actions for them, and the runtime
-    /// trusts that the owning service keeps them in sync per tenant.
+    /// startup by the base class's <see cref="DefaultConfigurationCreatorServiceStandardized.ApplyServiceManagedBlueprintsAsync"/>;
+    /// each blueprint's <c>requires:</c> block decides whether it actually runs on the given
+    /// tenant. By OctoMesh convention these are <c>System.*</c> blueprints — service-managed,
+    /// Studio hides install / uninstall actions for them, and the runtime trusts that the
+    /// owning service keeps them in sync per tenant.
     /// </summary>
     /// <remarks>
     /// Note the trailing dot: only <c>System.Communication.&lt;Variant&gt;-x.y.z</c> matches,
@@ -58,8 +61,7 @@ internal class DefaultConfigurationCreatorService(
     /// match anchored so a future foreign embedded source named e.g.
     /// <c>System.CommunicationOps-1.0.0</c> wouldn't accidentally get applied here.
     /// </remarks>
-    private const string ServiceManagedBlueprintPrefix = "System.Communication.";
-
+    protected override string ServiceManagedBlueprintPrefix => "System.Communication.";
 
     public override async Task InitializeAsync()
     {
@@ -106,57 +108,19 @@ internal class DefaultConfigurationCreatorService(
     }
 
     /// <summary>
-    /// Applies (or re-applies) every embedded blueprint whose name starts with
-    /// <see cref="ServiceManagedBlueprintPrefix"/>, picking the newest registered version per
-    /// blueprint name. Each blueprint's <c>requires:</c> block decides whether it actually
-    /// applies to the given tenant — non-matching blueprints return
-    /// <see cref="BlueprintApplicationResult.WasSkipped"/>=true, which is logged at debug
-    /// level and otherwise treated as success.
+    /// Surfaces a blueprint auto-apply failure on the startup path (<c>throwOnFailure: false</c>)
+    /// as an Error event in the tenant's event log so operators see the regression alongside
+    /// other tenant lifecycle errors. The base class has already logged the failure;
+    /// this override adds the audit-event side effect.
     /// </summary>
-    /// <remarks>
-    /// <paramref name="throwOnFailure"/> lets Enable surface failures as
-    /// <see cref="InitializationException"/> (so the tenant doesn't end up half-initialised),
-    /// while the startup path tolerates failures (the next startup retries; meanwhile the
-    /// tenant can still serve traffic on whatever version it already has).
-    /// </remarks>
-    private async Task ApplyServiceManagedBlueprintsAsync(string tenantId, bool throwOnFailure)
+    protected override async Task OnServiceManagedBlueprintApplyFailedAsync(
+        string tenantId,
+        BlueprintId blueprintId,
+        OperationResult operationResult,
+        CancellationToken cancellationToken)
     {
-        var blueprintsByName = embeddedBlueprintSources
-            .Where(s => s.BlueprintId.Name.StartsWith(ServiceManagedBlueprintPrefix, StringComparison.Ordinal))
-            .GroupBy(s => s.BlueprintId.Name, StringComparer.Ordinal);
-
-        foreach (var grouping in blueprintsByName)
-        {
-            var latest = grouping
-                .OrderByDescending(s => s.BlueprintId.Version)
-                .First();
-
-            var result = await blueprintService.ApplyBlueprintAsync(tenantId, latest.BlueprintId);
-
-            if (result.IsSuccess)
-            {
-                if (result.WasSkipped)
-                {
-                    logger.LogDebug(
-                        "Service-managed blueprint {BlueprintId} skipped for tenant {TenantId}: {Reason}",
-                        latest.BlueprintId.FullName, tenantId, result.SkipReason);
-                }
-                continue;
-            }
-
-            if (throwOnFailure)
-            {
-                throw InitializationException.ImportCkModelFailed(tenantId,
-                    result.OperationResult.GetMessages());
-            }
-
-            logger.LogError(
-                "Failed to auto-apply service-managed blueprint {BlueprintId} on tenant {TenantId}: {Messages}",
-                latest.BlueprintId.FullName, tenantId,
-                string.Join("; ", result.OperationResult.GetMessages()));
-            await communicationEventService.StoreErrorEventAsync(tenantId,
-                $"Auto-update of blueprint {latest.BlueprintId.FullName} failed: {string.Join("; ", result.OperationResult.GetMessages())}");
-        }
+        await communicationEventService.StoreErrorEventAsync(tenantId,
+            $"Auto-update of blueprint {blueprintId.FullName} failed: {string.Join("; ", operationResult.GetMessages())}");
     }
 
     protected override async Task StopTenantAsync(string tenantId)
