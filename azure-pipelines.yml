@@ -1,0 +1,165 @@
+# Root-level CI pipeline for octo-communication-controller-services, using shared
+# templates from octo-pipeline-templates@tpl-v0.4.2.
+#
+# Phase 7 finale (2026-06-14): the last two .NET services on the legacy
+# devops-build/ flow get their root yaml. Without the migration the
+# Directory.Build.props OctoCoreLibVersion + OctoCommVersion split that
+# every csproj already references via $(OctoCoreLibVersion) /
+# $(OctoCommVersion) is correct at restore but legacy CI has no way to
+# trigger r-tag hotfix flows through hotfix-service.yml.
+#
+# Coexists with devops-build/azure-pipelines.yml during pilot. Once the
+# first green build is verified, def 101 yamlFilename flips here and
+# devops-build/ can be deleted in a follow-up commit.
+#
+# controller-services-specific quirks preserved from the legacy YAML:
+#   - SSHKey + submodules:recursive — checkout pulls private submodules.
+#   - Build args include /p:OctoPrivateGitHubApiKey + /p:OctoPublicGitHubApiKey
+#     because SystemCommunicationCkModel publishes to GitHub catalogs on
+#     main / r* tags (effectivePublishCatalog).
+#   - Two separate test steps:
+#       1. Unit tests (TUnit) excluding *IntegrationTests.csproj.
+#       2. Integration tests (xUnit) with publishTestResults: false —
+#          xunit.v3 3.2.2 targets MTP v1 but the private NuGet feed only
+#          carries Microsoft.Testing.Extensions.TrxReport 2.x (MTP v2);
+#          without the extension the --report-trx flag the ADO task
+#          appends fails with "Unknown option".
+#   - Docker diagnostics + MongoDB pre-pull (mongo:8.0.15) before the
+#     integration tests — they spin up Testcontainers MongoDB; pre-pull
+#     avoids pull-time-out failures on cold agents.
+#   - HAS push-nuget — controller-services publishes Meshmakers.Octo.Communication
+#     NuGets (CommunicationController.Sdk, Common, Server contracts).
+#   - HAS CK library output: SystemCommunicationCkModel.
+#
+# Why tpl-v0.4.2 (not v0.3.1): aligns with octo-communication-sdk (the
+# direct upstream this repo references via $(OctoCommVersion)) — both
+# stay on the same template tag so future template upgrades roll forward
+# in lockstep on the Communication line.
+
+name: $(MajorVersion).$(MinorVersion).$(date:yyMM).$(DayOfMonth)$(rev:rrr)-$(Build.SourceBranchName)
+
+resources:
+  repositories:
+    - repository: pipelineTemplates
+      type: github
+      name: meshmakers/octo-pipeline-templates
+      endpoint: meshmakers-access-token
+      ref: refs/tags/tpl-v0.4.2
+
+trigger:
+  batch: true
+  branches:
+    include:
+      - dev/*
+      - test/*
+      - main
+  tags:
+    exclude:
+      - '*'
+
+variables:
+  - group: GitSSHGroup
+  - group: ApiKeys-mm-cloud
+  - group: OctoDefault
+  - name: solutionFile
+    value: 'Octo.CommunicationController.sln'
+  - name: artifactsFrameworkVersion
+    value: 'net10.0'
+  - name: buildConfiguration
+    value: 'Release'
+  - name: buildPlatform
+    value: 'Any CPU'
+  - name: isRelease
+    value: ${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
+  - name: isMain
+    value: ${{ eq(variables['Build.SourceBranch'], 'refs/heads/main') }}
+  - name: isTest
+    value: ${{ startsWith(variables['Build.SourceBranch'], 'refs/heads/test') }}
+  # CK publish routing (effectivePublishCatalog: GitHub catalogs only on main/r* tags,
+  # incident: Industry.Basic-2.1.1) and the per-run local catalog root
+  # (OctoLocalCatalogRootPath -> Agent.TempDirectory, AB#4167) are exported as runtime
+  # variables by update-build-number.yml.
+
+stages:
+  - stage: Build
+    jobs:
+      - job: linux
+        displayName: 'Build, test, push Docker image and NuGets'
+        pool:
+          name: meshmakers-ci-agents
+        steps:
+          - template: templates/steps/update-build-number.yml@pipelineTemplates
+          - checkout: self
+            clean: true
+            submodules: recursive
+          - task: InstallSSHKey@0
+            displayName: 'Install SSH key for submodules'
+            inputs:
+              knownHostsEntry: '$(SSHKnownHosts)'
+              sshPublicKey: '$(SSHPublicKey)'
+              sshPassphrase: '$(SSHPassphrase)'
+              sshKeySecureFile: '$(SSHPrivateKeyFile)'
+          - template: templates/steps/set-version.yml@pipelineTemplates
+          - template: templates/steps/download-ca.yml@pipelineTemplates
+          - task: DotNetCoreCLI@2
+            displayName: 'Restore NuGet packages'
+            inputs:
+              command: 'restore'
+              projects: '$(solutionFile)'
+              restoreArguments: '--force /p:OctoNugetPrivateServer=$(nugetPrivateServer)'
+              noCache: true
+          - task: DotNetCoreCLI@2
+            displayName: 'Build'
+            inputs:
+              command: 'build'
+              projects: '$(solutionFile)'
+              arguments: '--configuration $(buildConfiguration) /p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCatalog="$(effectivePublishCatalog)" /p:OctoPrivateGitHubApiKey=$(GitHubPAT) /p:OctoPublicGitHubApiKey=$(GitHubPAT)'
+              publishWebProjects: false
+              zipAfterPublish: false
+              modifyOutputPath: false
+          - script: |
+              echo "=== Docker Diagnostics ==="
+              echo "DOCKER_HOST: $DOCKER_HOST"
+              docker version || echo "ERROR: Docker not available"
+              docker info || echo "ERROR: Docker info failed"
+              echo ""
+              echo "=== Pre-pulling MongoDB image ==="
+              docker pull mongo:8.0.15 || echo "Warning: Failed to pre-pull MongoDB image"
+            displayName: 'Docker diagnostics and pre-pull'
+            env:
+              DOCKER_HOST: unix:///var/run/docker.sock
+          - task: DotNetCoreCLI@2
+            displayName: 'Unit Tests (TUnit)'
+            inputs:
+              command: 'test'
+              arguments: '--configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false'
+              projects: |
+                **/*Tests.csproj
+                !**/*IntegrationTests.csproj
+                !**/*SystemTests.csproj
+              testRunTitle: 'Unit Tests'
+          - task: DotNetCoreCLI@2
+            displayName: 'Integration Tests (xUnit)'
+            inputs:
+              command: 'test'
+              arguments: '--configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false'
+              projects: '**/*IntegrationTests.csproj'
+              # publishTestResults disabled: xunit.v3 3.2.2 targets MTP v1 and the
+              # private NuGet feed only carries Microsoft.Testing.Extensions.TrxReport 2.x
+              # (MTP v2). Without the extension, the --report-trx flag the Azure DevOps
+              # task appends fails with "Unknown option".
+              publishTestResults: false
+            env:
+              DOCKER_HOST: unix:///var/run/docker.sock
+          - template: templates/steps/build-and-push-docker.yml@pipelineTemplates
+            parameters:
+              publicRegistryServiceConnection: $(DockerRegistryPublicConnection)
+              privateRegistryName: $(DockerRegistryPrivateUri)
+              repository: meshmakers/octo-mesh-communication-controller-services
+              dockerfile: src/CommunicationControllerServices/Dockerfile
+              enableMainLatestTag: true
+          - template: templates/steps/handle-artifacts.yml@pipelineTemplates
+            parameters:
+              constructionKitLibraryPaths:
+                - 'src/SystemCommunicationCkModel/bin/$(buildConfiguration)/$(artifactsFrameworkVersion)/octo-ck-libraries/SystemCommunicationCkModel'
+          - template: templates/steps/push-nuget-package.yml@pipelineTemplates
