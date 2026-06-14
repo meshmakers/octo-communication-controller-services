@@ -48,7 +48,7 @@ internal class DefaultConfigurationCreatorService(
     /// <summary>
     /// Prefix used to recognise blueprints this service owns. Every embedded blueprint whose
     /// name starts with <c>System.Communication.</c> is auto-applied on tenant Enable /
-    /// startup by the base class's <see cref="DefaultConfigurationCreatorServiceStandardized.ApplyServiceManagedBlueprintsAsync"/>;
+    /// startup by the base class's <see cref="DefaultConfigurationCreatorServiceBase.ApplyServiceManagedBlueprintsAsync"/>;
     /// each blueprint's <c>requires:</c> block decides whether it actually runs on the given
     /// tenant. By OctoMesh convention these are <c>System.*</c> blueprints — service-managed,
     /// Studio hides install / uninstall actions for them, and the runtime trusts that the
