@@ -151,13 +151,7 @@ stages:
               publishTestResults: false
             env:
               DOCKER_HOST: unix:///var/run/docker.sock
-          # Communication Controller image — internal only, no docker.io mirror.
-          # pushPublic:false because the release-train r3.4.12 build (#35081) failed
-          # pushing to docker.io with insufficient_scope (no meshmakers org / creds
-          # on docker.io); these images run only in OctoMesh clusters pulling from
-          # docker.mm.cloud. The legacy devops-build/ template silently swallowed
-          # the same failure via && short-circuits; tpl-v0.4.2's set -e surfaces it.
-          # Mirrors the same pattern as octo-ai-services (since r3.4.10 #34874).
+          # Communication Controller image
           - template: templates/steps/build-and-push-docker.yml@pipelineTemplates
             parameters:
               publicRegistryServiceConnection: $(DockerRegistryPublicConnection)
@@ -165,7 +159,6 @@ stages:
               repository: meshmakers/octo-mesh-communication-controller-services
               dockerfile: src/CommunicationControllerServices/Dockerfile
               enableMainLatestTag: true
-              pushPublic: false
           - template: templates/steps/handle-artifacts.yml@pipelineTemplates
             parameters:
               constructionKitLibraryPaths:
