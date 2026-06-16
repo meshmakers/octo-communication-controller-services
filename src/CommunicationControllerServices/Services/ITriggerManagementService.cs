@@ -14,8 +14,12 @@ public interface ITriggerManagementService
     /// <param name="tenantId">The tenant id</param>
     /// <param name="pipelineRtId">The runtime id of the pipeline</param>
     /// <param name="pipelineInput">The input for the pipeline</param>
+    /// <param name="isDryRun">When true (M4-B.2), the adapter runs the pipeline with all
+    /// dry-run-honouring Load nodes suppressing their real side effect; would-be payloads
+    /// are recorded on the debug stream instead. Default false preserves classic semantics.</param>
     /// <returns>The pipeline execution id, if the start of execution was successful</returns>
-    Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId, OctoObjectId pipelineRtId, string? pipelineInput);
+    Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId, OctoObjectId pipelineRtId,
+        string? pipelineInput, bool isDryRun = false);
     
     /// <summary>
     /// Remove the schedule for the triggers of the tenant
