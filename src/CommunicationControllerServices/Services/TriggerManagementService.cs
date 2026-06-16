@@ -20,9 +20,10 @@ internal class TriggerManagementService(
     : ITriggerManagementService
 {
     public async Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId,
-        OctoObjectId pipelineRtId, string? pipelineInput)
+        OctoObjectId pipelineRtId, string? pipelineInput, bool isDryRun = false)
     {
-        logger.LogInformation("[{TenantId}] Executing pipeline '{PipelineRtId}'", tenantId, pipelineRtId);
+        logger.LogInformation("[{TenantId}] Executing pipeline '{PipelineRtId}' (dry-run={IsDryRun})",
+            tenantId, pipelineRtId, isDryRun);
 
         ExecutePipelineResponse? r;
         try
@@ -36,7 +37,7 @@ internal class TriggerManagementService(
                 $"{PipelineQueueNames.ExecutePipelineCommand.ToLower()}-{tenantId.ToLower()}-data-flow-{dataFlowRtId.ToString().ToLower()}";
 
             r = await executeMeshPipelineCommandClient.GetResponse<ExecutePipelineResponse>(address,
-                new ExecutePipelineRequest(tenantId, pipelineInput));
+                new ExecutePipelineRequest(tenantId, pipelineInput) { IsDryRun = isDryRun });
 
             if (r.IsSuccessStartingExecution)
             {

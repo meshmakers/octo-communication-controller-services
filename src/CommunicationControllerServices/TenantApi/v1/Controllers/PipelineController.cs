@@ -131,12 +131,17 @@ public class PipelineController : ControllerBase
     /// Deploys the pipeline definition at the corresponding adapter
     /// </summary>
     /// <param name="pipelineRtId">The runtime id of the pipeline to execute.</param>
+    /// <param name="isDryRun">When true (M4-B.2), the adapter executes the pipeline with every
+    /// dry-run-honouring Load node suppressing its real side effect; would-be payloads land on
+    /// the debug stream instead. Useful for verifying a freshly-authored pipeline against a real
+    /// adapter without committing any writes. Default false preserves classic behaviour.</param>
     /// <returns>The pipeline execution id</returns>
     [HttpPost("execute")]
     [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> ExecutePipeline([Required][FromQuery] OctoObjectId pipelineRtId)
+    public async Task<IActionResult> ExecutePipeline([Required][FromQuery] OctoObjectId pipelineRtId,
+        [FromQuery] bool isDryRun = false)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
@@ -150,7 +155,7 @@ public class PipelineController : ControllerBase
 
             var pipelineInput = await reader.ReadToEndAsync();
             var pipelineExecutionId = await _triggerManagementService.StartExecutePipelineAsync(tenantId, pipelineRtId,
-                pipelineInput);
+                pipelineInput, isDryRun);
             return Ok(pipelineExecutionId);
         }
         catch (Exception e)
