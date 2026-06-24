@@ -25,3 +25,6 @@ types:
       - id: ${this}/BearerToken
         name: BearerToken
         isOptional: true
+      - id: ${this}/AdditionalHeaders
+        name: AdditionalHeaders
+        isOptional: true

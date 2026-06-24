@@ -16,3 +16,7 @@ attributes:
   - id: BearerToken
     valueType: String
     description: 'Optional bearer token for HTTP-style MCP server authentication. Sent as the `Authorization: Bearer {token}` header. Stored as a configuration attribute, not exposed in the pipeline data context.'
+  - id: AdditionalHeaders
+    valueType: RecordArray
+    valueCkRecordId: ${this}/HttpHeader
+    description: 'Optional custom HTTP headers for Sse/Http MCP server authentication (e.g. x-api-key, X-Org-Id). Each entry is a Name/Value pair; entries flagged IsSecret are stored encrypted at rest and never logged. Applied on top of BearerToken; an Authorization entry here overrides the BearerToken-derived header. Ignored for Stdio.'
