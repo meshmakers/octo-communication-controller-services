@@ -1,10 +1,15 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Meshmakers.Octo.Runtime.Contracts.Formulas;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services;
 
 public class ExpressionValidationServiceTests
 {
-    private readonly ExpressionValidationService _service = new();
+    private static readonly IFormulaEngine FormulaEngine =
+        new ServiceCollection().AddFormulaEngine().BuildServiceProvider().GetRequiredService<IFormulaEngine>();
+
+    private readonly ExpressionValidationService _service = new(FormulaEngine);
 
     [Test]
     public async Task Validate_SimpleArithmetic_ReturnsValid()
@@ -162,16 +167,16 @@ public class ExpressionValidationServiceTests
     }
 
     [Test]
-    public async Task ConvertTernaryToIf_NoTernary_ReturnsUnchanged()
+    public async Task Validate_NoTernary_NormalizedExpressionUnchanged()
     {
-        var result = ExpressionValidationService.ConvertTernaryToIf("value + 1");
-        await Assert.That(result).IsEqualTo("value + 1");
+        var result = _service.Validate("value + 1");
+        await Assert.That(result.NormalizedExpression).IsEqualTo("value + 1");
     }
 
     [Test]
-    public async Task ConvertTernaryToIf_SimpleTernary_ConvertsCorrectly()
+    public async Task Validate_SimpleTernary_NormalizedToIf()
     {
-        var result = ExpressionValidationService.ConvertTernaryToIf("value > 0 ? value : 0");
-        await Assert.That(result).IsEqualTo("if(value > 0, value, 0)");
+        var result = _service.Validate("value > 0 ? value : 0");
+        await Assert.That(result.NormalizedExpression).IsEqualTo("if(value > 0, value, 0)");
     }
 }
