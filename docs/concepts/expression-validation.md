@@ -1,5 +1,42 @@
 # Expression Validation Concept
 
+> **Status: implemented (AB#4189).** The backend authoritative validation and the *shared
+> formula engine* this document originally proposed have shipped. The historical proposal is
+> kept below for context; **the authoritative current state is the section directly under this
+> banner.** User-facing formula-language reference lives in the public docs:
+> *Tech Guide → Communication → Formula Expressions*.
+
+## Current Implementation (AB#4189)
+
+The mXparser glue is now a single shared component, not duplicated per consumer:
+
+| Concern | Location |
+|---------|----------|
+| Abstraction | `IFormulaEngine` + `FormulaResultType` + `FormulaSyntaxResult` in `Runtime.Contracts/Formulas` (no mXparser dependency) |
+| Implementation | `FormulaEngine` + `OctoExpression` + `now` / `startOfDay` extensions in the **`Meshmakers.Octo.Runtime.Engine.Formulas`** package (net10.0; a dedicated package because mXparser ships `netstandard2.1` but not `netstandard2.0`) |
+| DI | `AddFormulaEngine()` — invoked from `AddMongoDbRuntimeRepository()`, so every runtime-engine host gets `IFormulaEngine` |
+
+`IFormulaEngine` exposes `NormalizeTernary`, `Validate(expression, arguments)`,
+`EvaluateRaw(expression, arguments)` and `Evaluate(expression, arguments, resultType)` (the
+latter casts the `double` result back to `Boolean` / `Int` / `Int64` / `Double` / `DateTime`).
+
+Consumers are now thin callers:
+
+- **`ExpressionValidationService`** (this service) delegates `Validate` to `IFormulaEngine` and
+  maps `FormulaSyntaxResult` → `ExpressionValidationResult`. It no longer carries its own
+  `ConvertTernaryToIf`.
+- **`ApplyDataPointMappingsNode`** (mesh-adapter) evaluates via `IFormulaEngine.EvaluateRaw`; its
+  private `ConvertTernaryToIf` was removed.
+- **`FieldFilterResolver` / `RtFieldFilterResolver`** (runtime query) use `OctoExpression` from the
+  new package.
+
+The supported formula syntax (operators, `if` / ternary, built-in functions, the `now` /
+`startOfDay` / `null` extensions, null/NaN handling) is documented once in the public
+**Formula Expressions** page and reused by every feature, including the forthcoming archive
+*computed columns* (AB#4189 epic).
+
+---
+
 ## Problem
 
 Users enter mXparser expressions in the `MappingExpression` field of DataPointMappings (e.g., `value / 100`, `value > 0 ? value : 0`). Currently there is no validation — errors only surface at runtime when `ApplyDataPointMappingsNode` evaluates the expression and logs a warning. Users have no way to test or verify their expressions before activating polling.
@@ -361,9 +398,9 @@ User types expression
 
 **Effort:** ~2 days
 
-**Dependencies:**
-- `OctoExpression` class accessible from Communication Controller (via `Runtime.Engine.MongoDb` package)
-- `ConvertTernaryToIf` logic needs to be extracted to a shared location or duplicated
+**Dependencies:** *(resolved in AB#4189 — see "Current Implementation" above)*
+- ~~`OctoExpression` class accessible from Communication Controller (via `Runtime.Engine.MongoDb` package)~~ → now `IFormulaEngine` from the `Runtime.Engine.Formulas` package
+- ~~`ConvertTernaryToIf` logic needs to be extracted to a shared location or duplicated~~ → extracted into the shared `FormulaEngine`
 
 ### Phase 3: Expression Help / Autocomplete (optional)
 
