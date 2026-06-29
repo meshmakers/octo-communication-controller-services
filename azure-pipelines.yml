@@ -117,6 +117,7 @@ stages:
           - template: templates/steps/set-version.yml@pipelineTemplates
           - template: templates/steps/download-ca.yml@pipelineTemplates
           - task: DotNetCoreCLI@2
+            retryCountOnTaskFailure: 2
             displayName: 'Restore NuGet packages'
             inputs:
               command: 'restore'
@@ -124,6 +125,7 @@ stages:
               restoreArguments: '--force /p:OctoNugetPrivateServer=$(nugetPrivateServer)'
               noCache: true
           - task: DotNetCoreCLI@2
+            retryCountOnTaskFailure: 2
             displayName: 'Build'
             inputs:
               command: 'build'
@@ -144,6 +146,7 @@ stages:
             env:
               DOCKER_HOST: unix:///var/run/docker.sock
           - task: DotNetCoreCLI@2
+            retryCountOnTaskFailure: 2
             displayName: 'Unit Tests (TUnit)'
             inputs:
               command: 'test'
@@ -154,6 +157,7 @@ stages:
                 !**/*SystemTests.csproj
               testRunTitle: 'Unit Tests'
           - task: DotNetCoreCLI@2
+            retryCountOnTaskFailure: 2
             displayName: 'Integration Tests (xUnit)'
             inputs:
               command: 'test'
