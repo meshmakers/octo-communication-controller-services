@@ -1,8 +1,5 @@
-using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using IdentityModel;
-using Meshmakers.Octo.Services.Infrastructure;
-using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -18,20 +15,17 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.SystemApi.v1.C
 public class CommunicationController: ControllerBase
 {
     private readonly ILogger<CommunicationController> _logger;
-    private readonly IConfigurationService _configurationService;
 
     /// <summary>
     /// Constructor
     /// </summary>
     /// <param name="logger"></param>
-    /// <param name="configurationService"></param>
-    public CommunicationController(ILogger<CommunicationController> logger, IConfigurationService configurationService)
+    public CommunicationController(ILogger<CommunicationController> logger)
     {
         _logger = logger;
-        _configurationService = configurationService;
     }
-    
-    
+
+
     /// <summary>
     /// Pings the communication controller
     /// </summary>
@@ -47,49 +41,5 @@ public class CommunicationController: ControllerBase
         _logger.LogError("Ping ERROR");
         _logger.LogCritical("Ping CRITICAL");
         return Ok("Pong");
-    }
-
-    /// <summary>
-    /// Enables the communication controller for a tenant
-    /// </summary>
-    /// <param name="tenantId">The id of the tenant.</param>
-    /// <returns></returns>
-    [HttpPost("enable")]
-    [Authorize(Constants.SystemCommunicationApiPolicy)]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> Enable([Required] string tenantId)
-    {
-        try
-        {
-            await _configurationService.EnableAsync(tenantId);
-            return NoContent();
-        }
-        catch (ConfigurationException e)
-        {
-            return BadRequest(e.Message);
-        }
-    }
-    
-    /// <summary>
-    /// Disables the communication controller for a tenant
-    /// </summary>
-    /// <param name="tenantId">The id of the tenant.</param>
-    /// <returns></returns>
-    [HttpPost("disable")]
-    [Authorize(Constants.SystemCommunicationApiPolicy)]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> Disable([Required] string tenantId)
-    {
-        try
-        {
-            await _configurationService.DisableAsync(tenantId);
-            return NoContent();
-        }
-        catch (ConfigurationException e)
-        {
-            return BadRequest(e.Message);
-        }
     }
 }

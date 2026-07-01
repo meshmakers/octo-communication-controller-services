@@ -937,14 +937,18 @@ Access tenant and adapter info from request context via extension methods in `Co
 ## API Structure
 
 Controllers are split by scope:
-- **System API** (`SystemApi/v1/Controllers/`): System-level operations (enable/disable tenants via query parameter, kept for backward compatibility)
+- **System API** (`SystemApi/v1/Controllers/`): System-level, non-tenant operations. The
+  `CommunicationController` here now only exposes `ping`; its `enable`/`disable` actions were
+  **removed (AB#4287)** — tenant enable/disable is tenant-scoped only. `DiagnosticsController`
+  (system-scoped) still uses `SystemCommunicationApiPolicy`.
 - **Tenant API** (`TenantApi/v1/Controllers/`): Tenant-scoped operations for adapters, pools, pipelines, and tenant enable/disable
 
 Routes follow pattern: `{tenantId:tenantId}/v{version:apiVersion}/[controller]`
 
-The `CommunicationController` exists in both System API and Tenant API:
-- **System API**: `system/v1/communication/enable?tenantId=X` (legacy, backward compatible)
-- **Tenant API**: `{tenantId}/v1/communication/enable` (preferred, tenant from route)
+Tenant enable/disable lives **only** on the Tenant API:
+- `{tenantId}/v1/communication/enable` / `.../disable` (tenant read from route)
+- The legacy `system/v1/communication/enable?tenantId=X` variant no longer exists (AB#4287).
+  The SDK dropped its `system/v1` fallback and now requires a tenant on the client options.
 
 ## Pipeline Reassignment (`PATCH /pipeline/move-to-adapter`)
 
