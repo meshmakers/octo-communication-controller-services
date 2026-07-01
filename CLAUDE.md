@@ -427,7 +427,9 @@ public int PipelineExecutionRetentionDays { get; set; } = 3;     // Days to keep
 public int StatisticsUpdateIntervalMinutes { get; set; } = 60;   // Statistics aggregation interval
 public bool StoreInputData { get; set; } = false;                // Whether to store pipeline input data
 public int MaxInputDataLength { get; set; } = 10000;             // Max length of stored input data
-public int PipelineExecutionTimeoutHours { get; set; } = 24;     // Hours after which running executions are marked as failed
+public int PipelineExecutionTimeoutHours { get; set; } = 24;     // Legacy connection-unaware timeout (no longer used by the reaper)
+public int PipelineExecutionStuckGraceMinutes { get; set; } = 15;         // AB#4280 grace before a stuck execution is failed
+public int PipelineExecutionStuckCheckIntervalMinutes { get; set; } = 5;  // AB#4280 reaper cadence
 ```
 
 ### Deployment State Management
@@ -1048,13 +1050,58 @@ When an adapter disconnects unexpectedly:
 2. On reconnect, adapter can query interrupted execution IDs
 3. Adapter reports final status via `ReportInterruptedExecutionResultAsync`
 
+### Execution Durability Across Adapter Restart (AB#4280)
+
+A pipeline execution runs as an in-memory `Task.Run` inside the adapter runtime
+(`AdapterTriggerContext.StartExecutePipelineAsync`, octo-communication-sdk); its state is
+tracked out-of-band in the `RtPipelineExecution` entity. When the adapter **process** restarts
+(deployment, crash, pod eviction) the in-memory task is lost, so the record must be driven to a
+terminal state instead of being left stuck in `Running` / `Interrupted`. Three cooperating
+mechanisms guarantee this:
+
+1. **Disconnect → `Interrupted`** (`AdapterHub.OnDisconnectedAsync` →
+   `MarkExecutionsAsInterruptedAsync`). Fires whenever the controller detects an adapter drop
+   *while the controller itself is healthy* — i.e. the common adapter-only restart. The
+   `IShutdownState.IsShuttingDown` guard deliberately skips this during a **controller**
+   rolling-upgrade: there the adapter is not gone, it is reconnecting to a surviving controller
+   pod with its live tasks intact, so marking its executions `Interrupted` would be a false
+   positive. (This is why AB#4280 does **not** touch the shutdown guard.)
+
+2. **Fresh-startup orphan resolution** (`IAdapterHub.FailOrphanedExecutionsAsync(processStartUtc)`
+   → `PipelineExecutionService.FailOrphanedExecutionsForAdapterAsync` →
+   `CommunicationRepository.FailOrphanedExecutionsForAdapterAsync`). The **SDK** calls this once
+   on a fresh process start (`isReconnect == false`), never on a transient reconnect. A fresh
+   process has an empty in-memory registry, so any `Running` / `Interrupted` execution for this
+   adapter whose `StartedAt` predates the process start is an orphan from the previous process and
+   is transitioned to `Failed`. This is the primary fix and covers both the adapter-only restart
+   and the simultaneous controller+adapter restart.
+
+3. **Connection-aware reaper** (`ExecutionCleanupBackgroundService` →
+   `FailStuckExecutionsAsync` → `CommunicationRepository.FailStuckExecutionsAsync`). The backstop
+   for the case where a disconnect was never cleanly detected (e.g. the controller also restarted
+   and missed the `OnDisconnected`). Past the `PipelineExecutionStuckGraceMinutes` grace period it
+   fails **all** stale `Interrupted` executions (an `Interrupted` execution implies its adapter
+   disconnected) **plus** stale `Running` executions **whose owning adapter is not `Online`**. A
+   `Running` execution on a live (`Online`) adapter is **never** failed, regardless of how long it
+   runs — this is what protects legitimate long-running ETL pipelines (e.g. multi-million-row
+   CrateDB inserts) from being killed. The reaper keys off the adapter's persisted
+   `CommunicationState`, so it is correct across controller pods.
+
+SDK safety net: `AdapterExecutionService.GetLocalExecutionStatus` returns `Failed` (not
+optimistic `Completed`) when an interrupted execution cannot be found in the local registry — an
+execution interrupted mid-flight must never be recorded as a success.
+
+Integration coverage lives in
+`tests/CommunicationControllerServices.IntegrationTests/Repository/FailStuckAndOrphanedExecutionsTests.cs`
+(connection-aware sparing of live long-runners; adapter-scoped pre-start orphan resolution).
+
 ### Background Services
 
 | Service | Interval | Description |
 |---------|----------|-------------|
 | `PipelineExecutionReportProcessor` | Continuous | Drains execution reports from Channel in batches, bulk-inserts starts and bulk-updates completions |
 | `PipelineStatisticsBackgroundService` | 60 minutes | Aggregates execution statistics for all pipelines |
-| `ExecutionCleanupBackgroundService` | Daily | Times out stale running executions and removes records older than retention period |
+| `ExecutionCleanupBackgroundService` | `PipelineExecutionStuckCheckIntervalMinutes` (default 5 min) for the connection-aware stuck reaper (AB#4280); retention deletion of records older than `PipelineExecutionRetentionDays` still runs daily |
 
 ### Service Methods
 
@@ -1068,5 +1115,7 @@ Task<IReadOnlyList<string>> GetInterruptedExecutionIdsAsync(string tenantId, RtE
 Task UpdateStatisticsAsync(string tenantId, RtEntityId pipelineRtEntityId);
 Task UpdateAllStatisticsAsync(string tenantId);
 Task<int> CleanupOldExecutionsAsync(string tenantId, int retentionDays);
-Task<int> TimeoutStaleExecutionsAsync(string tenantId, int timeoutHours);
+Task<int> TimeoutStaleExecutionsAsync(string tenantId, int timeoutHours);       // legacy, connection-unaware
+Task<int> FailStuckExecutionsAsync(string tenantId, int graceMinutes);          // AB#4280 connection-aware reaper
+Task<int> FailOrphanedExecutionsForAdapterAsync(string tenantId, RtEntityId adapterRtEntityId, DateTime beforeUtc); // AB#4280
 ```

@@ -98,6 +98,22 @@ public class CommunicationControllerOptions
     public int PipelineExecutionTimeoutHours { get; set; } = 24;
 
     /// <summary>
+    /// Gets or sets the grace period in minutes used by the connection-aware stuck-execution
+    /// reaper. An execution is only failed once it is older than this grace period AND its owning
+    /// adapter is not <c>Online</c> (or it is already <c>Interrupted</c>). Running executions on a
+    /// live adapter are never failed, regardless of how long they run — this protects legitimate
+    /// long-running ETL pipelines. The grace period only bounds how long an <em>orphaned</em>
+    /// execution (adapter restarted / disconnected) stays visible in a non-terminal state.
+    /// </summary>
+    public int PipelineExecutionStuckGraceMinutes { get; set; } = 15;
+
+    /// <summary>
+    /// Gets or sets the interval in minutes at which the stuck-execution reaper runs. Retention
+    /// cleanup of old execution records still runs once per day independent of this value.
+    /// </summary>
+    public int PipelineExecutionStuckCheckIntervalMinutes { get; set; } = 5;
+
+    /// <summary>
     /// Gets or sets whether to validate pipeline definitions against the adapter's JSON Schema before deployment
     /// </summary>
     public bool EnablePipelineSchemaValidation { get; set; } = false;

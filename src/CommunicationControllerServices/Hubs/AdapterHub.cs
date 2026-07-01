@@ -343,6 +343,38 @@ internal class AdapterHub : Hub, IAdapterHub
     }
 
     /// <summary>
+    /// Fails all non-terminal executions of this adapter that started before the given process
+    /// start time. Called by a freshly (re)started adapter process: because a new process cannot
+    /// own any earlier execution, those records are orphans left behind by the previous process
+    /// (whose in-memory task was lost on restart) and are transitioned to Failed.
+    /// </summary>
+    /// <param name="processStartUtc">The adapter process start time (adapter clock, UTC)</param>
+    /// <returns>Number of orphaned executions failed</returns>
+    public async Task<int> FailOrphanedExecutionsAsync(DateTime processStartUtc)
+    {
+        var tenantId = GetTenantId();
+        var adapterRtEntityId = GetAdapterRtEntityId();
+
+        try
+        {
+            return await _pipelineExecutionService.FailOrphanedExecutionsForAdapterAsync(
+                tenantId, adapterRtEntityId, processStartUtc);
+        }
+        catch (PipelineExecutionServiceException e)
+        {
+            Logger.Error(e, e.Message);
+            throw;
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e, "Cannot fail orphaned executions");
+            await _eventService.StoreErrorEventAsync(tenantId,
+                $"Failed to fail orphaned executions for adapter '{adapterRtEntityId}': {e.Message}");
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Synchronizes buffered executions from an adapter that was offline
     /// </summary>
     /// <param name="request">The sync request containing buffered executions</param>

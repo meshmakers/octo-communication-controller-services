@@ -430,6 +430,29 @@ public interface ICommunicationRepository
     /// <returns>Number of timed out executions</returns>
     Task<int> TimeoutStaleExecutionsAsync(string tenantId, DateTime olderThan);
 
+    /// <summary>
+    /// Connection-aware reaper. Fails executions that are stuck in a non-terminal state past the
+    /// grace cutoff: all <c>Interrupted</c> executions, plus <c>Running</c> executions whose owning
+    /// adapter is not <c>Online</c>. Running executions on a live (Online) adapter are never failed,
+    /// so legitimate long-running pipelines are unaffected.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="graceCutoff">Executions started before this instant are eligible</param>
+    /// <returns>Number of executions failed</returns>
+    Task<int> FailStuckExecutionsAsync(string tenantId, DateTime graceCutoff);
+
+    /// <summary>
+    /// Fails all non-terminal (<c>Running</c> / <c>Interrupted</c>) executions for the given adapter
+    /// that started before <paramref name="beforeUtc"/>. Called when a freshly (re)started adapter
+    /// process registers: such a process cannot own any earlier execution, so those records are
+    /// orphans from the previous process and are transitioned to <c>Failed</c>.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="adapterRtEntityId">The (re)started adapter</param>
+    /// <param name="beforeUtc">The adapter process start time; executions started earlier are orphans</param>
+    /// <returns>Number of executions failed</returns>
+    Task<int> FailOrphanedExecutionsForAdapterAsync(string tenantId, RtEntityId adapterRtEntityId, DateTime beforeUtc);
+
     #endregion
 
     #region Pipeline Statistics

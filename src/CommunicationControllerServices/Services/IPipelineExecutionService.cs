@@ -93,6 +93,28 @@ public interface IPipelineExecutionService
     Task<int> TimeoutStaleExecutionsAsync(string tenantId, int timeoutHours);
 
     /// <summary>
+    /// Connection-aware reaper: fails executions stuck in a non-terminal state past the grace
+    /// period. All <c>Interrupted</c> executions and <c>Running</c> executions whose owning adapter
+    /// is offline are failed; <c>Running</c> executions on a live adapter are left untouched so
+    /// long-running pipelines are never killed.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="graceMinutes">Executions must be older than this many minutes to be eligible</param>
+    /// <returns>Number of executions failed</returns>
+    Task<int> FailStuckExecutionsAsync(string tenantId, int graceMinutes);
+
+    /// <summary>
+    /// Fails all non-terminal executions of a freshly (re)started adapter that predate the given
+    /// process start time. Called on fresh adapter startup to resolve executions orphaned by the
+    /// previous process (which lost its in-memory task on restart).
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="adapterRtEntityId">The (re)started adapter</param>
+    /// <param name="beforeUtc">The adapter process start time</param>
+    /// <returns>Number of executions failed</returns>
+    Task<int> FailOrphanedExecutionsForAdapterAsync(string tenantId, RtEntityId adapterRtEntityId, DateTime beforeUtc);
+
+    /// <summary>
     /// Processes buffered executions from an adapter (for offline sync)
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>

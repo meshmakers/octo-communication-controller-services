@@ -1833,6 +1833,183 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
+    public async Task<int> FailStuckExecutionsAsync(string tenantId, DateTime graceCutoff)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        try
+        {
+            List<RtPipelineExecution> interrupted;
+            List<RtPipelineExecution> offlineRunning;
+
+            using (var session = await tenantRepository.GetSessionAsync())
+            {
+                // Interrupted executions past the grace period imply the owning adapter disconnected
+                // and never reported a final result (fresh restart or gone for good) -> orphaned.
+                interrupted = await GetExecutionsByStatusOlderThanAsync(
+                    tenantRepository, session, RtPipelineExecutionStatusEnum.Interrupted, graceCutoff);
+
+                // Running executions are only orphaned when their owning adapter is NOT Online.
+                // A long-running pipeline on a connected adapter must never be failed by the reaper,
+                // regardless of how long it runs.
+                var running = await GetExecutionsByStatusOlderThanAsync(
+                    tenantRepository, session, RtPipelineExecutionStatusEnum.Running, graceCutoff);
+
+                offlineRunning = running.Count > 0
+                    ? await FilterExecutionsWithNonOnlineAdapterAsync(tenantRepository, session, running)
+                    : [];
+            }
+
+            var total = 0;
+            total += await ApplyFailedStatusAsync(tenantRepository, interrupted,
+                "Adapter restarted; interrupted execution not recovered within grace period");
+            total += await ApplyFailedStatusAsync(tenantRepository, offlineRunning,
+                "Adapter offline; running execution orphaned by adapter restart");
+            return total;
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedTimeoutStaleExecutions(tenantId, graceCutoff, e);
+        }
+    }
+
+    public async Task<int> FailOrphanedExecutionsForAdapterAsync(string tenantId, RtEntityId adapterRtEntityId,
+        DateTime beforeUtc)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        try
+        {
+            List<RtPipelineExecution> orphaned;
+            using (var session = await tenantRepository.GetSessionAsync())
+            {
+                // A freshly (re)started adapter process cannot own any execution that started before
+                // it began. Any Running / Interrupted execution for this adapter with an earlier
+                // StartedAt is therefore an orphan left behind by the previous process -> fail it.
+                var running = await GetExecutionsForAdapterByStatusAsync(
+                    tenantRepository, session, adapterRtEntityId, RtPipelineExecutionStatusEnum.Running);
+                var interrupted = await GetExecutionsForAdapterByStatusAsync(
+                    tenantRepository, session, adapterRtEntityId, RtPipelineExecutionStatusEnum.Interrupted);
+
+                orphaned = running.Concat(interrupted)
+                    .Where(e => e.StartedAt < beforeUtc)
+                    .ToList();
+            }
+
+            return await ApplyFailedStatusAsync(tenantRepository, orphaned, "Execution orphaned by adapter restart");
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedTimeoutStaleExecutions(tenantId, beforeUtc, e);
+        }
+    }
+
+    private static async Task<List<RtPipelineExecution>> GetExecutionsByStatusOlderThanAsync(
+        ITenantRepository tenantRepository, IOctoSession session,
+        RtPipelineExecutionStatusEnum status, DateTime olderThan)
+    {
+        var queryOptions = RtEntityQueryOptions.Create()
+            .FieldFilter(nameof(RtPipelineExecution.Status), FieldFilterOperator.Equals, (int)status)
+            .FieldFilter(nameof(RtPipelineExecution.StartedAt), FieldFilterOperator.LessThan, olderThan);
+
+        var result = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(session, queryOptions);
+        return result.Items.ToList();
+    }
+
+    /// <summary>
+    /// Given a set of executions, returns those whose owning adapter is not <c>Online</c>
+    /// (or has no resolvable adapter). Used by the connection-aware reaper so that Running
+    /// executions on a live adapter are never treated as stuck.
+    /// </summary>
+    private static async Task<List<RtPipelineExecution>> FilterExecutionsWithNonOnlineAdapterAsync(
+        ITenantRepository tenantRepository, IOctoSession session, IReadOnlyList<RtPipelineExecution> executions)
+    {
+        var executionRtIds = executions.Select(e => e.RtId).ToList();
+
+        var associationResult = await tenantRepository.GetRtAssociationTargetsAsync<RtPipelineExecution, RtAdapter>(
+            session,
+            executionRtIds,
+            SystemCommunicationCkIds.RtCkExecutingAdapterRoleId,
+            GraphDirections.Outbound,
+            null,
+            RtEntityQueryOptions.Create());
+
+        // Map execution RtId -> owning adapter (executions have exactly one ExecutingAdapter).
+        var adapterByExecution = new Dictionary<OctoObjectId, RtAdapter>();
+        foreach (var entry in associationResult)
+        {
+            var adapter = entry.Value.Items.FirstOrDefault();
+            if (adapter != null)
+            {
+                adapterByExecution[entry.Key.RtId] = adapter;
+            }
+        }
+
+        return executions
+            .Where(e => !adapterByExecution.TryGetValue(e.RtId, out var adapter)
+                        || adapter.CommunicationState != RtCommunicationStateEnum.Online)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Marks the given executions as <c>Failed</c> in batches, stamping the error message,
+    /// completion time and duration. No-op for an empty list.
+    /// </summary>
+    private async Task<int> ApplyFailedStatusAsync(ITenantRepository tenantRepository,
+        IReadOnlyList<RtPipelineExecution> executions, string errorMessage)
+    {
+        if (executions.Count == 0)
+        {
+            return 0;
+        }
+
+        const int batchSize = 100;
+        var now = DateTime.UtcNow;
+        var total = 0;
+
+        for (var offset = 0; offset < executions.Count; offset += batchSize)
+        {
+            var batch = executions.Skip(offset).Take(batchSize).ToList();
+
+            using var session = await tenantRepository.GetSessionAsync();
+            session.StartTransaction();
+
+            var entityUpdateInfoList = batch
+                .Select(e =>
+                {
+                    var updated = new RtPipelineExecution
+                    {
+                        Status = RtPipelineExecutionStatusEnum.Failed,
+                        ErrorMessage = errorMessage,
+                        CompletedAt = now,
+                        DurationMs = (int)Math.Max(0, (now - e.StartedAt).TotalMilliseconds)
+                    };
+                    return EntityUpdateInfo<RtPipelineExecution>.CreateUpdate(e.ToRtEntityId(), updated);
+                })
+                .ToList();
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+            total += batch.Count;
+        }
+
+        return total;
+    }
+
     #endregion
 
     #region Pipeline Statistics

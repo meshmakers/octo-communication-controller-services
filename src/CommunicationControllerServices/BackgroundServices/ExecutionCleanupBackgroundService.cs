@@ -16,8 +16,8 @@ internal class ExecutionCleanupBackgroundService : BackgroundService
     private readonly CommunicationControllerOptions _options;
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-    // Run cleanup once per day
-    private static readonly TimeSpan CleanupInterval = TimeSpan.FromHours(24);
+    // Retention cleanup (deleting old records) runs at most once per day.
+    private static readonly TimeSpan RetentionInterval = TimeSpan.FromHours(24);
 
     /// <summary>
     /// Constructor
@@ -35,8 +35,15 @@ internal class ExecutionCleanupBackgroundService : BackgroundService
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        Logger.Info("Execution cleanup background service starting with retention period of {RetentionDays} days and execution timeout of {TimeoutHours} hours",
-            _options.PipelineExecutionRetentionDays, _options.PipelineExecutionTimeoutHours);
+        Logger.Info(
+            "Execution cleanup background service starting with retention period of {RetentionDays} days, " +
+            "stuck grace period of {GraceMinutes} minutes and stuck-check interval of {IntervalMinutes} minutes",
+            _options.PipelineExecutionRetentionDays, _options.PipelineExecutionStuckGraceMinutes,
+            _options.PipelineExecutionStuckCheckIntervalMinutes);
+
+        var stuckCheckInterval = TimeSpan.FromMinutes(Math.Max(1, _options.PipelineExecutionStuckCheckIntervalMinutes));
+        // Force a retention sweep on the first loop iteration.
+        var lastRetentionRun = DateTime.UtcNow - RetentionInterval;
 
         try
         {
@@ -46,16 +53,33 @@ internal class ExecutionCleanupBackgroundService : BackgroundService
 
             while (!stoppingToken.IsCancellationRequested)
             {
+                // The connection-aware stuck reaper runs every iteration (minutes-scale) so an
+                // execution orphaned by an adapter restart becomes observable quickly.
                 try
                 {
-                    await CleanupOldExecutionsForAllTenantsAsync();
+                    await FailStuckExecutionsForAllTenantsAsync();
                 }
                 catch (Exception ex)
                 {
-                    Logger.Error(ex, "Error cleaning up old executions");
+                    Logger.Error(ex, "Error failing stuck executions");
                 }
 
-                await Task.Delay(CleanupInterval, stoppingToken);
+                // Retention deletion is comparatively expensive and only needs to run daily.
+                if (DateTime.UtcNow - lastRetentionRun >= RetentionInterval)
+                {
+                    try
+                    {
+                        await CleanupOldExecutionsForAllTenantsAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error(ex, "Error cleaning up old executions");
+                    }
+
+                    lastRetentionRun = DateTime.UtcNow;
+                }
+
+                await Task.Delay(stuckCheckInterval, stoppingToken);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -66,44 +90,51 @@ internal class ExecutionCleanupBackgroundService : BackgroundService
         Logger.Info("Execution cleanup background service stopped");
     }
 
+    private async Task FailStuckExecutionsForAllTenantsAsync()
+    {
+        var tenantIds = _adapterCache.GetEnabledTenantIds();
+        var totalFailed = 0;
+
+        foreach (var tenantId in tenantIds)
+        {
+            try
+            {
+                var failedCount = await _pipelineExecutionService.FailStuckExecutionsAsync(
+                    tenantId,
+                    _options.PipelineExecutionStuckGraceMinutes);
+
+                totalFailed += failedCount;
+            }
+            catch (PipelineExecutionServiceException ex)
+            {
+                Logger.Warn(ex, "Failed to fail stuck executions for tenant '{TenantId}'", tenantId);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Unexpected error failing stuck executions for tenant '{TenantId}'", tenantId);
+            }
+        }
+
+        if (totalFailed > 0)
+        {
+            Logger.Info("Stuck-execution reaper failed {TotalFailed} orphaned executions across {TenantCount} tenants",
+                totalFailed, tenantIds.Count);
+        }
+    }
+
     private async Task CleanupOldExecutionsForAllTenantsAsync()
     {
         var tenantIds = _adapterCache.GetEnabledTenantIds();
 
-        Logger.Info("Starting execution cleanup for {TenantCount} tenants", tenantIds.Count);
+        Logger.Info("Starting execution retention cleanup for {TenantCount} tenants", tenantIds.Count);
 
-        var totalTimedOut = 0;
         var totalDeleted = 0;
 
         foreach (var tenantId in tenantIds)
         {
             try
             {
-                // First, timeout stale running executions
-                var timedOutCount = await _pipelineExecutionService.TimeoutStaleExecutionsAsync(
-                    tenantId,
-                    _options.PipelineExecutionTimeoutHours);
-
-                totalTimedOut += timedOutCount;
-
-                if (timedOutCount > 0)
-                {
-                    Logger.Info("Timed out {TimedOutCount} stale executions for tenant '{TenantId}'",
-                        timedOutCount, tenantId);
-                }
-            }
-            catch (PipelineExecutionServiceException ex)
-            {
-                Logger.Warn(ex, "Failed to timeout stale executions for tenant '{TenantId}'", tenantId);
-            }
-            catch (Exception ex)
-            {
-                Logger.Error(ex, "Unexpected error timing out stale executions for tenant '{TenantId}'", tenantId);
-            }
-
-            try
-            {
-                // Then, delete old executions based on retention policy
+                // Delete old executions based on retention policy
                 var deletedCount = await _pipelineExecutionService.CleanupOldExecutionsAsync(
                     tenantId,
                     _options.PipelineExecutionRetentionDays);
@@ -126,7 +157,6 @@ internal class ExecutionCleanupBackgroundService : BackgroundService
             }
         }
 
-        Logger.Info("Execution cleanup completed. Total timed out: {TotalTimedOut}, Total deleted: {TotalDeleted}",
-            totalTimedOut, totalDeleted);
+        Logger.Info("Execution retention cleanup completed. Total deleted: {TotalDeleted}", totalDeleted);
     }
 }

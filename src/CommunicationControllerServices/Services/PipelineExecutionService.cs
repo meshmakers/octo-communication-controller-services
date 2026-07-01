@@ -601,6 +601,69 @@ internal class PipelineExecutionService(
         }
     }
 
+    public async Task<int> FailStuckExecutionsAsync(string tenantId, int graceMinutes)
+    {
+        Logger.Debug("[{TenantId}] Failing stuck executions older than {GraceMinutes} minutes", tenantId, graceMinutes);
+
+        try
+        {
+            var graceCutoff = DateTime.UtcNow.AddMinutes(-graceMinutes);
+            var failedCount = await communicationRepository.FailStuckExecutionsAsync(tenantId, graceCutoff);
+
+            if (failedCount > 0)
+            {
+                Logger.Info("[{TenantId}] Failed {Count} stuck executions (interrupted or running on offline adapter)",
+                    tenantId, failedCount);
+
+                await eventService.StoreInformationEventAsync(tenantId,
+                    $"Failed {failedCount} stuck pipeline execution(s) orphaned by adapter restart/disconnect.");
+            }
+
+            return failedCount;
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e, "[{TenantId}] Failed to fail stuck executions", tenantId);
+            throw PipelineExecutionServiceException.CommonFailedTimeoutStaleExecutions(tenantId, e);
+        }
+    }
+
+    public async Task<int> FailOrphanedExecutionsForAdapterAsync(string tenantId, RtEntityId adapterRtEntityId,
+        DateTime beforeUtc)
+    {
+        Logger.Debug("[{TenantId}] Failing orphaned executions for adapter '{AdapterRtEntityId}' started before {BeforeUtc}",
+            tenantId, adapterRtEntityId, beforeUtc);
+
+        try
+        {
+            if (!adapterCache.TryGetTenant(tenantId, out _))
+            {
+                // Tenant not enabled, nothing to do
+                return 0;
+            }
+
+            var failedCount =
+                await communicationRepository.FailOrphanedExecutionsForAdapterAsync(tenantId, adapterRtEntityId, beforeUtc);
+
+            if (failedCount > 0)
+            {
+                Logger.Info("[{TenantId}] Failed {Count} orphaned execution(s) for restarted adapter '{AdapterRtEntityId}'",
+                    tenantId, failedCount, adapterRtEntityId);
+
+                await eventService.StoreInformationEventAsync(tenantId,
+                    $"Failed {failedCount} orphaned pipeline execution(s) after adapter restart.", adapterRtEntityId);
+            }
+
+            return failedCount;
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e, "[{TenantId}] Failed to fail orphaned executions for adapter '{AdapterRtEntityId}'",
+                tenantId, adapterRtEntityId);
+            throw PipelineExecutionServiceException.CommonFailedTimeoutStaleExecutions(tenantId, e);
+        }
+    }
+
     public async Task<BufferedExecutionsSyncResponse> ProcessBufferedExecutionsAsync(string tenantId, RtEntityId adapterRtEntityId,
         BufferedExecutionsSyncRequest request)
     {
