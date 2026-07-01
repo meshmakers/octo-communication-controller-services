@@ -241,6 +241,25 @@ in `docs/runbooks/recover-mesh-adapter-state.md`. Any future
 service-managed-blueprint bump on 3.22.0+ should not need a runbook
 companion for this class of failure.
 
+**`Pipeline.IsDebuggingEnabled` is runtime-state too (3.23.0, AB#4273).**
+Debugging is an operational toggle (`SetPipelineDebug` / the Studio debug
+button), not part of a pipeline's portable definition — so
+`RtEntityToTcDtoConverter` skips it on export and it never round-trips
+through `ExportRt`/`ImportRt` or a blueprint. The `isRuntimeState: true`
+marker was added to `IsDebuggingEnabled` in `attributes.yaml` back in commit
+`e54c749` but **in place on 3.22.0 without a version bump** (the 3.21.0→3.22.0
+bump `0b31271` had already been cut ~46 min earlier), so a same-version
+re-import is a no-op and the marker never reached tenants already on 3.22.0 —
+which is why an imported pipeline (e.g. the voest simulator shipping
+`IsDebuggingEnabled: true`) could still silently enable debugging. `3.23.0`
+is the bump that actually propagates the marker on upgrade. No migration
+script (`migration-meta.yaml` stays at 3.1.1 — schema-ahead-of-history; the
+change is additive metadata, existing attribute values are untouched).
+Note the flag only stops debug shipping via *export*; a hand-authored rt-model
+that explicitly sets a runtime-state attribute still writes it on import, so
+authored YAMLs must simply not declare `IsDebuggingEnabled` (fixed for the
+simulator under AB#4274).
+
 When adding a new attribute on `Adapter` / `Pool` / similar entities,
 decide at creation time: is the value driven by the blueprint author
 (configuration → leave `isRuntimeState` unset), or by services /
