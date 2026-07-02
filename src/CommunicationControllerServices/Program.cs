@@ -20,6 +20,7 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.Blueprints;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Extensions;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Services;
 using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
@@ -147,6 +148,15 @@ try
         .AddMongoBlueprintSupport();
 
     builder.Services.AddCkModelSystemCommunicationV3();
+    // Auto-import System.Communication at its embedded version into every tenant on resolve (engine
+    // descriptor mechanism), decoupled from the blueprint floors. Production previously imported the
+    // model only via the System.Communication.Release/MainLatest blueprint floors, so a CK-model bump
+    // left non-comm tenants stale until the floor was bumped too; the descriptor keeps every tenant at
+    // the embedded version. Bumping ConstructionKit/ckModel.yaml now propagates on its own.
+    builder.Services.AddSingleton<IServiceManagedCkModelDescriptor>(
+        _ => new ServiceManagedCkModelDescriptor(
+            Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3
+                .SystemCommunicationCkIds.CkModelId));
 
     // Register the System.Communication blueprint embedded with the CK-model package. OctoMesh
     // convention: blueprints named "System.*" are service-managed (BlueprintId.IsServiceManaged

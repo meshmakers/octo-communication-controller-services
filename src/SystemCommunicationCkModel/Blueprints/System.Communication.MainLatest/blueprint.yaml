@@ -29,6 +29,11 @@ description: |
   preserves their existing values on re-apply, so bumping this blueprint no longer
   resets a Deployed adapter back to Undeployed.
 
+# Satisfiability floor only. The install/upgrade target is driven by the engine's
+# IServiceManagedCkModelDescriptor (System.Communication embedded version), registered in
+# CommunicationControllerServices Program.cs — NOT by this range. Raise the floor only when this
+# blueprint's SEED needs a type/attribute introduced in a specific version; a plain CK model bump
+# needs no change here.
 ckModelDependencies:
   - System.Communication-[3.22.0,4.0)
 
