@@ -28,13 +28,12 @@ internal class TriggerManagementService(
         ExecutePipelineResponse? r;
         try
         {
-            // Resolve the DataFlow that contains this pipeline — the FromExecutePipelineCommandNode
-            // listens on a queue keyed by DataFlowRtId, not PipelineRtId
-            var dataFlow = await communicationRepository.GetDataFlowByPipelineAsync(tenantId, pipelineRtId);
-            var dataFlowRtId = dataFlow?.RtId ?? pipelineRtId;
-
+            // The FromExecutePipelineCommandNode listens on a queue keyed by the PIPELINE rtId.
+            // (It used to be keyed by DataFlowRtId, which collided when a DataFlow held more than
+            // one FromExecutePipelineCommand pipeline — only the first one could register its
+            // endpoint.) Must stay in sync with FromExecutePipelineCommandNode.StartAsync.
             var address =
-                $"{PipelineQueueNames.ExecutePipelineCommand.ToLower()}-{tenantId.ToLower()}-data-flow-{dataFlowRtId.ToString().ToLower()}";
+                $"{PipelineQueueNames.ExecutePipelineCommand.ToLower()}-{tenantId.ToLower()}-pipeline-{pipelineRtId.ToString().ToLower()}";
 
             r = await executeMeshPipelineCommandClient.GetResponse<ExecutePipelineResponse>(address,
                 new ExecutePipelineRequest(tenantId, pipelineInput) { IsDryRun = isDryRun });

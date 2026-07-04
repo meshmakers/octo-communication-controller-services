@@ -1045,6 +1045,33 @@ Tests: `Services/AdapterServiceTests/SetPipelineDebuggingAsyncTests` (online
 enable/disable, offline persist-only, not-found paths) and
 `Controllers/PipelineControllerDebugTests`.
 
+## Execute-Pipeline Endpoint Key (AB#4312)
+
+`FromExecutePipelineCommand@1` registers a distribution-event-hub receive endpoint whose
+address **must be keyed by the pipeline rtId**, not the DataFlow rtId. Both sides of the bus
+build the address and must stay in sync:
+
+- **Consumer** — `FromExecutePipelineCommandNode.StartAsync` (octo-communication-sdk,
+  `Sdk.Pipeline`): `…-pipeline-{PipelineRtEntityId.RtId}`.
+- **Sender** — `TriggerManagementService.StartExecutePipelineAsync`:
+  `…-pipeline-{pipelineRtId}` (no DataFlow lookup needed).
+
+The address format is
+`{PipelineQueueNames.ExecutePipelineCommand}-{tenantId}-pipeline-{pipelineRtId}` (lower-cased).
+
+Historically the key was `…-data-flow-{dataFlowRtId}` (since AB#1586). That collided when a
+single DataFlow held more than one `FromExecutePipelineCommand@1` pipeline — MassTransit
+rejected the duplicate (`A receive endpoint with the same key was already added`), so only the
+first pipeline deployed and the rest went to `DeploymentState = Error`. It was also
+semantically wrong: `ExecutePipeline` targets one specific pipeline, so a DataFlow-scoped queue
+with competing consumers would round-robin the message. Keying by pipeline rtId is the correct
+scope. Regression guard: `MeshAdapter.Sdk.Tests` →
+`FromExecutePipelineCommandNodeTests.StartAsync_KeysEndpointByPipelineRtId_NotDataFlowRtId`.
+
+> Wire-contract note: controller + mesh-adapter + SDK must ship together (release train).
+> Sibling `FromSendNotificationNode` still uses DataFlow-scoped keying and has the same latent
+> collision if a DataFlow holds two `FromSendNotification@1` pipelines — tracked separately.
+
 ## Pipeline Execution Metrics
 
 The `PipelineExecutionService` tracks pipeline execution metrics reported by adapters via SignalR. This enables real-time monitoring and historical analysis of pipeline performance.
