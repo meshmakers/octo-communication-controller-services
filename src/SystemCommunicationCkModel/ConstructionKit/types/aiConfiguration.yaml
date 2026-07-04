@@ -9,7 +9,6 @@ types:
         name: ApiKey
       - id: ${this}/AiModel
         name: AiModel
-        isOptional: true
       - id: ${this}/MaxTokens
         name: MaxTokens
         isOptional: true

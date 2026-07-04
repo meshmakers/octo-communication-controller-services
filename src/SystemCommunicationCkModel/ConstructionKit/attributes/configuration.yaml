@@ -82,9 +82,7 @@ attributes:
     description: 'API key for authenticating with the AI service (e.g. Anthropic sk-ant-... key). Stored as configuration attribute, not exposed in pipeline data context.'
   - id: AiModel
     valueType: String
-    description: 'AI model identifier to use (e.g. claude-sonnet-4-20250514, claude-haiku-4-5-20251001).'
-    defaultValues:
-      - claude-sonnet-4-20250514
+    description: 'AI model identifier to use (e.g. claude-sonnet-4-6, claude-opus-4-1). Mandatory and has no default: a pinned model id goes out of date (a retired "-20250514" snapshot returns HTTP 404), so it must be set explicitly on each AiConfiguration.'
   - id: MaxTokens
     valueType: Int
     description: 'Maximum number of tokens for the AI response.'
