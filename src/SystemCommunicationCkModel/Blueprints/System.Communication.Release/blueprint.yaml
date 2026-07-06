@@ -17,10 +17,11 @@ description: |
   auto-applied by the Communication Controller on tenant Enable / startup and Studio
   surfaces it as read-only.
 
-  1.5.1 sets the floor to System.Communication-3.24.0 (adds the McpConfiguration
-  AdditionalHeaders RecordArray and the HttpHeader record). The controller upgrades a
-  tenant to the range minimum, so the floor must name the version to install: at
-  3.22.0 the target sat below the already-installed 3.23.0, so nothing upgraded.
+  1.5.1 sets the floor to System.Communication-3.25.0 (adds the McpConfiguration type,
+  McpTransport enum, HttpHeader record and AdditionalHeaders RecordArray). The
+  controller upgrades a tenant to the range minimum, so the floor must name the
+  version to install: main already ships 3.24.0 without McpConfiguration, so the
+  MCP additions land as 3.25.0.
 
   The volatile state attributes (DeploymentState, CommunicationState,
   ConfigurationState, the Last*Error / Last*ErrorTimestamp pairs, StatusMessage,
@@ -34,7 +35,7 @@ description: |
 # blueprint's SEED needs a type/attribute introduced in a specific version; a plain CK model bump
 # needs no change here.
 ckModelDependencies:
-  - System.Communication-[3.24.0,4.0)
+  - System.Communication-[3.25.0,4.0)
 
 seedDataPath: seed-data/entities.yaml
 
