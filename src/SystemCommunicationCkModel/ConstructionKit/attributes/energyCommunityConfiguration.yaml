@@ -76,3 +76,6 @@ attributes:
     description: "Tax rate applied to farmers in the energy community"
     defaultValues:
       - 13.0
+  - id: NotificationEmailContact
+    valueType: String
+    description: "Email address for notifications related to EDA processes and messages"

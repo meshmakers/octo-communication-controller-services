@@ -6,3 +6,6 @@ types:
     attributes:
       - id: ${this}/NetworkPartnerId
         name: PartnerId
+      - id: ${this}/NotificationEmailContact
+        name: NotificationEmailContact
+        isOptional: true
