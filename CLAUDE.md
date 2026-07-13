@@ -1151,7 +1151,7 @@ Integration coverage lives in
 |---------|----------|-------------|
 | `PipelineExecutionReportProcessor` | Continuous | Drains execution reports from Channel in batches, bulk-inserts starts and bulk-updates completions |
 | `PipelineStatisticsBackgroundService` | 60 minutes | Aggregates execution statistics for all pipelines |
-| `ExecutionCleanupBackgroundService` | `PipelineExecutionStuckCheckIntervalMinutes` (default 5 min) for the connection-aware stuck reaper (AB#4280); retention deletion of records older than `PipelineExecutionRetentionDays` still runs daily |
+| `ExecutionCleanupBackgroundService` | `PipelineExecutionStuckCheckIntervalMinutes` (default 5 min) for the connection-aware stuck reaper (AB#4280); retention deletion of records older than `PipelineExecutionRetentionDays` still runs daily. Retention **erases** documents (`DeleteOptions.Erase`, AB#4363) and includes archived tombstones — the engine default `DeleteStrategies.Archive` only set `rtState=Archived` and let the collection grow unbounded (1M+ docs per tenant) |
 
 ### Service Methods
 

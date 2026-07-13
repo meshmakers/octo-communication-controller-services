@@ -6,6 +6,7 @@ using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
+using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
@@ -1724,8 +1725,13 @@ internal class CommunicationRepository : ICommunicationRepository
 
         try
         {
+            // Executions are telemetry, not domain data: erase them for real instead of the
+            // default Archive strategy, which only sets rtState=Archived and leaves the
+            // documents in MongoDB forever (the collection grew to 1M+ docs per tenant).
+            // includeArchived drains the tombstones accumulated by earlier archive-only runs.
             var queryOptions = RtEntityQueryOptions.Create()
-                .FieldFilter(nameof(RtPipelineExecution.StartedAt), FieldFilterOperator.LessThan, olderThan);
+                .FieldFilter(nameof(RtPipelineExecution.StartedAt), FieldFilterOperator.LessThan, olderThan)
+                .Global(includeArchived: true);
 
             var totalDeleted = 0;
             while (true)
@@ -1748,7 +1754,8 @@ internal class CommunicationRepository : ICommunicationRepository
                     .ToList();
 
                 OperationResult operationResult = new();
-                await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+                await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, DeleteOptions.Erase,
+                    operationResult);
                 if (operationResult.HasErrors || operationResult.HasFatalErrors)
                 {
                     throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
