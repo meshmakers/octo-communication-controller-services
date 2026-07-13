@@ -5,6 +5,8 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.Runtime.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -357,6 +359,16 @@ internal class PipelineExecutionService(
             var from12Hours = now.AddHours(-12);
             var from1Hour = now.AddHours(-1);
 
+            // Sliding windows are computed from two disjoint sources (AB#4370): the hourly
+            // buckets (folded + pruned executions) and a live scan over the executions still
+            // retained (roughly the last retention hour plus anything non-terminal). The two
+            // never overlap because an execution is deleted in the same pass that folds it.
+            var existingStatistics =
+                await communicationRepository.GetPipelineStatisticsAsync(tenantId, pipelineRtEntityId);
+            var buckets = (existingStatistics?.HourlyBuckets ?? Enumerable.Empty<RtPipelineStatisticsHourBucketRecord>())
+                .Where(b => b.HourStartAt >= from30Days)
+                .ToList();
+
             // Accumulate statistics across batches to avoid loading all executions at once.
             // Using skip/take triggers the optimized MongoDB query path which applies $limit
             // inside $lookup, preventing the 16MB BSON document size limit from being exceeded.
@@ -413,11 +425,8 @@ internal class PipelineExecutionService(
                 skip += batchSize;
             }
 
-            if (totalLoaded == 0)
+            if (totalLoaded == 0 && buckets.Count == 0)
             {
-                // No executions in the last 30 days - check if statistics need updating
-                var existingStatistics = await communicationRepository.GetPipelineStatisticsAsync(tenantId, pipelineRtEntityId);
-
                 if (existingStatistics == null)
                 {
                     Logger.Debug("[{TenantId}] No executions and no existing statistics for pipeline '{PipelineRtEntityId}', skipping update",
@@ -432,32 +441,44 @@ internal class PipelineExecutionService(
                     return;
                 }
 
-                // Statistics have non-zero values but no executions remain (retention cleanup) - reset to zero
+                // Statistics have non-zero values but no executions/buckets remain - reset to zero
                 // Fall through to normal upsert with zero values
+            }
+
+            var bucket1Hour = PipelineStatisticsFolder.SumBuckets(buckets, from1Hour);
+            var bucket12Hours = PipelineStatisticsFolder.SumBuckets(buckets, from12Hours);
+            var bucket24Hours = PipelineStatisticsFolder.SumBuckets(buckets, from24Hours);
+            var bucket30Days = PipelineStatisticsFolder.SumBuckets(buckets, from30Days);
+
+            if (lastExecutionAt == null || existingStatistics?.LastExecutionAt > lastExecutionAt)
+            {
+                // Folded executions are gone from the live scan; never regress the marker.
+                lastExecutionAt = existingStatistics?.LastExecutionAt;
             }
 
             var statistics = new RtPipelineStatistics
             {
-                LastHourSuccessCount = lastHour.SuccessCount,
-                LastHourFailureCount = lastHour.FailureCount,
-                LastHourAvgDurationMs = (int)lastHour.AvgDurationMs,
-                Last12HoursSuccessCount = last12Hours.SuccessCount,
-                Last12HoursFailureCount = last12Hours.FailureCount,
-                Last12HoursAvgDurationMs = (int)last12Hours.AvgDurationMs,
-                Last24HoursSuccessCount = last24Hours.SuccessCount,
-                Last24HoursFailureCount = last24Hours.FailureCount,
-                Last24HoursAvgDurationMs = (int)last24Hours.AvgDurationMs,
-                Last30DaysSuccessCount = last30Days.SuccessCount,
-                Last30DaysFailureCount = last30Days.FailureCount,
-                Last30DaysAvgDurationMs = (int)last30Days.AvgDurationMs,
+                LastHourSuccessCount = lastHour.SuccessCount + bucket1Hour.SuccessCount,
+                LastHourFailureCount = lastHour.FailureCount + bucket1Hour.FailureCount,
+                LastHourAvgDurationMs = CombinedAvgDurationMs(lastHour, bucket1Hour),
+                Last12HoursSuccessCount = last12Hours.SuccessCount + bucket12Hours.SuccessCount,
+                Last12HoursFailureCount = last12Hours.FailureCount + bucket12Hours.FailureCount,
+                Last12HoursAvgDurationMs = CombinedAvgDurationMs(last12Hours, bucket12Hours),
+                Last24HoursSuccessCount = last24Hours.SuccessCount + bucket24Hours.SuccessCount,
+                Last24HoursFailureCount = last24Hours.FailureCount + bucket24Hours.FailureCount,
+                Last24HoursAvgDurationMs = CombinedAvgDurationMs(last24Hours, bucket24Hours),
+                Last30DaysSuccessCount = last30Days.SuccessCount + bucket30Days.SuccessCount,
+                Last30DaysFailureCount = last30Days.FailureCount + bucket30Days.FailureCount,
+                Last30DaysAvgDurationMs = CombinedAvgDurationMs(last30Days, bucket30Days),
                 LastUpdatedAt = now,
-                LastExecutionAt = lastExecutionAt
+                LastExecutionAt = lastExecutionAt,
+                HourlyBuckets = new AttributeRecordValueList<RtPipelineStatisticsHourBucketRecord>(buckets.Cast<RtRecord>().ToList())
             };
 
             await communicationRepository.UpsertPipelineStatisticsAsync(tenantId, statistics, pipelineRtEntityId);
 
-            Logger.Debug("[{TenantId}] Statistics updated for pipeline '{PipelineRtEntityId}' ({TotalExecutions} executions processed)",
-                tenantId, pipelineRtEntityId, totalLoaded);
+            Logger.Debug("[{TenantId}] Statistics updated for pipeline '{PipelineRtEntityId}' ({TotalExecutions} executions processed, {BucketCount} buckets)",
+                tenantId, pipelineRtEntityId, totalLoaded, buckets.Count);
         }
         catch (Exception e)
         {
@@ -465,6 +486,17 @@ internal class PipelineExecutionService(
                 tenantId, pipelineRtEntityId);
             throw PipelineExecutionServiceException.CommonFailedUpdateStatistics(tenantId, pipelineRtEntityId, e);
         }
+    }
+
+    private static int CombinedAvgDurationMs(StatisticsAccumulator live, PipelineStatisticsFolder.WindowTotals buckets)
+    {
+        var durationCount = live.ExecutionWithDurationCount + buckets.DurationCount;
+        if (durationCount == 0)
+        {
+            return 0;
+        }
+
+        return (int)((live.TotalDurationMs + buckets.TotalDurationMs) / durationCount);
     }
 
     private static void AccumulateExecution(StatisticsAccumulator accumulator, RtPipelineExecution exec)
@@ -543,6 +575,113 @@ internal class PipelineExecutionService(
             Logger.Error(e, "[{TenantId}] Failed to update all statistics", tenantId);
             throw;
         }
+    }
+
+    public async Task<int> FoldAndPruneExecutionsAsync(string tenantId, int retentionHours)
+    {
+        var olderThan = DateTime.UtcNow.AddHours(-Math.Max(1, retentionHours));
+        var totalPruned = 0;
+
+        try
+        {
+            var pipelines = await communicationRepository.GetAllPipelinesAsync(tenantId);
+
+            foreach (var pipeline in pipelines)
+            {
+                // Note: CkTypeId should never be null for a valid pipeline
+                var pipelineRtEntityId = new RtEntityId(pipeline.CkTypeId!, pipeline.RtId);
+
+                try
+                {
+                    totalPruned += await FoldAndPrunePipelineAsync(tenantId, pipelineRtEntityId, olderThan);
+
+                    // Refresh the sliding windows on every pass — also when nothing was folded,
+                    // so counters decay once a pipeline stops executing.
+                    await UpdateStatisticsAsync(tenantId, pipelineRtEntityId);
+                }
+                catch (Exception e)
+                {
+                    Logger.Warn(e, "[{TenantId}] Failed to fold executions for pipeline '{PipelineRtId}'",
+                        tenantId, pipeline.RtId);
+                }
+            }
+
+            if (totalPruned > 0)
+            {
+                Logger.Info("[{TenantId}] Folded and pruned {Count} executions into statistics buckets",
+                    tenantId, totalPruned);
+            }
+
+            return totalPruned;
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e, "[{TenantId}] Failed to fold and prune executions", tenantId);
+            throw PipelineExecutionServiceException.CommonFailedCleanupOldExecutions(tenantId, e);
+        }
+    }
+
+    private async Task<int> FoldAndPrunePipelineAsync(string tenantId, RtEntityId pipelineRtEntityId,
+        DateTime olderThan)
+    {
+        const int batchSize = 500;
+        var pruned = 0;
+
+        while (true)
+        {
+            var batch = await communicationRepository.GetTerminalExecutionsOlderThanAsync(
+                tenantId, pipelineRtEntityId, olderThan, batchSize);
+
+            if (batch.Count == 0)
+            {
+                break;
+            }
+
+            var deltas = PipelineStatisticsFolder.ToBucketDeltas(batch);
+
+            var existing = await communicationRepository.GetPipelineStatisticsAsync(tenantId, pipelineRtEntityId);
+            var merged = PipelineStatisticsFolder.MergeBuckets(existing?.HourlyBuckets, deltas,
+                DateTime.UtcNow.AddDays(-30));
+
+            var maxStartedAt = batch.Max(e => e.StartedAt);
+            var updated = new RtPipelineStatistics
+            {
+                // Carry the current window values — they are recomputed right after the drain,
+                // but the update must not zero them in between.
+                LastHourSuccessCount = existing?.LastHourSuccessCount ?? 0,
+                LastHourFailureCount = existing?.LastHourFailureCount ?? 0,
+                LastHourAvgDurationMs = existing?.LastHourAvgDurationMs ?? 0,
+                Last12HoursSuccessCount = existing?.Last12HoursSuccessCount ?? 0,
+                Last12HoursFailureCount = existing?.Last12HoursFailureCount ?? 0,
+                Last12HoursAvgDurationMs = existing?.Last12HoursAvgDurationMs ?? 0,
+                Last24HoursSuccessCount = existing?.Last24HoursSuccessCount ?? 0,
+                Last24HoursFailureCount = existing?.Last24HoursFailureCount ?? 0,
+                Last24HoursAvgDurationMs = existing?.Last24HoursAvgDurationMs ?? 0,
+                Last30DaysSuccessCount = existing?.Last30DaysSuccessCount ?? 0,
+                Last30DaysFailureCount = existing?.Last30DaysFailureCount ?? 0,
+                Last30DaysAvgDurationMs = existing?.Last30DaysAvgDurationMs ?? 0,
+                LastUpdatedAt = existing?.LastUpdatedAt,
+                LastExecutionAt = existing?.LastExecutionAt > maxStartedAt
+                    ? existing.LastExecutionAt
+                    : maxStartedAt,
+                HourlyBuckets = new AttributeRecordValueList<RtPipelineStatisticsHourBucketRecord>(merged.Cast<RtRecord>().ToList())
+            };
+
+            // Fold-then-delete: persist the buckets BEFORE erasing the batch. A crash between
+            // the two double-counts at most one batch on the next run instead of losing it.
+            await communicationRepository.UpsertPipelineStatisticsAsync(tenantId, updated, pipelineRtEntityId);
+            await communicationRepository.DeleteExecutionsAsync(tenantId,
+                batch.Select(e => e.ToRtEntityId()).ToList());
+
+            pruned += batch.Count;
+
+            if (batch.Count < batchSize)
+            {
+                break;
+            }
+        }
+
+        return pruned;
     }
 
     public async Task<int> CleanupOldExecutionsAsync(string tenantId, int retentionDays)

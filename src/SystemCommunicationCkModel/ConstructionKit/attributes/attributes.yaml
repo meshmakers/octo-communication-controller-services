@@ -165,6 +165,37 @@ attributes:
   valueType: DateTime
   description: Timestamp of the most recent execution
 
+# Pipeline Statistics hourly-bucket attributes (AB#4370). Executions are folded
+# into per-hour buckets before their entities are pruned; the buckets are the
+# durable source for the sliding-window counters.
+- id: HourStartAt
+  valueType: DateTime
+  description: Start of the hour this bucket covers (UTC, minute/second zeroed)
+- id: SuccessCount
+  valueType: Int
+  description: Successful executions folded into this bucket
+  defaultValues:
+    - 0
+- id: FailureCount
+  valueType: Int
+  description: Failed executions folded into this bucket
+  defaultValues:
+    - 0
+- id: TotalDurationMs
+  valueType: Int64
+  description: Sum of execution durations folded into this bucket (ms)
+  defaultValues:
+    - 0
+- id: DurationCount
+  valueType: Int
+  description: Number of folded executions that carried a duration
+  defaultValues:
+    - 0
+- id: HourlyBuckets
+  valueType: RecordArray
+  valueCkRecordId: ${this}/PipelineStatisticsHourBucket
+  description: Per-hour aggregation buckets (rolling 30 days). Written by the execution fold; the window counters are derived from these plus the still-retained recent executions.
+
 # Adapter offline sync attribute
 - id: LastSyncedSequenceNumber
   valueType: Int

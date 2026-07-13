@@ -36,10 +36,11 @@ internal class ExecutionCleanupBackgroundService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         Logger.Info(
-            "Execution cleanup background service starting with retention period of {RetentionDays} days, " +
-            "stuck grace period of {GraceMinutes} minutes and stuck-check interval of {IntervalMinutes} minutes",
-            _options.PipelineExecutionRetentionDays, _options.PipelineExecutionStuckGraceMinutes,
-            _options.PipelineExecutionStuckCheckIntervalMinutes);
+            "Execution cleanup background service starting with fold retention of {RetentionHours} hours, " +
+            "orphan retention of {RetentionDays} days, stuck grace period of {GraceMinutes} minutes and " +
+            "stuck-check interval of {IntervalMinutes} minutes",
+            _options.PipelineExecutionRetentionHours, _options.PipelineExecutionRetentionDays,
+            _options.PipelineExecutionStuckGraceMinutes, _options.PipelineExecutionStuckCheckIntervalMinutes);
 
         var stuckCheckInterval = TimeSpan.FromMinutes(Math.Max(1, _options.PipelineExecutionStuckCheckIntervalMinutes));
         // Force a retention sweep on the first loop iteration.
@@ -64,7 +65,20 @@ internal class ExecutionCleanupBackgroundService : BackgroundService
                     Logger.Error(ex, "Error failing stuck executions");
                 }
 
-                // Retention deletion is comparatively expensive and only needs to run daily.
+                // Fold terminal executions older than the retention window into the hourly
+                // statistics buckets, delete them, and refresh the sliding-window counters
+                // (AB#4370). Runs every iteration — the fold is incremental and cheap.
+                try
+                {
+                    await FoldAndPruneExecutionsForAllTenantsAsync();
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, "Error folding executions into statistics");
+                }
+
+                // The daily sweep remains as a safety net for orphaned executions whose pipeline
+                // no longer exists — those are never reached by the per-pipeline fold.
                 if (DateTime.UtcNow - lastRetentionRun >= RetentionInterval)
                 {
                     try
@@ -119,6 +133,35 @@ internal class ExecutionCleanupBackgroundService : BackgroundService
         {
             Logger.Info("Stuck-execution reaper failed {TotalFailed} orphaned executions across {TenantCount} tenants",
                 totalFailed, tenantIds.Count);
+        }
+    }
+
+    private async Task FoldAndPruneExecutionsForAllTenantsAsync()
+    {
+        var tenantIds = _adapterCache.GetEnabledTenantIds();
+        var totalPruned = 0;
+
+        foreach (var tenantId in tenantIds)
+        {
+            try
+            {
+                totalPruned += await _pipelineExecutionService.FoldAndPruneExecutionsAsync(
+                    tenantId, _options.PipelineExecutionRetentionHours);
+            }
+            catch (PipelineExecutionServiceException ex)
+            {
+                Logger.Warn(ex, "Failed to fold executions for tenant '{TenantId}'", tenantId);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Unexpected error folding executions for tenant '{TenantId}'", tenantId);
+            }
+        }
+
+        if (totalPruned > 0)
+        {
+            Logger.Info("Execution fold pruned {TotalPruned} executions across {TenantCount} tenants",
+                totalPruned, tenantIds.Count);
         }
     }
 

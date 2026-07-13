@@ -96,8 +96,9 @@ try
     builder.Services.AddSingleton<IOperatorConnectionManager, OperatorConnectionManager>();
     builder.Services.AddSingleton<IAdapterHubCallbacks, AdapterHubCallbacks>();
 
-    // Add background services for pipeline execution metrics
-    builder.Services.AddHostedService<PipelineStatisticsBackgroundService>();
+    // Add background service for pipeline execution metrics. Statistics folding runs inside
+    // ExecutionCleanupBackgroundService since AB#4370 (fold-then-prune), so no separate
+    // statistics service is registered any more.
     builder.Services.AddHostedService<ExecutionCleanupBackgroundService>();
 
     // Add execution report background processor - decouples heavy DB writes from SignalR hub

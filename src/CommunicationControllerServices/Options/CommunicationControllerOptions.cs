@@ -73,12 +73,24 @@ public class CommunicationControllerOptions
     public LogLevelDto MinLogLevel { get; set; }
 
     /// <summary>
-    /// Gets or sets the number of days to retain pipeline execution records
+    /// Gets or sets the number of days after which execution records are deleted unconditionally.
+    /// Safety net behind the hourly fold (see PipelineExecutionRetentionHours): catches orphaned
+    /// executions whose pipeline no longer exists and which therefore never get folded.
     /// </summary>
     public int PipelineExecutionRetentionDays { get; set; } = 3;
 
     /// <summary>
-    /// Gets or sets the interval in minutes for updating pipeline statistics
+    /// Gets or sets the number of hours a terminal pipeline execution is retained before it is
+    /// folded into the hourly statistics buckets and physically deleted (AB#4370). Executions are
+    /// telemetry — RtPipelineStatistics is the durable record. Running executions are never
+    /// touched regardless of age.
+    /// </summary>
+    public int PipelineExecutionRetentionHours { get; set; } = 1;
+
+    /// <summary>
+    /// Gets or sets the interval in minutes for updating pipeline statistics.
+    /// Unused since AB#4370: statistics are refreshed by the execution fold in
+    /// ExecutionCleanupBackgroundService on the stuck-check cadence.
     /// </summary>
     public int StatisticsUpdateIntervalMinutes { get; set; } = 60;
 

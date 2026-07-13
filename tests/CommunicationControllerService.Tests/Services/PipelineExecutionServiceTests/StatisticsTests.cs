@@ -163,6 +163,7 @@ internal class StatisticsTests : PipelineExecutionServiceTestsBase
     {
         // Arrange
         var rtPipeline = RtEntityCreator.CreatePipeline();
+        var lastExecutionAt = DateTime.UtcNow.AddDays(-5);
 
         CommunicationRepository.GetPipelineExecutionsAsync(
             TenantId, rtPipeline.ToRtEntityId(), Arg.Any<DateTime>(), Arg.Any<DateTime>(),
@@ -172,7 +173,7 @@ internal class StatisticsTests : PipelineExecutionServiceTestsBase
         CommunicationRepository.GetPipelineStatisticsAsync(TenantId, rtPipeline.ToRtEntityId())
             .Returns(new RtPipelineStatistics
             {
-                LastExecutionAt = DateTime.UtcNow.AddDays(-5),
+                LastExecutionAt = lastExecutionAt,
                 LastHourSuccessCount = 0,
                 LastHourFailureCount = 0,
                 Last12HoursSuccessCount = 0,
@@ -186,11 +187,13 @@ internal class StatisticsTests : PipelineExecutionServiceTestsBase
         // Act
         await PipelineExecutionService.UpdateStatisticsAsync(TenantId, rtPipeline.ToRtEntityId());
 
-        // Assert - upsert SHOULD be called to reset stats to zero
+        // Assert - upsert SHOULD be called to reset counters to zero. LastExecutionAt is
+        // preserved (AB#4370): executions are folded away by design, so their disappearance
+        // must never regress the marker of the most recent run.
         await CommunicationRepository.Received(1).UpsertPipelineStatisticsAsync(
             TenantId,
             Arg.Is<RtPipelineStatistics>(s =>
-                s.LastExecutionAt == null &&
+                s.LastExecutionAt == lastExecutionAt &&
                 s.LastHourSuccessCount == 0 &&
                 s.LastHourFailureCount == 0 &&
                 s.Last12HoursSuccessCount == 0 &&

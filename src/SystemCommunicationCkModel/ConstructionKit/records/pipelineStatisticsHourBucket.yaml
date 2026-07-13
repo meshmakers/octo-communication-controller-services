@@ -1,0 +1,17 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+records:
+  - recordId: PipelineStatisticsHourBucket
+    description: One hour of folded pipeline-execution aggregates (AB#4370). Executions older than the retention window are folded into these buckets and then physically deleted; sliding-window statistics are recomputed from the buckets plus the still-retained recent executions.
+    isFinal: true
+    isAbstract: false
+    attributes:
+      - id: ${this}/HourStartAt
+        name: HourStartAt
+      - id: ${this}/SuccessCount
+        name: SuccessCount
+      - id: ${this}/FailureCount
+        name: FailureCount
+      - id: ${this}/TotalDurationMs
+        name: TotalDurationMs
+      - id: ${this}/DurationCount
+        name: DurationCount

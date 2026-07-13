@@ -77,7 +77,18 @@ public interface IPipelineExecutionService
     Task UpdateAllStatisticsAsync(string tenantId);
 
     /// <summary>
-    /// Cleans up old executions based on retention policy
+    /// Folds terminal executions older than the retention window into the hourly statistics
+    /// buckets, physically deletes them, and refreshes the sliding-window counters for every
+    /// pipeline of the tenant (AB#4370). Running executions are never touched.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="retentionHours">Number of hours a terminal execution is retained</param>
+    /// <returns>Number of folded and deleted executions</returns>
+    Task<int> FoldAndPruneExecutionsAsync(string tenantId, int retentionHours);
+
+    /// <summary>
+    /// Cleans up old executions based on retention policy. Safety net behind the fold: catches
+    /// orphaned executions whose pipeline no longer exists (they are erased without folding).
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="retentionDays">Number of days to retain executions</param>

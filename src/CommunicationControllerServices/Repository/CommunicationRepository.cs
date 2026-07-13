@@ -1625,6 +1625,86 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
+    public async Task<IReadOnlyList<RtPipelineExecution>> GetTerminalExecutionsOlderThanAsync(string tenantId,
+        RtEntityId pipelineRtEntityId, DateTime olderThan, int take)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            // Oldest first so repeated drain batches make monotonic progress. Running executions
+            // are excluded — they are folded/pruned only after they reach a terminal state.
+            var queryOptions = RtEntityQueryOptions.Create()
+                .SortOrder(nameof(RtPipelineExecution.StartedAt), SortOrders.Ascending)
+                .FieldFilter(nameof(RtPipelineExecution.StartedAt), FieldFilterOperator.LessThan, olderThan)
+                .FieldFilter(nameof(RtPipelineExecution.Status), FieldFilterOperator.NotEquals,
+                    (int)RtPipelineExecutionStatusEnum.Running);
+
+            var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPipeline, RtPipelineExecution>(
+                session,
+                [pipelineRtEntityId.RtId],
+                SystemCommunicationCkIds.RtCkExecutedPipelineRoleId,
+                GraphDirections.Inbound,
+                null,
+                queryOptions,
+                skip: 0,
+                take: take);
+
+            if (resultSet.Any())
+            {
+                return resultSet.First().Value.Items.ToList();
+            }
+
+            return [];
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGetPipelineExecutions(tenantId, pipelineRtEntityId, e);
+        }
+    }
+
+    public async Task<int> DeleteExecutionsAsync(string tenantId, IReadOnlyList<RtEntityId> executionRtEntityIds)
+    {
+        if (executionRtEntityIds.Count == 0)
+        {
+            return 0;
+        }
+
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        try
+        {
+            using var session = await tenantRepository.GetSessionAsync();
+            session.StartTransaction();
+
+            // Executions are telemetry: erase for real (same rationale as DeleteOldExecutionsAsync,
+            // AB#4363) — the default Archive strategy would leave tombstones in MongoDB forever.
+            var entityUpdateInfoList = executionRtEntityIds
+                .Select(EntityUpdateInfo<RtPipelineExecution>.CreateDelete)
+                .ToList();
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, DeleteOptions.Erase,
+                operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+            return executionRtEntityIds.Count;
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedDeleteOldExecutions(tenantId, DateTime.MinValue, e);
+        }
+    }
+
     public async Task<IReadOnlyList<RtPipelineExecution>> GetRunningExecutionsForAdapterAsync(string tenantId,
         RtEntityId adapterRtEntityId)
     {

@@ -442,7 +442,8 @@ Configuration is bound to strongly-typed options classes:
 **Pipeline Execution Configuration Options:**
 ```csharp
 // CommunicationControllerOptions
-public int PipelineExecutionRetentionDays { get; set; } = 3;     // Days to keep execution records
+public int PipelineExecutionRetentionDays { get; set; } = 3;     // Orphan hard-cap: unconditional delete (executions whose pipeline is gone)
+public int PipelineExecutionRetentionHours { get; set; } = 1;    // AB#4370: hours before terminal executions are folded into buckets + erased
 public int StatisticsUpdateIntervalMinutes { get; set; } = 60;   // Statistics aggregation interval
 public bool StoreInputData { get; set; } = false;                // Whether to store pipeline input data
 public int MaxInputDataLength { get; set; } = 10000;             // Max length of stored input data
@@ -1166,13 +1167,41 @@ Integration coverage lives in
 `tests/CommunicationControllerServices.IntegrationTests/Repository/FailStuckAndOrphanedExecutionsTests.cs`
 (connection-aware sparing of live long-runners; adapter-scoped pre-start orphan resolution).
 
+### Hourly Statistics Buckets + Execution Fold (AB#4370)
+
+Per-execution entities do not scale for high-frequency event pipelines (a Loxone
+state-change pipeline produced ~300k executions/day; the 3-day retention window held
+~700k documents and 1.4M association edges, saturating MongoDB and timing out the Studio
+data-flow page). Executions are telemetry — `RtPipelineStatistics` is the durable record:
+
+- `PipelineStatistics.HourlyBuckets` (CK model 3.25.0, record
+  `PipelineStatisticsHourBucket`: HourStartAt, SuccessCount, FailureCount,
+  TotalDurationMs (Int64), DurationCount) carries per-hour aggregates for a rolling
+  30 days. Buckets are keyed by the UTC hour the execution STARTED in.
+- **Fold-then-prune** (`PipelineExecutionService.FoldAndPruneExecutionsAsync`): every
+  cleanup iteration drains terminal executions older than
+  `PipelineExecutionRetentionHours` per pipeline in 500er batches — fold the batch into
+  the buckets, persist the statistics entity, THEN erase exactly those executions
+  (`DeleteExecutionsAsync`, `DeleteOptions.Erase`). Fold set == delete set, so nothing is
+  double-counted or lost; a crash between upsert and delete double-counts at most one
+  batch. Running executions are never drained regardless of age (protects long-running
+  ETL pipelines — same contract as the AB#4280 reaper).
+- **Window recompute** (`UpdateStatisticsAsync`): sliding windows (1h/12h/24h/30d) =
+  bucket sums (`PipelineStatisticsFolder.SumBuckets`) + a live scan over the still-retained
+  executions. The two sources are disjoint by construction. Buckets older than 30 days are
+  pruned on write (rebuild + reassign the record list — never mutate an
+  `AttributeValueList` in place, it materializes per read). `LastExecutionAt` never
+  regresses when executions are folded away.
+- Pure fold/merge/window rules live in `PipelineStatisticsFolder` (unit-tested); the
+  MongoDB round-trip of the bucket record array is pinned by
+  `FoldAndPruneRepositoryTests`.
+
 ### Background Services
 
 | Service | Interval | Description |
 |---------|----------|-------------|
 | `PipelineExecutionReportProcessor` | Continuous | Drains execution reports from Channel in batches, bulk-inserts starts and bulk-updates completions |
-| `PipelineStatisticsBackgroundService` | 60 minutes | Aggregates execution statistics for all pipelines |
-| `ExecutionCleanupBackgroundService` | `PipelineExecutionStuckCheckIntervalMinutes` (default 5 min) for the connection-aware stuck reaper (AB#4280); retention deletion of records older than `PipelineExecutionRetentionDays` still runs daily. Retention **erases** documents (`DeleteOptions.Erase`, AB#4363) and includes archived tombstones — the engine default `DeleteStrategies.Archive` only set `rtState=Archived` and let the collection grow unbounded (1M+ docs per tenant) |
+| `ExecutionCleanupBackgroundService` | `PipelineExecutionStuckCheckIntervalMinutes` (default 5 min) | Per iteration: (1) connection-aware stuck reaper (AB#4280); (2) **execution fold** (AB#4370) — terminal executions older than `PipelineExecutionRetentionHours` (default 1h) are folded into the hourly buckets on `RtPipelineStatistics` and then **erased**, and the sliding-window counters are refreshed for every pipeline; (3) daily orphan sweep erasing executions older than `PipelineExecutionRetentionDays` unconditionally (safety net for executions whose pipeline no longer exists). All deletes use `DeleteOptions.Erase` (AB#4363) — the engine default `DeleteStrategies.Archive` only set `rtState=Archived` and let the collection grow unbounded (1M+ docs per tenant). The former hourly `PipelineStatisticsBackgroundService` was removed — folding owns statistics freshness. |
 
 ### Service Methods
 

@@ -39,6 +39,10 @@ types:
     - id: ${this}/LastExecutionAt
       name: LastExecutionAt
       isOptional: true
+    # Hourly aggregation buckets (AB#4370) — durable fold target for pruned executions
+    - id: ${this}/HourlyBuckets
+      name: HourlyBuckets
+      isOptional: true
   associations:
     - id: ${this}/StatisticsForPipeline
       targetCkTypeId: ${this}/Pipeline

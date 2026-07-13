@@ -415,6 +415,26 @@ public interface ICommunicationRepository
     Task<IReadOnlyList<string>> GetInterruptedExecutionIdsAsync(string tenantId, RtEntityId adapterRtEntityId);
 
     /// <summary>
+    /// Gets terminal (non-Running) executions of a pipeline that started before the given cutoff,
+    /// oldest first. Used by the statistics fold (AB#4370) to drain executions in batches.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="pipelineRtEntityId">Pipeline identifier</param>
+    /// <param name="olderThan">Only executions started before this time</param>
+    /// <param name="take">Maximum batch size</param>
+    /// <returns>Batch of terminal executions, oldest first</returns>
+    Task<IReadOnlyList<RtPipelineExecution>> GetTerminalExecutionsOlderThanAsync(string tenantId,
+        RtEntityId pipelineRtEntityId, DateTime olderThan, int take);
+
+    /// <summary>
+    /// Physically erases the given execution entities (and their association edges).
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="executionRtEntityIds">Executions to erase</param>
+    /// <returns>Number of deleted executions</returns>
+    Task<int> DeleteExecutionsAsync(string tenantId, IReadOnlyList<RtEntityId> executionRtEntityIds);
+
+    /// <summary>
     /// Deletes executions older than the specified date
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
