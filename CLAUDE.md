@@ -675,6 +675,27 @@ entity, leaving a stray release on the wrong cluster while the Studio
 showed `DeploymentState=Deployed`. The routing fix scopes workload
 events to the one operator that actually owns the target pool.
 
+**Pending workload notifications (AB#4371).** When `GetConnectionsForPool`
+returns no owner, the workload deploy/undeploy notification is **queued**,
+not dropped. Dropping it caused the prod-1 incident where an undeploy fired
+while the pool was transiently orphaned (the operator's `RegisterPoolAsync`
+had been rejected during a parallel-startup CkCache race and the operator
+never retried — fixed operator-side by its registration retry loop): the
+helm release kept running forever while the entity said Undeployed.
+`OperatorConnectionManager` keeps a per-`(tenant, poolRtId)` map, last-wins
+per workload rtId — an undeploy queued after a deploy of the same workload
+supersedes it (and vice versa), so a stale deploy can never resurrect a
+release. `OperatorHub.RegisterPoolAsync` calls
+`FlushPendingWorkloadNotificationsAsync` right after the pool's state write
+succeeds; a replay whose send fails is re-queued for the pool's next
+registration. The queue is in-memory like the rest of the tracking maps —
+a controller restart clears it, and the operator reverse-sync plus the next
+user-triggered deploy/undeploy re-establish state. Note the tracking maps
+(`_deployedWorkloadsByTenant` etc.) are updated before routing, so the
+tenant-delete cascade sees consistent state whether or not the notification
+was queued. Tests: `Hubs/OperatorConnectionManagerTests` (pending-queue
+section).
+
 **Operator-mode enforcement at registration.** `IOperatorHub.RegisterOperatorAsync(bool? autoManagePools)`
 carries the calling operator's mode (true = central / Cloud-only,
 false = edge / Edge-only, null = legacy build pre-dating the

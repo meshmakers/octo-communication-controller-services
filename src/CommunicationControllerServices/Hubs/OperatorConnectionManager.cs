@@ -42,6 +42,21 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
     // NotifyWorkloadUndeployedAsync.
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, WorkloadUndeployedDto>> _deployedWorkloadsByTenant = new();
 
+    // Workload deploy/undeploy notifications that could not be routed because
+    // no operator connection owned the target pool at notify time (AB#4371 —
+    // e.g. the operator's pool registration was rejected transiently and the
+    // pool stayed orphaned until a later retry/reconnect). Keyed by
+    // (tenant, poolRtId); the inner map is last-wins per workload rtId so an
+    // undeploy supersedes a queued deploy of the same workload and vice
+    // versa. Values are either WorkloadDeployedDto or WorkloadUndeployedDto.
+    // Replayed by FlushPendingWorkloadNotificationsAsync when an operator
+    // registers the pool. In-memory by design, like the rest of the tracking
+    // here: a controller restart clears the queue and the operator-side
+    // reverse-sync plus the next user-triggered deploy/undeploy re-establish
+    // state.
+    private readonly ConcurrentDictionary<(string TenantId, string PoolRtId), ConcurrentDictionary<string, object>>
+        _pendingWorkloadNotificationsByPool = new();
+
     public void AddOperator(string connectionId)
     {
         _connectedOperators.TryAdd(connectionId, true);
@@ -267,8 +282,13 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
         var targetConnections = GetConnectionsForPool(workload.TenantId, workload.PoolRtId);
         if (targetConnections.Count == 0)
         {
+            // Don't drop the event — the pool may be orphaned only
+            // transiently (AB#4371). Queue it for replay when an operator
+            // registers the pool.
+            QueuePendingWorkloadNotification(workload.TenantId, workload.PoolRtId,
+                workload.WorkloadRtId, workload);
             Logger.Warn(
-                "No operator currently owns pool rtId {PoolRtId} for tenant '{TenantId}'; skipping workload-deployed notification for '{WorkloadName}'",
+                "No operator currently owns pool rtId {PoolRtId} for tenant '{TenantId}'; queueing workload-deployed notification for '{WorkloadName}' until the pool is registered",
                 workload.PoolRtId, workload.TenantId, workload.WorkloadName);
             return;
         }
@@ -337,8 +357,14 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
         var targetConnections = GetConnectionsForPool(workload.TenantId, workload.PoolRtId);
         if (targetConnections.Count == 0)
         {
+            // Don't drop the event (AB#4371) — a dropped undeploy leaves the
+            // helm release running forever while the entity says Undeployed.
+            // Queue it; last-wins per workload rtId also cancels out a queued
+            // deploy for the same workload.
+            QueuePendingWorkloadNotification(workload.TenantId, workload.PoolRtId,
+                workload.WorkloadRtId, workload);
             Logger.Warn(
-                "No operator currently owns pool rtId {PoolRtId} for tenant '{TenantId}'; skipping workload-undeployed notification for '{WorkloadName}'",
+                "No operator currently owns pool rtId {PoolRtId} for tenant '{TenantId}'; queueing workload-undeployed notification for '{WorkloadName}' until the pool is registered",
                 workload.PoolRtId, workload.TenantId, workload.WorkloadName);
             return;
         }
@@ -362,5 +388,48 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
                     connectionId, workload.TenantId, workload.PoolRtId, workload.WorkloadName);
             }
         }
+    }
+
+    public async Task FlushPendingWorkloadNotificationsAsync(string connectionId, string tenantId, string poolRtId)
+    {
+        if (!_pendingWorkloadNotificationsByPool.TryRemove((tenantId, poolRtId), out var pending)
+            || pending.IsEmpty)
+        {
+            return;
+        }
+
+        Logger.Info(
+            "Replaying {Count} queued workload notification(s) for pool rtId {PoolRtId} (tenant '{TenantId}') to operator {ConnectionId}",
+            pending.Count, poolRtId, tenantId, connectionId);
+
+        foreach (var (workloadRtId, notification) in pending)
+        {
+            var methodName = notification is WorkloadDeployedDto
+                ? nameof(IOperatorHubCallbacks.WorkloadDeployedAsync)
+                : nameof(IOperatorHubCallbacks.WorkloadUndeployedAsync);
+            try
+            {
+                await hubContext.Clients.Client(connectionId)
+                    .SendAsync(methodName, notification);
+            }
+            catch (Exception ex)
+            {
+                // Put it back so the next registration of this pool retries
+                // the replay — dropping it here would reintroduce the very
+                // bug this queue exists to fix.
+                QueuePendingWorkloadNotification(tenantId, poolRtId, workloadRtId, notification);
+                Logger.Warn(ex,
+                    "Failed to replay queued workload notification for workload rtId {WorkloadRtId} (tenant '{TenantId}', pool rtId {PoolRtId}); re-queued",
+                    workloadRtId, tenantId, poolRtId);
+            }
+        }
+    }
+
+    private void QueuePendingWorkloadNotification(string tenantId, string poolRtId,
+        string workloadRtId, object notification)
+    {
+        var pending = _pendingWorkloadNotificationsByPool.GetOrAdd((tenantId, poolRtId),
+            _ => new ConcurrentDictionary<string, object>());
+        pending[workloadRtId] = notification;
     }
 }

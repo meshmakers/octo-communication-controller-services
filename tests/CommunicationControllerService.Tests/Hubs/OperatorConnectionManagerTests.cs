@@ -387,4 +387,149 @@ internal class OperatorConnectionManagerTests
 
         await Assert.That(sut.GetOperatorMode("conn-1")).IsNull();
     }
+
+    // ---- Pending workload notifications (AB#4371) ----
+
+    private static WorkloadUndeployedDto WorkloadUndeploy(string tenantId, string poolRtId,
+        string workloadRtId, string workloadName) =>
+        new()
+        {
+            TenantId = tenantId,
+            PoolRtId = poolRtId,
+            WorkloadRtId = workloadRtId,
+            WorkloadName = workloadName,
+            WorkloadType = WorkloadTypeDto.Adapter,
+        };
+
+    [Test]
+    public async Task NotifyWorkloadUndeployedAsync_NoOwner_IsReplayedWhenThePoolRegisters()
+    {
+        // The prod-1 incident (AB#4371): undeploy fired while the pool was
+        // orphaned used to be dropped, leaving the helm release running
+        // forever. It must be queued and replayed on pool registration.
+        var (sut, _, centralProxy, _) = CreateRoutingSut();
+        sut.AddOperator(ConnCentral);
+
+        await sut.NotifyWorkloadUndeployedAsync(
+            WorkloadUndeploy(TenantA, CloudPoolRtId, WorkloadRtId1, "mesh-adapter"));
+        await centralProxy.DidNotReceiveWithAnyArgs().SendCoreAsync(default!, default!, default);
+
+        sut.RegisterPoolForConnection(ConnCentral, TenantA, CloudPoolRtId);
+        await sut.FlushPendingWorkloadNotificationsAsync(ConnCentral, TenantA, CloudPoolRtId);
+
+        await centralProxy.Received(1).SendCoreAsync(
+            nameof(IOperatorHubCallbacks.WorkloadUndeployedAsync),
+            Arg.Is<object?[]>(args =>
+                args.Length == 1
+                && ((WorkloadUndeployedDto)args[0]!).WorkloadRtId == WorkloadRtId1),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task NotifyWorkloadDeployedAsync_NoOwner_IsReplayedWhenThePoolRegisters()
+    {
+        var (sut, _, centralProxy, _) = CreateRoutingSut();
+        sut.AddOperator(ConnCentral);
+
+        await sut.NotifyWorkloadDeployedAsync(
+            WorkloadDeploy(TenantA, CloudPoolRtId, WorkloadRtId1, "mesh-adapter"));
+
+        await sut.FlushPendingWorkloadNotificationsAsync(ConnCentral, TenantA, CloudPoolRtId);
+
+        await centralProxy.Received(1).SendCoreAsync(
+            nameof(IOperatorHubCallbacks.WorkloadDeployedAsync),
+            Arg.Is<object?[]>(args =>
+                args.Length == 1
+                && ((WorkloadDeployedDto)args[0]!).WorkloadRtId == WorkloadRtId1),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task PendingNotifications_UndeploySupersedesQueuedDeployOfSameWorkload()
+    {
+        // Deploy then undeploy while orphaned: only the undeploy may be
+        // replayed — replaying the stale deploy after the undeploy would
+        // resurrect the helm release.
+        var (sut, _, centralProxy, _) = CreateRoutingSut();
+        sut.AddOperator(ConnCentral);
+
+        await sut.NotifyWorkloadDeployedAsync(
+            WorkloadDeploy(TenantA, CloudPoolRtId, WorkloadRtId1, "mesh-adapter"));
+        await sut.NotifyWorkloadUndeployedAsync(
+            WorkloadUndeploy(TenantA, CloudPoolRtId, WorkloadRtId1, "mesh-adapter"));
+
+        await sut.FlushPendingWorkloadNotificationsAsync(ConnCentral, TenantA, CloudPoolRtId);
+
+        await centralProxy.Received(1).SendCoreAsync(
+            nameof(IOperatorHubCallbacks.WorkloadUndeployedAsync),
+            Arg.Any<object?[]>(),
+            Arg.Any<CancellationToken>());
+        await centralProxy.DidNotReceive().SendCoreAsync(
+            nameof(IOperatorHubCallbacks.WorkloadDeployedAsync),
+            Arg.Any<object?[]>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task FlushPendingWorkloadNotificationsAsync_NothingPending_NoOp()
+    {
+        var (sut, _, centralProxy, _) = CreateRoutingSut();
+        sut.AddOperator(ConnCentral);
+
+        await sut.FlushPendingWorkloadNotificationsAsync(ConnCentral, TenantA, CloudPoolRtId);
+
+        await centralProxy.DidNotReceiveWithAnyArgs().SendCoreAsync(default!, default!, default);
+    }
+
+    [Test]
+    public async Task FlushPendingWorkloadNotificationsAsync_SecondFlush_DoesNotReplayTwice()
+    {
+        var (sut, _, centralProxy, _) = CreateRoutingSut();
+        sut.AddOperator(ConnCentral);
+        await sut.NotifyWorkloadUndeployedAsync(
+            WorkloadUndeploy(TenantA, CloudPoolRtId, WorkloadRtId1, "mesh-adapter"));
+
+        await sut.FlushPendingWorkloadNotificationsAsync(ConnCentral, TenantA, CloudPoolRtId);
+        await sut.FlushPendingWorkloadNotificationsAsync(ConnCentral, TenantA, CloudPoolRtId);
+
+        await centralProxy.Received(1).SendCoreAsync(
+            nameof(IOperatorHubCallbacks.WorkloadUndeployedAsync),
+            Arg.Any<object?[]>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task PendingNotifications_ScopedToPool_FlushOfOtherPoolSendsNothing()
+    {
+        var (sut, _, centralProxy, _) = CreateRoutingSut();
+        sut.AddOperator(ConnCentral);
+        await sut.NotifyWorkloadUndeployedAsync(
+            WorkloadUndeploy(TenantA, CloudPoolRtId, WorkloadRtId1, "mesh-adapter"));
+
+        await sut.FlushPendingWorkloadNotificationsAsync(ConnCentral, TenantA, EdgePoolRtId);
+
+        await centralProxy.DidNotReceiveWithAnyArgs().SendCoreAsync(default!, default!, default);
+    }
+
+    [Test]
+    public async Task FlushPendingWorkloadNotificationsAsync_SendFails_NotificationIsRequeued()
+    {
+        var (sut, _, centralProxy, _) = CreateRoutingSut();
+        sut.AddOperator(ConnCentral);
+        await sut.NotifyWorkloadUndeployedAsync(
+            WorkloadUndeploy(TenantA, CloudPoolRtId, WorkloadRtId1, "mesh-adapter"));
+
+        centralProxy.SendCoreAsync(default!, default!, default)
+            .ReturnsForAnyArgs(
+                _ => Task.FromException(new InvalidOperationException("connection gone")),
+                _ => Task.CompletedTask);
+
+        await sut.FlushPendingWorkloadNotificationsAsync(ConnCentral, TenantA, CloudPoolRtId);
+        await sut.FlushPendingWorkloadNotificationsAsync(ConnCentral, TenantA, CloudPoolRtId);
+
+        await centralProxy.Received(2).SendCoreAsync(
+            nameof(IOperatorHubCallbacks.WorkloadUndeployedAsync),
+            Arg.Any<object?[]>(),
+            Arg.Any<CancellationToken>());
+    }
 }

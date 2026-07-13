@@ -108,6 +108,17 @@ public interface IOperatorConnectionManager
     Task NotifyWorkloadUndeployedAsync(WorkloadUndeployedDto workload);
 
     /// <summary>
+    /// Replays workload deploy/undeploy notifications that were queued
+    /// because no operator connection owned the target pool at notify time
+    /// (AB#4371 — e.g. the operator's pool registration failed transiently
+    /// and it re-registered later). Called by <c>OperatorHub.RegisterPoolAsync</c>
+    /// right after the (connection, tenant, poolRtId) tuple is registered.
+    /// No-op when nothing is pending. A replay that fails to send is
+    /// re-queued so the next registration of the pool retries it.
+    /// </summary>
+    Task FlushPendingWorkloadNotificationsAsync(string connectionId, string tenantId, string poolRtId);
+
+    /// <summary>
     /// Server→client fanout of the tenant pre-update signal. Operators use
     /// this to let in-flight work settle before the CK-cache is unloaded.
     /// Replaces the legacy <c>IPoolHubCallbacks.PreUpdateTenantAsync</c>

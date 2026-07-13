@@ -265,6 +265,14 @@ public class OperatorHub : Hub, IOperatorHub
                 poolRtId, tenantId);
             throw;
         }
+
+        // Replay any workload deploy/undeploy the controller had to queue
+        // while no operator owned this pool (AB#4371) — e.g. an undeploy
+        // triggered while the operator's registration was failing
+        // transiently. Runs after the state write so a failed registration
+        // (rethrown above) does not consume the queue.
+        await _connectionManager.FlushPendingWorkloadNotificationsAsync(
+            Context.ConnectionId, tenantId, poolRtId);
     }
 
     /// <inheritdoc />
