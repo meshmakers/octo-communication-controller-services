@@ -380,7 +380,7 @@ internal class AdapterService(
         string? pipelineDefinition = null)
     {
         Logger.Info(
-            "[{TenantId}] AdapterRtId='{AdapterRtId}', PipelineRtEntityId='{PipelineRtEntityId}' deploy debug configuration",
+            "[{TenantId}] AdapterRtId='{AdapterRtId}', PipelineRtEntityId='{PipelineRtEntityId}' deploy pipeline configuration",
             tenantId, adapterRtEntityId, pipelineRtEntityId);
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
@@ -419,14 +419,11 @@ internal class AdapterService(
                         pipeline.PipelineDefinition);
                 }
 
-                // Enable debugging when deploying via the pipeline deploy endpoint.
-                // The IsDebuggingEnabled state is persisted on the RT entity so it survives page reloads.
-                if (pipeline.IsDebuggingEnabled != true)
-                {
-                    await communicationRepository.SetPipelineDebuggingEnabledAsync(tenantId, pipelineRtEntityId, true);
-                    pipeline = await communicationRepository.GetPipelineAsync(tenantId, pipelineRtEntityId)
-                               ?? throw AdapterServiceException.PipelineNotFound(tenantId, pipelineRtEntityId);
-                }
+                // Deploying never changes the debug state (AB#4364): the pushed configuration
+                // carries the persisted IsDebuggingEnabled as-is, so a pipeline in debug stays
+                // in debug across redeploys and a routine deploy (editor, import, adapter move)
+                // no longer switches debug capture on silently. Debug is toggled exclusively via
+                // SetPipelineDebuggingAsync (PATCH /pipeline/{id}/debug).
 
                 // Start from the cached adapter configuration to preserve debug state
                 // of already-deployed pipelines. Fall back to DB if no cache exists.

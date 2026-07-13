@@ -1057,11 +1057,16 @@ If the adapter is offline, `DeployDataFlowAsync` throws `AdapterServiceException
 (`AppliedToRunningAdapter = false`, applies on next deploy). An `Information`
 audit event tagged `(source: User)` is written per toggle.
 
-**Why deploy still force-enables debug:** Refinery Studio's editor "Deploy" and
-"Enable Debug" buttons rely on `POST /pipeline/deploy` force-enabling debug, and
-its "Disable Debug" uses a GraphQL `isDebuggingEnabled=false` write + a
-`POST /dataflow/deploy` (no force-enable). This feature mirrors the disable path
-and does not change deploy behavior, so the UI is unaffected.
+**Deploy never touches debug (AB#4364).** `POST /pipeline/deploy` used to
+force-enable `IsDebuggingEnabled` on every call — so the Studio editor's routine
+"Deploy" (e.g. right after importing a pipeline) and the move-to-adapter redeploy
+silently switched debug capture on, permanently. Observed on prod-1: the Loxone
+event pipeline ran with debug for months. Since AB#4364, deploying pushes the
+persisted `IsDebuggingEnabled` as-is: a pipeline in debug stays in debug across
+redeploys, a pipeline without debug stays clean. Debug is toggled exclusively via
+this PATCH endpoint / `SetPipelineDebuggingAsync`; the Studio's Enable/Disable
+Debug buttons call it directly (frontend-libraries
+`CommunicationService.setPipelineDebugging`).
 
 Tests: `Services/AdapterServiceTests/SetPipelineDebuggingAsyncTests` (online
 enable/disable, offline persist-only, not-found paths) and
