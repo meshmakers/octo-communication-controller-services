@@ -28,3 +28,6 @@ types:
       - id: ${this}/AdditionalHeaders
         name: AdditionalHeaders
         isOptional: true
+      - id: ${this}/AuthServiceAccountConfigurationName
+        name: AuthServiceAccountConfigurationName
+        isOptional: true
