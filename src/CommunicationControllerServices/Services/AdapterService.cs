@@ -977,26 +977,42 @@ internal class AdapterService(
     {
         if (string.IsNullOrEmpty(pipelineDefinition) || adapter.NodeDescriptors == null) return;
 
-        var deprecatedByQualifiedName = adapter.NodeDescriptors
-            .Where(d => d.IsDeprecated)
-            .ToDictionary(d => $"{d.NodeName}@{d.Version}", StringComparer.OrdinalIgnoreCase);
-        if (deprecatedByQualifiedName.Count == 0) return;
-
-        var usedNodeTypes = pipelineDefinitionService.GetAllNodes(pipelineDefinition)
-            .Select(n => n.NodeType)
-            .Distinct(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var nodeType in usedNodeTypes)
+        try
         {
-            if (!deprecatedByQualifiedName.TryGetValue(nodeType, out var descriptor)) continue;
+            // TryAdd tolerates duplicate descriptors (same NodeName@Version, incl. casing variants)
+            var deprecatedByQualifiedName =
+                new Dictionary<string, NodeDescriptorDto>(StringComparer.OrdinalIgnoreCase);
+            foreach (var descriptor in adapter.NodeDescriptors)
+            {
+                if (!descriptor.IsDeprecated) continue;
+                deprecatedByQualifiedName.TryAdd($"{descriptor.NodeName}@{descriptor.Version}", descriptor);
+            }
 
-            var message = string.IsNullOrEmpty(descriptor.DeprecationMessage)
-                ? $"Pipeline uses deprecated node '{nodeType}'."
-                : $"Pipeline uses deprecated node '{nodeType}': {descriptor.DeprecationMessage}";
+            if (deprecatedByQualifiedName.Count == 0) return;
 
-            Logger.Warn("[{TenantId}] Pipeline '{PipelineRtEntityId}' uses deprecated node '{NodeType}'",
-                tenantId, pipelineRtEntityId, nodeType);
-            await eventService.StoreWarningEventAsync(tenantId, message, pipelineRtEntityId);
+            var usedNodeTypes = pipelineDefinitionService.GetAllNodes(pipelineDefinition)
+                .Select(n => n.NodeType)
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var nodeType in usedNodeTypes)
+            {
+                if (!deprecatedByQualifiedName.TryGetValue(nodeType, out var descriptor)) continue;
+
+                var message = string.IsNullOrEmpty(descriptor.DeprecationMessage)
+                    ? $"Pipeline uses deprecated node '{nodeType}'."
+                    : $"Pipeline uses deprecated node '{nodeType}': {descriptor.DeprecationMessage}";
+
+                Logger.Warn("[{TenantId}] Pipeline '{PipelineRtEntityId}' uses deprecated node '{NodeType}'",
+                    tenantId, pipelineRtEntityId, nodeType);
+                await eventService.StoreWarningEventAsync(tenantId, message, pipelineRtEntityId);
+            }
+        }
+        catch (Exception e)
+        {
+            // Best-effort by contract: a failure to detect or store the warning must never fail the deploy
+            Logger.Warn(e,
+                "[{TenantId}] Failed to store deprecated-node warning events for pipeline '{PipelineRtEntityId}'",
+                tenantId, pipelineRtEntityId);
         }
     }
 

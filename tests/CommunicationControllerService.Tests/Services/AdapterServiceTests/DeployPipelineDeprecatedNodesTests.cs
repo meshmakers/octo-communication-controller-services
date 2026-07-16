@@ -114,6 +114,40 @@ internal class DeployPipelineDeprecatedNodesTests : AdapterServiceTestsBase
     }
 
     [Test]
+    public async Task DeployPipelineAsync_DuplicateDeprecatedDescriptors_StoresSingleWarningEvent()
+    {
+        // Arrange - defensive: duplicate NodeName@Version entries (incl. casing variant) must not throw
+        var (adapterRtEntityId, pipelineRtEntityId) = ArrangeDeployablePipeline(DefinitionWithDeprecatedNode,
+            CreateDescriptor("OldNode", isDeprecated: true, "Use NewNode@1 instead"),
+            CreateDescriptor("OldNode", isDeprecated: true),
+            CreateDescriptor("oldnode", isDeprecated: true));
+
+        // Act
+        await AdapterService.DeployPipelineAsync(TenantId, adapterRtEntityId, pipelineRtEntityId);
+
+        // Assert
+        await CommunicationEventService.Received(1).StoreWarningEventAsync(TenantId,
+            Arg.Is<string>(msg => msg.Contains("OldNode@1")),
+            pipelineRtEntityId);
+    }
+
+    [Test]
+    public async Task DeployPipelineAsync_EventStoreThrows_DeployStillSucceeds()
+    {
+        // Arrange - best-effort contract: a failing event store must never fail the deploy
+        var (adapterRtEntityId, pipelineRtEntityId) = ArrangeDeployablePipeline(DefinitionWithDeprecatedNode,
+            CreateDescriptor("OldNode", isDeprecated: true));
+        CommunicationEventService.StoreWarningEventAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<RtEntityId?>())
+            .Returns<Task>(_ => throw new InvalidOperationException("event store down"));
+
+        // Act & Assert - no exception
+        await AdapterService.DeployPipelineAsync(TenantId, adapterRtEntityId, pipelineRtEntityId);
+
+        await AdapterHubCallbacks.Received(1).AdapterConfigurationUpdatedAsync(TenantId,
+            Arg.Any<AdapterConfigurationDto>());
+    }
+
+    [Test]
     public async Task DeployPipelineAsync_AdapterWithoutNodeDescriptors_StoresNoWarningEvent()
     {
         // Arrange - older adapter version that did not report node descriptors
