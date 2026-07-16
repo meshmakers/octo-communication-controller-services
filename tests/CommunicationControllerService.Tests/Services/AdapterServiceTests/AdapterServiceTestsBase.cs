@@ -23,6 +23,7 @@ internal abstract class AdapterServiceTestsBase
     protected readonly IAdapterCachePublish AdapterCachePublish;
     protected readonly ICommunicationEventService CommunicationEventService;
     protected readonly IPipelineSchemaValidator PipelineSchemaValidator;
+    protected readonly IPipelineDefinitionService PipelineDefinitionService;
     protected readonly AdapterTenant AdapterTenant;
 
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
@@ -34,10 +35,12 @@ internal abstract class AdapterServiceTestsBase
         AdapterCachePublish = Substitute.For<IAdapterCachePublish>();
         CommunicationEventService = Substitute.For<ICommunicationEventService>();
         PipelineSchemaValidator = Substitute.For<IPipelineSchemaValidator>();
+        // Real parser (pure, dependency-free) so deprecated-node detection works against real YAML
+        PipelineDefinitionService = new PipelineDefinitionService();
         var options = Substitute.For<IOptions<CommunicationControllerOptions>>();
         options.Value.Returns(new CommunicationControllerOptions());
         AdapterService = new AdapterService(CommunicationRepository, AdapterCache, AdapterHubCallbacks,
-            CommunicationEventService, PipelineSchemaValidator, options);
+            CommunicationEventService, PipelineSchemaValidator, PipelineDefinitionService, options);
         AdapterTenant = new AdapterTenant(AdapterCachePublish, TenantId);
 
         InitAdapterCache();

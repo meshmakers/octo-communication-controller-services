@@ -85,6 +85,7 @@ The service uses the Octo Notification system to log important business events f
 | AdapterService | Configuration deployed | Information | Pipeline configuration sent to adapter |
 | AdapterService | Configuration failed | Error | Adapter deployment failed with errors |
 | AdapterService | Data pipeline deployed/undeployed | Information | Pipeline deployment to adapters |
+| AdapterService | Deprecated node used | Warning | Deployed pipeline uses a node type flagged `IsDeprecated` in the adapter's node descriptors (one event per deprecated node type, associated with the pipeline entity) |
 | AdapterService | Tenant pre/post-update | Information | Tenant lifecycle events |
 | PoolService | Pool operator registered/unregistered | Information | Pool operator connection state |
 | PoolService | Adapter deployed/undeployed to pool | Information | Adapter assignment to pools |

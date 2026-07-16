@@ -53,6 +53,7 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         Services.AddSingleton<ICommunicationRepository, CommunicationRepository>();
         Services.AddSingleton<ICommunicationEventService, CommunicationEventService>();
         Services.AddSingleton<IPipelineSchemaValidator, PipelineSchemaValidator>();
+        Services.AddSingleton<IPipelineDefinitionService, PipelineDefinitionService>();
         Services.AddSingleton<IAdapterService, AdapterService>();
         Services.AddSingleton<IPoolService, PoolService>();
         Services.AddSingleton<IPipelineDebugService, PipelineDebugService>();
