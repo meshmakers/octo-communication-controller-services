@@ -20,6 +20,7 @@ internal class AdapterService(
     IAdapterHubCallbacks adapterHubCallbacks,
     ICommunicationEventService eventService,
     IPipelineSchemaValidator pipelineSchemaValidator,
+    IPipelineDefinitionService pipelineDefinitionService,
     IOptions<CommunicationControllerOptions> communicationControllerOptions)
     : IAdapterService
 {
@@ -419,6 +420,9 @@ internal class AdapterService(
                         pipeline.PipelineDefinition);
                 }
 
+                await StoreDeprecatedNodeWarningEventsAsync(tenantId, adapter, pipelineRtEntityId,
+                    pipelineDefinition ?? pipeline.PipelineDefinition);
+
                 // Deploying never changes the debug state (AB#4364): the pushed configuration
                 // carries the persisted IsDebuggingEnabled as-is, so a pipeline in debug stays
                 // in debug across redeploys and a routine deploy (editor, import, adapter move)
@@ -532,6 +536,9 @@ internal class AdapterService(
 
                     adapterConfig.Pipelines.Add(
                         await CreatePipelineConfigurationAsync(tenantId, dataFlowRtId, rtDeployPipeline));
+
+                    await StoreDeprecatedNodeWarningEventsAsync(tenantId, adapter, rtDeployPipeline.ToRtEntityId(),
+                        rtDeployPipeline.PipelineDefinition);
                 }
                 else
                 {
@@ -957,6 +964,39 @@ internal class AdapterService(
 
             throw AdapterServiceException.CommonFailedSetAdapterCommunicationState(tenantId, adapterRtEntityId,
                 communicationState, e);
+        }
+    }
+
+    /// <summary>
+    /// Stores a tenant-scoped warning event for every deprecated node type used by a pipeline.
+    /// Deprecation is reported by the adapter via its node descriptors
+    /// (see <see cref="NodeDescriptorDto.IsDeprecated"/>). Best-effort: never fails the deploy.
+    /// </summary>
+    private async Task StoreDeprecatedNodeWarningEventsAsync(string tenantId, Adapter adapter,
+        RtEntityId pipelineRtEntityId, string? pipelineDefinition)
+    {
+        if (string.IsNullOrEmpty(pipelineDefinition) || adapter.NodeDescriptors == null) return;
+
+        var deprecatedByQualifiedName = adapter.NodeDescriptors
+            .Where(d => d.IsDeprecated)
+            .ToDictionary(d => $"{d.NodeName}@{d.Version}", StringComparer.OrdinalIgnoreCase);
+        if (deprecatedByQualifiedName.Count == 0) return;
+
+        var usedNodeTypes = pipelineDefinitionService.GetAllNodes(pipelineDefinition)
+            .Select(n => n.NodeType)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var nodeType in usedNodeTypes)
+        {
+            if (!deprecatedByQualifiedName.TryGetValue(nodeType, out var descriptor)) continue;
+
+            var message = string.IsNullOrEmpty(descriptor.DeprecationMessage)
+                ? $"Pipeline uses deprecated node '{nodeType}'."
+                : $"Pipeline uses deprecated node '{nodeType}': {descriptor.DeprecationMessage}";
+
+            Logger.Warn("[{TenantId}] Pipeline '{PipelineRtEntityId}' uses deprecated node '{NodeType}'",
+                tenantId, pipelineRtEntityId, nodeType);
+            await eventService.StoreWarningEventAsync(tenantId, message, pipelineRtEntityId);
         }
     }
 
