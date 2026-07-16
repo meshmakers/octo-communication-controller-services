@@ -39,6 +39,17 @@
              communication-sdk). Same rule as OctoCoreLibVersion: set by the pipeline
              (train override on r-tag); $(OctoVersion) fallback only for local/standalone. -->
         <OctoCommVersion Condition="'$(OctoCommVersion)'==''">$(OctoVersion)</OctoCommVersion>
+        <OctoCkModelVersion Condition="'$(Configuration)'=='DebugL'">999.0.0</OctoCkModelVersion>
+        <!-- CK-model DATA packages (Meshmakers.Octo.ConstructionKit.Models.*). These are
+             published PER MODEL by the ck-libraries train on independent, often-lagging
+             versions (a model only republishes when its definition changes), so they must
+             NOT share OctoCoreLibVersion / the build version: pinning them to the current
+             release patch over-demands models that did not bump this cascade and breaks
+             restore (NU1102 for a missing floor, NU1603 warning-as-error for an exact miss;
+             see AB#4308 follow-up). Float to the current major.minor line so each reference
+             resolves to that model's latest published patch. DebugL still uses the local
+             999.0.0 packages from ../nuget. -->
+        <OctoCkModelVersion Condition="'$(OctoCkModelVersion)'==''">3.4.*</OctoCkModelVersion>
         <Version Condition="'$(Configuration)'=='DebugL'">999.0.0</Version>
         <PackageVersion Condition="'$(Configuration)'=='DebugL'">999.0.0</PackageVersion>
         <RestoreSources Condition="'$(RestoreSources)'==''">https://api.nuget.org/v3/index.json</RestoreSources>
