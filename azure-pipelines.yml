@@ -171,12 +171,15 @@ stages:
             env:
               DOCKER_HOST: unix:///var/run/docker.sock
           # Communication Controller image
+          # Multi-arch image (AB#4451): arm64 for Apple-Silicon kind clusters and
+          # edge devices, amd64 for the managed clusters.
           - template: templates/steps/build-and-push-docker.yml@pipelineTemplates
             parameters:
               publicRegistryServiceConnection: $(DockerRegistryPublicConnection)
               privateRegistryName: $(DockerRegistryPrivateUri)
               repository: meshmakers/octo-mesh-communication-controller-services
               dockerfile: src/CommunicationControllerServices/Dockerfile
+              platforms: 'linux/arm64,linux/amd64'
               enableMainLatestTag: true
           - template: templates/steps/handle-artifacts.yml@pipelineTemplates
             parameters:
