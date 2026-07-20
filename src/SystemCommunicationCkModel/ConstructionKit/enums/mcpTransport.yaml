@@ -1,0 +1,15 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+  - enumId: McpTransport
+    description: 'Transport protocols supported by the Model Context Protocol C# SDK (ModelContextProtocol NuGet, joint Microsoft + Anthropic).'
+    isExtensible: false
+    values:
+      - key: 0
+        name: Stdio
+        description: 'Local subprocess over stdin/stdout. Use together with Command + Arguments; Url is ignored.'
+      - key: 1
+        name: Sse
+        description: 'Server-Sent Events over HTTPS. Use together with Url; Command/Arguments are ignored.'
+      - key: 2
+        name: Http
+        description: 'Streamable HTTPS. Use together with Url; Command/Arguments are ignored.'

@@ -1,5 +1,5 @@
 $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
-blueprintId: System.Communication.Release-1.5.0
+blueprintId: System.Communication.Release-1.5.1
 description: |
   Service-managed Communication seed for staging and production clusters. Seeds the
   default Cloud Pool and the managed Mesh Adapter with ChartVersion pinned to
@@ -17,12 +17,18 @@ description: |
   auto-applied by the Communication Controller on tenant Enable / startup and Studio
   surfaces it as read-only.
 
-  1.5.0 picks up System.Communication-3.22.0, which marks the volatile state
-  attributes (DeploymentState, CommunicationState, ConfigurationState, the Last*Error
-  / Last*ErrorTimestamp pairs, StatusMessage, LastSyncedSequenceNumber,
-  CommunicationStateTimestamp) as `isRuntimeState: true`. The blueprint engine now
-  preserves their existing values on re-apply, so bumping this blueprint no longer
-  resets a Deployed adapter back to Undeployed.
+  1.5.1 sets the floor to System.Communication-3.25.1 (adds the McpConfiguration type,
+  McpTransport enum, HttpHeader record, AdditionalHeaders RecordArray and the
+  AuthServiceAccountConfigurationName service-account reference, AB#4315). The
+  controller upgrades a tenant to the range minimum, so the floor must name the
+  version to install: main already ships 3.24.0 without McpConfiguration, so the
+  MCP additions land as 3.25.1.
+
+  The volatile state attributes (DeploymentState, CommunicationState,
+  ConfigurationState, the Last*Error / Last*ErrorTimestamp pairs, StatusMessage,
+  LastSyncedSequenceNumber, CommunicationStateTimestamp) are `isRuntimeState: true`
+  (since 3.22.0); the engine preserves their values on re-apply, so bumping this
+  blueprint will not reset a Deployed adapter to Undeployed.
 
 # Satisfiability floor only. The install/upgrade target is driven by the engine's
 # IServiceManagedCkModelDescriptor (System.Communication embedded version), registered in
@@ -30,7 +36,7 @@ description: |
 # blueprint's SEED needs a type/attribute introduced in a specific version; a plain CK model bump
 # needs no change here.
 ckModelDependencies:
-  - System.Communication-[3.22.0,4.0)
+  - System.Communication-[3.25.1,4.0)
 
 seedDataPath: seed-data/entities.yaml
 

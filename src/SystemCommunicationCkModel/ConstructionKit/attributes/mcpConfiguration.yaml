@@ -1,0 +1,25 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+attributes:
+  - id: Url
+    valueType: String
+    description: 'Base URL of the MCP server. Used by the Sse and Http transports. For Stdio, leave empty and set Command + Arguments instead. The LlmQuery@1 node may append the tenant id at resolution time if the URL contains a {tenantId} placeholder.'
+  - id: Transport
+    valueType: Enum
+    valueCkEnumId: ${this}/McpTransport
+    description: 'MCP transport protocol: Stdio (local subprocess), Sse (Server-Sent Events over HTTPS) or Http (streamable HTTPS).'
+  - id: Command
+    valueType: String
+    description: 'Stdio transport only: command to spawn the MCP server subprocess (e.g. "dotnet", "npx", "/usr/local/bin/my-mcp"). Ignored for Sse and Http.'
+  - id: Arguments
+    valueType: String
+    description: 'Stdio transport only: command-line arguments for the spawned MCP server. One argument per line, or a JSON array. Ignored for Sse and Http.'
+  - id: BearerToken
+    valueType: String
+    description: 'Optional bearer token for HTTP-style MCP server authentication. Sent as the `Authorization: Bearer {token}` header. Stored as a configuration attribute, not exposed in the pipeline data context.'
+  - id: AdditionalHeaders
+    valueType: RecordArray
+    valueCkRecordId: ${this}/HttpHeader
+    description: 'Optional custom HTTP headers for Sse/Http MCP server authentication (e.g. x-api-key, X-Org-Id). Each entry is a Name/Value pair; entries flagged IsSecret are stored encrypted at rest and never logged. Applied on top of BearerToken; an Authorization entry here overrides the BearerToken-derived header. Ignored for Stdio.'
+  - id: AuthServiceAccountConfigurationName
+    valueType: String
+    description: 'Optional wellKnownName of a System.Communication/ServiceAccountConfiguration entity used to authenticate MCP requests. When set, the adapter acquires an OAuth2 client-credentials token per execution (cached until expiry) and sends it as the Authorization: Bearer header. Takes precedence over BearerToken; an explicit Authorization entry in AdditionalHeaders overrides both. The pipeline must hold a Uses association to the referenced ServiceAccountConfiguration.'
