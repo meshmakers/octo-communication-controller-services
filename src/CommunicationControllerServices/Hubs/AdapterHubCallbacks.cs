@@ -60,4 +60,15 @@ internal class AdapterHubCallbacks : IAdapterHubCallbacks
             }
         }
     }
+
+    /// <inheritdoc />
+    public async Task CkModelChangedAsync(string tenantId)
+    {
+        // Deliberately broadcast to every adapter connection instead of routing through the
+        // adapter cache: the cache is wiped during a tenant pre-update, and an adapter whose
+        // re-registration failed stays connected but uncached — exactly the case where its
+        // stale CK model cache must be flushed (AB#4456). Adapters filter by tenant themselves.
+        await _adapterContext.Clients.All
+            .SendAsync(nameof(IAdapterHubCallbacks.CkModelChangedAsync), tenantId);
+    }
 }

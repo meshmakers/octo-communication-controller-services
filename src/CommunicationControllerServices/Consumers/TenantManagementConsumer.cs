@@ -52,6 +52,7 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
             // cache is reinitialised (Pos), even when the broker delivers in normal order.
             if (_receivedPreUpdateTenant.TryRemove(context.Message.CorrelationId, out _))
             {
+                await NotifyCkModelChangedAsync(context.Message.TenantId);
                 await ExecutePreTenantUpdate(context.Message.TenantId);
                 await ExecutePosTenantUpdate(context.Message.TenantId);
             }
@@ -86,6 +87,7 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
 
             if (_receivedPreUpdateTenant.TryRemove(context.Message.CorrelationId, out _))
             {
+                await NotifyCkModelChangedAsync(context.Message.TenantId);
                 await ExecutePreTenantUpdate(context.Message.TenantId);
                 await ExecutePosTenantUpdate(context.Message.TenantId);
             }
@@ -160,6 +162,28 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
         finally
         {
             _logger.LogInformation("Pre delete tenant finished: {TenantId}", context.Message.TenantId);
+        }
+    }
+
+    /// <summary>
+    ///     Tells every connected adapter of the tenant to invalidate its in-process CK model cache
+    ///     (AB#4456). Runs when the Pre/Pos pair completes — i.e. after the tenant update (CK model
+    ///     import, cache clear) has finished. Deliberately NOT gated on
+    ///     <see cref="IConfigurationService.IsEnabledAsync" /> and independent of the adapter cache:
+    ///     a connected adapter must drop its stale CK cache even when the enabled-gated restart
+    ///     relay below does not fire. Failures are logged but never block the restart relay.
+    /// </summary>
+    private async Task NotifyCkModelChangedAsync(string tenantId)
+    {
+        try
+        {
+            await _adapterService.CkModelChangedAsync(tenantId);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "CK model change notification failed: {TenantId}", tenantId);
+            await _eventService.StoreErrorEventAsync(tenantId,
+                $"CK model change notification to adapters failed: {e.Message}");
         }
     }
 

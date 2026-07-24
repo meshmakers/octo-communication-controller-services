@@ -210,6 +210,83 @@ internal class TenantManagementConsumerTests
     }
 
     [Test]
+    public async Task PreThenPos_NotifiesCkModelChanged()
+    {
+        // Arrange — a completed Pre/Pos pair signals a finished tenant update (CK model import,
+        // cache clear); connected adapters must be told to invalidate their CK caches (AB#4456).
+        var correlationId = Guid.NewGuid();
+        var preMessage = new PreUpdateTenant(TenantId, correlationId, FutureTimestamp);
+        var posMessage = new PosUpdateTenant(TenantId, correlationId, FutureTimestamp);
+
+        // Act
+        await _consumer.ConsumeAsync(BuildContext(preMessage));
+        await _consumer.ConsumeAsync(BuildContext(posMessage));
+
+        // Assert
+        await _adapterService.Received(1).CkModelChangedAsync(TenantId);
+    }
+
+    [Test]
+    public async Task PreThenPos_TenantDisabled_StillNotifiesCkModelChanged()
+    {
+        // Arrange — the CK cache flush must fire even when the enabled-gated restart relay
+        // does not (AB#4456): a connected adapter holds a stale CK cache regardless of the
+        // tenant's communication-enabled flag.
+        _configurationService.IsEnabledAsync(TenantId).Returns(false);
+
+        var correlationId = Guid.NewGuid();
+        var preMessage = new PreUpdateTenant(TenantId, correlationId, FutureTimestamp);
+        var posMessage = new PosUpdateTenant(TenantId, correlationId, FutureTimestamp);
+
+        // Act
+        await _consumer.ConsumeAsync(BuildContext(preMessage));
+        await _consumer.ConsumeAsync(BuildContext(posMessage));
+
+        // Assert
+        using var _ = Assert.Multiple();
+
+        await _adapterService.Received(1).CkModelChangedAsync(TenantId);
+        await _adapterService.DidNotReceive().PreUpdateTenantAsync(Arg.Any<string>());
+    }
+
+    [Test]
+    public async Task PreThenPos_CkModelChangedFails_StillRunsUpdates()
+    {
+        // Arrange — a failing CK cache-flush notification must not block the restart relay.
+        _adapterService.CkModelChangedAsync(TenantId)
+            .Returns<Task>(_ => throw new InvalidOperationException("hub send failed"));
+
+        var correlationId = Guid.NewGuid();
+        var preMessage = new PreUpdateTenant(TenantId, correlationId, FutureTimestamp);
+        var posMessage = new PosUpdateTenant(TenantId, correlationId, FutureTimestamp);
+
+        // Act
+        await _consumer.ConsumeAsync(BuildContext(preMessage));
+        await _consumer.ConsumeAsync(BuildContext(posMessage));
+
+        // Assert
+        using var _ = Assert.Multiple();
+
+        await _adapterService.Received(1).PreUpdateTenantAsync(TenantId);
+        await _adapterService.Received(1).PosUpdateTenantAsync(TenantId);
+    }
+
+    [Test]
+    public async Task PreOnly_DoesNotNotifyCkModelChanged()
+    {
+        // Arrange — an unpaired Pre means the tenant update is still in progress; flushing the
+        // adapters' CK caches now would let them re-load a half-imported model.
+        var correlationId = Guid.NewGuid();
+        var preMessage = new PreUpdateTenant(TenantId, correlationId, FutureTimestamp);
+
+        // Act
+        await _consumer.ConsumeAsync(BuildContext(preMessage));
+
+        // Assert
+        await _adapterService.DidNotReceive().CkModelChangedAsync(Arg.Any<string>());
+    }
+
+    [Test]
     public async Task OldMessage_BeforeStartTime_IsIgnored()
     {
         // Arrange — a message older than service start time must be discarded without

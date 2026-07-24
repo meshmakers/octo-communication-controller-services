@@ -22,6 +22,14 @@ public interface IAdapterService
     /// <param name="tenantId"></param>
     /// <returns></returns>
     Task PosUpdateTenantAsync(string tenantId);
+
+    /// <summary>
+    /// Notifies all connected adapters of the tenant that the Construction Kit model may have
+    /// changed (CK model import, cache clear) so they invalidate their in-process CK caches (AB#4456).
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <returns></returns>
+    Task CkModelChangedAsync(string tenantId);
     
     /// <summary>
     /// Registers an adapter

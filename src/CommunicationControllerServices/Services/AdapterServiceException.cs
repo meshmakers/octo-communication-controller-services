@@ -66,6 +66,11 @@ internal class AdapterServiceException : Exception
         return new AdapterServiceException($"[{tenantId}] Pos update tenant failed.", exception);
     }
 
+    public static Exception CkModelChangedNotificationFailed(string tenantId, Exception exception)
+    {
+        return new AdapterServiceException($"[{tenantId}] CK model change notification to adapters failed.", exception);
+    }
+
     public static Exception CkTypeIdUndefined()
     {
         return new AdapterServiceException("CkTypeId is undefined.");

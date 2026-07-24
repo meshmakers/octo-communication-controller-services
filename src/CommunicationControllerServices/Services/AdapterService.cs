@@ -945,6 +945,20 @@ internal class AdapterService(
         }
     }
 
+    public async Task CkModelChangedAsync(string tenantId)
+    {
+        Logger.Info("[{TenantId}] CK model changed, notifying adapters to invalidate their CK caches", tenantId);
+
+        try
+        {
+            await adapterHubCallbacks.CkModelChangedAsync(tenantId);
+        }
+        catch (Exception e)
+        {
+            throw AdapterServiceException.CkModelChangedNotificationFailed(tenantId, e);
+        }
+    }
+
     private async Task SetAdapterCommunicationStateAsync(string tenantId, RtEntityId adapterRtEntityId,
         RtCommunicationStateEnum communicationState)
     {

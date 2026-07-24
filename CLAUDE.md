@@ -97,6 +97,7 @@ The service uses the Octo Notification system to log important business events f
 | PipelineExecutionService | Pipeline execution cancelled | Information | Adapter reports cancelled execution |
 | PipelineExecutionService | Old executions cleaned up | Information | Retention cleanup completed |
 | TenantManagementConsumer | Tenant update failed | Error | Errors during tenant lifecycle |
+| TenantManagementConsumer | CK model change notification failed | Error | Adapter CK-cache flush broadcast failed (AB#4456) |
 | Hubs | Operation failed | Error | Hub operation errors |
 
 **Usage in Services:**
@@ -484,6 +485,42 @@ Repository exceptions are swallowed (same contract as
 `ReportWorkloadDeploymentStatusAsync`) — progress is best-effort, a
 write failure must not break the hub for the rest of the connection's
 traffic.
+
+### Adapter CK Cache Invalidation (AB#4456)
+
+Adapters cache the tenant's CK model in-process (engine `CkCacheService`, populated
+load-once per tenant). After a CK model import (`ImportCk`) or `ClearCache`, that cache
+must be invalidated or pipeline nodes (`CreateUpdateInfo@1` / `ApplyChanges@2`) keep
+validating against the old model until the adapter process restarts.
+
+Flow:
+
+1. Asset-repo publishes `PreUpdateTenant` / `PosUpdateTenant` (same `CorrelationId`)
+   around the tenant update — both for CK imports (`TenantContext.ImportCkModelAsync`)
+   and for `ClearCache` (`TenantsController.ClearCache`).
+2. `TenantManagementConsumer` pairs the two messages; when the pair completes (i.e. the
+   update is finished) it calls `IAdapterService.CkModelChangedAsync(tenantId)` **before**
+   the enabled-gated restart relay (`ExecutePreTenantUpdate`/`ExecutePosTenantUpdate`).
+   The call is deliberately NOT gated on `IConfigurationService.IsEnabledAsync` and its
+   failure never blocks the restart relay (own try/catch + error event).
+3. `AdapterService.CkModelChangedAsync` → `AdapterHubCallbacks.CkModelChangedAsync`,
+   which **broadcasts** `IAdapterHubCallbacks.CkModelChangedAsync(tenantId)` to every
+   adapter connection (`Clients.All`) instead of routing through the adapter cache. The
+   cache is wiped during a tenant pre-update, and an adapter whose re-registration failed
+   stays connected but uncached — exactly the stale-cache case; adapters filter by
+   tenant themselves.
+4. Adapter side (`octo-communication-sdk` `AdapterExecutionService`): the callback is a
+   no-op for foreign tenants; for the own tenant it calls the new
+   `IAdapterService.CkModelChangedAsync` (default interface method, no-op) — the mesh
+   adapter overrides it and unloads the CK cache (`MeshAdapterService`), which is lazily
+   reloaded on the next pipeline execution. No restart, pipelines stay registered.
+
+Old adapter builds without the hub handler just log an unbound-method warning — the
+`PreUpdateTenantAsync` restart relay remains their (gated) fallback.
+
+Tests: `Consumers/TenantManagementConsumerTests` (flush on pairing, flush despite
+disabled tenant, flush failure doesn't block relay, no flush on unpaired Pre) and
+`Services/AdapterServiceTests/CkModelChangedAsyncTests`.
 
 ### Pool Communication State Transitions
 
