@@ -21,7 +21,12 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
     private readonly IAdapterService _adapterService;
     private readonly IConfigurationService _configurationService;
     private readonly ICommunicationEventService _eventService;
-    private readonly ConcurrentDictionary<Guid, bool> _receivedPreUpdateTenant = new();
+
+    // Static on purpose (AB#4456): the consumer is registered scoped (AddBroadcastEventConsumer →
+    // AddScoped), so MassTransit creates a NEW instance per message. An instance field can never
+    // pair Pre with Pos — the pair state must live at process scope or the paired branch
+    // (adapter restart relay + CK cache flush) silently never runs.
+    private static readonly ConcurrentDictionary<Guid, bool> _receivedPreUpdateTenant = new();
 
     public TenantManagementConsumer(ILogger<TenantManagementConsumer> logger, IPoolService poolService,
         IAdapterService adapterService, IConfigurationService configurationService,

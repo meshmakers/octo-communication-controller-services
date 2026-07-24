@@ -287,6 +287,32 @@ internal class TenantManagementConsumerTests
     }
 
     [Test]
+    public async Task PreAndPosOnDifferentConsumerInstances_StillPair()
+    {
+        // Arrange — AB#4456 root cause: the consumer is registered SCOPED, so MassTransit
+        // delivers Pre and Pos to two different instances. The pair state must survive across
+        // instances (static), otherwise the paired branch silently never runs in production.
+        var secondConsumer = new TenantManagementConsumer(
+            Substitute.For<ILogger<TenantManagementConsumer>>(), _poolService, _adapterService,
+            _configurationService, Substitute.For<ICommunicationEventService>());
+
+        var correlationId = Guid.NewGuid();
+        var preMessage = new PreUpdateTenant(TenantId, correlationId, FutureTimestamp);
+        var posMessage = new PosUpdateTenant(TenantId, correlationId, FutureTimestamp);
+
+        // Act — Pre on the first instance, Pos on a fresh second instance.
+        await _consumer.ConsumeAsync(BuildContext(preMessage));
+        await secondConsumer.ConsumeAsync(BuildContext(posMessage));
+
+        // Assert
+        using var _ = Assert.Multiple();
+
+        await _adapterService.Received(1).CkModelChangedAsync(TenantId);
+        await _adapterService.Received(1).PreUpdateTenantAsync(TenantId);
+        await _adapterService.Received(1).PosUpdateTenantAsync(TenantId);
+    }
+
+    [Test]
     public async Task OldMessage_BeforeStartTime_IsIgnored()
     {
         // Arrange — a message older than service start time must be discarded without

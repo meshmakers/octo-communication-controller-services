@@ -518,9 +518,16 @@ Flow:
 Old adapter builds without the hub handler just log an unbound-method warning — the
 `PreUpdateTenantAsync` restart relay remains their (gated) fallback.
 
+**Pairing state is `static` on purpose.** `AddBroadcastEventConsumer` registers consumers
+**scoped**, so MassTransit creates a new `TenantManagementConsumer` per message — an
+instance-level pair dictionary can never match Pre with Pos, and the paired branch
+(restart relay + CK flush) silently never runs. This was the second root cause of
+AB#4456: the relay had been dead in production. Any consumer that keeps cross-message
+state must hold it in a static field or a singleton service, never an instance field.
+
 Tests: `Consumers/TenantManagementConsumerTests` (flush on pairing, flush despite
-disabled tenant, flush failure doesn't block relay, no flush on unpaired Pre) and
-`Services/AdapterServiceTests/CkModelChangedAsyncTests`.
+disabled tenant, flush failure doesn't block relay, no flush on unpaired Pre,
+cross-instance pairing) and `Services/AdapterServiceTests/CkModelChangedAsyncTests`.
 
 ### Pool Communication State Transitions
 
