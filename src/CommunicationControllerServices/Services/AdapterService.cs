@@ -123,6 +123,25 @@ internal class AdapterService(
                     adapter = adapterTenant.AddAdapter(adapterRtEntityId, connectionId, configuration);
                     // Note: Online state is already set in OnConnectedAsync, no need to set it again here
                 }
+                else if (adapter.ConnectionId != connectionId)
+                {
+                    // The adapter reconnected on a NEW SignalR connection (e.g. after a
+                    // CkModelChanged / PreUpdateTenant restart) but its configuration is
+                    // unchanged. Registration always arrives on the adapter's current live
+                    // connection, so it is the authoritative source of the ConnectionId.
+                    // Refresh it unconditionally here — relying solely on
+                    // SetAdapterCommunicationStateOnlineAsync (OnConnectedAsync) is not enough,
+                    // because that update can be raced or no-op'd (e.g. if the adapter was
+                    // momentarily removed from the cache). If the cached ConnectionId is left
+                    // stale, AdapterConfigurationUpdatedAsync keeps sending config to the dead
+                    // connection via Clients.Client(adapter.ConnectionId) and every deploy
+                    // silently times out after 120s while the adapter stays Online (AB#4594).
+                    Logger.Info(
+                        "[{TenantId}] Adapter '{AdapterRtId}' reconnected with unchanged configuration; " +
+                        "refreshing cached connection id '{OldConnectionId}' -> '{NewConnectionId}'",
+                        tenantId, adapterRtEntityId, adapter.ConnectionId, connectionId);
+                    adapterTenant.UpdateConnectionId(adapterRtEntityId, connectionId);
+                }
             }
 
             if (nodeDescriptors != null)
