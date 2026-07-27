@@ -113,11 +113,33 @@ try
     builder.Services.AddCors();
     builder.Services.AddControllers();
     // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-    builder.Services.AddSignalR(o =>
+    var signalRBuilder = builder.Services.AddSignalR(o =>
     {
         o.EnableDetailedErrors = true;
         o.MaximumReceiveMessageSize = 1024 * 1024 * 100;
     });
+
+    // SignalR backplane for multi-replica deployments (AB#4493). Adapters keep
+    // their SignalR connection on ONE replica; without a backplane a
+    // DeployDataFlow / Update-Configuration request routed (by the LB) to a
+    // DIFFERENT replica cannot reach the adapter and fails with
+    // "…has no live SignalR connection". The Redis backplane makes
+    // Clients.Client(connectionId) route to the replica that owns the connection.
+    // Opt-in: no connection string ⇒ no backplane (single-replica behaviour,
+    // unchanged). Bind directly from configuration since AddSignalR runs before
+    // the DI container / IOptions is built.
+    // IMPORTANT: the backplane is NECESSARY but NOT SUFFICIENT for >1 replica —
+    // the per-replica in-memory adapter registry (AdapterCache) is not synced
+    // across replicas (AdapterCache.PublishConfigurationAsync is stubbed), so the
+    // handling replica still won't find the adapter to route to. See the AB#4493
+    // PR: complete that registry sync, or run the controller single-replica.
+    var signalRRedisConnectionString =
+        builder.Configuration["CommunicationController:SignalRRedisConnectionString"];
+    if (!string.IsNullOrWhiteSpace(signalRRedisConnectionString))
+    {
+        signalRBuilder.AddStackExchangeRedis(signalRRedisConnectionString);
+        logger.Info("SignalR Redis backplane enabled — scale-out across controller replicas is active.");
+    }
 
     builder.Services.ConfigureOptions<ConfigureDistributionEventHubOptions>();
     builder.Services.ConfigureOptions<ConfigureJwtBearerOptions>();

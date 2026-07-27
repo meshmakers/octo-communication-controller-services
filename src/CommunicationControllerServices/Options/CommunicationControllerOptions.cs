@@ -43,6 +43,19 @@ public class CommunicationControllerOptions
     public string? InstancePrefix { get; set; }
 
     /// <summary>
+    ///     Optional StackExchange.Redis connection string for the SignalR backplane.
+    ///     REQUIRED when the controller runs with more than one replica: adapters
+    ///     hold their SignalR connection on a single replica, so a DeployDataFlow /
+    ///     Update-Configuration request handled by any OTHER replica cannot reach the
+    ///     adapter and fails with "no live SignalR connection" (AB#4493). The backplane
+    ///     lets <c>Clients.Client(connectionId)</c> route to the owning replica.
+    ///     Leave null/empty for single-replica deployments (no backplane, unchanged).
+    ///     NOTE: the backplane alone is not sufficient — see AdapterCache cross-replica
+    ///     sync (currently stubbed) documented in the AB#4493 PR.
+    /// </summary>
+    public string? SignalRRedisConnectionString { get; set; }
+
+    /// <summary>
     /// Gets or sets the RabbitMQ broker host name
     /// </summary>
     public string BrokerHost { get; set; }
