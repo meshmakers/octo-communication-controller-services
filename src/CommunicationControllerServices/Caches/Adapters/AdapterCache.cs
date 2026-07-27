@@ -1,12 +1,13 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using Meshmakers.Common.Shared;
+using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 
-internal class AdapterCache
+internal class AdapterCache(IDistributionEventHubService distributionEventHubService)
     : IAdapterCachePublish, IAdapterCache
 {
     private readonly ConcurrentDictionary<string, AdapterTenant> _tenantDescriptions = new();
@@ -77,20 +78,15 @@ internal class AdapterCache
     }
     
 
-    public Task PublishConfigurationAsync(string tenantId)
+    public async Task PublishConfigurationAsync(string tenantId)
     {
         Logger.Info("Publishing AdapterCache configuration for tenant '{TenantId}'", tenantId);
 
-        // if (_tenantDescriptions.TryGetValue(tenantId, out var desc))
-        // {
-        //     using MemoryStream memoryStream = new MemoryStream();
-        //     await JsonSerializer.SerializeAsync(memoryStream, desc.GetAdapterDescriptions());
-        //     await memoryStream.FlushAsync();
-        //     memoryStream.Position = 0;
-        //     await distributedCacheService.CreateOrUpdateStreamAsync(tenantId, memoryStream, "application/json", Constants.CacheFileName);
-        //     
-        //     await distributionEventHubService.PublishAsync(new ComControllerAdapterUpdate(tenantId, desc.GetAdapterDescriptions()));
-        // }
-        return Task.CompletedTask;
+        if (_tenantDescriptions.TryGetValue(tenantId, out var desc))
+        {
+            await distributionEventHubService.PublishAsync(
+                new ComControllerAdapterUpdate(tenantId, Guid.NewGuid(), DateTime.UtcNow,
+                    desc.GetAdapterDescriptions().ToList()));
+        }
     }
 }

@@ -132,7 +132,7 @@ try
                 .RemoveRecurringJobsByScheduleGroupCommand);
             c.AddRoutedCommandClient<ExecutePipelineRequest>();
 
-            // c.AddBroadcastEventConsumer<ComControllerAdapterUpdateConsumer, ComControllerAdapterUpdate>();
+            c.AddBroadcastEventConsumer<ComControllerAdapterUpdateConsumer, ComControllerAdapterUpdate>();
             c.AddBroadcastEventConsumer<TenantManagementConsumer, PreUpdateTenant>();
             c.AddBroadcastEventConsumer<TenantManagementConsumer, PosUpdateTenant>();
             c.AddBroadcastEventConsumer<TenantManagementConsumer, PreDeleteTenant>();
