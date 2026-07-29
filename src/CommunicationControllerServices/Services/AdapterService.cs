@@ -199,7 +199,14 @@ internal class AdapterService(
                 $"Adapter '{adapterRtEntityId}' unregistered with connection id '{connectionId}'.",
                 adapterRtEntityId);
 
-            adapterTenant.RemoveAdapter(adapterRtEntityId);
+            // Remove ONLY if this connection is still the current one. The stale-unregister
+            // guard above early-returns when the adapter has *already* reconnected before we
+            // entered — but the adapter can also re-register on a new connection DURING the
+            // awaits between that guard and here. An unconditional RemoveAdapter would then
+            // delete the freshly registered live connection, leaving every subsequent deploy
+            // failing with AdapterNotLoaded ("no live SignalR connection") until a pod restart
+            // (AB#4594). The compare-and-remove is atomic under the cache's connection lock.
+            adapterTenant.RemoveAdapterIfConnection(adapterRtEntityId, connectionId);
         }
     }
 
@@ -328,7 +335,10 @@ internal class AdapterService(
                     return;
                 }
 
-                adapterTenant.RemoveConnectionId(adapter.AdapterRtEntityId);
+                // Clear the connection only if it is still the current one — atomic
+                // compare-and-clear closes the residual TOCTOU between the guard above and
+                // here (a reconnect that lands in the gap must keep its live connection).
+                adapterTenant.RemoveConnectionIdIfConnection(adapter.AdapterRtEntityId, connectionId);
                 foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
                 {
                     await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,

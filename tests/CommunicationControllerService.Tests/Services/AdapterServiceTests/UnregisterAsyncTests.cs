@@ -205,4 +205,48 @@ internal class UnregisterAsyncTests : AdapterServiceTestsBase
         await Assert.That(AdapterTenant.AdapterById.ContainsKey(rtAdapter.ToRtEntityId())).IsTrue();
         await Assert.That(AdapterTenant.AdapterById[rtAdapter.ToRtEntityId()].ConnectionId).IsEqualTo(ConnectionId);
     }
+
+    [Test]
+    public async Task UnregisterAsync_ReconnectDuringUnregister_DoesNotRemoveFreshConnection()
+    {
+        // AB#4594 regression: a graceful UnRegister on the OLD connection passes the entry
+        // stale-guard (it IS the current connection at that moment), but the adapter
+        // re-registers on a NEW connection DURING the awaits that follow. The previous
+        // unconditional RemoveAdapter then deleted the freshly-registered live adapter, so
+        // every subsequent deploy failed with AdapterNotLoaded ("no live SignalR connection")
+        // until a pod restart. The atomic RemoveAdapterIfConnection must keep the adapter.
+        var rtAdapter = RtEntityCreator.CreateAdapter();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
+        var rtPipeline = RtEntityCreator.CreatePipeline();
+        const string newConnectionId = "newConnectionId";
+
+        AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
+            rtAdapter.ToRtEntityId(),
+            null,
+            [
+                new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline.ToRtEntityId(), false,
+                    rtPipeline.PipelineDefinition, [])
+            ]
+        ));
+
+        // Simulate the reconnect landing mid-unregister: when the first awaited DB write runs,
+        // the adapter re-registers on a NEW connection (as OnConnected / RegisterAdapter would).
+        CommunicationRepository
+            .SetPipelineDeploymentStateAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(),
+                Arg.Any<RtDeploymentStateEnum>(), Arg.Any<string?>())
+            .Returns(_ =>
+            {
+                AdapterTenant.UpdateConnectionId(rtAdapter.ToRtEntityId(), newConnectionId);
+                return Task.CompletedTask;
+            });
+
+        // Act - unregister arrives on the OLD connection, still current when it starts
+        await AdapterService.UnregisterAsync(TenantId, rtAdapter.ToRtEntityId(), ConnectionId);
+
+        // Assert - the freshly reconnected adapter survives with the NEW connection
+        using var _ = Assert.Multiple();
+        await Assert.That(AdapterTenant.AdapterById.ContainsKey(rtAdapter.ToRtEntityId())).IsTrue();
+        await Assert.That(AdapterTenant.AdapterById[rtAdapter.ToRtEntityId()].ConnectionId)
+            .IsEqualTo(newConnectionId);
+    }
 }

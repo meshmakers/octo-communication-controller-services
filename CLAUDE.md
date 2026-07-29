@@ -597,6 +597,43 @@ Tests:
   even if the `HttpContext` has already been torn down (and so the test
   doesn't need to mock one).
 
+### Adapter Reconnect Remove Race (AB#4594, completed)
+
+The first AB#4594 fix (`f43e2bc`) refreshed the cached `ConnectionId` in
+`RegisterAdapterInternalAsync` and added stale-connection early-return guards to
+`UnregisterAsync` / `SetAdapterCommunicationStateOfflineAsync`. Those guards only
+cover the case where the adapter has **already** reconnected *before* the
+stale handler runs. They do **not** cover the reconnect that lands *during* the
+handler's own `await`s: an adapter's graceful stop calls `UnRegisterAdapterAsync`
+on the OLD connection (`AdapterExecutionService.StopAsync`) and then reconnects.
+On the controller, `UnregisterAsync` passes the entry guard (the old connection
+is still current at that instant), does its DB downgrades (`await`s), and only
+then removed the adapter — but by then the new connection may have re-registered
+(`AddAdapter` / `UpdateConnectionId`). The old **unconditional** `RemoveAdapter`
+then deleted the freshly-registered live adapter, so every later deploy threw
+`AdapterServiceException.AdapterNotLoaded` ("no live SignalR connection") until a
+pod restart. `SetAdapterCommunicationStateOfflineAsync` had the same TOCTOU
+between its guard and the unconditional `RemoveConnectionId`.
+
+Fix: `AdapterTenant` now serializes its connection-lifecycle mutations
+(`AddAdapter` / `UpdateConnectionId` / `RemoveAdapter` / `RemoveConnectionId`)
+under a single `_connectionLock`, and exposes **atomic compare-and-remove**
+primitives `RemoveAdapterIfConnection(rtId, connectionId)` /
+`RemoveConnectionIdIfConnection(rtId, connectionId)` that only remove when the
+cached `ConnectionId` still equals the passed one. `UnregisterAsync` and
+`SetAdapterCommunicationStateOfflineAsync` call these instead of the unconditional
+variants, so a stale unregister/disconnect can never clobber a reconnected
+connection. (`PublishConfiguration` is a no-op today, so holding the lock across
+it is safe.) Note the DB `CommunicationState`/pipeline-`Pending` writes a stale
+unregister makes before the conditional remove are a narrow, cosmetic residual —
+the adapter stays live and deployable, and `OnConnectedAsync`'s Online write
+reconciles the state.
+
+Tests: `Caches/Adapters/AdapterTenantTests` (compare-and-remove happy path +
+newer-connection no-op for both primitives) and
+`Services/AdapterServiceTests/UnregisterAsyncTests.UnregisterAsync_ReconnectDuringUnregister_DoesNotRemoveFreshConnection`
+(the reconnect-mid-await interleaving that the old code failed).
+
 ### Cloud Pool Deploy Tracking (for the PreDeleteTenant cascade)
 
 The `OperatorConnectionManager` keeps an in-memory map
