@@ -79,7 +79,7 @@ attributes:
     description: 'The Discord guild (server) snowflake ID. Reserved for future channel-name resolution; not read by the ToDiscord node in v1.'
   - id: ApiKey
     valueType: String
-    description: 'API key for authenticating with the AI service (e.g. Anthropic sk-ant-... key). Stored as configuration attribute, not exposed in pipeline data context.'
+    description: 'API key for authenticating with an external service (e.g. Anthropic sk-ant-... key, WeClapp API token). Stored as configuration attribute, not exposed in pipeline data context.'
   - id: AiModel
     valueType: String
     description: 'AI model identifier to use (e.g. claude-sonnet-4-6, claude-opus-4-1). Mandatory and has no default: a pinned model id goes out of date (a retired "-20250514" snapshot returns HTTP 404), so it must be set explicitly on each AiConfiguration.'
