@@ -693,6 +693,22 @@ internal class AdapterService(
     private async Task SendConfigurationAndWaitForResultAsync(string tenantId, RtEntityId adapterRtEntityId,
         AdapterConfigurationDto adapterConfiguration)
     {
+        // AB#4662: debug capture retains per-iteration snapshots on the adapter and must never be
+        // active without the operator knowing. Deploy paths preserve the persisted flag as-is
+        // (AB#4364), so this single choke point for every configuration push surfaces each
+        // debug-enabled pipeline as a Warning event before it starts running in debug silently.
+        foreach (var debugPipeline in adapterConfiguration.Pipelines.Where(p => p.IsDebuggingEnabled))
+        {
+            Logger.Warn(
+                "[{TenantId}] Pipeline '{PipelineRtEntityId}' is deployed to adapter '{AdapterRtId}' with debug capture ENABLED",
+                tenantId, debugPipeline.PipelineRtEntityId, adapterRtEntityId);
+            await eventService.StoreWarningEventAsync(tenantId,
+                $"Pipeline '{debugPipeline.PipelineRtEntityId}' is deployed with debug capture enabled. " +
+                "Debug capture retains per-iteration snapshots and should be disabled for large runs " +
+                "(disable via SetPipelineDebug or the Studio debug button).",
+                debugPipeline.PipelineRtEntityId);
+        }
+
         var tcs = new TaskCompletionSource<DeploymentResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pendingDeployments[adapterRtEntityId] = tcs;
 

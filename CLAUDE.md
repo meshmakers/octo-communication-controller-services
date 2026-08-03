@@ -1132,8 +1132,9 @@ Tests:
 
 **Implementation:** `IAdapterService.SetPipelineDebuggingAsync` persists via
 `ICommunicationRepository.SetPipelineDebuggingEnabledAsync`, then re-pushes the
-owning data flow with `DeployDataFlowAsync` (the **non-force-enable** path —
-`DeployPipelineAsync` force-enables debug, so it is deliberately NOT used here).
+owning data flow with `DeployDataFlowAsync`. (Historic note: before AB#4364,
+`DeployPipelineAsync` force-enabled debug, which is why this path avoided it;
+since AB#4364 all deploy paths preserve the persisted flag as-is.)
 If the adapter is offline, `DeployDataFlowAsync` throws `AdapterServiceException`
 (`AdapterNotLoaded`); the service swallows it, leaving the flag persisted
 (`AppliedToRunningAdapter = false`, applies on next deploy). An `Information`
@@ -1150,8 +1151,19 @@ this PATCH endpoint / `SetPipelineDebuggingAsync`; the Studio's Enable/Disable
 Debug buttons call it directly (frontend-libraries
 `CommunicationService.setPipelineDebugging`).
 
+**Debug-enabled pipelines are surfaced on every push (AB#4662).** A lingering
+debug flag on a compute-heavy pipeline OOM-killed the FDA adapter without anyone
+knowing debug capture was active (debug retains per-iteration snapshots — memory
+bounds fixed SDK-side under the same AB#). `SendConfigurationAndWaitForResultAsync`
+— the single choke point for every configuration push (adapter config, pipeline
+deploy, data-flow deploy) — now writes a Warning audit event + NLog warning for
+each pipeline in the pushed configuration whose `IsDebuggingEnabled` is true, so
+sticky debug state is visible in the Studio event log instead of silent.
+
 Tests: `Services/AdapterServiceTests/SetPipelineDebuggingAsyncTests` (online
-enable/disable, offline persist-only, not-found paths) and
+enable/disable, offline persist-only, not-found paths),
+`Services/AdapterServiceTests/DebugEnabledDeployWarningTests` (warning event on
+debug-enabled push, silence otherwise) and
 `Controllers/PipelineControllerDebugTests`.
 
 ## Execute-Pipeline Endpoint Key (AB#4312)
