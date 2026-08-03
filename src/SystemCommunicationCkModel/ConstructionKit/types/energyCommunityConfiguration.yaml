@@ -27,6 +27,12 @@ types:
       - id: ${this}/BillingReportName
         name: BillingReportName
         isOptional: true
+      - id: ${this}/BillingReportFilePrefix
+        name: BillingReportFilePrefix
+        isOptional: true
+      - id: ${this}/BillingMailServerConfiguration
+        name: BillingMailServerConfiguration
+        isOptional: true
       - id: ${this}/HeaderGradientStart
         name: HeaderGradientStart
         isOptional: true

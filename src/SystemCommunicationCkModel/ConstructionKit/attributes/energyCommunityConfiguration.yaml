@@ -47,7 +47,13 @@ attributes:
     description: "Heading displayed in the application header bar"
   - id: BillingReportName
     valueType: String
-    description: "Name of the Telerik billing report template (e.g. SBEG_Billing.trdp)"
+    description: "Name of the Telerik billing report template (e.g. Billing.trdp)"
+  - id: BillingReportFilePrefix
+    valueType: String
+    description: "Filename prefix for generated billing report files (e.g. Billing_)"
+  - id: BillingMailServerConfiguration
+    valueType: String
+    description: "Well-known name of the EMailSenderConfiguration used for outbound billing mail"
   - id: HeaderGradientStart
     valueType: String
     description: "Start color of the header gradient"
