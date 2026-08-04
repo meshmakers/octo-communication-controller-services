@@ -1,0 +1,11 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+  - typeId: WeClappConfiguration
+    derivedFromCkTypeId: ${System}/Configuration
+    description: Configuration for the WeClapp cloud ERP API connection. Stores the tenant-specific base URL and API key. Referenced by WeClapp adapter nodes via apiConfiguration.
+    isFinal: true
+    attributes:
+      - id: ${this}/Host
+        name: BaseUrl
+      - id: ${this}/ApiKey
+        name: ApiKey
