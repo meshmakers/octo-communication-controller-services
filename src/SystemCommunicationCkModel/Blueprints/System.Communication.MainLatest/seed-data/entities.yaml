@@ -25,6 +25,30 @@ entities:
         value: ""
 
   # ---------------------------------------------------------------------------
+  # HelmRepositoryConfiguration — tenant-app charts (AB#4706). Shares rtId
+  # 670…005 with the Release variant's meshmakers-apps entity so app
+  # blueprints (e.g. EnergyCommunity.Base) can pin their Application's
+  # HelmRepository association to ONE stable rtId that resolves on every
+  # environment class: dev/test get the dev channel (main-CI publishes the
+  # app charts to helm-chart-build's gh-pages alongside the platform
+  # charts), staging/production get https://meshmakers.github.io/apps
+  # (r-tag publishes). A tenant migrating dev/test→staging automatically
+  # switches channels — same contract as the Pool/Adapter rtIds above.
+  # ---------------------------------------------------------------------------
+  - rtId: '670000000000000000000005'
+    ckTypeId: System.Communication/HelmRepositoryConfiguration
+    rtWellKnownName: meshmakers-apps
+    attributes:
+      - id: System.Communication/RepositoryUrl
+        value: https://meshmakers.github.io/helm-chart-build/
+      - id: System.Communication/Channel
+        value: 0   # Dev
+      - id: System.Communication/Username
+        value: ""
+      - id: System.Communication/Password
+        value: ""
+
+  # ---------------------------------------------------------------------------
   # Pool — Cloud-environment pool that the central Communication Operator owns.
   # Shares its rtId with the System.Communication.Release variant so a tenant
   # moving between channels keeps the same Pool entity.
