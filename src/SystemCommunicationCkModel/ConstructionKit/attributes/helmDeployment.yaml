@@ -5,10 +5,12 @@ attributes:
   description: 'Helm chart name within the repository (e.g. voest-app, octo-mesh-adapter).'
 - id: ChartVersion
   valueType: String
-  description: 'Helm chart version (e.g. 1.2.3).'
+  description: 'Helm chart version (e.g. 1.2.3). Runtime-state (AB#4706): set by the CD pipeline (UpdateWorkloadChartVersion) or the operator, not blueprint configuration - a blueprint re-apply preserves the live value instead of resetting it to the seeded version.'
+  isRuntimeState: true
 - id: ValuesYaml
   valueType: String
-  description: 'Full values.yaml content as a YAML string. Edited in a code editor or uploaded as a file in the Studio. Acts as the base layer of Helm values; ValueOverrides are deep-merged on top.'
+  description: 'Full values.yaml content as a YAML string. Edited in a code editor or uploaded as a file in the Studio. Acts as the base layer of Helm values; ValueOverrides are deep-merged on top. Runtime-state (AB#4706): operator-managed, preserved across blueprint re-apply.'
+  isRuntimeState: true
 - id: RepositoryUrl
   valueType: String
   description: 'HTTP(S) URL of a Helm repository index, e.g. https://meshmakers.github.io/octo-helm-core (public) or a private GitHub Pages site.'
@@ -20,12 +22,14 @@ attributes:
     - 0
 - id: IngressEnabled
   valueType: Boolean
-  description: 'When true, the operator projects ingress.enabled=true plus the workload Hostname into the Helm values. Cluster-wide defaults (className, cluster-issuer, TLS) come from the operator config and are not overridable per workload.'
+  description: 'When true, the operator projects ingress.enabled=true plus the workload Hostname into the Helm values. Cluster-wide defaults (className, cluster-issuer, TLS) come from the operator config and are not overridable per workload. Runtime-state (AB#4706): per-tenant operator decision, preserved across blueprint re-apply.'
   defaultValues:
     - false
+  isRuntimeState: true
 - id: Hostname
   valueType: String
-  description: 'Public hostname used when IngressEnabled=true (e.g. adapter.staging.octo-mesh.com). Adapters get a tenant-scoped path automatically (https://<hostname>/<tenantId>); Applications use the root path. Ignored when IngressEnabled=false.'
+  description: 'Public hostname used when IngressEnabled=true (e.g. adapter.staging.octo-mesh.com). Adapters get a tenant-scoped path automatically (https://<hostname>/<tenantId>); Applications use the root path. Ignored when IngressEnabled=false. Runtime-state (AB#4706): the productive hostname is tenant-specific (e.g. <tenant>.meshmakers.cloud) and operator-managed - a blueprint re-apply preserves it instead of resetting to the seeded default and silently breaking the deployed ingress/DNS.'
+  isRuntimeState: true
 - id: Path
   valueType: String
   description: 'Dotted Helm values path for a ValueOverride entry (e.g. image.tag, service.port, oauth.clientId).'
@@ -40,4 +44,5 @@ attributes:
 - id: Values
   valueType: RecordArray
   valueCkRecordId: ${this}/ValueOverride
-  description: 'Structured Helm value overrides. Deep-merged on top of ValuesYaml during deploy. Entries flagged IsSecret are stored encrypted.'
+  description: 'Structured Helm value overrides. Deep-merged on top of ValuesYaml during deploy. Entries flagged IsSecret are stored encrypted. Runtime-state (AB#4706): operator-managed overrides (e.g. publicUri, clientId) are preserved across blueprint re-apply; a blueprint that needs to ship NEW default overrides only seeds them on fresh installs.'
+  isRuntimeState: true

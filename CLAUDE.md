@@ -243,6 +243,26 @@ in `docs/runbooks/recover-mesh-adapter-state.md`. Any future
 service-managed-blueprint bump on 3.22.0+ should not need a runbook
 companion for this class of failure.
 
+**Operator-managed workload deploy attributes are runtime-state too
+(3.27.0, AB#4706).** `Hostname`, `IngressEnabled`, `ChartVersion`,
+`ValuesYaml` and `Values` on the deployable-workload attribute set
+(`attributes/helmDeployment.yaml`, shared by `Adapter` and `Application`)
+carry `isRuntimeState: true`. These fields are written at run time — the
+productive hostname (e.g. `<tenant>.meshmakers.cloud`) and per-tenant
+`ValueOverride`s (publicUri, clientId, …) by operators, `ChartVersion` by
+the CD pipeline's `UpdateWorkloadChartVersion` — and an app blueprint that
+seeds defaults (e.g. `EnergyCommunity.Base`'s Application entity) reset
+all of them on every `InstallBlueprint -f`, silently breaking the deployed
+ingress/DNS and OIDC configuration (observed live on prod-2/energydemo,
+2026-08-04). Seeds now only apply on fresh installs. Consequence for
+blueprint authors: a blueprint update can no longer ship CHANGED default
+values for these five attributes to existing tenants — by design; document
+new defaults in release notes instead. Note the association side (e.g. an
+Application's `HelmRepository` edge) has no preserve mechanism — blueprints
+must own their referenced `HelmRepositoryConfiguration` entity instead of
+pinning foreign per-environment rtIds (the EC Base blueprint does this
+since 2.2.5).
+
 **`Pipeline.IsDebuggingEnabled` is runtime-state too (3.23.0, AB#4273).**
 Debugging is an operational toggle (`SetPipelineDebug` / the Studio debug
 button), not part of a pipeline's portable definition — so
