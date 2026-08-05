@@ -244,7 +244,7 @@ service-managed-blueprint bump on 3.22.0+ should not need a runbook
 companion for this class of failure.
 
 **Operator-managed workload deploy attributes are runtime-state too
-(3.27.0, AB#4706).** `Hostname`, `IngressEnabled`, `ChartVersion`,
+(3.28.0, AB#4706).** `Hostname`, `IngressEnabled`, `ChartVersion`,
 `ValuesYaml` and `Values` on the deployable-workload attribute set
 (`attributes/helmDeployment.yaml`, shared by `Adapter` and `Application`)
 carry `isRuntimeState: true`. These fields are written at run time — the
