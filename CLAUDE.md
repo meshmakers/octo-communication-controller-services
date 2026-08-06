@@ -654,6 +654,50 @@ newer-connection no-op for both primitives) and
 `Services/AdapterServiceTests/UnregisterAsyncTests.UnregisterAsync_ReconnectDuringUnregister_DoesNotRemoveFreshConnection`
 (the reconnect-mid-await interleaving that the old code failed).
 
+### Reconcile Config Push on Registration (AB#4594 recurrence #2)
+
+The two fixes above only cover the *connection-cache* races (stale ConnectionId,
+TOCTOU remove). They do **not** guarantee the freshly (re-)registered adapter
+actually ends up running its deployed pipelines. Recurrence #2 (prod-1 /
+salzburgdev, 2026-08-06): a coordinated rollout restarted the Communication
+Controller (07:59) and then the mesh adapter (08:09) within minutes; the adapter
+came up `Online` with **zero pipeline routes registered** — every
+`FromHttpRequest` endpoint (`/exportHandover`, `/processDocuments`,
+`/uploadDocuments`, …) returned **404** — while the controller still reported the
+pipelines as `Deployed`. The accounting-app Handover export surfaced it as
+"kein Paket". Only a manual `UndeployWorkload`→`DeployWorkload` recreate restored
+the routes.
+
+Root cause: config reaches an adapter **two** ways — (1) the return value of
+`RegisterAdapterAsync` (the only delivery on the connect path), and (2) the active
+push `AdapterHubCallbacks.AdapterConfigurationUpdatedAsync` (used by the *deploy*
+paths). `RegisterAdapterInternalAsync` only ever *returned* the config DTO; it
+never actively pushed and never re-drove the deployed pipelines onto the new
+connection. So any register whose return value the adapter failed to fully apply
+(or that resolved to a stale/empty set during rollout churn) left the adapter
+routeless with **nothing to reconcile it** — the controller believed everything
+was `Deployed`, so no deploy was ever retried.
+
+Fix: `AdapterService.ReconcileAdapterConfigurationAsync` — after the connection is
+(re-)cached in `RegisterAdapterInternalAsync`, the controller actively re-pushes
+the adapter's deployed configuration onto the freshly registered connection
+(when it has ≥1 pipeline). This is **best-effort** (a push failure is logged, never
+fails the registration — the return value still carries the config) and uses the
+**raw, non-waiting** `AdapterConfigurationUpdatedAsync` send, *not*
+`SendConfigurationAndWaitForResultAsync`, so the register RPC is never blocked for
+the 120s deploy-ack window. The adapter's ack
+(`UpdateConfigurationStateAsync`) then transitions the pipelines to `Deployed`,
+which also clears the long-standing "stuck `Pending` after restart" drift (a
+registration delivered purely via the return value was never acked). The re-push
+is idempotent — the SDK's `RegisterPipelineCoreAsync` replaces stale registrations
+— so the double delivery (return value + push) is safe.
+
+Tests: `Services/AdapterServiceTests/RegisterAdapterTests`
+(`RegisterAdapter_RePushesDeployedConfiguration_OnRegistration` pins the re-push
+with the deployed pipeline set; `RegisterAdapter_NoPipelines_DoesNotRePush` pins
+the empty-config no-op). The `AdapterServiceTestsBase` mock already simulates the
+adapter's deploy ack, so the existing register tests exercise the ack path too.
+
 ### Cloud Pool Deploy Tracking (for the PreDeleteTenant cascade)
 
 The `OperatorConnectionManager` keeps an in-memory map

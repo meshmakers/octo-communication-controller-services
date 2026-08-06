@@ -175,6 +175,54 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
     }
 
     [Test]
+    public async Task RegisterAdapter_RePushesDeployedConfiguration_OnRegistration()
+    {
+        // Regression for AB#4594 recurrence #2 (prod-1/salzburgdev, 2026-08-06): after a
+        // coordinated controller+adapter rollout an adapter came up Online with NONE of its
+        // pipeline routes registered (every FromHttpRequest endpoint 404) while the controller
+        // still reported the pipelines Deployed. Returning the config from RegisterAdapterAsync
+        // is not enough — the controller must actively re-push the deployed configuration onto
+        // the freshly registered connection so the live adapter self-heals its routes.
+
+        // Arrange
+        var rtAdapter = RtEntityCreator.CreateAdapter();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
+        var rtPipeline = RtEntityCreator.CreatePipeline();
+
+        InitAdapterConfiguration(rtAdapter, rtDataFlow, [rtPipeline]);
+
+        // Act
+        await AdapterService.RegisterAdapterAsync(TenantId, rtAdapter.ToRtEntityId(), ConnectionId);
+
+        // Assert — the deployed configuration was re-pushed to the live connection
+        await AdapterHubCallbacks.Received(1).AdapterConfigurationUpdatedAsync(TenantId,
+            Arg.Is<AdapterConfigurationDto>(c =>
+                c.AdapterRtEntityId == rtAdapter.ToRtEntityId() &&
+                c.Pipelines.Count == 1 &&
+                c.Pipelines.First().PipelineRtEntityId == rtPipeline.ToRtEntityId()));
+    }
+
+    [Test]
+    public async Task RegisterAdapter_NoPipelines_DoesNotRePush()
+    {
+        // A registration that resolves to zero deployed pipelines must not push an empty
+        // configuration — that would be a no-op that only generates noise / spurious events.
+
+        // Arrange
+        var rtAdapter = RtEntityCreator.CreateAdapter();
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
+
+        InitAdapterConfiguration(rtAdapter, rtDataFlow, []);
+
+        // Act
+        await AdapterService.RegisterAdapterAsync(TenantId, rtAdapter.ToRtEntityId(), ConnectionId);
+
+        // Assert — no reconcile push for an empty configuration
+        await AdapterHubCallbacks.DidNotReceiveWithAnyArgs()
+            .AdapterConfigurationUpdatedAsync(Arg.Any<string>(), Arg.Any<AdapterConfigurationDto>());
+    }
+
+    [Test]
     public async Task RegisterAdapter_Removed_All_Pipelines()
     {
         // Arrange

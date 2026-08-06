@@ -158,10 +158,66 @@ internal class AdapterService(
                 adapter.SetPipelineSchema(pipelineSchemaJson);
             }
 
+            // AB#4594: reconcile the live adapter by actively re-pushing its deployed
+            // configuration onto the freshly registered connection. Returning the config DTO
+            // above is not sufficient on its own — during a coordinated controller+adapter
+            // rollout an adapter can come up Online with none of its pipeline routes registered
+            // (every FromHttpRequest endpoint 404s) while the controller still believes the
+            // pipelines are Deployed, and nothing re-drives the config onto the new connection.
+            await ReconcileAdapterConfigurationAsync(tenantId, adapterRtEntityId, adapter.Configuration);
+
             return adapter.Configuration;
         }
 
         throw AdapterServiceException.TenantNotEnabled(tenantId);
+    }
+
+    /// <summary>
+    /// AB#4594: re-push an adapter's deployed configuration to a freshly (re-)registered
+    /// connection so the live adapter self-heals its pipeline routes.
+    /// </summary>
+    /// <remarks>
+    /// The registration return value alone is not enough. During a coordinated
+    /// controller+adapter rollout (both pods restarting within seconds) an adapter can come up
+    /// Online while none of its pipelines' routes are registered — every FromHttpRequest
+    /// endpoint returns 404 — even though the controller still reports the pipelines as Deployed.
+    /// Nothing re-drives the configuration onto the new connection, so the outage persists until
+    /// a manual workload recreate.
+    ///
+    /// Re-pushing here reconciles the live adapter, and the adapter's ack
+    /// (<see cref="UpdateConfigurationStateAsync"/>) transitions the pipelines to Deployed — which
+    /// also clears the long-standing "stuck Pending after restart" drift, since a registration
+    /// delivered purely via the return value was never acked.
+    ///
+    /// Best-effort by contract: it MUST NOT fail the registration (the return value still carries
+    /// the configuration and the next deploy/reconnect retries), and it intentionally uses the raw,
+    /// non-waiting <see cref="IAdapterHubCallbacks.AdapterConfigurationUpdatedAsync"/> send rather
+    /// than <see cref="SendConfigurationAndWaitForResultAsync"/> so the register RPC is never
+    /// blocked for the 120s deploy-ack window.
+    /// </remarks>
+    private async Task ReconcileAdapterConfigurationAsync(string tenantId, RtEntityId adapterRtEntityId,
+        AdapterConfigurationDto configuration)
+    {
+        if (configuration.Pipelines.Count == 0)
+        {
+            // Nothing deployed to this adapter — a push would be a no-op that only adds noise.
+            return;
+        }
+
+        try
+        {
+            Logger.Info(
+                "[{TenantId}] Adapter '{AdapterRtId}' re-pushing {PipelineCount} deployed pipeline(s) on registration",
+                tenantId, adapterRtEntityId, configuration.Pipelines.Count);
+            await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, configuration);
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e,
+                "[{TenantId}] Adapter '{AdapterRtId}' reconcile push on registration failed; the registration " +
+                "return value still carries the configuration and the next deploy/reconnect will retry",
+                tenantId, adapterRtEntityId);
+        }
     }
 
     public async Task UnregisterAsync(string tenantId, RtEntityId adapterRtEntityId, string connectionId)
