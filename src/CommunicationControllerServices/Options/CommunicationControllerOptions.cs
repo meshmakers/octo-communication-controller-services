@@ -131,6 +131,19 @@ public class CommunicationControllerOptions
     public bool EnablePipelineSchemaValidation { get; set; } = false;
 
     /// <summary>
+    /// Gets or sets the interval in minutes at which the adapter offline-reconciliation sweep runs
+    /// (AB#4699). The sweep marks any adapter persisted as <c>Online</c> but without a live SignalR
+    /// connection on this pod as <c>Offline</c>, catching the case where an adapter's connection was
+    /// lost during the controller's own shutdown (the rolling-upgrade race guard deliberately skips
+    /// the Offline write there) and the adapter never reconnected.
+    ///
+    /// The same value is used as the startup grace: the first sweep only runs after this delay so
+    /// adapters have time to (re)connect after a controller (re)start or rolling upgrade before any
+    /// of them is judged orphaned. It must comfortably exceed the worst-case adapter reconnect time.
+    /// </summary>
+    public int AdapterOfflineReconciliationIntervalMinutes { get; set; } = 5;
+
+    /// <summary>
     /// Named public base domains available to workloads as <c>{{domain.NAME}}</c>
     /// placeholders in <c>Hostname</c>, non-secret <c>ValueOverride.Value</c>
     /// entries and <c>ValuesYaml</c>. Resolved by

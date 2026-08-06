@@ -21,6 +21,7 @@ internal class AdapterService(
     ICommunicationEventService eventService,
     IPipelineSchemaValidator pipelineSchemaValidator,
     IPipelineDefinitionService pipelineDefinitionService,
+    IAdapterConnectionTracker connectionTracker,
     IOptions<CommunicationControllerOptions> communicationControllerOptions)
     : IAdapterService
 {
@@ -348,6 +349,11 @@ internal class AdapterService(
         // as a stale disconnect, preventing it from overwriting the Online state.
         adapterTenant.UpdateConnectionId(adapterRtEntityId, connectionId);
 
+        // Record liveness in the reconciliation tracker (AB#4699). Unlike the config cache above,
+        // this survives a tenant pre/post-update flush, so the offline-reconciliation sweep can
+        // trust a tracker-miss to mean "no live connection".
+        connectionTracker.TrackConnected(tenantId, adapterRtEntityId, connectionId);
+
         if (wasAlreadyOnline)
         {
             Logger.Info("[{TenantId}] adapter rt id '{AdapterRtId}' reconnected (previous connection: '{OldConnectionId}', new connection: '{NewConnectionId}')",
@@ -402,6 +408,10 @@ internal class AdapterService(
                 }
             }
 
+            // Clear the reconciliation tracker (AB#4699). Compare-and-remove: a stale disconnect
+            // whose connection has already been replaced no-ops, keeping the live entry.
+            connectionTracker.TrackDisconnected(tenantId, adapterRtEntityId, connectionId);
+
             Logger.Info("[{TenantId}] adapter rt id '{AdapterRtId}' offline (connection '{ConnectionId}')",
                 tenantId, adapterRtEntityId, connectionId);
 
@@ -414,6 +424,56 @@ internal class AdapterService(
         }
 
         throw AdapterServiceException.TenantNotEnabled(tenantId);
+    }
+
+    public async Task<int> ReconcileOrphanedOnlineAdaptersAsync(string tenantId)
+    {
+        var adapters = await communicationRepository.GetAdaptersAsync(tenantId);
+
+        var reconciled = 0;
+        foreach (var adapter in adapters)
+        {
+            if (adapter.CommunicationState != RtCommunicationStateEnum.Online)
+            {
+                continue;
+            }
+
+            if (adapter.CkTypeId is null)
+            {
+                // Defensive: a runtime adapter should always carry its concrete type id.
+                Logger.Warn("[{TenantId}] Skipping offline reconciliation for adapter '{AdapterRtId}' with no CkTypeId",
+                    tenantId, adapter.RtId);
+                continue;
+            }
+
+            var adapterRtEntityId = new RtEntityId(adapter.CkTypeId, adapter.RtId);
+
+            // Re-check liveness immediately before writing so a reconnect that landed after the
+            // sweep started is not clobbered. The tracker (unlike the config cache) is not flushed
+            // by tenant updates, so a miss here reliably means "no live SignalR connection".
+            if (connectionTracker.HasLiveConnection(tenantId, adapterRtEntityId))
+            {
+                continue;
+            }
+
+            Logger.Warn(
+                "[{TenantId}] Adapter '{AdapterRtId}' is persisted Online but has no live SignalR connection on this pod; " +
+                "reconciling to Offline (AB#4699)",
+                tenantId, adapterRtEntityId);
+
+            await eventService.StoreInformationEventAsync(tenantId,
+                $"Adapter '{adapterRtEntityId}' had no live connection and was reconciled to Offline.",
+                adapterRtEntityId);
+
+            // The repository write carries an AttributeNewerThanGuard on the state timestamp, so a
+            // concurrent Online write with a newer timestamp still wins if it raced past the check
+            // above. Offline also resets ConfigurationState to Unconfigured (see the repository),
+            // so the badge follows reality.
+            await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId, RtCommunicationStateEnum.Offline);
+            reconciled++;
+        }
+
+        return reconciled;
     }
 
     public async Task DeployAdapterConfigurationAsync(string tenantId, RtEntityId adapterRtEntityId)

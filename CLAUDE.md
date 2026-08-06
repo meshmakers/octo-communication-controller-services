@@ -698,6 +698,54 @@ with the deployed pipeline set; `RegisterAdapter_NoPipelines_DoesNotRePush` pins
 the empty-config no-op). The `AdapterServiceTestsBase` mock already simulates the
 adapter's deploy ack, so the existing register tests exercise the ack path too.
 
+### Adapter Offline Reconciliation (AB#4699)
+
+The rolling-upgrade race guard in `AdapterHub.OnDisconnectedAsync` skips the Offline
+write during the controller pod's own shutdown, on the premise that the adapter
+reconnects to the surviving pod (which writes Online). If it never reconnects
+(adapter crash / lasting partition that coincides with the controller restart), the
+DB entity is stuck at a stale `Online` with no live SignalR connection — config
+pushes target a dead connection and Studio shows the adapter green. SignalR's own
+client-timeout only covers disconnects while the controller is **healthy**; the
+shutdown-window orphan has nothing to reconcile it.
+
+`AdapterOfflineReconciliationBackgroundService` closes the gap: after a startup
+grace it periodically asks `AdapterService.ReconcileOrphanedOnlineAdaptersAsync` to
+mark every adapter persisted `Online` but without a live connection as `Offline`.
+
+**Why not reuse the config `IAdapterCache` as the liveness signal?** Because
+`PreUpdateTenantAsync` flushes that cache on every tenant update while the SignalR
+connections stay alive (see `PreUpdateTenantAsync` / `PosUpdateTenantAsync`) — a
+connected adapter is therefore legitimately absent from the config cache, so a
+cache-miss cannot mean "disconnected". This is the exact trap that made the old
+"Offline-if-not-in-cache" loop reset every adapter's state; do not reintroduce it.
+There is also no periodic adapter heartbeat, so `CommunicationStateTimestamp`
+staleness is not a liveness signal either (a healthy adapter connected for days keeps
+its connect-time timestamp).
+
+The fix introduces a dedicated `IAdapterConnectionTracker` — a per-pod registry keyed
+by `(tenantId, adapterRtEntityId) → connectionId`, populated in
+`SetAdapterCommunicationStateOnlineAsync` and cleared (compare-and-remove) in
+`SetAdapterCommunicationStateOfflineAsync`, and **never** touched by a tenant
+pre/post-update. So a tracker-miss reliably means "no live SignalR connection on this
+pod". The controller runs single-replica in steady state (no SignalR backplane, the
+cross-node cache publish is a no-op), so this pod's tracker is the authoritative
+liveness view; the only overlap is the brief rolling-upgrade window, which the
+startup grace covers (adapters reconnect to the new pod, repopulating its tracker,
+before the first sweep runs). `ReconcileOrphanedOnlineAdaptersAsync` re-checks the
+tracker immediately before each write, and the repository's `AttributeNewerThanGuard`
+on the state timestamp rejects a stale Offline that raced past a concurrent Online.
+
+Config: `CommunicationControllerOptions.AdapterOfflineReconciliationIntervalMinutes`
+(default 5) is both the sweep cadence and the startup grace — it must comfortably
+exceed the worst-case adapter reconnect time after a controller restart.
+
+Tests: `Services/AdapterConnectionTrackerTests` (track / compare-and-remove /
+stale-disconnect-keeps-live / reconnect-then-stale-disconnect) and
+`Services/AdapterServiceTests/ReconcileOrphanedOnlineAdaptersAsyncTests` (orphaned
+Online → Offline, live connection kept, non-Online skipped, missing CkTypeId skipped,
+mixed fleet, and the real Online-write-populates-tracker path).
+
 ### Cloud Pool Deploy Tracking (for the PreDeleteTenant cascade)
 
 The `OperatorConnectionManager` keeps an in-memory map
