@@ -24,6 +24,9 @@ internal abstract class AdapterServiceTestsBase
     protected readonly ICommunicationEventService CommunicationEventService;
     protected readonly IPipelineSchemaValidator PipelineSchemaValidator;
     protected readonly IPipelineDefinitionService PipelineDefinitionService;
+    // Real tracker (simple, deterministic) so the Online/Offline write paths exercise real
+    // liveness tracking and the reconciliation tests can observe HasLiveConnection end-to-end.
+    protected readonly AdapterConnectionTracker AdapterConnectionTracker;
     protected readonly AdapterTenant AdapterTenant;
 
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
@@ -39,8 +42,10 @@ internal abstract class AdapterServiceTestsBase
         PipelineDefinitionService = new PipelineDefinitionService();
         var options = Substitute.For<IOptions<CommunicationControllerOptions>>();
         options.Value.Returns(new CommunicationControllerOptions());
+        AdapterConnectionTracker = new AdapterConnectionTracker();
         AdapterService = new AdapterService(CommunicationRepository, AdapterCache, AdapterHubCallbacks,
-            CommunicationEventService, PipelineSchemaValidator, PipelineDefinitionService, options);
+            CommunicationEventService, PipelineSchemaValidator, PipelineDefinitionService,
+            AdapterConnectionTracker, options);
         AdapterTenant = new AdapterTenant(AdapterCachePublish, TenantId);
 
         InitAdapterCache();

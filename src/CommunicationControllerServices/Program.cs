@@ -78,6 +78,7 @@ try
     builder.Services.AddSingleton<IWorkloadEncryptionService, WorkloadEncryptionService>();
     builder.Services.AddSingleton<IWorkloadTemplateResolver, WorkloadTemplateResolver>();
     builder.Services.AddSingleton<IShutdownState, HostApplicationShutdownState>();
+    builder.Services.AddSingleton<IAdapterConnectionTracker, AdapterConnectionTracker>();
     builder.Services.AddSingleton<IPipelineSchemaValidator, PipelineSchemaValidator>();
     builder.Services.AddSingleton<IExpressionValidationService, ExpressionValidationService>();
     builder.Services.AddSingleton<IPipelineDefinitionService, PipelineDefinitionService>();
@@ -100,6 +101,9 @@ try
     // ExecutionCleanupBackgroundService since AB#4370 (fold-then-prune), so no separate
     // statistics service is registered any more.
     builder.Services.AddHostedService<ExecutionCleanupBackgroundService>();
+
+    // Reconciles adapters stuck at a stale Online state with no live SignalR connection (AB#4699).
+    builder.Services.AddHostedService<AdapterOfflineReconciliationBackgroundService>();
 
     // Add execution report background processor - decouples heavy DB writes from SignalR hub
     // method processing so that execution reports don't block deployment results

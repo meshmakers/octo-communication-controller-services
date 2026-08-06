@@ -116,6 +116,18 @@ public interface IAdapterService
     Task SetAdapterCommunicationStateOfflineAsync(string tenantId, RtEntityId adapterRtEntityId, string connectionId);
 
     /// <summary>
+    /// Reconciles adapters of <paramref name="tenantId"/> that are persisted as <c>Online</c> but
+    /// have no live SignalR connection on this pod, marking them <c>Offline</c> (AB#4699).
+    /// Liveness is judged against <see cref="IAdapterConnectionTracker"/> (not the config cache,
+    /// which is flushed by tenant updates while connections survive), and re-checked immediately
+    /// before each write to avoid racing a concurrent reconnect. Callers must respect a startup
+    /// grace before invoking so adapters have time to (re)connect after a controller restart.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <returns>The number of adapters reconciled to Offline.</returns>
+    Task<int> ReconcileOrphanedOnlineAdaptersAsync(string tenantId);
+
+    /// <summary>
     /// Deploys the db version  an adapter configuration
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
