@@ -109,8 +109,7 @@ public class CommunicationController : ControllerBase
         }
         catch (ConfigurationException e) when (e.IsConflict)
         {
-            _logger.LogWarning("Rejected disable of Communication for tenant '{TenantId}': {Reason}", tenantId,
-                e.Message);
+            // The refusal is already logged (WARN) by the base DisableAsync.
             return Conflict(new OperationFailedErrorDto(e.Message));
         }
         catch (ConfigurationException e)

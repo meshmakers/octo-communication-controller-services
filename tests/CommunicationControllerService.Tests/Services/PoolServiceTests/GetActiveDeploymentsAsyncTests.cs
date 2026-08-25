@@ -43,13 +43,9 @@ internal class GetActiveDeploymentsAsyncTests : PoolServiceTestsBase
 
         var result = await PoolService.GetActiveDeploymentsAsync(TenantId);
 
-        await Assert.That(result.Select(d => d.ToString()).ToList()).IsEquivalentTo(new List<string>
-        {
-            "Pool 'alpha' (Deployed)",
-            "Pool 'zeta' (Pending)",
-            "Application 'grafana' (Error)",
-            "Adapter 'mesh' (Deployed)",
-        });
+        // Joined so the ORDER is pinned too (pools first, then workloads, each by name).
+        await Assert.That(string.Join(" | ", result.Select(d => d.ToString()))).IsEqualTo(
+            "Pool 'alpha' (Deployed) | Pool 'zeta' (Pending) | Application 'grafana' (Error) | Adapter 'mesh' (Deployed)");
     }
 
     [Test]
