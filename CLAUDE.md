@@ -1124,10 +1124,19 @@ open so remediation always works. `DeployDataFlow` / `DeployTrigger` already fai
 because the adapter cache is flushed (`AdapterServiceException.TenantNotEnabled`). Adding the
 middleware gate is a follow-up decision, not part of AB#4255.
 
+**Operator release must not resurrect a resting pool.** `UndeployPoolAsync` writes the resting state
+(`Undeployed` / Edge `Disabled`) *before* it notifies the operator; the operator then removes the CR and
+calls `UnregisterPoolAsync`, and `PoolService.UnregisterPoolOperatorAsync` used to overwrite the resting
+state with `Pending` ("no operator until one re-registers"). Every gracefully undeployed Cloud pool
+therefore sat at `Pending` forever — invisible before, fatal for the guard (found in the local E2E with
+the kind operator connected). The release now leaves a pool that already rests alone; only a
+still-deployed pool that loses its operator flips to `Pending`
+(`UnregisterPoolOperatorAsyncTests.UnregisterPoolOperatorAsync_RestingPool_KeepsItsDeploymentState`).
+
 Tests: `Services/PoolServiceTests/GetActiveDeploymentsAsyncTests`,
 `Services/DefaultConfigurationCreatorServiceTests/GetDisableBlockerAsyncTests`,
 `Controllers/CommunicationControllerDisableTests`, `Controllers/PoolControllerDeployGateTests`,
-integration `Repository/GetWorkloadsAsyncTests`.
+`Services/PoolServiceTests/UnregisterPoolOperatorAsyncTests`, integration `Repository/GetWorkloadsAsyncTests`.
 
 ## Project Structure Notes
 

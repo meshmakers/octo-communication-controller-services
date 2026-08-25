@@ -72,11 +72,24 @@ internal class PoolService : IPoolService
         // pools flip back to Pending until a new operator re-registers.
         var pools = await _communicationRepository.GetPoolsAsync(tenantId);
         var rtPool = pools.FirstOrDefault(p => p.RtId == poolRtId);
-        var targetState = rtPool?.Environment == RtEnvironmentEnum.Edge
-            ? RtDeploymentStateEnum.Disabled
-            : RtDeploymentStateEnum.Pending;
-        await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolDescription.PoolRtId,
-            targetState);
+        if (rtPool != null && !ActiveDeployment.IsActive(rtPool.DeploymentState))
+        {
+            // AB#4255: an operator releasing a pool that already rests (UndeployPoolAsync wrote
+            // Undeployed / Disabled before notifying it) is the acknowledgement of that undeploy.
+            // Overwriting the resting state here parked every gracefully undeployed Cloud pool at
+            // Pending forever, which the Communication disable guard would then refuse on.
+            Logger.Info(
+                "[{TenantId}] Pool '{PoolRtId}' already rests at {DeploymentState}; operator release leaves it there",
+                tenantId, poolRtId, rtPool.DeploymentState);
+        }
+        else
+        {
+            var targetState = rtPool?.Environment == RtEnvironmentEnum.Edge
+                ? RtDeploymentStateEnum.Disabled
+                : RtDeploymentStateEnum.Pending;
+            await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolDescription.PoolRtId,
+                targetState);
+        }
 
         await _eventService.StoreInformationEventAsync(tenantId,
             $"Pool operator for pool '{poolName}' unregistered.",
