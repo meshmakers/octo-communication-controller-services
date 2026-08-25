@@ -3,6 +3,7 @@ using Asp.Versioning;
 using IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -84,10 +85,15 @@ public class CommunicationController : ControllerBase
     /// Disables the communication controller for the current tenant
     /// </summary>
     /// <returns></returns>
+    /// <remarks>
+    /// Refused with 409 while pools or workloads of the tenant are still deployed (AB#4255); the body
+    /// names them and the commands that undeploy them. Every other configuration error stays a 400.
+    /// </remarks>
     [HttpPost("disable")]
     [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(OperationFailedErrorDto), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Disable()
     {
         var tenantId = HttpContext.GetTenantId();
@@ -100,6 +106,12 @@ public class CommunicationController : ControllerBase
         {
             await _configurationService.DisableAsync(tenantId);
             return NoContent();
+        }
+        catch (ConfigurationException e) when (e.IsConflict)
+        {
+            _logger.LogWarning("Rejected disable of Communication for tenant '{TenantId}': {Reason}", tenantId,
+                e.Message);
+            return Conflict(new OperationFailedErrorDto(e.Message));
         }
         catch (ConfigurationException e)
         {

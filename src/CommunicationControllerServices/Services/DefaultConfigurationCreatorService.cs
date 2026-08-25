@@ -123,6 +123,32 @@ internal class DefaultConfigurationCreatorService(
             $"Auto-update of blueprint {blueprintId.FullName} failed: {string.Join("; ", operationResult.GetMessages())}");
     }
 
+    /// <summary>
+    /// AB#4255: Communication may only be disabled once nothing it manages is deployed any more. The
+    /// answer is a verified precondition on the persisted deployment state (mirrored back by the
+    /// operator), not a teardown: the operator undeploys through the existing paths and retries.
+    /// Pipelines and triggers are deliberately not part of it — pipelines are no cluster resource and
+    /// become undeployable once their adapter is gone, and Disable removes trigger schedules itself.
+    /// </summary>
+    protected override async Task<string?> GetDisableBlockerAsync(string tenantId)
+    {
+        var activeDeployments = await poolService.GetActiveDeploymentsAsync(tenantId);
+        return activeDeployments.Count == 0 ? null : BuildDisableBlockedMessage(tenantId, activeDeployments);
+    }
+
+    /// <summary>
+    /// The operator-facing refusal. Surfaced verbatim by CLI, MCP and Studio, so it names every
+    /// resource with its kind and state and the commands that remove them.
+    /// </summary>
+    internal static string BuildDisableBlockedMessage(string tenantId, IReadOnlyList<ActiveDeployment> activeDeployments)
+    {
+        var resources = string.Join(", ", activeDeployments.Select(d => d.ToString()));
+        return $"Communication cannot be disabled for tenant '{tenantId}' while the following resources are still deployed: " +
+               $"{resources}. Undeploy them first - workloads with UndeployWorkload, pools with UndeployPool " +
+               $"(octo-cli in a context of tenant '{tenantId}', or Refinery Studio > Communication > Adapters / Applications / Pools) - " +
+               "then retry DisableCommunication.";
+    }
+
     protected override async Task StopTenantAsync(string tenantId)
     {
         logger.LogInformation("Unloading tenant '{TenantId}'", tenantId);
