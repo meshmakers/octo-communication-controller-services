@@ -877,6 +877,32 @@ internal class PoolService : IPoolService
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<ActiveDeployment>> GetActiveDeploymentsAsync(string tenantId)
+    {
+        var pools = await _communicationRepository.GetPoolsAsync(tenantId);
+        var workloads = await _communicationRepository.GetWorkloadsAsync(tenantId);
+
+        var active = new List<ActiveDeployment>();
+        active.AddRange(pools
+            .Where(p => ActiveDeployment.IsActive(p.DeploymentState))
+            .Select(p => new ActiveDeployment(ActiveDeployment.PoolKind, DisplayName(p.Name, p.RtId), p.DeploymentState))
+            .OrderBy(d => d.Name, StringComparer.Ordinal));
+        active.AddRange(workloads
+            .Where(w => ActiveDeployment.IsActive(w.DeploymentState))
+            .Select(w => new ActiveDeployment(
+                w is RtApplication ? ActiveDeployment.ApplicationKind : ActiveDeployment.AdapterKind,
+                DisplayName(w.Name, w.RtId), w.DeploymentState))
+            .OrderBy(d => d.Name, StringComparer.Ordinal));
+
+        return active;
+    }
+
+    private static string DisplayName(string? name, OctoObjectId rtId)
+    {
+        return string.IsNullOrWhiteSpace(name) ? rtId.ToString() : name;
+    }
+
+    /// <inheritdoc />
     public async Task RecomputeAllDeploymentStatesAsync(string tenantId)
     {
         Logger.Info("[{TenantId}] Recomputing all deployment states", tenantId);

@@ -85,6 +85,27 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyCollection<RtDeployableWorkload>> GetWorkloadsAsync(string tenantId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            // RtDeployableWorkload is abstract — the runtime engine returns the
+            // concrete RtAdapter / RtApplication instances polymorphically.
+            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtDeployableWorkload>(session,
+                RtEntityQueryOptions.Create());
+
+            return resultSet.Items.ToList();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingWorkloads(tenantId, e);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<RtDeployableWorkload?> GetWorkloadByRtIdAsync(string tenantId, OctoObjectId workloadRtId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);

@@ -144,6 +144,11 @@ internal class CommunicationRepositoryException : Exception
         return new CommunicationRepositoryException($"[{tenantId}] Failed to get pools", exception);
     }
 
+    internal static Exception CommonFailedGettingWorkloads(string tenantId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get workloads", exception);
+    }
+
     internal static Exception CommonFailedGettingPipeline(string tenantId, RtEntityId pipelineRtEntityId,
         Exception exception)
     {

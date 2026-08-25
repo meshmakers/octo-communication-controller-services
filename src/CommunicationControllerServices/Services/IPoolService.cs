@@ -111,6 +111,17 @@ public interface IPoolService
     Task<IReadOnlyList<PoolSummaryDto>> GetPoolSummariesAsync(string tenantId);
 
     /// <summary>
+    /// Lists the pools and workloads (Adapters/Applications) of the tenant that still own
+    /// operator-managed resources according to their persisted <c>DeploymentState</c>
+    /// (see <see cref="ActiveDeployment.IsActive"/>). Reads the repository, not the in-memory
+    /// operator tracking, so the answer survives controller restarts and covers Edge leftovers.
+    /// Pools first, then workloads, each ordered by name. Read failures propagate — an unreadable
+    /// tenant must never look torn down. Used by the Communication disable guard (AB#4255).
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    Task<IReadOnlyList<ActiveDeployment>> GetActiveDeploymentsAsync(string tenantId);
+
+    /// <summary>
     /// Walks every Pool, Workload (Adapter/Application), Pipeline, and PipelineTrigger of a
     /// tenant and recomputes their DeploymentState according to the Disabled rules:
     /// <list type="bullet">
