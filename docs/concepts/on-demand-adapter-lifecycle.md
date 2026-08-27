@@ -116,6 +116,8 @@ A workload is **`OnDemandCapable` iff none of its deployed pipelines uses a proc
 
 **Future extension:** `LifecycleMode = Auto` (controller decides from capability). The enum value (`2 Auto`) is reserved in the model now to avoid a later CK bump cascade, but validation rejects it until implemented (post wave 2).
 
+**Worked example — Energy Community billing:** "generate billing documents" arrives as a web request, which is no reason to be always-on. The EC mesh adapter (billing pipelines: HTTP/execute-triggered) classifies as OnDemandCapable; the EC *EDA adapter* (live event consumers) classifies as process-bound and stays `AlwaysOn` — exactly the split the classification exists for. For the request itself there are three options, in ascending quality: activator holds the request through the wake (~20–40 s once, AB#4923); the app calls the wake API first and shows "adapter starting" (AB#4922 pattern); or — the right answer for billing runs, which are long anyway — the **202 pattern**: trigger the pipeline with `awaitResult: false`, poll `PipelineExecution` status, show progress. Then wake latency disappears entirely into the background job (reference implementation: `bulkUpdateTransactions` in the accounting app). Rule of thumb: **HTTP-triggered long-runners belong on the 202 pattern — then wake is free.**
+
 ## 6. Failure modes
 
 | Failure | Handling |
