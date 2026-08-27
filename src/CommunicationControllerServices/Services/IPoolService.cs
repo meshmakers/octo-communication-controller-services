@@ -70,6 +70,18 @@ public interface IPoolService
     Task UndeployWorkloadAsync(string tenantId, OctoObjectId workloadRtId);
 
     /// <summary>
+    /// Re-dispatches every workload of the pool that is stuck in
+    /// <c>DeploymentState = Pending</c> (AB#4894). Called when an operator (re-)registers the
+    /// pool: a deploy notification sent while the previous operator pod was being replaced is
+    /// lost silently (SignalR SendAsync is fire-and-forget), leaving the entity Pending forever —
+    /// the reverse-sync restores Deployed state but never re-dispatches pending deploys.
+    /// Best effort: failures are logged per workload and never fail the registration.
+    /// A re-dispatch racing a genuinely in-flight deploy is safe — the operator queue is serial
+    /// and <c>helm upgrade --install</c> is idempotent.
+    /// </summary>
+    Task ReconcilePendingWorkloadsAsync(string tenantId, OctoObjectId poolRtId);
+
+    /// <summary>
     /// Undeploys every Cloud pool of a tenant. Used when a tenant is being
     /// deleted/detached so that the central Communication Operator cleans up
     /// all CommunicationPool CRs and broker secrets that were auto-managed

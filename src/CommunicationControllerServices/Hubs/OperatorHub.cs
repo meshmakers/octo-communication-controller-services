@@ -273,6 +273,13 @@ public class OperatorHub : Hub, IOperatorHub
         // (rethrown above) does not consume the queue.
         await _connectionManager.FlushPendingWorkloadNotificationsAsync(
             Context.ConnectionId, tenantId, poolRtId);
+
+        // Re-dispatch workloads stranded in Pending (AB#4894): a deploy
+        // notification sent to the PREVIOUS operator pod while it was being
+        // replaced is lost silently and never enters the AB#4371 queue (the
+        // pool had a registered — dying — owner at send time). Best effort,
+        // never fails the registration.
+        await _poolService.ReconcilePendingWorkloadsAsync(tenantId, poolObjectId);
     }
 
     /// <inheritdoc />

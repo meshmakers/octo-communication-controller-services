@@ -283,6 +283,48 @@ internal class PoolService : IPoolService
             $"Workload '{workload.Name}' deploy requested.");
     }
 
+    public async Task ReconcilePendingWorkloadsAsync(string tenantId, OctoObjectId poolRtId)
+    {
+        // AB#4894: a deploy notification that raced an operator pod replacement is lost
+        // silently, stranding the workload in Pending with nothing to reconcile it. On every
+        // pool (re-)registration, re-dispatch whatever is still Pending. Best effort — this
+        // runs on the registration path and must never fail it.
+        IReadOnlyCollection<RtDeployableWorkload> workloads;
+        try
+        {
+            workloads = await _communicationRepository.GetWorkloadsForPoolAsync(tenantId, poolRtId);
+        }
+        catch (Exception e)
+        {
+            // A tenant update may be unloading the CK cache concurrently (same race the
+            // PreDeleteTenant cascade avoids via in-memory tracking) — skip this round, the
+            // next registration reconciles.
+            Logger.Warn(e,
+                "[{TenantId}] Skipping pending-workload reconcile for pool {PoolRtId}: workload lookup failed",
+                tenantId, poolRtId);
+            return;
+        }
+
+        foreach (var workload in workloads.Where(w => w.DeploymentState == RtDeploymentStateEnum.Pending))
+        {
+            try
+            {
+                Logger.Info(
+                    "[{TenantId}] Workload '{WorkloadName}' ({WorkloadRtId}) is stuck in Pending on pool registration — re-dispatching its deploy (AB#4894)",
+                    tenantId, workload.Name, workload.RtId);
+                await _eventService.StoreInformationEventAsync(tenantId,
+                    $"Workload '{workload.Name}' was still Pending when its pool re-registered — deploy re-dispatched.");
+                await DeployWorkloadAsync(tenantId, workload.RtId);
+            }
+            catch (Exception e)
+            {
+                Logger.Warn(e,
+                    "[{TenantId}] Re-dispatch of pending workload '{WorkloadName}' ({WorkloadRtId}) failed, continuing",
+                    tenantId, workload.Name, workload.RtId);
+            }
+        }
+    }
+
     private async Task SetWorkloadDeploymentStateAsync(string tenantId, RtDeployableWorkload workload,
         RtDeploymentStateEnum deploymentState)
     {

@@ -538,6 +538,15 @@ Flow:
 Old adapter builds without the hub handler just log an unbound-method warning — the
 `PreUpdateTenantAsync` restart relay remains their (gated) fallback.
 
+**Update scope (AB#4895).** `PreUpdateTenant`/`PosUpdateTenant` carry an optional
+`TenantUpdateScope` (default `Full`; older publishers deserialize to `Full`). When a completed
+pair is `CacheOnly` — e.g. the nightly `AttributeValueAggregatorJob`, which only rewrites
+`AutoCompleteValues` on CK attributes — the consumer broadcasts the CK cache flush but
+**skips the adapter restart relay** entirely. The fleet-wide midnight restart this relay used
+to cause was the trigger window for AB#4876. A mixed pair is treated as `Full` (defensive).
+Tests: `CacheOnlyPair_NotifiesCkModelChangedButSkipsRestartRelay`,
+`MixedScopePair_FullWins_RunsRestartRelay`.
+
 **Pairing state is `static` on purpose.** `AddBroadcastEventConsumer` registers consumers
 **scoped**, so MassTransit creates a new `TenantManagementConsumer` per message — an
 instance-level pair dictionary can never match Pre with Pos, and the paired branch
@@ -932,6 +941,20 @@ Tests:
   workload fan-out, undeploy ordering, scoping workloads to the right pool.
 - `Services/PoolServiceTests/UndeployAllCloudPoolsAsyncTests` — extended
   with workload-cascade tests.
+
+### Pending-Workload Reconcile on Pool Registration (AB#4894)
+
+A workload deploy notification is fire-and-forget SignalR; one sent while the operator pod was
+being replaced (e.g. an operator CD mid-rollout) lands on the dying connection and is lost —
+the entity stays `Pending` forever, and neither the AB#4371 pending queue (the pool HAD a
+registered owner at send time) nor the reverse-sync (restores state, never re-dispatches)
+covers it. `OperatorHub.RegisterPoolAsync` therefore calls
+`PoolService.ReconcilePendingWorkloadsAsync` after the AB#4371 flush: every workload of the
+pool still in `DeploymentState=Pending` gets its deploy re-dispatched through the normal
+`DeployWorkloadAsync` path. Best effort — lookup or per-workload failures are logged and never
+fail the registration. Re-dispatching a genuinely in-flight deploy is safe: the operator queue
+is serial and `helm upgrade --install` is idempotent. Tests:
+`Services/PoolServiceTests/ReconcilePendingWorkloadsAsyncTests`.
 
 ### Operator Reverse-Sync
 
