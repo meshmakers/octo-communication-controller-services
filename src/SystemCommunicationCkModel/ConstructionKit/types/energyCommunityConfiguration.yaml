@@ -67,3 +67,9 @@ types:
         name: FarmerTaxRate
         isOptional: false
         
+      - id: ${this}/BankAccountIban
+        name: BankAccountIban
+        isOptional: true
+      - id: ${this}/BankAccountHolder
+        name: BankAccountHolder
+        isOptional: true
