@@ -95,7 +95,28 @@ The idle watchdog and the wake gates read the tenant config through a short-TTL 
 
 Test rollout: set the config record on selected staging-1 tenants (e.g. meshtest), `OnDemand` on their adapters, observe; prod-1 wave 1 = finAPI adapters (AB#4921), wave 2 = accounting mesh adapters after the trigger migration (AB#4922). `energyiq` stays `AlwaysOn` (and its tenant simply never gets the config record).
 
-## 5. Failure modes
+## 5. On-demand eligibility (trigger classification)
+
+Whether a workload *can* be OnDemand is not a free choice — it is derivable from the trigger nodes of its deployed pipelines. All triggers fall into two classes:
+
+| Class | Triggers | Behavior at 0 replicas |
+|---|---|---|
+| **Wake-capable** | cron `FromPipelineTriggerEvent`, `FromExecutePipelineCommand`, `FromHttpRequest@1/2`, `FromPipelineDataEvent` (chaining, durable queue) | work buffers durably or arrives through a wake gate |
+| **Process-bound** | `FromPolling`, `FromWatchRtEntity`, `FromMicrosoftGraphEmail`, MQTT/EDA/Loxone event consumers | state is in-memory only, no external wake signal — **silently stops** |
+
+A workload is **`OnDemandCapable` iff none of its deployed pipelines uses a process-bound trigger.**
+
+**Classification source — self-description over node descriptors:** adapters already register their node descriptors on startup (meshtest reports 111). The trigger-node descriptor contract (octo-sdk, `Meshmakers.Octo.Communication.Contracts`) gets a capability flag `RequiresRunningProcess` (default `false`), set by the SDK trigger-node implementations; the reflection-based descriptor scan picks it up automatically, so any adapter — including future third-party ones — self-describes. Fallback for adapters running older SDK versions: a controller-side known-name list.
+
+**Derived state & validation (both directions):**
+
+- The controller computes `OnDemandCapable` per workload, with blocking reasons ("pipeline X uses FromPolling"). Exposed via API and shown in Studio next to the LifecycleMode setting.
+- Setting `LifecycleMode=OnDemand` on a non-capable workload is **rejected** (validation in `PoolService`, same pattern as `EnsureWorkloadIsHelmDeployableAsync`).
+- The reverse direction is the sneaky one: deploying a pipeline with a process-bound trigger **to an already-OnDemand workload** is rejected by default (explicit beats silent). Auto-fallback to `AlwaysOn` + audit event was considered and rejected as too implicit; revisit if the rejection proves annoying in practice.
+
+**Future extension:** `LifecycleMode = Auto` (controller decides from capability). The enum value (`2 Auto`) is reserved in the model now to avoid a later CK bump cascade, but validation rejects it until implemented (post wave 2).
+
+## 6. Failure modes
 
 | Failure | Handling |
 |---|---|
@@ -106,7 +127,7 @@ Test rollout: set the config record on selected staging-1 tenants (e.g. meshtest
 | Controller restart mid-wake | Wait registry is in-memory; callers time out and retry. `LifecycleState=Waking` without a waiter is reconciled by the watchdog (Configured → Running; stale Waking > budget → Hibernated). |
 | Trigger replay storm after long hibernation | Queues have no TTL; N buffered `PipelineTriggerSchedule` replay at once. Measure (AB#4915), then decide: consumer-side dedupe in `FromPipelineTriggerEventNode` or values-driven `x-message-ttl` (AB#4920). |
 
-## 6. Baseline measurements (staging-1, 2026-08-27)
+## 7. Baseline measurements (staging-1, 2026-08-27)
 
 | Metric | Value | Notes |
 |---|---|---|
@@ -119,6 +140,6 @@ Test rollout: set the config record on selected staging-1 tenants (e.g. meshtest
 
 Still to measure: first-execution latency on a large tenant CK model with/without eager load (AB#4920); replay behavior with a real backlog; finAPI adapter cold start.
 
-## 7. Out of scope / follow-ups
+## 8. Out of scope / follow-ups
 
 HTTP activator (AB#4923, two-tier: app wake-interceptor first), shared multi-tenant runtime for platform-owned adapters (AB#4924 evaluation), KEDA integration (deliberately not in the core path — per-pipeline queue names churn, interactive path invisible to KEDA, edge clusters would need KEDA installs).
