@@ -76,6 +76,56 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
     }
 
     [Test]
+    public async Task UnregisterPoolOperatorAsync_DeployedCloudPool_FlipsToPending()
+    {
+        GivenTenantInCache();
+        AddPoolToTenant();
+        GivenPersistedPool(RtDeploymentStateEnum.Deployed, RtEnvironmentEnum.Cloud);
+
+        await PoolService.UnregisterPoolOperatorAsync(TenantId, PoolRtId);
+
+        await CommunicationRepository.Received(1)
+            .SetPoolDeploymentStateAsync(TenantId, PoolRtId, RtDeploymentStateEnum.Pending);
+    }
+
+    [Test]
+    [Arguments(RtDeploymentStateEnum.Undeployed, RtEnvironmentEnum.Cloud)]
+    [Arguments(RtDeploymentStateEnum.Disabled, RtEnvironmentEnum.Edge)]
+    public async Task UnregisterPoolOperatorAsync_RestingPool_KeepsItsDeploymentState(
+        RtDeploymentStateEnum restingState, RtEnvironmentEnum environment)
+    {
+        // AB#4255 regression: UndeployPoolAsync writes the resting state before it notifies the
+        // operator, whose release used to overwrite it with Pending - so a gracefully undeployed
+        // Cloud pool never reached a state the Communication disable guard accepts.
+        GivenTenantInCache();
+        AddPoolToTenant();
+        GivenPersistedPool(restingState, environment);
+
+        await PoolService.UnregisterPoolOperatorAsync(TenantId, PoolRtId);
+
+        await CommunicationRepository.DidNotReceiveWithAnyArgs()
+            .SetPoolDeploymentStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
+                Arg.Any<RtDeploymentStateEnum>());
+        await CommunicationRepository.Received(1)
+            .SetPoolCommunicationStateAsync(TenantId, PoolRtId, RtCommunicationStateEnum.Unregistered);
+    }
+
+    private void GivenPersistedPool(RtDeploymentStateEnum deploymentState, RtEnvironmentEnum environment)
+    {
+        CommunicationRepository.GetPoolsAsync(TenantId).Returns(new[]
+        {
+            new RtPool
+            {
+                RtId = PoolRtId,
+                CkTypeId = SystemCommunicationCkIds.RtCkPoolTypeId,
+                Name = PoolName,
+                DeploymentState = deploymentState,
+                Environment = environment
+            }
+        });
+    }
+
+    [Test]
     public async Task UnregisterPoolOperatorAsync_PoolInCache_StoresInformationEvent()
     {
         GivenTenantInCache();

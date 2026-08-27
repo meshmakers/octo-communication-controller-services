@@ -72,11 +72,24 @@ internal class PoolService : IPoolService
         // pools flip back to Pending until a new operator re-registers.
         var pools = await _communicationRepository.GetPoolsAsync(tenantId);
         var rtPool = pools.FirstOrDefault(p => p.RtId == poolRtId);
-        var targetState = rtPool?.Environment == RtEnvironmentEnum.Edge
-            ? RtDeploymentStateEnum.Disabled
-            : RtDeploymentStateEnum.Pending;
-        await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolDescription.PoolRtId,
-            targetState);
+        if (rtPool != null && !ActiveDeployment.IsActive(rtPool.DeploymentState))
+        {
+            // AB#4255: an operator releasing a pool that already rests (UndeployPoolAsync wrote
+            // Undeployed / Disabled before notifying it) is the acknowledgement of that undeploy.
+            // Overwriting the resting state here parked every gracefully undeployed Cloud pool at
+            // Pending forever, which the Communication disable guard would then refuse on.
+            Logger.Info(
+                "[{TenantId}] Pool '{PoolRtId}' already rests at {DeploymentState}; operator release leaves it there",
+                tenantId, poolRtId, rtPool.DeploymentState);
+        }
+        else
+        {
+            var targetState = rtPool?.Environment == RtEnvironmentEnum.Edge
+                ? RtDeploymentStateEnum.Disabled
+                : RtDeploymentStateEnum.Pending;
+            await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolDescription.PoolRtId,
+                targetState);
+        }
 
         await _eventService.StoreInformationEventAsync(tenantId,
             $"Pool operator for pool '{poolName}' unregistered.",
@@ -874,6 +887,32 @@ internal class PoolService : IPoolService
             CommunicationStateTimestamp = p.CommunicationStateTimestamp,
             StatusMessage = p.StatusMessage
         }).ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ActiveDeployment>> GetActiveDeploymentsAsync(string tenantId)
+    {
+        var pools = await _communicationRepository.GetPoolsAsync(tenantId);
+        var workloads = await _communicationRepository.GetWorkloadsAsync(tenantId);
+
+        var active = new List<ActiveDeployment>();
+        active.AddRange(pools
+            .Where(p => ActiveDeployment.IsActive(p.DeploymentState))
+            .Select(p => new ActiveDeployment(ActiveDeployment.PoolKind, DisplayName(p.Name, p.RtId), p.DeploymentState))
+            .OrderBy(d => d.Name, StringComparer.Ordinal));
+        active.AddRange(workloads
+            .Where(w => ActiveDeployment.IsActive(w.DeploymentState))
+            .Select(w => new ActiveDeployment(
+                w is RtApplication ? ActiveDeployment.ApplicationKind : ActiveDeployment.AdapterKind,
+                DisplayName(w.Name, w.RtId), w.DeploymentState))
+            .OrderBy(d => d.Name, StringComparer.Ordinal));
+
+        return active;
+    }
+
+    private static string DisplayName(string? name, OctoObjectId rtId)
+    {
+        return string.IsNullOrWhiteSpace(name) ? rtId.ToString() : name;
     }
 
     /// <inheritdoc />

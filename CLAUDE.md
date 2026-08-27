@@ -1081,6 +1081,63 @@ Tests:
   ordering and shape of `GET /workload-variables` so the Studio's
   suggestion list stays stable.
 
+## Disable Refuses While Pools or Workloads Are Deployed (AB#4255)
+
+`POST {tenantId}/v1/communication/disable` answers **409** with an `OperationFailedErrorDto` while any
+Pool, Adapter or Application of the tenant has a `DeploymentState` other than `Undeployed` /
+`Disabled` (`ActiveDeployment.IsActive`: Deployed, Pending and Error all own operator resources —
+see the recompute comment in `PoolService.RecomputeAllDeploymentStatesAsync`). The body names every
+resource as `Kind 'Name' (State)` plus the undeploy verbs (`UndeployWorkload`, `UndeployPool`,
+Studio). Every other `ConfigurationException` stays a 400. The tenant delete/detach guard in the
+asset repository (AB#4255 step 1) only reads the enabled flag, so this is the check that keeps a
+deleted tenant from leaving `CommunicationPool` CRs and helm releases behind.
+
+Mechanics:
+
+- `DefaultConfigurationCreatorService.GetDisableBlockerAsync` overrides the octo-common-services hook
+  (consulted after the already-disabled check, before the flag is removed; a refusal keeps the flag and
+  skips `StopTenantAsync`) and builds the message with `BuildDisableBlockedMessage` (pinned by
+  `GetDisableBlockerAsyncTests.BuildDisableBlockedMessage_IsTheOperatorContract`).
+- `IPoolService.GetActiveDeploymentsAsync` reads the **repository** (`GetPoolsAsync` +
+  `GetWorkloadsAsync`, the latter a polymorphic `GetRtEntitiesByTypeAsync<RtDeployableWorkload>`),
+  NOT the `OperatorConnectionManager` tracking maps: this is a user request on a live tenant (no race
+  with the PreDeleteTenant cache unload), and the persisted state is what the operator mirrors back
+  through the reverse-sync, survives controller restarts and shows Cloud→Edge leftovers. A read
+  failure propagates — an unreadable tenant must never look torn down.
+- **Deliberately not in the guard:** pipelines (no cluster resource — their registration lives in the
+  adapter's memory; disconnect/helm-uninstall leaves them `Pending`, and `UndeployDataFlowAsync` throws
+  `AdapterNotLoaded` once the adapter is gone, so a pipeline-aware guard could not be remediated) and
+  triggers (`StopTenantAsync` removes their schedule itself; `Pending` is their normal post-disable
+  state, see `TriggerManagementService.RemoveScheduleAsync`).
+- This is a **verified precondition, not a teardown**: `UndeployAllCloudPoolsAsync` stays wired to
+  `PreDeleteTenant` only. Reasons: it reads the process-local tracking map, is Cloud-only, cannot stop
+  self-hosted Edge adapters, and a flag flip that helm-uninstalls a production tenant's workloads would
+  be a dangerous side effect of a harmless-looking verb.
+
+**Deploy gate.** This service does not register the platform's `UseOctoTenants()` enabled-gate
+middleware (it would 403 the `adapterHub` negotiate and every Studio Communication page of a disabled
+tenant — the Studio derives navigation from CK-model presence, which Disable does not remove). After
+a Disable the tenant API therefore stays callable. `PoolController.DeployPoolAsync` and
+`DeployWorkloadAsync` — the two endpoints that create operator-managed cluster resources — check
+`IConfigurationService.IsEnabledAsync` themselves and answer 409 on a disabled tenant; undeploy stays
+open so remediation always works. `DeployDataFlow` / `DeployTrigger` already fail on a disabled tenant
+because the adapter cache is flushed (`AdapterServiceException.TenantNotEnabled`). Adding the
+middleware gate is a follow-up decision, not part of AB#4255.
+
+**Operator release must not resurrect a resting pool.** `UndeployPoolAsync` writes the resting state
+(`Undeployed` / Edge `Disabled`) *before* it notifies the operator; the operator then removes the CR and
+calls `UnregisterPoolAsync`, and `PoolService.UnregisterPoolOperatorAsync` used to overwrite the resting
+state with `Pending` ("no operator until one re-registers"). Every gracefully undeployed Cloud pool
+therefore sat at `Pending` forever — invisible before, fatal for the guard (found in the local E2E with
+the kind operator connected). The release now leaves a pool that already rests alone; only a
+still-deployed pool that loses its operator flips to `Pending`
+(`UnregisterPoolOperatorAsyncTests.UnregisterPoolOperatorAsync_RestingPool_KeepsItsDeploymentState`).
+
+Tests: `Services/PoolServiceTests/GetActiveDeploymentsAsyncTests`,
+`Services/DefaultConfigurationCreatorServiceTests/GetDisableBlockerAsyncTests`,
+`Controllers/CommunicationControllerDisableTests`, `Controllers/PoolControllerDeployGateTests`,
+`Services/PoolServiceTests/UnregisterPoolOperatorAsyncTests`, integration `Repository/GetWorkloadsAsyncTests`.
+
 ## Project Structure Notes
 
 - Main service: `src/CommunicationControllerServices/`

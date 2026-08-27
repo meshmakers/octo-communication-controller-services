@@ -29,6 +29,13 @@ public interface ICommunicationRepository
     Task<IReadOnlyCollection<RtDeployableWorkload>> GetWorkloadsForPoolAsync(string tenantId, OctoObjectId poolRtId);
 
     /// <summary>
+    /// Loads every deployable workload (Adapter and Application) of the tenant, regardless of
+    /// whether a pool manages it. Polymorphic like <see cref="GetWorkloadsForPoolAsync"/>.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    Task<IReadOnlyCollection<RtDeployableWorkload>> GetWorkloadsAsync(string tenantId);
+
+    /// <summary>
     /// Loads a single deployable workload by runtime id. Returns
     /// <c>null</c> when no entity with that id exists.
     /// </summary>
