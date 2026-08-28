@@ -312,8 +312,30 @@ internal class PoolService : IPoolService
                 Logger.Info(
                     "[{TenantId}] Workload '{WorkloadName}' ({WorkloadRtId}) is stuck in Pending on pool registration — re-dispatching its deploy (AB#4894)",
                     tenantId, workload.Name, workload.RtId);
-                await _eventService.StoreInformationEventAsync(tenantId,
-                    $"Workload '{workload.Name}' was still Pending when its pool re-registered — deploy re-dispatched.");
+
+                // AB#4955: an empty ChartVersion means "newest in the repository", resolved by the
+                // operator at `helm upgrade` time. This dispatch is not a release decision — it is
+                // triggered by a pool re-registration, i.e. an operator restart, a blueprint
+                // re-apply or a CK-model update — so an unpinned workload can come back on a
+                // different version than it was running, with nobody having asked for it. That is
+                // how the prod accounting fleet moved from 1.0.71 to 1.0.72 unattended. The
+                // controller cannot prevent it (it never learns the resolved version — see the
+                // work item for the operator-side fix), so at least make it visible rather than
+                // silent.
+                if (string.IsNullOrWhiteSpace(workload.ChartVersion))
+                {
+                    Logger.Warn(
+                        "[{TenantId}] Workload '{WorkloadName}' ({WorkloadRtId}) has no pinned ChartVersion — this unattended re-dispatch may resolve a newer chart than the one currently running (AB#4955)",
+                        tenantId, workload.Name, workload.RtId);
+                    await _eventService.StoreWarningEventAsync(tenantId,
+                        $"Workload '{workload.Name}' was re-deployed automatically without a pinned chart version — it may now run a newer chart than before. Pin ChartVersion to make deployments reproducible.");
+                }
+                else
+                {
+                    await _eventService.StoreInformationEventAsync(tenantId,
+                        $"Workload '{workload.Name}' was still Pending when its pool re-registered — deploy re-dispatched.");
+                }
+
                 await DeployWorkloadAsync(tenantId, workload.RtId);
             }
             catch (Exception e)
