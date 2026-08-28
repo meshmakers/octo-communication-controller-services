@@ -12,6 +12,9 @@ attributes:
   - id: FooterLogo
     valueType: BinaryLinked
     description: "Icon for the app footer"
+  - id: EmailFooterImage
+    valueType: BinaryLinked
+    description: "Image placed in the footer or imprint block of outgoing e-mails. Separate from FooterLogo, which brands the web application - the two are set independently on purpose."
   - id: ConsumptionRecordRequestDelay
     valueType: Int
     description: "Delay in days before automatic consumption record requests are sent"

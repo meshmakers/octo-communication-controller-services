@@ -15,6 +15,9 @@ types:
       - id: ${this}/FooterLogo
         name: FooterLogo
         isOptional: true
+      - id: ${this}/EmailFooterImage
+        name: EmailFooterImage
+        isOptional: true
       - id: ${this}/UiThemeColors
         name: Colors
         isOptional: true
