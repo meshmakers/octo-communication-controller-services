@@ -39,7 +39,15 @@ internal static class WorkloadLifecycleMetrics
         unit: "s",
         description:
         "Seconds from the scale-up request until the workload reports ConfigurationState=Configured. " +
-        "This is the latency an inbound request pays for a wake");
+        "This is the latency an inbound request pays for a wake",
+        // The default boundaries are tuned for milliseconds and jump 5 → 10 → 25 → 50, which puts a
+        // 7.8 s wake and a 24 s wake in the same bucket — exactly the range every measured wake
+        // falls into, so the percentiles would say nothing. These span the wake budget (default
+        // 60 s) with detail where the values actually are.
+        advice: new InstrumentAdvice<double>
+        {
+            HistogramBucketBoundaries = [1, 2, 3, 5, 7.5, 10, 15, 20, 30, 45, 60, 90],
+        });
 
     private static readonly Counter<long> Hibernations = Meter.CreateCounter<long>(
         "octo.workload.hibernation.count",
