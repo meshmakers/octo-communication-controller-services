@@ -16,11 +16,23 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.BackgroundServ
 /// nobody. The first build happens immediately rather than after a grace period: a controller that
 /// restarts while a workload is hibernated would otherwise answer its wake-up requests with 404
 /// until the first tick.
+///
+/// That immediate build usually finds nothing, because tenants reach the adapter cache a moment
+/// after the host starts (observed on test-2: "rebuilt with 0 entries" at startup). So the service
+/// polls every <see cref="WarmupInterval"/> for the first <see cref="WarmupWindow"/> before settling
+/// on the configured interval — otherwise every controller restart leaves hibernated workloads
+/// unreachable for a full refresh interval.
 /// </summary>
 internal class WorkloadHostnameIndexBackgroundService(
     IWorkloadHostnameIndex hostnameIndex,
     IOptions<CommunicationControllerOptions> options) : BackgroundService
 {
+    /// <summary>Refresh cadence while the host is still starting up.</summary>
+    internal static readonly TimeSpan WarmupInterval = TimeSpan.FromSeconds(15);
+
+    /// <summary>How long the faster cadence lasts before the configured interval takes over.</summary>
+    internal static readonly TimeSpan WarmupWindow = TimeSpan.FromMinutes(2);
+
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -32,6 +44,7 @@ internal class WorkloadHostnameIndexBackgroundService(
         }
 
         var interval = TimeSpan.FromMinutes(Math.Max(1, options.Value.ActivatorHostnameRefreshIntervalMinutes));
+        var warmupUntil = DateTime.UtcNow + WarmupWindow;
         Logger.Info("HTTP activator hostname index starting with a refresh interval of {IntervalMinutes} minute(s)",
             interval.TotalMinutes);
 
@@ -54,7 +67,7 @@ internal class WorkloadHostnameIndexBackgroundService(
 
             try
             {
-                await Task.Delay(interval, stoppingToken);
+                await Task.Delay(DateTime.UtcNow < warmupUntil ? WarmupInterval : interval, stoppingToken);
             }
             catch (OperationCanceledException)
             {
