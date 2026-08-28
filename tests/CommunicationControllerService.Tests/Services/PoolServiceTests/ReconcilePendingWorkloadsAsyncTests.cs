@@ -138,4 +138,44 @@ internal class ReconcilePendingWorkloadsAsyncTests : PoolServiceTestsBase
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(w => w.WorkloadRtId == second.RtId.ToString()));
     }
+
+    [Test]
+    public async Task UnpinnedWorkload_IsStillRedispatchedButWarnsAboutTheVersion()
+    {
+        // AB#4955: an empty ChartVersion resolves to "newest in the repository" at helm
+        // upgrade time. Because this dispatch is triggered by a pool re-registration —
+        // an operator restart, a blueprint re-apply, a CK-model update — the workload can
+        // come back on a version nobody chose. Recovery still has to happen (that is what
+        // AB#4894 is for), so the dispatch stays; it must not stay silent though.
+        var adapter = GivenPoolWithAdapterInState(RtDeploymentStateEnum.Pending);
+        adapter.ChartVersion = string.Empty;
+
+        await PoolService.ReconcilePendingWorkloadsAsync(TenantId, PoolRtId);
+
+        await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
+            Arg.Is<WorkloadDeployedDto>(w => w.WorkloadRtId == adapter.RtId.ToString()));
+        await CommunicationEventService.Received(1).StoreWarningEventAsync(
+            TenantId,
+            Arg.Is<string>(m => m.Contains("without a pinned chart version")),
+            Arg.Any<RtEntityId?>());
+    }
+
+    [Test]
+    public async Task PinnedWorkload_IsRedispatchedWithoutAVersionWarning()
+    {
+        // A pinned workload comes back on exactly the version it was running, so the
+        // re-dispatch is unremarkable and stays an information event.
+        GivenPoolWithAdapterInState(RtDeploymentStateEnum.Pending);
+
+        await PoolService.ReconcilePendingWorkloadsAsync(TenantId, PoolRtId);
+
+        await CommunicationEventService.DidNotReceive().StoreWarningEventAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<RtEntityId?>());
+        // DeployWorkloadAsync writes its own "deploy requested" event, so assert on the
+        // reconcile message rather than on the call count.
+        await CommunicationEventService.Received(1).StoreInformationEventAsync(
+            TenantId,
+            Arg.Is<string>(m => m.Contains("still Pending when its pool re-registered")),
+            Arg.Any<RtEntityId?>());
+    }
 }
