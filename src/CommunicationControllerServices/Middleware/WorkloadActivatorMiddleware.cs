@@ -93,16 +93,73 @@ internal sealed class WorkloadActivatorMiddleware(
         // it is down for some other reason (image pull, crash loop). Forwarding still gives the
         // clearest possible answer: either it works, or the connection failure below names the
         // workload instead of leaving nginx's bare error page.
-        await ForwardAsync(context, target);
+        try
+        {
+            await ForwardAsync(context, target);
+        }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            // The caller hung up mid-forward; there is nobody left to answer.
+        }
+        catch (Exception e)
+        {
+            // Anything unexpected here would otherwise surface as a 500 from a service the caller
+            // never addressed. 503 is both truthful and actionable — the workload is what is
+            // unavailable, and the client's own retry is the right next step.
+            logger.LogError(e, "[{TenantId}] Unexpected failure forwarding to workload '{WorkloadName}'",
+                target.TenantId, target.WorkloadName);
+            await WriteUnavailableAsync(context, target, "The workload could not be reached.");
+        }
     }
 
     private async Task ForwardAsync(HttpContext context, ActivatorTarget target)
     {
         var request = context.Request;
-        var uri = new Uri(target.Address, request.Path + request.QueryString);
 
-        using var forwarded = new HttpRequestMessage(new HttpMethod(request.Method), uri);
-        if (request.ContentLength is > 0 || request.Headers.ContainsKey("Transfer-Encoding"))
+        // Only bodyless requests are retried: the request stream is consumed by the first attempt
+        // and cannot be replayed, and silently forwarding a truncated body would be worse than a
+        // 503.
+        var hasBody = request.ContentLength is > 0 || request.Headers.ContainsKey("Transfer-Encoding");
+        var maxAttempts = hasBody ? 1 : ConnectRetryDelays.Length + 1;
+        var client = httpClientFactory.CreateClient(HttpClientName);
+
+        for (var attempt = 0; ; attempt++)
+        {
+            // A fresh message per attempt: HttpClient refuses to send the same HttpRequestMessage
+            // twice, so a retry that reuses it fails with an InvalidOperationException instead of
+            // reaching the workload.
+            using var forwarded = BuildForwardRequest(context, target, hasBody);
+            try
+            {
+                using var response = await client.SendAsync(forwarded, HttpCompletionOption.ResponseHeadersRead,
+                    context.RequestAborted);
+                await CopyResponseAsync(context, response);
+                return;
+            }
+            catch (HttpRequestException e) when (attempt + 1 < maxAttempts)
+            {
+                logger.LogDebug(e,
+                    "[{TenantId}] Workload '{WorkloadName}' not reachable yet (attempt {Attempt}); retrying",
+                    target.TenantId, target.WorkloadName, attempt + 1);
+                await Task.Delay(ConnectRetryDelays[attempt], context.RequestAborted);
+            }
+            catch (HttpRequestException e)
+            {
+                logger.LogWarning(e, "[{TenantId}] Forwarding to workload '{WorkloadName}' at '{Address}' failed",
+                    target.TenantId, target.WorkloadName, target.Address);
+                await WriteUnavailableAsync(context, target, "The workload is awake but not reachable.");
+                return;
+            }
+        }
+    }
+
+    private static HttpRequestMessage BuildForwardRequest(HttpContext context, ActivatorTarget target, bool hasBody)
+    {
+        var request = context.Request;
+        var forwarded = new HttpRequestMessage(new HttpMethod(request.Method),
+            new Uri(target.Address, request.Path + request.QueryString));
+
+        if (hasBody)
         {
             forwarded.Content = new StreamContent(request.Body);
         }
@@ -127,36 +184,7 @@ internal sealed class WorkloadActivatorMiddleware(
         // so a second pass through here is recognised as a loop rather than forwarded again.
         forwarded.Headers.Host = request.Host.Value;
         forwarded.Headers.TryAddWithoutValidation(HopHeader, "1");
-
-        var client = httpClientFactory.CreateClient(HttpClientName);
-
-        for (var attempt = 0; ; attempt++)
-        {
-            try
-            {
-                using var response = await client.SendAsync(forwarded, HttpCompletionOption.ResponseHeadersRead,
-                    context.RequestAborted);
-                await CopyResponseAsync(context, response);
-                return;
-            }
-            catch (HttpRequestException e) when (attempt < ConnectRetryDelays.Length && forwarded.Content == null)
-            {
-                // Only bodyless requests are retried: the request stream has already been consumed
-                // by the failed attempt and cannot be replayed, and silently sending a truncated
-                // body would be worse than the 503.
-                logger.LogDebug(e,
-                    "[{TenantId}] Workload '{WorkloadName}' not reachable yet (attempt {Attempt}); retrying",
-                    target.TenantId, target.WorkloadName, attempt + 1);
-                await Task.Delay(ConnectRetryDelays[attempt], context.RequestAborted);
-            }
-            catch (HttpRequestException e)
-            {
-                logger.LogWarning(e, "[{TenantId}] Forwarding to workload '{WorkloadName}' at '{Address}' failed",
-                    target.TenantId, target.WorkloadName, target.Address);
-                await WriteUnavailableAsync(context, target, "The workload is awake but not reachable.");
-                return;
-            }
-        }
+        return forwarded;
     }
 
     private static async Task CopyResponseAsync(HttpContext context, HttpResponseMessage response)
