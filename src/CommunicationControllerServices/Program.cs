@@ -7,6 +7,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Configuration;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Extensions;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Middleware;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Resources;
@@ -80,6 +81,7 @@ try
     builder.Services.AddSingleton<IShutdownState, HostApplicationShutdownState>();
     builder.Services.AddSingleton<ILifecycleConfigurationService, LifecycleConfigurationService>();
     builder.Services.AddSingleton<IWorkloadLifecycleService, WorkloadLifecycleService>();
+    builder.Services.AddSingleton<IWorkloadHostnameIndex, WorkloadHostnameIndex>();
     builder.Services.AddSingleton<IAdapterConnectionTracker, AdapterConnectionTracker>();
     builder.Services.AddSingleton<IPipelineSchemaValidator, PipelineSchemaValidator>();
     builder.Services.AddSingleton<IExpressionValidationService, ExpressionValidationService>();
@@ -107,6 +109,14 @@ try
     // Reconciles adapters stuck at a stale Online state with no live SignalR connection (AB#4699).
     builder.Services.AddHostedService<AdapterOfflineReconciliationBackgroundService>();
     builder.Services.AddHostedService<WorkloadLifecycleWatchdogBackgroundService>();
+
+    // HTTP activator (AB#4923): hostname index plus the client that forwards a held request to the
+    // woken workload. The client gets no timeout of its own — the wake already ran to completion by
+    // the time it is used, and an adapter route may legitimately be a long-runner; the ingress's
+    // proxy-read-timeout is the bound that matters.
+    builder.Services.AddHostedService<WorkloadHostnameIndexBackgroundService>();
+    builder.Services.AddHttpClient(WorkloadActivatorMiddleware.HttpClientName,
+        client => client.Timeout = Timeout.InfiniteTimeSpan);
 
     // Add execution report background processor - decouples heavy DB writes from SignalR hub
     // method processing so that execution reports don't block deployment results
@@ -263,6 +273,11 @@ try
     {
         //  app.UseDeveloperExceptionPage();
     }
+
+    // AB#4923: runs first because the requests it handles belong to an adapter's URL space, not the
+    // controller's — neither this service's auth policies nor its route table apply to them. Every
+    // other request falls through on a single dictionary miss.
+    app.UseMiddleware<WorkloadActivatorMiddleware>();
 
     app.UseCors();
 

@@ -161,6 +161,47 @@ public class CommunicationControllerOptions
     public int LifecycleWatchdogIntervalMinutes { get; set; } = 5;
 
     /// <summary>
+    /// Enables the HTTP activator (AB#4923): an inbound request for a hibernated OnDemand
+    /// workload is held while the workload wakes and is then forwarded to it, instead of the
+    /// bare 502/503 the ingress would answer with no pod behind the workload's Service.
+    ///
+    /// Wiring is an ingress annotation, not a route: adapter Ingresses carry
+    /// <c>nginx.ingress.kubernetes.io/default-backend</c> pointing at this service, which nginx
+    /// uses exactly when the primary Service has no ready endpoint — precisely the hibernated
+    /// case. Steady-state traffic never passes through here.
+    ///
+    /// Off by default; the annotation is what actually routes traffic, so switching this on
+    /// without it is inert, and switching it off with the annotation in place turns the activator
+    /// back into a plain 404 (the ingress's own error page behaviour).
+    /// </summary>
+    public bool ActivatorEnabled { get; set; }
+
+    /// <summary>
+    /// Template for the in-cluster address the activator forwards to once the workload is awake.
+    /// <c>{release}</c> is replaced by the workload's helm release name
+    /// (<c>{tenantId}-{workloadRtId}</c>, DNS-sanitised) — the operator names Deployment, Service
+    /// and Ingress after it, so it is also the Service name.
+    ///
+    /// The default has no namespace on purpose: the pod's own search domain resolves it inside
+    /// the controller's namespace, which is where the operator deploys workloads
+    /// (<c>OPERATOR__POOLNAMESPACE</c>). Override with an explicit
+    /// <c>http://{release}.other-namespace.svc.cluster.local</c> when they differ, or to reach a
+    /// workload whose chart sets its own <c>fullnameOverride</c>.
+    /// </summary>
+    public string ActivatorWorkloadAddressTemplate { get; set; } = "http://{release}";
+
+    /// <summary>
+    /// How often the activator rebuilds its hostname index (minutes). The index maps the public
+    /// hostname of every ingress-enabled workload to its tenant and rtId, so an inbound request
+    /// can be attributed without a per-request repository lookup.
+    ///
+    /// A freshly deployed workload is not reachable through the activator until the next refresh.
+    /// That is harmless in practice: a workload only routes through the activator once it has
+    /// hibernated, which takes at least its <c>IdleTimeoutMinutes</c>.
+    /// </summary>
+    public int ActivatorHostnameRefreshIntervalMinutes { get; set; } = 5;
+
+    /// <summary>
     /// Named public base domains available to workloads as <c>{{domain.NAME}}</c>
     /// placeholders in <c>Hostname</c>, non-secret <c>ValueOverride.Value</c>
     /// entries and <c>ValuesYaml</c>. Resolved by

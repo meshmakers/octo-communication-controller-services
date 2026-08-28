@@ -1262,6 +1262,58 @@ changes is only how loudly it is reported. Tests:
 `Services/AdapterServiceTests/HibernationAuditSuppressionTests`, the two hibernation cases in
 `Services/PipelineExecutionServiceTests/MarkInterruptedTests`.
 
+### HTTP Activator — wake on request (AB#4923)
+
+Routes and authorization live inside the adapter (`HttpRequestService` /
+`FromHttpRequest@2`), so nothing in front of it can pre-authorize a call — and with the
+workload scaled to zero the ingress can only answer 502/503. `WorkloadActivatorMiddleware`
+holds such a request through the wake and then forwards it.
+
+**Wiring is an ingress annotation, not a route.** Adapter Ingresses carry
+`nginx.ingress.kubernetes.io/default-backend` naming this service; nginx uses that backend
+exactly when the primary Service has no ready endpoint. That single condition is the whole
+mechanism — there is no state to flip on hibernate and no window where the two disagree,
+and steady-state traffic never passes through the controller. It also catches the
+non-lifecycle cases (ImagePullBackOff, crash loop) and answers them with a named 503 rather
+than nginx's default page. The companion annotation
+`nginx.ingress.kubernetes.io/proxy-read-timeout` must exceed the wake budget; the cluster
+default of 60 s would cut the hold short. Both are projected onto every workload by the
+operator's cluster-wide `OPERATOR__INGRESS__ANNOTATIONS__n__*`.
+
+Enabled per instance by `CommunicationControllerOptions.ActivatorEnabled` (chart:
+`services.communication.activatorEnabled`, default off). The flag alone is inert — the
+annotation is what routes traffic.
+
+Request path:
+
+1. `IWorkloadHostnameIndex` resolves the inbound `Host` header to a workload. The index is
+   built in the background (`WorkloadHostnameIndexBackgroundService`) over every enabled
+   tenant's ingress-enabled workloads, with hostname templates resolved exactly as the deploy
+   path resolves them, because the Ingress carries the resolved value. A miss falls through
+   untouched — one dictionary lookup, and it is what keeps the controller's own API
+   unaffected. The middleware therefore runs **before** authentication and routing: these
+   requests belong to the adapter's URL space, so neither this service's auth policies nor
+   its route table apply.
+2. `EnsureWorkloadRunningAsync` — the same wake gate the execute path uses, so concurrent
+   callers share one wake.
+3. Forward to `ActivatorWorkloadAddressTemplate` with `{release}` replaced by the workload's
+   helm release name. `WorkloadHostnameIndex.ReleaseName` mirrors the operator's
+   `K8sNaming.DnsName`; it is duplicated rather than shared (no common library) and pinned by
+   `WorkloadHostnameIndexTests.ReleaseName_MatchesTheOperatorsRule`. The default template
+   carries no namespace, so the pod's own search domain resolves it in the controller's
+   namespace — which is where the operator deploys workloads.
+4. A refused connection is retried briefly: endpoints appear in kube-proxy a moment after the
+   adapter reports itself configured. **Only bodyless requests are retried** — the request
+   stream is consumed by the failed attempt and a truncated body would be worse than a 503.
+5. Failure to wake, or a workload that stays unreachable, answers 503 with `Retry-After` set
+   to the wake budget. A forwarded request that comes back here is recognised by the
+   `X-Octo-Activator` header and answered 503 instead of forwarded again.
+
+The middleware makes **no authorization decision** and rewrites nothing but the loop-guard
+header: the adapter must see what the client sent.
+
+Tests: `Services/WorkloadHostnameIndexTests`.
+
 **Known limitations / follow-ups:** in-process `FromPolling`/`FromMicrosoftGraphEmail`
 triggers never idle and silently stop at 0 replicas — such pipelines must move to cron
 `PipelineTrigger`s before their workload goes OnDemand (AB#4922 precondition); the
