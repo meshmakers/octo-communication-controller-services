@@ -65,15 +65,33 @@ internal static class WorkloadLifecycleMetrics
     private static readonly ConcurrentDictionary<(string TenantId, string WorkloadRtId), WorkloadGaugeEntry> States =
         new();
 
-    // Assigning the gauge to a field is what keeps it alive; the callback is what actually reports.
-    // ReSharper disable once NotAccessedField.Local
+    // Assigning the gauges to fields is what keeps them alive; the callbacks do the reporting.
+    // ReSharper disable NotAccessedField.Local
     private static readonly ObservableGauge<int> HibernatedGauge = Meter.CreateObservableGauge(
         "octo.workload.hibernated",
-        ObserveHibernated,
+        () => Observe(e => e.Hibernated),
         unit: "{workload}",
         description: "1 while an on-demand workload is hibernated or draining, 0 while it is running");
 
-    private sealed record WorkloadGaugeEntry(string WorkloadName, bool Hibernated);
+    /// <summary>
+    ///     The alertable condition, evaluated where the knowledge lives.
+    ///
+    ///     "Offline" alone stopped meaning "broken" the day scale-to-zero shipped, and the two facts
+    ///     needed to tell those apart — the communication state and the lifecycle state — are not
+    ///     both exported as series, so an alert rule could not join them. Publishing the answer
+    ///     instead of the inputs keeps the rule a threshold on one series and keeps the judgement in
+    ///     the one place that already makes it.
+    /// </summary>
+    private static readonly ObservableGauge<int> OfflineUnexpectedGauge = Meter.CreateObservableGauge(
+        "octo.workload.offline_unexpected",
+        () => Observe(e => e.OfflineUnexpected),
+        unit: "{workload}",
+        description:
+        "1 while a workload is offline for a reason other than an intentional hibernation — " +
+        "this is the condition worth alerting on, 0 otherwise");
+    // ReSharper restore NotAccessedField.Local
+
+    private sealed record WorkloadGaugeEntry(string WorkloadName, bool Hibernated, bool OfflineUnexpected);
 
     /// <summary>Records a wake that reached <c>Configured</c> within the budget.</summary>
     public static void RecordWakeSucceeded(string tenantId, OctoObjectId workloadRtId, string? workloadName,
@@ -120,18 +138,46 @@ internal static class WorkloadLifecycleMetrics
         States.TryRemove((tenantId, workloadRtId.ToString()), out _);
     }
 
+    /// <summary>
+    ///     Records that a workload went offline. <paramref name="intentional"/> comes from the
+    ///     lifecycle state, so a hibernation reads as expected while anything else — crash, eviction,
+    ///     lost node — is what the alert fires on.
+    /// </summary>
+    public static void RecordOffline(string tenantId, OctoObjectId workloadRtId, string? workloadName,
+        bool intentional)
+    {
+        Update(tenantId, workloadRtId, workloadName, e => e with { OfflineUnexpected = !intentional });
+    }
+
+    /// <summary>Records that a workload is online again, whatever took it offline before.</summary>
+    public static void RecordOnline(string tenantId, OctoObjectId workloadRtId, string? workloadName)
+    {
+        Update(tenantId, workloadRtId, workloadName, e => e with { OfflineUnexpected = false });
+    }
+
     private static void SetHibernated(string tenantId, OctoObjectId workloadRtId, string? workloadName,
         bool hibernated)
     {
-        States[(tenantId, workloadRtId.ToString())] =
-            new WorkloadGaugeEntry(workloadName ?? string.Empty, hibernated);
+        Update(tenantId, workloadRtId, workloadName, e => e with { Hibernated = hibernated });
     }
 
-    private static IEnumerable<Measurement<int>> ObserveHibernated()
+    private static void Update(string tenantId, OctoObjectId workloadRtId, string? workloadName,
+        Func<WorkloadGaugeEntry, WorkloadGaugeEntry> change)
+    {
+        States.AddOrUpdate((tenantId, workloadRtId.ToString()),
+            _ => change(new WorkloadGaugeEntry(workloadName ?? string.Empty, false, false)),
+            // A caller that does not know the name (the disconnect path only has the rtId) must not
+            // blank out a name an earlier one supplied — the label is what makes a dashboard legible.
+            (_, existing) => change(string.IsNullOrEmpty(workloadName)
+                ? existing
+                : existing with { WorkloadName = workloadName }));
+    }
+
+    private static IEnumerable<Measurement<int>> Observe(Func<WorkloadGaugeEntry, bool> selector)
     {
         foreach (var ((tenantId, workloadRtId), entry) in States)
         {
-            yield return new Measurement<int>(entry.Hibernated ? 1 : 0,
+            yield return new Measurement<int>(selector(entry) ? 1 : 0,
                 new KeyValuePair<string, object?>("octo.tenant.id", tenantId),
                 new KeyValuePair<string, object?>("octo.workload.rt_id", workloadRtId),
                 new KeyValuePair<string, object?>("octo.workload.name", entry.WorkloadName));

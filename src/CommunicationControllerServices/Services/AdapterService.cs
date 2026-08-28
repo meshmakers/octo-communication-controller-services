@@ -377,6 +377,9 @@ internal class AdapterService(
         // Always update DB state, even if adapter is not in cache yet
         await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId,
             RtCommunicationStateEnum.Online);
+
+        // Whatever took it offline is over (AB#4919).
+        WorkloadLifecycleMetrics.RecordOnline(tenantId, adapterRtEntityId.RtId, workloadName: null);
     }
 
     public async Task SetAdapterCommunicationStateOfflineAsync(string tenantId, RtEntityId adapterRtEntityId,
@@ -421,7 +424,8 @@ internal class AdapterService(
             // make a real outage indistinguishable from routine scale-to-zero. The state write below
             // still happens — Offline is factually true while hibernated, and Studio reads it
             // through LifecycleState.
-            if (await workloadLifecycleService.IsIntentionallyDownAsync(tenantId, adapterRtEntityId.RtId))
+            var intentional = await workloadLifecycleService.IsIntentionallyDownAsync(tenantId, adapterRtEntityId.RtId);
+            if (intentional)
             {
                 Logger.Info("[{TenantId}] adapter rt id '{AdapterRtId}' offline as part of hibernation; " +
                             "skipping the offline audit event", tenantId, adapterRtEntityId);
@@ -432,6 +436,9 @@ internal class AdapterService(
                     $"Adapter '{adapterRtEntityId}' is now offline.",
                     adapterRtEntityId);
             }
+
+            // Same judgement, published as the metric an alert rule can threshold on (AB#4919).
+            WorkloadLifecycleMetrics.RecordOffline(tenantId, adapterRtEntityId.RtId, workloadName: null, intentional);
 
             await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId, RtCommunicationStateEnum.Offline);
             return;
@@ -474,7 +481,9 @@ internal class AdapterService(
             // workload has no connection by design. The reconciliation itself must still run (a
             // stale Online would show the workload as healthy), but reporting it as an anomaly
             // would page someone for a scale-down.
-            if (await workloadLifecycleService.IsIntentionallyDownAsync(tenantId, adapter.RtId))
+            var intentional = await workloadLifecycleService.IsIntentionallyDownAsync(tenantId, adapter.RtId);
+            WorkloadLifecycleMetrics.RecordOffline(tenantId, adapter.RtId, adapter.Name, intentional);
+            if (intentional)
             {
                 Logger.Info(
                     "[{TenantId}] Adapter '{AdapterRtId}' is hibernating and persisted Online; reconciling to Offline",

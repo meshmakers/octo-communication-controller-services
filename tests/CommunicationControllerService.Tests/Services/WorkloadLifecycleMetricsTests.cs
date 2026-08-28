@@ -173,9 +173,59 @@ internal class WorkloadLifecycleMetricsTests
             r.Tags["octo.workload.rt_id"] == rtId.ToString())).IsFalse();
     }
 
-    private static double? Gauge(List<Recorded> recorded, string tenantId, OctoObjectId rtId) =>
+    /// <summary>
+    ///     "Offline" stopped meaning "broken" the day scale-to-zero shipped. This gauge is the whole
+    ///     alerting story: a hibernation must never raise it, anything else must.
+    /// </summary>
+    [Test]
+    public async Task OfflineGauge_RisesOnlyWhenTheWorkloadDidNotGoDownOnPurpose()
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var rtId = OctoObjectId.GenerateNewId();
+
+        // Act
+        var afterHibernation = Collect(tenantId,
+            () => WorkloadLifecycleMetrics.RecordOffline(tenantId, rtId, "Mesh Adapter", intentional: true),
+            observeGauges: true);
+        var afterCrash = Collect(tenantId,
+            () => WorkloadLifecycleMetrics.RecordOffline(tenantId, rtId, "Mesh Adapter", intentional: false),
+            observeGauges: true);
+        var afterRecovery = Collect(tenantId,
+            () => WorkloadLifecycleMetrics.RecordOnline(tenantId, rtId, "Mesh Adapter"), observeGauges: true);
+
+        // Assert
+        await Assert.That(Gauge(afterHibernation, tenantId, rtId, "octo.workload.offline_unexpected")).IsEqualTo(0);
+        await Assert.That(Gauge(afterCrash, tenantId, rtId, "octo.workload.offline_unexpected")).IsEqualTo(1);
+        await Assert.That(Gauge(afterRecovery, tenantId, rtId, "octo.workload.offline_unexpected")).IsEqualTo(0);
+    }
+
+    /// <summary>
+    ///     The disconnect path only has the rtId, so it reports without a name. Blanking the label an
+    ///     earlier caller supplied would leave the alert naming an id nobody recognises.
+    /// </summary>
+    [Test]
+    public async Task ReportWithoutAName_KeepsTheNameAnEarlierOneSupplied()
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var rtId = OctoObjectId.GenerateNewId();
+        WorkloadLifecycleMetrics.RecordHibernated(tenantId, rtId, "Mesh Adapter");
+
+        // Act
+        var recorded = Collect(tenantId,
+            () => WorkloadLifecycleMetrics.RecordOffline(tenantId, rtId, workloadName: null, intentional: false),
+            observeGauges: true);
+
+        // Assert
+        await Assert.That(recorded.First(r => r.Instrument == "octo.workload.offline_unexpected")
+            .Tags["octo.workload.name"]).IsEqualTo("Mesh Adapter");
+    }
+
+    private static double? Gauge(List<Recorded> recorded, string tenantId, OctoObjectId rtId,
+        string instrument = "octo.workload.hibernated") =>
         recorded.SingleOrDefault(r =>
-            r.Instrument == "octo.workload.hibernated" &&
+            r.Instrument == instrument &&
             r.Tags["octo.tenant.id"] == tenantId &&
             r.Tags["octo.workload.rt_id"] == rtId.ToString())?.Value;
 }
