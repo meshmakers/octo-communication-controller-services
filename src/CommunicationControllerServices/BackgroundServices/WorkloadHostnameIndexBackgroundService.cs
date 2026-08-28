@@ -33,6 +33,9 @@ internal class WorkloadHostnameIndexBackgroundService(
     /// <summary>How long the faster cadence lasts before the configured interval takes over.</summary>
     internal static readonly TimeSpan WarmupWindow = TimeSpan.FromMinutes(2);
 
+    /// <summary>Upper bound for a single refresh; a blocked one must not wedge the loop.</summary>
+    internal static readonly TimeSpan RefreshTimeout = TimeSpan.FromSeconds(60);
+
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -52,11 +55,21 @@ internal class WorkloadHostnameIndexBackgroundService(
         {
             try
             {
-                await hostnameIndex.RefreshAsync(stoppingToken);
+                // Bounded: a refresh that blocks — a repository call waiting on a lock held by
+                // tenant startup, say — would otherwise wedge this loop for the process lifetime
+                // and leave the activator permanently blind, with nothing in the log to say so.
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                timeout.CancelAfter(RefreshTimeout);
+                await hostnameIndex.RefreshAsync(timeout.Token);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 return;
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.Warn("Refreshing the activator hostname index timed out after {Seconds}s; retrying",
+                    RefreshTimeout.TotalSeconds);
             }
             catch (Exception e)
             {

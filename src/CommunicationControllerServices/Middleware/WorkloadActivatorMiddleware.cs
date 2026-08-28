@@ -42,13 +42,36 @@ internal sealed class WorkloadActivatorMiddleware(
     internal const string HttpClientName = "WorkloadActivator";
 
     /// <summary>
-    ///     Endpoints appear in kube-proxy a moment after the adapter reports itself configured, so
-    ///     the first forward can still be refused. Retrying briefly turns that race into a slightly
-    ///     slower response instead of a spurious 503.
+    ///     Backoff shape for the wait between "the workload says it is awake" and "its Service
+    ///     endpoint accepts connections" — see
+    ///     <see cref="CommunicationControllerOptions.ActivatorForwardRetrySeconds"/> for why that
+    ///     gap exists. Steps are taken from the front until the configured budget is spent, so the
+    ///     budget alone decides how long the activator holds on.
     /// </summary>
     private static readonly TimeSpan[] ConnectRetryDelays =
         [TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(500), TimeSpan.FromSeconds(1),
-            TimeSpan.FromSeconds(2)];
+            TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(5),
+            TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5),
+            TimeSpan.FromSeconds(5)];
+
+    private static TimeSpan[] BuildRetryLadder(int budgetSeconds)
+    {
+        var budget = TimeSpan.FromSeconds(Math.Max(0, budgetSeconds));
+        var ladder = new List<TimeSpan>();
+        var spent = TimeSpan.Zero;
+        foreach (var delay in ConnectRetryDelays)
+        {
+            if (spent + delay > budget)
+            {
+                break;
+            }
+
+            ladder.Add(delay);
+            spent += delay;
+        }
+
+        return ladder.ToArray();
+    }
 
     private static readonly string[] HopByHopHeaders =
     [
@@ -120,7 +143,8 @@ internal sealed class WorkloadActivatorMiddleware(
         // and cannot be replayed, and silently forwarding a truncated body would be worse than a
         // 503.
         var hasBody = request.ContentLength is > 0 || request.Headers.ContainsKey("Transfer-Encoding");
-        var maxAttempts = hasBody ? 1 : ConnectRetryDelays.Length + 1;
+        var retryDelays = BuildRetryLadder(options.Value.ActivatorForwardRetrySeconds);
+        var maxAttempts = hasBody ? 1 : retryDelays.Length + 1;
         var client = httpClientFactory.CreateClient(HttpClientName);
 
         for (var attempt = 0; ; attempt++)
@@ -141,7 +165,7 @@ internal sealed class WorkloadActivatorMiddleware(
                 logger.LogDebug(e,
                     "[{TenantId}] Workload '{WorkloadName}' not reachable yet (attempt {Attempt}); retrying",
                     target.TenantId, target.WorkloadName, attempt + 1);
-                await Task.Delay(ConnectRetryDelays[attempt], context.RequestAborted);
+                await Task.Delay(retryDelays[attempt], context.RequestAborted);
             }
             catch (HttpRequestException e)
             {

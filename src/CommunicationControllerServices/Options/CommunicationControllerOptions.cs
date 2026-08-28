@@ -202,6 +202,18 @@ public class CommunicationControllerOptions
     public int ActivatorHostnameRefreshIntervalMinutes { get; set; } = 5;
 
     /// <summary>
+    /// How long the activator keeps retrying the forward after the workload reports itself awake
+    /// (seconds). The wake completes on <c>ConfigurationState=Configured</c> — the adapter has
+    /// registered over SignalR — while its Service endpoint appears later, once the readiness probe
+    /// passes and kube-proxy picks the change up; until then the connection is refused. Measured on
+    /// test-2, under four seconds was not enough and produced a 503 for a workload that was already
+    /// running. Spending this on a request the caller is already holding is the point of the
+    /// activator: failing early would waste the wake it just paid for. Zero forwards once and gives
+    /// up, which is what the tests use.
+    /// </summary>
+    public int ActivatorForwardRetrySeconds { get; set; } = 30;
+
+    /// <summary>
     /// Named public base domains available to workloads as <c>{{domain.NAME}}</c>
     /// placeholders in <c>Hostname</c>, non-secret <c>ValueOverride.Value</c>
     /// entries and <c>ValuesYaml</c>. Resolved by

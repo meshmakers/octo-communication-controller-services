@@ -79,7 +79,10 @@ internal sealed class WorkloadHostnameIndex(
         }
 
         _byHost = map.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
-        logger.LogDebug("Activator hostname index rebuilt with {Count} entries", _byHost.Count);
+        // Info, not Debug: this is once per refresh interval, and it is the only signal that the
+        // activator can attribute anything at all. A silent index is indistinguishable from a
+        // feature that is switched off.
+        logger.LogInformation("Activator hostname index rebuilt with {Count} entries", _byHost.Count);
     }
 
     private Uri BuildAddress(string tenantId, string workloadRtId)

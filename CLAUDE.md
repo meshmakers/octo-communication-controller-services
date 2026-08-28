@@ -1302,9 +1302,15 @@ Request path:
    `WorkloadHostnameIndexTests.ReleaseName_MatchesTheOperatorsRule`. The default template
    carries no namespace, so the pod's own search domain resolves it in the controller's
    namespace — which is where the operator deploys workloads.
-4. A refused connection is retried briefly: endpoints appear in kube-proxy a moment after the
-   adapter reports itself configured. **Only bodyless requests are retried** — the request
-   stream is consumed by the failed attempt and a truncated body would be worse than a 503.
+4. A refused connection is retried for `ActivatorForwardRetrySeconds` (default 30). The wake
+   completes on `ConfigurationState=Configured` — the adapter has registered over SignalR —
+   while the Service endpoint only appears once the readiness probe passes and kube-proxy picks
+   it up; until then the connection is refused. Measured on test-2, under four seconds was not
+   enough and produced a 503 for a workload that was already running. **Only bodyless requests
+   are retried** — the request stream is consumed by the failed attempt and a truncated body
+   would be worse than a 503. Each attempt builds a **fresh** `HttpRequestMessage`; reusing one
+   throws `InvalidOperationException` ("the request message was already sent"), which is exactly
+   how the first live request failed.
 5. Failure to wake, or a workload that stays unreachable, answers 503 with `Retry-After` set
    to the wake budget. A forwarded request that comes back here is recognised by the
    `X-Octo-Activator` header and answered 503 instead of forwarded again.

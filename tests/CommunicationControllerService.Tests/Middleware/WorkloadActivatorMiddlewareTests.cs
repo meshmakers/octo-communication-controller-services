@@ -40,7 +40,8 @@ internal class WorkloadActivatorMiddlewareTests
     }
 
     private (WorkloadActivatorMiddleware Middleware, DefaultHttpContext Context, bool[] NextCalled) Build(
-        HttpMessageHandler handler, bool indexHit = true, bool activatorEnabled = true)
+        HttpMessageHandler handler, bool indexHit = true, bool activatorEnabled = true,
+        int forwardRetrySeconds = 0)
     {
         _index.TryResolve(Arg.Any<string?>(), out Arg.Any<ActivatorTarget?>())
             .Returns(x =>
@@ -64,6 +65,7 @@ internal class WorkloadActivatorMiddlewareTests
             Options.Create(new CommunicationControllerOptions
             {
                 ActivatorEnabled = activatorEnabled, LifecycleWakeBudgetSeconds = 42,
+                ActivatorForwardRetrySeconds = forwardRetrySeconds,
             }));
 
         var context = new DefaultHttpContext();
@@ -106,7 +108,8 @@ internal class WorkloadActivatorMiddlewareTests
         var handler = new ScriptedHandler(
             () => throw new HttpRequestException("connection refused"),
             () => Ok());
-        var (middleware, context, _) = Build(handler);
+        // One retry step is enough to prove a fresh message is built; the live ladder is longer.
+        var (middleware, context, _) = Build(handler, forwardRetrySeconds: 1);
 
         // Act
         await middleware.InvokeAsync(context);
