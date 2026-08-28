@@ -229,7 +229,8 @@ internal class PoolService : IPoolService
     }
 
     /// <inheritdoc />
-    public async Task DeployWorkloadAsync(string tenantId, OctoObjectId workloadRtId)
+    public async Task DeployWorkloadAsync(string tenantId, OctoObjectId workloadRtId,
+        bool isReconciliation = false)
     {
         Logger.Info("[{TenantId}] Deploying workload '{WorkloadRtId}'", tenantId, workloadRtId);
 
@@ -260,7 +261,7 @@ internal class PoolService : IPoolService
         await EnsureWorkloadIsHelmDeployableAsync(tenantId, workload);
 
         var poolName = pool.Name ?? string.Empty;
-        var dto = await BuildWorkloadDeployedDtoAsync(tenantId, pool.RtId, poolName, workload);
+        var dto = await BuildWorkloadDeployedDtoAsync(tenantId, pool.RtId, poolName, workload, isReconciliation);
         if (dto == null)
         {
             // Should be unreachable after EnsureWorkloadIsHelmDeployableAsync, but
@@ -316,19 +317,19 @@ internal class PoolService : IPoolService
                 // AB#4955: an empty ChartVersion means "newest in the repository", resolved by the
                 // operator at `helm upgrade` time. This dispatch is not a release decision — it is
                 // triggered by a pool re-registration, i.e. an operator restart, a blueprint
-                // re-apply or a CK-model update — so an unpinned workload can come back on a
+                // re-apply or a CK-model update — so an unpinned workload could come back on a
                 // different version than it was running, with nobody having asked for it. That is
-                // how the prod accounting fleet moved from 1.0.71 to 1.0.72 unattended. The
-                // controller cannot prevent it (it never learns the resolved version — see the
-                // work item for the operator-side fix), so at least make it visible rather than
-                // silent.
+                // how the prod accounting fleet moved from 1.0.71 to 1.0.72 unattended. The DTO's
+                // IsReconciliation flag now tells the operator to keep the installed version, but
+                // an operator that pre-dates the flag still resolves anew — so the unpinned
+                // re-dispatch stays worth surfacing either way.
                 if (string.IsNullOrWhiteSpace(workload.ChartVersion))
                 {
                     Logger.Warn(
-                        "[{TenantId}] Workload '{WorkloadName}' ({WorkloadRtId}) has no pinned ChartVersion — this unattended re-dispatch may resolve a newer chart than the one currently running (AB#4955)",
+                        "[{TenantId}] Workload '{WorkloadName}' ({WorkloadRtId}) has no pinned ChartVersion — an operator without AB#4955 support resolves a possibly newer chart on this unattended re-dispatch",
                         tenantId, workload.Name, workload.RtId);
                     await _eventService.StoreWarningEventAsync(tenantId,
-                        $"Workload '{workload.Name}' was re-deployed automatically without a pinned chart version — it may now run a newer chart than before. Pin ChartVersion to make deployments reproducible.");
+                        $"Workload '{workload.Name}' was re-deployed automatically without a pinned chart version. A current operator keeps the chart version already installed; an older one resolves the newest chart in the repository. Pin ChartVersion to make deployments reproducible.");
                 }
                 else
                 {
@@ -336,7 +337,7 @@ internal class PoolService : IPoolService
                         $"Workload '{workload.Name}' was still Pending when its pool re-registered — deploy re-dispatched.");
                 }
 
-                await DeployWorkloadAsync(tenantId, workload.RtId);
+                await DeployWorkloadAsync(tenantId, workload.RtId, isReconciliation: true);
             }
             catch (Exception e)
             {
@@ -643,7 +644,8 @@ internal class PoolService : IPoolService
     }
 
     private async Task<WorkloadDeployedDto?> BuildWorkloadDeployedDtoAsync(string tenantId,
-        OctoObjectId poolRtId, string poolName, RtDeployableWorkload workload)
+        OctoObjectId poolRtId, string poolName, RtDeployableWorkload workload,
+        bool isReconciliation = false)
     {
         // ChartName is the minimal Helm identity we need to talk to a repository;
         // ChartVersion is optional and means "latest" when empty (see
@@ -697,6 +699,10 @@ internal class PoolService : IPoolService
             // "use latest from configured repo" contract (the operator's
             // HelmRunner omits --version when blank).
             ChartVersion = workload.ChartVersion ?? string.Empty,
+            // AB#4955: tells the operator this dispatch restores what was already running rather
+            // than acting on a release decision, so an unpinned workload stays on the chart version
+            // it currently has installed instead of resolving the newest one again.
+            IsReconciliation = isReconciliation,
             // Same template resolution as for non-secret ValueOverrides — already
             // validated by EnsureWorkloadIsHelmDeployableAsync.
             ValuesYaml = ResolveTemplate(workload.ValuesYaml, ctx) ?? string.Empty,
