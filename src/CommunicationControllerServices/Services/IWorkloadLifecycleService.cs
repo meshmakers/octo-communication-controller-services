@@ -64,4 +64,16 @@ public interface IWorkloadLifecycleService
     ///     behind by a controller restart.
     /// </summary>
     bool HasActiveWake(string tenantId, string workloadRtId);
+
+    /// <summary>
+    ///     True when the workload is down on purpose or on its way there (<c>Draining</c> /
+    ///     <c>Hibernated</c>), so an observed disconnect is the expected outcome of a scale-to-zero
+    ///     rather than an incident (AB#4919). Callers use it to keep intentional hibernation out of
+    ///     the offline audit trail; the state writes themselves stay unchanged, because
+    ///     <c>CommunicationState=Offline</c> remains factually true while hibernated.
+    ///     Fast-path <c>false</c> on tenants without scale-to-zero, so the disconnect path pays no
+    ///     repository lookup. Never throws: a workload that cannot be read is reported as not
+    ///     hibernating, which keeps the established offline handling.
+    /// </summary>
+    Task<bool> IsIntentionallyDownAsync(string tenantId, OctoObjectId workloadRtId);
 }

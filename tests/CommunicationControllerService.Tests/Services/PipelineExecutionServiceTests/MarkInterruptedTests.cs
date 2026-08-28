@@ -77,6 +77,50 @@ internal class MarkInterruptedTests : PipelineExecutionServiceTestsBase
             "Adapter disconnected");
     }
 
+    /// <summary>
+    ///     AB#4919: the idle watchdog only drains a workload with no running executions, so an
+    ///     execution interrupted by a hibernation means that guarantee did not hold. Unlike an
+    ///     ordinary disconnect nobody pulled a plug here — the platform did — so it is reported as a
+    ///     warning instead of the routine information event.
+    /// </summary>
+    [Test]
+    public async Task MarkExecutionsAsInterruptedAsync_WhileHibernating_ReportsTheDrainViolationAsWarning()
+    {
+        // Arrange
+        var rtAdapter = RtEntityCreator.CreateAdapter();
+        CommunicationRepository.GetRunningExecutionsForAdapterAsync(TenantId, rtAdapter.ToRtEntityId())
+            .Returns(new List<RtPipelineExecution> { RtEntityCreator.CreatePipelineExecution() });
+        WorkloadLifecycleService.IsIntentionallyDownAsync(TenantId, rtAdapter.RtId).Returns(true);
+
+        // Act
+        await PipelineExecutionService.MarkExecutionsAsInterruptedAsync(TenantId, rtAdapter.ToRtEntityId());
+
+        // Assert
+        await CommunicationEventService.Received(1).StoreWarningEventAsync(TenantId,
+            Arg.Is<string>(m => m.Contains("hibernated")), Arg.Any<Meshmakers.Octo.ConstructionKit.Contracts.RtEntityId?>());
+        await CommunicationEventService.DidNotReceive().StoreInformationEventAsync(TenantId,
+            Arg.Is<string>(m => m.Contains("adapter disconnect")),
+            Arg.Any<Meshmakers.Octo.ConstructionKit.Contracts.RtEntityId?>());
+    }
+
+    [Test]
+    public async Task MarkExecutionsAsInterruptedAsync_OrdinaryDisconnect_KeepsTheInformationEvent()
+    {
+        // Arrange
+        var rtAdapter = RtEntityCreator.CreateAdapter();
+        CommunicationRepository.GetRunningExecutionsForAdapterAsync(TenantId, rtAdapter.ToRtEntityId())
+            .Returns(new List<RtPipelineExecution> { RtEntityCreator.CreatePipelineExecution() });
+        WorkloadLifecycleService.IsIntentionallyDownAsync(TenantId, rtAdapter.RtId).Returns(false);
+
+        // Act
+        await PipelineExecutionService.MarkExecutionsAsInterruptedAsync(TenantId, rtAdapter.ToRtEntityId());
+
+        // Assert
+        await CommunicationEventService.Received(1).StoreInformationEventAsync(TenantId,
+            Arg.Is<string>(m => m.Contains("adapter disconnect")),
+            Arg.Any<Meshmakers.Octo.ConstructionKit.Contracts.RtEntityId?>());
+    }
+
     [Test]
     public async Task ReportInterruptedExecutionResultAsync_UnknownTenant_ThrowsException()
     {

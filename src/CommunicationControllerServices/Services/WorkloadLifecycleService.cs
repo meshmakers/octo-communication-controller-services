@@ -33,6 +33,30 @@ internal class WorkloadLifecycleService(
         return _wakeWaiters.ContainsKey((tenantId, workloadRtId));
     }
 
+    public async Task<bool> IsIntentionallyDownAsync(string tenantId, OctoObjectId workloadRtId)
+    {
+        try
+        {
+            if (!await lifecycleConfiguration.IsScaleToZeroEnabledAsync(tenantId))
+            {
+                return false;
+            }
+
+            var workload = await communicationRepository.GetWorkloadByRtIdAsync(tenantId, workloadRtId);
+            return workload?.LifecycleState is RtLifecycleStateEnum.Draining or RtLifecycleStateEnum.Hibernated;
+        }
+        catch (Exception e)
+        {
+            // This only decides how loudly a disconnect is reported. Failing it must never break
+            // the disconnect handling, and "not hibernating" is the safe answer: the caller then
+            // reports the offline exactly as it did before the lifecycle feature existed.
+            logger.LogWarning(e,
+                "[{TenantId}] Could not determine the lifecycle state of workload '{WorkloadRtId}'; " +
+                "treating it as not hibernating", tenantId, workloadRtId);
+            return false;
+        }
+    }
+
     public async Task EnsureWorkloadRunningForPipelineAsync(string tenantId, OctoObjectId pipelineRtId)
     {
         // Cheap cached gate first — on a tenant without scale-to-zero the execute path must not

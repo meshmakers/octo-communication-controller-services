@@ -1239,12 +1239,35 @@ activity at all counts as idle-since-forever (that fleet is the feature's target
 stuck > 2× wake budget → Hibernated + error event. Applications are skipped (no pipeline
 activity signal yet).
 
+**Hibernation stays out of the audit trail (AB#4919).** A scale-to-zero disconnects the
+workload on purpose, so the offline paths ask
+`IWorkloadLifecycleService.IsIntentionallyDownAsync` (true for `Draining`/`Hibernated`;
+fast-path false when the tenant has scale-to-zero off, never throws) before they report
+anything:
+
+- `AdapterService.SetAdapterCommunicationStateOfflineAsync` skips the "is now offline"
+  information event.
+- `AdapterService.ReconcileOrphanedOnlineAdaptersAsync` still corrects a stale `Online` — a
+  workload that looks healthy while hibernated is worse than the log line — but drops the
+  "had no live connection" event and logs at Info instead of Warn.
+- `PipelineExecutionService.MarkExecutionsAsInterruptedAsync` keeps marking executions, but
+  when the adapter is hibernating it reports a **warning** instead of the routine information
+  event: the watchdog only drains a workload with no running executions, so finding any here
+  means the drain guarantee did not hold, and unlike an ordinary disconnect the platform is
+  what cut the work short.
+
+The **state writes are deliberately unchanged** — `CommunicationState=Offline` is factually
+true while hibernated, and consumers are supposed to read it through `LifecycleState`. What
+changes is only how loudly it is reported. Tests:
+`Services/AdapterServiceTests/HibernationAuditSuppressionTests`, the two hibernation cases in
+`Services/PipelineExecutionServiceTests/MarkInterruptedTests`.
+
 **Known limitations / follow-ups:** in-process `FromPolling`/`FromMicrosoftGraphEmail`
 triggers never idle and silently stop at 0 replicas — such pipelines must move to cron
 `PipelineTrigger`s before their workload goes OnDemand (AB#4922 precondition); the
 OnDemandCapable trigger-classification validation is not yet implemented (rejecting
-`LifecycleMode=OnDemand` on process-bound workloads, AB#4916 §5); Hibernated-aware
-observability (suppressing offline error audits, Studio badges, metrics) is AB#4919; the
+`LifecycleMode=OnDemand` on process-bound workloads, AB#4916 §5); the Studio badges and the
+wake/hibernation metrics of AB#4919 are still open; the
 `octo-eda-adapter` chart still needs the `terminationGracePeriodSeconds` fix that
 `octo-mesh-adapter` got.
 

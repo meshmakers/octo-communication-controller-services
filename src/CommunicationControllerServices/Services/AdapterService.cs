@@ -416,9 +416,22 @@ internal class AdapterService(
             Logger.Info("[{TenantId}] adapter rt id '{AdapterRtId}' offline (connection '{ConnectionId}')",
                 tenantId, adapterRtEntityId, connectionId);
 
-            await eventService.StoreInformationEventAsync(tenantId,
-                $"Adapter '{adapterRtEntityId}' is now offline.",
-                adapterRtEntityId);
+            // AB#4919: a hibernating workload disconnects because we asked it to. Recording that as
+            // an offline event would fill the tenant's audit trail with one entry per idle cycle and
+            // make a real outage indistinguishable from routine scale-to-zero. The state write below
+            // still happens — Offline is factually true while hibernated, and Studio reads it
+            // through LifecycleState.
+            if (await workloadLifecycleService.IsIntentionallyDownAsync(tenantId, adapterRtEntityId.RtId))
+            {
+                Logger.Info("[{TenantId}] adapter rt id '{AdapterRtId}' offline as part of hibernation; " +
+                            "skipping the offline audit event", tenantId, adapterRtEntityId);
+            }
+            else
+            {
+                await eventService.StoreInformationEventAsync(tenantId,
+                    $"Adapter '{adapterRtEntityId}' is now offline.",
+                    adapterRtEntityId);
+            }
 
             await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId, RtCommunicationStateEnum.Offline);
             return;
@@ -457,14 +470,27 @@ internal class AdapterService(
                 continue;
             }
 
-            Logger.Warn(
-                "[{TenantId}] Adapter '{AdapterRtId}' is persisted Online but has no live SignalR connection on this pod; " +
-                "reconciling to Offline (AB#4699)",
-                tenantId, adapterRtEntityId);
+            // AB#4919: same reasoning as in SetAdapterCommunicationStateOfflineAsync — a hibernating
+            // workload has no connection by design. The reconciliation itself must still run (a
+            // stale Online would show the workload as healthy), but reporting it as an anomaly
+            // would page someone for a scale-down.
+            if (await workloadLifecycleService.IsIntentionallyDownAsync(tenantId, adapter.RtId))
+            {
+                Logger.Info(
+                    "[{TenantId}] Adapter '{AdapterRtId}' is hibernating and persisted Online; reconciling to Offline",
+                    tenantId, adapterRtEntityId);
+            }
+            else
+            {
+                Logger.Warn(
+                    "[{TenantId}] Adapter '{AdapterRtId}' is persisted Online but has no live SignalR connection on this pod; " +
+                    "reconciling to Offline (AB#4699)",
+                    tenantId, adapterRtEntityId);
 
-            await eventService.StoreInformationEventAsync(tenantId,
-                $"Adapter '{adapterRtEntityId}' had no live connection and was reconciled to Offline.",
-                adapterRtEntityId);
+                await eventService.StoreInformationEventAsync(tenantId,
+                    $"Adapter '{adapterRtEntityId}' had no live connection and was reconciled to Offline.",
+                    adapterRtEntityId);
+            }
 
             // The repository write carries an AttributeNewerThanGuard on the state timestamp, so a
             // concurrent Online write with a newer timestamp still wins if it raced past the check
