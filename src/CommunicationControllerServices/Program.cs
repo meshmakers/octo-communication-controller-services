@@ -78,6 +78,8 @@ try
     builder.Services.AddSingleton<IWorkloadEncryptionService, WorkloadEncryptionService>();
     builder.Services.AddSingleton<IWorkloadTemplateResolver, WorkloadTemplateResolver>();
     builder.Services.AddSingleton<IShutdownState, HostApplicationShutdownState>();
+    builder.Services.AddSingleton<ILifecycleConfigurationService, LifecycleConfigurationService>();
+    builder.Services.AddSingleton<IWorkloadLifecycleService, WorkloadLifecycleService>();
     builder.Services.AddSingleton<IAdapterConnectionTracker, AdapterConnectionTracker>();
     builder.Services.AddSingleton<IPipelineSchemaValidator, PipelineSchemaValidator>();
     builder.Services.AddSingleton<IExpressionValidationService, ExpressionValidationService>();
@@ -104,6 +106,7 @@ try
 
     // Reconciles adapters stuck at a stale Online state with no live SignalR connection (AB#4699).
     builder.Services.AddHostedService<AdapterOfflineReconciliationBackgroundService>();
+    builder.Services.AddHostedService<WorkloadLifecycleWatchdogBackgroundService>();
 
     // Add execution report background processor - decouples heavy DB writes from SignalR hub
     // method processing so that execution reports don't block deployment results
@@ -141,6 +144,12 @@ try
             c.AddBroadcastEventConsumer<TenantManagementConsumer, PosUpdateTenant>();
             c.AddBroadcastEventConsumer<TenantManagementConsumer, PreDeleteTenant>();
             c.AddBroadcastEventConsumer<TenantManagementConsumer, PosCreateTenant>();
+
+            // AB#4918: durable co-wake queue. Cron companion schedules of pipelines on OnDemand
+            // workloads land here; a wake tick fired while the controller restarts must survive,
+            // so this is a routed (durable, named) endpoint — not a temporary command queue.
+            c.AddRoutedEventConsumer<LifecycleWakeConsumer, LifecycleWakeMessage>(
+                PipelineQueueNames.LifecycleWakeQueue);
         });
 
     builder.Services.AddRuntimeEngine()

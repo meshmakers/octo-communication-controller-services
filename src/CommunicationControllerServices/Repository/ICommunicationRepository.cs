@@ -42,6 +42,22 @@ public interface ICommunicationRepository
     Task<RtDeployableWorkload?> GetWorkloadByRtIdAsync(string tenantId, OctoObjectId workloadRtId);
 
     /// <summary>
+    /// Writes the workload's lifecycle state (AB#4914) and optionally its
+    /// <c>StatusMessage</c>. Polymorphic over Adapter / Application — the
+    /// entity is loaded first to resolve the concrete CK type. Throws when
+    /// the workload does not exist.
+    /// </summary>
+    Task SetWorkloadLifecycleStateAsync(string tenantId, OctoObjectId workloadRtId,
+        RtLifecycleStateEnum lifecycleState, string? statusMessage = null);
+
+    /// <summary>
+    /// Stamps the workload's <c>LastActivityAt</c> (AB#4914) — input to the
+    /// idle watchdog. Polymorphic over Adapter / Application. Throws when
+    /// the workload does not exist.
+    /// </summary>
+    Task SetWorkloadLastActivityAsync(string tenantId, OctoObjectId workloadRtId, DateTime lastActivityAtUtc);
+
+    /// <summary>
     /// Walks the <c>Manages</c> association from a workload back to its
     /// parent <c>RtPool</c>. Returns <c>null</c> when the workload is not
     /// currently in any pool.

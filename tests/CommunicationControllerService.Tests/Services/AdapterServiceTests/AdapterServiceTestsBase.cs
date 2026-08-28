@@ -27,6 +27,7 @@ internal abstract class AdapterServiceTestsBase
     // Real tracker (simple, deterministic) so the Online/Offline write paths exercise real
     // liveness tracking and the reconciliation tests can observe HasLiveConnection end-to-end.
     protected readonly AdapterConnectionTracker AdapterConnectionTracker;
+    protected readonly IWorkloadLifecycleService WorkloadLifecycleService = Substitute.For<IWorkloadLifecycleService>();
     protected readonly AdapterTenant AdapterTenant;
 
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
@@ -45,7 +46,7 @@ internal abstract class AdapterServiceTestsBase
         AdapterConnectionTracker = new AdapterConnectionTracker();
         AdapterService = new AdapterService(CommunicationRepository, AdapterCache, AdapterHubCallbacks,
             CommunicationEventService, PipelineSchemaValidator, PipelineDefinitionService,
-            AdapterConnectionTracker, options);
+            AdapterConnectionTracker, options, WorkloadLifecycleService);
         AdapterTenant = new AdapterTenant(AdapterCachePublish, TenantId);
 
         InitAdapterCache();

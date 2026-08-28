@@ -89,6 +89,55 @@ internal class UpdateConfigurationStateAsyncTests : AdapterServiceTestsBase
             .SetPipelineDeploymentStateAsync(TenantId, rtPipeline2.ToRtEntityId(), RtDeploymentStateEnum.Deployed, null);
     }
 
+    /// <summary>
+    /// AB#4918: Configured is the wake readiness signal — a successful configuration ack must
+    /// notify the lifecycle service so wake-gate waiters are released and an OnDemand workload
+    /// transitions Waking → Running.
+    /// </summary>
+    [Test]
+    public async Task UpdateConfigurationStateAsync_SuccessfulDeployment_NotifiesWorkloadConfigured()
+    {
+        // Arrange
+        var rtAdapter = RtEntityCreator.CreateAdapter();
+
+        AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
+            rtAdapter.ToRtEntityId(),
+            null,
+            []
+        ));
+
+        var deploymentResult = new DeploymentResult { IsSuccess = true, ErrorMessages = null };
+
+        // Act
+        await AdapterService.UpdateConfigurationStateAsync(TenantId, rtAdapter.ToRtEntityId(), deploymentResult);
+
+        // Assert
+        await WorkloadLifecycleService.Received(1).NotifyWorkloadConfiguredAsync(TenantId,
+            Arg.Is<OctoObjectId>(id => id.ToString() == rtAdapter.RtId.ToString()));
+    }
+
+    [Test]
+    public async Task UpdateConfigurationStateAsync_FailedDeployment_DoesNotNotifyWorkloadConfigured()
+    {
+        // Arrange - a failed ack must not release wake waiters (the workload is not ready).
+        var rtAdapter = RtEntityCreator.CreateAdapter();
+
+        AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
+            rtAdapter.ToRtEntityId(),
+            null,
+            []
+        ));
+
+        var deploymentResult = new DeploymentResult { IsSuccess = false, ErrorMessages = null };
+
+        // Act
+        await AdapterService.UpdateConfigurationStateAsync(TenantId, rtAdapter.ToRtEntityId(), deploymentResult);
+
+        // Assert
+        await WorkloadLifecycleService.DidNotReceiveWithAnyArgs().NotifyWorkloadConfiguredAsync(
+            Arg.Any<string>(), Arg.Any<OctoObjectId>());
+    }
+
     [Test]
     public async Task UpdateConfigurationStateAsync_FailedDeploymentWithoutErrors_SetsErrorStateForAdapter()
     {

@@ -22,7 +22,8 @@ internal class AdapterService(
     IPipelineSchemaValidator pipelineSchemaValidator,
     IPipelineDefinitionService pipelineDefinitionService,
     IAdapterConnectionTracker connectionTracker,
-    IOptions<CommunicationControllerOptions> communicationControllerOptions)
+    IOptions<CommunicationControllerOptions> communicationControllerOptions,
+    IWorkloadLifecycleService workloadLifecycleService)
     : IAdapterService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
@@ -481,6 +482,11 @@ internal class AdapterService(
         Logger.Info("[{TenantId}] AdapterRtId='{AdapterRtId}' deploy configuration",
             tenantId, adapterRtEntityId);
 
+        // AB#4918 wake gate: a hibernated adapter is not in the cache and the push below would
+        // throw AdapterNotLoaded. Wake-first (no-op unless the tenant has scale-to-zero on and
+        // the adapter is OnDemand); after the wake the adapter has registered and is cached.
+        await workloadLifecycleService.EnsureWorkloadRunningAsync(tenantId, adapterRtEntityId.RtId);
+
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
             if (adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
@@ -528,6 +534,9 @@ internal class AdapterService(
         Logger.Info(
             "[{TenantId}] AdapterRtId='{AdapterRtId}', PipelineRtEntityId='{PipelineRtEntityId}' deploy pipeline configuration",
             tenantId, adapterRtEntityId, pipelineRtEntityId);
+
+        // AB#4918 wake gate — see DeployAdapterConfigurationAsync.
+        await workloadLifecycleService.EnsureWorkloadRunningAsync(tenantId, adapterRtEntityId.RtId);
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
@@ -655,6 +664,10 @@ internal class AdapterService(
                 {
                     throw AdapterServiceException.PipelineAdapterNotAssigned(tenantId, rtDeployPipeline.ToRtEntityId());
                 }
+
+                // AB#4918 wake gate: a hibernated executing adapter would fail the cache lookup
+                // below with AdapterNotLoaded. No-op unless scale-to-zero applies.
+                await workloadLifecycleService.EnsureWorkloadRunningAsync(tenantId, rtAdapter);
 
                 if (adapterTenant.AdapterById.TryGetValue(rtAdapter.ToRtEntityId(), out var adapter))
                 {
@@ -875,6 +888,11 @@ internal class AdapterService(
                 {
                     await communicationRepository.SetAdapterConfigurationStateAsync(tenantId, adapterRtEntityId,
                         RtConfigurationStateEnum.Configured, null);
+
+                    // AB#4918: Configured is the wake readiness signal (AB#4594 — Online is not
+                    // enough). Releases wake-gate waiters and moves an OnDemand workload to
+                    // Running. Best-effort by contract, never throws.
+                    await workloadLifecycleService.NotifyWorkloadConfiguredAsync(tenantId, adapterRtEntityId.RtId);
 
                     foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
                     {

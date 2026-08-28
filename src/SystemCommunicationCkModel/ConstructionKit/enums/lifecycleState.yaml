@@ -1,0 +1,14 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+- enumId: LifecycleState
+  description: 'Runtime lifecycle state of an OnDemand workload (AB#4914). Running: normal operation. Draining: idle timeout reached, scale-to-0 requested. Hibernated: scaled to 0 replicas on purpose — CommunicationState=Offline is expected and must not raise alarms. Waking: a demand signal triggered scale-to-1; consumers wait for ConfigurationState=Configured. AlwaysOn workloads stay Running permanently.'
+  useFlags: false
+  values:
+  - key: 0
+    name: Running
+  - key: 1
+    name: Draining
+  - key: 2
+    name: Hibernated
+  - key: 3
+    name: Waking

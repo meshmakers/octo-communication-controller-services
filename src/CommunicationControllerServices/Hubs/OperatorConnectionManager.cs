@@ -390,6 +390,56 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
         }
     }
 
+    public async Task NotifyWorkloadScaleAsync(ScaleWorkloadDto workload)
+    {
+        // No tracking-map updates: scaling does not change what is deployed —
+        // a hibernated workload keeps its helm release and must still be
+        // covered by the tenant-delete cascade.
+        var targetConnections = GetConnectionsForPool(workload.TenantId, workload.PoolRtId);
+        if (targetConnections.Count == 0)
+        {
+            // Same AB#4371 rationale as deploy/undeploy: the pool may be
+            // orphaned only transiently (operator mid-rollout), and a dropped
+            // scale-1 leaves a wake gate waiting for its full budget. Queued
+            // under a scale-specific key so a scale never supersedes a queued
+            // deploy/undeploy of the same workload (which the last-wins map
+            // would otherwise silently drop); among scales last-wins is
+            // exactly right.
+            QueuePendingWorkloadNotification(workload.TenantId, workload.PoolRtId,
+                ScalePendingKey(workload.WorkloadRtId), workload);
+            Logger.Warn(
+                "No operator currently owns pool rtId {PoolRtId} for tenant '{TenantId}'; queueing workload-scale notification for '{WorkloadName}' (replicas {Replicas}) until the pool is registered",
+                workload.PoolRtId, workload.TenantId, workload.WorkloadName, workload.Replicas);
+            return;
+        }
+
+        Logger.Info(
+            "Notifying {Count} operator(s) of workload scale: tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}' (rtId {WorkloadRtId}), replicas {Replicas}",
+            targetConnections.Count, workload.TenantId, workload.PoolRtId,
+            workload.WorkloadName, workload.WorkloadRtId, workload.Replicas);
+
+        foreach (var connectionId in targetConnections)
+        {
+            try
+            {
+                await hubContext.Clients.Client(connectionId)
+                    .SendAsync(nameof(IOperatorHubCallbacks.ScaleWorkloadAsync), workload);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn(ex,
+                    "Failed to notify operator {ConnectionId} of workload scale for tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}'",
+                    connectionId, workload.TenantId, workload.PoolRtId, workload.WorkloadName);
+            }
+        }
+    }
+
+    private static string ScalePendingKey(string workloadRtId)
+    {
+        // RtIds are 24-hex, so the suffix cannot collide with a real rtId key.
+        return workloadRtId + "::scale";
+    }
+
     public async Task FlushPendingWorkloadNotificationsAsync(string connectionId, string tenantId, string poolRtId)
     {
         if (!_pendingWorkloadNotificationsByPool.TryRemove((tenantId, poolRtId), out var pending)
@@ -404,9 +454,12 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
 
         foreach (var (workloadRtId, notification) in pending)
         {
-            var methodName = notification is WorkloadDeployedDto
-                ? nameof(IOperatorHubCallbacks.WorkloadDeployedAsync)
-                : nameof(IOperatorHubCallbacks.WorkloadUndeployedAsync);
+            var methodName = notification switch
+            {
+                WorkloadDeployedDto => nameof(IOperatorHubCallbacks.WorkloadDeployedAsync),
+                ScaleWorkloadDto => nameof(IOperatorHubCallbacks.ScaleWorkloadAsync),
+                _ => nameof(IOperatorHubCallbacks.WorkloadUndeployedAsync),
+            };
             try
             {
                 await hubContext.Clients.Client(connectionId)

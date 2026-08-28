@@ -144,6 +144,23 @@ public class CommunicationControllerOptions
     public int AdapterOfflineReconciliationIntervalMinutes { get; set; } = 5;
 
     /// <summary>
+    /// Maximum seconds a wake gate waits for a woken OnDemand workload to reach
+    /// <c>ConfigurationState=Configured</c> before it reverts the workload to Hibernated and
+    /// fails the caller with a typed error (AB#4918). Baseline measured wake-to-Configured is
+    /// ~16 s (staging-1, warm image); 60 s covers image pulls and slow nodes. Must stay below
+    /// the SDK caller cap of 100 s on the execute-pipeline path.
+    /// </summary>
+    public int LifecycleWakeBudgetSeconds { get; set; } = 60;
+
+    /// <summary>
+    /// Interval in minutes of the on-demand lifecycle idle watchdog (AB#4918). Each sweep
+    /// hibernates OnDemand workloads of scale-to-zero-enabled tenants whose last activity is
+    /// older than their <c>IdleTimeoutMinutes</c>, and reconciles stale <c>Waking</c> states
+    /// left behind by a controller restart. The same value is used as the startup grace.
+    /// </summary>
+    public int LifecycleWatchdogIntervalMinutes { get; set; } = 5;
+
+    /// <summary>
     /// Named public base domains available to workloads as <c>{{domain.NAME}}</c>
     /// placeholders in <c>Hostname</c>, non-secret <c>ValueOverride.Value</c>
     /// entries and <c>ValuesYaml</c>. Resolved by

@@ -189,4 +189,41 @@ internal class DeployAdapterConfigurationAsyncTests : AdapterServiceTestsBase
         await Assert.That(adapter.Configuration.AdapterConfiguration).IsEqualTo("new-json");
         await Assert.That(adapter.Configuration.Pipelines).Count().IsEqualTo(1);
     }
+
+    /// <summary>
+    /// AB#4918 wake gate: a hibernated adapter is not in the cache and the config push would
+    /// throw AdapterNotLoaded — the deploy must run the wake gate before the push so an
+    /// OnDemand adapter is up and registered first.
+    /// </summary>
+    [Test]
+    public async Task DeployAdapterConfigurationAsync_InvokesWakeGateBeforePush()
+    {
+        // Arrange
+        var rtAdapter = RtEntityCreator.CreateAdapter();
+        rtAdapter.Configuration = "new-json";
+
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
+        var rtPipeline = RtEntityCreator.CreatePipeline();
+
+        InitAdapterConfiguration(rtAdapter, rtDataFlow, [rtPipeline]);
+        CommunicationRepository.GetConfigurationsByPipelineAsync(TenantId, Arg.Any<OctoObjectId>())
+            .Returns([]);
+
+        AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
+            rtAdapter.ToRtEntityId(),
+            "old-json",
+            []
+        ));
+
+        // Act
+        await AdapterService.DeployAdapterConfigurationAsync(TenantId, rtAdapter.ToRtEntityId());
+
+        // Assert - the gate runs before the SignalR push
+        Received.InOrder(() =>
+        {
+            WorkloadLifecycleService.EnsureWorkloadRunningAsync(TenantId,
+                Arg.Is<OctoObjectId>(id => id.ToString() == rtAdapter.RtId.ToString()));
+            AdapterHubCallbacks.AdapterConfigurationUpdatedAsync(TenantId, Arg.Any<AdapterConfigurationDto>());
+        });
+    }
 }

@@ -19,6 +19,13 @@ internal static class Constants
     /// </summary>
     public const string CommunicationControllerServiceEnabledKey = TenantCapabilityConfigurationKeys.Communication;
 
+    /// <summary>
+    /// Tenant configuration key of the on-demand lifecycle configuration (AB#4914). Same
+    /// key-value store as the enabled flag; carries <c>CommunicationLifecycleConfiguration</c>
+    /// (currently just the per-tenant ScaleToZeroEnabled gate, default off).
+    /// </summary>
+    public const string CommunicationLifecycleConfigurationKey = "communicationLifecycle";
+
     public const string CommunicationControllerServiceIdentityDataVersionKey = "CommunicationControllerServicesIdentityData";
     public const int CommunicationControllerServiceIdentityDataVersionValue = 3;
     

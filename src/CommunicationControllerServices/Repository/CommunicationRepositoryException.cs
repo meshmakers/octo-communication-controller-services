@@ -83,6 +83,26 @@ internal class CommunicationRepositoryException : Exception
                                                     operationResult.GetMessages());
     }
 
+    internal static Exception WorkloadNotFound(string tenantId, OctoObjectId workloadRtId)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Deployable workload with rtId '{workloadRtId}' not found");
+    }
+
+    internal static Exception CommonFailedSetWorkloadLifecycleState(string tenantId, OctoObjectId workloadRtId,
+        RtLifecycleStateEnum state, Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to set lifecycle state of workload '{workloadRtId}' to '{state}'", exception);
+    }
+
+    internal static Exception CommonFailedSetWorkloadLastActivity(string tenantId, OctoObjectId workloadRtId,
+        Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to set last activity of workload '{workloadRtId}'", exception);
+    }
+
     internal static Exception CommonFailedCreatePool(string tenantId, string poolName, Exception exception)
     {
         return new CommunicationRepositoryException($"[{tenantId}] Failed to create pool '{poolName}'", exception);

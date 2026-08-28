@@ -228,6 +228,45 @@ public class CommunicationController : ControllerBase
                 kvp.Value)));
         return Ok(dtos);
     }
+
+    /// <summary>
+    /// Returns the tenant's on-demand lifecycle configuration (AB#4914). A tenant without a
+    /// stored record answers with the defaults (scale-to-zero off).
+    /// </summary>
+    [HttpGet("lifecycle")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(typeof(CommunicationLifecycleDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetLifecycle([FromServices] ILifecycleConfigurationService lifecycleConfigurationService)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        ArgumentNullException.ThrowIfNull(tenantId);
+
+        var configuration = await lifecycleConfigurationService.GetConfigurationAsync(tenantId);
+        return Ok(new CommunicationLifecycleDto(configuration.ScaleToZeroEnabled));
+    }
+
+    /// <summary>
+    /// Sets the tenant's on-demand lifecycle configuration (AB#4914). Runtime configuration —
+    /// effective without a controller redeploy; gates and watchdog pick it up within the
+    /// configuration cache TTL. Setting <c>ScaleToZeroEnabled=false</c> is the per-tenant
+    /// emergency stop.
+    /// </summary>
+    [HttpPut("lifecycle")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(typeof(CommunicationLifecycleDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> SetLifecycle([FromBody] CommunicationLifecycleDto request,
+        [FromServices] ILifecycleConfigurationService lifecycleConfigurationService)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        ArgumentNullException.ThrowIfNull(tenantId);
+
+        await lifecycleConfigurationService.SetConfigurationAsync(tenantId,
+            new CommunicationLifecycleConfiguration { ScaleToZeroEnabled = request.ScaleToZeroEnabled });
+
+        _logger.LogInformation("Lifecycle configuration set for tenant '{TenantId}': ScaleToZeroEnabled={Enabled}",
+            tenantId, request.ScaleToZeroEnabled);
+        return Ok(request);
+    }
 }
 
 /// <summary>

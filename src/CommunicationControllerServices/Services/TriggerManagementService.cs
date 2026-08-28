@@ -16,7 +16,8 @@ internal class TriggerManagementService(
     ICommandClient<RemoveRecurringJobsByScheduleGroupRequest> removeRecurringJobsByScheduleGroupCommandClient,
     IRoutedCommandClient<ExecutePipelineRequest> executeMeshPipelineCommandClient,
     IDistributionEventHubService distributionEventHubService,
-    ICommunicationEventService eventService)
+    ICommunicationEventService eventService,
+    IWorkloadLifecycleService workloadLifecycleService)
     : ITriggerManagementService
 {
     public async Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId,
@@ -24,6 +25,11 @@ internal class TriggerManagementService(
     {
         logger.LogInformation("[{TenantId}] Executing pipeline '{PipelineRtId}' (dry-run={IsDryRun})",
             tenantId, pipelineRtId, isDryRun);
+
+        // AB#4918 wake gate — MUST complete before the send below: the execute-pipeline queue is
+        // non-durable/auto-delete, so publishing while the adapter is scaled to 0 silently drops
+        // the message. No-op unless the tenant has scale-to-zero on and the adapter is OnDemand.
+        await workloadLifecycleService.EnsureWorkloadRunningForPipelineAsync(tenantId, pipelineRtId);
 
         ExecutePipelineResponse? r;
         try
@@ -143,6 +149,33 @@ internal class TriggerManagementService(
 
                         await distributionEventHubService.ScheduleRecurringSendAsync(pipelineTriggerSchedule,
                             address, recurringSchedulingOptions);
+
+                        // AB#4918 cron co-wake: for pipelines on an OnDemand workload, register a
+                        // companion recurring send (same cron, same schedule group so it is
+                        // added/removed together with the trigger schedule) to the controller's
+                        // durable wake queue. The trigger message above buffers durably on the
+                        // per-pipeline queue while the adapter is hibernated; the co-wake tick
+                        // brings the adapter up to consume it. Registered independently of the
+                        // tenant's ScaleToZeroEnabled flag — the consumer-side gate no-ops when
+                        // the feature is off, and flipping the flag later must not require a
+                        // trigger redeploy.
+                        var executingAdapter = await communicationRepository.GetAdapterByPipelineAsync(tenantId,
+                            new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, meshPipeline.RtId));
+                        if (executingAdapter?.LifecycleMode == RtLifecycleModeEnum.OnDemand)
+                        {
+                            var wakeAddress = $"queue:{PipelineQueueNames.LifecycleWakeQueue.ToLower()}";
+                            var coWakeOptions = new RecurringSchedulingOptions(
+                                pipelineTrigger.CronExpression,
+                                DateTime.Now, null,
+                                $"{pipelineTrigger.RtId.ToString()}-wake-{meshPipeline.RtId.ToString()}",
+                                scheduleGroup,
+                                "Lifecycle co-wake (AB#4918)",
+                                SchedulingMissedEventPolicy.Skip);
+
+                            await distributionEventHubService.ScheduleRecurringSendAsync(
+                                new LifecycleWakeMessage(tenantId, executingAdapter.RtId.ToString()),
+                                wakeAddress, coWakeOptions);
+                        }
                     }
 
                     await communicationRepository.SetPipelineTriggerDeploymentStateAsync(tenantId,

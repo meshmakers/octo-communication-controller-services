@@ -694,6 +694,13 @@ internal class PoolService : IPoolService
             // that every referenced NAME exists, so TryResolve cannot fail here.
             IngressEnabled = workload.IngressEnabled,
             Hostname = ResolveHostname(workload.Hostname, ctx),
+            // AB#4917: a redeploy of a hibernated/draining workload must not
+            // resurrect it — the operator pins the release at replicaCount=0.
+            // A deploy that is supposed to wake the workload goes through the
+            // wake gate first, which moves the state to Waking/Running before
+            // the deploy event is built.
+            Hibernated = workload.LifecycleState is RtLifecycleStateEnum.Hibernated
+                or RtLifecycleStateEnum.Draining,
         };
     }
 

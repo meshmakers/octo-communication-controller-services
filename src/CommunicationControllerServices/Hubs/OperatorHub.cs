@@ -24,6 +24,7 @@ public class OperatorHub : Hub, IOperatorHub
     private readonly IPoolService _poolService;
     private readonly IShutdownState _shutdownState;
     private readonly ICommunicationEventService _eventService;
+    private readonly IWorkloadLifecycleService _workloadLifecycleService;
 
     /// <summary>
     /// Constructor
@@ -32,13 +33,15 @@ public class OperatorHub : Hub, IOperatorHub
         ICommunicationRepository communicationRepository,
         IPoolService poolService,
         IShutdownState shutdownState,
-        ICommunicationEventService eventService)
+        ICommunicationEventService eventService,
+        IWorkloadLifecycleService workloadLifecycleService)
     {
         _connectionManager = connectionManager;
         _communicationRepository = communicationRepository;
         _poolService = poolService;
         _shutdownState = shutdownState;
         _eventService = eventService;
+        _workloadLifecycleService = workloadLifecycleService;
     }
 
     /// <inheritdoc />
@@ -384,6 +387,25 @@ public class OperatorHub : Hub, IOperatorHub
                 "Failed to persist deployment status for workload '{WorkloadName}' (tenant '{TenantId}')",
                 status.WorkloadName, status.TenantId);
         }
+    }
+
+    /// <inheritdoc />
+    public async Task ReportWorkloadScaleStatusAsync(WorkloadScaleStatusDto status)
+    {
+        Logger.Info(
+            "Workload scale status report: tenant '{TenantId}', workload '{WorkloadName}' (rtId {WorkloadRtId}), replicas={Replicas}, success={Success}",
+            status.TenantId, status.WorkloadName, status.WorkloadRtId, status.Replicas, status.Success);
+
+        if (string.IsNullOrWhiteSpace(status.TenantId) || string.IsNullOrWhiteSpace(status.WorkloadRtId))
+        {
+            Logger.Warn("Ignoring scale status report with missing tenant id or workload rt id");
+            return;
+        }
+
+        // The lifecycle service owns the state machine and is itself best-effort
+        // (same contract as the deployment status reports: a failed state write
+        // must not break the hub for the rest of the connection's traffic).
+        await _workloadLifecycleService.OnScaleStatusReportedAsync(status);
     }
 
     /// <inheritdoc />

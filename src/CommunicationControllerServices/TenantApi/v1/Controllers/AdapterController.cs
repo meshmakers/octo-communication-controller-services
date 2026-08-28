@@ -213,4 +213,45 @@ public class AdapterController : ControllerBase
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
         }
     }
+
+    /// <summary>
+    /// Wakes a hibernated OnDemand workload (AB#4918): scales it to 1 replica and waits until
+    /// it is registered and configured (budget: <c>LifecycleWakeBudgetSeconds</c>). No-op for
+    /// AlwaysOn workloads, for tenants without scale-to-zero, and for already-running
+    /// workloads. Used by the Studio's "wake now" action and by apps that want to pre-warm an
+    /// adapter before issuing requests.
+    /// </summary>
+    /// <param name="workloadRtId">The runtime id of the workload (adapter or application).</param>
+    /// <param name="workloadLifecycleService">The lifecycle service owning the wake gate.</param>
+    [HttpPost("{workloadRtId}/wake")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> Wake([Required] string workloadRtId,
+        [FromServices] IWorkloadLifecycleService workloadLifecycleService)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        if (!OctoObjectId.TryParse(workloadRtId, out var workloadObjectId))
+        {
+            return BadRequest(new ErrorResponse
+                { ErrorMessage = $"Invalid workloadRtId '{workloadRtId}': must be a 24-character hex ObjectId." });
+        }
+
+        try
+        {
+            await workloadLifecycleService.EnsureWorkloadRunningAsync(tenantId, workloadObjectId);
+            return NoContent();
+        }
+        catch (WorkloadLifecycleServiceException e)
+        {
+            _logger.LogWarning(e, "Wake of workload '{WorkloadRtId}' failed", workloadRtId);
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
+        }
+    }
 }

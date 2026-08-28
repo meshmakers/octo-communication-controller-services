@@ -124,6 +124,90 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
+    public async Task SetWorkloadLifecycleStateAsync(string tenantId, OctoObjectId workloadRtId,
+        RtLifecycleStateEnum lifecycleState, string? statusMessage = null)
+    {
+        await UpdateWorkloadPolymorphicAsync(tenantId, workloadRtId,
+            () => new RtAdapter { LifecycleState = lifecycleState, StatusMessage = statusMessage },
+            () => new RtApplication { LifecycleState = lifecycleState, StatusMessage = statusMessage },
+            e => CommunicationRepositoryException.CommonFailedSetWorkloadLifecycleState(tenantId, workloadRtId,
+                lifecycleState, e));
+    }
+
+    /// <inheritdoc />
+    public async Task SetWorkloadLastActivityAsync(string tenantId, OctoObjectId workloadRtId,
+        DateTime lastActivityAtUtc)
+    {
+        await UpdateWorkloadPolymorphicAsync(tenantId, workloadRtId,
+            () => new RtAdapter { LastActivityAt = lastActivityAtUtc },
+            () => new RtApplication { LastActivityAt = lastActivityAtUtc },
+            e => CommunicationRepositoryException.CommonFailedSetWorkloadLastActivity(tenantId, workloadRtId, e));
+    }
+
+    /// <summary>
+    /// Shared load-then-update helper for the AB#4914 lifecycle writers.
+    /// <c>RtDeployableWorkload</c> is abstract, and an <c>EntityUpdateInfo</c>
+    /// needs the concrete CK type — so the entity is loaded first and the
+    /// matching partial-update DTO is applied.
+    /// </summary>
+    private async Task UpdateWorkloadPolymorphicAsync(string tenantId, OctoObjectId workloadRtId,
+        Func<RtAdapter> adapterUpdateFactory, Func<RtApplication> applicationUpdateFactory,
+        Func<Exception, Exception> exceptionFactory)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var workload = await tenantRepository.GetRtEntityByRtIdAsync<RtDeployableWorkload>(session, workloadRtId);
+            if (workload == null)
+            {
+                throw CommunicationRepositoryException.WorkloadNotFound(tenantId, workloadRtId);
+            }
+
+            OperationResult operationResult = new();
+            switch (workload)
+            {
+                case RtAdapter:
+                    {
+                        var rtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, workloadRtId);
+                        await tenantRepository.ApplyChangesAsync(session,
+                            [EntityUpdateInfo<RtAdapter>.CreateUpdate(rtEntityId, adapterUpdateFactory())],
+                            operationResult);
+                        break;
+                    }
+                case RtApplication:
+                    {
+                        var rtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkApplicationTypeId, workloadRtId);
+                        await tenantRepository.ApplyChangesAsync(session,
+                            [EntityUpdateInfo<RtApplication>.CreateUpdate(rtEntityId, applicationUpdateFactory())],
+                            operationResult);
+                        break;
+                    }
+                default:
+                    throw CommunicationRepositoryException.WorkloadNotFound(tenantId, workloadRtId);
+            }
+
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw exceptionFactory(e);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<RtPool?> GetPoolForWorkloadAsync(string tenantId, OctoObjectId workloadRtId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);

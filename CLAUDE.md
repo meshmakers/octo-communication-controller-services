@@ -1161,6 +1161,102 @@ Tests: `Services/PoolServiceTests/GetActiveDeploymentsAsyncTests`,
 `Controllers/CommunicationControllerDisableTests`, `Controllers/PoolControllerDeployGateTests`,
 `Services/PoolServiceTests/UnregisterPoolOperatorAsyncTests`, integration `Repository/GetWorkloadsAsyncTests`.
 
+## On-Demand Adapter Lifecycle — Scale-to-Zero (Epic AB#4914; AB#4916/4917/4918)
+
+Rarely used adapter workloads scale to 0 replicas when idle and are woken automatically on
+demand. Design doc: `docs/concepts/on-demand-adapter-lifecycle.md`.
+
+**CK model (3.29.0, AB#4916).** `DeployableWorkload` carries `LifecycleMode`
+(AlwaysOn=0 default | OnDemand=1 | Auto=2 reserved, rejected until implemented) and
+`IdleTimeoutMinutes` (default 30) as author configuration, plus `LifecycleState`
+(Running/Draining/Hibernated/Waking) and `LastActivityAt` as `isRuntimeState` attributes.
+The existing state fields are deliberately untouched: `CommunicationState=Offline` stays
+factually correct while hibernated, `DeploymentState=Deployed` stays correct (the helm
+release still exists) — consumers interpret them *through* `LifecycleState`.
+
+**Activation is runtime configuration, not a deployment switch.** Two gates must both be on:
+1. Per-tenant config record `communicationLifecycle` (`CommunicationLifecycleConfiguration
+   { ScaleToZeroEnabled }`, default false) in the tenant KV store — same store as the
+   enabled flag. Read through `ILifecycleConfigurationService` (30 s TTL cache; a write
+   invalidates this pod immediately). REST: `GET/PUT {tenantId}/v1/communication/lifecycle`;
+   octo-cli: `GetCommunicationLifecycle` / `SetCommunicationLifecycle -sze true|false`.
+   Setting false is the per-tenant emergency stop.
+2. Per-workload `LifecycleMode=OnDemand`.
+
+**State machine (owned by `IWorkloadLifecycleService` / `WorkloadLifecycleService`).**
+`Running → Draining` (idle watchdog) `→ Hibernated` (operator scale-0 ack via
+`OperatorHub.ReportWorkloadScaleStatusAsync`) `→ Waking` (any demand signal) `→ Running`
+(readiness = **`ConfigurationState=Configured`**, NOT Online — AB#4594; hooked in
+`AdapterService.UpdateConfigurationStateAsync` → `NotifyWorkloadConfiguredAsync`, which also
+releases the wake waiters). A failed scale-0 reverts Draining→Running; a failed scale-1
+fail-fasts active waiters; a wake that never reaches Configured within
+`LifecycleWakeBudgetSeconds` (default 60) reverts to Hibernated and throws
+`WorkloadLifecycleServiceException` (deployment stays scaled up for diagnosis). The wake
+wait registry is per-pod in-memory and deliberately separate from
+`AdapterService._pendingDeployments` (single-TCS last-writer-wins slot).
+
+**Scale mechanics (AB#4917).** `RequestScaleAsync` routes a `ScaleWorkloadDto` through
+`IOperatorConnectionManager.NotifyWorkloadScaleAsync` (pool-scoped routing; when no operator
+owns the pool the notification is queued under a scale-specific pending key
+`{workloadRtId}::scale` so it never supersedes a queued deploy/undeploy — AB#4371 rules).
+The operator patches `{"spec":{"replicas":N}}` on the Deployments matching
+`app.kubernetes.io/instance={release}` (no helm) and acks via
+`ReportWorkloadScaleStatusAsync`. Redeploys must not resurrect: `BuildWorkloadDeployedDtoAsync`
+sets `WorkloadDeployedDto.Hibernated` for Hibernated/Draining workloads and the operator pins
+`--set replicaCount=0`.
+
+**Wake gates (AB#4918).** Demand signals all funnel into
+`EnsureWorkloadRunning[ForPipeline]Async` (fast no-op when the tenant gate is off, the
+workload is AlwaysOn, or the workload is Running — Running just stamps `LastActivityAt`):
+- Execute pipeline: `TriggerManagementService.StartExecutePipelineAsync`, **before** the
+  queue send — the execute queue is non-durable/auto-delete, a send to an absent queue is
+  silently dropped.
+- Config/deploy pushes: `AdapterService.DeployAdapterConfigurationAsync`,
+  `DeployPipelineAsync`, `DeployDataFlowAsync` (wake-first, before the cache lookup that
+  would throw `AdapterNotLoaded`).
+- Manual wake API: `POST {tenantId}/v1/adapter/{workloadRtId}/wake` (Studio "wake now",
+  app pre-warm).
+- Cron co-wake: `UpdateScheduleAsync` registers, for every cron trigger whose pipeline runs
+  on an OnDemand adapter, a companion recurring send (same cron, same scheduleGroup) of a
+  `LifecycleWakeMessage` to the **durable** queue `PipelineQueueNames.LifecycleWakeQueue`
+  (`octo::com-controller::lifecycle-wake`), consumed by `LifecycleWakeConsumer`
+  (registered via `AddRoutedEventConsumer` — NOT `AddCommandConsumer`, whose endpoints are
+  temporary). The pipeline's own trigger message meanwhile buffers durably on its
+  per-pipeline trigger queue. Co-wake schedules are registered independently of the tenant
+  gate (the consumer-side gate no-ops when the feature is off) so flipping the flag needs no
+  trigger redeploy.
+
+**Idle watchdog (AB#4918).** `WorkloadLifecycleWatchdogBackgroundService`
+(`LifecycleWatchdogIntervalMinutes`, default 5, also the startup grace; structure mirrors
+`AdapterOfflineReconciliationBackgroundService`). Per scale-to-zero tenant and OnDemand
+Adapter workload in Running+Deployed: idle metric = max(`LastActivityAt`, per-pipeline
+`RtPipelineStatistics.LastExecutionAt` — statistics survive the AB#4370 execution fold, raw
+`CompletedAt` does not); busy guards = running executions
+(`GetRunningExecutionsForAdapterAsync`) and an in-flight wake (`HasActiveWake`). No observed
+activity at all counts as idle-since-forever (that fleet is the feature's target). Idle >
+`IdleTimeoutMinutes` → Draining + scale-0 request. The watchdog also reconciles stale
+`Waking` states (controller restart lost the in-memory waiters): Configured → Running;
+stuck > 2× wake budget → Hibernated + error event. Applications are skipped (no pipeline
+activity signal yet).
+
+**Known limitations / follow-ups:** in-process `FromPolling`/`FromMicrosoftGraphEmail`
+triggers never idle and silently stop at 0 replicas — such pipelines must move to cron
+`PipelineTrigger`s before their workload goes OnDemand (AB#4922 precondition); the
+OnDemandCapable trigger-classification validation is not yet implemented (rejecting
+`LifecycleMode=OnDemand` on process-bound workloads, AB#4916 §5); Hibernated-aware
+observability (suppressing offline error audits, Studio badges, metrics) is AB#4919; the
+`octo-eda-adapter` chart still needs the `terminationGracePeriodSeconds` fix that
+`octo-mesh-adapter` got.
+
+Repository surface: `SetWorkloadLifecycleStateAsync` / `SetWorkloadLastActivityAsync`
+(polymorphic load-then-update over Adapter/Application — an `EntityUpdateInfo` needs the
+concrete CK type).
+
+Tests: `Services/WorkloadLifecycleServiceTests/*`, `Services/LifecycleConfigurationServiceTests`,
+`Hubs/OperatorHubTests/ReportWorkloadScaleStatusAsyncTests`, the scale section in
+`Hubs/OperatorConnectionManagerTests`, `BackgroundServices/WorkloadLifecycleWatchdogTests`,
+plus gate assertions in the AdapterService / TriggerManagementService test folders.
+
 ## Project Structure Notes
 
 - Main service: `src/CommunicationControllerServices/`

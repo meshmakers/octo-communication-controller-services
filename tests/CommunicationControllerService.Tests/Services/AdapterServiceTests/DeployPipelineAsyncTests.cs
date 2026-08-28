@@ -49,6 +49,38 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
             .And.Member(e => e.Message, msg => msg.Contains("Adapter").And.Contains("no live SignalR connection"));
     }
 
+    /// <summary>
+    /// AB#4918 wake gate: DeployPipelineAsync must invoke the workload wake gate with the
+    /// adapter's rtId before anything else (it runs even before the cache lookup, so a
+    /// hibernated OnDemand adapter is woken and registered instead of AdapterNotLoaded).
+    /// </summary>
+    [Test]
+    public async Task DeployPipelineAsync_InvokesWakeGateWithAdapterRtId()
+    {
+        // Arrange - minimal scenario: the pipeline lookup fails after the gate has run.
+        var rtAdapter = RtEntityCreator.CreateAdapter();
+        var rtPipeline = RtEntityCreator.CreatePipeline();
+
+        AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
+            rtAdapter.ToRtEntityId(),
+            null,
+            []
+        ));
+
+        CommunicationRepository.GetPipelineAsync(TenantId, rtPipeline.ToRtEntityId())
+            .Returns((RtPipeline?)null);
+
+        // Act
+        await Assert.That(async () =>
+                await AdapterService.DeployPipelineAsync(TenantId, rtAdapter.ToRtEntityId(),
+                    rtPipeline.ToRtEntityId()))
+            .Throws<AdapterServiceException>();
+
+        // Assert - the gate ran first, keyed by the adapter rtId
+        await WorkloadLifecycleService.Received(1).EnsureWorkloadRunningAsync(TenantId,
+            Arg.Is<OctoObjectId>(id => id.ToString() == rtAdapter.RtId.ToString()));
+    }
+
     [Test]
     public async Task DeployPipelineAsync_PipelineNotFound_ThrowsException()
     {

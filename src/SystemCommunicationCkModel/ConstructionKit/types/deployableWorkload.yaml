@@ -24,6 +24,15 @@ types:
     - id: ${this}/Hostname
       name: Hostname
       isOptional: true
+    - id: ${this}/LifecycleMode
+      name: LifecycleMode
+    - id: ${this}/IdleTimeoutMinutes
+      name: IdleTimeoutMinutes
+    - id: ${this}/LifecycleState
+      name: LifecycleState
+    - id: ${this}/LastActivityAt
+      name: LastActivityAt
+      isOptional: true
   associations:
     # Dedicated association role for the workload-to-Helm-repo link.
     # Reusing the generic "Uses" role would override the inverse usedBy view
