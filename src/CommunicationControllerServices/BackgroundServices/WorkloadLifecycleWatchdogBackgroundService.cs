@@ -106,6 +106,11 @@ internal class WorkloadLifecycleWatchdogBackgroundService(
 
             try
             {
+                // Republish the hibernation gauge from the persisted state before judging the
+                // workload (AB#4919). The in-memory gauge map is lost on a controller restart, so
+                // without this a restarted pod would report every workload as running until it
+                // happened to hibernate again.
+                WorkloadLifecycleMetrics.ObserveState(tenantId, workload);
                 await SweepWorkloadAsync(tenantId, workload);
             }
             catch (Exception ex)

@@ -1262,6 +1262,40 @@ changes is only how loudly it is reported. Tests:
 `Services/AdapterServiceTests/HibernationAuditSuppressionTests`, the two hibernation cases in
 `Services/PipelineExecutionServiceTests/MarkInterruptedTests`.
 
+### Lifecycle metrics (AB#4919)
+
+`WorkloadLifecycleMetrics` (static, mirroring `MongoCommandObservability` in the MongoDB
+engine) emits four instruments on the meter **`Meshmakers.Octo.Communication`**, which
+octo-common-services' `ObservabilityBuilder` registers with the OpenTelemetry MeterProvider —
+without that registration the measurements are recorded and dropped.
+
+| Instrument | Kind | Purpose |
+|---|---|---|
+| `octo.workload.wake.count` | counter | Wakes, tagged `octo.wake.outcome` = `configured` / `timeout` |
+| `octo.workload.wake.duration` | histogram (s) | Scale-up request → `ConfigurationState=Configured`; the latency a request pays for a wake |
+| `octo.workload.hibernation.count` | counter | Completed hibernations (operator acked scale-0) |
+| `octo.workload.hibernated` | observable gauge | 1 while hibernated or draining, 0 while running — averaged over time this is the hibernation ratio |
+
+Tags on every instrument: `octo.tenant.id`, `octo.workload.rt_id`, `octo.workload.name`.
+Cardinality is bounded by the number of workloads (dozens per cluster).
+
+Three decisions worth keeping:
+
+- **The wake is timed by the caller that started it**, in the `Hibernated`/`Draining` branch of
+  `EnsureWorkloadRunningAsync` — not inside `WaitForConfiguredAsync`, which is also entered by
+  callers joining an in-flight wake. Timing there would count one wake per waiter and inflate
+  both the count and the percentiles.
+- **A timed-out wake is counted but never recorded as a duration.** The budget is a cut-off,
+  not an observation; mixing it in pulls every percentile towards the timeout.
+- **The gauge map is in-memory and republished by the idle watchdog** from each swept
+  workload's persisted state (`ObserveState`), so a controller restart heals within one sweep
+  instead of reporting every workload as running forever. `UndeployWorkloadAsync` calls
+  `Forget` — an undeployed workload left in the map would keep publishing its last value.
+
+Tests: `Services/WorkloadLifecycleMetricsTests` (through a real `MeterListener`, so the
+assertions are about the names and tags the exporter actually publishes; each test uses a
+unique tenant because the instruments are process-wide and the suite runs concurrently).
+
 ### HTTP Activator — wake on request (AB#4923)
 
 Routes and authorization live inside the adapter (`HttpRequestService` /
@@ -1324,8 +1358,8 @@ Tests: `Services/WorkloadHostnameIndexTests`.
 triggers never idle and silently stop at 0 replicas — such pipelines must move to cron
 `PipelineTrigger`s before their workload goes OnDemand (AB#4922 precondition); the
 OnDemandCapable trigger-classification validation is not yet implemented (rejecting
-`LifecycleMode=OnDemand` on process-bound workloads, AB#4916 §5); the Studio badges and the
-wake/hibernation metrics of AB#4919 are still open; the
+`LifecycleMode=OnDemand` on process-bound workloads, AB#4916 §5); the Studio badges of AB#4919
+are still open, as is its Dash0 alerting review; the
 `octo-eda-adapter` chart still needs the `terminationGracePeriodSeconds` fix that
 `octo-mesh-adapter` got.
 

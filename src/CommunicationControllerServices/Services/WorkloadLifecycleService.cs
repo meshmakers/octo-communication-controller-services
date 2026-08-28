@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
@@ -118,7 +119,13 @@ internal class WorkloadLifecycleService(
                 await communicationEventService.StoreInformationEventAsync(tenantId,
                     $"Waking workload '{workload.Name}' (demand signal). (source: Lifecycle)");
                 await RequestScaleAsync(tenantId, workload, 1);
+                // Timed here rather than inside the wait: this is the caller that actually paid for
+                // the wake. Callers joining an in-flight wake (the Waking branch below) would
+                // otherwise each record one, inflating both the count and the percentiles.
+                var startedAt = Stopwatch.GetTimestamp();
                 await WaitForConfiguredAsync(tenantId, workload);
+                WorkloadLifecycleMetrics.RecordWakeSucceeded(tenantId, workload.RtId, workload.Name,
+                    Stopwatch.GetElapsedTime(startedAt));
                 return;
 
             case RtLifecycleStateEnum.Waking:
@@ -202,6 +209,7 @@ internal class WorkloadLifecycleService(
                 workload.RtId, tenantId);
         }
 
+        WorkloadLifecycleMetrics.RecordWakeTimedOut(tenantId, workload.RtId, workload.Name);
         throw WorkloadLifecycleServiceException.WakeTimedOut(tenantId, workload.RtId, workload.Name, budget);
     }
 
@@ -263,6 +271,7 @@ internal class WorkloadLifecycleService(
                             RtLifecycleStateEnum.Hibernated, "Hibernated (scaled to 0 after idle timeout).");
                         await communicationEventService.StoreInformationEventAsync(status.TenantId,
                             $"Workload '{status.WorkloadName}' hibernated (scaled to 0 replicas). (source: Lifecycle)");
+                        WorkloadLifecycleMetrics.RecordHibernated(status.TenantId, workloadRtId, workload.Name);
                     }
                     else
                     {

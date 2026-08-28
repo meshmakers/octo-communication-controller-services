@@ -480,6 +480,11 @@ internal class PoolService : IPoolService
             : RtDeploymentStateEnum.Disabled;
         await SetWorkloadDeploymentStateAsync(tenantId, workload, restingState);
 
+        // AB#4919: an undeployed workload has no lifecycle state to report. Left in the gauge it
+        // would keep publishing its last value forever, showing a permanently hibernated workload
+        // that no longer exists.
+        WorkloadLifecycleMetrics.Forget(tenantId, workload.RtId);
+
         await _eventService.StoreInformationEventAsync(tenantId,
             $"Workload '{workload.Name}' undeploy requested (resting state: {restingState}).");
     }
