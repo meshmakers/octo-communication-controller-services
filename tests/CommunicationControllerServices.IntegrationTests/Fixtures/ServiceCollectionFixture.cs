@@ -83,6 +83,12 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         Services.AddSingleton(Substitute.For<IRoutedCommandClient<ExecutePipelineRequest>>());
         Services.AddSingleton(Substitute.For<IDistributionEventHubService>());
 
+        // AB#4918: AdapterService and TriggerManagementService take the on-demand lifecycle
+        // service (wake gates / Configured hook). The integration tests exercise repository and
+        // config flows, not the lifecycle state machine — a substitute keeps every gate a no-op
+        // (same pattern as the command clients above).
+        Services.AddSingleton(Substitute.For<IWorkloadLifecycleService>());
+
         // Add mock SignalR hub contexts (required by hub callbacks). PoolHub
         // is gone — its responsibilities collapsed into OperatorHub.
         Services.AddSingleton(Substitute.For<IHubContext<AdapterHub>>());
