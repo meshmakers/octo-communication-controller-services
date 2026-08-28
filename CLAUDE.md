@@ -956,6 +956,24 @@ fail the registration. Re-dispatching a genuinely in-flight deploy is safe: the 
 is serial and `helm upgrade --install` is idempotent. Tests:
 `Services/PoolServiceTests/ReconcilePendingWorkloadsAsyncTests`.
 
+**A reconcile is not a release decision (AB#4955).** The re-dispatch above fires on events that
+have nothing to do with releasing software — an operator restart, a blueprint re-apply, a CK-model
+update, `EnableCommunication` — because all of them re-register the tenant's pools via
+`PreUpdateTenantAsync`. A workload with an empty `ChartVersion` means "newest in the repository",
+resolved by the operator at `helm upgrade` time, so those events silently moved six prod-1
+accounting workloads from chart 1.0.71 to 1.0.72 with nobody deploying them. Two things close it:
+
+- `DeployWorkloadAsync(tenantId, workloadRtId, isReconciliation)` puts
+  `WorkloadDeployedDto.IsReconciliation` on the wire; only `ReconcilePendingWorkloadsAsync` passes
+  `true`. The operator then keeps the chart version it already has installed instead of resolving
+  the newest one again (see the operator's CLAUDE.md → "Reconciliation Keeps the Installed Chart
+  Version"). A user-triggered Deploy stays `false`, so an empty `ChartVersion` keeps meaning
+  "newest" — the contract `System.Communication.MainLatest` depends on.
+- The re-dispatch of an **unpinned** workload additionally writes a Warning event. The flag is
+  additive, so an operator that pre-dates it still resolves anew; the warning is what makes that
+  visible until the whole fleet is current. A pinned workload gets an Information event instead —
+  it comes back on exactly the version it was running.
+
 ### Operator Reverse-Sync
 
 Closes the restart-survival gap on the controller-side in-memory tracking

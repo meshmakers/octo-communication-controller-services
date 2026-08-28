@@ -62,7 +62,15 @@ public interface IPoolService
     /// on the operator hub. Independent of <see cref="DeployPoolAsync"/>:
     /// the pool must already be deployed, but no fan-out happens here.
     /// </summary>
-    Task DeployWorkloadAsync(string tenantId, OctoObjectId workloadRtId);
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="workloadRtId">The object id of the workload</param>
+    /// <param name="isReconciliation">
+    /// Set only by <see cref="ReconcilePendingWorkloadsAsync"/>: this dispatch restores what was
+    /// already supposed to be running instead of acting on a release decision. It reaches the
+    /// operator on the deploy DTO and keeps a workload with an empty ChartVersion on the chart it
+    /// already has installed, rather than resolving "newest in the repository" again (AB#4955).
+    /// </param>
+    Task DeployWorkloadAsync(string tenantId, OctoObjectId workloadRtId, bool isReconciliation = false);
 
     /// <summary>
     /// Undeploys a single workload (Adapter or Application).

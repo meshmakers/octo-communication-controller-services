@@ -178,4 +178,30 @@ internal class ReconcilePendingWorkloadsAsyncTests : PoolServiceTestsBase
             Arg.Is<string>(m => m.Contains("still Pending when its pool re-registered")),
             Arg.Any<RtEntityId?>());
     }
+
+    [Test]
+    public async Task Redispatch_MarksTheDeployAsAReconciliation()
+    {
+        // AB#4955: the flag is what lets the operator tell "restore what was running" apart from
+        // "give me the newest chart", which is the whole reason an unpinned workload could drift.
+        GivenPoolWithAdapterInState(RtDeploymentStateEnum.Pending);
+
+        await PoolService.ReconcilePendingWorkloadsAsync(TenantId, PoolRtId);
+
+        await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
+            Arg.Is<WorkloadDeployedDto>(w => w.IsReconciliation));
+    }
+
+    [Test]
+    public async Task UserTriggeredDeploy_IsNotMarkedAsAReconciliation()
+    {
+        // The counterpart: an explicit Deploy is a release decision, so an empty ChartVersion
+        // must keep meaning "newest in the repository".
+        var adapter = GivenPoolWithAdapterInState(RtDeploymentStateEnum.Deployed);
+
+        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+
+        await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
+            Arg.Is<WorkloadDeployedDto>(w => !w.IsReconciliation));
+    }
 }
