@@ -145,3 +145,29 @@ Still to measure: first-execution latency on a large tenant CK model with/withou
 ## 8. Out of scope / follow-ups
 
 HTTP activator (AB#4923, two-tier: app wake-interceptor first), shared multi-tenant runtime for platform-owned adapters (AB#4924 evaluation), KEDA integration (deliberately not in the core path — per-pipeline queue names churn, interactive path invisible to KEDA, edge clusters would need KEDA installs).
+
+## 9. As built (addendum, 2026-08-29)
+
+The design above was implemented essentially as written (AB#4916–AB#4920, AB#4923). Where reality
+moved past the text:
+
+- **Cold start (AB#4920):** eager CK-model warm-up landed (triggered from `StartupAsync`, after the
+  configuration applied — a hosted service started too early to see the Mongo settings). Measured
+  effect on test/0.2-dev: wake 19 s → **7.8 s**, adapter boot 13 s → **4.2 s**, warm-up itself
+  ~1.5 s. The 60 s wake budget stands and is generous.
+- **§2 readiness held a hidden defect (AB#4968):** the adapter raised `Configured` *before* its
+  HTTP routes were registered — and a startup race could leave a pod permanently serving 404 while
+  every state signal read healthy. Fixed in the SDK (configuration-update lock taken before the
+  register invoke; registry lock and trigger stops bounded). With that fix, the §2 claim
+  ("waiting for Configured is race-free on every wake") actually holds.
+- **HTTP activator (AB#4923)** moved from follow-up into the shipped feature set: controller
+  middleware behind the nginx `default-backend` annotation, request held through the wake,
+  bodies ≤ 32 MB buffered and replayed across the forward retries. Off by default.
+- **Dash0 alert (§3.4):** the designed `Offline && LifecycleState=Running` join was not buildable
+  from existing series — the controller now publishes the answer itself as the
+  `octo.workload.offline_unexpected` event; alerting keys on that.
+- **Fleet stabilisation findings** are collected in AB#4967 (resolved) / AB#4982 (finAPI image is
+  amd64-only and the repo has no 0.2 chart lane).
+
+The authoritative behavioural spec remains the octo-communication-controller-services and
+octo-communication-operator `CLAUDE.md` sections; this document is the design record.
