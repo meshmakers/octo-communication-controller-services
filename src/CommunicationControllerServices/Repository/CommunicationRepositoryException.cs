@@ -103,6 +103,13 @@ internal class CommunicationRepositoryException : Exception
             $"[{tenantId}] Failed to set last activity of workload '{workloadRtId}'", exception);
     }
 
+    internal static Exception CommonFailedSetWorkloadOnDemandCapability(string tenantId, OctoObjectId workloadRtId,
+        Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to set on-demand capability of workload '{workloadRtId}'", exception);
+    }
+
     internal static Exception CommonFailedCreatePool(string tenantId, string poolName, Exception exception)
     {
         return new CommunicationRepositoryException($"[{tenantId}] Failed to create pool '{poolName}'", exception);

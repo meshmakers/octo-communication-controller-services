@@ -144,6 +144,16 @@ internal class CommunicationRepository : ICommunicationRepository
             e => CommunicationRepositoryException.CommonFailedSetWorkloadLastActivity(tenantId, workloadRtId, e));
     }
 
+    /// <inheritdoc />
+    public async Task SetWorkloadOnDemandCapabilityAsync(string tenantId, OctoObjectId workloadRtId,
+        bool onDemandCapable, string? blockingReasons)
+    {
+        await UpdateWorkloadPolymorphicAsync(tenantId, workloadRtId,
+            () => new RtAdapter { OnDemandCapable = onDemandCapable, OnDemandBlockingReasons = blockingReasons },
+            () => new RtApplication { OnDemandCapable = onDemandCapable, OnDemandBlockingReasons = blockingReasons },
+            e => CommunicationRepositoryException.CommonFailedSetWorkloadOnDemandCapability(tenantId, workloadRtId, e));
+    }
+
     /// <summary>
     /// Shared load-then-update helper for the AB#4914 lifecycle writers.
     /// <c>RtDeployableWorkload</c> is abstract, and an <c>EntityUpdateInfo</c>

@@ -23,7 +23,8 @@ internal class AdapterService(
     IPipelineDefinitionService pipelineDefinitionService,
     IAdapterConnectionTracker connectionTracker,
     IOptions<CommunicationControllerOptions> communicationControllerOptions,
-    IWorkloadLifecycleService workloadLifecycleService)
+    IWorkloadLifecycleService workloadLifecycleService,
+    IWorkloadOnDemandCapabilityService onDemandCapabilityService)
     : IAdapterService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
@@ -167,6 +168,11 @@ internal class AdapterService(
             // (every FromHttpRequest endpoint 404s) while the controller still believes the
             // pipelines are Deployed, and nothing re-drives the config onto the new connection.
             await ReconcileAdapterConfigurationAsync(tenantId, adapterRtEntityId, adapter.Configuration);
+
+            // AB#4984: registration is the first moment the descriptors (incl.
+            // RequiresRunningProcess) are known — persist the computed on-demand
+            // capability for the Studio. Best-effort, never fails the registration.
+            await onDemandCapabilityService.RefreshWorkloadCapabilityAsync(tenantId, adapterRtEntityId);
 
             return adapter.Configuration;
         }
@@ -595,6 +601,12 @@ internal class AdapterService(
                     throw AdapterServiceException.DataFlowNotFound(tenantId, pipelineRtEntityId);
                 }
 
+                // AB#4984: deploying a process-bound-trigger pipeline to an OnDemand workload
+                // is rejected — hibernation would silently stop the trigger (explicit beats silent).
+                var workload = await communicationRepository.GetWorkloadByRtIdAsync(tenantId, adapterRtEntityId.RtId);
+                EnsurePipelineIsOnDemandCompatible(tenantId, workload, adapter.NodeDescriptors,
+                    pipelineRtEntityId, pipelineDefinition ?? pipeline.PipelineDefinition);
+
                 // Persist the pipeline definition to the RT entity so it is visible in the UI
                 if (pipelineDefinition != null)
                 {
@@ -658,6 +670,9 @@ internal class AdapterService(
                     // sees the correct pipelines for deployment state updates
                     adapter.UpdateConfiguration(tenantId, adapterConfiguration);
                 }
+
+                // AB#4984: the deployed pipeline set changed — refresh the persisted capability
+                await onDemandCapabilityService.RefreshWorkloadCapabilityAsync(tenantId, adapterRtEntityId);
 
                 return;
             }
@@ -727,6 +742,10 @@ internal class AdapterService(
                         }
                     }
 
+                    // AB#4984: reject process-bound-trigger pipelines on OnDemand workloads
+                    EnsurePipelineIsOnDemandCompatible(tenantId, rtAdapter, adapter.NodeDescriptors,
+                        rtDeployPipeline.ToRtEntityId(), rtDeployPipeline.PipelineDefinition);
+
                     adapterConfig.Pipelines.Add(
                         await CreatePipelineConfigurationAsync(tenantId, dataFlowRtId, rtDeployPipeline));
 
@@ -741,10 +760,37 @@ internal class AdapterService(
 
             await UpdateAdapterConfigurationAsync(tenantId, adapterConfigurations.Values.ToList());
 
+            // AB#4984: the deployed pipeline sets changed — refresh the persisted capability
+            foreach (var configuredAdapterRtEntityId in adapterConfigurations.Keys)
+            {
+                await onDemandCapabilityService.RefreshWorkloadCapabilityAsync(tenantId, configuredAdapterRtEntityId);
+            }
+
             return;
         }
 
         throw AdapterServiceException.TenantNotEnabled(tenantId);
+    }
+
+    /// <summary>
+    /// AB#4984: rejects deploying a pipeline whose triggers are process-bound (would silently
+    /// stop at 0 replicas) to a workload with LifecycleMode=OnDemand. No-op for AlwaysOn
+    /// workloads or when the workload entity cannot be resolved.
+    /// </summary>
+    private void EnsurePipelineIsOnDemandCompatible(string tenantId, RtDeployableWorkload? workload,
+        IReadOnlyList<NodeDescriptorDto>? nodeDescriptors, RtEntityId pipelineRtEntityId, string? pipelineDefinition)
+    {
+        if (workload is not { LifecycleMode: RtLifecycleModeEnum.OnDemand })
+        {
+            return;
+        }
+
+        var processBoundNodes = onDemandCapabilityService.GetProcessBoundNodes(pipelineDefinition, nodeDescriptors);
+        if (processBoundNodes.Count > 0)
+        {
+            throw AdapterServiceException.PipelineNotOnDemandCompatible(tenantId, pipelineRtEntityId,
+                workload.Name, processBoundNodes);
+        }
     }
 
     public async Task<bool> SetPipelineDebuggingAsync(string tenantId, RtEntityId pipelineRtEntityId, bool isEnabled)
@@ -846,6 +892,12 @@ internal class AdapterService(
             }
 
             await UpdateAdapterConfigurationAsync(tenantId, adapterConfigurations.Values.ToList());
+
+            // AB#4984: the deployed pipeline sets changed — refresh the persisted capability
+            foreach (var configuredAdapterRtEntityId in adapterConfigurations.Keys)
+            {
+                await onDemandCapabilityService.RefreshWorkloadCapabilityAsync(tenantId, configuredAdapterRtEntityId);
+            }
 
             return;
         }

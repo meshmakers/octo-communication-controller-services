@@ -33,6 +33,11 @@ types:
     - id: ${this}/LastActivityAt
       name: LastActivityAt
       isOptional: true
+    - id: ${this}/OnDemandCapable
+      name: OnDemandCapable
+    - id: ${this}/OnDemandBlockingReasons
+      name: OnDemandBlockingReasons
+      isOptional: true
   associations:
     # Dedicated association role for the workload-to-Helm-repo link.
     # Reusing the generic "Uses" role would override the inverse usedBy view

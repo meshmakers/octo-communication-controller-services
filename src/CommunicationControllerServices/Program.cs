@@ -81,6 +81,7 @@ try
     builder.Services.AddSingleton<IShutdownState, HostApplicationShutdownState>();
     builder.Services.AddSingleton<ILifecycleConfigurationService, LifecycleConfigurationService>();
     builder.Services.AddSingleton<IWorkloadLifecycleService, WorkloadLifecycleService>();
+    builder.Services.AddSingleton<IWorkloadOnDemandCapabilityService, WorkloadOnDemandCapabilityService>();
     builder.Services.AddSingleton<IWorkloadHostnameIndex, WorkloadHostnameIndex>();
     builder.Services.AddSingleton<IAdapterConnectionTracker, AdapterConnectionTracker>();
     builder.Services.AddSingleton<IPipelineSchemaValidator, PipelineSchemaValidator>();

@@ -28,6 +28,9 @@ internal abstract class AdapterServiceTestsBase
     // liveness tracking and the reconciliation tests can observe HasLiveConnection end-to-end.
     protected readonly AdapterConnectionTracker AdapterConnectionTracker;
     protected readonly IWorkloadLifecycleService WorkloadLifecycleService = Substitute.For<IWorkloadLifecycleService>();
+    // Real capability service (AB#4984) on top of the substituted repository/cache so the
+    // OnDemand deploy gates run the real trigger classification against real YAML.
+    protected readonly IWorkloadOnDemandCapabilityService OnDemandCapabilityService;
     protected readonly AdapterTenant AdapterTenant;
 
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
@@ -44,9 +47,11 @@ internal abstract class AdapterServiceTestsBase
         var options = Substitute.For<IOptions<CommunicationControllerOptions>>();
         options.Value.Returns(new CommunicationControllerOptions());
         AdapterConnectionTracker = new AdapterConnectionTracker();
+        OnDemandCapabilityService = new WorkloadOnDemandCapabilityService(CommunicationRepository,
+            AdapterCache, PipelineDefinitionService);
         AdapterService = new AdapterService(CommunicationRepository, AdapterCache, AdapterHubCallbacks,
             CommunicationEventService, PipelineSchemaValidator, PipelineDefinitionService,
-            AdapterConnectionTracker, options, WorkloadLifecycleService);
+            AdapterConnectionTracker, options, WorkloadLifecycleService, OnDemandCapabilityService);
         AdapterTenant = new AdapterTenant(AdapterCachePublish, TenantId);
 
         InitAdapterCache();

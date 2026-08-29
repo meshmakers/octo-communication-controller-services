@@ -30,16 +30,24 @@ internal class WorkloadLifecycleWatchdogTests
         Substitute.For<IWorkloadLifecycleService>();
     private readonly ICommunicationEventService _eventService =
         Substitute.For<ICommunicationEventService>();
+    private readonly IWorkloadOnDemandCapabilityService _onDemandCapabilityService =
+        Substitute.For<IWorkloadOnDemandCapabilityService>();
     private readonly WorkloadLifecycleWatchdogBackgroundService _service;
 
     public WorkloadLifecycleWatchdogTests()
     {
+        // Default: capable (AB#4984). The capability-guard test overrides this.
+        _onDemandCapabilityService
+            .EvaluateAsync(Arg.Any<string>(), Arg.Any<RtEntityId>())
+            .Returns(new OnDemandCapabilityResult(true, []));
+
         _service = new WorkloadLifecycleWatchdogBackgroundService(
             Substitute.For<IAdapterCache>(),
             _repository,
             _lifecycleConfiguration,
             _workloadLifecycleService,
             _eventService,
+            _onDemandCapabilityService,
             Microsoft.Extensions.Options.Options.Create(new CommunicationControllerOptions()));
     }
 
@@ -127,6 +135,31 @@ internal class WorkloadLifecycleWatchdogTests
         await _eventService.Received(1).StoreInformationEventAsync(
             TenantId, Arg.Is<string>(m => m.Contains("idle")), Arg.Any<RtEntityId?>());
         await _workloadLifecycleService.Received(1).RequestScaleAsync(TenantId, adapter, 0);
+    }
+
+    [Test]
+    public async Task IdleAdapterNotOnDemandCapable_IsNotDrained_StoresWarning()
+    {
+        // AB#4984 defense-in-depth: LifecycleMode can be set to OnDemand via GraphQL or a
+        // blueprint without passing the PoolService deploy gate. The watchdog must never
+        // hibernate a workload whose pipelines use process-bound triggers.
+        var adapter = CreateOnDemandAdapter(lastActivityAt: DateTime.UtcNow.AddHours(-2));
+        GivenWorkloads(adapter);
+        GivenNoRunningExecutionsAndNoPipelines();
+        _onDemandCapabilityService.EvaluateAsync(TenantId, Arg.Any<RtEntityId>())
+            .Returns(new OnDemandCapabilityResult(false,
+                ["Pipeline 'sync' uses process-bound trigger 'FromPolling@1'"]));
+
+        await _service.SweepTenantAsync(TenantId);
+
+        using var _ = Assert.Multiple();
+        await _repository.DidNotReceiveWithAnyArgs().SetWorkloadLifecycleStateAsync(
+            Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<RtLifecycleStateEnum>(), Arg.Any<string?>());
+        await _workloadLifecycleService.DidNotReceiveWithAnyArgs().RequestScaleAsync(
+            Arg.Any<string>(), Arg.Any<RtDeployableWorkload>(), Arg.Any<int>());
+        await _eventService.Received(1).StoreWarningEventAsync(
+            TenantId, Arg.Is<string>(m => m.Contains("FromPolling@1") && m.Contains("NOT be")),
+            Arg.Any<RtEntityId?>());
     }
 
     [Test]

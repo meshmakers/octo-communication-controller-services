@@ -19,6 +19,7 @@ internal class PoolService : IPoolService
     private readonly IOperatorConnectionManager _operatorConnectionManager;
     private readonly IWorkloadEncryptionService _encryptionService;
     private readonly IWorkloadTemplateResolver _templateResolver;
+    private readonly IWorkloadOnDemandCapabilityService _onDemandCapabilityService;
 
     /// <summary>
     /// Constructor
@@ -29,11 +30,13 @@ internal class PoolService : IPoolService
     /// <param name="operatorConnectionManager">Manages SignalR connections to central Communication Operators (for Cloud-pool deploy/undeploy notifications and PreUpdateTenant fan-out)</param>
     /// <param name="encryptionService">Decrypts secret-flagged ValueOverride values before they go on the SignalR wire</param>
     /// <param name="templateResolver">Resolves <c>{{domain.NAME}}</c>, <c>{{service.NAME}}</c> and <c>{{context.tenantId}}</c> placeholders in workload <c>Hostname</c>, non-secret <c>ValueOverride.Value</c> and <c>ValuesYaml</c> at deploy time</param>
+    /// <param name="onDemandCapabilityService">Validates LifecycleMode=OnDemand against the workload's trigger classification at deploy time (AB#4984)</param>
     public PoolService(ICommunicationRepository communicationRepository, IPoolCache poolCache,
         ICommunicationEventService eventService,
         IOperatorConnectionManager operatorConnectionManager,
         IWorkloadEncryptionService encryptionService,
-        IWorkloadTemplateResolver templateResolver)
+        IWorkloadTemplateResolver templateResolver,
+        IWorkloadOnDemandCapabilityService onDemandCapabilityService)
     {
         _communicationRepository = communicationRepository;
         _poolCache = poolCache;
@@ -41,6 +44,7 @@ internal class PoolService : IPoolService
         _operatorConnectionManager = operatorConnectionManager;
         _encryptionService = encryptionService;
         _templateResolver = templateResolver;
+        _onDemandCapabilityService = onDemandCapabilityService;
     }
     
     /// <inheritdoc />
@@ -450,6 +454,31 @@ internal class PoolService : IPoolService
         {
             throw PoolServiceException.WorkloadTemplateUnknownPlaceholder(
                 tenantId, workload.RtId, workload.Name, "ValuesYaml", workload.ValuesYaml, unknownInYaml!);
+        }
+
+        // AB#4984 lifecycle-mode validation. LifecycleMode is plain CK author configuration
+        // (writable via GraphQL/blueprints without any service-layer hook), so the deploy is
+        // the enforcement net: fail fast with an actionable error instead of deploying a
+        // workload whose triggers would silently stop when the watchdog hibernates it.
+        if (workload.LifecycleMode == RtLifecycleModeEnum.Auto)
+        {
+            throw PoolServiceException.WorkloadLifecycleModeAutoNotImplemented(tenantId, workload.RtId, workload.Name);
+        }
+
+        if (workload.LifecycleMode == RtLifecycleModeEnum.OnDemand)
+        {
+            if (workload is not RtAdapter)
+            {
+                throw PoolServiceException.WorkloadOnDemandNotSupportedForType(tenantId, workload.RtId, workload.Name);
+            }
+
+            var capability = await _onDemandCapabilityService.EvaluateAsync(tenantId,
+                new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, workload.RtId));
+            if (!capability.IsCapable)
+            {
+                throw PoolServiceException.WorkloadNotOnDemandCapable(tenantId, workload.RtId, workload.Name,
+                    capability.BlockingReasons);
+            }
         }
     }
 

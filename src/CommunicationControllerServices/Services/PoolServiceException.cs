@@ -127,5 +127,32 @@ internal class PoolServiceException : Exception
             $"[{tenantId}] Workload '{workloadName ?? workloadRtId.ToString()}' is '{currentState}' — there is nothing to undeploy. " +
             "Undeploy is only valid when the workload is Deployed, Pending, or in Error.");
     }
+
+    internal static Exception WorkloadLifecycleModeAutoNotImplemented(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': LifecycleMode 'Auto' " +
+            "is reserved and not implemented yet (AB#4984). Set the workload to AlwaysOn or OnDemand in the Refinery Studio.");
+    }
+
+    internal static Exception WorkloadOnDemandNotSupportedForType(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': LifecycleMode 'OnDemand' " +
+            "is currently supported for adapter workloads only — the idle watchdog and wake gates do not manage " +
+            "Application workloads (AB#4984). Set the workload to AlwaysOn in the Refinery Studio.");
+    }
+
+    internal static Exception WorkloadNotOnDemandCapable(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName, IReadOnlyList<string> blockingReasons)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}' with LifecycleMode 'OnDemand': " +
+            $"{string.Join("; ", blockingReasons)}. Process-bound triggers stop silently while the workload is hibernated " +
+            "(AB#4984). Either set the workload back to AlwaysOn or migrate the pipelines to wake-capable triggers " +
+            "(cron PipelineTrigger, FromHttpRequest, FromPipelineDataEvent).");
+    }
 }
 

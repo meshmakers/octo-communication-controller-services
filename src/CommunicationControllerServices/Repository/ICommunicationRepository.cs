@@ -58,6 +58,15 @@ public interface ICommunicationRepository
     Task SetWorkloadLastActivityAsync(string tenantId, OctoObjectId workloadRtId, DateTime lastActivityAtUtc);
 
     /// <summary>
+    /// Writes the workload's computed <c>OnDemandCapable</c> flag and
+    /// <c>OnDemandBlockingReasons</c> (AB#4984) — display aid for the Studio
+    /// next to the LifecycleMode setting. Polymorphic over Adapter /
+    /// Application. Throws when the workload does not exist.
+    /// </summary>
+    Task SetWorkloadOnDemandCapabilityAsync(string tenantId, OctoObjectId workloadRtId, bool onDemandCapable,
+        string? blockingReasons);
+
+    /// <summary>
     /// Walks the <c>Manages</c> association from a workload back to its
     /// parent <c>RtPool</c>. Returns <c>null</c> when the workload is not
     /// currently in any pool.

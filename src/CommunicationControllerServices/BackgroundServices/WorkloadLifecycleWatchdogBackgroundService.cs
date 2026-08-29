@@ -35,6 +35,7 @@ internal class WorkloadLifecycleWatchdogBackgroundService(
     ILifecycleConfigurationService lifecycleConfiguration,
     IWorkloadLifecycleService workloadLifecycleService,
     ICommunicationEventService eventService,
+    IWorkloadOnDemandCapabilityService onDemandCapabilityService,
     IOptions<CommunicationControllerOptions> options)
     : BackgroundService
 {
@@ -169,6 +170,23 @@ internal class WorkloadLifecycleWatchdogBackgroundService(
         // began — exactly the fleet of long-idle adapters this feature targets.
         if (lastActivity.HasValue && DateTime.UtcNow - lastActivity.Value < idleTimeout)
         {
+            return;
+        }
+
+        // AB#4984 defense-in-depth: LifecycleMode is plain CK author configuration and can be
+        // set to OnDemand via GraphQL/blueprint without ever passing the PoolService deploy
+        // gate. Never hibernate a workload whose pipelines use process-bound triggers — that
+        // would silently stop them. Surface the misconfiguration as a warning event instead.
+        var capability = await onDemandCapabilityService.EvaluateAsync(tenantId, adapterRtEntityId);
+        if (!capability.IsCapable)
+        {
+            Logger.Warn(
+                "Workload '{WorkloadName}' (tenant '{TenantId}') is OnDemand but not on-demand capable; skipping hibernation: {Reasons}",
+                adapter.Name, tenantId, string.Join("; ", capability.BlockingReasons));
+            await eventService.StoreWarningEventAsync(tenantId,
+                $"Workload '{adapter.Name}' has LifecycleMode=OnDemand but is not on-demand capable and will NOT be " +
+                $"hibernated: {string.Join("; ", capability.BlockingReasons)}. Set it back to AlwaysOn or migrate the " +
+                "pipelines to wake-capable triggers (AB#4984).");
             return;
         }
 

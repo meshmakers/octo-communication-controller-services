@@ -107,4 +107,12 @@ internal class AdapterServiceException : Exception
     internal static AdapterServiceException PipelineSchemaValidationFailed(string tenantId,
         RtEntityId adapterRtEntityId, IReadOnlyList<string> errors) =>
         new($"[{tenantId}] Pipeline schema validation failed for adapter '{adapterRtEntityId}': {string.Join("; ", errors)}");
+
+    internal static AdapterServiceException PipelineNotOnDemandCompatible(string tenantId,
+        RtEntityId pipelineRtEntityId, string? workloadName, IReadOnlyList<string> processBoundNodes) =>
+        new($"[{tenantId}] Cannot deploy pipeline '{pipelineRtEntityId}' to workload '{workloadName}': " +
+            $"the workload has LifecycleMode=OnDemand, but the pipeline uses the process-bound trigger(s) " +
+            $"{string.Join(", ", processBoundNodes.Select(n => $"'{n}'"))} that would silently stop while the " +
+            "workload is hibernated (AB#4984). Either set the workload back to AlwaysOn or migrate the pipeline " +
+            "to a wake-capable trigger (cron PipelineTrigger, FromHttpRequest, FromPipelineDataEvent).");
 }

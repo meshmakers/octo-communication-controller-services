@@ -52,6 +52,16 @@ attributes:
   valueType: DateTime
   description: 'Timestamp of the last observed demand on the workload (pipeline execution, config push, or explicit wake; AB#4914). Input to the idle watchdog. Runtime-state: preserved across blueprint re-apply.'
   isRuntimeState: true
+- id: OnDemandCapable
+  valueType: Boolean
+  description: 'Whether the workload can safely run with LifecycleMode=OnDemand (AB#4984): true iff none of its deployed pipelines uses a process-bound trigger (e.g. FromPolling, FromWatchRtEntity) that would silently stop at 0 replicas. Computed by the Communication Controller from the registered node descriptors on adapter registration and pipeline deploy. Runtime-state: written exclusively by the controller, preserved across blueprint re-apply.'
+  defaultValues:
+    - false
+  isRuntimeState: true
+- id: OnDemandBlockingReasons
+  valueType: String
+  description: 'Human-readable reasons why the workload is not OnDemandCapable (AB#4984), e.g. "pipeline X uses process-bound trigger FromPolling@1". Empty when OnDemandCapable=true. Computed by the Communication Controller; shown in the Studio next to the LifecycleMode setting. Runtime-state: preserved across blueprint re-apply.'
+  isRuntimeState: true
 - id: Path
   valueType: String
   description: 'Dotted Helm values path for a ValueOverride entry (e.g. image.tag, service.port, oauth.clientId).'
