@@ -1358,14 +1358,29 @@ Request path:
    completes on `ConfigurationState=Configured` — the adapter has registered over SignalR —
    while the Service endpoint only appears once the readiness probe passes and kube-proxy picks
    it up; until then the connection is refused. Measured on test-2, under four seconds was not
-   enough and produced a 503 for a workload that was already running. **Only bodyless requests
-   are retried** — the request stream is consumed by the failed attempt and a truncated body
-   would be worse than a 503. Each attempt builds a **fresh** `HttpRequestMessage`; reusing one
-   throws `InvalidOperationException` ("the request message was already sent"), which is exactly
-   how the first live request failed.
+   enough and produced a 503 for a workload that was already running. Each attempt builds a
+   **fresh** `HttpRequestMessage`; reusing one throws `InvalidOperationException` ("the request
+   message was already sent"), which is exactly how the first live request failed.
+   **Bodies within `MaxBufferedBodyBytes` (32 MB) are buffered once and replayed per attempt**
+   (`ByteArrayContent` — a `StreamContent` over the request stream would be disposed with the
+   first message). Without that, a body meant exactly one attempt, and the first request after
+   hibernation is precisely the one that wakes the workload and lands in the endpoint gap:
+   browser uploads failed deterministically while bodyless probes sailed through (AB#4968 field
+   report). Oversized or chunked bodies keep the single attempt — silently forwarding a
+   truncated body would be worse than a 503.
+   A 503 response carrying the `X-Octo-Activator` marker is the **loop guard answering the
+   forwarded request** — the response-shaped twin of the refused connection, occurring where
+   the forward path re-enters through the ingress (a host-run controller cannot reach
+   ClusterIPs) — and gets the same retry treatment instead of being copied to the caller.
 5. Failure to wake, or a workload that stays unreachable, answers 503 with `Retry-After` set
-   to the wake budget. A forwarded request that comes back here is recognised by the
-   `X-Octo-Activator` header and answered 503 instead of forwarded again.
+   to the wake budget and the `X-Octo-Activator` marker. A forwarded request that comes back
+   here is recognised by that header and answered 503 instead of forwarded again.
+   **The 503 reflects the request's `Origin`** (plus `Vary: Origin`): the routes and their CORS
+   policy live inside the adapter — the thing that is unavailable — so nothing can make the
+   real policy call, and without a reflected origin the browser hides status and body entirely
+   and surfaces a bare network error ("0 Unknown Error"), which misdirected every diagnosis of
+   this path. An error-only response that names workload and tenant the caller addressed leaks
+   nothing.
 
 The middleware makes **no authorization decision** and rewrites nothing but the loop-guard
 header: the adapter must see what the client sent.

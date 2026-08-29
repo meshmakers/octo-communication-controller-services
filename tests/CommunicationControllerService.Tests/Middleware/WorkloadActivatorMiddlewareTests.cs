@@ -201,4 +201,138 @@ internal class WorkloadActivatorMiddlewareTests
         await Assert.That(nextCalled[0]).IsTrue();
         await _lifecycle.DidNotReceive().EnsureWorkloadRunningAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>());
     }
+
+    /// <summary>Captures the forwarded content per attempt so a replayed body can be asserted.</summary>
+    private sealed class BodyRecordingHandler(params Func<HttpResponseMessage>[] steps) : HttpMessageHandler
+    {
+        public List<byte[]> Bodies { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Bodies.Add(request.Content == null
+                ? []
+                : await request.Content.ReadAsByteArrayAsync(cancellationToken));
+            var step = steps[Math.Min(Bodies.Count - 1, steps.Length - 1)];
+            return step();
+        }
+    }
+
+    /// <summary>
+    ///     The routes and their CORS policy live inside the adapter — the thing that is unavailable —
+    ///     so nothing can make the real policy call. Without a reflected origin the browser hides
+    ///     status and body entirely and surfaces a bare network error ("0 Unknown Error"), which
+    ///     misdirected every diagnosis of this path (AB#4968 field report).
+    /// </summary>
+    [Test]
+    public async Task UnavailableResponse_ReflectsTheOriginAndCarriesTheHopMarker()
+    {
+        // Arrange
+        var handler = new ScriptedHandler(() => throw new HttpRequestException("connection refused"));
+        var (middleware, context, _) = Build(handler);
+        context.Request.Headers.Origin = "https://localhost:4300";
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        await Assert.That(context.Response.StatusCode).IsEqualTo(503);
+        await Assert.That(context.Response.Headers[WorkloadActivatorMiddleware.HopHeader].ToString()).IsEqualTo("1");
+        await Assert.That(context.Response.Headers.AccessControlAllowOrigin.ToString())
+            .IsEqualTo("https://localhost:4300");
+        await Assert.That(context.Response.Headers.Vary.ToString()).Contains("Origin");
+    }
+
+    [Test]
+    public async Task UnavailableResponse_WithoutAnOrigin_ReflectsNothing()
+    {
+        // Arrange
+        var handler = new ScriptedHandler(() => throw new HttpRequestException("connection refused"));
+        var (middleware, context, _) = Build(handler);
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        await Assert.That(context.Response.StatusCode).IsEqualTo(503);
+        await Assert.That(context.Response.Headers.ContainsKey("Access-Control-Allow-Origin")).IsFalse();
+    }
+
+    /// <summary>
+    ///     The first request after hibernation is precisely the one that wakes the workload and lands
+    ///     in the endpoint gap. A body used to mean exactly one attempt, so a browser upload failed
+    ///     deterministically while a bodyless probe sailed through. Bodies within the buffer bound
+    ///     are replayed per attempt — byte-identical, because a truncated forward would be worse
+    ///     than the 503.
+    /// </summary>
+    [Test]
+    public async Task UploadWithABody_IsBufferedAndRetriedWithTheFullBody()
+    {
+        // Arrange
+        var body = Encoding.UTF8.GetBytes("%PDF-1.4 the invoice");
+        var handler = new BodyRecordingHandler(
+            () => throw new HttpRequestException("connection refused"),
+            () => Ok());
+        var (middleware, context, _) = Build(handler, forwardRetrySeconds: 2);
+        context.Request.Method = "POST";
+        context.Request.Body = new MemoryStream(body);
+        context.Request.ContentLength = body.Length;
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        await Assert.That(context.Response.StatusCode).IsEqualTo(200);
+        await Assert.That(handler.Bodies.Count).IsEqualTo(2);
+        await Assert.That(handler.Bodies[0]).IsEquivalentTo(body);
+        await Assert.That(handler.Bodies[1]).IsEquivalentTo(body);
+    }
+
+    /// <summary>
+    ///     Where the forward path goes back in through the ingress (a host-run controller cannot
+    ///     reach ClusterIPs), "endpoint not ready" does not raise a connection error — it comes back
+    ///     as this middleware's own loop-guard 503. That is the response-shaped twin of the refused
+    ///     connection and gets the same retry treatment instead of being copied to the caller.
+    /// </summary>
+    [Test]
+    public async Task LoopGuardAnswer_IsRetriedInsteadOfCopiedToTheCaller()
+    {
+        // Arrange
+        HttpResponseMessage LoopGuard503()
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                { Content = new StringContent("not ready", Encoding.UTF8) };
+            response.Headers.TryAddWithoutValidation(WorkloadActivatorMiddleware.HopHeader, "1");
+            return response;
+        }
+
+        var handler = new ScriptedHandler(LoopGuard503, () => Ok());
+        var (middleware, context, _) = Build(handler, forwardRetrySeconds: 2);
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        await Assert.That(context.Response.StatusCode).IsEqualTo(200);
+        await Assert.That(handler.Calls).IsEqualTo(2);
+    }
+
+    /// <summary>A workload's own 503 is an answer, not an endpoint gap — it must reach the caller.</summary>
+    [Test]
+    public async Task AWorkloadsOwn503_IsCopiedThroughWithoutRetry()
+    {
+        // Arrange
+        var handler = new ScriptedHandler(
+            () => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                { Content = new StringContent("adapter says no", Encoding.UTF8) },
+            () => Ok());
+        var (middleware, context, _) = Build(handler, forwardRetrySeconds: 2);
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        await Assert.That(context.Response.StatusCode).IsEqualTo(503);
+        await Assert.That(handler.Calls).IsEqualTo(1);
+    }
 }

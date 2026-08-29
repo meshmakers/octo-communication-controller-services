@@ -42,6 +42,16 @@ internal sealed class WorkloadActivatorMiddleware(
     internal const string HttpClientName = "WorkloadActivator";
 
     /// <summary>
+    ///     Bodies up to this size are buffered so the forward can be RETRIED. Without a replayable
+    ///     body a request gets exactly one attempt — and the first request after hibernation is
+    ///     precisely the one that wakes the workload and lands in the endpoint gap, so a browser
+    ///     upload failed deterministically while a bodyless probe sailed through (AB#4968 field
+    ///     report). 32 MB comfortably covers the 25m ingress body limit; larger or chunked bodies
+    ///     keep the previous single-attempt behaviour.
+    /// </summary>
+    internal const long MaxBufferedBodyBytes = 32 * 1024 * 1024;
+
+    /// <summary>
     ///     Backoff shape for the wait between "the workload says it is awake" and "its Service
     ///     endpoint accepts connections" — see
     ///     <see cref="CommunicationControllerOptions.ActivatorForwardRetrySeconds"/> for why that
@@ -139,12 +149,23 @@ internal sealed class WorkloadActivatorMiddleware(
     {
         var request = context.Request;
 
-        // Only bodyless requests are retried: the request stream is consumed by the first attempt
-        // and cannot be replayed, and silently forwarding a truncated body would be worse than a
-        // 503.
+        // A request stream is consumed by the first attempt and cannot be replayed, so a body
+        // used to mean exactly one attempt — and the first request after hibernation is precisely
+        // the one that wakes the workload and lands in the endpoint gap, so browser uploads failed
+        // deterministically. Bodies with a known length within the buffer bound are therefore read
+        // once and replayed per attempt; only oversized or chunked bodies keep the single attempt
+        // (silently forwarding a truncated body would be worse than a 503).
         var hasBody = request.ContentLength is > 0 || request.Headers.ContainsKey("Transfer-Encoding");
+        byte[]? bufferedBody = null;
+        if (hasBody && request.ContentLength is { } contentLength && contentLength <= MaxBufferedBodyBytes)
+        {
+            using var buffer = new MemoryStream((int)contentLength);
+            await request.Body.CopyToAsync(buffer, context.RequestAborted);
+            bufferedBody = buffer.ToArray();
+        }
+
         var retryDelays = BuildRetryLadder(options.Value.ActivatorForwardRetrySeconds);
-        var maxAttempts = hasBody ? 1 : retryDelays.Length + 1;
+        var maxAttempts = !hasBody || bufferedBody != null ? retryDelays.Length + 1 : 1;
         var client = httpClientFactory.CreateClient(HttpClientName);
 
         for (var attempt = 0; ; attempt++)
@@ -152,11 +173,28 @@ internal sealed class WorkloadActivatorMiddleware(
             // A fresh message per attempt: HttpClient refuses to send the same HttpRequestMessage
             // twice, so a retry that reuses it fails with an InvalidOperationException instead of
             // reaching the workload.
-            using var forwarded = BuildForwardRequest(context, target, hasBody);
+            using var forwarded = BuildForwardRequest(context, target, hasBody, bufferedBody);
             try
             {
                 using var response = await client.SendAsync(forwarded, HttpCompletionOption.ResponseHeadersRead,
                     context.RequestAborted);
+
+                // A 503 carrying the hop marker is our own loop guard answering the forwarded
+                // request: the workload's endpoint was still not ready and nginx fell back to the
+                // activator again. That is the response-shaped twin of the connection failure
+                // below (it occurs where the forward path goes through the ingress), so it gets
+                // the same retry treatment instead of being copied to the caller.
+                if (response.StatusCode == HttpStatusCode.ServiceUnavailable &&
+                    response.Headers.Contains(HopHeader) &&
+                    attempt + 1 < maxAttempts)
+                {
+                    logger.LogDebug(
+                        "[{TenantId}] Workload '{WorkloadName}' endpoint not ready yet (loop-guard answer, attempt {Attempt}); retrying",
+                        target.TenantId, target.WorkloadName, attempt + 1);
+                    await Task.Delay(retryDelays[attempt], context.RequestAborted);
+                    continue;
+                }
+
                 await CopyResponseAsync(context, response);
                 return;
             }
@@ -177,13 +215,20 @@ internal sealed class WorkloadActivatorMiddleware(
         }
     }
 
-    private static HttpRequestMessage BuildForwardRequest(HttpContext context, ActivatorTarget target, bool hasBody)
+    private static HttpRequestMessage BuildForwardRequest(HttpContext context, ActivatorTarget target, bool hasBody,
+        byte[]? bufferedBody)
     {
         var request = context.Request;
         var forwarded = new HttpRequestMessage(new HttpMethod(request.Method),
             new Uri(target.Address, request.Path + request.QueryString));
 
-        if (hasBody)
+        if (bufferedBody != null)
+        {
+            // Replayable: a fresh content per attempt — StreamContent would dispose the request
+            // stream with the message and the retry would forward an empty body.
+            forwarded.Content = new ByteArrayContent(bufferedBody);
+        }
+        else if (hasBody)
         {
             forwarded.Content = new StreamContent(request.Body);
         }
@@ -243,6 +288,21 @@ internal sealed class WorkloadActivatorMiddleware(
         // The wake budget is how long the next attempt would have to wait in the worst case, so it
         // is the honest hint for a client that wants to retry.
         context.Response.Headers.RetryAfter = options.Value.LifecycleWakeBudgetSeconds.ToString();
+        // Marks this response as activator-generated so the forwarding side of a chained activator
+        // pass recognises it as "endpoint not ready" and retries instead of copying it through.
+        context.Response.Headers[HopHeader] = "1";
+        // The routes and their CORS policy live inside the adapter, which is exactly the thing
+        // that is unavailable here — so nothing can make the real policy call. Without a reflected
+        // origin the browser hides status and body entirely and surfaces a bare network error
+        // ("0 Unknown Error"), which misdirected every diagnosis of this path. Reflecting the
+        // origin on this error-only response leaks nothing: the body names workload and tenant the
+        // caller addressed anyway.
+        var origin = context.Request.Headers.Origin;
+        if (!StringValues.IsNullOrEmpty(origin))
+        {
+            context.Response.Headers.AccessControlAllowOrigin = origin;
+            context.Response.Headers.Append("Vary", "Origin");
+        }
         context.Response.ContentType = "text/plain; charset=utf-8";
         await context.Response.WriteAsync(
             $"{reason} Workload '{target.WorkloadName}' of tenant '{target.TenantId}' is not available right now.",
