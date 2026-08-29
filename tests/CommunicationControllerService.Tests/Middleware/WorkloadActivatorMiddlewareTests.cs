@@ -207,12 +207,19 @@ internal class WorkloadActivatorMiddlewareTests
     {
         public List<byte[]> Bodies { get; } = [];
 
+        /// <summary>Count of Content-Length VALUES per attempt — a duplicate made nginx close mid-send.</summary>
+        public List<int> ContentLengthValues { get; } = [];
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             Bodies.Add(request.Content == null
                 ? []
                 : await request.Content.ReadAsByteArrayAsync(cancellationToken));
+            ContentLengthValues.Add(request.Content != null &&
+                                    request.Content.Headers.TryGetValues("Content-Length", out var values)
+                ? values.Count()
+                : 0);
             var step = steps[Math.Min(Bodies.Count - 1, steps.Length - 1)];
             return step();
         }
@@ -286,6 +293,10 @@ internal class WorkloadActivatorMiddlewareTests
         await Assert.That(handler.Bodies.Count).IsEqualTo(2);
         await Assert.That(handler.Bodies[0]).IsEquivalentTo(body);
         await Assert.That(handler.Bodies[1]).IsEquivalentTo(body);
+        // Exactly ONE Content-Length per attempt: ByteArrayContent computes its own, and the
+        // copied original header on top of it was a duplicate nginx rejected mid-send.
+        await Assert.That(handler.ContentLengthValues[0]).IsEqualTo(1);
+        await Assert.That(handler.ContentLengthValues[1]).IsEqualTo(1);
     }
 
     /// <summary>

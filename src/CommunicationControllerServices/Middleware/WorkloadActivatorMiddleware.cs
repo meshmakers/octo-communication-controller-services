@@ -245,6 +245,16 @@ internal sealed class WorkloadActivatorMiddleware(
                 continue;
             }
 
+            // Content-Length is owned by the content object. ByteArrayContent computes its own,
+            // and appending the copied header on top produced a DUPLICATE Content-Length — nginx
+            // rejects that and closes mid-send, so every forward attempt failed identically no
+            // matter whether the workload was ready ("Error while copying content to a stream").
+            // The StreamContent path sets it explicitly below instead.
+            if (string.Equals(header.Key, "Content-Length", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             // Content headers belong on the content, everything else on the request. Both adds are
             // unvalidated: a header the client sent has already been accepted by nginx and Kestrel,
             // and rejecting it here would lose the request over a formatting opinion.
@@ -252,6 +262,13 @@ internal sealed class WorkloadActivatorMiddleware(
             {
                 forwarded.Content?.Headers.TryAddWithoutValidation(header.Key, (IEnumerable<string>)header.Value);
             }
+        }
+
+        // StreamContent does not know the stream's length; without this the forward would fall
+        // back to chunked encoding, which the single-attempt path never needed before.
+        if (bufferedBody == null && forwarded.Content != null && request.ContentLength is { } contentLength)
+        {
+            forwarded.Content.Headers.ContentLength = contentLength;
         }
 
         // Keep the original Host so the adapter sees the URL the client used, and mark the request
