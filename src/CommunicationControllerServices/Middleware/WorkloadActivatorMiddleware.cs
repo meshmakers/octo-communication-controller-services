@@ -64,20 +64,25 @@ internal sealed class WorkloadActivatorMiddleware(
             TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5),
             TimeSpan.FromSeconds(5)];
 
-    private static TimeSpan[] BuildRetryLadder(int budgetSeconds)
+    internal static TimeSpan[] BuildRetryLadder(int budgetSeconds)
     {
         var budget = TimeSpan.FromSeconds(Math.Max(0, budgetSeconds));
         var ladder = new List<TimeSpan>();
         var spent = TimeSpan.Zero;
-        foreach (var delay in ConnectRetryDelays)
+        // Walk the shaped steps, then keep repeating the final step until the budget is spent —
+        // the shape only ends because backoff has flattened, not because waiting should stop.
+        // Without the repeat, any ActivatorForwardRetrySeconds beyond the shape's total (~27 s)
+        // was silently ignored: a 90 s budget still gave up after ~27 s, moments before a cold
+        // local workload's endpoint came up (AB#4968 field report).
+        var index = 0;
+        while (spent + ConnectRetryDelays[index] <= budget)
         {
-            if (spent + delay > budget)
+            ladder.Add(ConnectRetryDelays[index]);
+            spent += ConnectRetryDelays[index];
+            if (index < ConnectRetryDelays.Length - 1)
             {
-                break;
+                index++;
             }
-
-            ladder.Add(delay);
-            spent += delay;
         }
 
         return ladder.ToArray();

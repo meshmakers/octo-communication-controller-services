@@ -335,4 +335,22 @@ internal class WorkloadActivatorMiddlewareTests
         await Assert.That(context.Response.StatusCode).IsEqualTo(503);
         await Assert.That(handler.Calls).IsEqualTo(1);
     }
+
+    /// <summary>
+    ///     The ladder used to stop when the shaped steps ran out (~27 s total), so any budget beyond
+    ///     that was silently ignored — a 90 s budget still gave up after ~27 s, moments before a cold
+    ///     local workload's endpoint came up. The final step repeats until the budget is spent.
+    /// </summary>
+    [Test]
+    public async Task RetryLadder_SpendsTheWholeBudget_NotJustTheShapedSteps()
+    {
+        var thirty = WorkloadActivatorMiddleware.BuildRetryLadder(30);
+        var ninety = WorkloadActivatorMiddleware.BuildRetryLadder(90);
+
+        await Assert.That(WorkloadActivatorMiddleware.BuildRetryLadder(0)).IsEmpty();
+        await Assert.That(thirty.Aggregate(TimeSpan.Zero, (a, d) => a + d).TotalSeconds)
+            .IsGreaterThanOrEqualTo(25).And.IsLessThanOrEqualTo(30);
+        await Assert.That(ninety.Aggregate(TimeSpan.Zero, (a, d) => a + d).TotalSeconds)
+            .IsGreaterThanOrEqualTo(85).And.IsLessThanOrEqualTo(90);
+    }
 }
