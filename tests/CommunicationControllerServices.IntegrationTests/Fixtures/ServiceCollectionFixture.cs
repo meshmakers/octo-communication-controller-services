@@ -54,6 +54,10 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         Services.AddSingleton<ICommunicationEventService, CommunicationEventService>();
         Services.AddSingleton<IPipelineSchemaValidator, PipelineSchemaValidator>();
         Services.AddSingleton<IPipelineDefinitionService, PipelineDefinitionService>();
+        // AB#4984: AdapterService/PoolService take the on-demand capability service. The real
+        // implementation is pure over the repository/cache/parser registered above, so the
+        // integration tests exercise the real trigger classification.
+        Services.AddSingleton<IWorkloadOnDemandCapabilityService, WorkloadOnDemandCapabilityService>();
         Services.AddSingleton<IAdapterConnectionTracker, AdapterConnectionTracker>();
         Services.AddSingleton<IAdapterService, AdapterService>();
         Services.AddSingleton<IPoolService, PoolService>();
