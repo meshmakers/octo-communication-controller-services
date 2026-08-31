@@ -30,6 +30,38 @@ attributes:
   valueType: String
   description: 'Public hostname used when IngressEnabled=true (e.g. adapter.staging.octo-mesh.com). Adapters get a tenant-scoped path automatically (https://<hostname>/<tenantId>); Applications use the root path. Ignored when IngressEnabled=false. Runtime-state (AB#4706): the productive hostname is tenant-specific (e.g. <tenant>.meshmakers.cloud) and operator-managed - a blueprint re-apply preserves it instead of resetting to the seeded default and silently breaking the deployed ingress/DNS.'
   isRuntimeState: true
+- id: LifecycleMode
+  valueType: Enum
+  valueCkEnumId: ${this}/LifecycleMode
+  description: 'Lifecycle policy of the workload (AB#4914). AlwaysOn (default) keeps it running permanently; OnDemand allows the controller to scale it to 0 replicas when idle and wake it on demand. Author configuration — a blueprint re-apply may reset it, so blueprints that opt workloads into OnDemand should seed the value.'
+  defaultValues:
+    - 0
+- id: IdleTimeoutMinutes
+  valueType: Int
+  description: 'Minutes without pipeline activity before an OnDemand workload is drained and scaled to 0 replicas (AB#4914). Ignored for AlwaysOn workloads.'
+  defaultValues:
+    - 30
+- id: LifecycleState
+  valueType: Enum
+  valueCkEnumId: ${this}/LifecycleState
+  description: 'Runtime lifecycle state of the workload (AB#4914): Running, Draining, Hibernated, or Waking. Written exclusively by the Communication Controller (idle watchdog and wake gates). Runtime-state: preserved across blueprint re-apply — resetting a Hibernated workload to Running would break the offline-is-expected semantics.'
+  defaultValues:
+    - 0
+  isRuntimeState: true
+- id: LastActivityAt
+  valueType: DateTime
+  description: 'Timestamp of the last observed demand on the workload (pipeline execution, config push, or explicit wake; AB#4914). Input to the idle watchdog. Runtime-state: preserved across blueprint re-apply.'
+  isRuntimeState: true
+- id: OnDemandCapable
+  valueType: Boolean
+  description: 'Whether the workload can safely run with LifecycleMode=OnDemand (AB#4984): true iff none of its deployed pipelines uses a process-bound trigger (e.g. FromPolling, FromWatchRtEntity) that would silently stop at 0 replicas. Computed by the Communication Controller from the registered node descriptors on adapter registration and pipeline deploy. Runtime-state: written exclusively by the controller, preserved across blueprint re-apply.'
+  defaultValues:
+    - false
+  isRuntimeState: true
+- id: OnDemandBlockingReasons
+  valueType: String
+  description: 'Human-readable reasons why the workload is not OnDemandCapable (AB#4984), e.g. "pipeline X uses process-bound trigger FromPolling@1". Empty when OnDemandCapable=true. Computed by the Communication Controller; shown in the Studio next to the LifecycleMode setting. Runtime-state: preserved across blueprint re-apply.'
+  isRuntimeState: true
 - id: Path
   valueType: String
   description: 'Dotted Helm values path for a ValueOverride entry (e.g. image.tag, service.port, oauth.clientId).'

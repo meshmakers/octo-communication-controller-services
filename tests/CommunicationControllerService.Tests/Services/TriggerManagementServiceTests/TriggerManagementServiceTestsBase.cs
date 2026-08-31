@@ -19,6 +19,7 @@ internal abstract class TriggerManagementServiceTestsBase
     protected readonly IRoutedCommandClient<ExecutePipelineRequest> ExecuteMeshPipelineCommandClient;
     protected readonly IDistributionEventHubService DistributionEventHubService;
     protected readonly ICommunicationEventService CommunicationEventService;
+    protected readonly IWorkloadLifecycleService WorkloadLifecycleService = Substitute.For<IWorkloadLifecycleService>();
 
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
     protected TriggerManagementServiceTestsBase()
@@ -39,7 +40,8 @@ internal abstract class TriggerManagementServiceTestsBase
             RemoveRecurringJobsCommandClient,
             ExecuteMeshPipelineCommandClient,
             DistributionEventHubService,
-            CommunicationEventService);
+            CommunicationEventService,
+            WorkloadLifecycleService);
 
         // Default: RemoveScheduleAsync returns empty triggers and succeeds
         CommunicationRepository.GetTriggersAsync(TenantId)

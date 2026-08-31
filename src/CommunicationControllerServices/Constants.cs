@@ -1,5 +1,6 @@
 
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Services.Infrastructure.Services;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices;
 
@@ -12,7 +13,18 @@ internal static class Constants
     private const string AdapterRtId = "adapter-rtId";
     private const string AdapterCkTypeId = "adapter-ckTypeId";
 
-    public const string CommunicationControllerServiceEnabledKey = "CommunicationControllerServicesEnabled";
+    /// <summary>
+    /// Tenant configuration key of the Communication enabled flag. The literal is owned by
+    /// octo-common-services so the asset repository's delete/detach guard reads the same key (AB#4255).
+    /// </summary>
+    public const string CommunicationControllerServiceEnabledKey = TenantCapabilityConfigurationKeys.Communication;
+
+    /// <summary>
+    /// Tenant configuration key of the on-demand lifecycle configuration (AB#4914). Same
+    /// key-value store as the enabled flag; carries <c>CommunicationLifecycleConfiguration</c>
+    /// (currently just the per-tenant ScaleToZeroEnabled gate, default off).
+    /// </summary>
+    public const string CommunicationLifecycleConfigurationKey = "communicationLifecycle";
 
     public const string CommunicationControllerServiceIdentityDataVersionKey = "CommunicationControllerServicesIdentityData";
     public const int CommunicationControllerServiceIdentityDataVersionValue = 3;

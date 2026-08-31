@@ -108,6 +108,16 @@ public interface IOperatorConnectionManager
     Task NotifyWorkloadUndeployedAsync(WorkloadUndeployedDto workload);
 
     /// <summary>
+    /// Notifies the operator owning the workload's pool that the workload
+    /// should be scaled to the given replica count (AB#4917, on-demand
+    /// lifecycle AB#4914). Same pool-scoped routing and pending-queue
+    /// semantics as deploy/undeploy; does not touch the deploy tracking maps
+    /// (a hibernated workload stays tracked as deployed — its helm release
+    /// still exists).
+    /// </summary>
+    Task NotifyWorkloadScaleAsync(ScaleWorkloadDto workload);
+
+    /// <summary>
     /// Replays workload deploy/undeploy notifications that were queued
     /// because no operator connection owned the target pool at notify time
     /// (AB#4371 — e.g. the operator's pool registration failed transiently

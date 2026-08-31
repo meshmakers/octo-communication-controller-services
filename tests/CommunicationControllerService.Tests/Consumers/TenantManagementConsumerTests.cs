@@ -330,6 +330,54 @@ internal class TenantManagementConsumerTests
         await _adapterService.DidNotReceive().PosUpdateTenantAsync(Arg.Any<string>());
     }
 
+    [Test]
+    public async Task CacheOnlyPair_NotifiesCkModelChangedButSkipsRestartRelay()
+    {
+        // Arrange — a CacheOnly pair (AB#4895, e.g. the nightly autocomplete aggregation) must
+        // flush the adapters' CK caches but never relay the full adapter restart: the fleet-wide
+        // midnight restart was the trigger window for AB#4876.
+        var correlationId = Guid.NewGuid();
+        var preMessage = new PreUpdateTenant(TenantId, correlationId, FutureTimestamp,
+            TenantUpdateScope.CacheOnly);
+        var posMessage = new PosUpdateTenant(TenantId, correlationId, FutureTimestamp,
+            TenantUpdateScope.CacheOnly);
+
+        // Act
+        await _consumer.ConsumeAsync(BuildContext(preMessage));
+        await _consumer.ConsumeAsync(BuildContext(posMessage));
+
+        // Assert
+        using var _ = Assert.Multiple();
+
+        await _adapterService.Received(1).CkModelChangedAsync(TenantId);
+        await _adapterService.DidNotReceive().PreUpdateTenantAsync(Arg.Any<string>());
+        await _poolService.DidNotReceive().PreUpdateTenantAsync(Arg.Any<string>());
+        await _adapterService.DidNotReceive().PosUpdateTenantAsync(Arg.Any<string>());
+        await _poolService.DidNotReceive().PosUpdateTenantAsync(Arg.Any<string>());
+    }
+
+    [Test]
+    public async Task MixedScopePair_FullWins_RunsRestartRelay()
+    {
+        // Arrange — defensive: a pair whose halves disagree must be treated as Full, otherwise a
+        // real tenant update could lose its restart relay (AB#4895).
+        var correlationId = Guid.NewGuid();
+        var preMessage = new PreUpdateTenant(TenantId, correlationId, FutureTimestamp,
+            TenantUpdateScope.CacheOnly);
+        var posMessage = new PosUpdateTenant(TenantId, correlationId, FutureTimestamp);
+
+        // Act
+        await _consumer.ConsumeAsync(BuildContext(preMessage));
+        await _consumer.ConsumeAsync(BuildContext(posMessage));
+
+        // Assert
+        using var _ = Assert.Multiple();
+
+        await _adapterService.Received(1).CkModelChangedAsync(TenantId);
+        await _adapterService.Received(1).PreUpdateTenantAsync(TenantId);
+        await _adapterService.Received(1).PosUpdateTenantAsync(TenantId);
+    }
+
     private static IDistributedContext<TMessage> BuildContext<TMessage>(TMessage message)
         where TMessage : class
     {

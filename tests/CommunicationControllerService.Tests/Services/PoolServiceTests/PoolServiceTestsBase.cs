@@ -22,6 +22,7 @@ internal abstract class PoolServiceTestsBase
     protected readonly IOperatorConnectionManager OperatorConnectionManager;
     protected readonly IWorkloadEncryptionService EncryptionService;
     protected readonly IWorkloadTemplateResolver TemplateResolver;
+    protected readonly IWorkloadOnDemandCapabilityService OnDemandCapabilityService;
     protected readonly IPoolCachePublish PoolCachePublish;
     protected readonly PoolTenant PoolTenant;
     protected readonly PoolService PoolService;
@@ -66,6 +67,12 @@ internal abstract class PoolServiceTestsBase
                 ci[3] = (string?)null;
                 return true;
             });
+        OnDemandCapabilityService = Substitute.For<IWorkloadOnDemandCapabilityService>();
+        // Default: every workload is on-demand capable (AB#4984). Tests that exercise
+        // the capability rejection override EvaluateAsync explicitly.
+        OnDemandCapabilityService
+            .EvaluateAsync(Arg.Any<string>(), Arg.Any<RtEntityId>())
+            .Returns(new OnDemandCapabilityResult(true, []));
         PoolCachePublish = Substitute.For<IPoolCachePublish>();
         PoolTenant = new PoolTenant(PoolCachePublish, TenantId);
 
@@ -75,7 +82,8 @@ internal abstract class PoolServiceTestsBase
             CommunicationEventService,
             OperatorConnectionManager,
             EncryptionService,
-            TemplateResolver);
+            TemplateResolver,
+            OnDemandCapabilityService);
     }
 
     [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]

@@ -4,7 +4,9 @@ using IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -21,16 +23,40 @@ public class PoolController : ControllerBase
 {
     private readonly ILogger<PoolController> _logger;
     private readonly IPoolService _poolService;
+    private readonly IConfigurationService _configurationService;
 
     /// <summary>
     /// Constructor
     /// </summary>
     /// <param name="logger">Logging object</param>
     /// <param name="poolService">Pool management service instance</param>
-    public PoolController(ILogger<PoolController> logger, IPoolService poolService)
+    /// <param name="configurationService">Enabled state of Communication per tenant</param>
+    public PoolController(ILogger<PoolController> logger, IPoolService poolService,
+        IConfigurationService configurationService)
     {
         _logger = logger;
         _poolService = poolService;
+        _configurationService = configurationService;
+    }
+
+    /// <summary>
+    /// AB#4255: deploying creates operator-managed cluster resources, which must not happen on a
+    /// tenant whose Communication is disabled — the tenant delete guard only sees the flag, and a
+    /// pool deployed afterwards would be orphaned. This service does not run the platform's tenant
+    /// enabled-gate middleware (it would also gate the adapter hub), so the two resource-creating
+    /// endpoints check the flag themselves. Undeploy stays open so remediation always works.
+    /// </summary>
+    private async Task<IActionResult?> RefuseWhileDisabledAsync(string tenantId, string operation)
+    {
+        if (await _configurationService.IsEnabledAsync(tenantId))
+        {
+            return null;
+        }
+
+        _logger.LogWarning("Rejected {Operation} for tenant '{TenantId}': Communication is disabled", operation,
+            tenantId);
+        return Conflict(new OperationFailedErrorDto(
+            $"Communication is disabled for tenant '{tenantId}'. Enable it first (EnableCommunication) before deploying pools or workloads."));
     }
     
     /// <summary>
@@ -66,12 +92,18 @@ public class PoolController : ControllerBase
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(OperationFailedErrorDto), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> DeployPoolAsync([Required][FromQuery] OctoObjectId poolRtId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
         {
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        if (await RefuseWhileDisabledAsync(tenantId, "pool deploy") is { } refusal)
+        {
+            return refusal;
         }
 
         try
@@ -129,12 +161,18 @@ public class PoolController : ControllerBase
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(OperationFailedErrorDto), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> DeployWorkloadAsync([Required][FromQuery] OctoObjectId workloadRtId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
         {
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        if (await RefuseWhileDisabledAsync(tenantId, "workload deploy") is { } refusal)
+        {
+            return refusal;
         }
 
         try

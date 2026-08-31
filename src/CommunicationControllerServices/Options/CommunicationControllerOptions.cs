@@ -144,6 +144,76 @@ public class CommunicationControllerOptions
     public int AdapterOfflineReconciliationIntervalMinutes { get; set; } = 5;
 
     /// <summary>
+    /// Maximum seconds a wake gate waits for a woken OnDemand workload to reach
+    /// <c>ConfigurationState=Configured</c> before it reverts the workload to Hibernated and
+    /// fails the caller with a typed error (AB#4918). Baseline measured wake-to-Configured is
+    /// ~16 s (staging-1, warm image); 60 s covers image pulls and slow nodes. Must stay below
+    /// the SDK caller cap of 100 s on the execute-pipeline path.
+    /// </summary>
+    public int LifecycleWakeBudgetSeconds { get; set; } = 60;
+
+    /// <summary>
+    /// Interval in minutes of the on-demand lifecycle idle watchdog (AB#4918). Each sweep
+    /// hibernates OnDemand workloads of scale-to-zero-enabled tenants whose last activity is
+    /// older than their <c>IdleTimeoutMinutes</c>, and reconciles stale <c>Waking</c> states
+    /// left behind by a controller restart. The same value is used as the startup grace.
+    /// </summary>
+    public int LifecycleWatchdogIntervalMinutes { get; set; } = 5;
+
+    /// <summary>
+    /// Enables the HTTP activator (AB#4923): an inbound request for a hibernated OnDemand
+    /// workload is held while the workload wakes and is then forwarded to it, instead of the
+    /// bare 502/503 the ingress would answer with no pod behind the workload's Service.
+    ///
+    /// Wiring is an ingress annotation, not a route: adapter Ingresses carry
+    /// <c>nginx.ingress.kubernetes.io/default-backend</c> pointing at this service, which nginx
+    /// uses exactly when the primary Service has no ready endpoint — precisely the hibernated
+    /// case. Steady-state traffic never passes through here.
+    ///
+    /// Off by default; the annotation is what actually routes traffic, so switching this on
+    /// without it is inert, and switching it off with the annotation in place turns the activator
+    /// back into a plain 404 (the ingress's own error page behaviour).
+    /// </summary>
+    public bool ActivatorEnabled { get; set; }
+
+    /// <summary>
+    /// Template for the in-cluster address the activator forwards to once the workload is awake.
+    /// <c>{release}</c> is replaced by the workload's helm release name
+    /// (<c>{tenantId}-{workloadRtId}</c>, DNS-sanitised) — the operator names Deployment, Service
+    /// and Ingress after it, so it is also the Service name.
+    ///
+    /// The default has no namespace on purpose: the pod's own search domain resolves it inside
+    /// the controller's namespace, which is where the operator deploys workloads
+    /// (<c>OPERATOR__POOLNAMESPACE</c>). Override with an explicit
+    /// <c>http://{release}.other-namespace.svc.cluster.local</c> when they differ, or to reach a
+    /// workload whose chart sets its own <c>fullnameOverride</c>.
+    /// </summary>
+    public string ActivatorWorkloadAddressTemplate { get; set; } = "http://{release}";
+
+    /// <summary>
+    /// How often the activator rebuilds its hostname index (minutes). The index maps the public
+    /// hostname of every ingress-enabled workload to its tenant and rtId, so an inbound request
+    /// can be attributed without a per-request repository lookup.
+    ///
+    /// A freshly deployed workload is not reachable through the activator until the next refresh.
+    /// That is harmless in practice: a workload only routes through the activator once it has
+    /// hibernated, which takes at least its <c>IdleTimeoutMinutes</c>.
+    /// </summary>
+    public int ActivatorHostnameRefreshIntervalMinutes { get; set; } = 5;
+
+    /// <summary>
+    /// How long the activator keeps retrying the forward after the workload reports itself awake
+    /// (seconds). The wake completes on <c>ConfigurationState=Configured</c> — the adapter has
+    /// registered over SignalR — while its Service endpoint appears later, once the readiness probe
+    /// passes and kube-proxy picks the change up; until then the connection is refused. Measured on
+    /// test-2, under four seconds was not enough and produced a 503 for a workload that was already
+    /// running. Spending this on a request the caller is already holding is the point of the
+    /// activator: failing early would waste the wake it just paid for. Zero forwards once and gives
+    /// up, which is what the tests use.
+    /// </summary>
+    public int ActivatorForwardRetrySeconds { get; set; } = 30;
+
+    /// <summary>
     /// Named public base domains available to workloads as <c>{{domain.NAME}}</c>
     /// placeholders in <c>Hostname</c>, non-secret <c>ValueOverride.Value</c>
     /// entries and <c>ValuesYaml</c>. Resolved by

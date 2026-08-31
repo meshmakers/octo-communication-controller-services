@@ -532,4 +532,122 @@ internal class OperatorConnectionManagerTests
             Arg.Any<object?[]>(),
             Arg.Any<CancellationToken>());
     }
+
+    // ---- Workload scale routing + pending queue (AB#4916 / AB#4917) ----
+
+    private static ScaleWorkloadDto WorkloadScale(string tenantId, string poolRtId,
+        string workloadRtId, string workloadName, int replicas) =>
+        new()
+        {
+            TenantId = tenantId,
+            PoolRtId = poolRtId,
+            WorkloadRtId = workloadRtId,
+            WorkloadName = workloadName,
+            WorkloadType = WorkloadTypeDto.Adapter,
+            Replicas = replicas,
+        };
+
+    [Test]
+    public async Task NotifyWorkloadScaleAsync_RoutesOnlyToOperatorOwningTheTargetPool()
+    {
+        // Same pool-scoped routing contract as deploy/undeploy: a central and
+        // an edge operator can both be connected — only the pool owner may
+        // receive the scale request.
+        var (sut, _, centralProxy, edgeProxy) = CreateRoutingSut();
+        sut.AddOperator(ConnCentral);
+        sut.AddOperator(ConnEdge);
+        sut.RegisterPoolForConnection(ConnCentral, TenantA, CloudPoolRtId);
+        sut.RegisterPoolForConnection(ConnEdge, TenantA, EdgePoolRtId);
+
+        await sut.NotifyWorkloadScaleAsync(WorkloadScale(TenantA, CloudPoolRtId,
+            WorkloadRtId1, "mesh-adapter", 0));
+
+        await centralProxy.Received(1).SendCoreAsync(
+            nameof(IOperatorHubCallbacks.ScaleWorkloadAsync),
+            Arg.Is<object?[]>(args =>
+                args.Length == 1
+                && ((ScaleWorkloadDto)args[0]!).WorkloadRtId == WorkloadRtId1
+                && ((ScaleWorkloadDto)args[0]!).Replicas == 0),
+            Arg.Any<CancellationToken>());
+        await edgeProxy.DidNotReceiveWithAnyArgs().SendCoreAsync(
+            default!, default!, default);
+    }
+
+    [Test]
+    public async Task NotifyWorkloadScaleAsync_NoOwner_IsReplayedAsScaleWorkloadWhenThePoolRegisters()
+    {
+        // AB#4371 contract extended to scale: a scale fired while the pool is
+        // transiently orphaned must be queued and replayed — a dropped scale-1
+        // leaves a wake gate waiting for its full budget.
+        var (sut, _, centralProxy, _) = CreateRoutingSut();
+        sut.AddOperator(ConnCentral);
+
+        await sut.NotifyWorkloadScaleAsync(WorkloadScale(TenantA, CloudPoolRtId,
+            WorkloadRtId1, "mesh-adapter", 1));
+        await centralProxy.DidNotReceiveWithAnyArgs().SendCoreAsync(default!, default!, default);
+
+        sut.RegisterPoolForConnection(ConnCentral, TenantA, CloudPoolRtId);
+        await sut.FlushPendingWorkloadNotificationsAsync(ConnCentral, TenantA, CloudPoolRtId);
+
+        await centralProxy.Received(1).SendCoreAsync(
+            nameof(IOperatorHubCallbacks.ScaleWorkloadAsync),
+            Arg.Is<object?[]>(args =>
+                args.Length == 1
+                && ((ScaleWorkloadDto)args[0]!).WorkloadRtId == WorkloadRtId1
+                && ((ScaleWorkloadDto)args[0]!).Replicas == 1),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task PendingNotifications_QueuedDeployAndScaleOfSameWorkload_BothSurviveAndReplay()
+    {
+        // The scale is queued under a scale-specific key ("{rtId}::scale") so it
+        // never supersedes a queued deploy/undeploy of the same workload in the
+        // last-wins map — both must survive and both must be replayed.
+        var (sut, _, centralProxy, _) = CreateRoutingSut();
+        sut.AddOperator(ConnCentral);
+
+        await sut.NotifyWorkloadDeployedAsync(
+            WorkloadDeploy(TenantA, CloudPoolRtId, WorkloadRtId1, "mesh-adapter"));
+        await sut.NotifyWorkloadScaleAsync(WorkloadScale(TenantA, CloudPoolRtId,
+            WorkloadRtId1, "mesh-adapter", 1));
+
+        await sut.FlushPendingWorkloadNotificationsAsync(ConnCentral, TenantA, CloudPoolRtId);
+
+        await centralProxy.Received(1).SendCoreAsync(
+            nameof(IOperatorHubCallbacks.WorkloadDeployedAsync),
+            Arg.Is<object?[]>(args =>
+                args.Length == 1
+                && ((WorkloadDeployedDto)args[0]!).WorkloadRtId == WorkloadRtId1),
+            Arg.Any<CancellationToken>());
+        await centralProxy.Received(1).SendCoreAsync(
+            nameof(IOperatorHubCallbacks.ScaleWorkloadAsync),
+            Arg.Is<object?[]>(args =>
+                args.Length == 1
+                && ((ScaleWorkloadDto)args[0]!).WorkloadRtId == WorkloadRtId1
+                && ((ScaleWorkloadDto)args[0]!).Replicas == 1),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task NotifyWorkloadScaleAsync_DoesNotTouchDeployedWorkloadTracking()
+    {
+        // Scaling does not change what is deployed — a hibernated workload keeps
+        // its helm release and must still be covered by the tenant-delete
+        // cascade, so the tracking map must stay exactly as the deploy left it.
+        var (sut, _, _, _) = CreateRoutingSut();
+        sut.AddOperator(ConnCentral);
+        sut.RegisterPoolForConnection(ConnCentral, TenantA, CloudPoolRtId);
+        await sut.NotifyWorkloadDeployedAsync(
+            WorkloadDeploy(TenantA, CloudPoolRtId, WorkloadRtId1, "mesh-adapter"));
+
+        await sut.NotifyWorkloadScaleAsync(WorkloadScale(TenantA, CloudPoolRtId,
+            WorkloadRtId1, "mesh-adapter", 0));
+        await sut.NotifyWorkloadScaleAsync(WorkloadScale(TenantA, CloudPoolRtId,
+            WorkloadRtId2, "other-workload", 1));
+
+        var tracked = sut.GetDeployedWorkloadsForTenant(TenantA);
+        await Assert.That(tracked.Count).IsEqualTo(1);
+        await Assert.That(tracked.Single().WorkloadRtId).IsEqualTo(WorkloadRtId1);
+    }
 }

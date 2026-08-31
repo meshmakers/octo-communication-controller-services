@@ -3,6 +3,7 @@ using Asp.Versioning;
 using IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -84,10 +85,15 @@ public class CommunicationController : ControllerBase
     /// Disables the communication controller for the current tenant
     /// </summary>
     /// <returns></returns>
+    /// <remarks>
+    /// Refused with 409 while pools or workloads of the tenant are still deployed (AB#4255); the body
+    /// names them and the commands that undeploy them. Every other configuration error stays a 400.
+    /// </remarks>
     [HttpPost("disable")]
     [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(OperationFailedErrorDto), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Disable()
     {
         var tenantId = HttpContext.GetTenantId();
@@ -100,6 +106,11 @@ public class CommunicationController : ControllerBase
         {
             await _configurationService.DisableAsync(tenantId);
             return NoContent();
+        }
+        catch (ConfigurationException e) when (e.IsConflict)
+        {
+            // The refusal is already logged (WARN) by the base DisableAsync.
+            return Conflict(new OperationFailedErrorDto(e.Message));
         }
         catch (ConfigurationException e)
         {
@@ -216,6 +227,45 @@ public class CommunicationController : ControllerBase
                 $"Public URI of service '{kvp.Key}' configured on this Communication Controller instance.",
                 kvp.Value)));
         return Ok(dtos);
+    }
+
+    /// <summary>
+    /// Returns the tenant's on-demand lifecycle configuration (AB#4914). A tenant without a
+    /// stored record answers with the defaults (scale-to-zero off).
+    /// </summary>
+    [HttpGet("lifecycle")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(typeof(CommunicationLifecycleDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetLifecycle([FromServices] ILifecycleConfigurationService lifecycleConfigurationService)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        ArgumentNullException.ThrowIfNull(tenantId);
+
+        var configuration = await lifecycleConfigurationService.GetConfigurationAsync(tenantId);
+        return Ok(new CommunicationLifecycleDto(configuration.ScaleToZeroEnabled));
+    }
+
+    /// <summary>
+    /// Sets the tenant's on-demand lifecycle configuration (AB#4914). Runtime configuration —
+    /// effective without a controller redeploy; gates and watchdog pick it up within the
+    /// configuration cache TTL. Setting <c>ScaleToZeroEnabled=false</c> is the per-tenant
+    /// emergency stop.
+    /// </summary>
+    [HttpPut("lifecycle")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(typeof(CommunicationLifecycleDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> SetLifecycle([FromBody] CommunicationLifecycleDto request,
+        [FromServices] ILifecycleConfigurationService lifecycleConfigurationService)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        ArgumentNullException.ThrowIfNull(tenantId);
+
+        await lifecycleConfigurationService.SetConfigurationAsync(tenantId,
+            new CommunicationLifecycleConfiguration { ScaleToZeroEnabled = request.ScaleToZeroEnabled });
+
+        _logger.LogInformation("Lifecycle configuration set for tenant '{TenantId}': ScaleToZeroEnabled={Enabled}",
+            tenantId, request.ScaleToZeroEnabled);
+        return Ok(request);
     }
 }
 

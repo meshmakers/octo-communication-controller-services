@@ -1,0 +1,12 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+- enumId: LifecycleMode
+  description: 'Author-configured lifecycle policy of a deployable workload. AlwaysOn (default) keeps the workload running permanently. OnDemand lets the controller scale it to 0 replicas when idle and wake it on demand (AB#4914); only valid for workloads whose deployed pipelines use exclusively wake-capable triggers. Auto is reserved for a future controller-decided mode and is rejected by validation until implemented.'
+  useFlags: false
+  values:
+  - key: 0
+    name: AlwaysOn
+  - key: 1
+    name: OnDemand
+  - key: 2
+    name: Auto

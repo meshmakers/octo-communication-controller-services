@@ -22,7 +22,9 @@ internal class AdapterService(
     IPipelineSchemaValidator pipelineSchemaValidator,
     IPipelineDefinitionService pipelineDefinitionService,
     IAdapterConnectionTracker connectionTracker,
-    IOptions<CommunicationControllerOptions> communicationControllerOptions)
+    IOptions<CommunicationControllerOptions> communicationControllerOptions,
+    IWorkloadLifecycleService workloadLifecycleService,
+    IWorkloadOnDemandCapabilityService onDemandCapabilityService)
     : IAdapterService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
@@ -166,6 +168,11 @@ internal class AdapterService(
             // (every FromHttpRequest endpoint 404s) while the controller still believes the
             // pipelines are Deployed, and nothing re-drives the config onto the new connection.
             await ReconcileAdapterConfigurationAsync(tenantId, adapterRtEntityId, adapter.Configuration);
+
+            // AB#4984: registration is the first moment the descriptors (incl.
+            // RequiresRunningProcess) are known — persist the computed on-demand
+            // capability for the Studio. Best-effort, never fails the registration.
+            await onDemandCapabilityService.RefreshWorkloadCapabilityAsync(tenantId, adapterRtEntityId);
 
             return adapter.Configuration;
         }
@@ -376,6 +383,9 @@ internal class AdapterService(
         // Always update DB state, even if adapter is not in cache yet
         await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId,
             RtCommunicationStateEnum.Online);
+
+        // Whatever took it offline is over (AB#4919).
+        WorkloadLifecycleMetrics.RecordOnline(tenantId, adapterRtEntityId.RtId, workloadName: null);
     }
 
     public async Task SetAdapterCommunicationStateOfflineAsync(string tenantId, RtEntityId adapterRtEntityId,
@@ -415,9 +425,26 @@ internal class AdapterService(
             Logger.Info("[{TenantId}] adapter rt id '{AdapterRtId}' offline (connection '{ConnectionId}')",
                 tenantId, adapterRtEntityId, connectionId);
 
-            await eventService.StoreInformationEventAsync(tenantId,
-                $"Adapter '{adapterRtEntityId}' is now offline.",
-                adapterRtEntityId);
+            // AB#4919: a hibernating workload disconnects because we asked it to. Recording that as
+            // an offline event would fill the tenant's audit trail with one entry per idle cycle and
+            // make a real outage indistinguishable from routine scale-to-zero. The state write below
+            // still happens — Offline is factually true while hibernated, and Studio reads it
+            // through LifecycleState.
+            var intentional = await workloadLifecycleService.IsIntentionallyDownAsync(tenantId, adapterRtEntityId.RtId);
+            if (intentional)
+            {
+                Logger.Info("[{TenantId}] adapter rt id '{AdapterRtId}' offline as part of hibernation; " +
+                            "skipping the offline audit event", tenantId, adapterRtEntityId);
+            }
+            else
+            {
+                await eventService.StoreInformationEventAsync(tenantId,
+                    $"Adapter '{adapterRtEntityId}' is now offline.",
+                    adapterRtEntityId);
+            }
+
+            // Same judgement, published as the metric an alert rule can threshold on (AB#4919).
+            WorkloadLifecycleMetrics.RecordOffline(tenantId, adapterRtEntityId.RtId, workloadName: null, intentional);
 
             await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId, RtCommunicationStateEnum.Offline);
             return;
@@ -456,14 +483,29 @@ internal class AdapterService(
                 continue;
             }
 
-            Logger.Warn(
-                "[{TenantId}] Adapter '{AdapterRtId}' is persisted Online but has no live SignalR connection on this pod; " +
-                "reconciling to Offline (AB#4699)",
-                tenantId, adapterRtEntityId);
+            // AB#4919: same reasoning as in SetAdapterCommunicationStateOfflineAsync — a hibernating
+            // workload has no connection by design. The reconciliation itself must still run (a
+            // stale Online would show the workload as healthy), but reporting it as an anomaly
+            // would page someone for a scale-down.
+            var intentional = await workloadLifecycleService.IsIntentionallyDownAsync(tenantId, adapter.RtId);
+            WorkloadLifecycleMetrics.RecordOffline(tenantId, adapter.RtId, adapter.Name, intentional);
+            if (intentional)
+            {
+                Logger.Info(
+                    "[{TenantId}] Adapter '{AdapterRtId}' is hibernating and persisted Online; reconciling to Offline",
+                    tenantId, adapterRtEntityId);
+            }
+            else
+            {
+                Logger.Warn(
+                    "[{TenantId}] Adapter '{AdapterRtId}' is persisted Online but has no live SignalR connection on this pod; " +
+                    "reconciling to Offline (AB#4699)",
+                    tenantId, adapterRtEntityId);
 
-            await eventService.StoreInformationEventAsync(tenantId,
-                $"Adapter '{adapterRtEntityId}' had no live connection and was reconciled to Offline.",
-                adapterRtEntityId);
+                await eventService.StoreInformationEventAsync(tenantId,
+                    $"Adapter '{adapterRtEntityId}' had no live connection and was reconciled to Offline.",
+                    adapterRtEntityId);
+            }
 
             // The repository write carries an AttributeNewerThanGuard on the state timestamp, so a
             // concurrent Online write with a newer timestamp still wins if it raced past the check
@@ -480,6 +522,11 @@ internal class AdapterService(
     {
         Logger.Info("[{TenantId}] AdapterRtId='{AdapterRtId}' deploy configuration",
             tenantId, adapterRtEntityId);
+
+        // AB#4918 wake gate: a hibernated adapter is not in the cache and the push below would
+        // throw AdapterNotLoaded. Wake-first (no-op unless the tenant has scale-to-zero on and
+        // the adapter is OnDemand); after the wake the adapter has registered and is cached.
+        await workloadLifecycleService.EnsureWorkloadRunningAsync(tenantId, adapterRtEntityId.RtId);
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
@@ -529,6 +576,9 @@ internal class AdapterService(
             "[{TenantId}] AdapterRtId='{AdapterRtId}', PipelineRtEntityId='{PipelineRtEntityId}' deploy pipeline configuration",
             tenantId, adapterRtEntityId, pipelineRtEntityId);
 
+        // AB#4918 wake gate — see DeployAdapterConfigurationAsync.
+        await workloadLifecycleService.EnsureWorkloadRunningAsync(tenantId, adapterRtEntityId.RtId);
+
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
             if (adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
@@ -550,6 +600,12 @@ internal class AdapterService(
                 {
                     throw AdapterServiceException.DataFlowNotFound(tenantId, pipelineRtEntityId);
                 }
+
+                // AB#4984: deploying a process-bound-trigger pipeline to an OnDemand workload
+                // is rejected — hibernation would silently stop the trigger (explicit beats silent).
+                var workload = await communicationRepository.GetWorkloadByRtIdAsync(tenantId, adapterRtEntityId.RtId);
+                EnsurePipelineIsOnDemandCompatible(tenantId, workload, adapter.NodeDescriptors,
+                    pipelineRtEntityId, pipelineDefinition ?? pipeline.PipelineDefinition);
 
                 // Persist the pipeline definition to the RT entity so it is visible in the UI
                 if (pipelineDefinition != null)
@@ -615,6 +671,9 @@ internal class AdapterService(
                     adapter.UpdateConfiguration(tenantId, adapterConfiguration);
                 }
 
+                // AB#4984: the deployed pipeline set changed — refresh the persisted capability
+                await onDemandCapabilityService.RefreshWorkloadCapabilityAsync(tenantId, adapterRtEntityId);
+
                 return;
             }
         }
@@ -656,6 +715,10 @@ internal class AdapterService(
                     throw AdapterServiceException.PipelineAdapterNotAssigned(tenantId, rtDeployPipeline.ToRtEntityId());
                 }
 
+                // AB#4918 wake gate: a hibernated executing adapter would fail the cache lookup
+                // below with AdapterNotLoaded. No-op unless scale-to-zero applies.
+                await workloadLifecycleService.EnsureWorkloadRunningAsync(tenantId, rtAdapter);
+
                 if (adapterTenant.AdapterById.TryGetValue(rtAdapter.ToRtEntityId(), out var adapter))
                 {
                     if (!adapterConfigurations.TryGetValue(rtAdapter.ToRtEntityId(), out var adapterConfig))
@@ -679,6 +742,10 @@ internal class AdapterService(
                         }
                     }
 
+                    // AB#4984: reject process-bound-trigger pipelines on OnDemand workloads
+                    EnsurePipelineIsOnDemandCompatible(tenantId, rtAdapter, adapter.NodeDescriptors,
+                        rtDeployPipeline.ToRtEntityId(), rtDeployPipeline.PipelineDefinition);
+
                     adapterConfig.Pipelines.Add(
                         await CreatePipelineConfigurationAsync(tenantId, dataFlowRtId, rtDeployPipeline));
 
@@ -693,10 +760,37 @@ internal class AdapterService(
 
             await UpdateAdapterConfigurationAsync(tenantId, adapterConfigurations.Values.ToList());
 
+            // AB#4984: the deployed pipeline sets changed — refresh the persisted capability
+            foreach (var configuredAdapterRtEntityId in adapterConfigurations.Keys)
+            {
+                await onDemandCapabilityService.RefreshWorkloadCapabilityAsync(tenantId, configuredAdapterRtEntityId);
+            }
+
             return;
         }
 
         throw AdapterServiceException.TenantNotEnabled(tenantId);
+    }
+
+    /// <summary>
+    /// AB#4984: rejects deploying a pipeline whose triggers are process-bound (would silently
+    /// stop at 0 replicas) to a workload with LifecycleMode=OnDemand. No-op for AlwaysOn
+    /// workloads or when the workload entity cannot be resolved.
+    /// </summary>
+    private void EnsurePipelineIsOnDemandCompatible(string tenantId, RtDeployableWorkload? workload,
+        IReadOnlyList<NodeDescriptorDto>? nodeDescriptors, RtEntityId pipelineRtEntityId, string? pipelineDefinition)
+    {
+        if (workload is not { LifecycleMode: RtLifecycleModeEnum.OnDemand })
+        {
+            return;
+        }
+
+        var processBoundNodes = onDemandCapabilityService.GetProcessBoundNodes(pipelineDefinition, nodeDescriptors);
+        if (processBoundNodes.Count > 0)
+        {
+            throw AdapterServiceException.PipelineNotOnDemandCompatible(tenantId, pipelineRtEntityId,
+                workload.Name, processBoundNodes);
+        }
     }
 
     public async Task<bool> SetPipelineDebuggingAsync(string tenantId, RtEntityId pipelineRtEntityId, bool isEnabled)
@@ -799,6 +893,12 @@ internal class AdapterService(
 
             await UpdateAdapterConfigurationAsync(tenantId, adapterConfigurations.Values.ToList());
 
+            // AB#4984: the deployed pipeline sets changed — refresh the persisted capability
+            foreach (var configuredAdapterRtEntityId in adapterConfigurations.Keys)
+            {
+                await onDemandCapabilityService.RefreshWorkloadCapabilityAsync(tenantId, configuredAdapterRtEntityId);
+            }
+
             return;
         }
 
@@ -875,6 +975,11 @@ internal class AdapterService(
                 {
                     await communicationRepository.SetAdapterConfigurationStateAsync(tenantId, adapterRtEntityId,
                         RtConfigurationStateEnum.Configured, null);
+
+                    // AB#4918: Configured is the wake readiness signal (AB#4594 — Online is not
+                    // enough). Releases wake-gate waiters and moves an OnDemand workload to
+                    // Running. Best-effort by contract, never throws.
+                    await workloadLifecycleService.NotifyWorkloadConfiguredAsync(tenantId, adapterRtEntityId.RtId);
 
                     foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
                     {

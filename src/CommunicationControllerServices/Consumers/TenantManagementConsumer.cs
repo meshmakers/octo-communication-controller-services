@@ -26,7 +26,21 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
     // AddScoped), so MassTransit creates a NEW instance per message. An instance field can never
     // pair Pre with Pos — the pair state must live at process scope or the paired branch
     // (adapter restart relay + CK cache flush) silently never runs.
-    private static readonly ConcurrentDictionary<Guid, bool> _receivedPreUpdateTenant = new();
+    // The value carries the first message's TenantUpdateScope (AB#4895) so the pairing branch
+    // knows how invasive the update is.
+    private static readonly ConcurrentDictionary<Guid, TenantUpdateScope> _receivedPreUpdateTenant = new();
+
+    /// <summary>
+    ///     The effective scope of a completed pair: Full wins over CacheOnly so a mixed pair
+    ///     (defensive — both messages come from one publisher and normally agree) never skips
+    ///     the restart relay for a real tenant update (AB#4895).
+    /// </summary>
+    private static TenantUpdateScope EffectiveScope(TenantUpdateScope first, TenantUpdateScope second)
+    {
+        return first == TenantUpdateScope.Full || second == TenantUpdateScope.Full
+            ? TenantUpdateScope.Full
+            : TenantUpdateScope.CacheOnly;
+    }
 
     public TenantManagementConsumer(ILogger<TenantManagementConsumer> logger, IPoolService poolService,
         IAdapterService adapterService, IConfigurationService configurationService,
@@ -55,15 +69,14 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
             // triggers the actual tenant update — Pre first, then Pos — regardless of
             // delivery order. This guarantees adapters are notified (Pre) before the
             // cache is reinitialised (Pos), even when the broker delivers in normal order.
-            if (_receivedPreUpdateTenant.TryRemove(context.Message.CorrelationId, out _))
+            if (_receivedPreUpdateTenant.TryRemove(context.Message.CorrelationId, out var firstScope))
             {
-                await NotifyCkModelChangedAsync(context.Message.TenantId);
-                await ExecutePreTenantUpdate(context.Message.TenantId);
-                await ExecutePosTenantUpdate(context.Message.TenantId);
+                await HandlePairedTenantUpdateAsync(context.Message.TenantId,
+                    EffectiveScope(firstScope, context.Message.Scope));
             }
             else
             {
-                _receivedPreUpdateTenant.TryAdd(context.Message.CorrelationId, true);
+                _receivedPreUpdateTenant.TryAdd(context.Message.CorrelationId, context.Message.Scope);
             }
         }
         catch (Exception e)
@@ -90,15 +103,14 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
                 return;
             }
 
-            if (_receivedPreUpdateTenant.TryRemove(context.Message.CorrelationId, out _))
+            if (_receivedPreUpdateTenant.TryRemove(context.Message.CorrelationId, out var firstScope))
             {
-                await NotifyCkModelChangedAsync(context.Message.TenantId);
-                await ExecutePreTenantUpdate(context.Message.TenantId);
-                await ExecutePosTenantUpdate(context.Message.TenantId);
+                await HandlePairedTenantUpdateAsync(context.Message.TenantId,
+                    EffectiveScope(firstScope, context.Message.Scope));
             }
             else
             {
-                _receivedPreUpdateTenant.TryAdd(context.Message.CorrelationId, false);
+                _receivedPreUpdateTenant.TryAdd(context.Message.CorrelationId, context.Message.Scope);
             }
         }
         catch (Exception e)
@@ -190,6 +202,27 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
             await _eventService.StoreErrorEventAsync(tenantId,
                 $"CK model change notification to adapters failed: {e.Message}");
         }
+    }
+
+    /// <summary>
+    ///     Runs when a Pre/Pos pair completed. Every update flushes the adapters' CK caches; only a
+    ///     Full update additionally relays the adapter restart (SignalR stop/start + shutdown/startup).
+    ///     A CacheOnly pair — e.g. the nightly autocomplete aggregation (AB#4895) — deliberately skips
+    ///     the relay: the fleet-wide midnight restart was the trigger window for AB#4876.
+    /// </summary>
+    private async Task HandlePairedTenantUpdateAsync(string tenantId, TenantUpdateScope scope)
+    {
+        await NotifyCkModelChangedAsync(tenantId);
+
+        if (scope == TenantUpdateScope.CacheOnly)
+        {
+            _logger.LogInformation(
+                "Tenant update for {TenantId} is cache-only, skipping the adapter restart relay", tenantId);
+            return;
+        }
+
+        await ExecutePreTenantUpdate(tenantId);
+        await ExecutePosTenantUpdate(tenantId);
     }
 
     private async Task ExecutePreTenantUpdate(string tenantId)

@@ -1,6 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Common.DistributionEventHub;
+using Meshmakers.Octo.Communication.Contracts.MessageObjects;
+using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using NSubstitute;
@@ -141,5 +143,83 @@ internal class UpdateScheduleAsyncTests : TriggerManagementServiceTestsBase
         // Assert
         await CommunicationEventService.Received(1).StoreInformationEventAsync(TenantId,
             Arg.Is<string>(s => s.Contains("0 trigger(s)")));
+    }
+
+    /// <summary>
+    /// AB#4918 cron co-wake: a cron trigger whose pipeline runs on an OnDemand adapter gets a
+    /// companion recurring send to the controller's durable wake queue — same cron, same
+    /// schedule group (so it is added/removed together with the trigger schedule) — carrying
+    /// the adapter's rtId in a <see cref="LifecycleWakeMessage"/>.
+    /// </summary>
+    [Test]
+    public async Task UpdateScheduleAsync_OnDemandAdapter_RegistersCoWakeScheduleForWakeQueue()
+    {
+        // Arrange
+        var trigger = RtEntityCreator.CreatePipelineTrigger(cronExpression: "0 * * * *");
+        var pipeline = RtEntityCreator.CreatePipeline();
+        var adapter = RtEntityCreator.CreateAdapter();
+        adapter.LifecycleMode = RtLifecycleModeEnum.OnDemand;
+
+        CommunicationRepository.GetTriggersAndPipelinesAsync(TenantId)
+            .Returns(new Dictionary<RtPipelineTrigger, IList<RtPipeline>>
+            {
+                { trigger, new List<RtPipeline> { pipeline } }
+            });
+        CommunicationRepository.GetAdapterByPipelineAsync(TenantId,
+                Arg.Is<RtEntityId>(id => id.RtId == pipeline.RtId))
+            .Returns(adapter);
+
+        // Act
+        await TriggerManagementService.UpdateScheduleAsync(TenantId);
+
+        // Assert
+        using var _ = Assert.Multiple();
+
+        await DistributionEventHubService.Received(1)
+            .ScheduleRecurringSendAsync(Arg.Any<PipelineTriggerSchedule>(), Arg.Any<string>(),
+                Arg.Any<RecurringSchedulingOptions>());
+
+        var expectedWakeAddress = $"queue:{PipelineQueueNames.LifecycleWakeQueue.ToLower()}";
+        await DistributionEventHubService.Received(1)
+            .ScheduleRecurringSendAsync(
+                Arg.Is<LifecycleWakeMessage>(m =>
+                    m.TenantId == TenantId && m.WorkloadRtId == adapter.RtId.ToString()),
+                expectedWakeAddress,
+                Arg.Is<RecurringSchedulingOptions>(o =>
+                    o.CronExpression == trigger.CronExpression
+                    && o.ScheduleGroup == $"pipelineTrigger-{TenantId}"));
+
+        await CommunicationRepository.Received(1).SetPipelineTriggerDeploymentStateAsync(
+            TenantId, trigger.RtId, RtDeploymentStateEnum.Deployed);
+    }
+
+    [Test]
+    public async Task UpdateScheduleAsync_AlwaysOnAdapter_DoesNotRegisterCoWake()
+    {
+        // Arrange
+        var trigger = RtEntityCreator.CreatePipelineTrigger(cronExpression: "0 * * * *");
+        var pipeline = RtEntityCreator.CreatePipeline();
+        var adapter = RtEntityCreator.CreateAdapter();
+        adapter.LifecycleMode = RtLifecycleModeEnum.AlwaysOn;
+
+        CommunicationRepository.GetTriggersAndPipelinesAsync(TenantId)
+            .Returns(new Dictionary<RtPipelineTrigger, IList<RtPipeline>>
+            {
+                { trigger, new List<RtPipeline> { pipeline } }
+            });
+        CommunicationRepository.GetAdapterByPipelineAsync(TenantId,
+                Arg.Is<RtEntityId>(id => id.RtId == pipeline.RtId))
+            .Returns(adapter);
+
+        // Act
+        await TriggerManagementService.UpdateScheduleAsync(TenantId);
+
+        // Assert - exactly one schedule (the trigger's own), no co-wake companion
+        await DistributionEventHubService.Received(1)
+            .ScheduleRecurringSendAsync(Arg.Any<PipelineTriggerSchedule>(), Arg.Any<string>(),
+                Arg.Any<RecurringSchedulingOptions>());
+        await DistributionEventHubService.DidNotReceiveWithAnyArgs()
+            .ScheduleRecurringSendAsync(Arg.Any<LifecycleWakeMessage>(), Arg.Any<string>(),
+                Arg.Any<RecurringSchedulingOptions>());
     }
 }

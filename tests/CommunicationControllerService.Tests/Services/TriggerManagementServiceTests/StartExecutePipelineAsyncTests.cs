@@ -1,6 +1,8 @@
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 using TUnit.Assertions;
 using TUnit.Assertions.Extensions;
 using TUnit.Core;
@@ -64,5 +66,56 @@ internal class StartExecutePipelineAsyncTests : TriggerManagementServiceTestsBas
 
         await Assert.That(captured).IsNotNull();
         await Assert.That(captured!.IsDryRun).IsFalse();
+    }
+
+    /// <summary>
+    /// AB#4918 wake gate: the execute-pipeline queue is non-durable, so the gate must have
+    /// completed before the command is sent — otherwise the message is silently dropped
+    /// while the adapter is scaled to 0.
+    /// </summary>
+    [Test]
+    public async Task StartExecutePipelineAsync_InvokesWakeGateBeforeSendingCommand()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+
+        ExecuteMeshPipelineCommandClient
+            .GetResponse<ExecutePipelineResponse>(Arg.Any<string>(), Arg.Any<ExecutePipelineRequest>(),
+                Arg.Any<CancellationToken>(), Arg.Any<TimeSpan?>())
+            .Returns(new ExecutePipelineResponse(true, null, Guid.NewGuid(), DateTime.UtcNow));
+
+        await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null);
+
+        Received.InOrder(() =>
+        {
+            WorkloadLifecycleService.EnsureWorkloadRunningForPipelineAsync(TenantId,
+                Arg.Is<OctoObjectId>(id => id.ToString() == pipelineRtId.ToString()));
+            ExecuteMeshPipelineCommandClient.GetResponse<ExecutePipelineResponse>(Arg.Any<string>(),
+                Arg.Any<ExecutePipelineRequest>(), Arg.Any<CancellationToken>(), Arg.Any<TimeSpan?>());
+        });
+    }
+
+    /// <summary>
+    /// The gate call sits OUTSIDE the try block: a wake failure must surface as the typed
+    /// <see cref="WorkloadLifecycleServiceException"/> (unwrapped, actionable "retry shortly"
+    /// message) and the execute command must never be sent.
+    /// </summary>
+    [Test]
+    public async Task StartExecutePipelineAsync_WakeGateThrows_PropagatesUnwrappedAndDoesNotSend()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+
+        WorkloadLifecycleService
+            .EnsureWorkloadRunningForPipelineAsync(TenantId, Arg.Any<OctoObjectId>())
+            .ThrowsAsync(WorkloadLifecycleServiceException.WakeTimedOut(TenantId, pipelineRtId,
+                "meshtest-adapter", TimeSpan.FromSeconds(1)));
+
+        await Assert.That(async () =>
+                await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId,
+                    pipelineInput: null))
+            .Throws<WorkloadLifecycleServiceException>();
+
+        await ExecuteMeshPipelineCommandClient.DidNotReceiveWithAnyArgs()
+            .GetResponse<ExecutePipelineResponse>(Arg.Any<string>(), Arg.Any<ExecutePipelineRequest>(),
+                Arg.Any<CancellationToken>(), Arg.Any<TimeSpan?>());
     }
 }

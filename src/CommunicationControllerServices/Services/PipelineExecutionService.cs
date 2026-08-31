@@ -14,7 +14,8 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 internal class PipelineExecutionService(
     ICommunicationRepository communicationRepository,
     IAdapterCache adapterCache,
-    ICommunicationEventService eventService)
+    ICommunicationEventService eventService,
+    IWorkloadLifecycleService workloadLifecycleService)
     : IPipelineExecutionService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
@@ -275,9 +276,24 @@ internal class PipelineExecutionService(
 
             if (runningExecutions.Any())
             {
-                await eventService.StoreInformationEventAsync(tenantId,
-                    $"{runningExecutions.Count} running execution(s) marked as interrupted due to adapter disconnect.",
-                    adapterRtEntityId);
+                // AB#4919: the idle watchdog only drains a workload with no running executions, so
+                // finding any here means a hibernation cut work short — the drain guarantee did not
+                // hold. That is worth a warning rather than the routine information event, because
+                // unlike an ordinary disconnect nobody pulled a plug: the platform did it.
+                if (await workloadLifecycleService.IsIntentionallyDownAsync(tenantId, adapterRtEntityId.RtId))
+                {
+                    await eventService.StoreWarningEventAsync(tenantId,
+                        $"{runningExecutions.Count} running execution(s) were interrupted while the adapter was " +
+                        "being hibernated. Hibernation is supposed to wait for running executions; " +
+                        "please report this with the execution ids.",
+                        adapterRtEntityId);
+                }
+                else
+                {
+                    await eventService.StoreInformationEventAsync(tenantId,
+                        $"{runningExecutions.Count} running execution(s) marked as interrupted due to adapter disconnect.",
+                        adapterRtEntityId);
+                }
             }
         }
         catch (Exception e)

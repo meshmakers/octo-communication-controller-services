@@ -54,6 +54,10 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         Services.AddSingleton<ICommunicationEventService, CommunicationEventService>();
         Services.AddSingleton<IPipelineSchemaValidator, PipelineSchemaValidator>();
         Services.AddSingleton<IPipelineDefinitionService, PipelineDefinitionService>();
+        // AB#4984: AdapterService/PoolService take the on-demand capability service. The real
+        // implementation is pure over the repository/cache/parser registered above, so the
+        // integration tests exercise the real trigger classification.
+        Services.AddSingleton<IWorkloadOnDemandCapabilityService, WorkloadOnDemandCapabilityService>();
         Services.AddSingleton<IAdapterConnectionTracker, AdapterConnectionTracker>();
         Services.AddSingleton<IAdapterService, AdapterService>();
         Services.AddSingleton<IPoolService, PoolService>();
@@ -82,6 +86,12 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         Services.AddSingleton(Substitute.For<ICommandClient<CreateIdentityDataCommandRequest>>());
         Services.AddSingleton(Substitute.For<IRoutedCommandClient<ExecutePipelineRequest>>());
         Services.AddSingleton(Substitute.For<IDistributionEventHubService>());
+
+        // AB#4918: AdapterService and TriggerManagementService take the on-demand lifecycle
+        // service (wake gates / Configured hook). The integration tests exercise repository and
+        // config flows, not the lifecycle state machine — a substitute keeps every gate a no-op
+        // (same pattern as the command clients above).
+        Services.AddSingleton(Substitute.For<IWorkloadLifecycleService>());
 
         // Add mock SignalR hub contexts (required by hub callbacks). PoolHub
         // is gone — its responsibilities collapsed into OperatorHub.

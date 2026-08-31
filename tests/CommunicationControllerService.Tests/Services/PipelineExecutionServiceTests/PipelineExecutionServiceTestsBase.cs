@@ -14,6 +14,7 @@ internal abstract class PipelineExecutionServiceTestsBase
     protected readonly ICommunicationRepository CommunicationRepository;
     protected readonly IAdapterCachePublish AdapterCachePublish;
     protected readonly ICommunicationEventService CommunicationEventService;
+    protected readonly IWorkloadLifecycleService WorkloadLifecycleService;
     protected readonly AdapterTenant AdapterTenant;
 
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
@@ -23,7 +24,9 @@ internal abstract class PipelineExecutionServiceTestsBase
         CommunicationRepository = Substitute.For<ICommunicationRepository>();
         AdapterCachePublish = Substitute.For<IAdapterCachePublish>();
         CommunicationEventService = Substitute.For<ICommunicationEventService>();
-        PipelineExecutionService = new PipelineExecutionService(CommunicationRepository, AdapterCache, CommunicationEventService);
+        WorkloadLifecycleService = Substitute.For<IWorkloadLifecycleService>();
+        PipelineExecutionService = new PipelineExecutionService(CommunicationRepository, AdapterCache,
+            CommunicationEventService, WorkloadLifecycleService);
         AdapterTenant = new AdapterTenant(AdapterCachePublish, TenantId);
 
         InitAdapterCache();

@@ -19,6 +19,7 @@ internal class PoolService : IPoolService
     private readonly IOperatorConnectionManager _operatorConnectionManager;
     private readonly IWorkloadEncryptionService _encryptionService;
     private readonly IWorkloadTemplateResolver _templateResolver;
+    private readonly IWorkloadOnDemandCapabilityService _onDemandCapabilityService;
 
     /// <summary>
     /// Constructor
@@ -29,11 +30,13 @@ internal class PoolService : IPoolService
     /// <param name="operatorConnectionManager">Manages SignalR connections to central Communication Operators (for Cloud-pool deploy/undeploy notifications and PreUpdateTenant fan-out)</param>
     /// <param name="encryptionService">Decrypts secret-flagged ValueOverride values before they go on the SignalR wire</param>
     /// <param name="templateResolver">Resolves <c>{{domain.NAME}}</c>, <c>{{service.NAME}}</c> and <c>{{context.tenantId}}</c> placeholders in workload <c>Hostname</c>, non-secret <c>ValueOverride.Value</c> and <c>ValuesYaml</c> at deploy time</param>
+    /// <param name="onDemandCapabilityService">Validates LifecycleMode=OnDemand against the workload's trigger classification at deploy time (AB#4984)</param>
     public PoolService(ICommunicationRepository communicationRepository, IPoolCache poolCache,
         ICommunicationEventService eventService,
         IOperatorConnectionManager operatorConnectionManager,
         IWorkloadEncryptionService encryptionService,
-        IWorkloadTemplateResolver templateResolver)
+        IWorkloadTemplateResolver templateResolver,
+        IWorkloadOnDemandCapabilityService onDemandCapabilityService)
     {
         _communicationRepository = communicationRepository;
         _poolCache = poolCache;
@@ -41,6 +44,7 @@ internal class PoolService : IPoolService
         _operatorConnectionManager = operatorConnectionManager;
         _encryptionService = encryptionService;
         _templateResolver = templateResolver;
+        _onDemandCapabilityService = onDemandCapabilityService;
     }
     
     /// <inheritdoc />
@@ -72,11 +76,24 @@ internal class PoolService : IPoolService
         // pools flip back to Pending until a new operator re-registers.
         var pools = await _communicationRepository.GetPoolsAsync(tenantId);
         var rtPool = pools.FirstOrDefault(p => p.RtId == poolRtId);
-        var targetState = rtPool?.Environment == RtEnvironmentEnum.Edge
-            ? RtDeploymentStateEnum.Disabled
-            : RtDeploymentStateEnum.Pending;
-        await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolDescription.PoolRtId,
-            targetState);
+        if (rtPool != null && !ActiveDeployment.IsActive(rtPool.DeploymentState))
+        {
+            // AB#4255: an operator releasing a pool that already rests (UndeployPoolAsync wrote
+            // Undeployed / Disabled before notifying it) is the acknowledgement of that undeploy.
+            // Overwriting the resting state here parked every gracefully undeployed Cloud pool at
+            // Pending forever, which the Communication disable guard would then refuse on.
+            Logger.Info(
+                "[{TenantId}] Pool '{PoolRtId}' already rests at {DeploymentState}; operator release leaves it there",
+                tenantId, poolRtId, rtPool.DeploymentState);
+        }
+        else
+        {
+            var targetState = rtPool?.Environment == RtEnvironmentEnum.Edge
+                ? RtDeploymentStateEnum.Disabled
+                : RtDeploymentStateEnum.Pending;
+            await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolDescription.PoolRtId,
+                targetState);
+        }
 
         await _eventService.StoreInformationEventAsync(tenantId,
             $"Pool operator for pool '{poolName}' unregistered.",
@@ -216,7 +233,8 @@ internal class PoolService : IPoolService
     }
 
     /// <inheritdoc />
-    public async Task DeployWorkloadAsync(string tenantId, OctoObjectId workloadRtId)
+    public async Task DeployWorkloadAsync(string tenantId, OctoObjectId workloadRtId,
+        bool isReconciliation = false)
     {
         Logger.Info("[{TenantId}] Deploying workload '{WorkloadRtId}'", tenantId, workloadRtId);
 
@@ -247,7 +265,7 @@ internal class PoolService : IPoolService
         await EnsureWorkloadIsHelmDeployableAsync(tenantId, workload);
 
         var poolName = pool.Name ?? string.Empty;
-        var dto = await BuildWorkloadDeployedDtoAsync(tenantId, pool.RtId, poolName, workload);
+        var dto = await BuildWorkloadDeployedDtoAsync(tenantId, pool.RtId, poolName, workload, isReconciliation);
         if (dto == null)
         {
             // Should be unreachable after EnsureWorkloadIsHelmDeployableAsync, but
@@ -268,6 +286,70 @@ internal class PoolService : IPoolService
 
         await _eventService.StoreInformationEventAsync(tenantId,
             $"Workload '{workload.Name}' deploy requested.");
+    }
+
+    public async Task ReconcilePendingWorkloadsAsync(string tenantId, OctoObjectId poolRtId)
+    {
+        // AB#4894: a deploy notification that raced an operator pod replacement is lost
+        // silently, stranding the workload in Pending with nothing to reconcile it. On every
+        // pool (re-)registration, re-dispatch whatever is still Pending. Best effort — this
+        // runs on the registration path and must never fail it.
+        IReadOnlyCollection<RtDeployableWorkload> workloads;
+        try
+        {
+            workloads = await _communicationRepository.GetWorkloadsForPoolAsync(tenantId, poolRtId);
+        }
+        catch (Exception e)
+        {
+            // A tenant update may be unloading the CK cache concurrently (same race the
+            // PreDeleteTenant cascade avoids via in-memory tracking) — skip this round, the
+            // next registration reconciles.
+            Logger.Warn(e,
+                "[{TenantId}] Skipping pending-workload reconcile for pool {PoolRtId}: workload lookup failed",
+                tenantId, poolRtId);
+            return;
+        }
+
+        foreach (var workload in workloads.Where(w => w.DeploymentState == RtDeploymentStateEnum.Pending))
+        {
+            try
+            {
+                Logger.Info(
+                    "[{TenantId}] Workload '{WorkloadName}' ({WorkloadRtId}) is stuck in Pending on pool registration — re-dispatching its deploy (AB#4894)",
+                    tenantId, workload.Name, workload.RtId);
+
+                // AB#4955: an empty ChartVersion means "newest in the repository", resolved by the
+                // operator at `helm upgrade` time. This dispatch is not a release decision — it is
+                // triggered by a pool re-registration, i.e. an operator restart, a blueprint
+                // re-apply or a CK-model update — so an unpinned workload could come back on a
+                // different version than it was running, with nobody having asked for it. That is
+                // how the prod accounting fleet moved from 1.0.71 to 1.0.72 unattended. The DTO's
+                // IsReconciliation flag now tells the operator to keep the installed version, but
+                // an operator that pre-dates the flag still resolves anew — so the unpinned
+                // re-dispatch stays worth surfacing either way.
+                if (string.IsNullOrWhiteSpace(workload.ChartVersion))
+                {
+                    Logger.Warn(
+                        "[{TenantId}] Workload '{WorkloadName}' ({WorkloadRtId}) has no pinned ChartVersion — an operator without AB#4955 support resolves a possibly newer chart on this unattended re-dispatch",
+                        tenantId, workload.Name, workload.RtId);
+                    await _eventService.StoreWarningEventAsync(tenantId,
+                        $"Workload '{workload.Name}' was re-deployed automatically without a pinned chart version. A current operator keeps the chart version already installed; an older one resolves the newest chart in the repository. Pin ChartVersion to make deployments reproducible.");
+                }
+                else
+                {
+                    await _eventService.StoreInformationEventAsync(tenantId,
+                        $"Workload '{workload.Name}' was still Pending when its pool re-registered — deploy re-dispatched.");
+                }
+
+                await DeployWorkloadAsync(tenantId, workload.RtId, isReconciliation: true);
+            }
+            catch (Exception e)
+            {
+                Logger.Warn(e,
+                    "[{TenantId}] Re-dispatch of pending workload '{WorkloadName}' ({WorkloadRtId}) failed, continuing",
+                    tenantId, workload.Name, workload.RtId);
+            }
+        }
     }
 
     private async Task SetWorkloadDeploymentStateAsync(string tenantId, RtDeployableWorkload workload,
@@ -373,6 +455,31 @@ internal class PoolService : IPoolService
             throw PoolServiceException.WorkloadTemplateUnknownPlaceholder(
                 tenantId, workload.RtId, workload.Name, "ValuesYaml", workload.ValuesYaml, unknownInYaml!);
         }
+
+        // AB#4984 lifecycle-mode validation. LifecycleMode is plain CK author configuration
+        // (writable via GraphQL/blueprints without any service-layer hook), so the deploy is
+        // the enforcement net: fail fast with an actionable error instead of deploying a
+        // workload whose triggers would silently stop when the watchdog hibernates it.
+        if (workload.LifecycleMode == RtLifecycleModeEnum.Auto)
+        {
+            throw PoolServiceException.WorkloadLifecycleModeAutoNotImplemented(tenantId, workload.RtId, workload.Name);
+        }
+
+        if (workload.LifecycleMode == RtLifecycleModeEnum.OnDemand)
+        {
+            if (workload is not RtAdapter)
+            {
+                throw PoolServiceException.WorkloadOnDemandNotSupportedForType(tenantId, workload.RtId, workload.Name);
+            }
+
+            var capability = await _onDemandCapabilityService.EvaluateAsync(tenantId,
+                new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, workload.RtId));
+            if (!capability.IsCapable)
+            {
+                throw PoolServiceException.WorkloadNotOnDemandCapable(tenantId, workload.RtId, workload.Name,
+                    capability.BlockingReasons);
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -424,6 +531,11 @@ internal class PoolService : IPoolService
             ? RtDeploymentStateEnum.Undeployed
             : RtDeploymentStateEnum.Disabled;
         await SetWorkloadDeploymentStateAsync(tenantId, workload, restingState);
+
+        // AB#4919: an undeployed workload has no lifecycle state to report. Left in the gauge it
+        // would keep publishing its last value forever, showing a permanently hibernated workload
+        // that no longer exists.
+        WorkloadLifecycleMetrics.Forget(tenantId, workload.RtId);
 
         await _eventService.StoreInformationEventAsync(tenantId,
             $"Workload '{workload.Name}' undeploy requested (resting state: {restingState}).");
@@ -566,7 +678,8 @@ internal class PoolService : IPoolService
     }
 
     private async Task<WorkloadDeployedDto?> BuildWorkloadDeployedDtoAsync(string tenantId,
-        OctoObjectId poolRtId, string poolName, RtDeployableWorkload workload)
+        OctoObjectId poolRtId, string poolName, RtDeployableWorkload workload,
+        bool isReconciliation = false)
     {
         // ChartName is the minimal Helm identity we need to talk to a repository;
         // ChartVersion is optional and means "latest" when empty (see
@@ -620,6 +733,10 @@ internal class PoolService : IPoolService
             // "use latest from configured repo" contract (the operator's
             // HelmRunner omits --version when blank).
             ChartVersion = workload.ChartVersion ?? string.Empty,
+            // AB#4955: tells the operator this dispatch restores what was already running rather
+            // than acting on a release decision, so an unpinned workload stays on the chart version
+            // it currently has installed instead of resolving the newest one again.
+            IsReconciliation = isReconciliation,
             // Same template resolution as for non-secret ValueOverrides — already
             // validated by EnsureWorkloadIsHelmDeployableAsync.
             ValuesYaml = ResolveTemplate(workload.ValuesYaml, ctx) ?? string.Empty,
@@ -639,6 +756,13 @@ internal class PoolService : IPoolService
             // that every referenced NAME exists, so TryResolve cannot fail here.
             IngressEnabled = workload.IngressEnabled,
             Hostname = ResolveHostname(workload.Hostname, ctx),
+            // AB#4917: a redeploy of a hibernated/draining workload must not
+            // resurrect it — the operator pins the release at replicaCount=0.
+            // A deploy that is supposed to wake the workload goes through the
+            // wake gate first, which moves the state to Waking/Running before
+            // the deploy event is built.
+            Hibernated = workload.LifecycleState is RtLifecycleStateEnum.Hibernated
+                or RtLifecycleStateEnum.Draining,
         };
     }
 
@@ -874,6 +998,32 @@ internal class PoolService : IPoolService
             CommunicationStateTimestamp = p.CommunicationStateTimestamp,
             StatusMessage = p.StatusMessage
         }).ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ActiveDeployment>> GetActiveDeploymentsAsync(string tenantId)
+    {
+        var pools = await _communicationRepository.GetPoolsAsync(tenantId);
+        var workloads = await _communicationRepository.GetWorkloadsAsync(tenantId);
+
+        var active = new List<ActiveDeployment>();
+        active.AddRange(pools
+            .Where(p => ActiveDeployment.IsActive(p.DeploymentState))
+            .Select(p => new ActiveDeployment(ActiveDeployment.PoolKind, DisplayName(p.Name, p.RtId), p.DeploymentState))
+            .OrderBy(d => d.Name, StringComparer.Ordinal));
+        active.AddRange(workloads
+            .Where(w => ActiveDeployment.IsActive(w.DeploymentState))
+            .Select(w => new ActiveDeployment(
+                w is RtApplication ? ActiveDeployment.ApplicationKind : ActiveDeployment.AdapterKind,
+                DisplayName(w.Name, w.RtId), w.DeploymentState))
+            .OrderBy(d => d.Name, StringComparer.Ordinal));
+
+        return active;
+    }
+
+    private static string DisplayName(string? name, OctoObjectId rtId)
+    {
+        return string.IsNullOrWhiteSpace(name) ? rtId.ToString() : name;
     }
 
     /// <inheritdoc />

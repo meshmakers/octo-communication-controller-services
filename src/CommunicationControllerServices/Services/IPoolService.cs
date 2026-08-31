@@ -62,12 +62,32 @@ public interface IPoolService
     /// on the operator hub. Independent of <see cref="DeployPoolAsync"/>:
     /// the pool must already be deployed, but no fan-out happens here.
     /// </summary>
-    Task DeployWorkloadAsync(string tenantId, OctoObjectId workloadRtId);
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="workloadRtId">The object id of the workload</param>
+    /// <param name="isReconciliation">
+    /// Set only by <see cref="ReconcilePendingWorkloadsAsync"/>: this dispatch restores what was
+    /// already supposed to be running instead of acting on a release decision. It reaches the
+    /// operator on the deploy DTO and keeps a workload with an empty ChartVersion on the chart it
+    /// already has installed, rather than resolving "newest in the repository" again (AB#4955).
+    /// </param>
+    Task DeployWorkloadAsync(string tenantId, OctoObjectId workloadRtId, bool isReconciliation = false);
 
     /// <summary>
     /// Undeploys a single workload (Adapter or Application).
     /// </summary>
     Task UndeployWorkloadAsync(string tenantId, OctoObjectId workloadRtId);
+
+    /// <summary>
+    /// Re-dispatches every workload of the pool that is stuck in
+    /// <c>DeploymentState = Pending</c> (AB#4894). Called when an operator (re-)registers the
+    /// pool: a deploy notification sent while the previous operator pod was being replaced is
+    /// lost silently (SignalR SendAsync is fire-and-forget), leaving the entity Pending forever —
+    /// the reverse-sync restores Deployed state but never re-dispatches pending deploys.
+    /// Best effort: failures are logged per workload and never fail the registration.
+    /// A re-dispatch racing a genuinely in-flight deploy is safe — the operator queue is serial
+    /// and <c>helm upgrade --install</c> is idempotent.
+    /// </summary>
+    Task ReconcilePendingWorkloadsAsync(string tenantId, OctoObjectId poolRtId);
 
     /// <summary>
     /// Undeploys every Cloud pool of a tenant. Used when a tenant is being
@@ -109,6 +129,17 @@ public interface IPoolService
     /// <param name="tenantId">Tenant identifier</param>
     /// <returns>List of pool summaries with typed communication, configuration, and deployment states</returns>
     Task<IReadOnlyList<PoolSummaryDto>> GetPoolSummariesAsync(string tenantId);
+
+    /// <summary>
+    /// Lists the pools and workloads (Adapters/Applications) of the tenant that still own
+    /// operator-managed resources according to their persisted <c>DeploymentState</c>
+    /// (see <see cref="ActiveDeployment.IsActive"/>). Reads the repository, not the in-memory
+    /// operator tracking, so the answer survives controller restarts and covers Edge leftovers.
+    /// Pools first, then workloads, each ordered by name. Read failures propagate — an unreadable
+    /// tenant must never look torn down. Used by the Communication disable guard (AB#4255).
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    Task<IReadOnlyList<ActiveDeployment>> GetActiveDeploymentsAsync(string tenantId);
 
     /// <summary>
     /// Walks every Pool, Workload (Adapter/Application), Pipeline, and PipelineTrigger of a

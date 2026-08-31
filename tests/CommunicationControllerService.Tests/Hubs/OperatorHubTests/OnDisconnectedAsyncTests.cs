@@ -23,12 +23,14 @@ internal class OnDisconnectedAsyncTests : IDisposable
         Substitute.For<IShutdownState>();
     private readonly ICommunicationEventService _eventService =
         Substitute.For<ICommunicationEventService>();
+    private readonly IWorkloadLifecycleService _workloadLifecycleService =
+        Substitute.For<IWorkloadLifecycleService>();
     private readonly OperatorHub _hub;
 
     public OnDisconnectedAsyncTests()
     {
         _hub = new OperatorHub(_connectionManager, _repository, _poolService, _shutdownState,
-            _eventService);
+            _eventService, _workloadLifecycleService);
 
         var context = Substitute.For<HubCallerContext>();
         context.ConnectionId.Returns(ConnectionId);

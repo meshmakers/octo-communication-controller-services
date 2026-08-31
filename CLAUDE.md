@@ -538,6 +538,15 @@ Flow:
 Old adapter builds without the hub handler just log an unbound-method warning — the
 `PreUpdateTenantAsync` restart relay remains their (gated) fallback.
 
+**Update scope (AB#4895).** `PreUpdateTenant`/`PosUpdateTenant` carry an optional
+`TenantUpdateScope` (default `Full`; older publishers deserialize to `Full`). When a completed
+pair is `CacheOnly` — e.g. the nightly `AttributeValueAggregatorJob`, which only rewrites
+`AutoCompleteValues` on CK attributes — the consumer broadcasts the CK cache flush but
+**skips the adapter restart relay** entirely. The fleet-wide midnight restart this relay used
+to cause was the trigger window for AB#4876. A mixed pair is treated as `Full` (defensive).
+Tests: `CacheOnlyPair_NotifiesCkModelChangedButSkipsRestartRelay`,
+`MixedScopePair_FullWins_RunsRestartRelay`.
+
 **Pairing state is `static` on purpose.** `AddBroadcastEventConsumer` registers consumers
 **scoped**, so MassTransit creates a new `TenantManagementConsumer` per message — an
 instance-level pair dictionary can never match Pre with Pos, and the paired branch
@@ -933,6 +942,38 @@ Tests:
 - `Services/PoolServiceTests/UndeployAllCloudPoolsAsyncTests` — extended
   with workload-cascade tests.
 
+### Pending-Workload Reconcile on Pool Registration (AB#4894)
+
+A workload deploy notification is fire-and-forget SignalR; one sent while the operator pod was
+being replaced (e.g. an operator CD mid-rollout) lands on the dying connection and is lost —
+the entity stays `Pending` forever, and neither the AB#4371 pending queue (the pool HAD a
+registered owner at send time) nor the reverse-sync (restores state, never re-dispatches)
+covers it. `OperatorHub.RegisterPoolAsync` therefore calls
+`PoolService.ReconcilePendingWorkloadsAsync` after the AB#4371 flush: every workload of the
+pool still in `DeploymentState=Pending` gets its deploy re-dispatched through the normal
+`DeployWorkloadAsync` path. Best effort — lookup or per-workload failures are logged and never
+fail the registration. Re-dispatching a genuinely in-flight deploy is safe: the operator queue
+is serial and `helm upgrade --install` is idempotent. Tests:
+`Services/PoolServiceTests/ReconcilePendingWorkloadsAsyncTests`.
+
+**A reconcile is not a release decision (AB#4955).** The re-dispatch above fires on events that
+have nothing to do with releasing software — an operator restart, a blueprint re-apply, a CK-model
+update, `EnableCommunication` — because all of them re-register the tenant's pools via
+`PreUpdateTenantAsync`. A workload with an empty `ChartVersion` means "newest in the repository",
+resolved by the operator at `helm upgrade` time, so those events silently moved six prod-1
+accounting workloads from chart 1.0.71 to 1.0.72 with nobody deploying them. Two things close it:
+
+- `DeployWorkloadAsync(tenantId, workloadRtId, isReconciliation)` puts
+  `WorkloadDeployedDto.IsReconciliation` on the wire; only `ReconcilePendingWorkloadsAsync` passes
+  `true`. The operator then keeps the chart version it already has installed instead of resolving
+  the newest one again (see the operator's CLAUDE.md → "Reconciliation Keeps the Installed Chart
+  Version"). A user-triggered Deploy stays `false`, so an empty `ChartVersion` keeps meaning
+  "newest" — the contract `System.Communication.MainLatest` depends on.
+- The re-dispatch of an **unpinned** workload additionally writes a Warning event. The flag is
+  additive, so an operator that pre-dates it still resolves anew; the warning is what makes that
+  visible until the whole fleet is current. A pinned workload gets an Information event instead —
+  it comes back on exactly the version it was running.
+
 ### Operator Reverse-Sync
 
 Closes the restart-survival gap on the controller-side in-memory tracking
@@ -1080,6 +1121,289 @@ Tests:
 - `Controllers/CommunicationControllerWorkloadVariablesTests` — pins the
   ordering and shape of `GET /workload-variables` so the Studio's
   suggestion list stays stable.
+
+## Disable Refuses While Pools or Workloads Are Deployed (AB#4255)
+
+`POST {tenantId}/v1/communication/disable` answers **409** with an `OperationFailedErrorDto` while any
+Pool, Adapter or Application of the tenant has a `DeploymentState` other than `Undeployed` /
+`Disabled` (`ActiveDeployment.IsActive`: Deployed, Pending and Error all own operator resources —
+see the recompute comment in `PoolService.RecomputeAllDeploymentStatesAsync`). The body names every
+resource as `Kind 'Name' (State)` plus the undeploy verbs (`UndeployWorkload`, `UndeployPool`,
+Studio). Every other `ConfigurationException` stays a 400. The tenant delete/detach guard in the
+asset repository (AB#4255 step 1) only reads the enabled flag, so this is the check that keeps a
+deleted tenant from leaving `CommunicationPool` CRs and helm releases behind.
+
+Mechanics:
+
+- `DefaultConfigurationCreatorService.GetDisableBlockerAsync` overrides the octo-common-services hook
+  (consulted after the already-disabled check, before the flag is removed; a refusal keeps the flag and
+  skips `StopTenantAsync`) and builds the message with `BuildDisableBlockedMessage` (pinned by
+  `GetDisableBlockerAsyncTests.BuildDisableBlockedMessage_IsTheOperatorContract`).
+- `IPoolService.GetActiveDeploymentsAsync` reads the **repository** (`GetPoolsAsync` +
+  `GetWorkloadsAsync`, the latter a polymorphic `GetRtEntitiesByTypeAsync<RtDeployableWorkload>`),
+  NOT the `OperatorConnectionManager` tracking maps: this is a user request on a live tenant (no race
+  with the PreDeleteTenant cache unload), and the persisted state is what the operator mirrors back
+  through the reverse-sync, survives controller restarts and shows Cloud→Edge leftovers. A read
+  failure propagates — an unreadable tenant must never look torn down.
+- **Deliberately not in the guard:** pipelines (no cluster resource — their registration lives in the
+  adapter's memory; disconnect/helm-uninstall leaves them `Pending`, and `UndeployDataFlowAsync` throws
+  `AdapterNotLoaded` once the adapter is gone, so a pipeline-aware guard could not be remediated) and
+  triggers (`StopTenantAsync` removes their schedule itself; `Pending` is their normal post-disable
+  state, see `TriggerManagementService.RemoveScheduleAsync`).
+- This is a **verified precondition, not a teardown**: `UndeployAllCloudPoolsAsync` stays wired to
+  `PreDeleteTenant` only. Reasons: it reads the process-local tracking map, is Cloud-only, cannot stop
+  self-hosted Edge adapters, and a flag flip that helm-uninstalls a production tenant's workloads would
+  be a dangerous side effect of a harmless-looking verb.
+
+**Deploy gate.** This service does not register the platform's `UseOctoTenants()` enabled-gate
+middleware (it would 403 the `adapterHub` negotiate and every Studio Communication page of a disabled
+tenant — the Studio derives navigation from CK-model presence, which Disable does not remove). After
+a Disable the tenant API therefore stays callable. `PoolController.DeployPoolAsync` and
+`DeployWorkloadAsync` — the two endpoints that create operator-managed cluster resources — check
+`IConfigurationService.IsEnabledAsync` themselves and answer 409 on a disabled tenant; undeploy stays
+open so remediation always works. `DeployDataFlow` / `DeployTrigger` already fail on a disabled tenant
+because the adapter cache is flushed (`AdapterServiceException.TenantNotEnabled`). Adding the
+middleware gate is a follow-up decision, not part of AB#4255.
+
+**Operator release must not resurrect a resting pool.** `UndeployPoolAsync` writes the resting state
+(`Undeployed` / Edge `Disabled`) *before* it notifies the operator; the operator then removes the CR and
+calls `UnregisterPoolAsync`, and `PoolService.UnregisterPoolOperatorAsync` used to overwrite the resting
+state with `Pending` ("no operator until one re-registers"). Every gracefully undeployed Cloud pool
+therefore sat at `Pending` forever — invisible before, fatal for the guard (found in the local E2E with
+the kind operator connected). The release now leaves a pool that already rests alone; only a
+still-deployed pool that loses its operator flips to `Pending`
+(`UnregisterPoolOperatorAsyncTests.UnregisterPoolOperatorAsync_RestingPool_KeepsItsDeploymentState`).
+
+Tests: `Services/PoolServiceTests/GetActiveDeploymentsAsyncTests`,
+`Services/DefaultConfigurationCreatorServiceTests/GetDisableBlockerAsyncTests`,
+`Controllers/CommunicationControllerDisableTests`, `Controllers/PoolControllerDeployGateTests`,
+`Services/PoolServiceTests/UnregisterPoolOperatorAsyncTests`, integration `Repository/GetWorkloadsAsyncTests`.
+
+## On-Demand Adapter Lifecycle — Scale-to-Zero (Epic AB#4914; AB#4916/4917/4918)
+
+Rarely used adapter workloads scale to 0 replicas when idle and are woken automatically on
+demand. Design doc: `docs/concepts/on-demand-adapter-lifecycle.md`.
+
+**CK model (3.29.0, AB#4916).** `DeployableWorkload` carries `LifecycleMode`
+(AlwaysOn=0 default | OnDemand=1 | Auto=2 reserved, rejected until implemented) and
+`IdleTimeoutMinutes` (default 30) as author configuration, plus `LifecycleState`
+(Running/Draining/Hibernated/Waking) and `LastActivityAt` as `isRuntimeState` attributes.
+The existing state fields are deliberately untouched: `CommunicationState=Offline` stays
+factually correct while hibernated, `DeploymentState=Deployed` stays correct (the helm
+release still exists) — consumers interpret them *through* `LifecycleState`.
+
+**Activation is runtime configuration, not a deployment switch.** Two gates must both be on:
+1. Per-tenant config record `communicationLifecycle` (`CommunicationLifecycleConfiguration
+   { ScaleToZeroEnabled }`, default false) in the tenant KV store — same store as the
+   enabled flag. Read through `ILifecycleConfigurationService` (30 s TTL cache; a write
+   invalidates this pod immediately). REST: `GET/PUT {tenantId}/v1/communication/lifecycle`;
+   octo-cli: `GetCommunicationLifecycle` / `SetCommunicationLifecycle -sze true|false`.
+   Setting false is the per-tenant emergency stop.
+2. Per-workload `LifecycleMode=OnDemand`.
+
+**State machine (owned by `IWorkloadLifecycleService` / `WorkloadLifecycleService`).**
+`Running → Draining` (idle watchdog) `→ Hibernated` (operator scale-0 ack via
+`OperatorHub.ReportWorkloadScaleStatusAsync`) `→ Waking` (any demand signal) `→ Running`
+(readiness = **`ConfigurationState=Configured`**, NOT Online — AB#4594; hooked in
+`AdapterService.UpdateConfigurationStateAsync` → `NotifyWorkloadConfiguredAsync`, which also
+releases the wake waiters). A failed scale-0 reverts Draining→Running; a failed scale-1
+fail-fasts active waiters; a wake that never reaches Configured within
+`LifecycleWakeBudgetSeconds` (default 60) reverts to Hibernated and throws
+`WorkloadLifecycleServiceException` (deployment stays scaled up for diagnosis). The wake
+wait registry is per-pod in-memory and deliberately separate from
+`AdapterService._pendingDeployments` (single-TCS last-writer-wins slot).
+
+**Scale mechanics (AB#4917).** `RequestScaleAsync` routes a `ScaleWorkloadDto` through
+`IOperatorConnectionManager.NotifyWorkloadScaleAsync` (pool-scoped routing; when no operator
+owns the pool the notification is queued under a scale-specific pending key
+`{workloadRtId}::scale` so it never supersedes a queued deploy/undeploy — AB#4371 rules).
+The operator patches `{"spec":{"replicas":N}}` on the Deployments matching
+`app.kubernetes.io/instance={release}` (no helm) and acks via
+`ReportWorkloadScaleStatusAsync`. Redeploys must not resurrect: `BuildWorkloadDeployedDtoAsync`
+sets `WorkloadDeployedDto.Hibernated` for Hibernated/Draining workloads and the operator pins
+`--set replicaCount=0`.
+
+**Wake gates (AB#4918).** Demand signals all funnel into
+`EnsureWorkloadRunning[ForPipeline]Async` (fast no-op when the tenant gate is off, the
+workload is AlwaysOn, or the workload is Running — Running just stamps `LastActivityAt`):
+- Execute pipeline: `TriggerManagementService.StartExecutePipelineAsync`, **before** the
+  queue send — the execute queue is non-durable/auto-delete, a send to an absent queue is
+  silently dropped.
+- Config/deploy pushes: `AdapterService.DeployAdapterConfigurationAsync`,
+  `DeployPipelineAsync`, `DeployDataFlowAsync` (wake-first, before the cache lookup that
+  would throw `AdapterNotLoaded`).
+- Manual wake API: `POST {tenantId}/v1/adapter/{workloadRtId}/wake` (Studio "wake now",
+  app pre-warm).
+- Cron co-wake: `UpdateScheduleAsync` registers, for every cron trigger whose pipeline runs
+  on an OnDemand adapter, a companion recurring send (same cron, same scheduleGroup) of a
+  `LifecycleWakeMessage` to the **durable** queue `PipelineQueueNames.LifecycleWakeQueue`
+  (`octo::com-controller::lifecycle-wake`), consumed by `LifecycleWakeConsumer`
+  (registered via `AddRoutedEventConsumer` — NOT `AddCommandConsumer`, whose endpoints are
+  temporary). The pipeline's own trigger message meanwhile buffers durably on its
+  per-pipeline trigger queue. Co-wake schedules are registered independently of the tenant
+  gate (the consumer-side gate no-ops when the feature is off) so flipping the flag needs no
+  trigger redeploy.
+
+**Idle watchdog (AB#4918).** `WorkloadLifecycleWatchdogBackgroundService`
+(`LifecycleWatchdogIntervalMinutes`, default 5, also the startup grace; structure mirrors
+`AdapterOfflineReconciliationBackgroundService`). Per scale-to-zero tenant and OnDemand
+Adapter workload in Running+Deployed: idle metric = max(`LastActivityAt`, per-pipeline
+`RtPipelineStatistics.LastExecutionAt` — statistics survive the AB#4370 execution fold, raw
+`CompletedAt` does not); busy guards = running executions
+(`GetRunningExecutionsForAdapterAsync`) and an in-flight wake (`HasActiveWake`). No observed
+activity at all counts as idle-since-forever (that fleet is the feature's target). Idle >
+`IdleTimeoutMinutes` → Draining + scale-0 request. The watchdog also reconciles stale
+`Waking` states (controller restart lost the in-memory waiters): Configured → Running;
+stuck > 2× wake budget → Hibernated + error event. Applications are skipped (no pipeline
+activity signal yet).
+
+**Hibernation stays out of the audit trail (AB#4919).** A scale-to-zero disconnects the
+workload on purpose, so the offline paths ask
+`IWorkloadLifecycleService.IsIntentionallyDownAsync` (true for `Draining`/`Hibernated`;
+fast-path false when the tenant has scale-to-zero off, never throws) before they report
+anything:
+
+- `AdapterService.SetAdapterCommunicationStateOfflineAsync` skips the "is now offline"
+  information event.
+- `AdapterService.ReconcileOrphanedOnlineAdaptersAsync` still corrects a stale `Online` — a
+  workload that looks healthy while hibernated is worse than the log line — but drops the
+  "had no live connection" event and logs at Info instead of Warn.
+- `PipelineExecutionService.MarkExecutionsAsInterruptedAsync` keeps marking executions, but
+  when the adapter is hibernating it reports a **warning** instead of the routine information
+  event: the watchdog only drains a workload with no running executions, so finding any here
+  means the drain guarantee did not hold, and unlike an ordinary disconnect the platform is
+  what cut the work short.
+
+The **state writes are deliberately unchanged** — `CommunicationState=Offline` is factually
+true while hibernated, and consumers are supposed to read it through `LifecycleState`. What
+changes is only how loudly it is reported. Tests:
+`Services/AdapterServiceTests/HibernationAuditSuppressionTests`, the two hibernation cases in
+`Services/PipelineExecutionServiceTests/MarkInterruptedTests`.
+
+### Lifecycle metrics (AB#4919)
+
+`WorkloadLifecycleMetrics` (static, mirroring `MongoCommandObservability` in the MongoDB
+engine) emits four instruments on the meter **`Meshmakers.Octo.Communication`**, which
+octo-common-services' `ObservabilityBuilder` registers with the OpenTelemetry MeterProvider —
+without that registration the measurements are recorded and dropped.
+
+| Instrument | Kind | Purpose |
+|---|---|---|
+| `octo.workload.wake.count` | counter | Wakes, tagged `octo.wake.outcome` = `configured` / `timeout` |
+| `octo.workload.wake.duration` | histogram (s) | Scale-up request → `ConfigurationState=Configured`; the latency a request pays for a wake |
+| `octo.workload.hibernation.count` | counter | Completed hibernations (operator acked scale-0) |
+| `octo.workload.hibernated` | observable gauge | 1 while hibernated or draining, 0 while running — averaged over time this is the hibernation ratio |
+
+Tags on every instrument: `octo.tenant.id`, `octo.workload.rt_id`, `octo.workload.name`.
+Cardinality is bounded by the number of workloads (dozens per cluster).
+
+Three decisions worth keeping:
+
+- **The wake is timed by the caller that started it**, in the `Hibernated`/`Draining` branch of
+  `EnsureWorkloadRunningAsync` — not inside `WaitForConfiguredAsync`, which is also entered by
+  callers joining an in-flight wake. Timing there would count one wake per waiter and inflate
+  both the count and the percentiles.
+- **A timed-out wake is counted but never recorded as a duration.** The budget is a cut-off,
+  not an observation; mixing it in pulls every percentile towards the timeout.
+- **The gauge map is in-memory and republished by the idle watchdog** from each swept
+  workload's persisted state (`ObserveState`), so a controller restart heals within one sweep
+  instead of reporting every workload as running forever. `UndeployWorkloadAsync` calls
+  `Forget` — an undeployed workload left in the map would keep publishing its last value.
+
+Tests: `Services/WorkloadLifecycleMetricsTests` (through a real `MeterListener`, so the
+assertions are about the names and tags the exporter actually publishes; each test uses a
+unique tenant because the instruments are process-wide and the suite runs concurrently).
+
+### HTTP Activator — wake on request (AB#4923)
+
+Routes and authorization live inside the adapter (`HttpRequestService` /
+`FromHttpRequest@2`), so nothing in front of it can pre-authorize a call — and with the
+workload scaled to zero the ingress can only answer 502/503. `WorkloadActivatorMiddleware`
+holds such a request through the wake and then forwards it.
+
+**Wiring is an ingress annotation, not a route.** Adapter Ingresses carry
+`nginx.ingress.kubernetes.io/default-backend` naming this service; nginx uses that backend
+exactly when the primary Service has no ready endpoint. That single condition is the whole
+mechanism — there is no state to flip on hibernate and no window where the two disagree,
+and steady-state traffic never passes through the controller. It also catches the
+non-lifecycle cases (ImagePullBackOff, crash loop) and answers them with a named 503 rather
+than nginx's default page. The companion annotation
+`nginx.ingress.kubernetes.io/proxy-read-timeout` must exceed the wake budget; the cluster
+default of 60 s would cut the hold short. Both are projected onto every workload by the
+operator's cluster-wide `OPERATOR__INGRESS__ANNOTATIONS__n__*`.
+
+Enabled per instance by `CommunicationControllerOptions.ActivatorEnabled` (chart:
+`services.communication.activatorEnabled`, default off). The flag alone is inert — the
+annotation is what routes traffic.
+
+Request path:
+
+1. `IWorkloadHostnameIndex` resolves the inbound `Host` header to a workload. The index is
+   built in the background (`WorkloadHostnameIndexBackgroundService`) over every enabled
+   tenant's ingress-enabled workloads, with hostname templates resolved exactly as the deploy
+   path resolves them, because the Ingress carries the resolved value. A miss falls through
+   untouched — one dictionary lookup, and it is what keeps the controller's own API
+   unaffected. The middleware therefore runs **before** authentication and routing: these
+   requests belong to the adapter's URL space, so neither this service's auth policies nor
+   its route table apply.
+2. `EnsureWorkloadRunningAsync` — the same wake gate the execute path uses, so concurrent
+   callers share one wake.
+3. Forward to `ActivatorWorkloadAddressTemplate` with `{release}` replaced by the workload's
+   helm release name. `WorkloadHostnameIndex.ReleaseName` mirrors the operator's
+   `K8sNaming.DnsName`; it is duplicated rather than shared (no common library) and pinned by
+   `WorkloadHostnameIndexTests.ReleaseName_MatchesTheOperatorsRule`. The default template
+   carries no namespace, so the pod's own search domain resolves it in the controller's
+   namespace — which is where the operator deploys workloads.
+4. A refused connection is retried for `ActivatorForwardRetrySeconds` (default 30). The wake
+   completes on `ConfigurationState=Configured` — the adapter has registered over SignalR —
+   while the Service endpoint only appears once the readiness probe passes and kube-proxy picks
+   it up; until then the connection is refused. Measured on test-2, under four seconds was not
+   enough and produced a 503 for a workload that was already running. Each attempt builds a
+   **fresh** `HttpRequestMessage`; reusing one throws `InvalidOperationException` ("the request
+   message was already sent"), which is exactly how the first live request failed.
+   **Bodies within `MaxBufferedBodyBytes` (32 MB) are buffered once and replayed per attempt**
+   (`ByteArrayContent` — a `StreamContent` over the request stream would be disposed with the
+   first message). Without that, a body meant exactly one attempt, and the first request after
+   hibernation is precisely the one that wakes the workload and lands in the endpoint gap:
+   browser uploads failed deterministically while bodyless probes sailed through (AB#4968 field
+   report). Oversized or chunked bodies keep the single attempt — silently forwarding a
+   truncated body would be worse than a 503.
+   A 503 response carrying the `X-Octo-Activator` marker is the **loop guard answering the
+   forwarded request** — the response-shaped twin of the refused connection, occurring where
+   the forward path re-enters through the ingress (a host-run controller cannot reach
+   ClusterIPs) — and gets the same retry treatment instead of being copied to the caller.
+5. Failure to wake, or a workload that stays unreachable, answers 503 with `Retry-After` set
+   to the wake budget and the `X-Octo-Activator` marker. A forwarded request that comes back
+   here is recognised by that header and answered 503 instead of forwarded again.
+   **The 503 reflects the request's `Origin`** (plus `Vary: Origin`): the routes and their CORS
+   policy live inside the adapter — the thing that is unavailable — so nothing can make the
+   real policy call, and without a reflected origin the browser hides status and body entirely
+   and surfaces a bare network error ("0 Unknown Error"), which misdirected every diagnosis of
+   this path. An error-only response that names workload and tenant the caller addressed leaks
+   nothing.
+
+The middleware makes **no authorization decision** and rewrites nothing but the loop-guard
+header: the adapter must see what the client sent.
+
+Tests: `Services/WorkloadHostnameIndexTests`.
+
+**Known limitations / follow-ups:** in-process `FromPolling`/`FromMicrosoftGraphEmail`
+triggers never idle and silently stop at 0 replicas — such pipelines must move to cron
+`PipelineTrigger`s before their workload goes OnDemand (AB#4922 precondition); the
+OnDemandCapable trigger-classification validation is not yet implemented (rejecting
+`LifecycleMode=OnDemand` on process-bound workloads, AB#4916 §5); the Studio badges of AB#4919
+are still open, as is its Dash0 alerting review; the
+`octo-eda-adapter` chart still needs the `terminationGracePeriodSeconds` fix that
+`octo-mesh-adapter` got.
+
+Repository surface: `SetWorkloadLifecycleStateAsync` / `SetWorkloadLastActivityAsync`
+(polymorphic load-then-update over Adapter/Application — an `EntityUpdateInfo` needs the
+concrete CK type).
+
+Tests: `Services/WorkloadLifecycleServiceTests/*`, `Services/LifecycleConfigurationServiceTests`,
+`Hubs/OperatorHubTests/ReportWorkloadScaleStatusAsyncTests`, the scale section in
+`Hubs/OperatorConnectionManagerTests`, `BackgroundServices/WorkloadLifecycleWatchdogTests`,
+plus gate assertions in the AdapterService / TriggerManagementService test folders.
 
 ## Project Structure Notes
 

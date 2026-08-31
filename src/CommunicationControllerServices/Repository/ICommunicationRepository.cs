@@ -29,10 +29,42 @@ public interface ICommunicationRepository
     Task<IReadOnlyCollection<RtDeployableWorkload>> GetWorkloadsForPoolAsync(string tenantId, OctoObjectId poolRtId);
 
     /// <summary>
+    /// Loads every deployable workload (Adapter and Application) of the tenant, regardless of
+    /// whether a pool manages it. Polymorphic like <see cref="GetWorkloadsForPoolAsync"/>.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    Task<IReadOnlyCollection<RtDeployableWorkload>> GetWorkloadsAsync(string tenantId);
+
+    /// <summary>
     /// Loads a single deployable workload by runtime id. Returns
     /// <c>null</c> when no entity with that id exists.
     /// </summary>
     Task<RtDeployableWorkload?> GetWorkloadByRtIdAsync(string tenantId, OctoObjectId workloadRtId);
+
+    /// <summary>
+    /// Writes the workload's lifecycle state (AB#4914) and optionally its
+    /// <c>StatusMessage</c>. Polymorphic over Adapter / Application — the
+    /// entity is loaded first to resolve the concrete CK type. Throws when
+    /// the workload does not exist.
+    /// </summary>
+    Task SetWorkloadLifecycleStateAsync(string tenantId, OctoObjectId workloadRtId,
+        RtLifecycleStateEnum lifecycleState, string? statusMessage = null);
+
+    /// <summary>
+    /// Stamps the workload's <c>LastActivityAt</c> (AB#4914) — input to the
+    /// idle watchdog. Polymorphic over Adapter / Application. Throws when
+    /// the workload does not exist.
+    /// </summary>
+    Task SetWorkloadLastActivityAsync(string tenantId, OctoObjectId workloadRtId, DateTime lastActivityAtUtc);
+
+    /// <summary>
+    /// Writes the workload's computed <c>OnDemandCapable</c> flag and
+    /// <c>OnDemandBlockingReasons</c> (AB#4984) — display aid for the Studio
+    /// next to the LifecycleMode setting. Polymorphic over Adapter /
+    /// Application. Throws when the workload does not exist.
+    /// </summary>
+    Task SetWorkloadOnDemandCapabilityAsync(string tenantId, OctoObjectId workloadRtId, bool onDemandCapable,
+        string? blockingReasons);
 
     /// <summary>
     /// Walks the <c>Manages</c> association from a workload back to its
