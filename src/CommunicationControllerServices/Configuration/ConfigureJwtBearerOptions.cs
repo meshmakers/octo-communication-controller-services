@@ -52,5 +52,47 @@ internal class ConfigureJwtBearerOptions(
         // every bearer request. Same fix as octo-mcp-service (AB#4315) and octo-ai-services
         // (AB#5051/AB#5056).
         options.TokenValidationParameters.AuthenticationType = JwtBearerDefaults.AuthenticationScheme;
+
+        // AB#5059 — accept the access token from the query string on the SignalR hub paths.
+        // SignalR's own AccessTokenProvider cannot use an Authorization header on the WebSocket and
+        // Server-Sent-Events transports (browsers do not allow one on those handshakes), so it appends
+        // ?access_token=… instead; that is the documented server-side counterpart. Without this the
+        // hub gate (OperatorHubAuthorizationFilter) would report every standards-compliant client as
+        // anonymous, which is worse than no gate — it would produce a clean-looking inventory.
+        // Narrowed to the hub paths so a token can never be smuggled into a REST route as a query
+        // parameter, where it would end up in access logs and browser history.
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                if (!string.IsNullOrEmpty(accessToken) && IsHubPath(context.Request.Path))
+                {
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
+            }
+        };
+    }
+
+    /// <summary>
+    ///     True for <c>/operatorHub</c> and <c>/{tenantId}/adapterHub</c>, including their SignalR
+    ///     sub-paths (<c>/negotiate</c>).
+    /// </summary>
+    private static bool IsHubPath(PathString path)
+    {
+        var value = path.Value;
+        if (string.IsNullOrEmpty(value))
+        {
+            return false;
+        }
+
+        var withoutNegotiate = value.EndsWith("/negotiate", StringComparison.OrdinalIgnoreCase)
+            ? value[..^"/negotiate".Length]
+            : value;
+
+        return withoutNegotiate.EndsWith("/operatorHub", StringComparison.OrdinalIgnoreCase) ||
+               withoutNegotiate.EndsWith("/adapterHub", StringComparison.OrdinalIgnoreCase);
     }
 }

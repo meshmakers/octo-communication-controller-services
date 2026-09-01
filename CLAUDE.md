@@ -59,6 +59,51 @@ All operations are tenant-scoped. Routes use a custom `tenantId` constraint. The
   - `TenantCommunicationApiReadOnlyPolicy` - tenant read-only
 - Scopes defined in `CommonConstants` from the Contracts library
 
+#### The SignalR hubs are not covered by any of that (AB#5059)
+
+`app.MapHub<AdapterHub>` / `app.MapHub<OperatorHub>` carry **no** `RequireAuthorization()`, neither hub
+class has an `[Authorize]` attribute, and the service registers no `FallbackPolicy`. The policies above
+apply to the controller routes only. For `/operatorHub` — the tenant-crossing control plane where an
+operator claims pools and acknowledges workload deploy / scale outcomes — that gap is now closed by a
+**staged** gate; `/adapterHub` still has none and needs its own consumer inventory (the mesh-adapter
+fleet plus Studio's pipeline debugger).
+
+`Hubs/OperatorHubAuthorizationFilter` is an `IHubFilter` registered per hub via
+`AddSignalR().AddHubOptions<OperatorHub>(o => o.AddFilter<OperatorHubAuthorizationFilter>())`. On every
+connection it evaluates **`Constants.SystemCommunicationApiPolicy`** — deliberately the policy the
+service's own `system/v{version}` routes already use, not a new one: the hub is not tenant-scoped and
+everything it does is a system-level write.
+
+| `OperatorHubAuthorization:Mode` | Behaviour |
+|---|---|
+| `LogOnly` (**default**, and the enum's zero value) | Connection outcomes identical to no gate at all, but every connection an enforcing run would refuse is logged as a warning naming connection id, `client_id`, `sub` and scopes. That log **is** the consumer inventory. |
+| `Enforce` | A connection that does not satisfy the policy is refused with a `HubException`. |
+
+🔴 **It must stay on `LogOnly` until the operator gets a credential — this is a precondition outside
+this repo, not a knob to flip.** The operator's connection is built by `SignalRClient.CreateHubConnection`
+in **octo-sdk** (`src/Sdk.ServiceClient/SignalRClient.cs`), which contains a literal
+`options.Headers["Authorization"] = "Bearer your-access-token"` under a `// TODO: Handle authentication`,
+and **octo-communication-operator**'s `OperatorHubClientFactory` hands the client a freshly constructed,
+never-populated `ServiceClientAccessToken`; `OperatorOptions` has no client id, secret or authority to
+obtain a real one from. Arming `Enforce` today 401s **every** operator in the estate, central and edge
+alike, and every pool goes Unregistered with no workload deploys. Bind it per environment with
+`OCTO_OPERATORHUBAUTHORIZATION__MODE=Enforce` once the fleet authenticates — no release needed. The
+staging shape is the same one `TenantAuthorizationOptions` uses (AB#5032 / AB#5054) on purpose.
+
+`ConfigureJwtBearerOptions` also gained `OnMessageReceived`, which accepts the token from
+`?access_token=` **on the hub paths only** (`/operatorHub`, `/{tenantId}/adapterHub`, and their
+`/negotiate` sub-paths). SignalR cannot send an `Authorization` header on the WebSocket / SSE
+transports, so this is the documented server-side counterpart; without it the gate would read every
+standards-compliant client as anonymous and produce a clean-looking but worthless inventory. It is
+narrowed to the hub paths so a token can never be smuggled into a REST route as a query parameter,
+where it would land in access and proxy logs.
+
+Tests: `tests/CommunicationControllerService.Tests/Hubs/OperatorHubAuthorizationFilterTests.cs`
+(scoped operator connects in both modes; unauthenticated and read-only-scoped connections pass in
+`LogOnly` and are refused in `Enforce`; the default is `LogOnly`) and
+`Configuration/OperatorHubAuthorizationWiringTests.cs` (query token accepted on hub paths, ignored on
+REST paths, filter registration pinned at the `Program.cs` source, mode operator-settable).
+
 ### External Dependencies
 
 - **Meshmakers.Octo.*** packages - Octo platform libraries for runtime, infrastructure, observability

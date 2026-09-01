@@ -32,6 +32,7 @@ using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Meshmakers.Octo.Services.Notifications.Services;
 using Meshmakers.Octo.Services.Observability;
 using Meshmakers.Octo.Services.Swagger.Configuration;
+using Microsoft.AspNetCore.SignalR;
 using NLog;
 using NLog.Web;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
@@ -134,10 +135,22 @@ try
     builder.Services.AddControllers();
     // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
     builder.Services.AddSignalR(o =>
-    {
-        o.EnableDetailedErrors = true;
-        o.MaximumReceiveMessageSize = 1024 * 1024 * 100;
-    });
+        {
+            o.EnableDetailedErrors = true;
+            o.MaximumReceiveMessageSize = 1024 * 1024 * 100;
+        })
+        // AB#5059: /operatorHub is the tenant-crossing control plane of the operator fleet and had
+        // no authorization whatsoever — no [Authorize], no FallbackPolicy, no RequireAuthorization().
+        // The filter applies Constants.SystemCommunicationApiPolicy to every connection, staged
+        // behind OCTO_OPERATORHUBAUTHORIZATION__MODE because the operator SDK does not send a usable
+        // token yet (it sends the literal "Bearer your-access-token"). LogOnly is the default and
+        // changes no outcome; see OperatorHubAuthorizationOptions for the full reasoning.
+        // Scoped to this hub on purpose — AdapterHub needs its own consumer inventory.
+        .AddHubOptions<OperatorHub>(o => o.AddFilter<OperatorHubAuthorizationFilter>());
+
+    // AB#5059: bound as configuration so an environment can be armed without a release.
+    builder.Services.Configure<OperatorHubAuthorizationOptions>(
+        builder.Configuration.GetSection(OperatorHubAuthorizationOptions.SectionName));
 
     builder.Services.ConfigureOptions<ConfigureDistributionEventHubOptions>();
     builder.Services.ConfigureOptions<ConfigureJwtBearerOptions>();
