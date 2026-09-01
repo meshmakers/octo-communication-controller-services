@@ -3,9 +3,27 @@ attributes:
   - id: ClientId
     valueType: String
     description: "OAuth2 Client ID for authenticating with the external API."
+  # AB#5027. Runtime state, NOT author configuration: a client secret is issued by the
+  # identity provider (or pasted in by an admin) *after* the entity exists — a blueprint
+  # can only ever seed a placeholder for it. Without this marker every service-managed
+  # blueprint re-apply overwrote the live secret with that placeholder and broke the
+  # affected configuration until someone re-entered it by hand.
+  #
+  # BLAST RADIUS: this attribute definition is shared — it is referenced by
+  # ServiceAccountConfiguration, FinApiConfiguration and MicrosoftGraphConfiguration.
+  # All three now keep their secret across a re-apply. That is intentional and correct
+  # for all three (same reasoning), but it does mean a blueprint can no longer *change*
+  # a ClientSecret on an existing tenant — document new secrets in release notes and
+  # rotate them through Studio / the provisioning path instead.
+  #
+  # First install is unaffected: the engine's preservation only rewrites an incoming
+  # value when the target entity already exists AND already has a value for the
+  # attribute (ImportRtModelCommand.PreserveAttributesForEntity). A fresh tenant, or a
+  # pre-existing entity that has never had a ClientSecret, still gets the seeded value.
   - id: ClientSecret
     valueType: String
-    description: "OAuth2 Client Secret for authenticating with the external API."
+    isRuntimeState: true
+    description: "OAuth2 Client Secret for authenticating with the external API. Runtime state (AB#5027): issued/rotated at runtime, preserved across blueprint re-apply."
   - id: IsSandbox
     valueType: Boolean
     description: "If true, the adapter connects to the sandbox environment instead of production."

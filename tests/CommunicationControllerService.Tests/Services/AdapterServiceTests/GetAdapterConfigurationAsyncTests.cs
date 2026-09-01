@@ -247,10 +247,12 @@ internal class GetAdapterConfigurationAsyncTests : AdapterServiceTestsBase
         await Assert.That(configuration.Pipelines).Count().IsEqualTo(1);
 
         var pipeline = configuration.Pipelines.First();
-        await Assert.That(pipeline.Configurations).Count().IsEqualTo(2);;
+        // AB#5027: the two linked configurations plus the projected adapter default service account.
+        await Assert.That(pipeline.Configurations).Count().IsEqualTo(3);
         await Assert.That(pipeline.Configurations.Select(c => c.ConfigurationRtId))
             .Contains(configuration1.RtId)
-            .And.Contains(configuration2.RtId);
+            .And.Contains(configuration2.RtId)
+            .And.Contains(DefaultAdapterServiceAccount.RtId);
     }
 
 

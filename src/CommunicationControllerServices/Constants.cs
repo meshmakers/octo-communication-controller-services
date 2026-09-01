@@ -28,6 +28,25 @@ internal static class Constants
 
     public const string CommunicationControllerServiceIdentityDataVersionKey = "CommunicationControllerServicesIdentityData";
     public const int CommunicationControllerServiceIdentityDataVersionValue = 3;
+
+    /// <summary>
+    /// The OctoMesh delegation ("on-behalf-of") grant type (AB#5026), put on every provisioned
+    /// pipeline service account by <see cref="Services.PipelineServiceAccountProvisioningService"/>.
+    /// <para>
+    /// Duende gates its extension-grant validators on the client's own <c>AllowedGrantTypes</c>, so a
+    /// service account without this URN has its delegation request rejected before
+    /// <c>OnBehalfOfGrantValidator</c> runs — which is why it is seeded now (AB#5027) rather than
+    /// when AB#5031 lands, when adding it would mean touching every already-provisioned tenant.
+    /// </para>
+    /// <para>
+    /// The literal is duplicated on purpose: the canonical definition is
+    /// <c>DelegationConstants.OnBehalfOfGrantType</c> in the <c>IdentityServices</c> web assembly,
+    /// which is not referenceable from here (nor from <c>octo-sdk</c>); the mesh adapter's
+    /// <c>ServiceAccountTokenService.OnBehalfOfGrantType</c> carries the same copy. Promoting it into
+    /// a shared package is worth doing when one of these repos next needs a contract change anyway.
+    /// </para>
+    /// </summary>
+    public const string OnBehalfOfGrantType = "urn:meshmakers:params:oauth:grant-type:on-behalf-of";
     
     /// <summary>
     ///     Policy for system api authorization

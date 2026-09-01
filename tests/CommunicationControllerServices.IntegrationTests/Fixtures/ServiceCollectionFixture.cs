@@ -58,6 +58,14 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         // implementation is pure over the repository/cache/parser registered above, so the
         // integration tests exercise the real trigger classification.
         Services.AddSingleton<IWorkloadOnDemandCapabilityService, WorkloadOnDemandCapabilityService>();
+        // AB#5027: AdapterService takes the pipeline service-account resolver. Real implementation
+        // over the repository registered above, so the association traversal is exercised for real.
+        Services.AddSingleton<IPipelineServiceAccountResolver, PipelineServiceAccountResolver>();
+        // AB#5027 phase 2: PoolService takes the provisioning service. Substituted here — the real
+        // one talks to the identity service over the distribution event hub, which the integration
+        // fixture does not run; the repository-side entity + edge write it performs is covered
+        // directly by Repository/PipelineServiceAccountRepositoryTests.
+        Services.AddSingleton(Substitute.For<IPipelineServiceAccountProvisioningService>());
         Services.AddSingleton<IAdapterConnectionTracker, AdapterConnectionTracker>();
         Services.AddSingleton<IAdapterService, AdapterService>();
         Services.AddSingleton<IPoolService, PoolService>();

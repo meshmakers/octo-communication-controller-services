@@ -348,8 +348,11 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
             rtAdapter.ToRtEntityId(),
             null,
             [
+                // AB#5027: the adapter default service account is projected into every pipeline
+                // configuration, so an "already deployed, unchanged" configuration must carry it
+                // too — otherwise the comparison below differs purely because of the projection.
                 new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline.ToRtEntityId(), true,
-                    rtPipeline.PipelineDefinition, [])
+                    rtPipeline.PipelineDefinition, [DefaultAdapterServiceAccountDto])
             ]
         ));
 

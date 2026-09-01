@@ -90,6 +90,29 @@ internal static class RtEntityCreator
         };
     }
 
+    /// <summary>
+    /// AB#5027: a ServiceAccountConfiguration usable both as an adapter-wide default and as a
+    /// per-pipeline override. Both <c>CkTypeId</c> and <c>RtWellKnownName</c> must be set —
+    /// <c>AdapterService.CreatePipelineConfigurationAsync</c> throws on either being null.
+    /// </summary>
+    public static RtServiceAccountConfiguration CreateServiceAccountConfiguration(string? wellKnownName = null,
+        string? id = null)
+    {
+        id ??= OctoObjectId.GenerateNewId().ToString();
+        return new RtServiceAccountConfiguration
+        {
+            RtId = new OctoObjectId(id),
+            CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
+            RtWellKnownName = wellKnownName ?? "adapter-service-account",
+            // All four attributes are mandatory on the CK type — the generated getters throw
+            // InvalidAttributeValueException on null, and Serialize() reads every one of them.
+            ClientId = "client-id",
+            ClientSecret = "client-secret",
+            IssuerUri = "https://identity.example.com",
+            TenantId = "tenantId"
+        };
+    }
+
     public static RtPipelineExecution CreatePipelineExecution(
         string? executionId = null,
         RtPipelineExecutionStatusEnum status = RtPipelineExecutionStatusEnum.Running,

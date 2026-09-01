@@ -29,6 +29,7 @@ internal class DefaultConfigurationCreatorService(
     IPoolService poolService,
     IAdapterCachePublish adapterCachePublish,
     IAdapterService adapterService,
+    IPipelineServiceAccountProvisioningService serviceAccountProvisioningService,
     FailedTenantRegistry failedTenantRegistry,
     ICommunicationEventService communicationEventService,
     IBlueprintService blueprintService,
@@ -98,6 +99,19 @@ internal class DefaultConfigurationCreatorService(
         // already-current versions, so the cost when nothing changed is minimal.
         await ApplyServiceManagedBlueprintsAsync(tenantId, throwOnFailure: false);
 
+        // AB#5027 phase 2 — the backfill that keeps the phase 1 deploy guard from bricking tenants.
+        // Runs AFTER the service-managed blueprints so the default Adapter they seed is already there
+        // on a fresh tenant, which makes this the creation path and the backfill path at once.
+        //
+        // This hook is the per-tenant setup path on purpose: it is driven by service start (every
+        // tenant), by Enable, and by PosUpdateTenant — i.e. the documented `clearCache` recovery
+        // lever — so an operator has a way to force convergence without a pod restart, and a tenant
+        // that failed once is retried by the existing FailedTenantRegistry machinery anyway. The
+        // controller has no adapter-CREATE code path of its own (adapters are RtEntities written
+        // through the asset repository), so an adapter added by hand between two tenant loads is
+        // picked up by its workload deploy (PoolService.DeployWorkloadAsync) or by the next load.
+        await EnsurePipelineServiceAccountsAsync(tenantId);
+
         // try to load the configuration from the cache
         await adapterCachePublish.LoadConfigurationAsync(tenantId);
 
@@ -105,6 +119,51 @@ internal class DefaultConfigurationCreatorService(
         await poolService.PosUpdateTenantAsync(tenantId);
 
         await triggerManagementService.UpdateScheduleAsync(tenantId);
+    }
+
+    /// <summary>
+    /// AB#5027: makes sure every adapter of the tenant has a pipeline service account, and reports
+    /// loudly and persistently when it could not.
+    ///
+    /// <para>
+    /// Fault tolerance is the whole point. The provisioning service already isolates each adapter and
+    /// never throws; this wrapper adds the belt-and-braces catch so that even an unexpected failure
+    /// cannot fail <c>StartTenantAsync</c> — a tenant that cannot reach the identity service must
+    /// still load, keep serving its already-deployed pipelines, and get its adapters, pools and
+    /// trigger schedules. What it must NOT do is fail silently: every failure lands in the tenant's
+    /// event log (written per adapter by the provisioning service) so the refusal an operator later
+    /// sees on a pipeline deploy has a visible cause.
+    /// </para>
+    /// </summary>
+    internal async Task EnsurePipelineServiceAccountsAsync(string tenantId)
+    {
+        try
+        {
+            var report = await serviceAccountProvisioningService.EnsureTenantProvisionedAsync(tenantId);
+
+            if (report.HasChanges)
+            {
+                logger.LogInformation(
+                    "Pipeline service accounts for tenant '{TenantId}': {Provisioned} provisioned, {Repaired} repaired, {Unchanged} already in place",
+                    tenantId, report.Provisioned, report.Repaired, report.AlreadyProvisioned);
+                await communicationEventService.StoreInformationEventAsync(tenantId,
+                    $"Pipeline service accounts provisioned (AB#5027): {report.Provisioned} created, {report.Repaired} repaired, {report.AlreadyProvisioned} unchanged.");
+            }
+
+            if (report.HasFailures)
+            {
+                logger.LogError(
+                    "Pipeline service account provisioning incomplete for tenant '{TenantId}': {Failures}",
+                    tenantId, string.Join(" ", report.Failures));
+            }
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e,
+                "Pipeline service account provisioning failed for tenant '{TenantId}'. Tenant startup continues; " +
+                "deploying pipelines of the affected adapters will be refused until it succeeds",
+                tenantId);
+        }
     }
 
     /// <summary>

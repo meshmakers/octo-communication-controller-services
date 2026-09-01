@@ -24,7 +24,8 @@ internal class AdapterService(
     IAdapterConnectionTracker connectionTracker,
     IOptions<CommunicationControllerOptions> communicationControllerOptions,
     IWorkloadLifecycleService workloadLifecycleService,
-    IWorkloadOnDemandCapabilityService onDemandCapabilityService)
+    IWorkloadOnDemandCapabilityService onDemandCapabilityService,
+    IPipelineServiceAccountResolver serviceAccountResolver)
     : IAdapterService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
@@ -315,7 +316,8 @@ internal class AdapterService(
                     rtPipeline.DeploymentState == RtDeploymentStateEnum.Deployed)
                 {
                     pipelineConfigurations.Add(
-                        await CreatePipelineConfigurationAsync(tenantId, dataFlow.RtId, rtPipeline));
+                        await CreatePipelineConfigurationAsync(tenantId, dataFlow.RtId, adapterRtEntityId.RtId,
+                            rtPipeline));
                 }
             }
 
@@ -607,6 +609,12 @@ internal class AdapterService(
                 EnsurePipelineIsOnDemandCompatible(tenantId, workload, adapter.NodeDescriptors,
                     pipelineRtEntityId, pipelineDefinition ?? pipeline.PipelineDefinition);
 
+                // AB#5027: a pipeline must have a resolvable service account before it may run.
+                // Like the AB#4984 gate this runs BEFORE the first state write below, so a
+                // rejected deploy leaves no half-applied definition behind.
+                await EnsurePipelineHasServiceAccountAsync(tenantId, pipelineRtEntityId, adapterRtEntityId.RtId,
+                    workload?.Name);
+
                 // Persist the pipeline definition to the RT entity so it is visible in the UI
                 if (pipelineDefinition != null)
                 {
@@ -653,7 +661,7 @@ internal class AdapterService(
                 }
 
                 adapterConfiguration.Pipelines.Add(
-                    await CreatePipelineConfigurationAsync(tenantId, dataFlow.RtId, pipeline,
+                    await CreatePipelineConfigurationAsync(tenantId, dataFlow.RtId, adapterRtEntityId.RtId, pipeline,
                         pipelineDefinition));
 
                 if (!adapterConfiguration.Equals(adapter.Configuration))
@@ -746,8 +754,15 @@ internal class AdapterService(
                     EnsurePipelineIsOnDemandCompatible(tenantId, rtAdapter, adapter.NodeDescriptors,
                         rtDeployPipeline.ToRtEntityId(), rtDeployPipeline.PipelineDefinition);
 
+                    // AB#5027: mandatory identity. Runs before UpdateAdapterConfigurationAsync
+                    // below (the first state write of this path), so one identity-less pipeline
+                    // aborts the whole data-flow deploy instead of half-applying it.
+                    await EnsurePipelineHasServiceAccountAsync(tenantId, rtDeployPipeline.ToRtEntityId(),
+                        rtAdapter.RtId, rtAdapter.Name);
+
                     adapterConfig.Pipelines.Add(
-                        await CreatePipelineConfigurationAsync(tenantId, dataFlowRtId, rtDeployPipeline));
+                        await CreatePipelineConfigurationAsync(tenantId, dataFlowRtId, rtAdapter.RtId,
+                            rtDeployPipeline));
 
                     await StoreDeprecatedNodeWarningEventsAsync(tenantId, adapter, rtDeployPipeline.ToRtEntityId(),
                         rtDeployPipeline.PipelineDefinition);
@@ -791,6 +806,30 @@ internal class AdapterService(
             throw AdapterServiceException.PipelineNotOnDemandCompatible(tenantId, pipelineRtEntityId,
                 workload.Name, processBoundNodes);
         }
+    }
+
+    /// <summary>
+    /// AB#5027 (Epic AB#4979): refuses to deploy a pipeline that has no resolvable service
+    /// account. Every mesh adapter must have one linked (adapter-wide default), a single
+    /// pipeline may override it — but "no identity at all" is never accepted. The obligation
+    /// lives here rather than in the CK multiplicity so that existing Adapter entities keep
+    /// importing while the provisioning phase is still outstanding.
+    /// Always call this BEFORE the first state write of a deploy path.
+    /// </summary>
+    private async Task EnsurePipelineHasServiceAccountAsync(string tenantId, RtEntityId pipelineRtEntityId,
+        OctoObjectId adapterRtId, string? adapterName)
+    {
+        var resolution = await serviceAccountResolver.ResolveAsync(tenantId, pipelineRtEntityId.RtId, adapterRtId);
+        if (!resolution.IsResolved)
+        {
+            throw AdapterServiceException.PipelineHasNoServiceAccount(tenantId, pipelineRtEntityId, adapterRtId,
+                adapterName);
+        }
+
+        Logger.Debug(
+            "[{TenantId}] Pipeline '{PipelineRtEntityId}' executes as service account '{ServiceAccount}' (source: {Source})",
+            tenantId, pipelineRtEntityId, resolution.ServiceAccount!.RtWellKnownName ?? resolution.ServiceAccount.RtId.ToString(),
+            resolution.Source);
     }
 
     public async Task<bool> SetPipelineDebuggingAsync(string tenantId, RtEntityId pipelineRtEntityId, bool isEnabled)
@@ -1069,12 +1108,42 @@ internal class AdapterService(
         throw AdapterServiceException.TenantNotEnabled(tenantId);
     }
 
+    /// <summary>
+    /// Builds the per-pipeline configuration the adapter receives.
+    ///
+    /// AB#5027 projection: configurations reach a pipeline exclusively through that pipeline's
+    /// own <c>Uses</c> edges — the adapter materialises the list into a per-pipeline
+    /// <c>GlobalConfiguration</c> dictionary keyed by <c>RtWellKnownName</c>, and there is no
+    /// adapter-level configuration scope. So the adapter-wide default service account has to be
+    /// mixed into this list controller-side, or the pipeline could never read it. Done here on
+    /// purpose: no SDK/wire change, no new DTO shape, hence no version skew between adapter and
+    /// controller.
+    ///
+    /// NOTE: the adapter caches <c>GlobalConfiguration</c> when the pipeline is registered, so a
+    /// change to the linked service account only takes effect after the pipeline / data flow is
+    /// redeployed.
+    /// </summary>
     private async Task<PipelineConfigurationDto> CreatePipelineConfigurationAsync(string tenantId,
-        OctoObjectId dataFlowRtId, RtPipeline rtPipeline,
+        OctoObjectId dataFlowRtId, OctoObjectId adapterRtId, RtPipeline rtPipeline,
         string? pipelineDefinition = null)
     {
-        var pipelineConfigurations = await communicationRepository
-            .GetConfigurationsByPipelineAsync(tenantId, rtPipeline.RtId);
+        var pipelineConfigurations = (await communicationRepository
+            .GetConfigurationsByPipelineAsync(tenantId, rtPipeline.RtId)).ToList();
+
+        // Only when the pipeline has no service account of its own: an explicit per-pipeline
+        // override is already in the list and must win untouched.
+        if (pipelineConfigurations.OfType<RtServiceAccountConfiguration>().Any() == false)
+        {
+            var adapterServiceAccount = await serviceAccountResolver.GetAdapterDefaultAsync(tenantId, adapterRtId);
+            if (adapterServiceAccount != null &&
+                // Never insert the same well-known name twice — it is the dictionary key on the
+                // adapter side, and a duplicate would throw there.
+                pipelineConfigurations.All(c => c.RtId != adapterServiceAccount.RtId &&
+                                                c.RtWellKnownName != adapterServiceAccount.RtWellKnownName))
+            {
+                pipelineConfigurations.Add(adapterServiceAccount);
+            }
+        }
 
         var configurationsDto = pipelineConfigurations.Select(c => new ConfigurationDto(c.RtId,
             c.CkTypeId ?? throw AdapterServiceException.CkTypeIdUndefined(),

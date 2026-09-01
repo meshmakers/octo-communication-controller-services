@@ -23,6 +23,7 @@ internal abstract class PoolServiceTestsBase
     protected readonly IWorkloadEncryptionService EncryptionService;
     protected readonly IWorkloadTemplateResolver TemplateResolver;
     protected readonly IWorkloadOnDemandCapabilityService OnDemandCapabilityService;
+    protected readonly IPipelineServiceAccountProvisioningService ServiceAccountProvisioningService;
     protected readonly IPoolCachePublish PoolCachePublish;
     protected readonly PoolTenant PoolTenant;
     protected readonly PoolService PoolService;
@@ -76,6 +77,11 @@ internal abstract class PoolServiceTestsBase
         PoolCachePublish = Substitute.For<IPoolCachePublish>();
         PoolTenant = new PoolTenant(PoolCachePublish, TenantId);
 
+        // AB#5027: the deploy path provisions the adapter's pipeline service account. Substituted
+        // here — the real behaviour is covered by PipelineServiceAccountProvisioningServiceTests;
+        // what the pool suite asserts is that the call is made for Adapters and only for Adapters.
+        ServiceAccountProvisioningService = Substitute.For<IPipelineServiceAccountProvisioningService>();
+
         PoolService = new PoolService(
             CommunicationRepository,
             PoolCache,
@@ -83,7 +89,8 @@ internal abstract class PoolServiceTestsBase
             OperatorConnectionManager,
             EncryptionService,
             TemplateResolver,
-            OnDemandCapabilityService);
+            OnDemandCapabilityService,
+            ServiceAccountProvisioningService);
     }
 
     [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]

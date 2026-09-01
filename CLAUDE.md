@@ -282,6 +282,13 @@ that explicitly sets a runtime-state attribute still writes it on import, so
 authored YAMLs must simply not declare `IsDebuggingEnabled` (fixed for the
 simulator under AB#4274).
 
+**`Configuration.ClientSecret` is runtime-state too (3.31.0, AB#5027).** The shared
+`ClientSecret` attribute definition (used by `ServiceAccountConfiguration`,
+`FinApiConfiguration` and `MicrosoftGraphConfiguration`) carries `isRuntimeState: true`
+so a blueprint re-apply can no longer overwrite a live secret with the seeded
+placeholder. Details, blast radius and the first-install semantics: see
+"Pipeline Service Account — mandatory execution identity" below.
+
 When adding a new attribute on `Adapter` / `Pool` / similar entities,
 decide at creation time: is the value driven by the blueprint author
 (configuration → leave `isRuntimeState` unset), or by services /
@@ -1404,6 +1411,219 @@ Tests: `Services/WorkloadLifecycleServiceTests/*`, `Services/LifecycleConfigurat
 `Hubs/OperatorHubTests/ReportWorkloadScaleStatusAsyncTests`, the scale section in
 `Hubs/OperatorConnectionManagerTests`, `BackgroundServices/WorkloadLifecycleWatchdogTests`,
 plus gate assertions in the AdapterService / TriggerManagementService test folders.
+
+## Pipeline Service Account — mandatory execution identity (Epic AB#4979; AB#5027 phases 1 + 2)
+
+Pipeline execution runs under a real identity instead of anonymously. Granularity:
+**one service account per adapter as the default, optionally overridden per pipeline**;
+a pipeline without a resolvable account is refused at deploy time.
+
+**CK model (3.31.0, additive minor).**
+
+| Change | File | Why |
+|---|---|---|
+| New association role `PipelineServiceAccount` (`PipelineServiceAccountOf` ← N / `PipelineServiceAccount` → ZeroOrOne) | `ConstructionKit/associations/pipelineServiceAccount.yaml` | Dedicated role, **not** the generic `Uses`. A second origin type on `Uses` flips the inverse `UsedBy` view on `Configuration` and the CK engine then drops `SystemConfigurationInterface` from the generated GraphQL schema for every `Configuration` subtype — the exact failure already documented on the `HelmRepository` link in `types/deployableWorkload.yaml`. |
+| `Adapter.PipelineServiceAccount → ServiceAccountConfiguration` | `ConstructionKit/types/adapter.yaml` | Declared on `Adapter`, not on `DeployableWorkload`: only Adapters execute pipelines. |
+| `ClientSecret` marked `isRuntimeState: true` | `ConstructionKit/attributes/finApiConfiguration.yaml` | See below. |
+
+**Multiplicity is `ZeroOrOne`, i.e. optional — deliberately.** The obligation ("every mesh
+adapter MUST have a service account") is enforced by the deploy guard, not by the model.
+A mandatory `One` would (a) reject every existing `Adapter` entity on the next
+blueprint re-apply / `ImportRt`, before any tenant has an account at all and before the
+provisioning phase exists, and (b) reclassify the change as a **major** CK bump
+(`octo-construction-kit-engine/docs/ck-semver-rules.md`: a new association referencing a
+role with multiplicity `One` is Major). No migration script is needed — the engine's
+no-migrations bridge synthesises a schema-only no-op step for purely additive bumps, so
+`migration-meta.yaml` stays at 3.1.1.
+
+**No blueprint bump.** `System.Communication.{Release,MainLatest}` keep `1.5.0` and their
+`ckModelDependencies` floor `[3.22.0,4.0)`: their seed creates neither a
+`ServiceAccountConfiguration` nor the new edge, and the floor is a satisfiability floor
+only — the install target is the embedded `IServiceManagedCkModelDescriptor` version.
+The CK bump alone is what carries the change to tenants.
+
+**`ClientSecret` is runtime state now.** A client secret is issued by the identity provider
+(or pasted in by an admin) *after* the entity exists — a blueprint can only ever seed a
+placeholder, and before the marker every re-apply overwrote the live secret with it.
+Blast radius: the attribute definition is **shared**, so `ServiceAccountConfiguration`,
+`FinApiConfiguration` and `MicrosoftGraphConfiguration` all keep their secret across a
+re-apply. Correct for all three; the consequence is that a blueprint can no longer *change*
+a `ClientSecret` on an existing tenant — rotate through Studio / the provisioning path.
+First install is unaffected: preservation only rewrites an incoming value when the target
+entity already exists **and** already holds a value for the attribute
+(`ImportRtModelCommand.PreserveAttributesForEntity`), so a fresh tenant still gets the
+seeded value. The marker needs the version bump to land — a same-version re-import is a
+no-op (`ImportCkModelAsync` short-circuits; see the `IsDebuggingEnabled` 3.22.0/3.23.0
+cautionary tale above). Explicitly **not** marked: `IssuerUri` and `ClientId` are
+per-environment author configuration a blueprint must be able to correct;
+`TenantId` is `${System}/TenantId` and can only be marked in the System model.
+
+**Resolution** — `IPipelineServiceAccountResolver` / `PipelineServiceAccountResolver`
+(singleton, registered next to the capability service in `Program.cs`):
+
+1. the pipeline's own `ServiceAccountConfiguration` on the generic `Uses` role — the
+   per-pipeline override. Needs no model change; Pipeline→Configuration already exists.
+   Several linked accounts are picked by ordinal `RtId` so every pod and every redeploy
+   agrees; a warning is logged.
+2. otherwise the executing adapter's `PipelineServiceAccount` edge
+   (`ICommunicationRepository.GetServiceAccountForAdapterAsync`).
+3. otherwise `PipelineServiceAccountResolution.Unresolved`.
+
+`ResolveAsync` takes an already-known adapter (the deploy paths have it);
+`ResolveForPipelineAsync` walks the `Executes` edge itself and treats "pipeline has no
+adapter" as unresolved rather than an error — that condition belongs to the deploy paths.
+
+**Projection into the pipeline configuration.** Configurations reach a pipeline
+*exclusively* through that pipeline's own `Uses` edges: `GetConfigurationsByPipelineAsync`
+traverses `Uses` outbound from the pipeline, `CreatePipelineConfigurationAsync` turns the
+result into `ConfigurationDto`s keyed on `RtWellKnownName`, and the adapter materialises
+that into a per-pipeline `GlobalConfiguration` dictionary. There is no adapter-level
+configuration scope, so the adapter-wide default has to be **mixed in controller-side** —
+done in `CreatePipelineConfigurationAsync` (which now takes the adapter's `RtId`), only
+when the pipeline has no service account of its own, and skipped when the same `RtId`
+**or** the same `RtWellKnownName` is already present (a duplicate key throws on the adapter).
+No SDK/wire change and no new DTO shape, hence no adapter/controller version skew.
+**The adapter caches `GlobalConfiguration` at pipeline registration — changing the linked
+service account only takes effect after the pipeline / data flow is redeployed.**
+
+**Deploy guard** (`AdapterService.EnsurePipelineHasServiceAccountAsync`, modelled on the
+AB#4984 gate): called from `DeployPipelineAsync` and `DeployDataFlowAsync`, in both cases
+**before the first state write**, so a rejected deploy leaves nothing half-applied. It
+throws `AdapterServiceException.PipelineHasNoServiceAccount` — deliberately the same
+exception family as the AB#4984 gate (→ HTTP 404 in `PipelineController`, not 400): both
+gates must surface identically in the Studio, which renders `ErrorResponse.ErrorMessage`
+regardless of status. The message names cause, work item, pipeline, adapter and **both**
+ways out (link the account on the adapter, or set a per-pipeline override).
+
+**Not guarded in `PoolService.DeployWorkloadAsync`** (documented in place next to the
+AB#4984 lifecycle validation): that method also validates `Application`s, which execute no
+pipelines; the helm deploy of the adapter pod is the step that must succeed *before* a
+service account can be provisioned onto it, so gating it would be circular and would make
+every existing tenant's adapter undeployable ahead of the provisioning phase; and an
+adapter with no pipelines is harmless. Enforcement stays tight either way — no pipeline
+reaches an adapter without a resolvable identity. Phase 2 does the *opposite* on that path:
+`DeployWorkloadAsync` **provisions** the adapter's account (best effort, after the deploy
+notification) instead of gating on it — see below.
+
+Phase 1 tests: `Services/PipelineServiceAccountResolverTests` (override wins, adapter default,
+nothing linked, no adapter query when an override exists, deterministic multi-link pick,
+`ResolveForPipeline` via `Executes`, pipeline without adapter),
+`Services/AdapterServiceTests/DeployPipelineServiceAccountGateTests` (rejection message
+contents, negative proof that neither the adapter nor any state write is reached, data-flow
+path, both happy paths), `Services/AdapterServiceTests/PipelineServiceAccountProjectionTests`
+(default projected exactly once, no duplicate when already linked, untouched when the
+pipeline has an override, coexistence with other configurations).
+`AdapterServiceTestsBase` arranges a provisioned tenant by default
+(`DefaultAdapterServiceAccount` + `DefaultAdapterServiceAccountDto`) so the pre-existing
+suites keep testing what they were written for; gate tests re-stub the repository to null.
+
+### Phase 2 — provisioning (must ship together with phase 1)
+
+🔴 **Phase 1 alone bricks every tenant.** Before AB#5027 nothing on the platform created a client
+*secret*: dynamic client registration deliberately produces public clients
+(`RequireClientSecret=false`), the operator's `CreateSecret` paths are Kubernetes secrets, and client
+mirroring only copies. So without phase 2 the deploy guard refuses **every** pipeline deploy in
+**every** tenant. Never release one without the other.
+
+**`IPipelineServiceAccountProvisioningService` / `PipelineServiceAccountProvisioningService`**
+(singleton, registered next to the resolver in `Program.cs`). Per adapter, in this order:
+
+1. Resolve the adapter's linked account; if there is none, look one up by the **deterministic
+   well-known name** `pipeline-service-account-{adapterRtId}` — that is what makes a second run
+   adopt its own earlier work instead of creating a second credential entity (and what repairs a
+   lost edge). The rtId, not the name, is the key: names are editable.
+2. Decide the secret. A **complete** existing configuration (issuer + client id + secret + tenant id
+   all present) contributes its own plaintext; otherwise a fresh 384-bit URL-safe secret is generated
+   with `RandomNumberGenerator`.
+3. Send `CreateIdentityDataCommandRequest` with that one client — **every pass**, not only the first.
+   Re-sending the *same* plaintext hashes to the same value identity-side, so nothing rotates, while
+   grants / scope / roles converge for a client created before this code, and a client someone
+   deleted underneath us is recreated with the credential the adapter still holds.
+4. Write the `ServiceAccountConfiguration` entity and the `PipelineServiceAccount` edge in one
+   transaction (`ICommunicationRepository.SavePipelineServiceAccountAsync`) — unless step 2 found a
+   complete, linked, current configuration, in which case nothing is written at all.
+
+**Why the bus and not the identity REST API.** `ClientsController` already accepts a plaintext
+`ClientSecret` and hashes it — but calling it needs an `octo_api` bearer token, i.e. a
+client-credentials identity, which is exactly what is being created. No bootstrap client with a
+secret is seeded anywhere (`System.Identity.Bootstrap` has only authorization-code and device-code
+clients), so the REST route is circular. It would also add a `Meshmakers.Octo.Sdk.ServiceClient`
+package reference and a second identity transport to a service that already has exactly one:
+`ICommandClient<CreateIdentityDataCommandRequest>`. Cost of the bus route: three optional properties
+on the shared `DistClientDto` in octo-common-services (`ClientSecret`, `RequireClientSecret`,
+`AssignedRoleNames`) — additive, defaulting to the pre-existing behaviour, so every other producer is
+unchanged. **Deployment order: identity first, then the controller**; an identity that predates the
+change ignores the new fields and would create a secretless client.
+
+🔴 **The command client is scoped.** `ICommandClient<T>` wraps MassTransit's `IRequestClient<T>`,
+which is **scoped**; this service is a singleton consumed by the singleton `PoolService`, so it
+resolves the client per call from a fresh scope (the `CommunicationEventService` pattern).
+Constructor-injecting it fails DI validation at startup.
+
+**What the client looks like:** `AllowedGrantTypes = [client_credentials, on-behalf-of URN]`,
+`AllowedScopes = [octo_api]`, `RequireClientSecret = true`, `AllowOfflineAccess = false`. The
+delegation URN (`Constants.OnBehalfOfGrantType`) is seeded **now** even though AB#5031 is not live:
+Duende gates its extension-grant validators on the client's own `AllowedGrantTypes`, so adding it
+later would mean touching every already-provisioned tenant.
+
+**Triggers.** Two, both idempotent:
+
+| Trigger | Where | Covers |
+|---|---|---|
+| Tenant-wide sweep | `DefaultConfigurationCreatorService.StartTenantAsync` → `EnsurePipelineServiceAccountsAsync`, right after `ApplyServiceManagedBlueprintsAsync` | The **backfill** for existing tenants (service start, Enable, and `PosUpdateTenant` — i.e. the documented `clearCache` recovery lever), and the blueprint-seeded default Adapter on a fresh tenant. |
+| Per adapter | `PoolService.DeployWorkloadAsync`, after the deploy notification, for `RtAdapter` only | An adapter an operator adds between two tenant loads. There is no adapter-*create* path in this service (adapters are RtEntities written through the asset repository), and nothing runs pipelines before its workload is deployed, so this is the earliest point that matters. |
+
+**Fault tolerance is the point of the backfill.** `EnsureAdapterProvisionedAsync` never throws: it
+logs an Error **and writes a persistent Error event into the tenant's event log**, so the refusal an
+operator later sees on a pipeline deploy has a visible cause instead of only a pod log line. One
+adapter's failure does not stop the others; a failing adapter lookup (CK cache being unloaded during
+a tenant update) is reported, not thrown; and `EnsurePipelineServiceAccountsAsync` wraps the whole
+thing again so tenant startup — adapters, pools, trigger schedules — completes regardless.
+
+### 🔴 Roles: an under-privileged service account fails **silently**
+
+The controller's own endpoints authorize on the **`octo_api` scope**, not on a role — every policy in
+`Program.cs` is a `RequireClaim` on the scope claim, so `CommunicationManagement` is *not* required
+for the deploy calls a pipeline makes back into this service. It is granted anyway, because of what
+comes next.
+
+For the delegation case (AB#5031) the issued token carries the **intersection** of the service
+account's roles and the calling user's roles. A service account without the tenant's *business* roles
+(e.g. the Accounting roles) therefore produces an **empty intersection** — and identity treats an
+empty intersection as a **success**, not an error: the token is issued, it simply carries no `role`
+claim, and every role-gated consumer fails closed. The symptom is a chat that goes quiet, an export
+that returns nothing, a pipeline that "does nothing" — with **no error anywhere**.
+
+So when you set up delegation for a tenant, grant the pipeline service account
+(`octo-pipeline-sa-{adapterRtId}`, one per adapter) the fachliche roles its pipelines must act
+under, on top of `CommunicationManagement`:
+
+```
+octo-cli AddClientToRole --clientId octo-pipeline-sa-<adapterRtId> --roleName <Role> --context <tenant>
+```
+
+(or Refinery Studio → Identity → Clients → Roles). Role names are matched case-insensitively against
+the tenant's `RtRole.NormalizedName`; a role that does not exist yet is **skipped with a warning**
+identity-side rather than failing the whole identity-data setup, and picked up by the next
+provisioning pass.
+
+Phase 2 tests: `Services/PipelineServiceAccountProvisioningServiceTests` (secret entropy / URL-safety /
+randomness, both grant types + scope + role on the created client, entity and edge written with the
+plaintext, second run rotates nothing and writes nothing, unlinked entity is re-linked without
+rotation, entity without a secret gets a fresh one, issuer change converges, no secret in any NLog
+target and `DistClientDto.ToString()` redaction, tenant sweep backfills / isolates one broken adapter
+/ survives a failing adapter lookup, identity refusal is not written as a half-provisioned entity,
+seed-pending still writes the entity),
+`Services/AdapterServiceTests/DeployPipelineAfterProvisioningTests` (**the phase 1 ↔ phase 2 proof**:
+same guard refuses before and passes after the backfill, and the projected configuration carries the
+deterministic well-known name the mesh adapter's `ServiceAccountTokenService` looks accounts up by),
+`Services/PoolServiceTests/DeployWorkloadServiceAccountProvisioningTests` (Adapter yes / Application
+no / a throwing provisioning does not fail the deploy),
+`Services/DefaultConfigurationCreatorServiceTests/EnsurePipelineServiceAccountsAsyncTests` (audit
+event only when something changed, never throws), integration
+`Repository/PipelineServiceAccountRepositoryTests` (entity + edge against real MongoDB, repeat run
+keeps exactly one edge despite the ZeroOrOne multiplicity, a different account replaces the edge).
+
 
 ## Project Structure Notes
 

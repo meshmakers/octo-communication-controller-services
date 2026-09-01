@@ -20,6 +20,7 @@ internal class PoolService : IPoolService
     private readonly IWorkloadEncryptionService _encryptionService;
     private readonly IWorkloadTemplateResolver _templateResolver;
     private readonly IWorkloadOnDemandCapabilityService _onDemandCapabilityService;
+    private readonly IPipelineServiceAccountProvisioningService _serviceAccountProvisioningService;
 
     /// <summary>
     /// Constructor
@@ -31,12 +32,14 @@ internal class PoolService : IPoolService
     /// <param name="encryptionService">Decrypts secret-flagged ValueOverride values before they go on the SignalR wire</param>
     /// <param name="templateResolver">Resolves <c>{{domain.NAME}}</c>, <c>{{service.NAME}}</c> and <c>{{context.tenantId}}</c> placeholders in workload <c>Hostname</c>, non-secret <c>ValueOverride.Value</c> and <c>ValuesYaml</c> at deploy time</param>
     /// <param name="onDemandCapabilityService">Validates LifecycleMode=OnDemand against the workload's trigger classification at deploy time (AB#4984)</param>
+    /// <param name="serviceAccountProvisioningService">Provisions the adapter's pipeline service account on deploy (AB#5027)</param>
     public PoolService(ICommunicationRepository communicationRepository, IPoolCache poolCache,
         ICommunicationEventService eventService,
         IOperatorConnectionManager operatorConnectionManager,
         IWorkloadEncryptionService encryptionService,
         IWorkloadTemplateResolver templateResolver,
-        IWorkloadOnDemandCapabilityService onDemandCapabilityService)
+        IWorkloadOnDemandCapabilityService onDemandCapabilityService,
+        IPipelineServiceAccountProvisioningService serviceAccountProvisioningService)
     {
         _communicationRepository = communicationRepository;
         _poolCache = poolCache;
@@ -45,6 +48,7 @@ internal class PoolService : IPoolService
         _encryptionService = encryptionService;
         _templateResolver = templateResolver;
         _onDemandCapabilityService = onDemandCapabilityService;
+        _serviceAccountProvisioningService = serviceAccountProvisioningService;
     }
     
     /// <inheritdoc />
@@ -275,6 +279,34 @@ internal class PoolService : IPoolService
 
         await _operatorConnectionManager.NotifyWorkloadDeployedAsync(dto);
 
+        // AB#5027 phase 2: deploying an Adapter is the closest thing this service has to "an adapter
+        // was created" — adapters themselves are RtEntities written through the asset repository, so
+        // there is no create hook here, but nothing can run pipelines before its workload is
+        // deployed. Provisioning the execution identity right here therefore closes the window
+        // between an operator adding an adapter and the next tenant load, so the very first pipeline
+        // deploy onto a brand-new adapter already passes the phase 1 guard.
+        //
+        // Best-effort by construction (EnsureAdapterProvisionedAsync never throws and writes its own
+        // error event): a failure must not fail a deploy that is otherwise fine, and the tenant-load
+        // sweep re-converges. Applications are skipped — they execute no pipelines. Deliberately
+        // AFTER the deploy notification so the identity round trip cannot delay the helm rollout.
+        if (workload is RtAdapter adapterWorkload)
+        {
+            try
+            {
+                await _serviceAccountProvisioningService.EnsureAdapterProvisionedAsync(tenantId, adapterWorkload);
+            }
+            catch (Exception e)
+            {
+                // EnsureAdapterProvisionedAsync is contractually non-throwing and logs / audits its
+                // own failures — but a helm rollout that is already on its way must not depend on
+                // that contract holding.
+                Logger.Error(e,
+                    "[{TenantId}] Pipeline service account provisioning failed during the deploy of adapter '{WorkloadName}' ({WorkloadRtId}); the deploy continues",
+                    tenantId, workload.Name, workload.RtId);
+            }
+        }
+
         // Set Pending immediately so a re-deploy is visible in the UI — e.g.
         // the user updates the chart version on a currently-Deployed adapter
         // and clicks Deploy: without this write the state would stay Deployed
@@ -480,6 +512,19 @@ internal class PoolService : IPoolService
                     capability.BlockingReasons);
             }
         }
+
+        // AB#5027, deliberately NOT guarded here: the mandatory-service-account check lives on
+        // the pipeline / data-flow deploy paths in AdapterService, not on the workload deploy.
+        // Reasons: (a) this method also validates Applications, which execute no pipelines and
+        // therefore have no pipeline identity; (b) the helm deploy of the adapter pod is the very
+        // step that has to succeed before a service account can be provisioned onto it — gating
+        // it on an already-linked account would be circular and would make every existing tenant's
+        // adapter undeployable the moment this ships, ahead of the provisioning phase; (c) an
+        // adapter with no pipelines is harmless. Enforcement stays tight regardless: no pipeline
+        // can reach an adapter without a resolvable identity.
+        //
+        // Phase 2 does the opposite on this path: DeployWorkloadAsync PROVISIONS the adapter's
+        // service account (best effort, after the deploy notification) rather than gating on it.
     }
 
     /// <inheritdoc />

@@ -272,6 +272,134 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
+    public async Task<RtServiceAccountConfiguration?> GetServiceAccountForAdapterAsync(string tenantId,
+        OctoObjectId adapterRtId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            // Dedicated PipelineServiceAccount role (AB#5027), NOT the generic Uses role — see
+            // ConstructionKit/associations/pipelineServiceAccount.yaml for why reusing Uses
+            // would break SystemConfigurationInterface in the generated GraphQL schema.
+            var resultSet = await tenantRepository
+                .GetRtAssociationTargetsAsync<RtAdapter, RtServiceAccountConfiguration>(session,
+                    [adapterRtId], SystemCommunicationCkIds.RtCkPipelineServiceAccountRoleId,
+                    GraphDirections.Outbound, null, RtEntityQueryOptions.Create());
+
+            if (!resultSet.Any())
+            {
+                return null;
+            }
+
+            return resultSet.First().Value.Items.FirstOrDefault();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingServiceAccountForAdapter(tenantId, adapterRtId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<RtServiceAccountConfiguration?> GetServiceAccountByWellKnownNameAsync(string tenantId,
+        string wellKnownName)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            var queryOptions = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtServiceAccountConfiguration.RtWellKnownName), FieldFilterOperator.Equals,
+                    wellKnownName);
+
+            var resultSet = await tenantRepository
+                .GetRtEntitiesByTypeAsync<RtServiceAccountConfiguration>(session, queryOptions, take: 1);
+
+            return resultSet.Items.FirstOrDefault();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingServiceAccountByWellKnownName(tenantId,
+                wellKnownName, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task SavePipelineServiceAccountAsync(string tenantId, RtEntityId adapterRtEntityId,
+        RtServiceAccountConfiguration serviceAccount, bool isNewEntity)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtServiceAccountConfiguration>>
+            {
+                isNewEntity
+                    ? EntityUpdateInfo<RtServiceAccountConfiguration>.CreateInsert(serviceAccount)
+                    : EntityUpdateInfo<RtServiceAccountConfiguration>.CreateUpdate(serviceAccount.ToRtEntityId(),
+                        serviceAccount)
+            };
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            // The edge is written in the same transaction as the entity, so a failure can never
+            // leave a credential entity nobody points at. Read the current edge first: the
+            // outbound multiplicity is ZeroOrOne, so blindly inserting a second one is rejected
+            // by the engine, and re-inserting the identical one would be a duplicate.
+            var existingTargets = await tenantRepository
+                .GetRtAssociationTargetsAsync<RtAdapter, RtServiceAccountConfiguration>(session,
+                    [adapterRtEntityId.RtId], SystemCommunicationCkIds.RtCkPipelineServiceAccountRoleId,
+                    GraphDirections.Outbound, null, RtEntityQueryOptions.Create());
+
+            var currentTarget = existingTargets.FirstOrDefault().Value?.Items.FirstOrDefault();
+            if (currentTarget != null && currentTarget.RtId == serviceAccount.RtId)
+            {
+                await session.CommitTransactionAsync();
+                return;
+            }
+
+            var associations = new List<AssociationUpdateInfo>();
+            if (currentTarget != null)
+            {
+                // Points at a different account — replace it. An adapter has exactly one default.
+                associations.Add(AssociationUpdateInfo.CreateDelete(adapterRtEntityId,
+                    currentTarget.ToRtEntityId(), SystemCommunicationCkIds.RtCkPipelineServiceAccountRoleId));
+            }
+
+            associations.Add(AssociationUpdateInfo.CreateInsert(adapterRtEntityId,
+                serviceAccount.ToRtEntityId(), SystemCommunicationCkIds.RtCkPipelineServiceAccountRoleId));
+
+            await tenantRepository.ApplyChangesAsync(session, associations, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            // 🔴 serviceAccount carries a plaintext secret — only its rtId goes into the message.
+            throw CommunicationRepositoryException.CommonFailedSavingPipelineServiceAccount(tenantId,
+                adapterRtEntityId, serviceAccount.RtId, e);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyCollection<RtDeployableWorkload>> GetWorkloadsByChartNameAsync(string tenantId,
         string chartName)
     {

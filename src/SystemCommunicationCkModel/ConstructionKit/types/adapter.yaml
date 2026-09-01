@@ -22,6 +22,19 @@ types:
       isOptional: true
     - id: ${this}/LastSyncedSequenceNumber
       name: LastSyncedSequenceNumber
+  associations:
+    # AB#5027: the service account every pipeline of this adapter executes as, unless
+    # the pipeline carries its own ServiceAccountConfiguration on the generic Uses role.
+    # Declared on Adapter (not on DeployableWorkload): only Adapters execute pipelines,
+    # an Application has no pipeline identity to carry.
+    #
+    # Optional in the model on purpose — the "every adapter MUST have one" rule is
+    # enforced by the deploy guard (AdapterService.EnsurePipelineHasServiceAccountAsync),
+    # not by a mandatory multiplicity that would break the import/re-apply of every
+    # existing Adapter entity before any tenant even has a service account. See
+    # associations/pipelineServiceAccount.yaml for the full rationale.
+    - id: ${this}/PipelineServiceAccount
+      targetCkTypeId: ${this}/ServiceAccountConfiguration
   # Manages → Pool moved up to DeployableWorkload, so Application inherits the
   # same association. Existing runtime entities of type Adapter retain their
   # Manages relations because the association role id is unchanged.

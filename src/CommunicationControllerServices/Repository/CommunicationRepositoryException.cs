@@ -247,6 +247,32 @@ internal class CommunicationRepositoryException : Exception
         return new CommunicationRepositoryException($"[{tenantId}] Failed to get configurations of pipeline '{pipelineRtId}'", exception);
     }
 
+    public static Exception CommonFailedGettingServiceAccountForAdapter(string tenantId, OctoObjectId adapterRtId,
+        Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to get pipeline service account of adapter '{adapterRtId}'", exception);
+    }
+
+    public static Exception CommonFailedGettingServiceAccountByWellKnownName(string tenantId, string wellKnownName,
+        Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to get service account configuration '{wellKnownName}'", exception);
+    }
+
+    /// <summary>
+    /// AB#5027. The message names the entity by rtId only — the configuration it was built from
+    /// carries a plaintext client secret and must never reach a log sink or an exception message.
+    /// </summary>
+    public static Exception CommonFailedSavingPipelineServiceAccount(string tenantId, RtEntityId adapterRtEntityId,
+        OctoObjectId serviceAccountRtId, Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to save pipeline service account '{serviceAccountRtId}' of adapter '{adapterRtEntityId}'",
+            exception);
+    }
+
     public static Exception AdapterTypeMismatch(string tenantId, RtEntityId requestedAdapterRtEntityId, RtCkId<CkTypeId> returnedAdapterCkTypeId)
     {
         return new CommunicationRepositoryException($"[{tenantId}] Adapter type mismatch: requested adapter '{requestedAdapterRtEntityId}' has different type than returned adapter type '{returnedAdapterCkTypeId}'");

@@ -83,6 +83,55 @@ public interface ICommunicationRepository
         OctoObjectId workloadRtId);
 
     /// <summary>
+    /// AB#5027: resolves the <c>ServiceAccountConfiguration</c> linked to an adapter through the
+    /// dedicated <c>PipelineServiceAccount</c> association role. This is the adapter-wide default
+    /// identity every pipeline of that adapter executes as, unless the pipeline carries its own
+    /// service account on the generic <c>Uses</c> role. Returns <c>null</c> when the adapter has
+    /// no service account linked (the model multiplicity is ZeroOrOne — the obligation is
+    /// enforced by the deploy guard, not by the model).
+    /// </summary>
+    Task<RtServiceAccountConfiguration?> GetServiceAccountForAdapterAsync(string tenantId,
+        OctoObjectId adapterRtId);
+
+    /// <summary>
+    /// AB#5027: looks a <c>ServiceAccountConfiguration</c> up by its <c>RtWellKnownName</c>.
+    /// The provisioning path derives a deterministic well-known name per adapter, so this is what
+    /// makes a second provisioning run recognise its own earlier work — including the case where
+    /// the entity exists but the <c>PipelineServiceAccount</c> edge was lost (a half-applied run,
+    /// or an operator who unlinked it). Returns <c>null</c> when no such entity exists.
+    /// </summary>
+    Task<RtServiceAccountConfiguration?> GetServiceAccountByWellKnownNameAsync(string tenantId,
+        string wellKnownName);
+
+    /// <summary>
+    /// AB#5027: inserts or updates the given <c>ServiceAccountConfiguration</c> and makes sure the
+    /// adapter's <c>PipelineServiceAccount</c> edge points at it — both in one transaction, so a
+    /// provisioning run can never leave an orphaned credential entity behind.
+    /// <para>
+    /// The edge write is itself idempotent: an already existing edge to the same target is left
+    /// alone (re-inserting it would violate the ZeroOrOne outbound multiplicity), and an edge that
+    /// points at a *different* service account is replaced — the adapter has exactly one default.
+    /// </para>
+    /// <para>
+    /// 🔴 <paramref name="serviceAccount"/> carries a plaintext client secret. Never log this
+    /// parameter, and never include it in an exception message.
+    /// </para>
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="adapterRtEntityId">The adapter that owns the service account</param>
+    /// <param name="serviceAccount">
+    ///     The configuration to persist. Its <c>RtId</c> must be the existing entity's id when
+    ///     <paramref name="isNewEntity"/> is <c>false</c>.
+    /// </param>
+    /// <param name="isNewEntity">
+    ///     <c>true</c> to insert, <c>false</c> to update the entity carrying
+    ///     <c>serviceAccount.RtId</c>. The caller knows which, because it had to read the entity to
+    ///     decide whether a secret must be issued at all.
+    /// </param>
+    Task SavePipelineServiceAccountAsync(string tenantId, RtEntityId adapterRtEntityId,
+        RtServiceAccountConfiguration serviceAccount, bool isNewEntity);
+
+    /// <summary>
     /// Lists every <see cref="RtDeployableWorkload"/> in the tenant whose
     /// <c>ChartName</c> equals <paramref name="chartName"/>. Returns an
     /// empty collection when the chart is not used in this tenant — the

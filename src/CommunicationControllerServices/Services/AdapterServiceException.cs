@@ -115,4 +115,21 @@ internal class AdapterServiceException : Exception
             $"{string.Join(", ", processBoundNodes.Select(n => $"'{n}'"))} that would silently stop while the " +
             "workload is hibernated (AB#4984). Either set the workload back to AlwaysOn or migrate the pipeline " +
             "to a wake-capable trigger (cron PipelineTrigger, FromHttpRequest, FromPipelineDataEvent).");
+
+    /// <summary>
+    /// AB#5027 mandatory-identity guard. Deliberately an <see cref="AdapterServiceException" />
+    /// (→ HTTP 404 in <c>PipelineController</c>) rather than a <c>PoolServiceException</c> (→ 400):
+    /// it is thrown on the same deploy paths as the AB#4984 gate and must surface identically in
+    /// the Studio, which renders <c>ErrorResponse.ErrorMessage</c> regardless of the status code.
+    /// The message carries the whole remedy, so the status code is not the diagnostic here.
+    /// </summary>
+    internal static AdapterServiceException PipelineHasNoServiceAccount(string tenantId,
+        RtEntityId pipelineRtEntityId, OctoObjectId adapterRtId, string? adapterName) =>
+        new($"[{tenantId}] Cannot deploy pipeline '{pipelineRtEntityId}': no pipeline service account could be " +
+            "resolved. Since AB#5027 (Epic AB#4979) every pipeline executes under a service-account identity, so " +
+            "a pipeline without one would run unauthenticated and is refused before anything is written. " +
+            $"Fix it in one of two ways: (1) link a ServiceAccountConfiguration to adapter '{adapterName ?? "?"}' " +
+            $"({adapterRtId}) through its 'PipelineServiceAccount' association — this becomes the default identity " +
+            "for every pipeline that adapter executes; or (2) set a per-pipeline override by linking a " +
+            "ServiceAccountConfiguration to this pipeline through its 'Uses' association.");
 }
