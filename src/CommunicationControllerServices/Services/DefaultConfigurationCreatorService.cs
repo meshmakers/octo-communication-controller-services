@@ -45,6 +45,11 @@ internal class DefaultConfigurationCreatorService(
         embeddedBlueprintSources: embeddedBlueprintSources
         )
 {
+    // Explicit field instead of capturing the primary-constructor parameter in method bodies:
+    // the parameter is also passed to the base constructor, and capturing it as well would
+    // store it twice (CS9107).
+    private readonly ISystemContext _systemContext = systemContext;
+
     /// <summary>
     /// Prefix used to recognise blueprints this service owns. Every embedded blueprint whose
     /// name starts with <c>System.Communication.</c> is auto-applied on tenant Enable /
@@ -129,12 +134,54 @@ internal class DefaultConfigurationCreatorService(
     /// operator), not a teardown: the operator undeploys through the existing paths and retries.
     /// Pipelines and triggers are deliberately not part of it — pipelines are no cluster resource and
     /// become undeployable once their adapter is gone, and Disable removes trigger schedules itself.
+    /// AB#4884 adds the AI Services flag: EnableAi refuses while Communication is disabled, so the
+    /// reverse holds too — disabling Communication under a still-enabled AI Services would leave the
+    /// tenant in a state EnableAi could never have produced.
     /// </summary>
     protected override async Task<string?> GetDisableBlockerAsync(string tenantId)
     {
         var activeDeployments = await poolService.GetActiveDeploymentsAsync(tenantId);
-        return activeDeployments.Count == 0 ? null : BuildDisableBlockedMessage(tenantId, activeDeployments);
+        var aiServicesEnabled = await IsAiServicesEnabledAsync(tenantId);
+
+        var blockers = new List<string>();
+        if (activeDeployments.Count > 0)
+        {
+            blockers.Add(BuildDisableBlockedMessage(tenantId, activeDeployments));
+        }
+
+        if (aiServicesEnabled)
+        {
+            blockers.Add(BuildAiDisableBlockedMessage(tenantId));
+        }
+
+        return blockers.Count == 0 ? null : string.Join(" ", blockers);
     }
+
+    /// <summary>
+    /// Reads the AI Services enabled flag exactly as the tenant delete/detach guard does: from the
+    /// tenant's own configuration store, missing key or false = disabled. A read failure propagates —
+    /// an unreadable state must never look torn down.
+    /// </summary>
+    private async Task<bool> IsAiServicesEnabledAsync(string tenantId)
+    {
+        var tenantContext = await _systemContext.FindTenantContextAsync(tenantId);
+        using var session = await tenantContext.GetAdminSessionAsync();
+        var aiFlag = await tenantContext.GetConfigurationAsync(
+            session,
+            TenantCapabilityConfigurationKeys.AiServices,
+            new DefaultConfigurationEnabled { IsEnabled = false });
+        return aiFlag is { IsEnabled: true };
+    }
+
+    /// <summary>
+    /// The operator-facing refusal for the AI Services dependency (AB#4884). Surfaced verbatim by
+    /// CLI, MCP and Studio, so it names the disable verb and the Studio path.
+    /// </summary>
+    internal static string BuildAiDisableBlockedMessage(string tenantId) =>
+        $"Communication cannot be disabled for tenant '{tenantId}' while AI Services is still enabled - " +
+        "the AI service depends on Communication. Disable AI Services first (DisableAi, octo-cli in a " +
+        $"context of tenant '{tenantId}', or Refinery Studio > General > Settings > Tenant Features) - " +
+        "then retry DisableCommunication.";
 
     /// <summary>
     /// The operator-facing refusal. Surfaced verbatim by CLI, MCP and Studio, so it names every
