@@ -15,6 +15,9 @@ types:
       - id: ${this}/FooterLogo
         name: FooterLogo
         isOptional: true
+      - id: ${this}/EmailFooterImage
+        name: EmailFooterImage
+        isOptional: true
       - id: ${this}/UiThemeColors
         name: Colors
         isOptional: true
@@ -67,3 +70,9 @@ types:
         name: FarmerTaxRate
         isOptional: false
         
+      - id: ${this}/BankAccountIban
+        name: BankAccountIban
+        isOptional: true
+      - id: ${this}/BankAccountHolder
+        name: BankAccountHolder
+        isOptional: true
