@@ -327,14 +327,14 @@ public class AdapterController : ControllerBase
                 $"Pipeline service account secret rotated for adapter '{adapter.Name ?? adapterRtId}' " +
                 $"({adapterRtId}), client '{result.ClientId}' (source: User). {message}");
 
-            return Ok(new RotateServiceAccountSecretResultDto
-            {
-                ClientId = result.ClientId,
-                ConfigurationWellKnownName = result.WellKnownName,
-                WasCreated = result.WasCreated,
-                RequiresPipelineRedeploy = result.RequiresPipelineRedeploy,
-                Message = message
-            });
+            // The shape lives in Communication.Contracts so the service and every client speak the
+            // same one; a controller-local copy drifted from it the moment the SDK gained its own.
+            return Ok(new RotateServiceAccountSecretResultDto(
+                result.ClientId,
+                result.WellKnownName,
+                result.WasCreated,
+                result.RequiresPipelineRedeploy,
+                message));
         }
         catch (Exception e)
         {

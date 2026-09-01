@@ -1689,6 +1689,54 @@ target on the happy and the double-failure path),
 secret-shaped property on the DTO, provisioning variant, 404 unknown adapter, 400 malformed rtId,
 400 naming that the previous secret still works).
 
+### The tenant gate only started working in AB#5054
+
+The section below describes a middleware that, until AB#5054, **never ran a single check in this
+service**. `TenantAuthorizationMiddleware` inspects only principals whose
+`Identity.AuthenticationType` reads `Bearer` — its guard against false 403s on cookie principals.
+That label is not the scheme name; it comes from `TokenValidationParameters.AuthenticationType`,
+which the JWT handler leaves at the framework default `AuthenticationTypes.Federation` unless the
+host sets it. This service did not, so the `Use…`/`Add…` pair gated nothing: no user token was ever
+checked, and the AB#5032 service-token audit log — the inventory an operator is supposed to read
+before flipping to `Enforce` — was empty because nothing wrote to it, not because nothing was wrong.
+
+Two pieces make it work now:
+
+| Where | What |
+|---|---|
+| `Configuration/ConfigureJwtBearerOptions.cs` | Sets `TokenValidationParameters.AuthenticationType = "Bearer"`, and now also owns `Audience`, `NameClaimType` and `RoleClaimType`. |
+| `Program.cs` | `AddAuthentication().AddJwtBearer()` — **without a configuration delegate**. |
+
+🔴 **The second row is the load-bearing one.** `Program.cs` used to pass
+`AddJwtBearer(jwt => { jwt.TokenValidationParameters = new TokenValidationParameters { … }; })`. The
+options factory runs configurators in **registration order**, and `ConfigureOptions<ConfigureJwtBearerOptions>()`
+is registered first — so that delegate ran last and replaced the whole instance, discarding both the
+explicit `ValidIssuer` (the IDX10204 hardening) and the `AuthenticationType`. It compiles, and a unit
+test of the configurator in isolation stays green, because neither ever sees the composed state:
+octo-ai-services shipped a full release in exactly that condition (AB#5051 → AB#5056). Keep the rule
+— one configurator owns the scheme, `AddJwtBearer()` takes no argument.
+`tests/CommunicationControllerService.Tests/Configuration/TenantAuthorizationWiringTests.cs` pins the
+label, the authority/issuer/audience contract, and a source-level guard that no second configurator
+reappears.
+
+### Tenant authorization for user tokens is staged (AB#5054)
+
+`TenantAuthorizationOptions.UserTokenEnforcement` (no `Disabled`; `LogOnly` | `Enforce`, platform
+default `Enforce`) is set to **`LogOnly`** in `Program.cs` — registered *before*
+`AddOctoTenantAuthorization(builder.Configuration)` so configuration still wins. No request outcome
+changes; every access an enforcing run would refuse is logged with subject, client id and both
+tenants. Flip an environment with `OCTO_TENANTAUTHORIZATION__USERTOKENENFORCEMENT=Enforce` once that
+log is clean.
+
+Why staged even though a static sweep found no cross-tenant user caller for this service (Studio
+re-mints per tenant and guards the route client-side, octo-cli derives URL tenant and `acr_values`
+from one context value, octo-mcp-service RFC 8693-exchanges before calling): that is an argument, and
+the gate has never produced the evidence here. One release in `LogOnly` costs nothing and produces
+it. Note also what the gate does **not** cover, and never did: `/{tenantId}/adapterHub` carries no
+`[Authorize]`, so no principal is built and the middleware short-circuits on the unauthenticated
+request — that hub's tenant isolation is a separate, open problem, not something this work item
+changed. `GET {tenantId}/v1/communication/ping` is `[AllowAnonymous]` and is skipped by design.
+
 ### Tenant authorization for service tokens (AB#5032)
 
 `Program.cs` calls `AddOctoTenantAuthorization(builder.Configuration)` so the staged narrowing of the

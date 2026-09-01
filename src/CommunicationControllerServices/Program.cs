@@ -32,7 +32,6 @@ using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Meshmakers.Octo.Services.Notifications.Services;
 using Meshmakers.Octo.Services.Observability;
 using Meshmakers.Octo.Services.Swagger.Configuration;
-using Microsoft.IdentityModel.Tokens;
 using NLog;
 using NLog.Web;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
@@ -199,20 +198,35 @@ try
 
     builder.Services.AddOctoNotification();
 
+    // AB#5054: start the *user*-token half of the tenant gate in its migration mode. AB#5054 set
+    // TokenValidationParameters.AuthenticationType = "Bearer" (ConfigureJwtBearerOptions), which is
+    // what makes TenantAuthorizationMiddleware run at all here — before that it was a silent no-op
+    // on every bearer request, so neither the user check nor the AB#5032 service-token audit log
+    // ever produced anything. The service half has always been staged; the user half was not, so
+    // switching the label on would flip it from "never checked" to "always 403" in one step.
+    //
+    // A static sweep of this service's callers found no cross-tenant user-token caller (Studio
+    // re-mints per tenant and guards the route client-side, octo-cli derives the URL tenant and the
+    // acr_values from the same context value, octo-mcp-service RFC 8693-exchanges before calling).
+    // That is an argument, not the evidence — and the evidence is exactly what this gate has never
+    // produced here. One release in LogOnly writes it, at zero behavioural cost; then arm the
+    // environment with OCTO_TENANTAUTHORIZATION__USERTOKENENFORCEMENT=Enforce. The code default is
+    // deliberately registered BEFORE the section binding, so configuration wins over it.
+    builder.Services.AddOctoTenantAuthorization(o =>
+        o.UserTokenEnforcement = UserTokenTenantEnforcementMode.LogOnly);
+
     // AB#5032: lets an operator narrow the client-credentials exemption of
     // UseOctoTenantAuthorization() per environment (OCTO_TENANTAUTHORIZATION__…). The defaults
     // reproduce the previous behaviour and only add the audit log.
     builder.Services.AddOctoTenantAuthorization(builder.Configuration);
 
-    builder.Services.AddAuthentication().AddJwtBearer(jwt =>
-        {
-            jwt.Audience = CommonConstants.OctoApi;
-            jwt.TokenValidationParameters = new TokenValidationParameters
-            {
-                NameClaimType = JwtClaimTypes.Name,
-                RoleClaimType = JwtClaimTypes.Role
-            };
-        });
+    // 🔴 AB#5054 — no configuration delegate here. Audience, claim types, issuer and the "Bearer"
+    // AuthenticationType all live in ConfigureJwtBearerOptions (registered above). A delegate here
+    // runs LAST in the options factory, so an assignment to TokenValidationParameters silently
+    // discards what the configurator set — including the label TenantAuthorizationMiddleware keys
+    // its whole tenant check off, which turns the gate back into a no-op with no compile error and
+    // no red test. See the remarks on ConfigureJwtBearerOptions.
+    builder.Services.AddAuthentication().AddJwtBearer();
 
 
     builder.Services.AddAuthorization(options =>
