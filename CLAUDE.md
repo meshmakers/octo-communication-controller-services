@@ -1625,6 +1625,80 @@ event only when something changed, never throws), integration
 keeps exactly one edge despite the ZeroOrOne multiplicity, a different account replaces the edge).
 
 
+### Phase 3 — deliberate secret rotation (AB#5032)
+
+Everything above is built to **never** rotate: a convergence pass re-sends the plaintext it already
+holds, because a service restart that invalidated every adapter's credential would be a
+self-inflicted outage. That leaves a leaked or aged secret unretireable. The rotation verb is the
+explicit counterpart.
+
+```
+POST {tenantId}/v1/adapter/{adapterRtId}/serviceAccount/rotateSecret
+  → 200 RotateServiceAccountSecretResultDto { ClientId, ConfigurationWellKnownName,
+                                              WasCreated, RequiresPipelineRedeploy, Message }
+```
+
+`AdapterController.RotateServiceAccountSecret` (`TenantCommunicationApiReadWritePolicy`) →
+`IPipelineServiceAccountProvisioningService.RotateAdapterSecretAsync`.
+
+**Why the REST verb belongs here and not (only) in the CLI.** This service is the sole owner of
+*both* halves of the credential — it is the only producer of the identity client (over the
+distribution event hub; the identity REST API is unreachable without exactly the client-credentials
+identity being rotated) and the writer of the `ServiceAccountConfiguration` entity. A CLI-side
+rotation would have to reproduce that pairing across two services and could leave the halves apart.
+Putting it here means CLI, MCP and Studio all reach it through the existing
+`ICommunicationServicesClient`, and the audit event is written where the change happens. The
+octo-cli/SDK command is a follow-up in those repos; nothing else is needed server-side.
+
+**Ordering is the consistency argument** — identity is written **first**:
+
+| Failure | Resulting state |
+|---|---|
+| Identity write fails | Nothing changed anywhere. Both sides still hold the old secret; the verb throws and answers 400 saying the previous secret remains in effect. |
+| Configuration write fails | The client already carries the new hash — the one genuinely inconsistent window. The previous plaintext is pushed back to identity (compensation), so the adapters running on it keep working, and the original failure is surfaced. |
+| Compensation also fails | Logged as Error naming both sides. The next convergence pass re-sends the plaintext the configuration still holds and heals it. |
+
+A second call after any failure rotates again from a consistent state; two successful calls in a row
+each leave both sides on the same fresh secret.
+
+🔴 **`isRuntimeState` on `ClientSecret` does not block this.** That marker only makes a *blueprint
+re-apply* preserve the existing value (`ImportRtModelCommand.PreserveAttributesForEntity`) and
+excludes the attribute from `ExportRt`. The runtime write path (`EntityUpdateInfo` /
+`SavePipelineServiceAccountAsync`) is unaffected — which is precisely why rotation has to go through
+this path: a blueprint can no longer change a live secret at all.
+
+🔴 **A rotation only takes effect after a redeploy.** The adapter bakes the pipeline's
+`GlobalConfiguration` — service-account credentials included — into the immutable
+`PipelineRegistration` at **pipeline registration** (`PipelineRegistryService`,
+octo-communication-sdk) and never refreshes it. Until the adapter's pipelines / data flows are
+redeployed, they keep presenting the secret the identity service has already replaced.
+`RequiresPipelineRedeploy` and the `Message` say so; the audit event repeats it.
+
+🔴 **No secret leaves the two sanctioned sinks.** The response DTO deliberately has no secret-shaped
+property (returning one would add proxy logs, shell history and CI output as a third home), and
+neither plaintext — the new one or the retired one — is written to any log target, not even
+truncated, and not on the failure paths that log the most.
+
+Phase 3 tests: `Services/PipelineServiceAccountRotationTests` (both sides get the same new secret,
+entity updated not duplicated, identity-before-configuration ordering, twice in a row stays
+consistent and really rotates, identity refusal leaves the configuration untouched, configuration
+failure restores the previous secret, a failing compensation still reports the original failure,
+adapter without an account degrades to a provisioning that needs no redeploy, no secret in any NLog
+target on the happy and the double-failure path),
+`Controllers/AdapterControllerRotateServiceAccountTests` (redeploy hint + audit event, no
+secret-shaped property on the DTO, provisioning variant, 404 unknown adapter, 400 malformed rtId,
+400 naming that the previous secret still works).
+
+### Tenant authorization for service tokens (AB#5032)
+
+`Program.cs` calls `AddOctoTenantAuthorization(builder.Configuration)` so the staged narrowing of the
+client-credentials exemption in `UseOctoTenantAuthorization()` is settable per environment
+(`OCTO_TENANTAUTHORIZATION__SERVICETOKENENFORCEMENT` = `Disabled` | `LogOnly` (default) | `Enforce`,
+plus `…__CROSSTENANTSERVICECLIENTIDS__n`). Defaults keep today's behaviour and only add an audit log.
+Full rationale in octo-common-services CLAUDE.md § "Tenant Authorization — the service-token
+exemption". Note this service sets `jwt.Audience = octoAPI`, so it is *not* among the repos running
+with `ValidateAudience = false`.
+
 ## Project Structure Notes
 
 - Main service: `src/CommunicationControllerServices/`

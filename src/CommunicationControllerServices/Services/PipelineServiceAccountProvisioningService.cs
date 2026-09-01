@@ -185,12 +185,98 @@ internal class PipelineServiceAccountProvisioningService(
         }
 
         var isNewEntity = existing == null;
-        var serviceAccount = new RtServiceAccountConfiguration
+
+        await communicationRepository.SavePipelineServiceAccountAsync(tenantId, adapter.ToRtEntityId(),
+            BuildServiceAccount(tenantId, existing?.RtId, wellKnownName, clientId, secret), isNewEntity);
+
+        Logger.Info(
+            "[{TenantId}] Pipeline service account '{WellKnownName}' (client '{ClientId}') is linked to adapter '{AdapterName}' ({AdapterRtId})",
+            tenantId, wellKnownName, clientId, adapter.Name, adapter.RtId);
+
+        return isNewEntity
+            ? PipelineServiceAccountProvisioningOutcome.Provisioned
+            : PipelineServiceAccountProvisioningOutcome.Repaired;
+    }
+
+    /// <inheritdoc />
+    public async Task<PipelineServiceAccountRotationResult> RotateAdapterSecretAsync(string tenantId,
+        RtAdapter adapter)
+    {
+        var wellKnownName = BuildWellKnownName(adapter.RtId);
+        var clientId = BuildClientId(adapter.RtId);
+
+        var linked = await serviceAccountResolver.GetAdapterDefaultAsync(tenantId, adapter.RtId);
+        var existing = linked ?? await communicationRepository
+            .GetServiceAccountByWellKnownNameAsync(tenantId, wellKnownName);
+
+        // The plaintext currently in the configuration, i.e. the one every running pipeline of this
+        // adapter is presenting. Kept only to be able to put it back if the write below fails.
+        var previousSecret = ReadAttribute(existing, nameof(RtServiceAccountConfiguration.ClientSecret));
+        var isNewEntity = existing == null;
+
+        // 🔴 Same secret hygiene as the provisioning path: neither the old nor the new plaintext is
+        // logged, truncated or carried in an exception message.
+        var secret = GenerateSecret();
+
+        // Identity first. A failure here leaves BOTH sides on the old secret — the rotation simply
+        // did not happen, which is a consistent state, and the exception tells the caller so.
+        await SendIdentityClientAsync(tenantId, adapter, clientId, secret);
+
+        try
         {
-            RtId = existing?.RtId ?? OctoObjectId.GenerateNewId(),
+            await communicationRepository.SavePipelineServiceAccountAsync(tenantId, adapter.ToRtEntityId(),
+                BuildServiceAccount(tenantId, existing?.RtId, wellKnownName, clientId, secret), isNewEntity);
+        }
+        catch (Exception e)
+        {
+            // The only genuinely inconsistent window: the client already carries the new hash while
+            // the configuration still holds the old plaintext. Push the old one back so the adapters
+            // running on it keep working, then let the failure surface.
+            if (!string.IsNullOrWhiteSpace(previousSecret))
+            {
+                try
+                {
+                    await SendIdentityClientAsync(tenantId, adapter, clientId, previousSecret!);
+                    Logger.Warn(e,
+                        "[{TenantId}] Rotating the pipeline service account of adapter '{AdapterName}' ({AdapterRtId}) failed while writing the configuration; the previous secret was restored at the identity service, so nothing changed",
+                        tenantId, adapter.Name, adapter.RtId);
+                }
+                catch (Exception rollbackException)
+                {
+                    // Both sides now disagree. The next convergence pass re-sends the plaintext the
+                    // configuration still holds and heals it, but an operator must know now.
+                    Logger.Error(rollbackException,
+                        "[{TenantId}] Could not restore the previous secret of the pipeline service account of adapter '{AdapterName}' ({AdapterRtId}) after a failed rotation. The identity client and the tenant configuration disagree until the next provisioning pass converges them",
+                        tenantId, adapter.Name, adapter.RtId);
+                }
+            }
+
+            throw;
+        }
+
+        Logger.Info(
+            "[{TenantId}] Rotated the secret of pipeline service account '{WellKnownName}' (client '{ClientId}') of adapter '{AdapterName}' ({AdapterRtId})",
+            tenantId, wellKnownName, clientId, adapter.Name, adapter.RtId);
+
+        return new PipelineServiceAccountRotationResult(clientId, wellKnownName, isNewEntity);
+    }
+
+    /// <summary>
+    /// The configuration entity both the convergence and the rotation path write. Kept in one place
+    /// so a rotated entity can never drift from a provisioned one.
+    /// </summary>
+    private RtServiceAccountConfiguration BuildServiceAccount(string tenantId, OctoObjectId? existingRtId,
+        string wellKnownName, string clientId, string secret)
+    {
+        return new RtServiceAccountConfiguration
+        {
+            RtId = existingRtId ?? OctoObjectId.GenerateNewId(),
             CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
             RtWellKnownName = wellKnownName,
             ClientId = clientId,
+            // `ClientSecret` is marked isRuntimeState (AB#5027), which only stops a blueprint
+            // re-apply from overwriting it — the runtime write path used here is unaffected, and it
+            // is exactly why rotation has to go through this path rather than through a seed.
             ClientSecret = secret,
             // IssuerUri is per-environment author configuration (see serviceAccountConfiguration.yaml):
             // taking it from this instance's configuration is what lets a tenant that moved clusters
@@ -200,17 +286,6 @@ internal class PipelineServiceAccountProvisioningService(
             // delegation grant (AB#5031) cannot resolve a tenant at all.
             TenantId = tenantId
         };
-
-        await communicationRepository.SavePipelineServiceAccountAsync(tenantId, adapter.ToRtEntityId(),
-            serviceAccount, isNewEntity);
-
-        Logger.Info(
-            "[{TenantId}] Pipeline service account '{WellKnownName}' (client '{ClientId}') is linked to adapter '{AdapterName}' ({AdapterRtId})",
-            tenantId, wellKnownName, clientId, adapter.Name, adapter.RtId);
-
-        return isNewEntity
-            ? PipelineServiceAccountProvisioningOutcome.Provisioned
-            : PipelineServiceAccountProvisioningOutcome.Repaired;
     }
 
     /// <summary>

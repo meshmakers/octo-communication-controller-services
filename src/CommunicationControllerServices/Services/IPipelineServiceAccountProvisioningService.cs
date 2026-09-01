@@ -52,6 +52,31 @@ public record PipelineServiceAccountProvisioningReport(
 }
 
 /// <summary>
+/// Result of a deliberate secret rotation for one adapter's pipeline service account (AB#5032).
+/// </summary>
+/// <param name="ClientId">The identity client whose secret was replaced.</param>
+/// <param name="WellKnownName">
+///     The <c>RtWellKnownName</c> of the <c>ServiceAccountConfiguration</c> that now holds the new
+///     plaintext — the key the mesh adapter looks the account up by.
+/// </param>
+/// <param name="WasCreated">
+///     <c>true</c> when the adapter had no service account at all and rotation degraded into a first
+///     provisioning. Nothing was replaced in that case; nothing needs redeploying either, because
+///     nothing was running under the old credential.
+/// </param>
+public record PipelineServiceAccountRotationResult(string ClientId, string WellKnownName, bool WasCreated)
+{
+    /// <summary>
+    /// 🔴 Always <c>true</c> for an actual rotation. The adapter caches the pipeline's
+    /// <c>GlobalConfiguration</c> — and with it the service-account credentials — at
+    /// <b>pipeline registration</b> (<c>PipelineRegistryService</c>, octo-communication-sdk), and
+    /// never refreshes it. Until the pipelines / data flows of this adapter are redeployed, every
+    /// pipeline keeps presenting the old secret, which the identity service has already replaced.
+    /// </summary>
+    public bool RequiresPipelineRedeploy => !WasCreated;
+}
+
+/// <summary>
 /// Creates and maintains the execution identity every adapter's pipelines run under
 /// (Epic AB#4979 / AB#5027 phase 2).
 ///
@@ -98,4 +123,31 @@ public interface IPipelineServiceAccountProvisioningService
     /// deploy) rather than during the tenant-wide sweep.
     /// </summary>
     Task<PipelineServiceAccountProvisioningOutcome> EnsureAdapterProvisionedAsync(string tenantId, RtAdapter adapter);
+
+    /// <summary>
+    /// Deliberately replaces the secret of one adapter's pipeline service account (AB#5032), keeping
+    /// both sides consistent: a fresh plaintext is hashed into the identity client and written into
+    /// the tenant's <c>ServiceAccountConfiguration</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The convergence paths above deliberately never rotate — they re-send the plaintext they
+    /// already hold so a service restart cannot invalidate the credential every running adapter is
+    /// using. This is the explicit counterpart: the only way to retire a secret that leaked, aged
+    /// out or was seen by someone who should not have seen it.
+    /// </para>
+    /// <para>
+    /// Unlike the convergence paths this one <b>throws</b>. A rotation is a user request with a
+    /// caller waiting for an answer, and a silent failure would leave that caller believing the old
+    /// secret is dead when it is not.
+    /// </para>
+    /// <para>
+    /// 🔴 Ordering is the consistency argument: identity is written <b>first</b>. If that fails,
+    /// nothing has changed anywhere and the rotation is a clean no-op. If the configuration write
+    /// then fails, the previous plaintext is pushed back to identity so the adapters still running
+    /// on it keep working, and the failure is reported. A second call after any failure rotates
+    /// again from a consistent state.
+    /// </para>
+    /// </remarks>
+    Task<PipelineServiceAccountRotationResult> RotateAdapterSecretAsync(string tenantId, RtAdapter adapter);
 }

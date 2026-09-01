@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
@@ -252,6 +253,114 @@ public class AdapterController : ControllerBase
         {
             _logger.LogWarning(e, "Wake of workload '{WorkloadRtId}' failed", workloadRtId);
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
+        }
+    }
+
+    /// <summary>
+    /// Rotates the client secret of the adapter's pipeline service account (AB#5032): a fresh secret
+    /// is hashed into the identity client and written into the tenant's
+    /// <c>ServiceAccountConfiguration</c> in one deliberate step.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Why here and not only in the CLI: the controller is the only component that owns <b>both</b>
+    /// sides of the credential — it is the sole producer of the identity client (over the
+    /// distribution event hub; the identity REST API is unreachable without the very
+    /// client-credentials identity being rotated) and the writer of the configuration entity.
+    /// A CLI-side rotation would have to reproduce that pairing over two services and could leave
+    /// the two halves apart. Putting the verb here means CLI, MCP and Studio can all reach it
+    /// through the existing communication service client, and the audit event is written where the
+    /// change happens.
+    /// </para>
+    /// <para>
+    /// 🔴 The response carries no secret, and the new secret only takes effect once the adapter's
+    /// pipelines / data flows are redeployed — the adapter caches them at pipeline registration.
+    /// </para>
+    /// </remarks>
+    /// <param name="adapterRtId">The runtime id of the adapter.</param>
+    /// <param name="provisioningService">The service owning both sides of the credential.</param>
+    /// <param name="eventService">Audit trail.</param>
+    [HttpPost("{adapterRtId}/serviceAccount/rotateSecret")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(typeof(RotateServiceAccountSecretResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> RotateServiceAccountSecret([Required] string adapterRtId,
+        [FromServices] IPipelineServiceAccountProvisioningService provisioningService,
+        [FromServices] ICommunicationEventService eventService)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        if (!OctoObjectId.TryParse(adapterRtId, out var adapterObjectId))
+        {
+            return BadRequest(new ErrorResponse
+                { ErrorMessage = $"Invalid adapterRtId '{adapterRtId}': must be a 24-character hex ObjectId." });
+        }
+
+        // Resolved through the tenant's adapter list rather than by RtEntityId: Adapter is
+        // polymorphic (RtMeshAdapter and friends), so the caller would have to know the concrete
+        // CkTypeId to build an RtEntityId. A tenant has a handful of adapters.
+        var adapters = await _communicationRepository.GetAdaptersAsync(tenantId);
+        var adapter = adapters.FirstOrDefault(a => a.RtId == adapterObjectId);
+        if (adapter == null)
+        {
+            return NotFound(new ErrorResponse
+                { ErrorMessage = $"Adapter '{adapterRtId}' was not found in tenant '{tenantId}'." });
+        }
+
+        try
+        {
+            var result = await provisioningService.RotateAdapterSecretAsync(tenantId, adapter);
+
+            var message = result.RequiresPipelineRedeploy
+                ? $"The client secret of pipeline service account '{result.ClientId}' was rotated. " +
+                  "🔴 Redeploy the pipelines / data flows of this adapter — the adapter caches the credentials " +
+                  "in the pipeline configuration at registration time, so until then they still present the old secret."
+                : $"Adapter '{adapter.Name ?? adapterRtId}' had no pipeline service account; " +
+                  $"'{result.ClientId}' was provisioned instead. Nothing was invalidated.";
+
+            await eventService.StoreInformationEventAsync(tenantId,
+                $"Pipeline service account secret rotated for adapter '{adapter.Name ?? adapterRtId}' " +
+                $"({adapterRtId}), client '{result.ClientId}' (source: User). {message}");
+
+            return Ok(new RotateServiceAccountSecretResultDto
+            {
+                ClientId = result.ClientId,
+                ConfigurationWellKnownName = result.WellKnownName,
+                WasCreated = result.WasCreated,
+                RequiresPipelineRedeploy = result.RequiresPipelineRedeploy,
+                Message = message
+            });
+        }
+        catch (Exception e)
+        {
+            // Deliberately broad: the rotation spans the identity bus and the tenant repository, and
+            // whatever went wrong the caller must learn that the rotation did NOT happen rather than
+            // be left guessing whether the old secret is still valid. The message never contains a
+            // secret — neither the service nor DistClientDto.ToString() emits one.
+            _logger.LogError(e, "Rotating the pipeline service account secret of adapter '{AdapterRtId}' failed",
+                adapterRtId);
+
+            try
+            {
+                await eventService.StoreErrorEventAsync(tenantId,
+                    $"Rotating the pipeline service account secret of adapter '{adapter.Name ?? adapterRtId}' " +
+                    $"({adapterRtId}) failed: {e.Message}. The previous secret remains in effect.");
+            }
+            catch (Exception eventException)
+            {
+                _logger.LogWarning(eventException, "Could not store the rotation failure event");
+            }
+
+            return BadRequest(new ErrorResponse
+            {
+                ErrorMessage = $"Rotating the pipeline service account secret failed: {e.Message}. " +
+                               "The previous secret remains in effect."
+            });
         }
     }
 }

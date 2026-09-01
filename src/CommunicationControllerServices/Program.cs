@@ -199,6 +199,11 @@ try
 
     builder.Services.AddOctoNotification();
 
+    // AB#5032: lets an operator narrow the client-credentials exemption of
+    // UseOctoTenantAuthorization() per environment (OCTO_TENANTAUTHORIZATION__…). The defaults
+    // reproduce the previous behaviour and only add the audit log.
+    builder.Services.AddOctoTenantAuthorization(builder.Configuration);
+
     builder.Services.AddAuthentication().AddJwtBearer(jwt =>
         {
             jwt.Audience = CommonConstants.OctoApi;
