@@ -1122,7 +1122,7 @@ Tests:
   ordering and shape of `GET /workload-variables` so the Studio's
   suggestion list stays stable.
 
-## Disable Refuses While Pools or Workloads Are Deployed (AB#4255)
+## Disable Refuses While Pools or Workloads Are Deployed (AB#4255) — or AI Services Is Enabled (AB#4884)
 
 `POST {tenantId}/v1/communication/disable` answers **409** with an `OperationFailedErrorDto` while any
 Pool, Adapter or Application of the tenant has a `DeploymentState` other than `Undeployed` /
@@ -1132,6 +1132,16 @@ resource as `Kind 'Name' (State)` plus the undeploy verbs (`UndeployWorkload`, `
 Studio). Every other `ConfigurationException` stays a 400. The tenant delete/detach guard in the
 asset repository (AB#4255 step 1) only reads the enabled flag, so this is the check that keeps a
 deleted tenant from leaving `CommunicationPool` CRs and helm releases behind.
+
+**The AI Services flag blocks too (AB#4884).** `EnableAi` refuses while Communication is disabled
+(the AI service depends on System.Communication), so the reverse holds as well: the blocker hook
+additionally reads the tenant's `TenantCapabilityConfigurationKeys.AiServices` flag (from the
+tenant's own configuration store, exactly as the delete/detach guard does — missing key or `false`
+= disabled) and refuses with a `BuildAiDisableBlockedMessage` naming `DisableAi` and the Studio
+Tenant Features panel. Without it, disabling Communication under a still-enabled AI Services left
+the tenant in a state `EnableAi` could never have produced, which only the delete/detach guard
+surfaced later. Both blockers can be present; their messages are joined. A flag read failure
+propagates — an unreadable state must never look torn down.
 
 Mechanics:
 
