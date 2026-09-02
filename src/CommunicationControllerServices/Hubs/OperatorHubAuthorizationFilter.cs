@@ -1,7 +1,4 @@
-using System.Security.Claims;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
@@ -20,22 +17,27 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 ///     scale outcomes, receiving tenant lifecycle events — is a system-level write. That is exactly
 ///     what <c>SystemCommunicationApiPolicy</c> describes (<c>RequireClaim(scope, octo_api)</c>).
 ///     <para>
-///         🔴 It runs in <see cref="OperatorHubAuthorizationMode.LogOnly" /> by default and must stay
-///         there until the operator actually sends a token — the SDK currently sends the literal string
-///         <c>"Bearer your-access-token"</c>. See <see cref="OperatorHubAuthorizationOptions" /> for the
-///         full reasoning and for how to arm it.
+///         🔴 It runs in <see cref="OperatorHubAuthorizationMode.LogOnly" /> by default. It was written
+///         when the SDK sent the literal string <c>"Bearer your-access-token"</c>; AB#5062 has since
+///         replaced that with an <c>AccessTokenProvider</c> and given the operator an
+///         <c>OperatorAccessTokenService</c> that fills it, so the precondition named in
+///         <see cref="OperatorHubAuthorizationOptions" /> may no longer hold. Whether this hub can be
+///         armed is AB#5062's question — read the <c>LogOnly</c> inventory of an environment before
+///         answering it there.
 ///     </para>
 ///     <para>
 ///         Registered per hub via <c>AddHubOptions&lt;OperatorHub&gt;</c> in <c>Program.cs</c>, not
-///         globally: <c>AdapterHub</c> is authenticated by the same absent mechanism and closing it is a
-///         separate exercise with its own consumer inventory (the mesh adapter fleet plus Studio's
-///         pipeline debugger).
+///         globally: <c>AdapterHub</c> is tenant-addressed and needs a tenant-binding check this filter
+///         does not make, plus its own consumer inventory. It has its own gate since AB#5063 — see
+///         <see cref="AdapterHubAuthorizationFilter" />.
 ///     </para>
 ///     <para>
 ///         The filter resolves its dependencies from the connection's own
 ///         <see cref="HubLifetimeContext.ServiceProvider" /> rather than through its constructor,
 ///         because SignalR caches filter instances for the lifetime of the host while
-///         <c>IAuthorizationService</c> is transient.
+///         <c>IAuthorizationService</c> is transient. Reading the caller — the principal fallback and
+///         the shape of the inventory line — lives in <see cref="HubConnectionPrincipal" />, shared
+///         with the adapter gate.
 ///     </para>
 /// </remarks>
 internal class OperatorHubAuthorizationFilter : IHubFilter
@@ -48,7 +50,7 @@ internal class OperatorHubAuthorizationFilter : IHubFilter
             .GetRequiredService<IOptions<OperatorHubAuthorizationOptions>>().Value;
         var authorizationService = context.ServiceProvider.GetRequiredService<IAuthorizationService>();
 
-        var user = await ResolvePrincipalAsync(context);
+        var user = await HubConnectionPrincipal.ResolveAsync(context);
         var authorized = user != null &&
                          (await authorizationService.AuthorizeAsync(user, null,
                              Constants.SystemCommunicationApiPolicy)).Succeeded;
@@ -59,7 +61,7 @@ internal class OperatorHubAuthorizationFilter : IHubFilter
             return;
         }
 
-        var caller = Describe(user, context.Context.ConnectionId);
+        var caller = HubConnectionPrincipal.Describe(user, context.Context.ConnectionId);
 
         if (options.Mode == OperatorHubAuthorizationMode.Enforce)
         {
@@ -77,59 +79,5 @@ internal class OperatorHubAuthorizationFilter : IHubFilter
             Constants.SystemCommunicationApiPolicy, caller);
 
         await next(context);
-    }
-
-    /// <summary>
-    ///     The connection's principal.
-    /// </summary>
-    /// <remarks>
-    ///     <c>Context.User</c> is what <c>app.UseAuthentication()</c> left on the negotiate request, so
-    ///     it depends on the default authenticate scheme being resolvable. The bearer scheme is
-    ///     authenticated explicitly as a fallback so the gate — and above all the LogOnly inventory —
-    ///     cannot silently report "anonymous" for a caller that did present a valid token. That
-    ///     silent-no-op is the exact failure mode AB#5054 had to repair on the HTTP gate of this same
-    ///     service.
-    /// </remarks>
-    private static async Task<ClaimsPrincipal?> ResolvePrincipalAsync(HubLifetimeContext context)
-    {
-        var user = context.Context.User;
-        if (user?.Identity is { IsAuthenticated: true })
-        {
-            return user;
-        }
-
-        var httpContext = context.Context.GetHttpContext();
-        if (httpContext == null)
-        {
-            return user;
-        }
-
-        try
-        {
-            var result = await httpContext.AuthenticateAsync(JwtBearerDefaults.AuthenticationScheme);
-            return result.Succeeded && result.Principal != null ? result.Principal : user;
-        }
-        catch (Exception e)
-        {
-            Logger.Debug(e, "Could not authenticate the bearer scheme for an /operatorHub connection");
-            return user;
-        }
-    }
-
-    private static string Describe(ClaimsPrincipal? user, string connectionId)
-    {
-        if (user?.Identity is not { IsAuthenticated: true })
-        {
-            return $"connection '{connectionId}', unauthenticated";
-        }
-
-        var clientId = user.FindFirst("client_id")?.Value ?? "<none>";
-        var subject = user.FindFirst("sub")?.Value
-                      ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "<none>";
-        var scopes = string.Join(' ', user.FindAll(Meshmakers.Octo.Services.Infrastructure
-            .InfrastructureCommon.ClaimScope).Select(c => c.Value));
-
-        return $"connection '{connectionId}', client_id '{clientId}', sub '{subject}', " +
-               $"scopes '{(string.IsNullOrWhiteSpace(scopes) ? "<none>" : scopes)}'";
     }
 }

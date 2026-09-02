@@ -142,15 +142,26 @@ try
         // AB#5059: /operatorHub is the tenant-crossing control plane of the operator fleet and had
         // no authorization whatsoever — no [Authorize], no FallbackPolicy, no RequireAuthorization().
         // The filter applies Constants.SystemCommunicationApiPolicy to every connection, staged
-        // behind OCTO_OPERATORHUBAUTHORIZATION__MODE because the operator SDK does not send a usable
-        // token yet (it sends the literal "Bearer your-access-token"). LogOnly is the default and
-        // changes no outcome; see OperatorHubAuthorizationOptions for the full reasoning.
-        // Scoped to this hub on purpose — AdapterHub needs its own consumer inventory.
-        .AddHubOptions<OperatorHub>(o => o.AddFilter<OperatorHubAuthorizationFilter>());
+        // behind OCTO_OPERATORHUBAUTHORIZATION__MODE because the operator fleet did not send a usable
+        // token when it was written. LogOnly is the default and changes no outcome; see
+        // OperatorHubAuthorizationOptions for the full reasoning.
+        .AddHubOptions<OperatorHub>(o => o.AddFilter<OperatorHubAuthorizationFilter>())
+        // AB#5063: the same treatment for /{tenantId}/adapterHub, which was equally unguarded — but
+        // with a second check the operator hub does not need: the connecting adapter must belong to
+        // the tenant whose hub path it uses. TenantAuthorizationMiddleware cannot do that here; it
+        // returns early on any request without an "Authorization: Bearer" header, and a SignalR
+        // client sends its token as ?access_token= on the WebSocket / SSE transports. Also staged
+        // (OCTO_ADAPTERHUBAUTHORIZATION__MODE), because an adapter connects anonymously today — see
+        // AdapterHubAuthorizationOptions.
+        // Both filters are registered per hub rather than globally: the two hubs evaluate different
+        // policies and only one of them is tenant-addressed.
+        .AddHubOptions<AdapterHub>(o => o.AddFilter<AdapterHubAuthorizationFilter>());
 
-    // AB#5059: bound as configuration so an environment can be armed without a release.
+    // AB#5059 / AB#5063: bound as configuration so an environment can be armed without a release.
     builder.Services.Configure<OperatorHubAuthorizationOptions>(
         builder.Configuration.GetSection(OperatorHubAuthorizationOptions.SectionName));
+    builder.Services.Configure<AdapterHubAuthorizationOptions>(
+        builder.Configuration.GetSection(AdapterHubAuthorizationOptions.SectionName));
 
     builder.Services.ConfigureOptions<ConfigureDistributionEventHubOptions>();
     builder.Services.ConfigureOptions<ConfigureJwtBearerOptions>();
