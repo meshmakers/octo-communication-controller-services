@@ -17,7 +17,7 @@ internal class AdapterHealthChecks(IAdapterCache adapterCache, ISystemContext sy
         using var session = await systemContext.GetAdminSessionAsync();
         session.StartTransaction();
 
-        var tenants = await systemContext.GetChildTenantsAsync(session);
+        var tenants = await systemContext.GetAllTenantsAsync(session);
         
         var unhealthyTenants = new Dictionary<string, List<UnhealthyAdapterInfo>>();
 

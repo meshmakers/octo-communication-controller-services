@@ -6,6 +6,7 @@ using Meshmakers.Octo.ConstructionKit.Contracts.BlueprintCatalogs;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.Runtime.Contracts.Blueprints;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -25,15 +26,105 @@ internal class GetDisableBlockerAsyncTests
     private const string TenantId = "child-a";
 
     private readonly IPoolService _poolService = Substitute.For<IPoolService>();
+    private readonly ISystemContext _systemContext = Substitute.For<ISystemContext>();
+    private readonly ITenantContext _tenantContext = Substitute.For<ITenantContext>();
+
+    public GetDisableBlockerAsyncTests()
+    {
+        _systemContext.FindTenantContextAsync(TenantId).Returns(_tenantContext);
+        _tenantContext.GetAdminSessionAsync().Returns(Substitute.For<IOctoAdminSession>());
+    }
+
+    private void SetAiServicesFlag(bool enabled)
+    {
+        _tenantContext.GetConfigurationAsync(
+                Arg.Any<IOctoAdminSession>(),
+                TenantCapabilityConfigurationKeys.AiServices,
+                Arg.Any<DefaultConfigurationEnabled>())
+            .Returns(new DefaultConfigurationEnabled { IsEnabled = enabled });
+    }
 
     [Test]
     public async Task AnswersNull_WhenNothingIsDeployed()
     {
         _poolService.GetActiveDeploymentsAsync(TenantId).Returns(Array.Empty<ActiveDeployment>());
+        SetAiServicesFlag(false);
 
         var blocker = await CreateSut().ProbeDisableBlockerAsync(TenantId);
 
         await Assert.That(blocker).IsNull();
+    }
+
+    [Test]
+    public async Task AnswersNull_WhenTheAiFlagIsAbsent()
+    {
+        // A missing flag document reads as disabled - same normalisation as the delete/detach guard.
+        _poolService.GetActiveDeploymentsAsync(TenantId).Returns(Array.Empty<ActiveDeployment>());
+        _tenantContext.GetConfigurationAsync(
+                Arg.Any<IOctoAdminSession>(),
+                TenantCapabilityConfigurationKeys.AiServices,
+                Arg.Any<DefaultConfigurationEnabled>())
+            .Returns((DefaultConfigurationEnabled?)null);
+
+        var blocker = await CreateSut().ProbeDisableBlockerAsync(TenantId);
+
+        await Assert.That(blocker).IsNull();
+    }
+
+    [Test]
+    public async Task Blocks_WhileAiServicesIsStillEnabled()
+    {
+        // AB#4884: EnableAi refuses while Communication is disabled, so the reverse must hold too -
+        // otherwise the tenant lands in a state EnableAi could never have produced.
+        _poolService.GetActiveDeploymentsAsync(TenantId).Returns(Array.Empty<ActiveDeployment>());
+        SetAiServicesFlag(true);
+
+        var blocker = await CreateSut().ProbeDisableBlockerAsync(TenantId);
+
+        await Assert.That(blocker).IsNotNull();
+        await Assert.That(blocker!).Contains("AI Services is still enabled");
+        await Assert.That(blocker!).Contains("DisableAi");
+        await Assert.That(blocker!).Contains("Tenant Features");
+        await Assert.That(blocker!).Contains("then retry DisableCommunication.");
+    }
+
+    [Test]
+    public async Task NamesBothBlockers_WhenDeploymentsAndAiServicesBlock()
+    {
+        _poolService.GetActiveDeploymentsAsync(TenantId).Returns(new List<ActiveDeployment>
+        {
+            new(ActiveDeployment.PoolKind, "edge-a", RtDeploymentStateEnum.Deployed),
+        });
+        SetAiServicesFlag(true);
+
+        var blocker = await CreateSut().ProbeDisableBlockerAsync(TenantId);
+
+        await Assert.That(blocker).IsNotNull();
+        await Assert.That(blocker!).Contains("Pool 'edge-a' (Deployed)");
+        await Assert.That(blocker!).Contains("AI Services is still enabled");
+    }
+
+    [Test]
+    public async Task PropagatesAiFlagReadFailures_InsteadOfAllowingTheDisable()
+    {
+        _poolService.GetActiveDeploymentsAsync(TenantId).Returns(Array.Empty<ActiveDeployment>());
+        _systemContext.FindTenantContextAsync(TenantId).ThrowsAsync(new InvalidOperationException("mongo down"));
+
+        await Assert.That(async () => await CreateSut().ProbeDisableBlockerAsync(TenantId))
+            .Throws<InvalidOperationException>();
+    }
+
+    [Test]
+    public async Task BuildAiDisableBlockedMessage_IsTheOperatorContract()
+    {
+        var message = DefaultConfigurationCreatorService.BuildAiDisableBlockedMessage("child-a");
+
+        await Assert.That(message).IsEqualTo(
+            "Communication cannot be disabled for tenant 'child-a' while AI Services is still enabled - " +
+            "the AI service depends on Communication. Disable AI Services first (DisableAi, octo-cli in a " +
+            "context of tenant 'child-a', or Refinery Studio > General > Settings > Tenant Features) - " +
+            "then retry DisableCommunication.");
+        await Assert.That(message.All(c => c < 128)).IsTrue();
     }
 
     [Test]
@@ -84,16 +175,17 @@ internal class GetDisableBlockerAsyncTests
 
     private TestableCreator CreateSut()
     {
-        return new TestableCreator(_poolService);
+        return new TestableCreator(_poolService, _systemContext);
     }
 
-    private sealed class TestableCreator(IPoolService poolService) : DefaultConfigurationCreatorService(
+    private sealed class TestableCreator(IPoolService poolService, ISystemContext systemContext)
+        : DefaultConfigurationCreatorService(
         NullLogger<DefaultConfigurationCreatorService>.Instance,
         Substitute.For<IDiagnosticsService>(),
         Microsoft.Extensions.Options.Options.Create(new CommunicationControllerOptions()),
         Substitute.For<ITriggerManagementService>(),
         Substitute.For<ICommandClient<CreateIdentityDataCommandRequest>>(),
-        Substitute.For<ISystemContext>(),
+        systemContext,
         poolService,
         Substitute.For<IAdapterCachePublish>(),
         Substitute.For<IAdapterService>(),

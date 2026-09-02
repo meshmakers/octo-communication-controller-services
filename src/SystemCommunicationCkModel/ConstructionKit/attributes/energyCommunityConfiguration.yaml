@@ -12,6 +12,9 @@ attributes:
   - id: FooterLogo
     valueType: BinaryLinked
     description: "Icon for the app footer"
+  - id: EmailFooterImage
+    valueType: BinaryLinked
+    description: "Image placed in the footer or imprint block of outgoing e-mails. Separate from FooterLogo, which brands the web application - the two are set independently on purpose."
   - id: ConsumptionRecordRequestDelay
     valueType: Int
     description: "Delay in days before automatic consumption record requests are sent"
@@ -85,3 +88,9 @@ attributes:
   - id: NotificationEmailContact
     valueType: String
     description: "Email address for notifications related to EDA processes and messages"
+  - id: BankAccountIban
+    valueType: String
+    description: "IBAN of the energy community's own account - the one members are asked to pay into. Distinct from Customer.BankAccount, which holds a MEMBER's account and is used for payouts in the opposite direction."
+  - id: BankAccountHolder
+    valueType: String
+    description: "Account holder of the energy community's own account, as it must appear on a transfer"
