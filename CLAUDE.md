@@ -1823,6 +1823,88 @@ target on the happy and the double-failure path),
 secret-shaped property on the DTO, provisioning variant, 404 unknown adapter, 400 malformed rtId,
 400 naming that the previous secret still works).
 
+### Phase 4 — the credentials reach the adapter pod (AB#5072)
+
+Everything above provisions and rotates a credential the adapter had no way of *receiving*. AB#5072
+delivers it: `octo-communication-sdk` gained `AdapterOptions.IssuerUri` / `ClientId` / `ClientSecret`
+plus an `AdapterAccessTokenService` that logs in **before** the hub client connects, and this service
+supplies the two values through the `ValueOverride[]` that already goes to the operator at deploy
+time.
+
+**The coupling to the chart, side by side.** These four rows are the whole contract, and a typo in
+any of them is invisible until a pod is running — the adapter simply connects anonymously:
+
+| Controller (`PoolService`) | Operator | Chart (`octo-mesh-adapter/templates/_env.tpl`) | Adapter |
+|---|---|---|---|
+| `ServiceAccountClientIdValuePath` = `serviceAccountClientId`, `IsSecret=false` | literal value in `values-overrides.yaml` | `.Values.serviceAccountClientId` | `OCTO_ADAPTER__CLIENTID` |
+| `ServiceAccountClientSecretValuePath` = `secrets.serviceAccountClientSecret`, **`IsSecret=true`** | materialised into `{release}-octo-secrets`, path rewritten to `valueFrom.secretKeyRef` | `.Values.secrets.serviceAccountClientSecret` through `octo-mesh.secretEnv` (same helper as `secrets.rabbitmq`) | `OCTO_ADAPTER__CLIENTSECRET` |
+| *(nothing — deliberately)* | `authUri` from `OperatorOptions.AuthUri` | `.Values.authUri` | `OCTO_ADAPTER__ISSUERURI` **and** `OCTO_ADAPTER__AUTHORITYURL` |
+
+The third row is Gerald's decision and worth keeping: `AuthorityUrl` (inbound — the issuer secured
+`FromHttpRequest@2` routes accept) and `IssuerUri` (outbound — the identity service the adapter
+authenticates *itself* against) are two configuration keys because `AdapterOptions` lives in the SDK
+and must also serve adapters that have no `MeshAdapterConfiguration` (Loxone, Modbus, Zenon). They
+always name the same identity service, so the chart feeds both from the one `authUri` value; a second
+chart value could only ever drift. Nothing is projected for it here.
+
+**Where the projection happens.** `PoolService.AppendPipelineServiceAccountOverridesAsync`, called
+from `BuildWorkloadDeployedDtoAsync` after the entity's own overrides are built. It reads the account
+through `IPipelineServiceAccountResolver.GetAdapterDefaultAsync` — the adapter-wide default, not a
+per-pipeline override: this is the *process* identity of the pod, and a per-pipeline account is about
+one pipeline's execution.
+
+- **Adapters only.** `Application`s execute no pipelines, connect to no adapter hub, and their CK
+  type does not carry the association; they are skipped before any repository read.
+- **Not gated on `ReceivesClusterSecrets`, deliberately.** That flag decides whether a workload gets
+  the *cluster's shared* data-store credentials (MongoDB, CrateDB) — a pure edge adapter must not.
+  These two values are the opposite kind of thing: the adapter's own, per-adapter, tenant-scoped
+  identity, and an edge adapter needs it *more* than an in-cluster one, because it is the only
+  credential it presents when dialling into the controller across the network. Same precedent as the
+  RabbitMQ broker password, which is injected unconditionally because every workload needs the
+  command bus.
+- **Everything degrades to "no credentials", never to a failed deploy.** No account linked, a
+  half-written entity (attributes are read through `GetAttributeValueOrDefault`, never the generated
+  mandatory-attribute getters), a resolver that throws while the CK cache is being unloaded — each
+  logs and returns the overrides unchanged. The result is a pod that connects anonymously, which is
+  what the entire fleet does today.
+- **A path the workload entity already pins wins.** `WorkloadOverrideYamlBuilder` is last-wins, so
+  appending unconditionally would silently overrule a deliberate manual override.
+- 🔴 **The secret reaches no log path.** Not verbatim, not truncated, not in an exception message.
+  Pinned by `DeployWorkloadAsync_NeverWritesTheClientSecretToAnyLogTarget`, which reconfigures NLog
+  to a `MemoryTarget` and asserts on the **rendered** output.
+
+#### 🔴 The ordering: provisioning moved BEFORE the deploy notification
+
+AB#5027 phase 2 provisions the adapter's account in `DeployWorkloadAsync` **after** the deploy
+notification ("best effort, so the identity round trip cannot delay the helm rollout"), while
+`BuildWorkloadDeployedDtoAsync` runs before it. That was free while the account was only ever read
+back by a *later* pipeline deploy. It is not free any more: the deploy notification now carries the
+credentials, and the DTO is built from what exists at that moment — so the **first** deploy of every
+freshly created adapter would ship none, the pod would come up anonymous, and nothing would
+re-deploy it. Once the adapter-hub gate (AB#5063) is armed, such a pod never gets online at all.
+
+Provisioning therefore now runs **before** `BuildWorkloadDeployedDtoAsync`, immediately after
+`EnsureWorkloadIsHelmDeployableAsync`. The two rejected alternatives: triggering a second deploy after
+a successful provisioning costs a second helm rollout and pod restart on every deploy and needs its
+own loop guard; and documenting "the first deploy is anonymous" pushes a manual second click onto
+every adapter creation. What is paid instead is latency on the deploy call — bounded by the
+provisioning service's own 30 s identity timeout, normally milliseconds — and it is paid *before* the
+rollout starts rather than during it, so a slow identity service delays a deploy instead of
+half-configuring one. The best-effort contract is unchanged: a provisioning failure is still
+swallowed and the workload still deploys, just without credentials.
+
+Note `DeployManagedWorkloadsAsync` (the pool fan-out) calls `BuildWorkloadDeployedDtoAsync` without
+provisioning first — it has no live caller today, and the tenant-start sweep
+(`EnsurePipelineServiceAccountsAsync`) is what covers that path.
+
+Phase 4 tests: `Services/PoolServiceTests/DeployWorkloadServiceAccountCredentialsTests` (both paths
+projected with the right secret flags, Application projects nothing and never asks the resolver, no
+account / half-written account / throwing resolver each deploy without credentials, an entity pin is
+kept, `ReceivesClusterSecrets=false` still gets them, an encrypted attribute reaches the wire
+decrypted, no secret in any NLog target, and a literal assertion that the two value paths match the
+chart) plus `DeployWorkloadAsync_ProvisionsBeforeItBuildsTheDeployNotification` in
+`DeployWorkloadServiceAccountProvisioningTests`.
+
 ### The tenant gate only started working in AB#5054
 
 The section below describes a middleware that, until AB#5054, **never ran a single check in this

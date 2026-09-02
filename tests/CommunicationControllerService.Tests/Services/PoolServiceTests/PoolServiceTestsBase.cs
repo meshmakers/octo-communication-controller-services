@@ -5,6 +5,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using NSubstitute;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.PoolServiceTests;
@@ -24,6 +25,7 @@ internal abstract class PoolServiceTestsBase
     protected readonly IWorkloadTemplateResolver TemplateResolver;
     protected readonly IWorkloadOnDemandCapabilityService OnDemandCapabilityService;
     protected readonly IPipelineServiceAccountProvisioningService ServiceAccountProvisioningService;
+    protected readonly IPipelineServiceAccountResolver ServiceAccountResolver;
     protected readonly IPoolCachePublish PoolCachePublish;
     protected readonly PoolTenant PoolTenant;
     protected readonly PoolService PoolService;
@@ -82,6 +84,14 @@ internal abstract class PoolServiceTestsBase
         // what the pool suite asserts is that the call is made for Adapters and only for Adapters.
         ServiceAccountProvisioningService = Substitute.For<IPipelineServiceAccountProvisioningService>();
 
+        // AB#5072: the deploy path projects the adapter's provisioned credentials into the
+        // workload's Helm values. Default: nothing linked, so the pre-AB#5072 DTO shape is what
+        // every existing suite keeps seeing. Tests that exercise the projection arrange an account.
+        ServiceAccountResolver = Substitute.For<IPipelineServiceAccountResolver>();
+        ServiceAccountResolver
+            .GetAdapterDefaultAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>())
+            .Returns((RtServiceAccountConfiguration?)null);
+
         PoolService = new PoolService(
             CommunicationRepository,
             PoolCache,
@@ -90,7 +100,8 @@ internal abstract class PoolServiceTestsBase
             EncryptionService,
             TemplateResolver,
             OnDemandCapabilityService,
-            ServiceAccountProvisioningService);
+            ServiceAccountProvisioningService,
+            ServiceAccountResolver);
     }
 
     [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]

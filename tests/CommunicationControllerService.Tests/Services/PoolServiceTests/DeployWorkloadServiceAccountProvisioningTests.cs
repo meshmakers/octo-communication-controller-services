@@ -90,13 +90,37 @@ internal class DeployWorkloadServiceAccountProvisioningTests : PoolServiceTestsB
 
         await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
-        // The deploy notification goes out before provisioning is attempted, and the state write
-        // after it — so neither is skipped by a broken identity service.
+        // Provisioning runs BEFORE the deploy notification since AB#5072 (the notification carries
+        // the credentials), so a broken identity service must not swallow the notification or the
+        // state write behind it — the workload deploys, just without credentials.
         using var _ = Assert.Multiple();
         await OperatorConnectionManager.Received(1)
             .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
         await CommunicationRepository.Received(1)
             .SetAdapterDeploymentStateAsync(TenantId, adapter.ToRtEntityId(),
                 RtDeploymentStateEnum.Pending, Arg.Any<string?>());
+    }
+
+    /// <summary>
+    /// 🔴 AB#5072, the ordering that makes the whole feature work. The deploy notification is built
+    /// from the service account that exists at that moment, so provisioning has to have run first —
+    /// otherwise the FIRST deploy of every freshly created adapter ships no credentials and nothing
+    /// re-deploys it.
+    /// </summary>
+    [Test]
+    public async Task DeployWorkloadAsync_ProvisionsBeforeItBuildsTheDeployNotification()
+    {
+        var pool = ArrangeCloudPool();
+        var adapter = RtEntityCreator.CreateAdapter();
+        ArrangeDeployableWorkload(pool, adapter);
+
+        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+
+        Received.InOrder(() =>
+        {
+            ServiceAccountProvisioningService.EnsureAdapterProvisionedAsync(TenantId, adapter);
+            ServiceAccountResolver.GetAdapterDefaultAsync(TenantId, adapter.RtId);
+            OperatorConnectionManager.NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
+        });
     }
 }

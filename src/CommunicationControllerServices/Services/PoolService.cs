@@ -21,6 +21,25 @@ internal class PoolService : IPoolService
     private readonly IWorkloadTemplateResolver _templateResolver;
     private readonly IWorkloadOnDemandCapabilityService _onDemandCapabilityService;
     private readonly IPipelineServiceAccountProvisioningService _serviceAccountProvisioningService;
+    private readonly IPipelineServiceAccountResolver _serviceAccountResolver;
+
+    /// <summary>
+    /// Helm values path carrying the adapter's own OAuth client id (AB#5072). Must stay in lockstep
+    /// with <c>octo-mesh-adapter/src/charts/octo-mesh-adapter/templates/_env.tpl</c>, which reads
+    /// <c>.Values.serviceAccountClientId</c> into <c>OCTO_ADAPTER__CLIENTID</c>. This constant and
+    /// that template are the only coupling between the two repositories, and a typo in either is
+    /// invisible until the pod is running: the adapter would simply connect anonymously.
+    /// </summary>
+    internal const string ServiceAccountClientIdValuePath = "serviceAccountClientId";
+
+    /// <summary>
+    /// Helm values path carrying the adapter's own OAuth client secret (AB#5072), projected
+    /// secret-flagged so the operator materialises it into <c>{release}-octo-secrets</c> and the
+    /// chart receives a <c>valueFrom.secretKeyRef</c> map. Chart counterpart:
+    /// <c>.Values.secrets.serviceAccountClientSecret</c> through <c>octo-mesh.secretEnv</c>, the same
+    /// helper <c>secrets.rabbitmq</c> uses.
+    /// </summary>
+    internal const string ServiceAccountClientSecretValuePath = "secrets.serviceAccountClientSecret";
 
     /// <summary>
     /// Constructor
@@ -33,13 +52,15 @@ internal class PoolService : IPoolService
     /// <param name="templateResolver">Resolves <c>{{domain.NAME}}</c>, <c>{{service.NAME}}</c> and <c>{{context.tenantId}}</c> placeholders in workload <c>Hostname</c>, non-secret <c>ValueOverride.Value</c> and <c>ValuesYaml</c> at deploy time</param>
     /// <param name="onDemandCapabilityService">Validates LifecycleMode=OnDemand against the workload's trigger classification at deploy time (AB#4984)</param>
     /// <param name="serviceAccountProvisioningService">Provisions the adapter's pipeline service account on deploy (AB#5027)</param>
+    /// <param name="serviceAccountResolver">Reads the adapter's provisioned service account so its credentials can be projected into the workload's Helm values (AB#5072)</param>
     public PoolService(ICommunicationRepository communicationRepository, IPoolCache poolCache,
         ICommunicationEventService eventService,
         IOperatorConnectionManager operatorConnectionManager,
         IWorkloadEncryptionService encryptionService,
         IWorkloadTemplateResolver templateResolver,
         IWorkloadOnDemandCapabilityService onDemandCapabilityService,
-        IPipelineServiceAccountProvisioningService serviceAccountProvisioningService)
+        IPipelineServiceAccountProvisioningService serviceAccountProvisioningService,
+        IPipelineServiceAccountResolver serviceAccountResolver)
     {
         _communicationRepository = communicationRepository;
         _poolCache = poolCache;
@@ -49,6 +70,7 @@ internal class PoolService : IPoolService
         _templateResolver = templateResolver;
         _onDemandCapabilityService = onDemandCapabilityService;
         _serviceAccountProvisioningService = serviceAccountProvisioningService;
+        _serviceAccountResolver = serviceAccountResolver;
     }
     
     /// <inheritdoc />
@@ -268,6 +290,52 @@ internal class PoolService : IPoolService
         // the user deserves to know which field is missing.
         await EnsureWorkloadIsHelmDeployableAsync(tenantId, workload);
 
+        // AB#5027 phase 2: deploying an Adapter is the closest thing this service has to "an adapter
+        // was created" — adapters themselves are RtEntities written through the asset repository, so
+        // there is no create hook here, but nothing can run pipelines before its workload is
+        // deployed. Provisioning the execution identity right here therefore closes the window
+        // between an operator adding an adapter and the next tenant load, so the very first pipeline
+        // deploy onto a brand-new adapter already passes the phase 1 guard.
+        //
+        // Best-effort by construction (EnsureAdapterProvisionedAsync never throws and writes its own
+        // error event): a failure must not fail a deploy that is otherwise fine, and the tenant-load
+        // sweep re-converges. Applications are skipped — they execute no pipelines.
+        //
+        // 🔴 AB#5072 MOVED THIS BEFORE THE DEPLOY NOTIFICATION. It used to run after it, so the
+        // identity round trip could not delay the helm rollout. That was free while the account was
+        // only ever read back by a *later* pipeline deploy — but the deploy notification now carries
+        // the account's credentials into the workload's Helm values, and the DTO is built from what
+        // exists at that moment. Provisioning afterwards means the very first deploy of a
+        // freshly created adapter ships no credentials and the pod comes up anonymous; nothing
+        // re-deploys it, so it stays that way until a human clicks Deploy a second time. That is not
+        // an edge case — it is every new adapter, and once the adapter-hub gate (AB#5063) is armed
+        // such a pod never gets online at all.
+        //
+        // The two rejected alternatives: firing a second deploy after provisioning costs a second
+        // helm rollout and a second pod restart on every deploy and needs its own loop guard; and
+        // documenting "the first deploy is anonymous" pushes a manual step onto every adapter
+        // creation. The cost paid instead is latency on the deploy call, bounded by the
+        // provisioning service's own 30 s identity timeout and normally a few milliseconds — and it
+        // is paid before the rollout starts rather than during it, so a slow identity service delays
+        // a deploy instead of half-configuring one.
+        if (workload is RtAdapter adapterWorkload)
+        {
+            try
+            {
+                await _serviceAccountProvisioningService.EnsureAdapterProvisionedAsync(tenantId, adapterWorkload);
+            }
+            catch (Exception e)
+            {
+                // EnsureAdapterProvisionedAsync is contractually non-throwing and logs / audits its
+                // own failures — but a deploy must not depend on that contract holding. Swallowing
+                // it here degrades to exactly the pre-AB#5072 behaviour: the workload deploys, the
+                // adapter connects anonymously, and the next deploy converges it.
+                Logger.Error(e,
+                    "[{TenantId}] Pipeline service account provisioning failed during the deploy of adapter '{WorkloadName}' ({WorkloadRtId}); the deploy continues without adapter credentials",
+                    tenantId, workload.Name, workload.RtId);
+            }
+        }
+
         var poolName = pool.Name ?? string.Empty;
         var dto = await BuildWorkloadDeployedDtoAsync(tenantId, pool.RtId, poolName, workload, isReconciliation);
         if (dto == null)
@@ -278,34 +346,6 @@ internal class PoolService : IPoolService
         }
 
         await _operatorConnectionManager.NotifyWorkloadDeployedAsync(dto);
-
-        // AB#5027 phase 2: deploying an Adapter is the closest thing this service has to "an adapter
-        // was created" — adapters themselves are RtEntities written through the asset repository, so
-        // there is no create hook here, but nothing can run pipelines before its workload is
-        // deployed. Provisioning the execution identity right here therefore closes the window
-        // between an operator adding an adapter and the next tenant load, so the very first pipeline
-        // deploy onto a brand-new adapter already passes the phase 1 guard.
-        //
-        // Best-effort by construction (EnsureAdapterProvisionedAsync never throws and writes its own
-        // error event): a failure must not fail a deploy that is otherwise fine, and the tenant-load
-        // sweep re-converges. Applications are skipped — they execute no pipelines. Deliberately
-        // AFTER the deploy notification so the identity round trip cannot delay the helm rollout.
-        if (workload is RtAdapter adapterWorkload)
-        {
-            try
-            {
-                await _serviceAccountProvisioningService.EnsureAdapterProvisionedAsync(tenantId, adapterWorkload);
-            }
-            catch (Exception e)
-            {
-                // EnsureAdapterProvisionedAsync is contractually non-throwing and logs / audits its
-                // own failures — but a helm rollout that is already on its way must not depend on
-                // that contract holding.
-                Logger.Error(e,
-                    "[{TenantId}] Pipeline service account provisioning failed during the deploy of adapter '{WorkloadName}' ({WorkloadRtId}); the deploy continues",
-                    tenantId, workload.Name, workload.RtId);
-            }
-        }
 
         // Set Pending immediately so a re-deploy is visible in the UI — e.g.
         // the user updates the chart version on a currently-Deployed adapter
@@ -758,6 +798,8 @@ internal class PoolService : IPoolService
             })
             .ToArray();
 
+        overrides = await AppendPipelineServiceAccountOverridesAsync(tenantId, workload, overrides);
+
         return new WorkloadDeployedDto
         {
             TenantId = tenantId,
@@ -809,6 +851,109 @@ internal class PoolService : IPoolService
             Hibernated = workload.LifecycleState is RtLifecycleStateEnum.Hibernated
                 or RtLifecycleStateEnum.Draining,
         };
+    }
+
+    /// <summary>
+    /// Projects the adapter's provisioned <c>ServiceAccountConfiguration</c> (AB#5027) onto the two
+    /// Helm value paths the adapter chart reads its own OAuth credentials from (AB#5072), so the pod
+    /// can authenticate its <c>/{tenantId}/adapterHub</c> connection instead of coming up anonymous.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Adapters only.</b> Only Adapters execute pipelines and only Adapters connect to the adapter
+    /// hub; <c>Application</c>s have no pipeline identity and the association does not even exist on
+    /// their type, so they are skipped before any repository read.
+    /// </para>
+    /// <para>
+    /// <b>Deliberately NOT gated on <c>ReceivesClusterSecrets</c>.</b> That flag decides whether a
+    /// workload receives the *cluster's* shared data-store credentials (MongoDB, CrateDB) — a pure
+    /// edge adapter must not get them. These two values are the opposite kind of thing: the adapter's
+    /// own, per-adapter, tenant-scoped identity, and an edge adapter needs it *more* than an
+    /// in-cluster one, because it is the only credential it presents when it dials into the
+    /// controller across the network. The precedent is the RabbitMQ broker password, which is
+    /// injected unconditionally for exactly the same reason — every workload needs the command bus,
+    /// and every adapter needs its identity.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>The secret never reaches a log path.</b> It is read, decrypted and put on the DTO;
+    /// it is not logged at any level, not truncated, and not carried in an exception message. The
+    /// warning paths below deliberately name only the adapter and the missing attribute.
+    /// </para>
+    /// </remarks>
+    private async Task<ValueOverrideDto[]> AppendPipelineServiceAccountOverridesAsync(string tenantId,
+        RtDeployableWorkload workload, ValueOverrideDto[] overrides)
+    {
+        if (workload is not RtAdapter adapter)
+        {
+            return overrides;
+        }
+
+        RtServiceAccountConfiguration? serviceAccount;
+        try
+        {
+            serviceAccount = await _serviceAccountResolver.GetAdapterDefaultAsync(tenantId, adapter.RtId);
+        }
+        catch (Exception e)
+        {
+            // Same rule as everywhere else on this path: a workload whose credentials cannot be read
+            // still deploys, it just comes up anonymous — which is what the whole fleet does today.
+            // Failing the deploy here would make an identity/CK-cache hiccup undeployable.
+            Logger.Warn(e,
+                "[{TenantId}] Could not read the pipeline service account of adapter '{WorkloadName}' ({WorkloadRtId}); it is deployed without its own credentials and connects to the adapter hub anonymously",
+                tenantId, workload.Name, workload.RtId);
+            return overrides;
+        }
+
+        if (serviceAccount == null)
+        {
+            // Provisioning runs immediately before this on the deploy path, so reaching here means
+            // it failed (and wrote its own error event) or nothing is linked yet on a path that does
+            // not provision. Debug, not warning: the failing side already reported it.
+            Logger.Debug(
+                "[{TenantId}] Adapter '{WorkloadName}' ({WorkloadRtId}) has no linked pipeline service account; deploying without adapter credentials",
+                tenantId, workload.Name, workload.RtId);
+            return overrides;
+        }
+
+        // Read through GetAttributeValueOrDefault, never the generated properties: all four
+        // attributes are mandatory on the CK type, so a generated getter throws
+        // InvalidAttributeValueException on a half-written entity — which must degrade to "no
+        // credentials", not to a failed deploy. Same reasoning as
+        // PipelineServiceAccountProvisioningService.ReadAttribute.
+        var clientId =
+            serviceAccount.GetAttributeValueOrDefault(nameof(RtServiceAccountConfiguration.ClientId)) as string;
+        var clientSecret =
+            serviceAccount.GetAttributeValueOrDefault(nameof(RtServiceAccountConfiguration.ClientSecret)) as string;
+
+        if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
+        {
+            Logger.Warn(
+                "[{TenantId}] The pipeline service account of adapter '{WorkloadName}' ({WorkloadRtId}) is missing its client id or secret; deploying without adapter credentials",
+                tenantId, workload.Name, workload.RtId);
+            return overrides;
+        }
+
+        // An operator who pinned either path on the workload entity itself wins: the override list
+        // is last-wins in WorkloadOverrideYamlBuilder, so appending unconditionally would silently
+        // overrule a deliberate manual pin.
+        var result = new List<ValueOverrideDto>(overrides);
+        AddUnlessPresent(result, ServiceAccountClientIdValuePath, clientId!, false);
+        AddUnlessPresent(result, ServiceAccountClientSecretValuePath,
+            // The provisioning path writes this attribute in plaintext, so this is normally a
+            // pass-through. It goes through Decrypt anyway to sit in the same lane as every other
+            // secret leaving this method — if the attribute ever carries the `enc:v1:` sentinel, the
+            // wire must still carry the plaintext (Decrypt is a no-op without the sentinel).
+            _encryptionService.Decrypt(clientSecret!), true);
+        return result.ToArray();
+
+        static void AddUnlessPresent(List<ValueOverrideDto> target, string path, string value, bool isSecret)
+        {
+            if (target.Any(v => string.Equals(v.Path, path, StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+            target.Add(new ValueOverrideDto { Path = path, Value = value, IsSecret = isSecret });
+        }
     }
 
     private string? ResolveHostname(string? hostname, WorkloadTemplateContext ctx)
