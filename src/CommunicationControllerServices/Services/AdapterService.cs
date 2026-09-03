@@ -26,7 +26,9 @@ internal class AdapterService(
     IWorkloadLifecycleService workloadLifecycleService,
     IWorkloadOnDemandCapabilityService onDemandCapabilityService,
     IPipelineServiceAccountResolver serviceAccountResolver,
-    IWorkloadTemplateResolver templateResolver)
+    IWorkloadTemplateResolver templateResolver,
+    IIdentityClientReader identityClientReader,
+    IOptions<ServiceAccountGuardOptions> serviceAccountGuardOptions)
     : IAdapterService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
@@ -816,6 +818,18 @@ internal class AdapterService(
     /// lives here rather than in the CK multiplicity so that existing Adapter entities keep
     /// importing while the provisioning phase is still outstanding.
     /// Always call this BEFORE the first state write of a deploy path.
+    ///
+    /// <para>
+    /// AB#5112 hardens the guard beyond mere resolvability: a resolved configuration without a
+    /// client secret is refused unconditionally (a local fact — such a pipeline could never
+    /// authenticate), and the identity client's existence is verified against the identity service
+    /// when <see cref="ServiceAccountGuardOptions.CheckIdentityClient" /> allows it (default on;
+    /// the per-environment off switch exists for rollouts that outpace the tenant sweep). 🔴 An
+    /// <b>unanswerable</b> identity lookup — identity down, or no caller token to ask with — is
+    /// deliberately NON-blocking: it logs a warning and lets the deploy proceed, because identity
+    /// downtime must not brick pipeline deploys, and the adapter-side token request will surface a
+    /// genuinely missing client immediately anyway.
+    /// </para>
     /// </summary>
     private async Task EnsurePipelineHasServiceAccountAsync(string tenantId, RtEntityId pipelineRtEntityId,
         OctoObjectId adapterRtId, string? adapterName)
@@ -825,6 +839,49 @@ internal class AdapterService(
         {
             throw AdapterServiceException.PipelineHasNoServiceAccount(tenantId, pipelineRtEntityId, adapterRtId,
                 adapterName);
+        }
+
+        var serviceAccount = resolution.ServiceAccount!;
+        var wellKnownName = serviceAccount.RtWellKnownName ?? serviceAccount.RtId.ToString();
+
+        // Defensive reads, same reasoning as the whole service-account path: the attributes are
+        // mandatory on the CK type, so the generated getters throw on exactly the half-configured
+        // entity this guard exists to refuse with a useful message instead.
+        var secret = serviceAccount.GetAttributeValueOrDefault(
+            nameof(RtServiceAccountConfiguration.ClientSecret)) as string;
+        if (string.IsNullOrWhiteSpace(secret))
+        {
+            throw AdapterServiceException.PipelineServiceAccountSecretMissing(tenantId, pipelineRtEntityId,
+                wellKnownName, adapterRtId, adapterName);
+        }
+
+        if (serviceAccountGuardOptions.Value.CheckIdentityClient)
+        {
+            var clientId = serviceAccount.GetAttributeValueOrDefault(
+                nameof(RtServiceAccountConfiguration.ClientId)) as string;
+            if (string.IsNullOrWhiteSpace(clientId))
+            {
+                // No client id means no identity client can exist — the same violation, established
+                // without asking identity.
+                throw AdapterServiceException.PipelineServiceAccountClientMissing(tenantId, pipelineRtEntityId,
+                    wellKnownName, clientId: null, adapterRtId, adapterName);
+            }
+
+            var lookup = await identityClientReader.GetClientAsync(tenantId, clientId!, includeRoles: false);
+            switch (lookup.Status)
+            {
+                case IdentityClientLookupStatus.NotFound:
+                    throw AdapterServiceException.PipelineServiceAccountClientMissing(tenantId, pipelineRtEntityId,
+                        wellKnownName, clientId, adapterRtId, adapterName);
+
+                case IdentityClientLookupStatus.Unavailable:
+                    // Non-blocking by design (see the method remarks). The reason never carries a secret.
+                    Logger.Warn(
+                        "[{TenantId}] Deploying pipeline '{PipelineRtEntityId}' without verifying identity client '{ClientId}' of service account '{WellKnownName}': {Reason}",
+                        tenantId, pipelineRtEntityId, clientId, wellKnownName,
+                        lookup.UnavailableReason ?? "the identity service could not be queried");
+                    break;
+            }
         }
 
         Logger.Debug(

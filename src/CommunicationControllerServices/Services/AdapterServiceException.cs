@@ -132,4 +132,41 @@ internal class AdapterServiceException : Exception
             $"({adapterRtId}) through its 'PipelineServiceAccount' association — this becomes the default identity " +
             "for every pipeline that adapter executes; or (2) set a per-pipeline override by linking a " +
             "ServiceAccountConfiguration to this pipeline through its 'Uses' association.");
+
+    /// <summary>
+    /// AB#5112 hardened guard, first check: the account resolves but holds no client secret — the
+    /// pipeline could never authenticate, so deploying it would only defer the failure to a place
+    /// with no error message. Same exception type as the AB#5027 guard for the same Studio-surface
+    /// reason (see <see cref="PipelineHasNoServiceAccount" />).
+    /// </summary>
+    internal static AdapterServiceException PipelineServiceAccountSecretMissing(string tenantId,
+        RtEntityId pipelineRtEntityId, string wellKnownName, OctoObjectId adapterRtId, string? adapterName) =>
+        new($"[{tenantId}] Cannot deploy pipeline '{pipelineRtEntityId}': its service account '{wellKnownName}' " +
+            "holds no client secret, so the pipeline could not authenticate (AB#5112, Epic AB#4979). " +
+            $"Run the service-account reconcile for adapter '{adapterName ?? "?"}' ({adapterRtId}) — " +
+            "POST {tenantId}/v1/adapter/{adapterRtId}/serviceAccount/reconcile — or for the configuration " +
+            "(POST {tenantId}/v1/serviceAccount/reconcile?configurationRtId=...), or open the adapter in Studio; " +
+            "the reconcile issues a secret without rotating an existing one.");
+
+    /// <summary>
+    /// AB#5112 hardened guard, second check: the identity client behind the account does not exist
+    /// (or the configuration names none), so every token request of the deployed pipeline would be
+    /// refused. Only thrown on an authoritative identity answer —
+    /// an <b>unreachable</b> identity service is non-blocking by design (warning + deploy), see
+    /// <c>AdapterService.EnsurePipelineHasServiceAccountAsync</c> — and the whole check can be
+    /// disabled per environment via <c>OCTO_SERVICEACCOUNTGUARD__CHECKIDENTITYCLIENT=false</c>.
+    /// </summary>
+    internal static AdapterServiceException PipelineServiceAccountClientMissing(string tenantId,
+        RtEntityId pipelineRtEntityId, string wellKnownName, string? clientId, OctoObjectId adapterRtId,
+        string? adapterName) =>
+        new($"[{tenantId}] Cannot deploy pipeline '{pipelineRtEntityId}': " +
+            (clientId == null
+                ? $"its service account '{wellKnownName}' declares no identity client at all"
+                : $"the identity client '{clientId}' of its service account '{wellKnownName}' does not exist in " +
+                  "this tenant") +
+            " (AB#5112, Epic AB#4979) — every token request of the running pipeline would be refused. " +
+            $"Run the service-account reconcile for adapter '{adapterName ?? "?"}' ({adapterRtId}) — " +
+            "POST {tenantId}/v1/adapter/{adapterRtId}/serviceAccount/reconcile — or for the configuration " +
+            "(POST {tenantId}/v1/serviceAccount/reconcile?configurationRtId=...), or open the adapter in Studio; " +
+            "the reconcile materialises the client from the declaration.");
 }

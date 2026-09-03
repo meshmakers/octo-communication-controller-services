@@ -73,6 +73,18 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         // fixture does not run; the repository-side entity + edge write it performs is covered
         // directly by Repository/PipelineServiceAccountRepositoryTests.
         Services.AddSingleton(Substitute.For<IPipelineServiceAccountProvisioningService>());
+        // AB#5112: AdapterService takes the identity-client reader (hardened deploy guard) and the
+        // guard options. Substituted for the same reason as the provisioning service above — the
+        // real reader talks HTTP to the identity service, which the fixture does not run. It is
+        // stubbed to answer Unavailable (a bare substitute would return null and NRE), which the
+        // guard treats as non-blocking by contract — exactly the identity-less deployment shape.
+        var identityClientReader = Substitute.For<IIdentityClientReader>();
+        identityClientReader
+            .GetClientAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>())
+            .Returns(IdentityClientLookup.Unavailable("integration fixture runs no identity service"));
+        Services.AddSingleton(identityClientReader);
+        Services.AddOptions<ServiceAccountGuardOptions>();
+        Services.AddSingleton<IServiceAccountHealthService, ServiceAccountHealthService>();
         Services.AddSingleton<IAdapterConnectionTracker, AdapterConnectionTracker>();
         Services.AddSingleton<IAdapterService, AdapterService>();
         Services.AddSingleton<IPoolService, PoolService>();

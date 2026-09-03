@@ -83,6 +83,18 @@ try
     builder.Services.AddSingleton<IPipelineServiceAccountResolver, PipelineServiceAccountResolver>();
     builder.Services
         .AddSingleton<IPipelineServiceAccountProvisioningService, PipelineServiceAccountProvisioningService>();
+
+    // AB#5112: identity-health aggregate + hardened deploy guard. The reader answers "does the
+    // identity client exist / what does it carry" by forwarding the calling user's bearer token to
+    // the identity REST API — see IIdentityClientReader for why neither the bus (write-only
+    // command) nor the SDK service client (second transport, no bootstrap credential) can carry
+    // this read. The tight timeout bounds what an unreachable identity service may cost a deploy:
+    // the guard treats a failed lookup as non-blocking, but only after it has failed.
+    builder.Services.AddHttpContextAccessor();
+    builder.Services.AddHttpClient(IdentityClientReader.HttpClientName,
+        client => client.Timeout = TimeSpan.FromSeconds(10));
+    builder.Services.AddSingleton<IIdentityClientReader, IdentityClientReader>();
+    builder.Services.AddSingleton<IServiceAccountHealthService, ServiceAccountHealthService>();
     builder.Services.AddSingleton<IWorkloadHostnameIndex, WorkloadHostnameIndex>();
     builder.Services.AddSingleton<IAdapterConnectionTracker, AdapterConnectionTracker>();
     builder.Services.AddSingleton<IPipelineSchemaValidator, PipelineSchemaValidator>();
@@ -160,6 +172,12 @@ try
         builder.Configuration.GetSection(OperatorHubAuthorizationOptions.SectionName));
     builder.Services.Configure<AdapterHubAuthorizationOptions>(
         builder.Configuration.GetSection(AdapterHubAuthorizationOptions.SectionName));
+
+    // AB#5112: rollout switch of the hardened deploy guard's identity-client check — bound as
+    // configuration for the same reason as the hub gates above: an environment can be loosened
+    // (OCTO_SERVICEACCOUNTGUARD__CHECKIDENTITYCLIENT=false) without a release.
+    builder.Services.Configure<ServiceAccountGuardOptions>(
+        builder.Configuration.GetSection(ServiceAccountGuardOptions.SectionName));
 
     builder.Services.ConfigureOptions<ConfigureDistributionEventHubOptions>();
     builder.Services.ConfigureOptions<ConfigureJwtBearerOptions>();

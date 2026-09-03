@@ -67,6 +67,19 @@ internal abstract class AdapterServiceTestsBase
     /// </summary>
     protected readonly CommunicationControllerOptions ControllerOptions = new();
 
+    /// <summary>
+    /// AB#5112: the base arranges a verifiable identity — the reader answers "Found" for any
+    /// client, so the hardened deploy guard passes everywhere it is not the subject under test.
+    /// Guard tests re-stub this to NotFound / Unavailable.
+    /// </summary>
+    protected readonly IIdentityClientReader IdentityClientReader = Substitute.For<IIdentityClientReader>();
+
+    /// <summary>
+    /// AB#5112: mutable guard options (default: identity-client check ON, matching production);
+    /// the option-disabled pass-through test flips <see cref="ServiceAccountGuardOptions.CheckIdentityClient" />.
+    /// </summary>
+    protected readonly ServiceAccountGuardOptions GuardOptions = new();
+
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
     protected AdapterServiceTestsBase()
     {
@@ -87,17 +100,21 @@ internal abstract class AdapterServiceTestsBase
             AdapterCache, PipelineDefinitionService);
         ServiceAccountResolver = new PipelineServiceAccountResolver(CommunicationRepository);
         DefaultAdapterServiceAccount = RtEntityCreator.CreateServiceAccountConfiguration();
+        var guardOptions = Substitute.For<IOptions<ServiceAccountGuardOptions>>();
+        guardOptions.Value.Returns(GuardOptions);
         AdapterService = new AdapterService(CommunicationRepository, AdapterCache, AdapterHubCallbacks,
             CommunicationEventService, PipelineSchemaValidator, PipelineDefinitionService,
             AdapterConnectionTracker, options, WorkloadLifecycleService, OnDemandCapabilityService,
             ServiceAccountResolver,
             // Real resolver (AB#5111), same reasoning as the service-account resolver above: the
             // IssuerUri token resolution in the configuration projection runs the real machinery.
-            new WorkloadTemplateResolver(optionsMonitor));
+            new WorkloadTemplateResolver(optionsMonitor),
+            IdentityClientReader, guardOptions);
         AdapterTenant = new AdapterTenant(AdapterCachePublish, TenantId);
 
         InitAdapterCache();
         InitAdapterServiceAccount();
+        InitIdentityClientReader();
         SimulateAdapterDeploymentCallback();
     }
     
@@ -122,6 +139,18 @@ internal abstract class AdapterServiceTestsBase
         CommunicationRepository
             .GetServiceAccountForAdapterAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>())
             .Returns(DefaultAdapterServiceAccount);
+    }
+
+    /// <summary>
+    /// AB#5112: default the identity to "client exists", so the hardened guard passes everywhere
+    /// it is not the subject under test (mirrors <see cref="InitAdapterServiceAccount" />).
+    /// </summary>
+    private void InitIdentityClientReader()
+    {
+        IdentityClientReader
+            .GetClientAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>())
+            .Returns(callInfo => new IdentityClientLookup(IdentityClientLookupStatus.Found,
+                new ClientDto { ClientId = callInfo.ArgAt<string>(1) }, null, null));
     }
 
     [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]

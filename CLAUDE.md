@@ -1905,6 +1905,79 @@ decrypted, no secret in any NLog target, and a literal assertion that the two va
 chart) plus `DeployWorkloadAsync_ProvisionsBeforeItBuildsTheDeployNotification` in
 `DeployWorkloadServiceAccountProvisioningTests`.
 
+### Phase 5 — declarative reconcile (AB#5111) and identity health + hardened guard (AB#5112)
+
+**AB#5111** made the account declarative: `ServiceAccountConfiguration` (CK 3.32.0, additive)
+carries `AssignedRoleNames` (null = legacy, roles unmanaged) and `AllowDelegation`, the backfill
+became an idempotent reconcile (`ReconcileAdapterAsync` / `ReconcileConfigurationAsync` — never
+rotates an existing secret), `IssuerUri` defaults to the portable `{{service.authority}}` token
+resolved at projection time by the workload-template machinery, and REST endpoints (`POST
+{tenantId}/v1/adapter/{adapterRtId}/serviceAccount/reconcile`, `POST
+{tenantId}/v1/serviceAccount/reconcile?configurationRtId=…`, `POST
+{tenantId}/v1/serviceAccount/{configurationRtId}/rotateSecret`) expose it; a user-initiated
+reconcile only materialises roles when the caller holds `UserManagement`. See the XML docs on
+`IPipelineServiceAccountProvisioningService` for the full contract.
+
+**AB#5112** adds the read side and hardens the deploy guard.
+
+**Identity-health aggregate** — `IServiceAccountHealthService` / `ServiceAccountHealthService`:
+
+```
+GET {tenantId}/v1/adapter/{adapterRtId}/serviceAccount/health        (adapter-scoped)
+GET {tenantId}/v1/serviceAccount/{configurationRtId}/health          (configuration-bound)
+  → 200 ServiceAccountHealthDto { OverallStatus, ConfigurationRtId,
+                                  ConfigurationWellKnownName, ClientId, Checks[] }
+```
+
+Both `TenantCommunicationApiReadOnlyPolicy`. One check per concern, each with a machine-readable
+name (`association` — adapter variant only, `configuration`, `client`, `secret`, `roles`,
+`delegation`, `tenant`, `issuerUri`), a status (`Healthy` / `Violation` / `Unknown` /
+`NotApplicable`), a violation `Code` (`association-missing`, `configuration-missing`,
+`client-missing`, `secret-missing`, `roles-drift` — with `MissingRoles` / `SuperfluousRoles`
+lists, `delegation-drift`, `tenant-mismatch`, `issuer-uri-drift`) and a human message naming the
+reconcile as the fix. `OverallStatus`: any violation → `Unhealthy`, else any unknown → `Unknown`,
+else `Healthy`. The secret check reports **presence only** — the value never leaves the entity.
+Roles are only compared for declarative accounts (`AssignedRoleNames != null`); the issuer rule is
+the sweep's own (`PipelineServiceAccountProvisioningService.IsIssuerUriHealthy`, shared so
+endpoint and sweep cannot disagree). **Degrades instead of failing**: an unreachable identity
+service turns the identity-backed checks (`client`, `roles`, `delegation`) into `Unknown`, never
+into a 5xx or a violation.
+
+**Controller→identity read** — `IIdentityClientReader` / `IdentityClientReader`. The bus carries
+no identity *query* surface (only the create/converge command) and the SDK service client stays
+rejected (second transport, no bootstrap credential — see phase 2). What every path that needs the
+read *does* have is the calling user's bearer token, so the reader forwards it verbatim to
+identity's REST API at `AuthorityUrl` (`GET {tenantId}/v1/Clients/{id}`, `…/{id}/roles` + `GET
+…/Roles` to map role rtIds to the names the declaration speaks in) — the caller's own privileges
+answer the question, no new service credential, no escalation. Identity's read endpoints accept
+exactly the `octo_api` scope family the controller's own policies require. No ambient HTTP
+request, 401/403/5xx, timeout → `IdentityClientLookupStatus.Unavailable`, which every consumer
+treats as "unknown", never as "missing". Named `HttpClient` with a 10 s timeout (Program.cs).
+
+**Hardened deploy guard** (`EnsurePipelineHasServiceAccountAsync`, both deploy paths): after the
+AB#5027 resolution check, (a) an account without a **client secret** is refused unconditionally —
+a local fact, `AdapterServiceException.PipelineServiceAccountSecretMissing`; (b) the **identity
+client's existence** is verified through the reader —
+`AdapterServiceException.PipelineServiceAccountClientMissing` on an authoritative NotFound (or a
+configuration naming no `ClientId` at all). Both messages name the reconcile endpoints and Studio
+as the fix, AB#5027-style. Check (b) is gated by `ServiceAccountGuardOptions`
+(`ServiceAccountGuard:CheckIdentityClient`, **default `true`**;
+`OCTO_SERVICEACCOUNTGUARD__CHECKIDENTITYCLIENT=false` loosens an environment without a release —
+the switch turns the whole identity round trip off, not just the refusal). 🔴 An **unreachable**
+identity answer never blocks: warning log, deploy proceeds — identity downtime must not brick
+pipeline deploys, and the adapter-side token request surfaces a real problem immediately anyway.
+
+Phase 5 tests: `Services/ServiceAccountHealthTests` (all checks green on both variants, every
+violation with its code, unlinked-but-existing entity, legacy roles opt-out, both delegation drift
+directions, tenant mismatch naming the foreign tenant, issuer token case-insensitivity +
+authority acceptance, identity-unreachable → Unknown aggregate, partial role-read degradation),
+`Services/AdapterServiceTests/DeployPipelineServiceAccountHardenedGuardTests` (secret-missing and
+client-missing refusals with remedy text on both deploy paths, secret check independent of the
+option, option-disabled pass-through without any identity call, identity-unreachable
+pass-through), `Controllers/ServiceAccountHealthEndpointTests` (routing, 404/400 mapping). The
+integration fixture substitutes the reader with an `Unavailable` answer — it runs no identity
+service, and the guard is non-blocking by contract.
+
 ### The tenant gate only started working in AB#5054
 
 The section below describes a middleware that, until AB#5054, **never ran a single check in this

@@ -333,6 +333,65 @@ public class AdapterController : ControllerBase
     }
 
     /// <summary>
+    /// Read-only identity-health aggregate of the adapter's pipeline service account (AB#5112):
+    /// one answer covering everything the AB#5111 reconcile converges — the
+    /// <c>PipelineServiceAccount</c> association, configuration completeness, identity-client
+    /// existence, role drift against the declaration, the on-behalf-of grant, tenant and issuer.
+    /// The configuration-bound variant lives on <see cref="ServiceAccountController"/>.
+    /// </summary>
+    /// <remarks>
+    /// Never returns the secret — the <c>secret</c> check reports presence only. Degrades instead
+    /// of failing: an unreachable identity service turns the identity-backed checks into
+    /// <c>Unknown</c> rather than a 5xx.
+    /// </remarks>
+    /// <param name="adapterRtId">The runtime id of the adapter.</param>
+    /// <param name="healthService">The aggregate evaluator.</param>
+    [HttpGet("{adapterRtId}/serviceAccount/health")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(typeof(ServiceAccountHealthDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetServiceAccountHealth([Required] string adapterRtId,
+        [FromServices] IServiceAccountHealthService healthService)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        if (!OctoObjectId.TryParse(adapterRtId, out var adapterObjectId))
+        {
+            return BadRequest(new ErrorResponse
+                { ErrorMessage = $"Invalid adapterRtId '{adapterRtId}': must be a 24-character hex ObjectId." });
+        }
+
+        // Same resolution as the reconcile / rotate endpoints: Adapter is polymorphic, so the
+        // tenant's adapter list is the caller-friendly lookup.
+        var adapters = await _communicationRepository.GetAdaptersAsync(tenantId);
+        var adapter = adapters.FirstOrDefault(a => a.RtId == adapterObjectId);
+        if (adapter == null)
+        {
+            return NotFound(new ErrorResponse
+                { ErrorMessage = $"Adapter '{adapterRtId}' was not found in tenant '{tenantId}'." });
+        }
+
+        try
+        {
+            return Ok(await healthService.GetAdapterHealthAsync(tenantId, adapter));
+        }
+        catch (Exception e)
+        {
+            // Only repository-level failures land here — identity degradation is absorbed into
+            // Unknown checks by the service. The message never contains a secret.
+            _logger.LogError(e, "Evaluating the pipeline service account health of adapter '{AdapterRtId}' failed",
+                adapterRtId);
+            return BadRequest(new ErrorResponse
+                { ErrorMessage = $"Evaluating the pipeline service account health failed: {e.Message}" });
+        }
+    }
+
+    /// <summary>
     /// Rotates the client secret of the adapter's pipeline service account (AB#5032): a fresh secret
     /// is hashed into the identity client and written into the tenant's
     /// <c>ServiceAccountConfiguration</c> in one deliberate step.

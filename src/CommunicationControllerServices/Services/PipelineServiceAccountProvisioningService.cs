@@ -653,8 +653,18 @@ internal class PipelineServiceAccountProvisioningService(
     /// </summary>
     private bool IsIssuerUriCurrent(string? issuerUri)
     {
+        return IsIssuerUriHealthy(issuerUri, options.Value.AuthorityUrl);
+    }
+
+    /// <summary>
+    /// The one shared definition of "this IssuerUri needs no repair" — used by the convergence
+    /// pass above and by the AB#5112 health aggregate (<see cref="ServiceAccountHealthService" />),
+    /// so the sweep and the health endpoint can never disagree about the same value.
+    /// </summary>
+    internal static bool IsIssuerUriHealthy(string? issuerUri, string authorityUrl)
+    {
         return issuerUri != null &&
-               (IssuerUriTokenPattern.IsMatch(issuerUri) || issuerUri == options.Value.AuthorityUrl);
+               (IssuerUriTokenPattern.IsMatch(issuerUri) || issuerUri == authorityUrl);
     }
 
     /// <summary>

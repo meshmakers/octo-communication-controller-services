@@ -118,6 +118,66 @@ public class ServiceAccountController : ControllerBase
     }
 
     /// <summary>
+    /// Read-only identity-health aggregate of a <c>ServiceAccountConfiguration</c> (AB#5112): one
+    /// answer covering everything the AB#5111 reconcile converges — configuration completeness,
+    /// identity-client existence, role drift against the declaration, the on-behalf-of grant,
+    /// tenant and issuer. The adapter-scoped variant (which additionally checks the association)
+    /// lives on <see cref="AdapterController"/>.
+    /// </summary>
+    /// <remarks>
+    /// Never returns the secret — the <c>secret</c> check reports presence only. Degrades instead
+    /// of failing: an unreachable identity service turns the identity-backed checks into
+    /// <c>Unknown</c> rather than a 5xx.
+    /// </remarks>
+    /// <param name="configurationRtId">The runtime id of the <c>ServiceAccountConfiguration</c>.</param>
+    /// <param name="healthService">The aggregate evaluator.</param>
+    [HttpGet("{configurationRtId}/health")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(typeof(ServiceAccountHealthDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetHealth([Required] string configurationRtId,
+        [FromServices] IServiceAccountHealthService healthService)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        if (!OctoObjectId.TryParse(configurationRtId, out var configurationObjectId))
+        {
+            return BadRequest(new ErrorResponse
+                { ErrorMessage = $"Invalid configurationRtId '{configurationRtId}': must be a 24-character hex ObjectId." });
+        }
+
+        var configuration = await _communicationRepository.GetServiceAccountByRtIdAsync(tenantId,
+            configurationObjectId);
+        if (configuration == null)
+        {
+            return NotFound(new ErrorResponse
+            {
+                ErrorMessage =
+                    $"ServiceAccountConfiguration '{configurationRtId}' was not found in tenant '{tenantId}'."
+            });
+        }
+
+        try
+        {
+            return Ok(await healthService.GetConfigurationHealthAsync(tenantId, configuration));
+        }
+        catch (Exception e)
+        {
+            // Only repository-level failures land here — identity degradation is absorbed into
+            // Unknown checks by the service. The message never contains a secret.
+            _logger.LogError(e, "Evaluating the health of service account configuration '{ConfigurationRtId}' failed",
+                configurationRtId);
+            return BadRequest(new ErrorResponse
+                { ErrorMessage = $"Evaluating the pipeline service account health failed: {e.Message}" });
+        }
+    }
+
+    /// <summary>
     /// Rotates the client secret of a <c>ServiceAccountConfiguration</c> (AB#5111) — the
     /// configuration-bound variant of the adapter-scoped
     /// <c>POST {tenantId}/v1/adapter/{adapterRtId}/serviceAccount/rotateSecret</c> (AB#5032), sharing
