@@ -663,8 +663,13 @@ internal class PipelineServiceAccountProvisioningService(
     /// </summary>
     internal static bool IsIssuerUriHealthy(string? issuerUri, string authorityUrl)
     {
+        // Trailing-slash-insensitive: 'https://localhost:5003/' and 'https://localhost:5003'
+        // are the same authority, and both spellings occur in the wild (seeds write the
+        // slash, options usually don't). Flagging that as drift would send operators
+        // chasing a repair that changes nothing.
         return issuerUri != null &&
-               (IssuerUriTokenPattern.IsMatch(issuerUri) || issuerUri == authorityUrl);
+               (IssuerUriTokenPattern.IsMatch(issuerUri) ||
+                issuerUri.TrimEnd('/') == authorityUrl.TrimEnd('/'));
     }
 
     /// <summary>

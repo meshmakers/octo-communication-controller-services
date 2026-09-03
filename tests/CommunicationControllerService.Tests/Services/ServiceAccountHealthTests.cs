@@ -356,7 +356,13 @@ internal class ServiceAccountHealthTests
 
         // Same tolerance as the convergence sweep (shared helper): the token in any case, or the
         // installation's own authority (pre-AB#5111 entities).
-        foreach (var healthyIssuer in new[] { "{{service.authority}}", "{{ SERVICE.Authority }}", _options.AuthorityUrl })
+        // The trailing-slash spelling counts as the same authority — seeds write the slash,
+        // options usually don't, and neither is drift.
+        foreach (var healthyIssuer in new[]
+                 {
+                     "{{service.authority}}", "{{ SERVICE.Authority }}", _options.AuthorityUrl,
+                     _options.AuthorityUrl.TrimEnd('/') + "/"
+                 })
         {
             var configuration = CreateHealthyConfiguration();
             configuration.IssuerUri = healthyIssuer;
