@@ -106,6 +106,34 @@ internal class ServiceAccountControllerTests
     }
 
     [Test]
+    public async Task Reconcile_CallerWithMappedRoleClaimType_StillCountsAsUserManagement()
+    {
+        // Production principals do NOT look like CreateSut's: with MapInboundClaims enabled the
+        // JWT handler renames the token's "role" claims to ClaimTypes.Role while the identity's
+        // RoleClaimType stays "role" — IsInRole answers false although the caller carries the
+        // role. The gate must probe both spellings (PrincipalRoleExtensions.HasRole).
+        var sut = CreateSut();
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.RouteValues["tenantId"] = TenantId;
+        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.Role, CommonConstants.UserManagementRole) },
+            "TestAuth", "name", "role"));
+        sut.ControllerContext = new ControllerContext { HttpContext = httpContext };
+
+        var configuration = ArrangeConfiguration();
+        _provisioning
+            .ReconcileConfigurationAsync(TenantId, configuration, Arg.Any<ServiceAccountReconcileContext>())
+            .Returns(new ServiceAccountReconcileResult(
+                PipelineServiceAccountProvisioningOutcome.AlreadyProvisioned,
+                "octo-pipeline-sa-1", "pipeline-service-account-1", RoleChangesSkipped: false));
+
+        await sut.Reconcile(configuration.RtId.ToString());
+
+        await _provisioning.Received(1).ReconcileConfigurationAsync(TenantId, configuration,
+            Arg.Is<ServiceAccountReconcileContext>(c => c.MaterializeRoles && c.Source == "User"));
+    }
+
+    [Test]
     public async Task Reconcile_UnknownConfiguration_Returns404WithoutReconciling()
     {
         var sut = CreateSut();

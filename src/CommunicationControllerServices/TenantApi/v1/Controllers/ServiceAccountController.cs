@@ -95,7 +95,7 @@ public class ServiceAccountController : ControllerBase
         try
         {
             var result = await _provisioningService.ReconcileConfigurationAsync(tenantId, configuration,
-                ServiceAccountReconcileContext.User(User.IsInRole(CommonConstants.UserManagementRole)));
+                ServiceAccountReconcileContext.User(User.HasRole(CommonConstants.UserManagementRole)));
 
             var dto = BuildReconcileDto(result);
 

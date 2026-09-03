@@ -309,7 +309,7 @@ public class AdapterController : ControllerBase
         try
         {
             var result = await provisioningService.ReconcileAdapterAsync(tenantId, adapter,
-                ServiceAccountReconcileContext.User(User.IsInRole(CommonConstants.UserManagementRole)));
+                ServiceAccountReconcileContext.User(User.HasRole(CommonConstants.UserManagementRole)));
 
             var dto = ServiceAccountController.BuildReconcileDto(result);
 
