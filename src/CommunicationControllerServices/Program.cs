@@ -11,7 +11,6 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Middleware;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Resources;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Routing;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Sdk.Common.Encryption;
 using Meshmakers.Octo.Communication.Contracts;
@@ -60,8 +59,7 @@ try
     // OCTO_BLUEPRINTS__* environment variables instead of falling back to defaults.
     builder.Services.Configure<OctoBlueprintVariablesOptions>(options =>
         builder.Configuration.GetSection(OctoBlueprintVariablesOptions.SectionName).Bind(options));
-    builder.Services.Configure<RouteOptions>(options =>
-        options.ConstraintMap.Add("tenantId", typeof(TenantIdRouteConstraint)));
+    builder.Services.AddOctoTenantIdRouteConstraint();
 
     // NLog: Setup NLog for Dependency injection
     builder.Logging.ClearProviders();
