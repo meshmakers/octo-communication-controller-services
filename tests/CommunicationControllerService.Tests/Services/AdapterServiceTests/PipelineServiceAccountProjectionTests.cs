@@ -1,6 +1,7 @@
 using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using NSubstitute;
@@ -163,6 +164,38 @@ internal class PipelineServiceAccountProjectionTests : AdapterServiceTestsBase
 
         await Assert.That(pipelineConfig.Configurations.Single().ConfigurationValue)
             .Contains("https://identity.cluster.example.com");
+    }
+
+    [Test]
+    public async Task BaseTypedOverrideFromTheRepository_IsRecognisedAndItsTokenResolved()
+    {
+        // Production shape: GetConfigurationsByPipelineAsync materialises the Uses targets as the
+        // requested base RtConfiguration (generic "RtEntity" discriminator), NOT as the typed
+        // RtServiceAccountConfiguration the other tests hand in. The projection must still
+        // recognise the override (no adapter default injected) and resolve its issuer token —
+        // found live on AB#5111's first delegated run, where an OfType<> test matched neither.
+        ControllerOptions.ServiceUrls["authority"] = "https://identity.cluster.example.com";
+        var overrideAccount = new RtConfiguration
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
+            RtWellKnownName = "pipeline-override"
+        };
+        overrideAccount.SetAttributeValue(nameof(RtServiceAccountConfiguration.ClientId),
+            AttributeValueTypesDto.String, "octo-pipeline-sa-base");
+        overrideAccount.SetAttributeValue(nameof(RtServiceAccountConfiguration.IssuerUri),
+            AttributeValueTypesDto.String, "{{service.authority}}");
+        var (adapter, pipeline) = ArrangeDeployablePipeline(overrideAccount);
+
+        var pipelineConfig = await DeployAndCaptureAsync(adapter, pipeline);
+
+        using var _ = Assert.Multiple();
+        // Recognised as the override: the adapter default must NOT be projected on top.
+        await Assert.That(pipelineConfig.Configurations.Count()).IsEqualTo(1);
+        var projected = pipelineConfig.Configurations.Single();
+        await Assert.That(projected.ConfigurationRtId).IsEqualTo(overrideAccount.RtId);
+        await Assert.That(projected.ConfigurationValue).Contains("https://identity.cluster.example.com");
+        await Assert.That(projected.ConfigurationValue.Contains("{{", StringComparison.Ordinal)).IsFalse();
     }
 
     [Test]

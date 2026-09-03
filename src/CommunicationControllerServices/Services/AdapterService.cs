@@ -6,7 +6,9 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Resources;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Runtime.Contracts;
 using Microsoft.Extensions.Options;
@@ -1190,7 +1192,14 @@ internal class AdapterService(
 
         // Only when the pipeline has no service account of its own: an explicit per-pipeline
         // override is already in the list and must win untouched.
-        if (pipelineConfigurations.OfType<RtServiceAccountConfiguration>().Any() == false)
+        //
+        // NOT OfType: GetConfigurationsByPipelineAsync materialises the Uses targets as the
+        // requested base RtConfiguration (the Mongo discriminator is the generic "RtEntity"),
+        // so a type test never matches a loaded override — it matched only the typed instances
+        // unit tests hand in. Found live on AB#5111's first delegated run: the override WAS in
+        // the list, yet the adapter default was injected and the issuer token below stayed
+        // unresolved. Detect by CkTypeId instead.
+        if (pipelineConfigurations.Any(IsServiceAccountConfiguration) == false)
         {
             var adapterServiceAccount = await serviceAccountResolver.GetAdapterDefaultAsync(tenantId, adapterRtId);
             if (adapterServiceAccount != null &&
@@ -1206,7 +1215,7 @@ internal class AdapterService(
         // AB#5111: resolve the IssuerUri deploy-time token before the configuration is serialised
         // for the adapter — the projection is the consumption point of the entity, so this is
         // where {{service.authority}} has to become a concrete URL.
-        foreach (var serviceAccount in pipelineConfigurations.OfType<RtServiceAccountConfiguration>())
+        foreach (var serviceAccount in pipelineConfigurations.Where(IsServiceAccountConfiguration))
         {
             ResolveServiceAccountIssuerUri(tenantId, serviceAccount);
         }
@@ -1248,7 +1257,18 @@ internal class AdapterService(
     /// token request will name the failing issuer clearly.
     /// </para>
     /// </summary>
-    private void ResolveServiceAccountIssuerUri(string tenantId, RtServiceAccountConfiguration serviceAccount)
+    /// <summary>
+    ///     A service-account configuration regardless of how it was materialised: the typed
+    ///     instance the resolver/provisioning builds, or the base-typed entity the generic
+    ///     Uses-association load returns (see the CkTypeId rationale at the override check).
+    /// </summary>
+    private static bool IsServiceAccountConfiguration(RtConfiguration configuration)
+    {
+        return configuration is RtServiceAccountConfiguration ||
+               SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId.Equals(configuration.CkTypeId);
+    }
+
+    private void ResolveServiceAccountIssuerUri(string tenantId, RtConfiguration serviceAccount)
     {
         // Defensive read, same reasoning as everywhere on the service-account path: IssuerUri is
         // mandatory on the CK type, and the generated getter throws on a half-written entity.
@@ -1263,7 +1283,8 @@ internal class AdapterService(
                 out var unknownPlaceholder))
         {
             // resolved is non-null whenever the input was non-null and TryResolve returned true.
-            serviceAccount.IssuerUri = resolved!;
+            serviceAccount.SetAttributeValue(nameof(RtServiceAccountConfiguration.IssuerUri),
+                AttributeValueTypesDto.String, resolved!);
             return;
         }
 
@@ -1274,7 +1295,8 @@ internal class AdapterService(
             // against itself, which is exactly what the provisioning wrote before AB#5111. Only for
             // the bare token: a composite template with an unresolvable part is a configuration
             // error and falls through to the warning below.
-            serviceAccount.IssuerUri = communicationControllerOptions.Value.AuthorityUrl;
+            serviceAccount.SetAttributeValue(nameof(RtServiceAccountConfiguration.IssuerUri),
+                AttributeValueTypesDto.String, communicationControllerOptions.Value.AuthorityUrl);
             return;
         }
 
