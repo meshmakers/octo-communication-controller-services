@@ -2,6 +2,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 
@@ -671,6 +672,47 @@ public interface ICommunicationRepository
     /// <param name="tenantId">Tenant identifier</param>
     /// <returns>List of all pipelines</returns>
     Task<IReadOnlyCollection<RtPipeline>> GetAllPipelinesAsync(string tenantId);
+
+    #endregion
+
+    #region Rights analysis (AB#5113) — System.Identity reads
+
+    /// <summary>
+    /// AB#5113: the pipelines whose generic <c>Uses</c> edge points at the given
+    /// <c>ServiceAccountConfiguration</c> — the reverse of
+    /// <see cref="GetConfigurationsByPipelineAsync" />, restricted to pipeline origins. These are
+    /// the per-pipeline override candidates for that configuration (whether an edge is the
+    /// <em>effective</em> override is the resolver's call — a pipeline may link several
+    /// configurations). Returns an empty list when nothing links the configuration.
+    /// </summary>
+    Task<IReadOnlyCollection<RtPipeline>> GetPipelinesUsingServiceAccountAsync(string tenantId,
+        OctoObjectId serviceAccountRtId);
+
+    /// <summary>
+    /// AB#5113: all <c>System.Identity/DataPolicy</c> entities of the tenant. Read untyped — the
+    /// controller references no generated <c>System.Identity</c> model (see
+    /// <see cref="SystemIdentityCkIds" />); the analysis service interprets the attributes
+    /// (<c>TargetCkTypeIds</c>, <c>Scope</c>, <c>EnforcementMode</c>). The full list is small by
+    /// construction (a handful of policies per tenant) and the analysis needs every policy to
+    /// decide which touched types are protected.
+    /// </summary>
+    Task<IReadOnlyCollection<RtEntity>> GetDataPoliciesAsync(string tenantId);
+
+    /// <summary>
+    /// AB#5113: the <c>System.Identity/DataPermission</c> entities each given policy binds through
+    /// its <c>PolicyPermission</c> edge, keyed by policy rtId. Policies without a permission edge
+    /// are absent from the result.
+    /// </summary>
+    Task<IReadOnlyDictionary<OctoObjectId, IReadOnlyList<RtEntity>>> GetDataPermissionsForPoliciesAsync(
+        string tenantId, IReadOnlyCollection<OctoObjectId> policyRtIds);
+
+    /// <summary>
+    /// AB#5113: the <c>System.Identity/Role</c> entities granted each given data permission
+    /// (inbound over the <c>GrantsPermission</c> edge — the edge lives on the role), keyed by
+    /// permission rtId. Permissions no role holds are absent from the result.
+    /// </summary>
+    Task<IReadOnlyDictionary<OctoObjectId, IReadOnlyList<RtEntity>>> GetGrantingRolesForDataPermissionsAsync(
+        string tenantId, IReadOnlyCollection<OctoObjectId> permissionRtIds);
 
     #endregion
 }

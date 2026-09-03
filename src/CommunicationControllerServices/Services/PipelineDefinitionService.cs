@@ -58,9 +58,33 @@ internal class PipelineDefinitionService : IPipelineDefinitionService
     /// <inheritdoc />
     public IReadOnlyList<PipelineNodeProperties> GetAllNodes(string pipelineDefinition)
     {
-        var root = DeserializeDefinition(pipelineDefinition);
-        if (root == null) return [];
+        TryGetAllNodes(pipelineDefinition, out var nodes);
+        return nodes;
+    }
 
+    /// <inheritdoc />
+    public bool TryGetAllNodes(string pipelineDefinition, out IReadOnlyList<PipelineNodeProperties> nodes)
+    {
+        Dictionary<object, object>? root;
+        try
+        {
+            root = _deserializer.Deserialize<Dictionary<object, object>>(pipelineDefinition);
+        }
+        catch
+        {
+            // Malformed YAML — the caller decides whether that is a silent empty result
+            // (GetAllNodes, historical behavior) or a reportable finding (AB#5113).
+            nodes = [];
+            return false;
+        }
+
+        // A null root is an empty (whitespace/comment-only) document: valid YAML, zero nodes.
+        nodes = root == null ? [] : CollectAllNodes(root);
+        return true;
+    }
+
+    private static IReadOnlyList<PipelineNodeProperties> CollectAllNodes(Dictionary<object, object> root)
+    {
         var nodes = new List<PipelineNodeProperties>();
         var typeCounters = new Dictionary<string, int>();
 

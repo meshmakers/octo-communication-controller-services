@@ -1978,6 +1978,63 @@ pass-through), `Controllers/ServiceAccountHealthEndpointTests` (routing, 404/400
 integration fixture substitutes the reader with an `Unavailable` answer — it runs no identity
 service, and the guard is non-blocking by contract.
 
+### Phase 6 — rights analysis: touched types × data permissions (AB#5113)
+
+**`IServiceAccountRightsAnalysisService` / `ServiceAccountRightsAnalysisService`** answers "which
+roles does this pipeline service account need?" — read-only, side-effect free, entirely from
+tenant-local data:
+
+```
+GET {tenantId}/v1/adapter/{adapterRtId}/serviceAccount/rightsAnalysis      (adapter-scoped)
+GET {tenantId}/v1/serviceAccount/{configurationRtId}/rightsAnalysis       (configuration-bound)
+  → 200 ServiceAccountRightsAnalysisDto { AnalyzedPipelines[], ProtectedTypes[],
+        DynamicTypeUsages[], Warnings[], DeclaredRoles[]|null, MissingRoles[],
+        SuperfluousRoles[], BaselineRoles[], Message }
+```
+
+Both `TenantCommunicationApiReadOnlyPolicy`. Three data sources are joined:
+
+1. **Touched CK types** — extracted from the pipeline set's `PipelineDefinition` YAML via the
+   existing `IPipelineDefinitionService` (the debugger's dictionary-based YamlDotNet parser; a new
+   `TryGetAllNodes` distinguishes unparsable from empty). The scan walks every node's properties
+   **recursively** (association updates carry `targetCkTypeId`/`originCkTypeId` in nested update
+   records) looking for `ckTypeId` / `ckTypeIds` / `targetCkTypeId` / `originCkTypeId`; container
+   nesting (`ForEach@1`, `If@1`, …) is already handled by the parser's `transformations`
+   recursion. A `*ckTypeIdPath` property or a non-literal value (template token, JSONPath) lands
+   in `DynamicTypeUsages` — **reported as not statically analyzable, never silently dropped**.
+2. **Data policies/permissions** (Epic AB#4969) — untyped `RtEntity` reads through the tenant
+   repository: `GetDataPoliciesAsync` (all `System.Identity/DataPolicy`),
+   `GetDataPermissionsForPoliciesAsync` (outbound `PolicyPermission`),
+   `GetGrantingRolesForDataPermissionsAsync` (inbound `GrantsPermission` → `Role`). The
+   controller references **no generated System.Identity model** — the four stable ids live in
+   `Repository/SystemIdentityCkIds`. Type matching is on the `Model/Type` name part,
+   **version-insensitively** (pipeline YAML is unversioned, policy targets are canonical
+   `SemanticVersionedFullName` and may carry an element version — `NormalizeCkTypeId` strips it).
+3. **The declaration** — `AssignedRoleNames` (AB#5111); `null` = legacy → recommendation without
+   a delta.
+
+Pipeline-set semantics follow the AB#5027 resolver: adapter-scoped = executing pipelines minus
+those with their own override; configuration-bound = the adapter-default pipelines resolving to
+it plus pipelines overriding **to** it (new reverse read `GetPipelinesUsingServiceAccountAsync`,
+inbound over `Uses`; the resolver still decides which link is effective). Unprotected touched
+types are **dropped** (no policy targets them → no role needed). `ProtectedTypes` is the
+(type × policy) join — one entry per pair, with `OwnerScoped` flagged: 🔴 **D7 — an owner-scoped
+(`OwnedOnly`) grant never counts as coverage** (a service account owns nothing); a type with only
+owner-scoped grants is called out as blind in the summary. Delta: `MissingRoles` = full-scope
+granting roles of uncovered types; `SuperfluousRoles` = declared roles granting nothing for any
+touched type — except the provisioning baseline (`CommunicationManagement`,
+`PipelineServiceAccountProvisioningService.DefaultAssignedRoleNames`), which lands in
+`BaselineRoles` instead (it grants no data access and every pipeline SA needs it). Robustness:
+unparsable/empty definitions become `Warnings` entries, an empty pipeline set returns an
+empty-but-valid result.
+
+Phase 6 tests: `Services/ServiceAccountRightsAnalysisTests` (extraction incl. nested containers +
+list/record recursion, dynamic-path and templated-id reporting, unprotected drop, versioned-target
+matching, role join, owner-scope flag + blind-type handling, delta with baseline, legacy null
+declaration, unparsable-YAML warning, empty set, both pipeline-set resolutions),
+`Controllers/ServiceAccountRightsAnalysisEndpointTests` (routing, 404/400 mapping — AB#5112
+pattern).
+
 ### The tenant gate only started working in AB#5054
 
 The section below describes a middleware that, until AB#5054, **never ran a single check in this

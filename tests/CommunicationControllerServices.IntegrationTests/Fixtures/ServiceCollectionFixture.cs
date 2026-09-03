@@ -85,6 +85,10 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         Services.AddSingleton(identityClientReader);
         Services.AddOptions<ServiceAccountGuardOptions>();
         Services.AddSingleton<IServiceAccountHealthService, ServiceAccountHealthService>();
+        // AB#5113: the rights analysis is pure over the repository/resolver/parser registered
+        // above — real implementation, no identity REST involved (the System.Identity reads go
+        // through the tenant repository).
+        Services.AddSingleton<IServiceAccountRightsAnalysisService, ServiceAccountRightsAnalysisService>();
         Services.AddSingleton<IAdapterConnectionTracker, AdapterConnectionTracker>();
         Services.AddSingleton<IAdapterService, AdapterService>();
         Services.AddSingleton<IPoolService, PoolService>();

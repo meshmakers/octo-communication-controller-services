@@ -8,6 +8,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 
@@ -2707,6 +2708,124 @@ internal class CommunicationRepository : ICommunicationRepository
         catch (Exception e)
         {
             throw CommunicationRepositoryException.CommonFailedGetAllPipelines(tenantId, e);
+        }
+    }
+
+    #endregion
+
+    #region Rights analysis (AB#5113) — System.Identity reads
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyCollection<RtPipeline>> GetPipelinesUsingServiceAccountAsync(string tenantId,
+        OctoObjectId serviceAccountRtId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            // Inbound over the generic Uses role: the edge lives on the pipeline
+            // (GetConfigurationsByPipelineAsync walks it outbound), so from the configuration's
+            // side it is the incoming direction. The typed target restricts the polymorphic
+            // origins to pipelines.
+            var resultSet = await tenantRepository
+                .GetRtAssociationTargetsAsync<RtServiceAccountConfiguration, RtPipeline>(session,
+                    [serviceAccountRtId], SystemCommunicationCkIds.RtCkUsesRoleId,
+                    GraphDirections.Inbound, null, RtEntityQueryOptions.Create());
+
+            if (!resultSet.Any())
+            {
+                return Array.Empty<RtPipeline>();
+            }
+
+            return resultSet.First().Value.Items.ToList();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingPipelinesUsingServiceAccount(tenantId,
+                serviceAccountRtId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyCollection<RtEntity>> GetDataPoliciesAsync(string tenantId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            // Untyped read on purpose — no generated System.Identity model in this service, see
+            // SystemIdentityCkIds. The analysis service interprets the attributes.
+            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync(session,
+                SystemIdentityCkIds.RtCkDataPolicyTypeId, RtEntityQueryOptions.Create());
+
+            return resultSet.Items.ToList();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingDataPolicies(tenantId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<OctoObjectId, IReadOnlyList<RtEntity>>>
+        GetDataPermissionsForPoliciesAsync(string tenantId, IReadOnlyCollection<OctoObjectId> policyRtIds)
+    {
+        if (policyRtIds.Count == 0)
+        {
+            return new Dictionary<OctoObjectId, IReadOnlyList<RtEntity>>();
+        }
+
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            // Outbound over PolicyPermission: the edge lives on the policy.
+            var resultSet = await tenantRepository.GetRtAssociationTargetsAsync(session,
+                policyRtIds, SystemIdentityCkIds.RtCkDataPolicyTypeId,
+                SystemIdentityCkIds.RtCkPolicyPermissionRoleId,
+                SystemIdentityCkIds.RtCkDataPermissionTypeId,
+                GraphDirections.Outbound, null, RtEntityQueryOptions.Create());
+
+            return resultSet.ToDictionary(kvp => kvp.Key.RtId,
+                kvp => (IReadOnlyList<RtEntity>)kvp.Value.Items.ToList());
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingDataPermissionsForPolicies(tenantId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<OctoObjectId, IReadOnlyList<RtEntity>>>
+        GetGrantingRolesForDataPermissionsAsync(string tenantId, IReadOnlyCollection<OctoObjectId> permissionRtIds)
+    {
+        if (permissionRtIds.Count == 0)
+        {
+            return new Dictionary<OctoObjectId, IReadOnlyList<RtEntity>>();
+        }
+
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            // Inbound over GrantsPermission: the edge lives on the role, the permission is the
+            // target — same direction reasoning as GetAdapterForServiceAccountAsync.
+            var resultSet = await tenantRepository.GetRtAssociationTargetsAsync(session,
+                permissionRtIds, SystemIdentityCkIds.RtCkDataPermissionTypeId,
+                SystemIdentityCkIds.RtCkGrantsPermissionRoleId,
+                SystemIdentityCkIds.RtCkRoleTypeId,
+                GraphDirections.Inbound, null, RtEntityQueryOptions.Create());
+
+            return resultSet.ToDictionary(kvp => kvp.Key.RtId,
+                kvp => (IReadOnlyList<RtEntity>)kvp.Value.Items.ToList());
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingGrantingRoles(tenantId, e);
         }
     }
 

@@ -432,4 +432,33 @@ internal class CommunicationRepositoryException : Exception
     }
 
     #endregion
+
+    #region Rights analysis exceptions (AB#5113)
+
+    internal static Exception CommonFailedGettingPipelinesUsingServiceAccount(string tenantId,
+        OctoObjectId serviceAccountRtId, Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to get pipelines using service account configuration '{serviceAccountRtId}'",
+            exception);
+    }
+
+    internal static Exception CommonFailedGettingDataPolicies(string tenantId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get data policies", exception);
+    }
+
+    internal static Exception CommonFailedGettingDataPermissionsForPolicies(string tenantId, Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to get data permissions for policies", exception);
+    }
+
+    internal static Exception CommonFailedGettingGrantingRoles(string tenantId, Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to get granting roles for data permissions", exception);
+    }
+
+    #endregion
 }

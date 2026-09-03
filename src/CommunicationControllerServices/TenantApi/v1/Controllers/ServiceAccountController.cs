@@ -178,6 +178,67 @@ public class ServiceAccountController : ControllerBase
     }
 
     /// <summary>
+    /// Read-only rights analysis of a <c>ServiceAccountConfiguration</c> (AB#5113): joins the CK
+    /// types touched by every pipeline whose effective account is this configuration (its
+    /// adapter's default pipelines minus those overriding away, plus pipelines overriding to it)
+    /// with the tenant's data policies/permissions, and computes the role delta against the
+    /// AB#5111 declaration. The adapter-scoped variant lives on <see cref="AdapterController"/>.
+    /// </summary>
+    /// <remarks>
+    /// Side-effect free and robust by contract: an unparsable pipeline definition becomes a
+    /// warning entry, dynamic type references are reported as not analyzable, and an empty
+    /// pipeline set returns an empty-but-valid result.
+    /// </remarks>
+    /// <param name="configurationRtId">The runtime id of the <c>ServiceAccountConfiguration</c>.</param>
+    /// <param name="rightsAnalysisService">The analysis evaluator.</param>
+    [HttpGet("{configurationRtId}/rightsAnalysis")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(typeof(ServiceAccountRightsAnalysisDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetRightsAnalysis([Required] string configurationRtId,
+        [FromServices] IServiceAccountRightsAnalysisService rightsAnalysisService)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        if (!OctoObjectId.TryParse(configurationRtId, out var configurationObjectId))
+        {
+            return BadRequest(new ErrorResponse
+                { ErrorMessage = $"Invalid configurationRtId '{configurationRtId}': must be a 24-character hex ObjectId." });
+        }
+
+        var configuration = await _communicationRepository.GetServiceAccountByRtIdAsync(tenantId,
+            configurationObjectId);
+        if (configuration == null)
+        {
+            return NotFound(new ErrorResponse
+            {
+                ErrorMessage =
+                    $"ServiceAccountConfiguration '{configurationRtId}' was not found in tenant '{tenantId}'."
+            });
+        }
+
+        try
+        {
+            return Ok(await rightsAnalysisService.AnalyzeConfigurationAsync(tenantId, configuration));
+        }
+        catch (Exception e)
+        {
+            // Only repository-level failures land here — pipeline parsing problems are absorbed
+            // into warning entries by the service. The message never contains a secret.
+            _logger.LogError(e,
+                "Rights analysis of service account configuration '{ConfigurationRtId}' failed",
+                configurationRtId);
+            return BadRequest(new ErrorResponse
+                { ErrorMessage = $"The pipeline service account rights analysis failed: {e.Message}" });
+        }
+    }
+
+    /// <summary>
     /// Rotates the client secret of a <c>ServiceAccountConfiguration</c> (AB#5111) — the
     /// configuration-bound variant of the adapter-scoped
     /// <c>POST {tenantId}/v1/adapter/{adapterRtId}/serviceAccount/rotateSecret</c> (AB#5032), sharing

@@ -95,6 +95,11 @@ try
         client => client.Timeout = TimeSpan.FromSeconds(10));
     builder.Services.AddSingleton<IIdentityClientReader, IdentityClientReader>();
     builder.Services.AddSingleton<IServiceAccountHealthService, ServiceAccountHealthService>();
+
+    // AB#5113: read-only rights analysis — touched CK types × data policies × declared roles.
+    // Pure tenant-repository reads (System.Communication and System.Identity RT collections),
+    // no identity REST involved.
+    builder.Services.AddSingleton<IServiceAccountRightsAnalysisService, ServiceAccountRightsAnalysisService>();
     builder.Services.AddSingleton<IWorkloadHostnameIndex, WorkloadHostnameIndex>();
     builder.Services.AddSingleton<IAdapterConnectionTracker, AdapterConnectionTracker>();
     builder.Services.AddSingleton<IPipelineSchemaValidator, PipelineSchemaValidator>();

@@ -44,6 +44,16 @@ public interface IPipelineDefinitionService
     IReadOnlyList<PipelineNodeProperties> GetAllNodes(string pipelineDefinition);
 
     /// <summary>
+    /// Like <see cref="GetAllNodes" />, but distinguishes "unparsable YAML" from "parsable but
+    /// empty" — the AB#5113 rights analysis must report a broken definition as a warning instead
+    /// of silently treating it as a pipeline that touches nothing.
+    /// </summary>
+    /// <param name="pipelineDefinition">The YAML pipeline definition string</param>
+    /// <param name="nodes">All nodes found in the definition; empty when parsing failed</param>
+    /// <returns><c>true</c> when the definition parsed as YAML; <c>false</c> otherwise</returns>
+    bool TryGetAllNodes(string pipelineDefinition, out IReadOnlyList<PipelineNodeProperties> nodes);
+
+    /// <summary>
     /// Updates the properties of a specific node in a YAML pipeline definition.
     /// Finds the node by type and occurrence index, then merges the provided properties.
     /// </summary>

@@ -392,6 +392,68 @@ public class AdapterController : ControllerBase
     }
 
     /// <summary>
+    /// Read-only rights analysis of the adapter's pipeline service account (AB#5113): joins the CK
+    /// types touched by the adapter's executing pipelines (minus those carrying their own
+    /// override account) with the tenant's data policies/permissions, and computes the role delta
+    /// against the AB#5111 declaration of the adapter's default account. Answers "which roles
+    /// does this adapter's service account need?" before a deploy fails on missing data access.
+    /// The configuration-bound variant lives on <see cref="ServiceAccountController"/>.
+    /// </summary>
+    /// <remarks>
+    /// Side-effect free and robust by contract: an unparsable pipeline definition becomes a
+    /// warning entry, dynamic type references are reported as not analyzable, and an adapter
+    /// without pipelines (or even without a service account yet) returns an empty-but-valid
+    /// recommendation.
+    /// </remarks>
+    /// <param name="adapterRtId">The runtime id of the adapter.</param>
+    /// <param name="rightsAnalysisService">The analysis evaluator.</param>
+    [HttpGet("{adapterRtId}/serviceAccount/rightsAnalysis")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(typeof(ServiceAccountRightsAnalysisDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetServiceAccountRightsAnalysis([Required] string adapterRtId,
+        [FromServices] IServiceAccountRightsAnalysisService rightsAnalysisService)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        if (!OctoObjectId.TryParse(adapterRtId, out var adapterObjectId))
+        {
+            return BadRequest(new ErrorResponse
+                { ErrorMessage = $"Invalid adapterRtId '{adapterRtId}': must be a 24-character hex ObjectId." });
+        }
+
+        // Same resolution as the reconcile / health endpoints: Adapter is polymorphic, so the
+        // tenant's adapter list is the caller-friendly lookup.
+        var adapters = await _communicationRepository.GetAdaptersAsync(tenantId);
+        var adapter = adapters.FirstOrDefault(a => a.RtId == adapterObjectId);
+        if (adapter == null)
+        {
+            return NotFound(new ErrorResponse
+                { ErrorMessage = $"Adapter '{adapterRtId}' was not found in tenant '{tenantId}'." });
+        }
+
+        try
+        {
+            return Ok(await rightsAnalysisService.AnalyzeAdapterAsync(tenantId, adapter));
+        }
+        catch (Exception e)
+        {
+            // Only repository-level failures land here — pipeline parsing problems are absorbed
+            // into warning entries by the service. The message never contains a secret.
+            _logger.LogError(e,
+                "Rights analysis of the pipeline service account of adapter '{AdapterRtId}' failed",
+                adapterRtId);
+            return BadRequest(new ErrorResponse
+                { ErrorMessage = $"The pipeline service account rights analysis failed: {e.Message}" });
+        }
+    }
+
+    /// <summary>
     /// Rotates the client secret of the adapter's pipeline service account (AB#5032): a fresh secret
     /// is hashed into the identity client and written into the tenant's
     /// <c>ServiceAccountConfiguration</c> in one deliberate step.
