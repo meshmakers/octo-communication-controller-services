@@ -25,7 +25,8 @@ internal class AdapterService(
     IOptions<CommunicationControllerOptions> communicationControllerOptions,
     IWorkloadLifecycleService workloadLifecycleService,
     IWorkloadOnDemandCapabilityService onDemandCapabilityService,
-    IPipelineServiceAccountResolver serviceAccountResolver)
+    IPipelineServiceAccountResolver serviceAccountResolver,
+    IWorkloadTemplateResolver templateResolver)
     : IAdapterService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
@@ -1145,6 +1146,14 @@ internal class AdapterService(
             }
         }
 
+        // AB#5111: resolve the IssuerUri deploy-time token before the configuration is serialised
+        // for the adapter — the projection is the consumption point of the entity, so this is
+        // where {{service.authority}} has to become a concrete URL.
+        foreach (var serviceAccount in pipelineConfigurations.OfType<RtServiceAccountConfiguration>())
+        {
+            ResolveServiceAccountIssuerUri(tenantId, serviceAccount);
+        }
+
         var configurationsDto = pipelineConfigurations.Select(c => new ConfigurationDto(c.RtId,
             c.CkTypeId ?? throw AdapterServiceException.CkTypeIdUndefined(),
             c.RtWellKnownName ?? throw AdapterServiceException.RtWellKnownNameUndefined(),
@@ -1156,6 +1165,65 @@ internal class AdapterService(
             rtPipeline.IsDebuggingEnabled ?? false,
             pipelineDefinition ?? rtPipeline.PipelineDefinition,
             configurationsDto);
+    }
+
+    /// <summary>
+    /// AB#5111: resolves deploy-time tokens in a service account's <c>IssuerUri</c> — the reconcile
+    /// writes <c>{{service.authority}}</c> as the default, and the mesh adapter's
+    /// <c>ServiceAccountTokenService</c> needs a concrete URL to run OIDC discovery against.
+    ///
+    /// <para>
+    /// REUSES the existing workload-template machinery (<see cref="IWorkloadTemplateResolver" />,
+    /// the same one that resolves <c>{{service.NAME}}</c> / <c>{{domain.NAME}}</c> in Hostname,
+    /// ValueOverrides and ValuesYaml at deploy time) instead of inventing a second token syntax.
+    /// One deliberate extra: when <c>ServiceUrls</c> has no <c>authority</c> entry (local dev,
+    /// clusters whose helm chart predates the map), <c>{{service.authority}}</c> alone falls back
+    /// to this instance's <c>AuthorityUrl</c> — the value the provisioning wrote before AB#5111 —
+    /// so the token can never resolve to less than the old hard-coded behaviour.
+    /// </para>
+    ///
+    /// <para>
+    /// Mutates only the in-memory entity that is about to be serialised into the
+    /// <c>PipelineConfigurationDto</c>; nothing is written back to the repository — the persisted
+    /// entity keeps the portable token. An unresolvable value (unknown placeholder, no fallback)
+    /// is passed through verbatim with a warning rather than failing the deploy: a deploy that
+    /// worked yesterday must not start failing because a template map shrank, and the adapter-side
+    /// token request will name the failing issuer clearly.
+    /// </para>
+    /// </summary>
+    private void ResolveServiceAccountIssuerUri(string tenantId, RtServiceAccountConfiguration serviceAccount)
+    {
+        // Defensive read, same reasoning as everywhere on the service-account path: IssuerUri is
+        // mandatory on the CK type, and the generated getter throws on a half-written entity.
+        var issuerUri = serviceAccount.GetAttributeValueOrDefault(
+            nameof(RtServiceAccountConfiguration.IssuerUri)) as string;
+        if (issuerUri == null || issuerUri.IndexOf("{{", StringComparison.Ordinal) < 0)
+        {
+            return;
+        }
+
+        if (templateResolver.TryResolve(issuerUri, new WorkloadTemplateContext(tenantId), out var resolved,
+                out var unknownPlaceholder))
+        {
+            // resolved is non-null whenever the input was non-null and TryResolve returned true.
+            serviceAccount.IssuerUri = resolved!;
+            return;
+        }
+
+        if (string.Equals(unknownPlaceholder, "service.authority", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(issuerUri.Trim(), "{{service.authority}}", StringComparison.OrdinalIgnoreCase))
+        {
+            // No configured authority URL — fall back to the one this instance authenticates
+            // against itself, which is exactly what the provisioning wrote before AB#5111. Only for
+            // the bare token: a composite template with an unresolvable part is a configuration
+            // error and falls through to the warning below.
+            serviceAccount.IssuerUri = communicationControllerOptions.Value.AuthorityUrl;
+            return;
+        }
+
+        Logger.Warn(
+            "[{TenantId}] IssuerUri of service account '{WellKnownName}' references the unknown placeholder '{Placeholder}'; the value is passed to the adapter unresolved",
+            tenantId, serviceAccount.RtWellKnownName, unknownPlaceholder);
     }
 
     private async Task UpdateAdapterConfigurationAsync(string tenantId,

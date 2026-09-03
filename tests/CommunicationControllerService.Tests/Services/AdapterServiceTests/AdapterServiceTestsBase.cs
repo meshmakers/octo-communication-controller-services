@@ -59,6 +59,14 @@ internal abstract class AdapterServiceTestsBase
 
     protected readonly AdapterTenant AdapterTenant;
 
+    /// <summary>
+    /// AB#5111: the options instance behind both the service's IOptions and the real
+    /// <see cref="WorkloadTemplateResolver" /> the service uses to resolve the IssuerUri token —
+    /// tests mutate <c>ServiceUrls</c> / <c>AuthorityUrl</c> on it (the resolver re-snapshots per
+    /// call, so no rebuild is needed).
+    /// </summary>
+    protected readonly CommunicationControllerOptions ControllerOptions = new();
+
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
     protected AdapterServiceTestsBase()
     {
@@ -71,7 +79,9 @@ internal abstract class AdapterServiceTestsBase
         // Real parser (pure, dependency-free) so deprecated-node detection works against real YAML
         PipelineDefinitionService = new PipelineDefinitionService();
         var options = Substitute.For<IOptions<CommunicationControllerOptions>>();
-        options.Value.Returns(new CommunicationControllerOptions());
+        options.Value.Returns(ControllerOptions);
+        var optionsMonitor = Substitute.For<IOptionsMonitor<CommunicationControllerOptions>>();
+        optionsMonitor.CurrentValue.Returns(ControllerOptions);
         AdapterConnectionTracker = new AdapterConnectionTracker();
         OnDemandCapabilityService = new WorkloadOnDemandCapabilityService(CommunicationRepository,
             AdapterCache, PipelineDefinitionService);
@@ -80,7 +90,10 @@ internal abstract class AdapterServiceTestsBase
         AdapterService = new AdapterService(CommunicationRepository, AdapterCache, AdapterHubCallbacks,
             CommunicationEventService, PipelineSchemaValidator, PipelineDefinitionService,
             AdapterConnectionTracker, options, WorkloadLifecycleService, OnDemandCapabilityService,
-            ServiceAccountResolver);
+            ServiceAccountResolver,
+            // Real resolver (AB#5111), same reasoning as the service-account resolver above: the
+            // IssuerUri token resolution in the configuration projection runs the real machinery.
+            new WorkloadTemplateResolver(optionsMonitor));
         AdapterTenant = new AdapterTenant(AdapterCachePublish, TenantId);
 
         InitAdapterCache();

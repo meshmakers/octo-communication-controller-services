@@ -2,6 +2,7 @@ using MartinCostello.Logging.XUnit;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
@@ -61,6 +62,12 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         // AB#5027: AdapterService takes the pipeline service-account resolver. Real implementation
         // over the repository registered above, so the association traversal is exercised for real.
         Services.AddSingleton<IPipelineServiceAccountResolver, PipelineServiceAccountResolver>();
+        // AB#5111: AdapterService takes the workload template resolver to resolve the IssuerUri
+        // deploy-time token in the service-account projection. Real implementation over default
+        // (empty) options — with no ServiceUrls configured the {{service.authority}} token falls
+        // back to AuthorityUrl, which is exactly the local-dev shape.
+        Services.AddOptions<CommunicationControllerOptions>();
+        Services.AddSingleton<IWorkloadTemplateResolver, WorkloadTemplateResolver>();
         // AB#5027 phase 2: PoolService takes the provisioning service. Substituted here — the real
         // one talks to the identity service over the distribution event hub, which the integration
         // fixture does not run; the repository-side entity + edge write it performs is covered

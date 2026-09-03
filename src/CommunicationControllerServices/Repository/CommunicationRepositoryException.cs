@@ -261,6 +261,32 @@ internal class CommunicationRepositoryException : Exception
             $"[{tenantId}] Failed to get service account configuration '{wellKnownName}'", exception);
     }
 
+    public static Exception CommonFailedGettingServiceAccountByRtId(string tenantId,
+        OctoObjectId serviceAccountRtId, Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to get service account configuration '{serviceAccountRtId}'", exception);
+    }
+
+    public static Exception CommonFailedGettingAdapterForServiceAccount(string tenantId,
+        OctoObjectId serviceAccountRtId, Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to get the adapter of service account configuration '{serviceAccountRtId}'",
+            exception);
+    }
+
+    /// <summary>
+    /// AB#5111. The message names the entity by rtId only — the configuration carries a plaintext
+    /// client secret and must never reach a log sink or an exception message.
+    /// </summary>
+    public static Exception CommonFailedUpdatingServiceAccount(string tenantId,
+        OctoObjectId serviceAccountRtId, Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to update service account configuration '{serviceAccountRtId}'", exception);
+    }
+
     /// <summary>
     /// AB#5027. The message names the entity by rtId only — the configuration it was built from
     /// carries a plaintext client secret and must never reach a log sink or an exception message.

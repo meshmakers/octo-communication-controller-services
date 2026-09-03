@@ -327,6 +327,92 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
+    public async Task<RtServiceAccountConfiguration?> GetServiceAccountByRtIdAsync(string tenantId,
+        OctoObjectId serviceAccountRtId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            return await tenantRepository.GetRtEntityByRtIdAsync<RtServiceAccountConfiguration>(session,
+                serviceAccountRtId);
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingServiceAccountByRtId(tenantId,
+                serviceAccountRtId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<RtAdapter?> GetAdapterForServiceAccountAsync(string tenantId, OctoObjectId serviceAccountRtId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            // Inbound over the dedicated PipelineServiceAccount role: the edge lives on the
+            // adapter, so from the configuration's side it is the incoming direction — same
+            // pattern as GetAdaptersAsync resolves Pool→Adapter over the Manages role.
+            var resultSet = await tenantRepository
+                .GetRtAssociationTargetsAsync<RtServiceAccountConfiguration, RtAdapter>(session,
+                    [serviceAccountRtId], SystemCommunicationCkIds.RtCkPipelineServiceAccountRoleId,
+                    GraphDirections.Inbound, null, RtEntityQueryOptions.Create());
+
+            if (!resultSet.Any())
+            {
+                return null;
+            }
+
+            return resultSet.First().Value.Items.FirstOrDefault();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingAdapterForServiceAccount(tenantId,
+                serviceAccountRtId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task UpdateServiceAccountAsync(string tenantId, RtServiceAccountConfiguration serviceAccount)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtServiceAccountConfiguration>>
+            {
+                EntityUpdateInfo<RtServiceAccountConfiguration>.CreateUpdate(serviceAccount.ToRtEntityId(),
+                    serviceAccount)
+            };
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            // 🔴 serviceAccount carries a plaintext secret — only its rtId goes into the message.
+            throw CommunicationRepositoryException.CommonFailedUpdatingServiceAccount(tenantId,
+                serviceAccount.RtId, e);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task SavePipelineServiceAccountAsync(string tenantId, RtEntityId adapterRtEntityId,
         RtServiceAccountConfiguration serviceAccount, bool isNewEntity)
     {

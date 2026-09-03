@@ -52,6 +52,52 @@ public record PipelineServiceAccountProvisioningReport(
 }
 
 /// <summary>
+/// Who triggered a reconcile pass and how far it may go (AB#5111).
+/// </summary>
+/// <param name="MaterializeRoles">
+///     Whether the pass may materialise the declared roles into the identity client. System
+///     triggers (tenant start, workload deploy, blueprint-applied) always may — the declaration is
+///     the tenant's own configuration and the platform executes it. A user-initiated call (REST)
+///     may only when the caller could have granted the roles directly, i.e. carries the
+///     <c>UserManagement</c> role; otherwise the client is still created/converged, just with its
+///     roles left untouched, and a warning is logged (see
+///     <see cref="ServiceAccountReconcileResult.RoleChangesSkipped" />).
+/// </param>
+/// <param name="Source">Audit label: <c>System</c> or <c>User</c>.</param>
+public record ServiceAccountReconcileContext(bool MaterializeRoles, string Source)
+{
+    /// <summary>System-initiated triggers materialise the declaration as-is.</summary>
+    public static readonly ServiceAccountReconcileContext System = new(true, "System");
+
+    /// <summary>
+    /// A user-initiated call. Role materialisation requires the caller to hold the
+    /// <c>UserManagement</c> role — the same privilege needed to assign roles directly, so the
+    /// reconcile endpoint cannot be used to escalate a declaration the caller could not grant.
+    /// </summary>
+    public static ServiceAccountReconcileContext User(bool callerHasUserManagementRole)
+    {
+        return new ServiceAccountReconcileContext(callerHasUserManagementRole, "User");
+    }
+}
+
+/// <summary>
+/// Result of one reconcile pass over a single service account (AB#5111).
+/// </summary>
+/// <param name="Outcome">What the pass did to the configuration entity.</param>
+/// <param name="ClientId">The identity client the declaration was materialised into.</param>
+/// <param name="WellKnownName">The <c>RtWellKnownName</c> of the configuration entity.</param>
+/// <param name="RoleChangesSkipped">
+///     <c>true</c> when the account declares roles but the pass did not materialise them because
+///     the triggering caller lacks the <c>UserManagement</c> role. The client itself (secret,
+///     grants, scope) was still converged.
+/// </param>
+public record ServiceAccountReconcileResult(
+    PipelineServiceAccountProvisioningOutcome Outcome,
+    string ClientId,
+    string WellKnownName,
+    bool RoleChangesSkipped);
+
+/// <summary>
 /// Result of a deliberate secret rotation for one adapter's pipeline service account (AB#5032).
 /// </summary>
 /// <param name="ClientId">The identity client whose secret was replaced.</param>
@@ -120,9 +166,48 @@ public interface IPipelineServiceAccountProvisioningService
 
     /// <summary>
     /// Provisions a single adapter — used when one adapter becomes relevant on its own (a workload
-    /// deploy) rather than during the tenant-wide sweep.
+    /// deploy) rather than during the tenant-wide sweep. A non-throwing wrapper around
+    /// <see cref="ReconcileAdapterAsync" /> with the <see cref="ServiceAccountReconcileContext.System" />
+    /// context.
     /// </summary>
     Task<PipelineServiceAccountProvisioningOutcome> EnsureAdapterProvisionedAsync(string tenantId, RtAdapter adapter);
+
+    /// <summary>
+    /// AB#5111 — materialises the declaration of the adapter's pipeline service account: ensures
+    /// the configuration entity exists (creating it with the declaration defaults —
+    /// <c>AssignedRoleNames</c> = the platform's default role, <c>AllowDelegation</c> = true),
+    /// ensures the identity client exists with the hashed secret, syncs its role edges to the
+    /// declared <c>AssignedRoleNames</c> (add missing, remove superfluous), sets or removes the
+    /// on-behalf-of grant per <c>AllowDelegation</c>, and (re-)derives <c>TenantId</c> and the
+    /// <c>IssuerUri</c> default (<c>{{service.authority}}</c>). Idempotent; an existing secret is
+    /// <b>never</b> rotated.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>Legacy accounts keep their roles.</b> An entity that does not carry the
+    /// <c>AssignedRoleNames</c> attribute (everything provisioned before CK 3.32.0) is reconciled
+    /// with its identity roles left completely untouched: role edges granted by hand or by a
+    /// blueprint (the documented delegation setup, see the interface remarks above) must survive
+    /// the upgrade. Declarative role management is opted into by setting the attribute.
+    /// </para>
+    /// <para>
+    /// Unlike the Ensure* wrappers this method <b>throws</b> — it backs the REST endpoint, whose
+    /// caller is waiting for an answer.
+    /// </para>
+    /// </remarks>
+    Task<ServiceAccountReconcileResult> ReconcileAdapterAsync(string tenantId, RtAdapter adapter,
+        ServiceAccountReconcileContext context);
+
+    /// <summary>
+    /// AB#5111 — the configuration-bound variant of <see cref="ReconcileAdapterAsync" />. When the
+    /// configuration is linked to an adapter through the <c>PipelineServiceAccount</c> edge, the
+    /// adapter-bound reconcile runs (the adapter defines the deterministic names). A standalone
+    /// configuration — e.g. a per-pipeline override linked only via <c>Uses</c> — is reconciled in
+    /// place: its own <c>ClientId</c> is used (derived deterministically from the configuration's
+    /// rtId when unset), and no adapter edge is written.
+    /// </summary>
+    Task<ServiceAccountReconcileResult> ReconcileConfigurationAsync(string tenantId,
+        RtServiceAccountConfiguration configuration, ServiceAccountReconcileContext context);
 
     /// <summary>
     /// Deliberately replaces the secret of one adapter's pipeline service account (AB#5032), keeping
@@ -150,4 +235,14 @@ public interface IPipelineServiceAccountProvisioningService
     /// </para>
     /// </remarks>
     Task<PipelineServiceAccountRotationResult> RotateAdapterSecretAsync(string tenantId, RtAdapter adapter);
+
+    /// <summary>
+    /// AB#5111 — the configuration-bound variant of <see cref="RotateAdapterSecretAsync" />, for
+    /// callers that hold a <c>ServiceAccountConfiguration</c> rather than an adapter. A
+    /// configuration linked to an adapter rotates through the adapter path (same core logic, same
+    /// consistency ordering); a standalone configuration rotates in place. Roles are never touched
+    /// by a rotation.
+    /// </summary>
+    Task<PipelineServiceAccountRotationResult> RotateConfigurationSecretAsync(string tenantId,
+        RtServiceAccountConfiguration configuration);
 }

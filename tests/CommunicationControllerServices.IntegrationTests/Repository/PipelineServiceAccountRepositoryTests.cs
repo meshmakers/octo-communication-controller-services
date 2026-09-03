@@ -131,4 +131,82 @@ public class PipelineServiceAccountRepositoryTests(CommunicationControllerFixtur
 
         result.Should().BeNull();
     }
+
+    // ------------------------------------------------------------------------- AB#5111
+
+    [Fact]
+    public async Task GetAdapterForServiceAccountAsync_ResolvesTheOwningAdapterThroughTheInboundEdge()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var adapter = await CreateAdapterAsync($"sa-adapter-{Guid.NewGuid():N}");
+        var adapterRtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, adapter.RtId);
+        var serviceAccount = BuildServiceAccount($"pipeline-service-account-{adapter.RtId}", "secret-one",
+            fixture.TestTenantId);
+        await repository.SavePipelineServiceAccountAsync(fixture.TestTenantId, adapterRtEntityId, serviceAccount,
+            isNewEntity: true);
+
+        // The reverse lookup the configuration-bound reconcile/rotate endpoints route through.
+        var owner = await repository.GetAdapterForServiceAccountAsync(fixture.TestTenantId, serviceAccount.RtId);
+
+        owner.Should().NotBeNull();
+        owner!.RtId.Should().Be(adapter.RtId);
+    }
+
+    [Fact]
+    public async Task GetAdapterForServiceAccountAsync_StandaloneAccount_ReturnsNull()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var standalone = BuildServiceAccount($"sa-standalone-{Guid.NewGuid():N}", "secret-one",
+            fixture.TestTenantId);
+        // Written without any adapter edge — a per-pipeline override account.
+        await InsertServiceAccountAsync(standalone);
+
+        var owner = await repository.GetAdapterForServiceAccountAsync(fixture.TestTenantId, standalone.RtId);
+
+        owner.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetServiceAccountByRtIdAsync_RoundTripsWithUpdateServiceAccountAsync()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var standalone = BuildServiceAccount($"sa-standalone-{Guid.NewGuid():N}", "secret-one",
+            fixture.TestTenantId);
+        await InsertServiceAccountAsync(standalone);
+
+        var loaded = await repository.GetServiceAccountByRtIdAsync(fixture.TestTenantId, standalone.RtId);
+        loaded.Should().NotBeNull();
+        loaded!.ClientSecret.Should().Be("secret-one");
+
+        // The standalone write path of the AB#5111 reconcile/rotation — entity only, no edge.
+        var updated = BuildServiceAccount(standalone.RtWellKnownName!, "secret-two", fixture.TestTenantId,
+            standalone.RtId);
+        await repository.UpdateServiceAccountAsync(fixture.TestTenantId, updated);
+
+        var reloaded = await repository.GetServiceAccountByRtIdAsync(fixture.TestTenantId, standalone.RtId);
+        reloaded.Should().NotBeNull();
+        reloaded!.ClientSecret.Should().Be("secret-two");
+    }
+
+    [Fact]
+    public async Task GetServiceAccountByRtIdAsync_UnknownRtId_ReturnsNull()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+
+        var result = await repository.GetServiceAccountByRtIdAsync(fixture.TestTenantId,
+            OctoObjectId.GenerateNewId());
+
+        result.Should().BeNull();
+    }
+
+    private async Task InsertServiceAccountAsync(RtServiceAccountConfiguration serviceAccount)
+    {
+        var systemContext = fixture.GetSystemContext();
+        var tenantRepository = await systemContext.FindTenantRepositoryAsync(fixture.TestTenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+        await tenantRepository.InsertOneRtEntityAsync(session, serviceAccount);
+        await session.CommitTransactionAsync();
+    }
 }

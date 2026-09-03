@@ -104,6 +104,34 @@ public interface ICommunicationRepository
         string wellKnownName);
 
     /// <summary>
+    /// AB#5111: looks a <c>ServiceAccountConfiguration</c> up by its rtId — the handle the
+    /// configuration-bound reconcile/rotate endpoints receive. Returns <c>null</c> when no such
+    /// entity exists (or the entity with that rtId is not a service account configuration).
+    /// </summary>
+    Task<RtServiceAccountConfiguration?> GetServiceAccountByRtIdAsync(string tenantId,
+        OctoObjectId serviceAccountRtId);
+
+    /// <summary>
+    /// AB#5111: the reverse of <see cref="GetServiceAccountForAdapterAsync" /> — the adapter whose
+    /// <c>PipelineServiceAccount</c> edge points at the given configuration, or <c>null</c> for a
+    /// standalone configuration (e.g. a per-pipeline override linked only via <c>Uses</c>). Lets
+    /// the configuration-bound reconcile/rotate operations route through the adapter path, so both
+    /// entry points share one deterministic naming scheme per adapter.
+    /// </summary>
+    Task<RtAdapter?> GetAdapterForServiceAccountAsync(string tenantId, OctoObjectId serviceAccountRtId);
+
+    /// <summary>
+    /// AB#5111: updates a standalone <c>ServiceAccountConfiguration</c> in place — the counterpart
+    /// of <see cref="SavePipelineServiceAccountAsync" /> for configurations that belong to no
+    /// adapter, so no <c>PipelineServiceAccount</c> edge is touched.
+    /// <para>
+    /// 🔴 <paramref name="serviceAccount"/> carries a plaintext client secret. Never log this
+    /// parameter, and never include it in an exception message.
+    /// </para>
+    /// </summary>
+    Task UpdateServiceAccountAsync(string tenantId, RtServiceAccountConfiguration serviceAccount);
+
+    /// <summary>
     /// AB#5027: inserts or updates the given <c>ServiceAccountConfiguration</c> and makes sure the
     /// adapter's <c>PipelineServiceAccount</c> edge points at it — both in one transaction, so a
     /// provisioning run can never leave an orphaned credential entity behind.

@@ -98,6 +98,73 @@ internal class PipelineServiceAccountProjectionTests : AdapterServiceTestsBase
         await Assert.That(pipelineConfig.Configurations.Single().ConfigurationRtId).IsEqualTo(overrideAccount.RtId);
     }
 
+    // ------------------------------------------------------------- AB#5111 issuer token resolution
+
+    [Test]
+    public async Task IssuerUriToken_IsResolvedFromTheConfiguredServiceUrls()
+    {
+        // The reconcile writes {{service.authority}} as the portable default; the projection is the
+        // consumption point, so the adapter must receive a concrete URL it can run OIDC discovery
+        // against. Wired into the EXISTING deploy-time template machinery (ServiceUrls, the same
+        // map {{service.NAME}} resolves from in Hostname/ValueOverrides/ValuesYaml).
+        ControllerOptions.ServiceUrls["authority"] = "https://identity.cluster.example.com";
+        DefaultAdapterServiceAccount.IssuerUri = "{{service.AUTHORITY}}";
+        var (adapter, pipeline) = ArrangeDeployablePipeline();
+
+        var pipelineConfig = await DeployAndCaptureAsync(adapter, pipeline);
+
+        var projected = pipelineConfig.Configurations
+            .Single(c => c.ConfigurationRtId == DefaultAdapterServiceAccount.RtId);
+        await Assert.That(projected.ConfigurationValue).Contains("https://identity.cluster.example.com");
+        await Assert.That(projected.ConfigurationValue.Contains("{{", StringComparison.Ordinal)).IsFalse();
+    }
+
+    [Test]
+    public async Task IssuerUriToken_WithoutConfiguredAuthority_FallsBackToTheAuthorityUrl()
+    {
+        // Local dev / clusters whose chart predates the ServiceUrls map: the token must never
+        // resolve to less than the pre-AB#5111 behaviour, which wrote AuthorityUrl verbatim.
+        ControllerOptions.AuthorityUrl = "https://identity.fallback.example.com";
+        DefaultAdapterServiceAccount.IssuerUri = "{{service.authority}}";
+        var (adapter, pipeline) = ArrangeDeployablePipeline();
+
+        var pipelineConfig = await DeployAndCaptureAsync(adapter, pipeline);
+
+        var projected = pipelineConfig.Configurations
+            .Single(c => c.ConfigurationRtId == DefaultAdapterServiceAccount.RtId);
+        await Assert.That(projected.ConfigurationValue).Contains("https://identity.fallback.example.com");
+    }
+
+    [Test]
+    public async Task ConcreteIssuerUri_IsPassedThroughUntouched()
+    {
+        // Entities provisioned before AB#5111 (or deliberately pinned by an author) carry a
+        // concrete URL — the projection must not rewrite it.
+        var (adapter, pipeline) = ArrangeDeployablePipeline();
+
+        var pipelineConfig = await DeployAndCaptureAsync(adapter, pipeline);
+
+        var projected = pipelineConfig.Configurations
+            .Single(c => c.ConfigurationRtId == DefaultAdapterServiceAccount.RtId);
+        await Assert.That(projected.ConfigurationValue).Contains("https://identity.example.com");
+    }
+
+    [Test]
+    public async Task PipelineOverrideAccount_GetsItsIssuerTokenResolvedToo()
+    {
+        // The resolution walks every service account in the projected list, not just the adapter
+        // default — a per-pipeline override written by the AB#5111 reconcile carries the token too.
+        ControllerOptions.ServiceUrls["authority"] = "https://identity.cluster.example.com";
+        var overrideAccount = RtEntityCreator.CreateServiceAccountConfiguration("pipeline-override");
+        overrideAccount.IssuerUri = "{{service.authority}}";
+        var (adapter, pipeline) = ArrangeDeployablePipeline(overrideAccount);
+
+        var pipelineConfig = await DeployAndCaptureAsync(adapter, pipeline);
+
+        await Assert.That(pipelineConfig.Configurations.Single().ConfigurationValue)
+            .Contains("https://identity.cluster.example.com");
+    }
+
     [Test]
     public async Task NonServiceAccountConfigurations_AreKeptAndDefaultIsAdded()
     {

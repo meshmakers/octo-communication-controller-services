@@ -180,6 +180,11 @@ try
             c.AddBroadcastEventConsumer<TenantManagementConsumer, PreDeleteTenant>();
             c.AddBroadcastEventConsumer<TenantManagementConsumer, PosCreateTenant>();
 
+            // AB#5111: reconcile pipeline service accounts after a blueprint apply — the only
+            // entity-creating bulk path the controller can observe (see BlueprintAppliedConsumer
+            // for why there is no finer-grained entity-change subscription).
+            c.AddBroadcastEventConsumer<BlueprintAppliedConsumer, BlueprintApplied>();
+
             // AB#4918: durable co-wake queue. Cron companion schedules of pipelines on OnDemand
             // workloads land here; a wake tick fired while the controller restarts must survive,
             // so this is a routed (durable, named) endpoint — not a temporary command queue.

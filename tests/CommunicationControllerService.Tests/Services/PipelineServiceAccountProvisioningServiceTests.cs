@@ -188,13 +188,21 @@ internal class PipelineServiceAccountProvisioningServiceTests
             .IsEqualTo(PipelineServiceAccountProvisioningService.BuildWellKnownName(adapter.RtId));
         await Assert.That(saved.ClientId)
             .IsEqualTo(PipelineServiceAccountProvisioningService.BuildClientId(adapter.RtId));
-        await Assert.That(saved.IssuerUri).IsEqualTo(AuthorityUrl);
+        // AB#5111: the portable deploy-time token, not this instance's concrete authority URL — it
+        // is resolved when the configuration is projected to the adapter.
+        await Assert.That(saved.IssuerUri)
+            .IsEqualTo(PipelineServiceAccountProvisioningService.IssuerUriToken);
         // The delegation grant needs acr_values=tenant:{tenantId}; without it the adapter cannot
         // even resolve a tenant at the token endpoint.
         await Assert.That(saved.TenantId).IsEqualTo(TenantId);
         // The tenant-side entity must hold the PLAINTEXT — the identity side stores only the hash,
         // so the adapter could never authenticate from it.
         await Assert.That(saved.ClientSecret).IsEqualTo(clientSecret);
+        // AB#5111: a fresh account is declarative from birth — the declaration defaults are
+        // persisted so Studio shows (and an operator can edit) what will be materialised.
+        await Assert.That(saved.AssignedRoleNames!.ToArray())
+            .IsEquivalentTo(new[] { CommonConstants.CommunicationManagementRole });
+        await Assert.That(saved.AllowDelegation ?? false).IsTrue();
     }
 
     // ---------------------------------------------------------------- idempotency
@@ -294,7 +302,9 @@ internal class PipelineServiceAccountProvisioningServiceTests
 
         using var _ = Assert.Multiple();
         await Assert.That(outcome).IsEqualTo(PipelineServiceAccountProvisioningOutcome.Repaired);
-        await Assert.That(saved.IssuerUri).IsEqualTo(AuthorityUrl);
+        // AB#5111: converged onto the portable token, so the next cluster move is a no-op.
+        await Assert.That(saved.IssuerUri)
+            .IsEqualTo(PipelineServiceAccountProvisioningService.IssuerUriToken);
         // Moving cluster must not invalidate the credential the adapter already holds.
         await Assert.That(saved.ClientSecret).IsEqualTo(stale.ClientSecret);
     }

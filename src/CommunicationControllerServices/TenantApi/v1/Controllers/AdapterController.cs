@@ -5,6 +5,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Authorization;
@@ -253,6 +254,81 @@ public class AdapterController : ControllerBase
         {
             _logger.LogWarning(e, "Wake of workload '{WorkloadRtId}' failed", workloadRtId);
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
+        }
+    }
+
+    /// <summary>
+    /// Reconciles the adapter's pipeline service account against its declaration (AB#5111): ensures
+    /// the configuration entity and the identity client exist, syncs the client's role edges to the
+    /// declared <c>AssignedRoleNames</c>, sets/removes the on-behalf-of grant per
+    /// <c>AllowDelegation</c>, and re-derives <c>TenantId</c> / the <c>IssuerUri</c> default.
+    /// Idempotent; never rotates an existing secret. The configuration-bound variant lives on
+    /// <see cref="ServiceAccountController"/>.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 Security gate: user-initiated trigger, so the declared roles are only materialised when
+    /// the caller holds the <c>UserManagement</c> role — the same privilege needed to assign roles
+    /// directly. Without it the client is still converged, roles untouched, and the response says
+    /// so (<c>RoleChangesSkipped</c>). System triggers (tenant start, workload deploy) materialise
+    /// the declaration as-is.
+    /// </remarks>
+    /// <param name="adapterRtId">The runtime id of the adapter.</param>
+    /// <param name="provisioningService">The service owning both sides of the credential.</param>
+    /// <param name="eventService">Audit trail.</param>
+    [HttpPost("{adapterRtId}/serviceAccount/reconcile")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(typeof(ReconcileServiceAccountResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ReconcileServiceAccount([Required] string adapterRtId,
+        [FromServices] IPipelineServiceAccountProvisioningService provisioningService,
+        [FromServices] ICommunicationEventService eventService)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        if (!OctoObjectId.TryParse(adapterRtId, out var adapterObjectId))
+        {
+            return BadRequest(new ErrorResponse
+                { ErrorMessage = $"Invalid adapterRtId '{adapterRtId}': must be a 24-character hex ObjectId." });
+        }
+
+        // Same resolution as the rotate endpoint below: Adapter is polymorphic, so the tenant's
+        // adapter list is the caller-friendly lookup.
+        var adapters = await _communicationRepository.GetAdaptersAsync(tenantId);
+        var adapter = adapters.FirstOrDefault(a => a.RtId == adapterObjectId);
+        if (adapter == null)
+        {
+            return NotFound(new ErrorResponse
+                { ErrorMessage = $"Adapter '{adapterRtId}' was not found in tenant '{tenantId}'." });
+        }
+
+        try
+        {
+            var result = await provisioningService.ReconcileAdapterAsync(tenantId, adapter,
+                ServiceAccountReconcileContext.User(User.IsInRole(CommonConstants.UserManagementRole)));
+
+            var dto = ServiceAccountController.BuildReconcileDto(result);
+
+            await eventService.StoreInformationEventAsync(tenantId,
+                $"Pipeline service account '{result.WellKnownName}' (client '{result.ClientId}') of adapter " +
+                $"'{adapter.Name ?? adapterRtId}' ({adapterRtId}) reconciled (source: User): {result.Outcome}." +
+                $"{(result.RoleChangesSkipped ? " Declared roles were skipped." : string.Empty)}");
+
+            return Ok(dto);
+        }
+        catch (Exception e)
+        {
+            // Deliberately broad, mirroring the rotate endpoint: the reconcile spans the identity
+            // bus and the tenant repository, and the caller must learn that it did NOT complete.
+            // The message never contains a secret.
+            _logger.LogError(e, "Reconciling the pipeline service account of adapter '{AdapterRtId}' failed",
+                adapterRtId);
+            return BadRequest(new ErrorResponse
+                { ErrorMessage = $"Reconciling the pipeline service account failed: {e.Message}" });
         }
     }
 
