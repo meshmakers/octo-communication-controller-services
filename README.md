@@ -117,14 +117,14 @@ dotnet run --project src/CommunicationControllerServices/CommunicationController
 ### Run Tests
 
 ```bash
-# All tests
+# All tests (Microsoft.Testing.Platform runner, selected via global.json)
 dotnet test --configuration Release
 
-# Specific test class
-dotnet test --filter "FullyQualifiedName~AdapterServiceTests"
+# Specific unit test class (TUnit understands the MTP tree-node filter only)
+dotnet test --project tests/CommunicationControllerService.Tests/CommunicationControllerService.Tests.csproj --treenode-filter "/*/*/ReportAdapterMetricsAsyncTests/*"
 
-# Specific test method
-dotnet test --filter "FullyQualifiedName~RegisterAdapterTests.ShouldRegisterNewAdapter"
+# Specific unit test method
+dotnet test --project tests/CommunicationControllerService.Tests/CommunicationControllerService.Tests.csproj --treenode-filter "/*/*/ReportAdapterMetricsAsyncTests/ReportAdapterMetricsAsync_ServiceThrows_Swallowed"
 ```
 
 ## Project Structure
@@ -525,11 +525,12 @@ public class MyServiceTests : MyServiceTestsBase
 ### Running Tests
 
 ```bash
-# All tests with verbose output
-dotnet test --configuration Release --logger "console;verbosity=detailed"
+# All tests with verbose output (Microsoft.Testing.Platform switch; VSTest --logger is not available)
+dotnet test --configuration Release --output Detailed
 
-# With code coverage
-dotnet test --configuration Release --collect:"XPlat Code Coverage"
+# Unit tests with code coverage (TUnit ships the Microsoft.Testing.Extensions.CodeCoverage extension;
+# the .coverage file lands in TestResults/)
+dotnet test --configuration Release --project tests/CommunicationControllerService.Tests/CommunicationControllerService.Tests.csproj --coverage
 ```
 
 ## Deployment

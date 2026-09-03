@@ -127,15 +127,20 @@ dotnet restore Octo.CommunicationController.sln
 # Build solution
 dotnet build Octo.CommunicationController.sln --configuration Release
 
-# Run all unit tests
+# Run all tests (unit + integration). global.json selects the Microsoft.Testing.Platform
+# runner, so VSTest-only switches (--logger, --collect) are not available.
 dotnet test --configuration Release
 
-# Run a specific test class
-dotnet test --filter "FullyQualifiedName~AdapterServiceTests"
+# Run a specific unit test class. TUnit only understands the MTP tree-node filter
+# (/assembly/namespace/class/method, '*' wildcards); a VSTest --filter selects zero tests.
+dotnet test --project tests/CommunicationControllerService.Tests/CommunicationControllerService.Tests.csproj --treenode-filter "/*/*/ReportAdapterMetricsAsyncTests/*"
 
-# Run a specific test method
-dotnet test --filter "FullyQualifiedName~RegisterAdapterTests.ShouldRegisterNewAdapter"
+# Run a specific unit test method
+dotnet test --project tests/CommunicationControllerService.Tests/CommunicationControllerService.Tests.csproj --treenode-filter "/*/*/ReportAdapterMetricsAsyncTests/ReportAdapterMetricsAsync_ServiceThrows_Swallowed"
 ```
+
+The xUnit integration tests additionally accept `--filter` (VSTest syntax) and
+`--filter-class` / `--filter-method`; see "Running Integration Tests" below.
 
 ### Run the Service
 
@@ -1422,7 +1427,7 @@ plus gate assertions in the AdapterService / TriggerManagementService test folde
 - Resource strings: `src/CommunicationControllerServices.Resources/`
 - Unit tests (TUnit): `tests/CommunicationControllerService.Tests/`
 - Integration tests (xUnit): `tests/CommunicationControllerServices.IntegrationTests/`
-- CI/CD: `devops-build/azure-pipelines.yml`
+- CI/CD: `azure-pipelines.yml` (root; uses shared `octo-pipeline-templates`)
 - Output directory: `bin/$(Configuration)/`
 
 ## Configuration Notes
