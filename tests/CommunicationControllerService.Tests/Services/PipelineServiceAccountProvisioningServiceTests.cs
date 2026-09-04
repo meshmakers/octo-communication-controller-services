@@ -71,7 +71,10 @@ internal class PipelineServiceAccountProvisioningServiceTests
             .Returns(new EnumCommandResponse<CreateIdentityDataResult> { Response = result });
     }
 
-    /// <summary>The steady state: entity present, complete, linked and pointing at this instance.</summary>
+    /// <summary>
+    /// The steady state since AB#5115: entity present, complete, linked — and IssuerUri/TenantId
+    /// EMPTY, the canonical "this adapter's own installation and tenant".
+    /// </summary>
     private RtServiceAccountConfiguration ArrangeProvisionedAdapter(RtAdapter adapter, string secret = "existing-secret")
     {
         var serviceAccount = new RtServiceAccountConfiguration
@@ -80,9 +83,8 @@ internal class PipelineServiceAccountProvisioningServiceTests
             CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
             RtWellKnownName = PipelineServiceAccountProvisioningService.BuildWellKnownName(adapter.RtId),
             ClientId = PipelineServiceAccountProvisioningService.BuildClientId(adapter.RtId),
-            ClientSecret = secret,
-            IssuerUri = AuthorityUrl,
-            TenantId = TenantId
+            ClientSecret = secret
+            // IssuerUri / TenantId deliberately absent (AB#5115).
         };
 
         _communicationRepository.GetServiceAccountForAdapterAsync(TenantId, adapter.RtId).Returns(serviceAccount);
@@ -188,13 +190,10 @@ internal class PipelineServiceAccountProvisioningServiceTests
             .IsEqualTo(PipelineServiceAccountProvisioningService.BuildWellKnownName(adapter.RtId));
         await Assert.That(saved.ClientId)
             .IsEqualTo(PipelineServiceAccountProvisioningService.BuildClientId(adapter.RtId));
-        // AB#5111: the portable deploy-time token, not this instance's concrete authority URL — it
-        // is resolved when the configuration is projected to the adapter.
-        await Assert.That(saved.IssuerUri)
-            .IsEqualTo(PipelineServiceAccountProvisioningService.IssuerUriToken);
-        // The delegation grant needs acr_values=tenant:{tenantId}; without it the adapter cannot
-        // even resolve a tenant at the token endpoint.
-        await Assert.That(saved.TenantId).IsEqualTo(TenantId);
+        // AB#5115: EMPTY issuer and tenant — the adapter resolves both against its own
+        // installation, so the entity is cluster- and tenant-portable by construction.
+        await Assert.That(saved.IssuerUri).IsNull();
+        await Assert.That(saved.TenantId).IsNull();
         // The tenant-side entity must hold the PLAINTEXT — the identity side stores only the hash,
         // so the adapter could never authenticate from it.
         await Assert.That(saved.ClientSecret).IsEqualTo(clientSecret);
@@ -284,14 +283,39 @@ internal class PipelineServiceAccountProvisioningServiceTests
         await Assert.That(saved.RtId).IsEqualTo(incomplete.RtId);
         await Assert.That(saved.ClientSecret).IsNotNull();
         await Assert.That(saved.ClientSecret!.Length).IsEqualTo(64);
+        // The repair rides the AB#5115 convergence: the concrete own-authority URL and the current
+        // tenant id are the installation spellings and become empty.
+        await Assert.That(saved.IssuerUri).IsNull();
+        await Assert.That(saved.TenantId).IsNull();
     }
 
     [Test]
-    public async Task Provision_IssuerMovedToAnotherCluster_ConvergesTheEntity()
+    public async Task Provision_ForeignIssuer_IsADeliberateTargetAndStaysUntouched()
     {
+        // AB#5115 inverted the AB#5111 behaviour here: a concrete URL that is NOT this
+        // installation is no longer "drift to repair" but a deliberate foreign identity target —
+        // the installation spellings converge to EMPTY instead, and foreign stays foreign.
         var adapter = RtEntityCreator.CreateAdapter();
-        var stale = ArrangeProvisionedAdapter(adapter);
-        stale.IssuerUri = "https://identity.old-cluster.example.com";
+        var foreign = ArrangeProvisionedAdapter(adapter);
+        foreign.IssuerUri = "https://identity.other-installation.example.com";
+
+        var outcome = await _sut.EnsureAdapterProvisionedAsync(TenantId, adapter);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(outcome).IsEqualTo(PipelineServiceAccountProvisioningOutcome.AlreadyProvisioned);
+        await _communicationRepository.DidNotReceiveWithAnyArgs().SavePipelineServiceAccountAsync(
+            Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<RtServiceAccountConfiguration>(), Arg.Any<bool>());
+    }
+
+    [Test]
+    public async Task Provision_InstallationSpelledIssuerAndTenant_ConvergeToEmpty()
+    {
+        // The pre-AB#5115 fleet: concrete own-authority URL (pre-AB#5111) and the current tenant
+        // id. One repair pass empties both; the credential survives.
+        var adapter = RtEntityCreator.CreateAdapter();
+        var legacy = ArrangeProvisionedAdapter(adapter);
+        legacy.IssuerUri = AuthorityUrl;
+        legacy.TenantId = TenantId;
 
         var outcome = await _sut.EnsureAdapterProvisionedAsync(TenantId, adapter);
 
@@ -302,11 +326,10 @@ internal class PipelineServiceAccountProvisioningServiceTests
 
         using var _ = Assert.Multiple();
         await Assert.That(outcome).IsEqualTo(PipelineServiceAccountProvisioningOutcome.Repaired);
-        // AB#5111: converged onto the portable token, so the next cluster move is a no-op.
-        await Assert.That(saved.IssuerUri)
-            .IsEqualTo(PipelineServiceAccountProvisioningService.IssuerUriToken);
-        // Moving cluster must not invalidate the credential the adapter already holds.
-        await Assert.That(saved.ClientSecret).IsEqualTo(stale.ClientSecret);
+        await Assert.That(saved.IssuerUri).IsNull();
+        await Assert.That(saved.TenantId).IsNull();
+        // Converging must not invalidate the credential the adapter already holds.
+        await Assert.That(saved.ClientSecret).IsEqualTo(legacy.ClientSecret);
     }
 
     // ---------------------------------------------------------------- secret hygiene

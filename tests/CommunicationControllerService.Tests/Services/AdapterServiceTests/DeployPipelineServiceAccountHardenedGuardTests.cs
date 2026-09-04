@@ -10,8 +10,10 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 
 /// <summary>
 /// AB#5112 (Epic AB#4979) hardened deploy guard: beyond AB#5027's "resolvable at all", the
-/// resolved account must hold a client secret (refused unconditionally — a local fact), and its
-/// identity client must exist (refused only on an authoritative identity answer, gated by
+/// resolved account must hold a usable client secret OR (AB#5114) a capable impersonation actor —
+/// the adapter's own client with a usable secret; with neither, the refusal is unconditional
+/// (both are local facts of the tenant's entities). The identity client must additionally exist
+/// (refused only on an authoritative identity answer, gated by
 /// <c>ServiceAccountGuard:CheckIdentityClient</c>; an unreachable identity service is
 /// deliberately NON-blocking so identity downtime cannot brick pipeline deploys).
 /// </summary>
@@ -51,7 +53,9 @@ internal class DeployPipelineServiceAccountHardenedGuardTests : AdapterServiceTe
 
     /// <summary>
     /// Replaces the base's complete default account with one that resolves fine (AB#5027 passes)
-    /// but holds no client secret — the state AB#5112 exists to catch.
+    /// but holds no client secret — the state AB#5112 exists to catch. Note the AB#5114 twist:
+    /// the secretless account here IS the adapter's own account, and a client cannot impersonate
+    /// itself, so impersonation can never rescue this shape — still refused.
     /// </summary>
     private void ArrangeSecretlessServiceAccount()
     {
@@ -126,6 +130,104 @@ internal class DeployPipelineServiceAccountHardenedGuardTests : AdapterServiceTe
             await AdapterService.DeployPipelineAsync(TenantId, adapter.ToRtEntityId(), pipeline.ToRtEntityId()));
 
         await Assert.That(ex!.Message).Contains("client secret");
+    }
+
+    // ------------------------------------------------------- AB#5114 secretless + impersonation
+
+    /// <summary>
+    /// The AB#5114 shape: a per-pipeline override account WITHOUT a usable secret, linked via the
+    /// pipeline's Uses edge. Whether the deploy passes now depends on the adapter's own client
+    /// (the base's <c>DefaultAdapterServiceAccount</c> — client-id / client-secret).
+    /// </summary>
+    private RtServiceAccountConfiguration ArrangeSecretlessPipelineOverride(RtPipeline pipeline,
+        string? placeholderSecret = null)
+    {
+        var overrideAccount = new RtServiceAccountConfiguration
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
+            RtWellKnownName = "secretless-override",
+            ClientId = "octo-pipeline-sa-override"
+            // ClientSecret deliberately never written (or a placeholder below).
+        };
+        if (placeholderSecret != null)
+        {
+            overrideAccount.ClientSecret = placeholderSecret;
+        }
+
+        CommunicationRepository.GetConfigurationsByPipelineAsync(TenantId, pipeline.RtId)
+            .Returns(Task.FromResult<IEnumerable<RtConfiguration>>([overrideAccount]));
+        return overrideAccount;
+    }
+
+    [Test]
+    [Arguments(null)]
+    [Arguments("<insert secret here>")] // the angle-bracket seed placeholder is "no secret" too
+    public async Task DeployPipelineAsync_SecretlessOverrideWithCapableAdapterOwnClient_Deploys(
+        string? placeholderSecret)
+    {
+        var (adapter, _, pipeline) = ArrangeDeployablePipeline();
+        ArrangeSecretlessPipelineOverride(pipeline, placeholderSecret);
+
+        // The adapter's own client (DefaultAdapterServiceAccount) holds a usable secret, so the
+        // adapter impersonates the override account (AB#5114) — the deploy must pass. The MayActAs
+        // edge itself is not verifiable controller-side and must not block.
+        await AdapterService.DeployPipelineAsync(TenantId, adapter.ToRtEntityId(), pipeline.ToRtEntityId());
+
+        await AdapterHubCallbacks.Received(1)
+            .AdapterConfigurationUpdatedAsync(TenantId, Arg.Any<AdapterConfigurationDto>());
+    }
+
+    [Test]
+    public async Task DeployPipelineAsync_SecretlessOverrideAndNoAdapterOwnClient_IsRejected()
+    {
+        var (adapter, _, pipeline) = ArrangeDeployablePipeline();
+        ArrangeSecretlessPipelineOverride(pipeline);
+        CommunicationRepository
+            .GetServiceAccountForAdapterAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>())
+            .Returns((RtServiceAccountConfiguration?)null);
+
+        var ex = await Assert.ThrowsAsync<Exception>(async () =>
+            await AdapterService.DeployPipelineAsync(TenantId, adapter.ToRtEntityId(), pipeline.ToRtEntityId()));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(ex!).IsTypeOf<AdapterServiceException>();
+        await Assert.That(ex!.Message).Contains("client secret");
+        await Assert.That(ex!.Message).Contains("AB#5114");
+        await Assert.That(ex!.Message).Contains("secretless-override");
+        await Assert.That(ex!.Message).Contains("reconcile");
+    }
+
+    [Test]
+    public async Task DeployPipelineAsync_SecretlessOverrideAndAdapterOwnPlaceholderSecret_IsRejected()
+    {
+        var (adapter, _, pipeline) = ArrangeDeployablePipeline();
+        ArrangeSecretlessPipelineOverride(pipeline);
+        // The adapter's own account exists but carries only a seed placeholder — the adapter could
+        // not authenticate as itself, so impersonation cannot stand in.
+        DefaultAdapterServiceAccount.ClientSecret = "<insert secret here>";
+
+        var ex = await Assert.ThrowsAsync<Exception>(async () =>
+            await AdapterService.DeployPipelineAsync(TenantId, adapter.ToRtEntityId(), pipeline.ToRtEntityId()));
+
+        await Assert.That(ex!).IsTypeOf<AdapterServiceException>();
+    }
+
+    [Test]
+    public async Task DeployPipelineAsync_SecretlessOverride_IdentityUnreachable_DeploysAnyway()
+    {
+        var (adapter, _, pipeline) = ArrangeDeployablePipeline();
+        ArrangeSecretlessPipelineOverride(pipeline);
+        IdentityClientReader
+            .GetClientAsync(TenantId, Arg.Any<string>(), Arg.Any<bool>())
+            .Returns(IdentityClientLookup.Unavailable("connection refused"));
+
+        // Impersonation is judged on local facts (both entities of this tenant); the identity
+        // client check stays best-effort — identity downtime must not brick the deploy.
+        await AdapterService.DeployPipelineAsync(TenantId, adapter.ToRtEntityId(), pipeline.ToRtEntityId());
+
+        await AdapterHubCallbacks.Received(1)
+            .AdapterConfigurationUpdatedAsync(TenantId, Arg.Any<AdapterConfigurationDto>());
     }
 
     // ---------------------------------------------------------------- identity client missing

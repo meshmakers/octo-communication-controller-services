@@ -2035,6 +2035,70 @@ declaration, unparsable-YAML warning, empty set, both pipeline-set resolutions),
 `Controllers/ServiceAccountRightsAnalysisEndpointTests` (routing, 404/400 mapping — AB#5112
 pattern).
 
+### Phase 7 — installation defaults (AB#5115) and MayActAs materialisation (AB#5114 v1)
+
+**AB#5115** (CK **3.33.0**, minor): `IssuerUri`, `TenantId` and `ClientSecret` on
+`ServiceAccountConfiguration` became **optional** — `isOptional` sits on the type's attribute
+*references*, so the shared definitions (`ClientId`/`ClientSecret` with FinApi/MicrosoftGraph,
+`${System}/TenantId` platform-wide) stay mandatory everywhere else. Empty now MEANS something,
+mirrored by the adapter (octo-mesh-adapter `ServiceAccountTokenService`, commit acff5ac): empty
+`IssuerUri` = the adapter's own installation, empty `TenantId` = the tenant the adapter runs for,
+empty/`<placeholder>` `ClientSecret` = "no secret — impersonate instead" (AB#5114). The reconcile
+**creates new accounts with issuer and tenant EMPTY** and converges the two historic installation
+spellings to empty — the `{{service.authority}}` token (case-insensitive) and this installation's
+concrete `AuthorityUrl` (trailing-slash-insensitive), plus a `TenantId` naming the current tenant.
+Any **other** concrete issuer/tenant is a **deliberate foreign target and is left alone** (this
+*inverts* the AB#5111 "converge foreign issuers onto the token" rule and retires the AB#5111
+"always rewrite TenantId" rule). Shared helpers on `PipelineServiceAccountProvisioningService`:
+`IsInstallationIssuer` (replaces `IsIssuerUriHealthy`), `ConvergeIssuerUri`, `ConvergeTenantId`,
+`IsSecretUsable` (byte-for-byte the adapter's rule: empty or leading `<` = no secret). The
+projection passes an empty `IssuerUri` through EMPTY; token resolution remains only for legacy
+entities that still carry it. The secret transition stays dual-path: the reconcile still issues a
+secret where none exists — an impersonation-only account is authored, never generated.
+
+**AB#5114 v1** — the controller declares which clients may impersonate a pipeline service
+account: `DistClientDto.MayActAsClientIds` (octo-common-services; additive + idempotent
+identity-side, unknown actors skipped with a warning, `null` = no edge changes, removal stays a
+v1 non-goal). The **adapter's own client** is the adapter-default account's client — exactly the
+AB#5072 credentials in the pod's Helm values — so the adapter path never declares actors (a
+self-edge authorizes nothing); the **standalone** branch of `ReconcileConfigurationAsync` resolves
+its actors via `GetPipelinesUsingServiceAccountAsync` → `GetAdapterByPipelineAsync` → the adapter
+defaults' `ClientId`s (deduplicated, sorted, self excluded; no actor resolvable → `null` + info
+log, never a failure). Rotation sends `null` — like roles, edges are never touched by a rotation.
+
+**Health** — new check `impersonation`: `NotApplicable` with message when the account has a
+usable secret, when nothing links a standalone account to an adapter, or when no capable actor
+exists (the adapter-scoped variant is *always* one of these — it evaluates the adapter's own
+account, which cannot impersonate itself); **`Unknown`** when a capable actor exists, because 🔴
+**the MayActAs edge is not verifiable controller-side**: the identity REST surface the
+`IIdentityClientReader` uses (`GET {tenantId}/v1/Clients/…`) exposes clients and role edges but
+**no client-to-client associations** — the edge lives in `System.Identity/MayActAs` and only the
+identity token endpoint consults it (`ClientImpersonationStore`). The `secret` check became
+credential-aware: empty is a `Violation` (`secret-missing`) **only when no impersonation is
+possible**; with a capable actor it is `Healthy` with a message naming that actor. `issuerUri` /
+`tenant` report `Healthy` with "installation default" when empty; the token/own-authority/current
+tenant spellings stay healthy as legacy (message says the next reconcile empties them); a foreign
+issuer is a healthy deliberate target (the `issuer-uri-drift` violation is retired), and a
+foreign *tenant* is only a `tenant-mismatch` violation while the issuer resolves to *this*
+installation — paired with a foreign issuer it is a healthy foreign pairing.
+
+**Deploy guard** — refuses `PipelineServiceAccountSecretMissing` only when the account has
+neither a usable secret NOR a capable impersonation actor (adapter default with usable secret,
+different client) — both local facts; the edge itself stays best-effort exactly like the
+client-existence check (identity unreachable never blocks), and the refusal message names both
+repairs.
+
+Phase 7 tests: `Services/PipelineServiceAccountReconcileTests` (+ `…ProvisioningServiceTests`,
+`…RotationTests`) — create-with-empty, the full convergence matrix (token incl. case, own
+authority incl. trailing slash, current tenant → empty; foreign issuer/tenant untouched incl.
+no-write), MayActAs on the wire (adapter path null, standalone actors deduplicated, unused
+standalone null); `Services/ServiceAccountHealthTests` — installation-default messages,
+credential-aware secret, all four impersonation states, foreign pairing, placeholder secret;
+`Services/AdapterServiceTests/DeployPipelineServiceAccountHardenedGuardTests` — the AB#5114
+matrix (capable actor deploys incl. placeholder target secret, no/incapable actor refused with
+remedy, identity-down non-blocking); `…/PipelineServiceAccountProjectionTests` — empty issuer
+passes through empty.
+
 ### The tenant gate only started working in AB#5054
 
 The section below describes a middleware that, until AB#5054, **never ran a single check in this

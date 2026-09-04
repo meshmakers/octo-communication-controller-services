@@ -142,11 +142,15 @@ internal class AdapterServiceException : Exception
     internal static AdapterServiceException PipelineServiceAccountSecretMissing(string tenantId,
         RtEntityId pipelineRtEntityId, string wellKnownName, OctoObjectId adapterRtId, string? adapterName) =>
         new($"[{tenantId}] Cannot deploy pipeline '{pipelineRtEntityId}': its service account '{wellKnownName}' " +
-            "holds no client secret, so the pipeline could not authenticate (AB#5112, Epic AB#4979). " +
+            "holds no usable client secret, and the adapter has no own client to impersonate the account with " +
+            "(AB#5112/AB#5114, Epic AB#4979) — the pipeline could not authenticate either way. " +
             $"Run the service-account reconcile for adapter '{adapterName ?? "?"}' ({adapterRtId}) — " +
-            "POST {tenantId}/v1/adapter/{adapterRtId}/serviceAccount/reconcile — or for the configuration " +
-            "(POST {tenantId}/v1/serviceAccount/reconcile?configurationRtId=...), or open the adapter in Studio; " +
-            "the reconcile issues a secret without rotating an existing one.");
+            "POST {tenantId}/v1/adapter/{adapterRtId}/serviceAccount/reconcile — which provisions the adapter's " +
+            "own credentials AND issues this account a secret where one is missing (never rotating an existing " +
+            "one); or reconcile the configuration itself " +
+            "(POST {tenantId}/v1/serviceAccount/reconcile?configurationRtId=...), or open the adapter in Studio. " +
+            "A deliberately secretless account additionally needs the MayActAs edge the reconcile materialises " +
+            "(AB#5114).");
 
     /// <summary>
     /// AB#5112 hardened guard, second check: the identity client behind the account does not exist

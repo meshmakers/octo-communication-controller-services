@@ -14,10 +14,13 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 /// identity client's existence, secret presence (never the value), role drift against the
 /// declaration (only for declarative accounts — a legacy account without
 /// <c>AssignedRoleNames</c> reports NotApplicable), the on-behalf-of grant against
-/// <c>AllowDelegation</c>, the derived <c>TenantId</c>, and the <c>IssuerUri</c> (the
-/// <c>{{service.authority}}</c> token or this installation's authority — the same rule the
-/// convergence sweep applies, shared via
-/// <see cref="PipelineServiceAccountProvisioningService.IsIssuerUriHealthy" />).
+/// <c>AllowDelegation</c>, the <c>TenantId</c> and <c>IssuerUri</c> (AB#5115: empty is the
+/// installation default and healthy; the <c>{{service.authority}}</c> token and this
+/// installation's authority stay healthy as legacy spellings — the same rule the convergence
+/// sweep applies, shared via
+/// <see cref="PipelineServiceAccountProvisioningService.IsInstallationIssuer" /> — and any other
+/// concrete value is a deliberate foreign target), and the AB#5114 <c>impersonation</c> view of a
+/// secretless account.
 /// </para>
 ///
 /// <para>

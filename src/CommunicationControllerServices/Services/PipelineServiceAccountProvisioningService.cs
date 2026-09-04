@@ -41,12 +41,13 @@ internal class PipelineServiceAccountProvisioningService(
     internal const int SecretByteLength = 48;
 
     /// <summary>
-    /// AB#5111: the canonical default <c>IssuerUri</c> value. It is the existing deploy-time token
-    /// family (<c>IWorkloadTemplateResolver</c>, <c>{{service.NAME}}</c>): the reconcile writes the
-    /// token instead of a concrete URL, and <c>AdapterService.CreatePipelineConfigurationAsync</c>
-    /// resolves it against the installation's identity authority when the configuration is
-    /// projected into a pipeline's <c>GlobalConfiguration</c>. A configuration entity therefore
-    /// stays cluster-portable — moving the identity host no longer requires rewriting the entity.
+    /// The AB#5111 deploy-time token (<c>IWorkloadTemplateResolver</c>, <c>{{service.NAME}}</c>
+    /// family) — the canonical <c>IssuerUri</c> default between 3.32.0 and AB#5115. Since AB#5115
+    /// the canonical spelling of "this installation" is an <b>empty</b> <c>IssuerUri</c> (the
+    /// adapter resolves it against its own authority configuration), the reconcile converges
+    /// entities still carrying the token to empty, and the token survives only as a legacy value:
+    /// the projection (<c>AdapterService.ResolveServiceAccountIssuerUri</c>) still resolves it for
+    /// entities the sweep has not reached yet, and the health aggregate still counts it healthy.
     /// </summary>
     internal const string IssuerUriToken = "{{service.authority}}";
 
@@ -182,6 +183,13 @@ internal class PipelineServiceAccountProvisioningService(
 
         var result = await ReconcileCoreAsync(tenantId, existing, linked != null, wellKnownName, clientId,
             BuildAdapterClientDisplayName(adapter), context,
+            // AB#5114: no MayActAs list on the adapter path. The adapter's own OAuth client IS this
+            // account's client (AB#5072 projects exactly these credentials into the adapter's Helm
+            // values), so the only edge this path could declare is actor == target — a client
+            // impersonating itself, which authorizes nothing the client cannot already do. The
+            // meaningful edges (adapter-own client → per-pipeline override client) are materialised
+            // by the standalone branch of ReconcileConfigurationAsync.
+            mayActAsClientIds: null,
             (entity, isNewEntity) => communicationRepository.SavePipelineServiceAccountAsync(tenantId,
                 adapter.ToRtEntityId(), entity, isNewEntity));
 
@@ -221,8 +229,16 @@ internal class PipelineServiceAccountProvisioningService(
             ? BuildClientId(configuration.RtId)
             : existingClientId!;
 
+        // AB#5114: the actor clients that may impersonate this account — the OWN clients (AB#5072)
+        // of every adapter whose pipelines link this configuration via Uses. When none can be
+        // resolved (nothing links the configuration yet, or the adapters have no provisioned own
+        // account), null goes onto the wire — the identity side changes no edges — and the next
+        // reconcile pass after the linkage exists materialises them.
+        var mayActAsClientIds = await ResolveImpersonationActorClientIdsAsync(tenantId, configuration.RtId,
+            wellKnownName, clientId);
+
         var result = await ReconcileCoreAsync(tenantId, configuration, isLinked: true, wellKnownName, clientId,
-            BuildStandaloneClientDisplayName(wellKnownName), context,
+            BuildStandaloneClientDisplayName(wellKnownName), context, mayActAsClientIds,
             (entity, _) => communicationRepository.UpdateServiceAccountAsync(tenantId, entity));
 
         if (result.Outcome != PipelineServiceAccountProvisioningOutcome.AlreadyProvisioned)
@@ -252,30 +268,52 @@ internal class PipelineServiceAccountProvisioningService(
     /// <param name="clientId">The identity client id the declaration materialises into.</param>
     /// <param name="clientDisplayName">Human-readable client name for the identity side.</param>
     /// <param name="context">Who triggered the pass and whether roles may be materialised.</param>
+    /// <param name="mayActAsClientIds">
+    ///     AB#5114: actor client ids that may impersonate this account, materialised identity-side
+    ///     as additive <c>MayActAs</c> edges. <c>null</c> = no edge changes (the adapter path, and
+    ///     standalone accounts whose using adapters could not be resolved).
+    /// </param>
     /// <param name="saveAsync">Writes the (new or repaired) entity; receives <c>isNewEntity</c>.</param>
     private async Task<ServiceAccountReconcileResult> ReconcileCoreAsync(string tenantId,
         RtServiceAccountConfiguration? existing, bool isLinked, string wellKnownName, string clientId,
-        string clientDisplayName, ServiceAccountReconcileContext context,
+        string clientDisplayName, ServiceAccountReconcileContext context, IList<string>? mayActAsClientIds,
         Func<RtServiceAccountConfiguration, bool, Task> saveAsync)
     {
-        // Read through GetAttributeValueOrDefault, never through the generated properties: the four
-        // original attributes are mandatory on the CK type, so the generated getters throw
-        // InvalidAttributeValueException on a value that was never written — which is exactly the
-        // half-configured entity this method exists to repair. The two declaration attributes are
-        // optional and read through their (OrDefault-based) generated properties below.
+        // Read through GetAttributeValueOrDefault, never through the generated properties — kept
+        // even though 3.33.0 made IssuerUri/ClientSecret/TenantId optional (their getters no
+        // longer throw): ClientId is still mandatory, and the defensive read documents that a
+        // half-written entity is exactly what this method exists to repair. The two declaration
+        // attributes are optional and read through their (OrDefault-based) generated properties
+        // below.
         var existingSecret = ReadAttribute(existing, nameof(RtServiceAccountConfiguration.ClientSecret));
         var existingClientId = ReadAttribute(existing, nameof(RtServiceAccountConfiguration.ClientId));
         var existingIssuerUri = ReadAttribute(existing, nameof(RtServiceAccountConfiguration.IssuerUri));
         var existingTenantId = ReadAttribute(existing, nameof(RtServiceAccountConfiguration.TenantId));
 
+        // AB#5115: IssuerUri and TenantId are no longer part of "complete" — empty is the
+        // canonical value ("the adapter's own installation / the tenant the adapter runs for"),
+        // and a concrete foreign value is a deliberate author choice. What still makes an entity
+        // incomplete: no secret (the dual-path transition keeps issuing one — impersonation-only
+        // accounts are authored, never generated), no client id, no well-known name.
         var isComplete = existing != null &&
                          !string.IsNullOrWhiteSpace(existingSecret) &&
                          !string.IsNullOrWhiteSpace(existingClientId) &&
-                         !string.IsNullOrWhiteSpace(existingIssuerUri) &&
-                         !string.IsNullOrWhiteSpace(existingTenantId) &&
                          // The projection keys GlobalConfiguration on RtWellKnownName and throws on
                          // null — an unnamed entity is unusable and gets the deterministic name.
                          !string.IsNullOrWhiteSpace(existing.RtWellKnownName);
+
+        // AB#5115 convergence: the two historic spellings of "this installation" — the AB#5111
+        // token and the concrete pre-AB#5111 authority URL — become empty; likewise a TenantId
+        // naming the tenant the entity already lives in. Anything else is a deliberate foreign
+        // target and is preserved verbatim (needsConvergence stays false for it).
+        // ConvergeX returns either null ("empty" — converged or already empty) or the existing
+        // value verbatim (foreign target, preserved), so "this pass must write" is exactly "the
+        // result is null while the entity still carries a value".
+        var issuerUriToPersist = ConvergeIssuerUri(existingIssuerUri, options.Value.AuthorityUrl);
+        var tenantIdToPersist = ConvergeTenantId(existingTenantId, tenantId);
+        var needsConvergence =
+            (issuerUriToPersist == null && !string.IsNullOrWhiteSpace(existingIssuerUri)) ||
+            (tenantIdToPersist == null && !string.IsNullOrWhiteSpace(existingTenantId));
 
         var isNewEntity = existing == null;
 
@@ -336,18 +374,22 @@ internal class PipelineServiceAccountProvisioningService(
             : GenerateSecret();
 
         await SendIdentityClientAsync(tenantId, clientDisplayName, clientId, secret, rolesToMaterialize,
-            allowDelegation);
+            allowDelegation, mayActAsClientIds);
 
-        if (isComplete && isLinked && existingClientId == clientId &&
-            IsIssuerUriCurrent(existingIssuerUri) && existingTenantId == tenantId)
+        if (isComplete && isLinked && existingClientId == clientId && !needsConvergence)
         {
-            // Healthy and current: entity complete, linked to its owner, and pointing at the
-            // issuer/tenant this instance serves. Leave it completely untouched.
+            // Healthy and current: entity complete, linked to its owner, and its issuer/tenant are
+            // either empty (the AB#5115 installation default) or a deliberate foreign target.
+            // Leave it completely untouched.
             return new ServiceAccountReconcileResult(PipelineServiceAccountProvisioningOutcome.AlreadyProvisioned,
                 clientId, wellKnownName, roleChangesSkipped);
         }
 
-        var entity = BuildServiceAccount(tenantId, existing?.RtId, wellKnownName, clientId, secret,
+        var entity = BuildServiceAccount(existing?.RtId, wellKnownName, clientId, secret,
+            // AB#5115: a new entity is born with issuer and tenant EMPTY (the adapter's own
+            // installation and tenant); a repaired entity carries the converged values — empty for
+            // the installation spellings, verbatim for a deliberate foreign target.
+            issuerUriToPersist, tenantIdToPersist,
             // A new entity is declarative from birth (the AB#5111 defaults); a repaired legacy
             // entity keeps its declaration state as-is — repairs must not flip it into
             // declarative mode behind the operator's back.
@@ -442,12 +484,18 @@ internal class PipelineServiceAccountProvisioningService(
 
         // Identity first. A failure here leaves BOTH sides on the old secret — the rotation simply
         // did not happen, which is a consistent state, and the exception tells the caller so.
+        // MayActAs edges are — like roles — never touched by a rotation (null on the wire).
         await SendIdentityClientAsync(tenantId, clientDisplayName, clientId, secret,
-            assignedRoleNames: null, allowDelegation);
+            assignedRoleNames: null, allowDelegation, mayActAsClientIds: null);
 
         try
         {
-            await saveAsync(BuildServiceAccount(tenantId, existing?.RtId, wellKnownName, clientId, secret,
+            await saveAsync(BuildServiceAccount(existing?.RtId, wellKnownName, clientId, secret,
+                // AB#5115: same convergence as the reconcile — the installation spellings become
+                // empty, a deliberate foreign issuer/tenant survives the rotation verbatim.
+                ConvergeIssuerUri(ReadAttribute(existing, nameof(RtServiceAccountConfiguration.IssuerUri)),
+                    options.Value.AuthorityUrl),
+                ConvergeTenantId(ReadAttribute(existing, nameof(RtServiceAccountConfiguration.TenantId)), tenantId),
                 existing?.AssignedRoleNames, existing?.AllowDelegation), isNewEntity);
         }
         catch (Exception e)
@@ -460,7 +508,7 @@ internal class PipelineServiceAccountProvisioningService(
                 try
                 {
                     await SendIdentityClientAsync(tenantId, clientDisplayName, clientId, previousSecret!,
-                        assignedRoleNames: null, allowDelegation);
+                        assignedRoleNames: null, allowDelegation, mayActAsClientIds: null);
                     Logger.Warn(e,
                         "[{TenantId}] Rotating pipeline service account '{WellKnownName}' (adapter '{AdapterName}') failed while writing the configuration; the previous secret was restored at the identity service, so nothing changed",
                         tenantId, wellKnownName, adapterNameForLog ?? "-");
@@ -485,20 +533,30 @@ internal class PipelineServiceAccountProvisioningService(
     /// The configuration entity every convergence and rotation path writes. Kept in one place so a
     /// rotated entity can never drift from a provisioned one.
     /// </summary>
-    /// <param name="tenantId">Tenant identifier — written as the derived <c>TenantId</c>.</param>
     /// <param name="existingRtId">The entity to update in place, or <c>null</c> to mint a new id.</param>
     /// <param name="wellKnownName">The deterministic <c>RtWellKnownName</c>.</param>
     /// <param name="clientId">The identity client id.</param>
     /// <param name="secret">The plaintext secret. 🔴 Never log the returned entity.</param>
+    /// <param name="issuerUri">
+    ///     AB#5115: <c>null</c> keeps the attribute absent — the canonical "this adapter's own
+    ///     installation", which the adapter resolves against its own authority configuration. A
+    ///     value is only ever the preserved deliberate foreign target (see
+    ///     <see cref="ConvergeIssuerUri" />); nothing writes the <see cref="IssuerUriToken" /> or a
+    ///     concrete own-installation URL any more.
+    /// </param>
+    /// <param name="tenantId">
+    ///     AB#5115: <c>null</c> keeps the attribute absent — "the tenant the adapter runs for".
+    ///     A value is only ever a preserved foreign target (see <see cref="ConvergeTenantId" />).
+    /// </param>
     /// <param name="assignedRoleNames">
     ///     The declaration to persist, or <c>null</c> to keep the entity in legacy mode (no
     ///     <c>AssignedRoleNames</c> attribute). Copied defensively — the list instance of a read
     ///     entity is never re-attached to a new one.
     /// </param>
     /// <param name="allowDelegation"><c>null</c> keeps the attribute absent (legacy = true).</param>
-    private RtServiceAccountConfiguration BuildServiceAccount(string tenantId, OctoObjectId? existingRtId,
-        string wellKnownName, string clientId, string secret, IAttributeValueList<string>? assignedRoleNames,
-        bool? allowDelegation)
+    private static RtServiceAccountConfiguration BuildServiceAccount(OctoObjectId? existingRtId,
+        string wellKnownName, string clientId, string secret, string? issuerUri, string? tenantId,
+        IAttributeValueList<string>? assignedRoleNames, bool? allowDelegation)
     {
         var serviceAccount = new RtServiceAccountConfiguration
         {
@@ -509,20 +567,18 @@ internal class PipelineServiceAccountProvisioningService(
             // `ClientSecret` is marked isRuntimeState (AB#5027), which only stops a blueprint
             // re-apply from overwriting it — the runtime write path used here is unaffected, and it
             // is exactly why rotation has to go through this path rather than through a seed.
-            ClientSecret = secret,
-            // AB#5111: the deploy-time token, not this instance's concrete authority URL. The
-            // projection (AdapterService.CreatePipelineConfigurationAsync) resolves it via the
-            // existing IWorkloadTemplateResolver, falling back to this instance's AuthorityUrl —
-            // so the entity survives a cluster move without a rewrite. A concrete URL that an
-            // author pinned deliberately still passes IsIssuerUriCurrent when it matches this
-            // instance, and is converged to the token otherwise (the pre-AB#5111 behaviour, with
-            // the token instead of the new concrete URL).
-            IssuerUri = IssuerUriToken,
-            // Derived runtime state without the marker (see types/serviceAccountConfiguration.yaml):
-            // always the current tenant — the adapter needs it to send acr_values=tenant:{tenantId},
-            // without which the delegation grant (AB#5031) cannot resolve a tenant at all.
-            TenantId = tenantId
+            ClientSecret = secret
         };
+
+        if (issuerUri != null)
+        {
+            serviceAccount.IssuerUri = issuerUri;
+        }
+
+        if (tenantId != null)
+        {
+            serviceAccount.TenantId = tenantId;
+        }
 
         if (assignedRoleNames != null)
         {
@@ -572,8 +628,14 @@ internal class PipelineServiceAccountProvisioningService(
     ///     <c>AllowedGrantTypes</c> wholesale, so sending the list without the URN is what removes
     ///     an existing grant.
     /// </param>
+    /// <param name="mayActAsClientIds">
+    ///     AB#5114: actor client ids that may impersonate this client — materialised identity-side
+    ///     as additive <c>System.Identity/MayActAs</c> edges (actor → this client); unknown actors
+    ///     are skipped with a warning, existing edges are never removed (v1). <c>null</c> changes
+    ///     no edges.
+    /// </param>
     private async Task SendIdentityClientAsync(string tenantId, string clientDisplayName, string clientId,
-        string secret, string[]? assignedRoleNames, bool allowDelegation)
+        string secret, string[]? assignedRoleNames, bool allowDelegation, IList<string>? mayActAsClientIds)
     {
         var allowedGrantTypes = new List<string> { OidcConstants.GrantTypes.ClientCredentials };
         if (allowDelegation)
@@ -613,7 +675,11 @@ internal class PipelineServiceAccountProvisioningService(
                     // because the AB#5031 delegated token carries the INTERSECTION of service-account
                     // and user roles. A role the service account lacks can never appear in a
                     // delegated token.
-                    AssignedRoleNames = assignedRoleNames
+                    AssignedRoleNames = assignedRoleNames,
+                    // AB#5114: which clients may obtain this account's identity via the
+                    // impersonation grant / the on-behalf-of requested_client_id extension —
+                    // additive and idempotent identity-side, exactly like the role semantics.
+                    MayActAsClientIds = mayActAsClientIds
                 }
             }
         };
@@ -646,39 +712,147 @@ internal class PipelineServiceAccountProvisioningService(
     }
 
     /// <summary>
-    /// True when the persisted <c>IssuerUri</c> needs no repair: either the AB#5111 token (which
-    /// the projection resolves at deploy time) or the concrete authority URL this instance serves
-    /// (every entity provisioned before AB#5111) — converging the whole fleet onto the token in one
-    /// sweep would be a pointless mass write.
+    /// The one shared definition of "this IssuerUri means this installation" — the AB#5111 token
+    /// (which the projection still resolves for legacy entities) or the concrete authority URL
+    /// this instance serves (every entity provisioned before AB#5111). Trailing-slash-insensitive:
+    /// 'https://localhost:5003/' and 'https://localhost:5003' are the same authority, and both
+    /// spellings occur in the wild (seeds write the slash, options usually don't). Shared with the
+    /// AB#5112 health aggregate (<see cref="ServiceAccountHealthService" />) so the convergence
+    /// sweep and the health endpoint can never disagree about the same value.
     /// </summary>
-    private bool IsIssuerUriCurrent(string? issuerUri)
+    internal static bool IsInstallationIssuer(string? issuerUri, string authorityUrl)
     {
-        return IsIssuerUriHealthy(issuerUri, options.Value.AuthorityUrl);
-    }
-
-    /// <summary>
-    /// The one shared definition of "this IssuerUri needs no repair" — used by the convergence
-    /// pass above and by the AB#5112 health aggregate (<see cref="ServiceAccountHealthService" />),
-    /// so the sweep and the health endpoint can never disagree about the same value.
-    /// </summary>
-    internal static bool IsIssuerUriHealthy(string? issuerUri, string authorityUrl)
-    {
-        // Trailing-slash-insensitive: 'https://localhost:5003/' and 'https://localhost:5003'
-        // are the same authority, and both spellings occur in the wild (seeds write the
-        // slash, options usually don't). Flagging that as drift would send operators
-        // chasing a repair that changes nothing.
-        return issuerUri != null &&
+        return !string.IsNullOrWhiteSpace(issuerUri) &&
                (IssuerUriTokenPattern.IsMatch(issuerUri) ||
                 issuerUri.TrimEnd('/') == authorityUrl.TrimEnd('/'));
     }
 
     /// <summary>
-    /// Reads one attribute without triggering the generated mandatory-attribute guard. A
-    /// configuration counts as usable only when all four are present — the adapter's
-    /// <c>ServiceAccountTokenService</c> needs issuer and client id to discover and authenticate,
-    /// both grants need the secret, and the delegation grant needs the tenant id for
-    /// <c>acr_values</c>. An entity that fails this is repaired rather than preserved: the "leave a
-    /// working configuration untouched" rule is about *working* ones.
+    /// AB#5115 convergence of <c>IssuerUri</c>: <c>null</c> (keep/leave the attribute absent) when
+    /// the value is already empty or one of the installation spellings
+    /// (<see cref="IsInstallationIssuer" />); any other concrete value — a deliberate foreign
+    /// identity target — comes back verbatim and is preserved.
+    /// </summary>
+    internal static string? ConvergeIssuerUri(string? issuerUri, string authorityUrl)
+    {
+        if (string.IsNullOrWhiteSpace(issuerUri) || IsInstallationIssuer(issuerUri, authorityUrl))
+        {
+            return null;
+        }
+
+        return issuerUri;
+    }
+
+    /// <summary>
+    /// AB#5115 convergence of <c>TenantId</c>: <c>null</c> when the value is already empty or names
+    /// the tenant the entity lives in ("the tenant the adapter runs for" — the installation
+    /// default); a different value is a deliberate foreign target (paired with a foreign
+    /// <c>IssuerUri</c>) and comes back verbatim. This replaces the AB#5111 "always rewrite the
+    /// current tenant id" behaviour.
+    /// </summary>
+    internal static string? ConvergeTenantId(string? existingTenantId, string currentTenantId)
+    {
+        if (string.IsNullOrWhiteSpace(existingTenantId) || existingTenantId == currentTenantId)
+        {
+            return null;
+        }
+
+        return existingTenantId;
+    }
+
+    /// <summary>
+    /// AB#5114: whether a persisted <c>ClientSecret</c> is an actual credential. Mirrors the mesh
+    /// adapter's <c>ServiceAccountTokenService.IsSecretUsable</c> byte for byte — empty and the
+    /// angle-bracket seed placeholder (<c>&lt;insert secret here&gt;</c>) both mean "no secret",
+    /// i.e. the account is used via impersonation, and guard/health must judge it the same way the
+    /// adapter will.
+    /// </summary>
+    internal static bool IsSecretUsable(string? clientSecret)
+    {
+        return !string.IsNullOrWhiteSpace(clientSecret) && !clientSecret.TrimStart().StartsWith('<');
+    }
+
+    /// <summary>
+    /// AB#5114: resolves the actor client ids for a standalone (per-pipeline override) account —
+    /// the OWN clients of the adapters whose pipelines link the configuration via <c>Uses</c>. The
+    /// adapter's own client is its default pipeline service account's <c>ClientId</c>: exactly the
+    /// credentials AB#5072 projects into the adapter's Helm values, i.e. what the adapter presents
+    /// on the impersonation path. Best-effort by design: an adapter without a provisioned own
+    /// account (a local host adapter, or one the sweep has not reached) simply contributes no
+    /// actor — the reconcile must never fail over it — and <c>null</c> is returned when no actor
+    /// could be resolved at all, which leaves the identity edges untouched.
+    /// </summary>
+    private async Task<IList<string>?> ResolveImpersonationActorClientIdsAsync(string tenantId,
+        OctoObjectId configurationRtId, string wellKnownName, string targetClientId)
+    {
+        try
+        {
+            var pipelines = await communicationRepository
+                .GetPipelinesUsingServiceAccountAsync(tenantId, configurationRtId);
+
+            // Sorted for a deterministic wire order (and log line) across pods and passes.
+            var actorClientIds = new SortedSet<string>(StringComparer.Ordinal);
+            var seenAdapterRtIds = new HashSet<OctoObjectId>();
+            foreach (var pipeline in pipelines ?? [])
+            {
+                RtAdapter? adapter;
+                try
+                {
+                    adapter = await communicationRepository.GetAdapterByPipelineAsync(tenantId,
+                        pipeline.ToRtEntityId());
+                }
+                catch (CommunicationRepositoryException)
+                {
+                    // A pipeline without an Executes edge cannot tell us its adapter — the deploy
+                    // paths own that error; for the edge materialisation it contributes nothing.
+                    continue;
+                }
+
+                if (adapter == null || !seenAdapterRtIds.Add(adapter.RtId))
+                {
+                    continue;
+                }
+
+                var adapterDefault = await serviceAccountResolver.GetAdapterDefaultAsync(tenantId, adapter.RtId);
+                var actorClientId = ReadAttribute(adapterDefault, nameof(RtServiceAccountConfiguration.ClientId));
+                // A self-edge (actor == target) authorizes nothing and is never declared.
+                if (!string.IsNullOrWhiteSpace(actorClientId) && actorClientId != targetClientId)
+                {
+                    actorClientIds.Add(actorClientId!);
+                }
+            }
+
+            if (actorClientIds.Count == 0)
+            {
+                Logger.Info(
+                    "[{TenantId}] Reconcile of standalone pipeline service account '{WellKnownName}' (client '{ClientId}') declares no MayActAs actors: no adapter with an own client could be resolved from the account's Uses linkage (AB#5114). Impersonation of this account stays unauthorized until a later pass finds one.",
+                    tenantId, wellKnownName, targetClientId);
+                return null;
+            }
+
+            Logger.Debug(
+                "[{TenantId}] Reconcile of standalone pipeline service account '{WellKnownName}' (client '{ClientId}') declares MayActAs actors: {Actors} (AB#5114)",
+                tenantId, wellKnownName, targetClientId, string.Join(", ", actorClientIds));
+            return actorClientIds.ToList();
+        }
+        catch (Exception e)
+        {
+            // The edge materialisation is additive convenience — a lookup hiccup must not fail the
+            // reconcile that keeps the client and secret converged. The next pass retries.
+            Logger.Warn(e,
+                "[{TenantId}] Could not resolve the MayActAs actors of standalone pipeline service account '{WellKnownName}' (client '{ClientId}'); the identity edges are left untouched this pass (AB#5114)",
+                tenantId, wellKnownName, targetClientId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Reads one attribute without triggering the generated mandatory-attribute guard (only
+    /// <c>ClientId</c> still has one since 3.33.0). What makes a configuration usable (AB#5115):
+    /// the client id — the adapter's <c>ServiceAccountTokenService</c> resolves an empty issuer
+    /// and tenant against its own installation, and an empty secret selects the impersonation
+    /// path (AB#5114). An entity missing the client id or well-known name is repaired rather than
+    /// preserved: the "leave a working configuration untouched" rule is about *working* ones.
     /// </summary>
     private static string? ReadAttribute(RtServiceAccountConfiguration? configuration, string attributeName)
     {

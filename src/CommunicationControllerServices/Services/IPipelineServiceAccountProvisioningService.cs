@@ -15,9 +15,10 @@ public enum PipelineServiceAccountProvisioningOutcome
     Provisioned = 1,
 
     /// <summary>
-    /// A configuration entity existed but was unusable (missing client id / secret / issuer) or was
-    /// not linked to the adapter. A fresh secret was issued where one was missing, and the link
-    /// was restored.
+    /// A configuration entity existed but was unusable (missing client id / secret / well-known
+    /// name), was not linked to the adapter, or still carried an installation-spelled
+    /// <c>IssuerUri</c>/<c>TenantId</c> that AB#5115 converges to empty. A fresh secret was issued
+    /// where one was missing, and the link was restored.
     /// </summary>
     Repaired = 2,
 
@@ -178,9 +179,12 @@ public interface IPipelineServiceAccountProvisioningService
     /// <c>AssignedRoleNames</c> = the platform's default role, <c>AllowDelegation</c> = true),
     /// ensures the identity client exists with the hashed secret, syncs its role edges to the
     /// declared <c>AssignedRoleNames</c> (add missing, remove superfluous), sets or removes the
-    /// on-behalf-of grant per <c>AllowDelegation</c>, and (re-)derives <c>TenantId</c> and the
-    /// <c>IssuerUri</c> default (<c>{{service.authority}}</c>). Idempotent; an existing secret is
-    /// <b>never</b> rotated.
+    /// on-behalf-of grant per <c>AllowDelegation</c>, and converges <c>IssuerUri</c> /
+    /// <c>TenantId</c> onto the AB#5115 installation default: new accounts are created with both
+    /// EMPTY ("the adapter's own installation and tenant"), the historic installation spellings
+    /// (the <c>{{service.authority}}</c> token and this installation's concrete authority URL /
+    /// the current tenant id) converge to empty, and any other concrete value is a deliberate
+    /// foreign target that is left alone. Idempotent; an existing secret is <b>never</b> rotated.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -205,6 +209,14 @@ public interface IPipelineServiceAccountProvisioningService
     /// configuration — e.g. a per-pipeline override linked only via <c>Uses</c> — is reconciled in
     /// place: its own <c>ClientId</c> is used (derived deterministically from the configuration's
     /// rtId when unset), and no adapter edge is written.
+    /// <para>
+    /// AB#5114: the standalone pass additionally declares the account's impersonation actors —
+    /// the own clients (AB#5072) of the adapters whose pipelines link the configuration — as
+    /// <c>MayActAsClientIds</c>, which identity materialises into additive <c>MayActAs</c> edges;
+    /// that is what authorizes the adapter to obtain this account's tokens when the configuration
+    /// carries no usable secret. When no actor can be resolved (nothing linked yet, adapter
+    /// without an own client), the pass logs it and leaves the edges untouched — never a failure.
+    /// </para>
     /// </summary>
     Task<ServiceAccountReconcileResult> ReconcileConfigurationAsync(string tenantId,
         RtServiceAccountConfiguration configuration, ServiceAccountReconcileContext context);

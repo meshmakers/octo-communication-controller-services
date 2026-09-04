@@ -53,6 +53,29 @@ internal class ServiceAccountHealthTests
         return configuration;
     }
 
+    /// <summary>
+    /// The AB#5115 steady-state entity: declarative, IssuerUri/TenantId ABSENT (the installation
+    /// default), and optionally without a ClientSecret (the AB#5114 impersonation shape).
+    /// </summary>
+    private static RtServiceAccountConfiguration CreateInstallationDefaultConfiguration(bool withSecret = true)
+    {
+        var configuration = new RtServiceAccountConfiguration
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
+            RtWellKnownName = "adapter-service-account",
+            ClientId = "client-id",
+            AssignedRoleNames = new AttributeStringValueList([CommonConstants.CommunicationManagementRole]),
+            AllowDelegation = true
+        };
+        if (withSecret)
+        {
+            configuration.ClientSecret = "client-secret";
+        }
+
+        return configuration;
+    }
+
     /// <summary>The identity answer that matches <see cref="CreateHealthyConfiguration" />.</summary>
     private void ArrangeMatchingIdentityClient()
     {
@@ -88,9 +111,12 @@ internal class ServiceAccountHealthTests
         await Assert.That(dto.ConfigurationRtId).IsEqualTo(configuration.RtId.ToString());
         await Assert.That(dto.ConfigurationWellKnownName).IsEqualTo(configuration.RtWellKnownName);
         await Assert.That(dto.ClientId).IsEqualTo("client-id");
-        // Config variant: no association check; everything else healthy.
+        // Config variant: no association check; everything else healthy — except the AB#5114
+        // impersonation view, which is NotApplicable for an account with its own secret.
         await Assert.That(dto.Checks.Any(c => c.Check == "association")).IsFalse();
-        await Assert.That(dto.Checks.All(c => c.Status == "Healthy")).IsTrue();
+        await Assert.That(dto.Checks.Where(c => c.Check != "impersonation")
+            .All(c => c.Status == "Healthy")).IsTrue();
+        await Assert.That(Check(dto, "impersonation").Status).IsEqualTo("NotApplicable");
         // Declarative account → the reader is asked for the role detail.
         await _identityReader.Received(1).GetClientAsync(TenantId, "client-id", true);
     }
@@ -109,7 +135,9 @@ internal class ServiceAccountHealthTests
         using var _ = Assert.Multiple();
         await Assert.That(dto.OverallStatus).IsEqualTo("Healthy");
         await Assert.That(Check(dto, "association").Status).IsEqualTo("Healthy");
-        await Assert.That(dto.Checks.All(c => c.Status == "Healthy")).IsTrue();
+        await Assert.That(dto.Checks.Where(c => c.Check != "impersonation")
+            .All(c => c.Status == "Healthy")).IsTrue();
+        await Assert.That(Check(dto, "impersonation").Status).IsEqualTo("NotApplicable");
     }
 
     // ---------------------------------------------------------------- association / configuration
@@ -227,6 +255,8 @@ internal class ServiceAccountHealthTests
         await Assert.That(secret.Status).IsEqualTo("Violation");
         await Assert.That(secret.Code).IsEqualTo("secret-missing");
         await Assert.That(secret.Message!).Contains("rotate");
+        // Nothing links this standalone account to an adapter, so no impersonation verdict either.
+        await Assert.That(Check(dto, "impersonation").Status).IsEqualTo("NotApplicable");
     }
 
     // ---------------------------------------------------------------- roles
@@ -374,8 +404,10 @@ internal class ServiceAccountHealthTests
     }
 
     [Test]
-    public async Task GetConfigurationHealth_IssuerUriDrifted_ReportsDrift()
+    public async Task GetConfigurationHealth_ForeignIssuer_IsAHealthyDeliberateTarget()
     {
+        // AB#5115: a concrete URL that is not this installation stopped being "drift" — it is a
+        // deliberate foreign identity target the reconcile leaves alone, and health agrees.
         var sut = CreateSut();
         var configuration = CreateHealthyConfiguration();
         configuration.IssuerUri = "https://identity.of-some-other-cluster.example.com";
@@ -384,11 +416,139 @@ internal class ServiceAccountHealthTests
         var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
 
         using var _ = Assert.Multiple();
-        await Assert.That(dto.OverallStatus).IsEqualTo("Unhealthy");
+        await Assert.That(dto.OverallStatus).IsEqualTo("Healthy");
         var issuer = Check(dto, "issuerUri");
-        await Assert.That(issuer.Status).IsEqualTo("Violation");
-        await Assert.That(issuer.Code).IsEqualTo("issuer-uri-drift");
+        await Assert.That(issuer.Status).IsEqualTo("Healthy");
         await Assert.That(issuer.Message!).Contains("of-some-other-cluster");
+        await Assert.That(issuer.Message!).Contains("foreign");
+    }
+
+    [Test]
+    public async Task GetConfigurationHealth_EmptyIssuerAndTenant_AreTheHealthyInstallationDefault()
+    {
+        var sut = CreateSut();
+        var configuration = CreateInstallationDefaultConfiguration();
+        ArrangeMatchingIdentityClient();
+
+        var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(dto.OverallStatus).IsEqualTo("Healthy");
+        await Assert.That(Check(dto, "issuerUri").Status).IsEqualTo("Healthy");
+        await Assert.That(Check(dto, "issuerUri").Message!).Contains("installation default");
+        await Assert.That(Check(dto, "tenant").Status).IsEqualTo("Healthy");
+        await Assert.That(Check(dto, "tenant").Message!).Contains("installation default");
+    }
+
+    [Test]
+    public async Task GetConfigurationHealth_ForeignTenantWithForeignIssuer_IsAHealthyPairing()
+    {
+        var sut = CreateSut();
+        var configuration = CreateHealthyConfiguration();
+        configuration.IssuerUri = "https://identity.of-some-other-cluster.example.com";
+        configuration.TenantId = "energyiq";
+        ArrangeMatchingIdentityClient();
+
+        var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
+
+        using var _ = Assert.Multiple();
+        // The foreign tenant belongs to the foreign issuer — a deliberate pairing, not a mismatch.
+        await Assert.That(dto.OverallStatus).IsEqualTo("Healthy");
+        await Assert.That(Check(dto, "tenant").Status).IsEqualTo("Healthy");
+        await Assert.That(Check(dto, "tenant").Message!).Contains("energyiq");
+    }
+
+    // ---------------------------------------------------------------- AB#5114 impersonation
+
+    [Test]
+    public async Task GetConfigurationHealth_SecretlessStandaloneWithCapableAdapter_SecretHealthyImpersonationUnknown()
+    {
+        var sut = CreateSut();
+        var configuration = CreateInstallationDefaultConfiguration(withSecret: false);
+        ArrangeMatchingIdentityClient();
+
+        // A pipeline links the account; its adapter has an own client with a usable secret.
+        var adapter = RtEntityCreator.CreateAdapter();
+        var adapterOwn = RtEntityCreator.CreateServiceAccountConfiguration("adapter-own-account");
+        adapterOwn.ClientId = "octo-pipeline-sa-adapter-own";
+        var pipeline = RtEntityCreator.CreatePipeline();
+        _repo.GetPipelinesUsingServiceAccountAsync(TenantId, configuration.RtId).Returns([pipeline]);
+        _repo.GetAdapterByPipelineAsync(TenantId, pipeline.ToRtEntityId()).Returns(adapter);
+        _resolver.GetAdapterDefaultAsync(TenantId, adapter.RtId).Returns(adapterOwn);
+
+        var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
+
+        using var _ = Assert.Multiple();
+        // No secret is NOT a violation here — the account is used via impersonation (AB#5114).
+        var secret = Check(dto, "secret");
+        await Assert.That(secret.Status).IsEqualTo("Healthy");
+        await Assert.That(secret.Message!).Contains("octo-pipeline-sa-adapter-own");
+        // But the MayActAs edge itself is not verifiable through the identity REST surface, so the
+        // impersonation view is honest about not knowing — and the overall status says so.
+        var impersonation = Check(dto, "impersonation");
+        await Assert.That(impersonation.Status).IsEqualTo("Unknown");
+        await Assert.That(impersonation.Message!).Contains("MayActAs");
+        await Assert.That(dto.OverallStatus).IsEqualTo("Unknown");
+    }
+
+    [Test]
+    public async Task GetConfigurationHealth_SecretlessStandaloneWithIncapableAdapter_SecretViolation()
+    {
+        var sut = CreateSut();
+        var configuration = CreateInstallationDefaultConfiguration(withSecret: false);
+        ArrangeMatchingIdentityClient();
+
+        // The using adapter exists but has no own account — impersonation is impossible.
+        var adapter = RtEntityCreator.CreateAdapter();
+        var pipeline = RtEntityCreator.CreatePipeline();
+        _repo.GetPipelinesUsingServiceAccountAsync(TenantId, configuration.RtId).Returns([pipeline]);
+        _repo.GetAdapterByPipelineAsync(TenantId, pipeline.ToRtEntityId()).Returns(adapter);
+        _resolver.GetAdapterDefaultAsync(TenantId, adapter.RtId)
+            .Returns((RtServiceAccountConfiguration?)null);
+
+        var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(dto.OverallStatus).IsEqualTo("Unhealthy");
+        await Assert.That(Check(dto, "secret").Status).IsEqualTo("Violation");
+        await Assert.That(Check(dto, "secret").Code).IsEqualTo("secret-missing");
+        await Assert.That(Check(dto, "impersonation").Status).IsEqualTo("NotApplicable");
+    }
+
+    [Test]
+    public async Task GetAdapterHealth_SecretlessDefaultAccount_IsAlwaysASecretViolation()
+    {
+        // The adapter variant evaluates the adapter's OWN account (AB#5072): it cannot impersonate
+        // itself, so a missing secret leaves the adapter with no credentials at all.
+        var sut = CreateSut();
+        var adapter = RtEntityCreator.CreateAdapter();
+        var configuration = CreateInstallationDefaultConfiguration(withSecret: false);
+        _resolver.GetAdapterDefaultAsync(TenantId, adapter.RtId).Returns(configuration);
+        ArrangeMatchingIdentityClient();
+
+        var dto = await sut.GetAdapterHealthAsync(TenantId, adapter);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(dto.OverallStatus).IsEqualTo("Unhealthy");
+        await Assert.That(Check(dto, "secret").Status).IsEqualTo("Violation");
+        await Assert.That(Check(dto, "impersonation").Status).IsEqualTo("NotApplicable");
+        await Assert.That(Check(dto, "impersonation").Message!).Contains("own client");
+    }
+
+    [Test]
+    public async Task GetConfigurationHealth_PlaceholderSecret_CountsAsNoSecret()
+    {
+        var sut = CreateSut();
+        var configuration = CreateHealthyConfiguration();
+        configuration.ClientSecret = "<insert secret here>";
+        ArrangeMatchingIdentityClient();
+
+        var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
+
+        using var _ = Assert.Multiple();
+        // Same rule as the adapter-side token service: an angle-bracket placeholder is no secret.
+        await Assert.That(Check(dto, "secret").Status).IsEqualTo("Violation");
+        await Assert.That(Check(dto, "secret").Code).IsEqualTo("secret-missing");
     }
 
     // ---------------------------------------------------------------- identity unreachable

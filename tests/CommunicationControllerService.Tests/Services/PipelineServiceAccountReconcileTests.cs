@@ -70,8 +70,9 @@ internal class PipelineServiceAccountReconcileTests
     }
 
     /// <summary>
-    /// The AB#5111 steady state: complete, linked, token-issuer, declarative. <paramref name="mutate"/>
-    /// tweaks the entity before the repository stubs are armed.
+    /// The steady state since AB#5115: complete, linked, declarative — issuer and tenant EMPTY
+    /// (the installation default). <paramref name="mutate"/> tweaks the entity before the
+    /// repository stubs are armed.
     /// </summary>
     private RtServiceAccountConfiguration ArrangeDeclaredAdapter(RtAdapter adapter,
         Action<RtServiceAccountConfiguration>? mutate = null)
@@ -83,8 +84,6 @@ internal class PipelineServiceAccountReconcileTests
             RtWellKnownName = PipelineServiceAccountProvisioningService.BuildWellKnownName(adapter.RtId),
             ClientId = PipelineServiceAccountProvisioningService.BuildClientId(adapter.RtId),
             ClientSecret = ExistingSecret,
-            IssuerUri = PipelineServiceAccountProvisioningService.IssuerUriToken,
-            TenantId = TenantId,
             AssignedRoleNames = new AttributeStringValueList([CommonConstants.CommunicationManagementRole]),
             AllowDelegation = true
         };
@@ -97,7 +96,11 @@ internal class PipelineServiceAccountReconcileTests
         return serviceAccount;
     }
 
-    /// <summary>A pre-AB#5111 entity: complete and linked, but without the declaration attributes.</summary>
+    /// <summary>
+    /// A pre-AB#5111 entity: complete and linked, without the declaration attributes, and still
+    /// carrying the installation spellings (concrete authority URL, current tenant id) that
+    /// AB#5115 converges to empty on the next pass.
+    /// </summary>
     private RtServiceAccountConfiguration ArrangeLegacyAdapter(RtAdapter adapter)
     {
         var serviceAccount = new RtServiceAccountConfiguration
@@ -232,20 +235,27 @@ internal class PipelineServiceAccountReconcileTests
         var result = await _sut.ReconcileAdapterAsync(TenantId, adapter,
             ServiceAccountReconcileContext.System);
 
+        var saved = (RtServiceAccountConfiguration)_communicationRepository.ReceivedCalls()
+            .Single(c => c.GetMethodInfo().Name ==
+                         nameof(ICommunicationRepository.SavePipelineServiceAccountAsync))
+            .GetArguments()[2]!;
+
         using var _ = Assert.Multiple();
         // 🔴 The upgrade-safety pin: a pre-AB#5111 account may carry role edges granted by hand or
         // by a blueprint (the documented delegation setup). null on the wire = the identity side
         // does not touch the edges; a declared list would sync them (removals included).
         await Assert.That(SentClient().AssignedRoleNames).IsNull();
-        await Assert.That(result.Outcome).IsEqualTo(PipelineServiceAccountProvisioningOutcome.AlreadyProvisioned);
-        // And the reconcile does NOT flip the entity into declarative mode behind the operator's
-        // back — no write at all for a healthy legacy account.
-        await _communicationRepository.DidNotReceiveWithAnyArgs().SavePipelineServiceAccountAsync(
-            Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<RtServiceAccountConfiguration>(), Arg.Any<bool>());
+        // AB#5115: the pass DOES write once — the installation spellings converge to empty — but
+        // the write must not flip the entity into declarative mode behind the operator's back.
+        await Assert.That(result.Outcome).IsEqualTo(PipelineServiceAccountProvisioningOutcome.Repaired);
+        await Assert.That(saved.IssuerUri).IsNull();
+        await Assert.That(saved.TenantId).IsNull();
+        await Assert.That(saved.AssignedRoleNames).IsNull();
+        await Assert.That(saved.ClientSecret).IsEqualTo(ExistingSecret);
     }
 
     [Test]
-    public async Task Reconcile_RepairedLegacyAccount_StaysLegacy()
+    public async Task Reconcile_RepairedLegacyAccount_StaysLegacyAndKeepsItsForeignIssuer()
     {
         var adapter = RtEntityCreator.CreateAdapter();
         var legacy = ArrangeLegacyAdapter(adapter);
@@ -259,18 +269,20 @@ internal class PipelineServiceAccountReconcileTests
             .GetArguments()[2]!;
 
         using var _ = Assert.Multiple();
-        // The issuer repair happens, but the declaration attributes stay absent.
-        await Assert.That(saved.IssuerUri)
-            .IsEqualTo(PipelineServiceAccountProvisioningService.IssuerUriToken);
+        // AB#5115: a foreign issuer is a deliberate target — the write (triggered by the tenant
+        // convergence) carries it through verbatim, and the declaration attributes stay absent.
+        await Assert.That(saved.IssuerUri).IsEqualTo("https://identity.old-cluster.example.com");
+        await Assert.That(saved.TenantId).IsNull();
         await Assert.That(saved.AssignedRoleNames).IsNull();
         await Assert.That(saved.ClientSecret).IsEqualTo(ExistingSecret);
     }
 
     [Test]
-    public async Task Reconcile_IncompleteEntityWithASecret_KeepsTheSecret()
+    public async Task Reconcile_RepairKeepsTheSecretAndTheForeignTenant()
     {
         // AB#5111 tightened AB#5027 here: a repair of an unrelated attribute must not re-issue the
-        // credential every running pipeline presents.
+        // credential every running pipeline presents. AB#5115 additionally stops "repairing" a
+        // foreign TenantId — it is a deliberate target now, like a foreign IssuerUri.
         var adapter = RtEntityCreator.CreateAdapter();
         var legacy = ArrangeLegacyAdapter(adapter);
         legacy.TenantId = "some-other-tenant";
@@ -283,28 +295,108 @@ internal class PipelineServiceAccountReconcileTests
             .GetArguments()[2]!;
 
         using var _ = Assert.Multiple();
-        await Assert.That(saved.TenantId).IsEqualTo(TenantId);
+        // The write is triggered by the issuer convergence (concrete own authority -> empty);
+        // the foreign tenant rides through untouched.
+        await Assert.That(saved.TenantId).IsEqualTo("some-other-tenant");
+        await Assert.That(saved.IssuerUri).IsNull();
         await Assert.That(saved.ClientSecret).IsEqualTo(ExistingSecret);
         await Assert.That(SentClient().ClientSecret).IsEqualTo(ExistingSecret);
     }
 
-    // ---------------------------------------------------------------- issuer token
+    // ---------------------------------------------------------------- AB#5115 convergence matrix
 
     [Test]
-    public async Task Reconcile_UppercaseIssuerToken_CountsAsHealthy()
+    [Arguments("{{service.authority}}", null)]
+    [Arguments("{{service.AUTHORITY}}", null)] // case-insensitive like the resolver itself
+    [Arguments("https://identity.example.com", null)] // this installation, concrete (pre-AB#5111)
+    [Arguments("https://identity.example.com/", null)] // trailing-slash spelling of the same
+    public async Task Reconcile_InstallationSpelledIssuer_ConvergesToEmpty(string issuerUri,
+        string? expectedPersisted)
     {
         var adapter = RtEntityCreator.CreateAdapter();
-        ArrangeDeclaredAdapter(adapter, sa => sa.IssuerUri = "{{service.AUTHORITY}}");
+        ArrangeDeclaredAdapter(adapter, sa => sa.IssuerUri = issuerUri);
+
+        var result = await _sut.ReconcileAdapterAsync(TenantId, adapter,
+            ServiceAccountReconcileContext.System);
+
+        var saved = (RtServiceAccountConfiguration)_communicationRepository.ReceivedCalls()
+            .Single(c => c.GetMethodInfo().Name ==
+                         nameof(ICommunicationRepository.SavePipelineServiceAccountAsync))
+            .GetArguments()[2]!;
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.Outcome).IsEqualTo(PipelineServiceAccountProvisioningOutcome.Repaired);
+        await Assert.That(saved.IssuerUri).IsEqualTo(expectedPersisted);
+        await Assert.That(saved.ClientSecret).IsEqualTo(ExistingSecret);
+    }
+
+    [Test]
+    public async Task Reconcile_CurrentTenantSpelledExplicitly_ConvergesToEmpty()
+    {
+        var adapter = RtEntityCreator.CreateAdapter();
+        ArrangeDeclaredAdapter(adapter, sa => sa.TenantId = TenantId);
+
+        var result = await _sut.ReconcileAdapterAsync(TenantId, adapter,
+            ServiceAccountReconcileContext.System);
+
+        var saved = (RtServiceAccountConfiguration)_communicationRepository.ReceivedCalls()
+            .Single(c => c.GetMethodInfo().Name ==
+                         nameof(ICommunicationRepository.SavePipelineServiceAccountAsync))
+            .GetArguments()[2]!;
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.Outcome).IsEqualTo(PipelineServiceAccountProvisioningOutcome.Repaired);
+        await Assert.That(saved.TenantId).IsNull();
+    }
+
+    [Test]
+    [Arguments("https://identity.other-installation.example.com", null)]
+    [Arguments(null, "some-other-tenant")]
+    public async Task Reconcile_ForeignIssuerOrTenant_IsLeftAlone(string? foreignIssuer,
+        string? foreignTenant)
+    {
+        var adapter = RtEntityCreator.CreateAdapter();
+        ArrangeDeclaredAdapter(adapter, sa =>
+        {
+            if (foreignIssuer != null)
+            {
+                sa.IssuerUri = foreignIssuer;
+            }
+
+            if (foreignTenant != null)
+            {
+                sa.TenantId = foreignTenant;
+            }
+        });
 
         var result = await _sut.ReconcileAdapterAsync(TenantId, adapter,
             ServiceAccountReconcileContext.System);
 
         using var _ = Assert.Multiple();
-        // Case-insensitive like the resolver itself — otherwise every sweep would "repair" a value
-        // the projection resolves fine.
+        // A deliberate foreign target is healthy — no "repair", no write, nothing converges.
         await Assert.That(result.Outcome).IsEqualTo(PipelineServiceAccountProvisioningOutcome.AlreadyProvisioned);
         await _communicationRepository.DidNotReceiveWithAnyArgs().SavePipelineServiceAccountAsync(
             Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<RtServiceAccountConfiguration>(), Arg.Any<bool>());
+    }
+
+    [Test]
+    public async Task Reconcile_FreshAdapter_CreatesTheEntityWithEmptyIssuerAndTenant()
+    {
+        var adapter = RtEntityCreator.CreateAdapter();
+
+        var result = await _sut.ReconcileAdapterAsync(TenantId, adapter,
+            ServiceAccountReconcileContext.System);
+
+        var saved = (RtServiceAccountConfiguration)_communicationRepository.ReceivedCalls()
+            .Single(c => c.GetMethodInfo().Name ==
+                         nameof(ICommunicationRepository.SavePipelineServiceAccountAsync))
+            .GetArguments()[2]!;
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.Outcome).IsEqualTo(PipelineServiceAccountProvisioningOutcome.Provisioned);
+        // AB#5115: nothing names what the adapter already knows — no token, no URL, no tenant.
+        await Assert.That(saved.IssuerUri).IsNull();
+        await Assert.That(saved.TenantId).IsNull();
     }
 
     // ---------------------------------------------------------------- security gate
@@ -439,8 +531,7 @@ internal class PipelineServiceAccountReconcileTests
             RtWellKnownName = "pipeline-override-account",
             ClientId = "octo-pipeline-sa-custom",
             ClientSecret = ExistingSecret,
-            IssuerUri = PipelineServiceAccountProvisioningService.IssuerUriToken,
-            TenantId = TenantId,
+            // IssuerUri / TenantId absent — the AB#5115 steady state.
             AssignedRoleNames = new AttributeStringValueList(["AccountingRead"]),
             AllowDelegation = true
         };
@@ -454,6 +545,90 @@ internal class PipelineServiceAccountReconcileTests
         await Assert.That(result.Outcome).IsEqualTo(PipelineServiceAccountProvisioningOutcome.AlreadyProvisioned);
         await _communicationRepository.DidNotReceiveWithAnyArgs()
             .UpdateServiceAccountAsync(Arg.Any<string>(), Arg.Any<RtServiceAccountConfiguration>());
+    }
+
+    // ---------------------------------------------------------------- AB#5114 MayActAs materialisation
+
+    [Test]
+    public async Task Reconcile_AdapterPath_DeclaresNoMayActAsActors()
+    {
+        // The adapter's own client IS this account's client (AB#5072) — a self-edge authorizes
+        // nothing, so the adapter path never declares actors.
+        var adapter = RtEntityCreator.CreateAdapter();
+        ArrangeDeclaredAdapter(adapter);
+
+        await _sut.ReconcileAdapterAsync(TenantId, adapter, ServiceAccountReconcileContext.System);
+
+        await Assert.That(SentClient().MayActAsClientIds).IsNull();
+    }
+
+    [Test]
+    public async Task ReconcileConfiguration_StandaloneUsedByPipelines_DeclaresTheAdapterOwnClientsAsActors()
+    {
+        var standalone = new RtServiceAccountConfiguration
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
+            RtWellKnownName = "pipeline-override-account",
+            ClientId = "octo-pipeline-sa-custom",
+            ClientSecret = ExistingSecret,
+            AssignedRoleNames = new AttributeStringValueList(["AccountingRead"]),
+            AllowDelegation = true
+        };
+        _communicationRepository.GetAdapterForServiceAccountAsync(TenantId, standalone.RtId)
+            .Returns((RtAdapter?)null);
+
+        // Two pipelines on the same adapter (the actor must be de-duplicated), one on a second
+        // adapter without an own account (contributes nothing, never fails the pass).
+        var adapter = RtEntityCreator.CreateAdapter();
+        var bareAdapter = RtEntityCreator.CreateAdapter();
+        ArrangeDeclaredAdapter(adapter);
+        var pipelineA = RtEntityCreator.CreatePipeline();
+        var pipelineB = RtEntityCreator.CreatePipeline();
+        var pipelineC = RtEntityCreator.CreatePipeline();
+        _communicationRepository.GetPipelinesUsingServiceAccountAsync(TenantId, standalone.RtId)
+            .Returns([pipelineA, pipelineB, pipelineC]);
+        _communicationRepository.GetAdapterByPipelineAsync(TenantId, pipelineA.ToRtEntityId()).Returns(adapter);
+        _communicationRepository.GetAdapterByPipelineAsync(TenantId, pipelineB.ToRtEntityId()).Returns(adapter);
+        _communicationRepository.GetAdapterByPipelineAsync(TenantId, pipelineC.ToRtEntityId()).Returns(bareAdapter);
+        _communicationRepository.GetServiceAccountForAdapterAsync(TenantId, bareAdapter.RtId)
+            .Returns((RtServiceAccountConfiguration?)null);
+
+        await _sut.ReconcileConfigurationAsync(TenantId, standalone, ServiceAccountReconcileContext.System);
+
+        // Exactly the adapter's own client, exactly once — identity materialises the
+        // adapter-own-client → this-account MayActAs edge from it.
+        await Assert.That(SentClient().MayActAsClientIds!)
+            .IsEquivalentTo(new[] { PipelineServiceAccountProvisioningService.BuildClientId(adapter.RtId) });
+    }
+
+    [Test]
+    public async Task ReconcileConfiguration_StandaloneWithoutUsage_DeclaresNullAndStillConverges()
+    {
+        var standalone = new RtServiceAccountConfiguration
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
+            RtWellKnownName = "pipeline-override-account",
+            ClientId = "octo-pipeline-sa-custom",
+            ClientSecret = ExistingSecret,
+            AssignedRoleNames = new AttributeStringValueList(["AccountingRead"]),
+            AllowDelegation = true
+        };
+        _communicationRepository.GetAdapterForServiceAccountAsync(TenantId, standalone.RtId)
+            .Returns((RtAdapter?)null);
+        _communicationRepository.GetPipelinesUsingServiceAccountAsync(TenantId, standalone.RtId)
+            .Returns([]);
+
+        var result = await _sut.ReconcileConfigurationAsync(TenantId, standalone,
+            ServiceAccountReconcileContext.System);
+
+        using var _ = Assert.Multiple();
+        // null on the wire = the identity side leaves the MayActAs edges untouched; the client
+        // itself still converges (roles went out verbatim).
+        await Assert.That(SentClient().MayActAsClientIds).IsNull();
+        await Assert.That(SentClient().AssignedRoleNames).IsEquivalentTo(new[] { "AccountingRead" });
+        await Assert.That(result.Outcome).IsEqualTo(PipelineServiceAccountProvisioningOutcome.AlreadyProvisioned);
     }
 
     // ---------------------------------------------------------------- configuration-bound rotation

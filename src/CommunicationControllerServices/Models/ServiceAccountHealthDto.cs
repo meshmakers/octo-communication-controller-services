@@ -6,7 +6,8 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 /// <param name="Check">
 ///     Machine-readable name of the check: <c>association</c>, <c>configuration</c>,
 ///     <c>client</c>, <c>secret</c>, <c>roles</c>, <c>delegation</c>, <c>tenant</c>,
-///     <c>issuerUri</c>. The <c>association</c> check only appears on the adapter-scoped variant.
+///     <c>issuerUri</c>, <c>impersonation</c> (AB#5114). The <c>association</c> check only
+///     appears on the adapter-scoped variant.
 /// </param>
 /// <param name="Status">
 ///     <c>Healthy</c>, <c>Violation</c>, <c>Unknown</c> (an identity-backed check that could not

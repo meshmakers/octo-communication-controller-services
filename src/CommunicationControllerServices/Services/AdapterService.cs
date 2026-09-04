@@ -823,8 +823,10 @@ internal class AdapterService(
     ///
     /// <para>
     /// AB#5112 hardens the guard beyond mere resolvability: a resolved configuration without a
-    /// client secret is refused unconditionally (a local fact — such a pipeline could never
-    /// authenticate), and the identity client's existence is verified against the identity service
+    /// usable client secret is refused when the AB#5114 impersonation path cannot stand in either
+    /// (no adapter-own client with a usable secret — with both credentials absent such a pipeline
+    /// could never authenticate; both are local facts of the tenant's entities), and the identity
+    /// client's existence is verified against the identity service
     /// when <see cref="ServiceAccountGuardOptions.CheckIdentityClient" /> allows it (default on;
     /// the per-environment off switch exists for rollouts that outpace the tenant sweep). 🔴 An
     /// <b>unanswerable</b> identity lookup — identity down, or no caller token to ask with — is
@@ -846,21 +848,43 @@ internal class AdapterService(
         var serviceAccount = resolution.ServiceAccount!;
         var wellKnownName = serviceAccount.RtWellKnownName ?? serviceAccount.RtId.ToString();
 
-        // Defensive reads, same reasoning as the whole service-account path: the attributes are
-        // mandatory on the CK type, so the generated getters throw on exactly the half-configured
-        // entity this guard exists to refuse with a useful message instead.
+        // Defensive reads, same reasoning as the whole service-account path (and ClientId is still
+        // mandatory on the CK type since 3.33.0, so its generated getter throws on exactly the
+        // half-configured entity this guard exists to refuse with a useful message instead).
         var secret = serviceAccount.GetAttributeValueOrDefault(
             nameof(RtServiceAccountConfiguration.ClientSecret)) as string;
-        if (string.IsNullOrWhiteSpace(secret))
+        var serviceAccountClientId = serviceAccount.GetAttributeValueOrDefault(
+            nameof(RtServiceAccountConfiguration.ClientId)) as string;
+
+        // AB#5114 credential-aware refusal: a configuration without a usable secret (empty, or an
+        // angle-bracket seed placeholder) is refused ONLY when impersonation cannot stand in — the
+        // adapter's own client (AB#5072: its default pipeline service account, whose credentials
+        // travel in the pod's Helm values) must exist with a usable secret and be a different
+        // client than the account itself. The MayActAs edge that ultimately authorizes the
+        // impersonation lives identity-side and is NOT verifiable through the identity REST
+        // surface the controller reads (no client-association endpoint) — best-effort like the
+        // client-existence check below, so its absence never blocks a deploy here; the identity
+        // token endpoint refuses the impersonation request if it is missing, and the reconcile
+        // materialises it.
+        if (!PipelineServiceAccountProvisioningService.IsSecretUsable(secret))
         {
-            throw AdapterServiceException.PipelineServiceAccountSecretMissing(tenantId, pipelineRtEntityId,
-                wellKnownName, adapterRtId, adapterName);
+            var actorClientId = string.IsNullOrWhiteSpace(serviceAccountClientId)
+                ? null
+                : await TryGetImpersonationActorClientIdAsync(tenantId, adapterRtId, serviceAccountClientId!);
+            if (actorClientId == null)
+            {
+                throw AdapterServiceException.PipelineServiceAccountSecretMissing(tenantId, pipelineRtEntityId,
+                    wellKnownName, adapterRtId, adapterName);
+            }
+
+            Logger.Info(
+                "[{TenantId}] Pipeline '{PipelineRtEntityId}' deploys on the impersonation path (AB#5114): service account '{WellKnownName}' has no usable secret; adapter client '{ActorClientId}' will request its identity. The MayActAs edge cannot be verified from here — identity refuses the token request if it is missing.",
+                tenantId, pipelineRtEntityId, wellKnownName, actorClientId);
         }
 
         if (serviceAccountGuardOptions.Value.CheckIdentityClient)
         {
-            var clientId = serviceAccount.GetAttributeValueOrDefault(
-                nameof(RtServiceAccountConfiguration.ClientId)) as string;
+            var clientId = serviceAccountClientId;
             if (string.IsNullOrWhiteSpace(clientId))
             {
                 // No client id means no identity client can exist — the same violation, established
@@ -890,6 +914,43 @@ internal class AdapterService(
             "[{TenantId}] Pipeline '{PipelineRtEntityId}' executes as service account '{ServiceAccount}' (source: {Source})",
             tenantId, pipelineRtEntityId, resolution.ServiceAccount!.RtWellKnownName ?? resolution.ServiceAccount.RtId.ToString(),
             resolution.Source);
+    }
+
+    /// <summary>
+    /// AB#5114: the adapter's own client, as far as the deploy guard can establish it — the
+    /// adapter's default pipeline service account with a usable secret (exactly what AB#5072
+    /// projects into the pod as its own credentials), and a different client than the account
+    /// being deployed (a client cannot impersonate itself; in particular, the adapter default
+    /// itself without a secret leaves the adapter with no credentials at all). Returns <c>null</c>
+    /// when no such actor exists <b>or the lookup fails</b> — a guard must fail closed on its
+    /// local facts, and the actionable repair (reconcile the adapter) is named in the refusal.
+    /// </summary>
+    private async Task<string?> TryGetImpersonationActorClientIdAsync(string tenantId, OctoObjectId adapterRtId,
+        string targetClientId)
+    {
+        try
+        {
+            var adapterDefault = await serviceAccountResolver.GetAdapterDefaultAsync(tenantId, adapterRtId);
+            var actorClientId = adapterDefault?.GetAttributeValueOrDefault(
+                nameof(RtServiceAccountConfiguration.ClientId)) as string;
+            var actorSecret = adapterDefault?.GetAttributeValueOrDefault(
+                nameof(RtServiceAccountConfiguration.ClientSecret)) as string;
+
+            if (string.IsNullOrWhiteSpace(actorClientId) || actorClientId == targetClientId ||
+                !PipelineServiceAccountProvisioningService.IsSecretUsable(actorSecret))
+            {
+                return null;
+            }
+
+            return actorClientId;
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e,
+                "[{TenantId}] Could not read the own service account of adapter '{AdapterRtId}' while judging the impersonation path (AB#5114)",
+                tenantId, adapterRtId);
+            return null;
+        }
     }
 
     public async Task<bool> SetPipelineDebuggingAsync(string tenantId, RtEntityId pipelineRtEntityId, bool isEnabled)
@@ -1234,9 +1295,12 @@ internal class AdapterService(
     }
 
     /// <summary>
-    /// AB#5111: resolves deploy-time tokens in a service account's <c>IssuerUri</c> — the reconcile
-    /// writes <c>{{service.authority}}</c> as the default, and the mesh adapter's
-    /// <c>ServiceAccountTokenService</c> needs a concrete URL to run OIDC discovery against.
+    /// AB#5111: resolves deploy-time tokens in a service account's <c>IssuerUri</c> — legacy
+    /// entities may still carry <c>{{service.authority}}</c> (the 3.32.0 default), and an adapter
+    /// that pre-dates AB#5115 needs a concrete URL to run OIDC discovery against. An <b>empty</b>
+    /// (or absent) IssuerUri — the AB#5115 canonical value — passes through EMPTY untouched: it
+    /// means "the adapter's own installation", and the adapter resolves it against its own
+    /// authority configuration.
     ///
     /// <para>
     /// REUSES the existing workload-template machinery (<see cref="IWorkloadTemplateResolver" />,

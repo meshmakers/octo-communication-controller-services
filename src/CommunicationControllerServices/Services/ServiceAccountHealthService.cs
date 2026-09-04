@@ -1,7 +1,9 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
+using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.Runtime.Contracts;
 using Microsoft.Extensions.Options;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -39,6 +41,19 @@ internal class ServiceAccountHealthService(
     private const string DelegationCheck = "delegation";
     private const string TenantCheck = "tenant";
     private const string IssuerUriCheck = "issuerUri";
+    private const string ImpersonationCheck = "impersonation";
+
+    /// <summary>
+    /// AB#5114: what the aggregate knows about the account's impersonation actor — the adapter's
+    /// own client (its default pipeline service account, the credentials AB#5072 projects into the
+    /// pod). <paramref name="HasAdapterContext" /> is false only for the configuration-scoped
+    /// variant of a standalone account that no pipeline links yet; <paramref name="ActorClientId" />
+    /// is non-null only when an actor with a usable secret exists that is not the account itself.
+    /// </summary>
+    private sealed record ImpersonationContext(bool HasAdapterContext, string? ActorClientId, string? NoActorReason)
+    {
+        public static readonly ImpersonationContext NoAdapter = new(false, null, null);
+    }
 
     /// <inheritdoc />
     public async Task<ServiceAccountHealthDto> GetAdapterHealthAsync(string tenantId, RtAdapter adapter)
@@ -66,12 +81,20 @@ internal class ServiceAccountHealthService(
                 $"No ServiceAccountConfiguration exists for adapter '{adapterName}' ({adapter.RtId}). " +
                 "The reconcile creates it with the declaration defaults."));
             checks.AddRange(NotEvaluated(ClientCheck, RolesCheck, DelegationCheck, SecretCheck, TenantCheck,
-                IssuerUriCheck));
+                IssuerUriCheck, ImpersonationCheck));
             return Build(null, checks);
         }
 
         checks.Add(Healthy(ConfigurationCheck));
-        await EvaluateConfigurationAsync(tenantId, configuration, checks);
+        // The adapter variant always evaluates the adapter's DEFAULT account — which is the
+        // adapter's own client itself (AB#5072), so there is never a distinct impersonation actor
+        // here: the account either authenticates with its own secret or the adapter has no
+        // credentials at all.
+        await EvaluateConfigurationAsync(tenantId, configuration, checks,
+            new ImpersonationContext(HasAdapterContext: true, ActorClientId: null,
+                NoActorReason:
+                "this account IS the adapter's own client (AB#5072) — it cannot impersonate itself, so a " +
+                "usable secret is its only credential"));
         return Build(configuration, checks);
     }
 
@@ -83,8 +106,84 @@ internal class ServiceAccountHealthService(
         // two variants' check lists congruent (minus the association, which has no meaning for a
         // standalone / per-pipeline configuration).
         var checks = new List<ServiceAccountHealthCheckDto> { Healthy(ConfigurationCheck) };
-        await EvaluateConfigurationAsync(tenantId, configuration, checks);
+        await EvaluateConfigurationAsync(tenantId, configuration, checks,
+            await ResolveImpersonationContextAsync(tenantId, configuration));
         return Build(configuration, checks);
+    }
+
+    /// <summary>
+    /// AB#5114: derives the impersonation actor for the configuration-scoped variant. An
+    /// adapter-owned account is the adapter's own client itself (no distinct actor, like the
+    /// adapter variant); a standalone account's actors are the own clients of the adapters whose
+    /// pipelines link it via <c>Uses</c> — the first one with a usable secret is reported (the
+    /// aggregate names one concrete actor, the reconcile materialises the edges for all of them).
+    /// Best-effort: any lookup failure degrades to "no adapter context" instead of failing the
+    /// aggregate — this is a read-only diagnosis endpoint.
+    /// </summary>
+    private async Task<ImpersonationContext> ResolveImpersonationContextAsync(string tenantId,
+        RtServiceAccountConfiguration configuration)
+    {
+        var targetClientId = ReadAttribute(configuration, nameof(RtServiceAccountConfiguration.ClientId));
+        try
+        {
+            var owningAdapter = await communicationRepository.GetAdapterForServiceAccountAsync(tenantId,
+                configuration.RtId);
+            if (owningAdapter != null)
+            {
+                return new ImpersonationContext(HasAdapterContext: true, ActorClientId: null,
+                    NoActorReason:
+                    "this account IS the adapter's own client (AB#5072) — it cannot impersonate itself, so a " +
+                    "usable secret is its only credential");
+            }
+
+            var pipelines = await communicationRepository.GetPipelinesUsingServiceAccountAsync(tenantId,
+                configuration.RtId);
+            var hasAdapterContext = false;
+            var seenAdapterRtIds = new HashSet<OctoObjectId>();
+            foreach (var pipeline in pipelines ?? [])
+            {
+                RtAdapter? adapter;
+                try
+                {
+                    adapter = await communicationRepository.GetAdapterByPipelineAsync(tenantId,
+                        pipeline.ToRtEntityId());
+                }
+                catch (CommunicationRepositoryException)
+                {
+                    continue; // pipeline without an Executes edge — owned by the deploy paths
+                }
+
+                if (adapter == null || !seenAdapterRtIds.Add(adapter.RtId))
+                {
+                    continue;
+                }
+
+                hasAdapterContext = true;
+                var adapterDefault = await serviceAccountResolver.GetAdapterDefaultAsync(tenantId, adapter.RtId);
+                var actorClientId = adapterDefault == null
+                    ? null
+                    : ReadAttribute(adapterDefault, nameof(RtServiceAccountConfiguration.ClientId));
+                var actorSecret = adapterDefault == null
+                    ? null
+                    : ReadAttribute(adapterDefault, nameof(RtServiceAccountConfiguration.ClientSecret));
+                if (!string.IsNullOrWhiteSpace(actorClientId) && actorClientId != targetClientId &&
+                    PipelineServiceAccountProvisioningService.IsSecretUsable(actorSecret))
+                {
+                    return new ImpersonationContext(HasAdapterContext: true, actorClientId, null);
+                }
+            }
+
+            return hasAdapterContext
+                ? new ImpersonationContext(HasAdapterContext: true, ActorClientId: null,
+                    NoActorReason:
+                    "none of the adapters using this account has an own client with a usable secret " +
+                    "(reconcile the adapters to provision their pipeline service accounts, AB#5072)")
+                : ImpersonationContext.NoAdapter;
+        }
+        catch (Exception)
+        {
+            return ImpersonationContext.NoAdapter;
+        }
     }
 
     /// <summary>
@@ -95,7 +194,7 @@ internal class ServiceAccountHealthService(
     /// getter throwing would turn the diagnosis into the disease.
     /// </summary>
     private async Task EvaluateConfigurationAsync(string tenantId, RtServiceAccountConfiguration configuration,
-        List<ServiceAccountHealthCheckDto> checks)
+        List<ServiceAccountHealthCheckDto> checks, ImpersonationContext impersonation)
     {
         var clientId = ReadAttribute(configuration, nameof(RtServiceAccountConfiguration.ClientId));
         var secret = ReadAttribute(configuration, nameof(RtServiceAccountConfiguration.ClientSecret));
@@ -145,31 +244,117 @@ internal class ServiceAccountHealthService(
             }
         }
 
-        // ---- local checks: secret presence, tenant, issuer ----
-        checks.Add(!string.IsNullOrWhiteSpace(secret)
-            ? Healthy(SecretCheck)
-            : Violation(SecretCheck, "secret-missing",
-                "The configuration holds no client secret, so no pipeline can authenticate with this account. " +
-                "The reconcile issues one (an existing secret is never rotated); a compromised secret is replaced " +
-                "via the rotate endpoint."));
+        // ---- local checks: secret/impersonation, tenant, issuer (AB#5115/AB#5114 semantics) ----
+        var secretUsable = PipelineServiceAccountProvisioningService.IsSecretUsable(secret);
 
-        checks.Add(configuredTenantId == tenantId
-            ? Healthy(TenantCheck)
-            : Violation(TenantCheck, "tenant-mismatch",
-                string.IsNullOrWhiteSpace(configuredTenantId)
-                    ? "The configuration carries no TenantId; the adapter cannot address the delegation grant without it."
-                    : $"The configuration points at tenant '{configuredTenantId}' instead of '{tenantId}' — " +
-                      "typically an entity imported from another tenant. The reconcile re-derives it."));
+        // Credential-aware secret check: an empty (or placeholder) secret is a violation ONLY when
+        // impersonation cannot stand in for it — the adapter-side dual path (AB#5114) makes a
+        // secretless account with a capable actor a fully legitimate configuration.
+        if (secretUsable)
+        {
+            checks.Add(Healthy(SecretCheck));
+        }
+        else if (impersonation.ActorClientId != null)
+        {
+            checks.Add(Healthy(SecretCheck,
+                "The configuration holds no usable client secret; the account is used via impersonation — " +
+                $"adapter client '{impersonation.ActorClientId}' presents its own credentials and requests this " +
+                "account's identity (AB#5114). See the impersonation check."));
+        }
+        else
+        {
+            checks.Add(Violation(SecretCheck, "secret-missing",
+                "The configuration holds no usable client secret and no adapter client is available to impersonate " +
+                "the account (AB#5114)" +
+                (impersonation.NoActorReason == null ? "" : $" — {impersonation.NoActorReason}") +
+                ". The reconcile issues a secret (an existing secret is never rotated); a compromised secret is " +
+                "replaced via the rotate endpoint."));
+        }
 
-        checks.Add(PipelineServiceAccountProvisioningService.IsIssuerUriHealthy(issuerUri,
-            options.Value.AuthorityUrl)
-            ? Healthy(IssuerUriCheck)
-            : Violation(IssuerUriCheck, "issuer-uri-drift",
-                string.IsNullOrWhiteSpace(issuerUri)
-                    ? "The configuration carries no IssuerUri."
-                    : $"IssuerUri '{issuerUri}' is neither the portable " +
-                      $"'{PipelineServiceAccountProvisioningService.IssuerUriToken}' token nor this installation's " +
-                      "authority. The reconcile converges it to the token."));
+        // AB#5114: the impersonation view. Only meaningful for a secretless account; the MayActAs
+        // edge itself is NOT verifiable from here — the identity REST surface the controller reads
+        // through (GET {tenantId}/v1/Clients/…, IIdentityClientReader) exposes clients and role
+        // edges but no client-to-client associations — so a capable actor is reported as Unknown
+        // rather than pretending certainty either way.
+        if (secretUsable)
+        {
+            checks.Add(NotApplicable(ImpersonationCheck,
+                "The configuration authenticates with its own client secret; impersonation is not used."));
+        }
+        else if (!impersonation.HasAdapterContext)
+        {
+            checks.Add(NotApplicable(ImpersonationCheck,
+                "No adapter context: nothing links this configuration to an adapter (no owning adapter, no " +
+                "pipeline Uses edge), so the impersonating actor cannot be determined here. The adapter-scoped " +
+                "health endpoint or the reconcile after linking a pipeline gives the definitive picture."));
+        }
+        else if (impersonation.ActorClientId != null)
+        {
+            checks.Add(Unknown(ImpersonationCheck,
+                $"Adapter client '{impersonation.ActorClientId}' can impersonate this account only while identity " +
+                $"holds a MayActAs edge onto '{clientId}'. The controller cannot verify that edge (the identity " +
+                "REST surface exposes no client-association read), so it is reported as unknown; the reconcile " +
+                "materialises it (AB#5114) and the identity token endpoint refuses impersonation without it."));
+        }
+        else
+        {
+            checks.Add(NotApplicable(ImpersonationCheck,
+                "Impersonation is not possible: " +
+                (impersonation.NoActorReason ?? "the adapter has no own client") +
+                ". The secret check carries the resulting violation."));
+        }
+
+        // AB#5115: empty issuer/tenant is the canonical installation default; the historic
+        // installation spellings stay healthy (the next reconcile converges them to empty); any
+        // other concrete value is a deliberate foreign target, not drift.
+        var issuerIsInstallation = string.IsNullOrWhiteSpace(issuerUri) ||
+                                   PipelineServiceAccountProvisioningService.IsInstallationIssuer(issuerUri,
+                                       options.Value.AuthorityUrl);
+
+        if (string.IsNullOrWhiteSpace(configuredTenantId))
+        {
+            checks.Add(Healthy(TenantCheck,
+                "installation default — an empty TenantId means the tenant the adapter runs for (AB#5115)."));
+        }
+        else if (configuredTenantId == tenantId)
+        {
+            checks.Add(Healthy(TenantCheck,
+                "The configuration names the current tenant explicitly — the pre-AB#5115 spelling of the " +
+                "installation default; the next reconcile converges it to empty."));
+        }
+        else if (!issuerIsInstallation)
+        {
+            checks.Add(Healthy(TenantCheck,
+                $"The configuration points at tenant '{configuredTenantId}' of the foreign identity target " +
+                $"'{issuerUri}' — a deliberate foreign pairing the reconcile leaves alone (AB#5115)."));
+        }
+        else
+        {
+            checks.Add(Violation(TenantCheck, "tenant-mismatch",
+                $"The configuration points at tenant '{configuredTenantId}' instead of '{tenantId}' while its " +
+                "IssuerUri resolves to this installation — typically an entity imported from another tenant. " +
+                "Clear the TenantId (empty = the adapter's tenant, AB#5115) or pair it with the foreign IssuerUri " +
+                "it belongs to."));
+        }
+
+        if (string.IsNullOrWhiteSpace(issuerUri))
+        {
+            checks.Add(Healthy(IssuerUriCheck,
+                "installation default — an empty IssuerUri means the adapter's own installation (AB#5115)."));
+        }
+        else if (issuerIsInstallation)
+        {
+            checks.Add(Healthy(IssuerUriCheck,
+                "The configuration spells this installation explicitly (the AB#5111 " +
+                $"'{PipelineServiceAccountProvisioningService.IssuerUriToken}' token or this installation's " +
+                "authority URL) — still healthy; the next reconcile converges it to empty (AB#5115)."));
+        }
+        else
+        {
+            checks.Add(Healthy(IssuerUriCheck,
+                $"IssuerUri '{issuerUri}' is a deliberate foreign identity target; the reconcile leaves it " +
+                "alone (AB#5115)."));
+        }
     }
 
     /// <summary>
@@ -257,6 +442,20 @@ internal class ServiceAccountHealthService(
     private static ServiceAccountHealthCheckDto Healthy(string check)
     {
         return new ServiceAccountHealthCheckDto(check, ServiceAccountHealthStatus.Healthy, null, null);
+    }
+
+    /// <summary>
+    /// Healthy with an explanation — for the AB#5115/AB#5114 findings whose green verdict rests on
+    /// a semantic ("installation default", "used via impersonation") the operator should see.
+    /// </summary>
+    private static ServiceAccountHealthCheckDto Healthy(string check, string message)
+    {
+        return new ServiceAccountHealthCheckDto(check, ServiceAccountHealthStatus.Healthy, null, message);
+    }
+
+    private static ServiceAccountHealthCheckDto NotApplicable(string check, string message)
+    {
+        return new ServiceAccountHealthCheckDto(check, ServiceAccountHealthStatus.NotApplicable, null, message);
     }
 
     private static ServiceAccountHealthCheckDto Violation(string check, string code, string message)

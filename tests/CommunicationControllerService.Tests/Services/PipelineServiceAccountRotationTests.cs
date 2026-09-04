@@ -132,10 +132,10 @@ internal class PipelineServiceAccountRotationTests
         await Assert.That(saved.RtId).IsEqualTo(existing.RtId);
         await Assert.That(saved.RtWellKnownName).IsEqualTo(existing.RtWellKnownName);
         await Assert.That(saved.ClientId).IsEqualTo(existing.ClientId);
-        // AB#5111: every service-account write converges IssuerUri onto the portable token.
-        await Assert.That(saved.IssuerUri)
-            .IsEqualTo(PipelineServiceAccountProvisioningService.IssuerUriToken);
-        await Assert.That(saved.TenantId).IsEqualTo(TenantId);
+        // AB#5115: every service-account write converges the installation spellings (the concrete
+        // own-authority URL, the current tenant id) onto EMPTY — the installation default.
+        await Assert.That(saved.IssuerUri).IsNull();
+        await Assert.That(saved.TenantId).IsNull();
 
         await Assert.That(result.WasCreated).IsFalse();
         await Assert.That(result.RequiresPipelineRedeploy).IsTrue();

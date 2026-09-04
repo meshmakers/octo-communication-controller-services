@@ -137,6 +137,33 @@ internal class PipelineServiceAccountProjectionTests : AdapterServiceTestsBase
     }
 
     [Test]
+    public async Task EmptyIssuerUri_IsPassedThroughEmpty()
+    {
+        // AB#5115: an absent IssuerUri means "the adapter's own installation" and the ADAPTER
+        // resolves it — the projection must not substitute anything (no token, no AuthorityUrl).
+        ControllerOptions.ServiceUrls["authority"] = "https://identity.cluster.example.com";
+        var installationDefault = new RtServiceAccountConfiguration
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
+            RtWellKnownName = "installation-default-account",
+            ClientId = "octo-pipeline-sa-empty",
+            ClientSecret = "secret"
+            // IssuerUri / TenantId deliberately absent.
+        };
+        var (adapter, pipeline) = ArrangeDeployablePipeline(installationDefault);
+
+        var pipelineConfig = await DeployAndCaptureAsync(adapter, pipeline);
+
+        var projected = pipelineConfig.Configurations.Single();
+        using var _ = Assert.Multiple();
+        await Assert.That(projected.ConfigurationValue.Contains("{{", StringComparison.Ordinal)).IsFalse();
+        await Assert.That(projected.ConfigurationValue)
+            .DoesNotContain("https://identity.cluster.example.com");
+        await Assert.That(projected.ConfigurationValue).DoesNotContain(ControllerOptions.AuthorityUrl);
+    }
+
+    [Test]
     public async Task ConcreteIssuerUri_IsPassedThroughUntouched()
     {
         // Entities provisioned before AB#5111 (or deliberately pinned by an author) carry a
