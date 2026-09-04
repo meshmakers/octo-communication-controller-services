@@ -460,14 +460,12 @@ internal class ServiceAccountHealthTests
 
     // ---------------------------------------------------------------- AB#5114 impersonation
 
-    [Test]
-    public async Task GetConfigurationHealth_SecretlessStandaloneWithCapableAdapter_SecretHealthyImpersonationUnknown()
+    /// <summary>
+    /// Arranges the AB#5114 secretless-standalone shape: a pipeline links the account and its
+    /// adapter has an own client ('octo-pipeline-sa-adapter-own') with a usable secret.
+    /// </summary>
+    private void ArrangeCapableAdapterActor(RtServiceAccountConfiguration configuration)
     {
-        var sut = CreateSut();
-        var configuration = CreateInstallationDefaultConfiguration(withSecret: false);
-        ArrangeMatchingIdentityClient();
-
-        // A pipeline links the account; its adapter has an own client with a usable secret.
         var adapter = RtEntityCreator.CreateAdapter();
         var adapterOwn = RtEntityCreator.CreateServiceAccountConfiguration("adapter-own-account");
         adapterOwn.ClientId = "octo-pipeline-sa-adapter-own";
@@ -475,6 +473,18 @@ internal class ServiceAccountHealthTests
         _repo.GetPipelinesUsingServiceAccountAsync(TenantId, configuration.RtId).Returns([pipeline]);
         _repo.GetAdapterByPipelineAsync(TenantId, pipeline.ToRtEntityId()).Returns(adapter);
         _resolver.GetAdapterDefaultAsync(TenantId, adapter.RtId).Returns(adapterOwn);
+    }
+
+    [Test]
+    public async Task GetConfigurationHealth_SecretlessStandaloneWithEdge_SecretAndImpersonationHealthy()
+    {
+        var sut = CreateSut();
+        var configuration = CreateInstallationDefaultConfiguration(withSecret: false);
+        ArrangeMatchingIdentityClient();
+        ArrangeCapableAdapterActor(configuration);
+        // Identity's actors read surface (AB#5114) lists the adapter's own client as an actor.
+        _identityReader.GetActorClientIdsAsync(TenantId, "client-id")
+            .Returns(IdentityClientActorsLookup.Found(["octo-pipeline-sa-adapter-own"]));
 
         var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
 
@@ -483,12 +493,102 @@ internal class ServiceAccountHealthTests
         var secret = Check(dto, "secret");
         await Assert.That(secret.Status).IsEqualTo("Healthy");
         await Assert.That(secret.Message!).Contains("octo-pipeline-sa-adapter-own");
-        // But the MayActAs edge itself is not verifiable through the identity REST surface, so the
-        // impersonation view is honest about not knowing — and the overall status says so.
+        // And the MayActAs edge is now verified through the actors read surface — fully green.
+        var impersonation = Check(dto, "impersonation");
+        await Assert.That(impersonation.Status).IsEqualTo("Healthy");
+        await Assert.That(impersonation.Message!).Contains("MayActAs");
+        await Assert.That(impersonation.Message!).Contains("octo-pipeline-sa-adapter-own");
+        await Assert.That(dto.OverallStatus).IsEqualTo("Healthy");
+    }
+
+    [Test]
+    public async Task GetConfigurationHealth_SecretlessStandaloneWithoutEdge_ImpersonationViolation()
+    {
+        var sut = CreateSut();
+        var configuration = CreateInstallationDefaultConfiguration(withSecret: false);
+        ArrangeMatchingIdentityClient();
+        ArrangeCapableAdapterActor(configuration);
+        // Identity answers authoritatively: the account has actors — but not this one.
+        _identityReader.GetActorClientIdsAsync(TenantId, "client-id")
+            .Returns(IdentityClientActorsLookup.Found(["some-other-actor"]));
+
+        var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(dto.OverallStatus).IsEqualTo("Unhealthy");
+        // The secret check still trusts the actor's existence — the broken half is the edge.
+        await Assert.That(Check(dto, "secret").Status).IsEqualTo("Healthy");
+        var impersonation = Check(dto, "impersonation");
+        await Assert.That(impersonation.Status).IsEqualTo("Violation");
+        await Assert.That(impersonation.Code).IsEqualTo("impersonation-edge-missing");
+        await Assert.That(impersonation.Message!).Contains("MayActAs");
+        await Assert.That(impersonation.Message!).Contains("octo-pipeline-sa-adapter-own");
+        await Assert.That(impersonation.Message!).Contains("reconcile");
+    }
+
+    [Test]
+    public async Task GetConfigurationHealth_SecretlessStandaloneEmptyActorList_ImpersonationViolation()
+    {
+        var sut = CreateSut();
+        var configuration = CreateInstallationDefaultConfiguration(withSecret: false);
+        ArrangeMatchingIdentityClient();
+        ArrangeCapableAdapterActor(configuration);
+        // An authoritative empty list ("client exists, nobody may act for it") is drift too.
+        _identityReader.GetActorClientIdsAsync(TenantId, "client-id")
+            .Returns(IdentityClientActorsLookup.Found([]));
+
+        var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(dto.OverallStatus).IsEqualTo("Unhealthy");
+        await Assert.That(Check(dto, "impersonation").Status).IsEqualTo("Violation");
+        await Assert.That(Check(dto, "impersonation").Code).IsEqualTo("impersonation-edge-missing");
+    }
+
+    [Test]
+    public async Task GetConfigurationHealth_SecretlessStandaloneActorsUnreachable_ImpersonationUnknown()
+    {
+        var sut = CreateSut();
+        var configuration = CreateInstallationDefaultConfiguration(withSecret: false);
+        ArrangeMatchingIdentityClient();
+        ArrangeCapableAdapterActor(configuration);
+        _identityReader.GetActorClientIdsAsync(TenantId, "client-id")
+            .Returns(IdentityClientActorsLookup.Unavailable(
+                "the identity service could not be queried: connection refused"));
+
+        var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
+
+        using var _ = Assert.Multiple();
+        // Degrade, don't accuse: unreachable identity is Unknown, never a violation.
+        await Assert.That(dto.OverallStatus).IsEqualTo("Unknown");
         var impersonation = Check(dto, "impersonation");
         await Assert.That(impersonation.Status).IsEqualTo("Unknown");
-        await Assert.That(impersonation.Message!).Contains("MayActAs");
-        await Assert.That(dto.OverallStatus).IsEqualTo("Unknown");
+        await Assert.That(impersonation.Code).IsNull();
+        await Assert.That(impersonation.Message!).Contains("connection refused");
+    }
+
+    [Test]
+    public async Task GetConfigurationHealth_SecretlessStandaloneTargetClientGone_ImpersonationViolation()
+    {
+        var sut = CreateSut();
+        var configuration = CreateInstallationDefaultConfiguration(withSecret: false);
+        ArrangeCapableAdapterActor(configuration);
+        // Identity knows neither the client nor (therefore) any edge onto it — both the client
+        // check and the impersonation check carry their own violation.
+        _identityReader.GetClientAsync(TenantId, "client-id", Arg.Any<bool>())
+            .Returns(IdentityClientLookup.NotFound);
+        _identityReader.GetActorClientIdsAsync(TenantId, "client-id")
+            .Returns(IdentityClientActorsLookup.NotFound);
+
+        var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(dto.OverallStatus).IsEqualTo("Unhealthy");
+        await Assert.That(Check(dto, "client").Code).IsEqualTo("client-missing");
+        var impersonation = Check(dto, "impersonation");
+        await Assert.That(impersonation.Status).IsEqualTo("Violation");
+        await Assert.That(impersonation.Code).IsEqualTo("impersonation-edge-missing");
+        await Assert.That(impersonation.Message!).Contains("does not exist");
     }
 
     [Test]

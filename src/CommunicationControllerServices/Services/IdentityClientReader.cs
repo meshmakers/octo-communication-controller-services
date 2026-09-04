@@ -97,6 +97,56 @@ internal class IdentityClientReader(
         return new IdentityClientLookup(IdentityClientLookupStatus.Found, client, roleNames, null);
     }
 
+    /// <inheritdoc />
+    public async Task<IdentityClientActorsLookup> GetActorClientIdsAsync(string tenantId, string clientId)
+    {
+        var bearer = httpContextAccessor.HttpContext?.Request.Headers.Authorization.ToString();
+        if (string.IsNullOrWhiteSpace(bearer))
+        {
+            return IdentityClientActorsLookup.Unavailable(
+                "no caller bearer token is available to query the identity service with");
+        }
+
+        var httpClient = httpClientFactory.CreateClient(HttpClientName);
+        var baseUrl = options.Value.AuthorityUrl.TrimEnd('/');
+        var actorsUrl =
+            $"{baseUrl}/{Uri.EscapeDataString(tenantId)}/v1/Clients/{Uri.EscapeDataString(clientId)}/actors";
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, actorsUrl);
+            request.Headers.TryAddWithoutValidation("Authorization", bearer);
+            using var response = await httpClient.SendAsync(request);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                // Authoritative: the TARGET client does not exist — no edge can exist onto it.
+                return IdentityClientActorsLookup.NotFound;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return IdentityClientActorsLookup.Unavailable(
+                    $"the identity service answered {(int)response.StatusCode} for the actors of client '{clientId}'");
+            }
+
+            var actorClientIds = JsonSerializer.Deserialize<List<string>>(
+                await response.Content.ReadAsStringAsync(), JsonOptions);
+            if (actorClientIds == null)
+            {
+                return IdentityClientActorsLookup.Unavailable(
+                    $"the identity service returned an empty actors payload for client '{clientId}'");
+            }
+
+            return IdentityClientActorsLookup.Found(actorClientIds);
+        }
+        catch (Exception e)
+        {
+            return IdentityClientActorsLookup.Unavailable(
+                $"the identity service could not be queried: {e.Message}");
+        }
+    }
+
     /// <summary>
     /// Resolves the names of the client's directly assigned roles:
     /// <c>GET Clients/{id}/roles</c> answers role <b>rtIds</b>, so the tenant's role list is

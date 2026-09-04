@@ -82,6 +82,9 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         identityClientReader
             .GetClientAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>())
             .Returns(IdentityClientLookup.Unavailable("integration fixture runs no identity service"));
+        identityClientReader
+            .GetActorClientIdsAsync(Arg.Any<string>(), Arg.Any<string>())
+            .Returns(IdentityClientActorsLookup.Unavailable("integration fixture runs no identity service"));
         Services.AddSingleton(identityClientReader);
         Services.AddOptions<ServiceAccountGuardOptions>();
         Services.AddSingleton<IServiceAccountHealthService, ServiceAccountHealthService>();

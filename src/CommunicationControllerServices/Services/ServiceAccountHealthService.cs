@@ -271,11 +271,11 @@ internal class ServiceAccountHealthService(
                 "replaced via the rotate endpoint."));
         }
 
-        // AB#5114: the impersonation view. Only meaningful for a secretless account; the MayActAs
-        // edge itself is NOT verifiable from here — the identity REST surface the controller reads
-        // through (GET {tenantId}/v1/Clients/…, IIdentityClientReader) exposes clients and role
-        // edges but no client-to-client associations — so a capable actor is reported as Unknown
-        // rather than pretending certainty either way.
+        // AB#5114: the impersonation view. Only meaningful for a secretless account; with a
+        // capable actor at hand the MayActAs edge is verified through identity's actors read
+        // surface (GET {tenantId}/v1/Clients/{id}/actors) — Healthy when the edge stands,
+        // Violation when identity authoritatively answers without it, Unknown only when identity
+        // could not be asked.
         if (secretUsable)
         {
             checks.Add(NotApplicable(ImpersonationCheck,
@@ -290,11 +290,7 @@ internal class ServiceAccountHealthService(
         }
         else if (impersonation.ActorClientId != null)
         {
-            checks.Add(Unknown(ImpersonationCheck,
-                $"Adapter client '{impersonation.ActorClientId}' can impersonate this account only while identity " +
-                $"holds a MayActAs edge onto '{clientId}'. The controller cannot verify that edge (the identity " +
-                "REST surface exposes no client-association read), so it is reported as unknown; the reconcile " +
-                "materialises it (AB#5114) and the identity token endpoint refuses impersonation without it."));
+            checks.Add(await EvaluateImpersonationEdgeAsync(tenantId, clientId, impersonation.ActorClientId));
         }
         else
         {
@@ -354,6 +350,59 @@ internal class ServiceAccountHealthService(
             checks.Add(Healthy(IssuerUriCheck,
                 $"IssuerUri '{issuerUri}' is a deliberate foreign identity target; the reconcile leaves it " +
                 "alone (AB#5115)."));
+        }
+    }
+
+    /// <summary>
+    /// AB#5114: the MayActAs edge behind a secretless account, verified through identity's actors
+    /// read surface (<c>GET {tenantId}/v1/Clients/{id}/actors</c>,
+    /// <see cref="IIdentityClientReader.GetActorClientIdsAsync" />). Only called when a capable
+    /// actor exists: Healthy when identity lists the actor, Violation
+    /// (<c>impersonation-edge-missing</c>) on any authoritative answer without it — an absent edge
+    /// or an absent target client both mean the identity token endpoint refuses the impersonation
+    /// request — and Unknown only when identity could not be asked.
+    /// </summary>
+    private async Task<ServiceAccountHealthCheckDto> EvaluateImpersonationEdgeAsync(string tenantId,
+        string? clientId, string actorClientId)
+    {
+        if (string.IsNullOrWhiteSpace(clientId))
+        {
+            // The client check already carries the client-missing violation; without a ClientId
+            // there is no identity client the edge could point at either.
+            return Violation(ImpersonationCheck, "impersonation-edge-missing",
+                $"Adapter client '{actorClientId}' cannot impersonate this account: the configuration declares " +
+                "no ClientId, so no identity client exists to hold a MayActAs edge. Run the service-account " +
+                "reconcile to materialise the client and the edge (AB#5114).");
+        }
+
+        var lookup = await identityClientReader.GetActorClientIdsAsync(tenantId, clientId!);
+        switch (lookup.Status)
+        {
+            case IdentityClientLookupStatus.NotFound:
+                return Violation(ImpersonationCheck, "impersonation-edge-missing",
+                    $"Adapter client '{actorClientId}' cannot impersonate this account: client '{clientId}' does " +
+                    $"not exist in tenant '{tenantId}', so no MayActAs edge onto it can exist. Run the " +
+                    "service-account reconcile to materialise the client and the edge (AB#5114).");
+
+            case IdentityClientLookupStatus.Unavailable:
+                var reason = lookup.UnavailableReason ?? "the identity service could not be queried";
+                return Unknown(ImpersonationCheck,
+                    $"Whether identity holds a MayActAs edge from adapter client '{actorClientId}' onto " +
+                    $"'{clientId}' could not be verified: {reason}. The identity token endpoint refuses " +
+                    "impersonation without the edge (AB#5114).");
+
+            default:
+                if (lookup.ActorClientIds!.Contains(actorClientId, StringComparer.Ordinal))
+                {
+                    return Healthy(ImpersonationCheck,
+                        $"Identity holds a MayActAs edge from adapter client '{actorClientId}' onto '{clientId}' " +
+                        "(AB#5114) — the adapter presents its own credentials and receives this account's identity.");
+                }
+
+                return Violation(ImpersonationCheck, "impersonation-edge-missing",
+                    $"Adapter client '{actorClientId}' is the account's impersonation actor, but identity holds " +
+                    $"no MayActAs edge from it onto '{clientId}' — the identity token endpoint refuses the " +
+                    "impersonation request (AB#5114). Run the service-account reconcile to materialise the edge.");
         }
     }
 

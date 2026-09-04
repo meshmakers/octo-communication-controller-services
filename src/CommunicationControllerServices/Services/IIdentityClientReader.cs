@@ -54,6 +54,46 @@ public record IdentityClientLookup(
 }
 
 /// <summary>
+/// Result of one impersonation-actors lookup (AB#5114) — the answer of identity's MayActAs read
+/// surface, <c>GET {tenantId}/v1/Clients/{id}/actors</c>.
+/// </summary>
+/// <param name="Status">
+///     <see cref="IdentityClientLookupStatus.Found" /> = identity answered authoritatively (the
+///     actor list is complete, possibly empty); <see cref="IdentityClientLookupStatus.NotFound" />
+///     = the TARGET client does not exist in the tenant (so no edge can exist either);
+///     <see cref="IdentityClientLookupStatus.Unavailable" /> = the question could not be answered.
+/// </param>
+/// <param name="ActorClientIds">
+///     The client ids holding a <c>MayActAs</c> edge onto the target — only when
+///     <see cref="IdentityClientLookupStatus.Found" />, else <c>null</c>.
+/// </param>
+/// <param name="UnavailableReason">
+///     Human-readable reason when <see cref="IdentityClientLookupStatus.Unavailable" />. Never
+///     contains a secret.
+/// </param>
+public record IdentityClientActorsLookup(
+    IdentityClientLookupStatus Status,
+    IReadOnlyList<string>? ActorClientIds,
+    string? UnavailableReason)
+{
+    /// <summary>Convenience factory for the unavailable case.</summary>
+    public static IdentityClientActorsLookup Unavailable(string reason)
+    {
+        return new IdentityClientActorsLookup(IdentityClientLookupStatus.Unavailable, null, reason);
+    }
+
+    /// <summary>The authoritative actor list (possibly empty).</summary>
+    public static IdentityClientActorsLookup Found(IReadOnlyList<string> actorClientIds)
+    {
+        return new IdentityClientActorsLookup(IdentityClientLookupStatus.Found, actorClientIds, null);
+    }
+
+    /// <summary>The authoritative "no such target client" answer.</summary>
+    public static readonly IdentityClientActorsLookup NotFound =
+        new(IdentityClientLookupStatus.NotFound, null, null);
+}
+
+/// <summary>
 /// Read-only view onto the tenant's identity clients (AB#5112, Epic AB#4979) — the query
 /// counterpart of the write-only <c>CreateIdentityDataCommandRequest</c> bus command the
 /// provisioning service converges clients with.
@@ -89,4 +129,15 @@ public interface IIdentityClientReader
     ///     the Found status.
     /// </param>
     Task<IdentityClientLookup> GetClientAsync(string tenantId, string clientId, bool includeRoles);
+
+    /// <summary>
+    /// Reads which clients may act for (impersonate) <paramref name="clientId" /> — identity's
+    /// <c>MayActAs</c> read surface, <c>GET {tenantId}/v1/Clients/{id}/actors</c> (AB#5114). Same
+    /// transport contract as <see cref="GetClientAsync" />: the caller's bearer is forwarded, and
+    /// anything short of an authoritative answer (no ambient request, 401/403/5xx, identity down)
+    /// degrades to <see cref="IdentityClientLookupStatus.Unavailable" />, never to "no edge".
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier.</param>
+    /// <param name="clientId">The identity client id of the impersonation TARGET.</param>
+    Task<IdentityClientActorsLookup> GetActorClientIdsAsync(string tenantId, string clientId);
 }
