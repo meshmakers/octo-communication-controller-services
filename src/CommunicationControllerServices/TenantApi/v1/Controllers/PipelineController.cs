@@ -1,7 +1,9 @@
 using System.ComponentModel.DataAnnotations;
+using System.Security.Claims;
 using System.Text;
 using Asp.Versioning;
 using IdentityModel;
+using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -154,8 +156,15 @@ public class PipelineController : ControllerBase
             using var reader = new StreamReader(Request.Body, Encoding.UTF8);
 
             var pipelineInput = await reader.ReadToEndAsync();
+
+            // AB#5126: this endpoint is invoked by an authenticated user, so carry them through as
+            // the caller of the FromExecutePipelineCommand pipeline. The route requires a bearer
+            // (see [Authorize] above), so a resolved invoker is strongly authenticated (trust=2).
+            var caller = BuildExecutePipelineCaller();
+            var callerAccessToken = ExtractBearerToken();
+
             var pipelineExecutionId = await _triggerManagementService.StartExecutePipelineAsync(tenantId, pipelineRtId,
-                pipelineInput, isDryRun);
+                pipelineInput, isDryRun, caller, callerAccessToken);
             return Ok(pipelineExecutionId);
         }
         catch (Exception e)
@@ -163,6 +172,44 @@ public class PipelineController : ControllerBase
             _logger.LogError(e, "Error during execution of pipeline");
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
         }
+    }
+
+    /// <summary>
+    ///     Projects the authenticated invoker into a token-free <see cref="ExecutePipelineCaller" />
+    ///     (AB#5126). Mirrors the claim mapping the HTTP trigger uses for its verified principal
+    ///     (AB#4975). Returns null when the request is unauthenticated (never expected here — the
+    ///     route requires a bearer — but kept defensive).
+    /// </summary>
+    private ExecutePipelineCaller? BuildExecutePipelineCaller()
+    {
+        if (User.Identity?.IsAuthenticated != true)
+        {
+            return null;
+        }
+
+        return new ExecutePipelineCaller
+        {
+            SubjectId = User.FindFirstValue(JwtClaimTypes.Subject) ?? User.FindFirstValue("client_id"),
+            TenantId = User.FindFirstValue(HubConnectionPrincipal.TenantIdClaimType),
+            Email = User.FindFirstValue(JwtClaimTypes.Email),
+            Name = User.FindFirstValue(JwtClaimTypes.Name) ?? User.FindFirstValue(JwtClaimTypes.PreferredUserName),
+            Roles = User.FindAll(JwtClaimTypes.Role).Select(claim => claim.Value).ToArray(),
+            // Bearer-authenticated invocation → strongly trusted (mirrors CallerTrustLevel.Strong=2).
+            TrustLevel = 2
+        };
+    }
+
+    /// <summary>
+    ///     The raw bearer token of the current request, for delegation on the adapter side (AB#5031),
+    ///     or null when the Authorization header is absent or not a Bearer credential. Never logged.
+    /// </summary>
+    private string? ExtractBearerToken()
+    {
+        var header = Request.Headers.Authorization.ToString();
+        const string prefix = "Bearer ";
+        return header.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            ? header[prefix.Length..].Trim()
+            : null;
     }
 
     /// <summary>

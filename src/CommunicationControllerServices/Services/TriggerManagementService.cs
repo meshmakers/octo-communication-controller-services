@@ -21,7 +21,8 @@ internal class TriggerManagementService(
     : ITriggerManagementService
 {
     public async Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId,
-        OctoObjectId pipelineRtId, string? pipelineInput, bool isDryRun = false)
+        OctoObjectId pipelineRtId, string? pipelineInput, bool isDryRun = false,
+        ExecutePipelineCaller? caller = null, string? callerAccessToken = null)
     {
         logger.LogInformation("[{TenantId}] Executing pipeline '{PipelineRtId}' (dry-run={IsDryRun})",
             tenantId, pipelineRtId, isDryRun);
@@ -42,7 +43,15 @@ internal class TriggerManagementService(
                 $"{PipelineQueueNames.ExecutePipelineCommand.ToLower()}-{tenantId.ToLower()}-pipeline-{pipelineRtId.ToString().ToLower()}";
 
             r = await executeMeshPipelineCommandClient.GetResponse<ExecutePipelineResponse>(address,
-                new ExecutePipelineRequest(tenantId, pipelineInput) { IsDryRun = isDryRun });
+                // AB#5126: carry the invoker through so a FromExecutePipelineCommand pipeline can run
+                // as them. Token-free principal on Caller; the raw token travels separately and never
+                // reaches the pipeline data root.
+                new ExecutePipelineRequest(tenantId, pipelineInput)
+                {
+                    IsDryRun = isDryRun,
+                    Caller = caller,
+                    CallerAccessToken = callerAccessToken
+                });
 
             if (r.IsSuccessStartingExecution)
             {

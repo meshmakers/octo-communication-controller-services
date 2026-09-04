@@ -17,9 +17,17 @@ public interface ITriggerManagementService
     /// <param name="isDryRun">When true (M4-B.2), the adapter runs the pipeline with all
     /// dry-run-honouring Load nodes suppressing their real side effect; would-be payloads
     /// are recorded on the debug stream instead. Default false preserves classic semantics.</param>
+    /// <param name="caller">The invoker of this manual execution, carried through so the pipeline
+    /// can run as them (AB#5126). Null for an internal invocation — the pipeline then runs
+    /// anonymously exactly as before.</param>
+    /// <param name="callerAccessToken">The invoker's raw access token, for a node that must act as
+    /// the invoker against another service (delegation, AB#5031). Null when none is available; never
+    /// logged.</param>
     /// <returns>The pipeline execution id, if the start of execution was successful</returns>
     Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId, OctoObjectId pipelineRtId,
-        string? pipelineInput, bool isDryRun = false);
+        string? pipelineInput, bool isDryRun = false,
+        Meshmakers.Octo.Communication.Contracts.MessageObjects.ExecutePipelineCaller? caller = null,
+        string? callerAccessToken = null);
     
     /// <summary>
     /// Remove the schedule for the triggers of the tenant
