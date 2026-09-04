@@ -9,8 +9,11 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
+using System.Security.Claims;
 using NSubstitute;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.AdapterServiceTests;
@@ -80,6 +83,14 @@ internal abstract class AdapterServiceTestsBase
     /// </summary>
     protected readonly ServiceAccountGuardOptions GuardOptions = new();
 
+    /// <summary>
+    /// AB#5128: the ambient HTTP context the elevation guard reads the caller principal from.
+    /// Default: no HttpContext (a system-initiated deploy), so suites that never touch elevation
+    /// are unaffected. Elevation tests call <see cref="SetCaller" /> to install a caller with or
+    /// without the UserManagement role.
+    /// </summary>
+    protected readonly IHttpContextAccessor HttpContextAccessor = Substitute.For<IHttpContextAccessor>();
+
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
     protected AdapterServiceTestsBase()
     {
@@ -109,8 +120,13 @@ internal abstract class AdapterServiceTestsBase
             // Real resolver (AB#5111), same reasoning as the service-account resolver above: the
             // IssuerUri token resolution in the configuration projection runs the real machinery.
             new WorkloadTemplateResolver(optionsMonitor),
-            IdentityClientReader, guardOptions);
+            IdentityClientReader, HttpContextAccessor, guardOptions);
         AdapterTenant = new AdapterTenant(AdapterCachePublish, TenantId);
+
+        // AB#5128: NSubstitute recursively auto-mocks HttpContext (non-null) by default, which
+        // would look like a caller with no roles; make the default an explicit null so the base
+        // represents a system-initiated deploy until a test calls SetCaller.
+        HttpContextAccessor.HttpContext.Returns((HttpContext?)null);
 
         InitAdapterCache();
         InitAdapterServiceAccount();
@@ -181,5 +197,24 @@ internal abstract class AdapterServiceTestsBase
             CommunicationRepository.GetDataFlowByPipelineAsync(TenantId, rtPipeline.RtId)
                 .Returns(rtDataFlow);
         }
+    }
+
+    /// <summary>
+    /// AB#5128: installs an HTTP caller principal on the ambient context so the elevation guard
+    /// sees a caller. Pass <paramref name="withUserManagementRole"/> to grant the elevation role
+    /// (emitted under the raw <c>role</c> claim, exactly as the JWT pipeline delivers it — see
+    /// <c>PrincipalRoleExtensions</c>).
+    /// </summary>
+    protected void SetCaller(bool withUserManagementRole)
+    {
+        var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, "test-caller") };
+        if (withUserManagementRole)
+        {
+            claims.Add(new Claim("role", CommonConstants.UserManagementRole));
+        }
+
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+        var httpContext = new DefaultHttpContext { User = principal };
+        HttpContextAccessor.HttpContext.Returns(httpContext);
     }
 }

@@ -160,6 +160,28 @@ internal class AdapterServiceException : Exception
     /// <c>AdapterService.EnsurePipelineHasServiceAccountAsync</c> — and the whole check can be
     /// disabled per environment via <c>OCTO_SERVICEACCOUNTGUARD__CHECKIDENTITYCLIENT=false</c>.
     /// </summary>
+    /// <summary>
+    /// AB#5128 (Epic AB#4979) elevation-authorization refusal. A pipeline that runs one or more
+    /// data nodes under an elevated identity (AB#5127 <c>Identity == ServiceAccount</c> or
+    /// <c>System</c>) escalates beyond the invoking caller's own rights — the node executes with
+    /// the service account's full roles, or unfiltered as the system context, even when a caller
+    /// principal is present. Deploying such a pipeline is therefore itself a privileged act and is
+    /// refused unless the caller carries the elevation role. Same exception type as the sibling
+    /// service-account guards for the same Studio-surface reason (see
+    /// <see cref="PipelineHasNoServiceAccount" />): the message names every offending node and the
+    /// required authorization, so it reads identically wherever it surfaces.
+    /// </summary>
+    internal static AdapterServiceException PipelineElevationNotAuthorized(string tenantId,
+        RtEntityId pipelineRtEntityId, IReadOnlyList<string> elevatedNodes, string requiredRole) =>
+        new($"[{tenantId}] Cannot deploy pipeline '{pipelineRtEntityId}': it elevates privilege in " +
+            $"the node(s) {string.Join(", ", elevatedNodes.Select(n => $"'{n}'"))} — each runs under an " +
+            "elevated identity (Identity=ServiceAccount or System, AB#5127/AB#5128, Epic AB#4979) that " +
+            "executes with the service account's full roles or unfiltered as the system context, beyond " +
+            "the rights of the caller who triggers the pipeline. Deploying an elevated pipeline is itself " +
+            $"a privileged operation and requires the '{requiredRole}' role, which the caller does not " +
+            "hold. Either have an authorized operator deploy it, or set the offending node(s) back to " +
+            "Identity=Caller (the safe default) so the pipeline runs within the caller's own permissions.");
+
     internal static AdapterServiceException PipelineServiceAccountClientMissing(string tenantId,
         RtEntityId pipelineRtEntityId, string wellKnownName, string? clientId, OctoObjectId adapterRtId,
         string? adapterName) =>

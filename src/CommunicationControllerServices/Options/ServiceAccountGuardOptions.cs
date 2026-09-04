@@ -32,4 +32,16 @@ internal class ServiceAccountGuardOptions
     ///     fall back to the AB#5027 behaviour (resolution + secret only).
     /// </summary>
     public bool CheckIdentityClient { get; set; } = true;
+
+    /// <summary>
+    ///     Whether the deploy guard authorizes privilege elevation (AB#5128, Epic AB#4979): a
+    ///     pipeline that runs any data node under <c>Identity == ServiceAccount</c> or
+    ///     <c>System</c> (AB#5127) escalates beyond the caller's own rights, so the deploy is
+    ///     refused unless the caller holds the elevation role (a system-initiated deploy without an
+    ///     HTTP caller principal is always allowed — it is logged). Default <c>true</c> (enforced);
+    ///     set <c>OCTO_SERVICEACCOUNTGUARD__CHECKELEVATION=false</c> to stage the controller ahead
+    ///     of pipelines being re-authored, mirroring the AB#5112 client-check off switch. The
+    ///     confused-deputy lint (AB#5128 part 2) is advisory and runs independently of this flag.
+    /// </summary>
+    public bool CheckElevation { get; set; } = true;
 }

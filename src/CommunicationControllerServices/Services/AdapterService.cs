@@ -10,7 +10,10 @@ using Meshmakers.Octo.ConstructionKit.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
+using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using NLog;
 
@@ -30,6 +33,7 @@ internal class AdapterService(
     IPipelineServiceAccountResolver serviceAccountResolver,
     IWorkloadTemplateResolver templateResolver,
     IIdentityClientReader identityClientReader,
+    IHttpContextAccessor httpContextAccessor,
     IOptions<ServiceAccountGuardOptions> serviceAccountGuardOptions)
     : IAdapterService
 {
@@ -620,6 +624,13 @@ internal class AdapterService(
                 await EnsurePipelineHasServiceAccountAsync(tenantId, pipelineRtEntityId, adapterRtEntityId.RtId,
                     workload?.Name);
 
+                // AB#5128 (Epic AB#4979): authorize privilege elevation. A pipeline running any
+                // node under Identity=ServiceAccount/System escalates beyond the caller's rights,
+                // so an unauthorized caller is refused here — before the first state write, like
+                // the guards above. The confused-deputy lint (advisory) runs on the same walk.
+                await EnsurePipelineElevationAuthorizedAsync(tenantId, pipelineRtEntityId,
+                    pipelineDefinition ?? pipeline.PipelineDefinition);
+
                 // Persist the pipeline definition to the RT entity so it is visible in the UI
                 if (pipelineDefinition != null)
                 {
@@ -764,6 +775,11 @@ internal class AdapterService(
                     // aborts the whole data-flow deploy instead of half-applying it.
                     await EnsurePipelineHasServiceAccountAsync(tenantId, rtDeployPipeline.ToRtEntityId(),
                         rtAdapter.RtId, rtAdapter.Name);
+
+                    // AB#5128: authorize elevation per pipeline — a data flow deploys many, and
+                    // one un-authorized elevated pipeline aborts the whole deploy before any write.
+                    await EnsurePipelineElevationAuthorizedAsync(tenantId, rtDeployPipeline.ToRtEntityId(),
+                        rtDeployPipeline.PipelineDefinition);
 
                     adapterConfig.Pipelines.Add(
                         await CreatePipelineConfigurationAsync(tenantId, dataFlowRtId, rtAdapter.RtId,
@@ -914,6 +930,120 @@ internal class AdapterService(
             "[{TenantId}] Pipeline '{PipelineRtEntityId}' executes as service account '{ServiceAccount}' (source: {Source})",
             tenantId, pipelineRtEntityId, resolution.ServiceAccount!.RtWellKnownName ?? resolution.ServiceAccount.RtId.ToString(),
             resolution.Source);
+    }
+
+    /// <summary>
+    /// AB#5128 (Epic AB#4979): authorizes privilege elevation at deploy time and runs the
+    /// confused-deputy lint. Setting any data node to <c>Identity=ServiceAccount</c> or
+    /// <c>System</c> (AB#5127) is an escalation — the node executes with the service account's full
+    /// roles, or unfiltered as the system context, even when a caller principal is present. When
+    /// the pipeline being deployed contains at least one such node:
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>Blocking gate</b> (behind <see cref="ServiceAccountGuardOptions.CheckElevation" />,
+    ///     default on): the caller must hold <see cref="CommonConstants.UserManagementRole" /> —
+    ///     the same role the AB#5111 service-account reconcile is gated on, elevation being at
+    ///     least as powerful. A system-initiated deploy (no HTTP caller principal, e.g. the
+    ///     post-provisioning re-deploy) is allowed, but logged. An unauthorized caller is refused
+    ///     naming every offending node.
+    ///   </item>
+    ///   <item>
+    ///     <b>Advisory lint</b> (always, independent of the flag): warns — never refuses — when an
+    ///     elevated node's target-selecting input reads a raw caller-controlled path
+    ///     (<c>$.body</c>/<c>$.query</c>/<c>$.files</c>/<c>$.headers</c>). The caller may TRIGGER
+    ///     the elevated op but must not silently STEER it (confused deputy).
+    ///   </item>
+    /// </list>
+    /// Always call this BEFORE the first state write of a deploy path.
+    /// </summary>
+    private async Task EnsurePipelineElevationAuthorizedAsync(string tenantId, RtEntityId pipelineRtEntityId,
+        string? pipelineDefinition)
+    {
+        if (string.IsNullOrEmpty(pipelineDefinition))
+        {
+            return;
+        }
+
+        // A definition that does not parse is not this guard's concern — schema validation and the
+        // AB#5113 rights analysis report it. Treat "unparsable" as "nothing to authorize".
+        if (!pipelineDefinitionService.TryGetAllNodes(pipelineDefinition, out var nodes))
+        {
+            return;
+        }
+
+        var elevatedNodes = PipelineElevationInspector.FindElevatedNodes(nodes);
+        if (elevatedNodes.Count == 0)
+        {
+            return;
+        }
+
+        // Blocking authorization (gated). The lint below still runs when this is disabled.
+        if (serviceAccountGuardOptions.Value.CheckElevation)
+        {
+            var caller = httpContextAccessor.HttpContext?.User;
+            if (caller == null)
+            {
+                // System-initiated deploy: no HTTP caller principal to authorize (e.g. the
+                // post-provisioning re-deploy). Allowed by design — same as the AB#5111 reconcile
+                // system path — but logged, because an elevation still happened.
+                Logger.Info(
+                    "[{TenantId}] Pipeline '{PipelineRtEntityId}' deploys with elevated node(s) {ElevatedNodes} on a system-initiated path (no caller principal) — elevation authorization skipped (AB#5128)",
+                    tenantId, pipelineRtEntityId, string.Join(", ", elevatedNodes.Select(n => n.Label)));
+            }
+            else if (!caller.HasRole(CommonConstants.UserManagementRole))
+            {
+                Logger.Warn(
+                    "[{TenantId}] Refusing to deploy pipeline '{PipelineRtEntityId}': caller lacks '{Role}' but the pipeline elevates in node(s) {ElevatedNodes} (AB#5128)",
+                    tenantId, pipelineRtEntityId, CommonConstants.UserManagementRole,
+                    string.Join(", ", elevatedNodes.Select(n => n.Label)));
+                throw AdapterServiceException.PipelineElevationNotAuthorized(tenantId, pipelineRtEntityId,
+                    elevatedNodes.Select(n => n.Label).ToList(), CommonConstants.UserManagementRole);
+            }
+            else
+            {
+                Logger.Info(
+                    "[{TenantId}] Authorized elevated deploy of pipeline '{PipelineRtEntityId}' (node(s) {ElevatedNodes}) for caller holding '{Role}' (AB#5128)",
+                    tenantId, pipelineRtEntityId, string.Join(", ", elevatedNodes.Select(n => n.Label)),
+                    CommonConstants.UserManagementRole);
+            }
+        }
+
+        await LintElevationConfusedDeputyAsync(tenantId, pipelineRtEntityId, nodes);
+    }
+
+    /// <summary>
+    /// AB#5128 confused-deputy lint: advisory, best-effort, never fails the deploy. Emits one
+    /// warning per elevated node whose target-selecting input reads a raw caller-controlled path,
+    /// into the tenant event log (the deploy result surface) and the service log. A pipeline author
+    /// may do this deliberately — the point is that they must SEE it.
+    /// </summary>
+    private async Task LintElevationConfusedDeputyAsync(string tenantId, RtEntityId pipelineRtEntityId,
+        IReadOnlyList<PipelineNodeProperties> nodes)
+    {
+        try
+        {
+            var findings = PipelineElevationInspector.FindConfusedDeputyHazards(nodes);
+            foreach (var finding in findings)
+            {
+                var message =
+                    $"Confused-deputy hazard: elevated node '{finding.NodeLabel}' takes its target from the " +
+                    $"caller-controlled path '{finding.CallerControlledPath}' (property '{finding.PropertyName}'). " +
+                    "The caller can trigger this elevated operation but should not steer which entity it acts on. " +
+                    "If this is intentional, ignore this warning; otherwise pin the target to a constant or a " +
+                    "value computed under the pipeline's control.";
+                Logger.Warn(
+                    "[{TenantId}] Pipeline '{PipelineRtEntityId}' confused-deputy hazard: elevated node '{NodeLabel}' property '{Property}' reads caller-controlled path '{Path}' (AB#5128)",
+                    tenantId, pipelineRtEntityId, finding.NodeLabel, finding.PropertyName, finding.CallerControlledPath);
+                await eventService.StoreWarningEventAsync(tenantId, message, pipelineRtEntityId);
+            }
+        }
+        catch (Exception e)
+        {
+            // Advisory by contract: a failure to detect or store the warning must never fail the deploy.
+            Logger.Warn(e,
+                "[{TenantId}] Failed to run the confused-deputy lint for pipeline '{PipelineRtEntityId}'",
+                tenantId, pipelineRtEntityId);
+        }
     }
 
     /// <summary>
