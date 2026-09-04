@@ -47,6 +47,15 @@ internal static class Constants
     /// </para>
     /// </summary>
     public const string OnBehalfOfGrantType = "urn:meshmakers:params:oauth:grant-type:on-behalf-of";
+
+    /// <summary>
+    ///     AB#5114: the impersonation grant — a client with a <c>System.Identity/MayActAs</c> edge
+    ///     obtains a client-credentials-shaped token for the target it may act for. Every
+    ///     reconciled pipeline service account carries it, because adapter-default accounts are
+    ///     the ACTORS for standalone/override accounts (the edge, not this grant permission, is
+    ///     what actually authorizes a concrete pairing).
+    /// </summary>
+    public const string ImpersonationGrantType = "urn:meshmakers:params:oauth:grant-type:impersonate";
     
     /// <summary>
     ///     Policy for system api authorization

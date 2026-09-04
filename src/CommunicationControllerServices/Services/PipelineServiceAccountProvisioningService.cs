@@ -638,6 +638,11 @@ internal class PipelineServiceAccountProvisioningService(
         string secret, string[]? assignedRoleNames, bool allowDelegation, IList<string>? mayActAsClientIds)
     {
         var allowedGrantTypes = new List<string> { OidcConstants.GrantTypes.ClientCredentials };
+        // AB#5114: every pipeline service account may be an ACTOR for another one (an adapter's
+        // default account impersonating a standalone/override account). The grant permission is
+        // harmless without a MayActAs edge — the edge authorizes the concrete pairing — so it is
+        // part of the reconciled baseline rather than a separate declarative switch.
+        allowedGrantTypes.Add(Constants.ImpersonationGrantType);
         if (allowDelegation)
         {
             // Precondition for AB#5031: Duende binds one extension-grant validator per grant type

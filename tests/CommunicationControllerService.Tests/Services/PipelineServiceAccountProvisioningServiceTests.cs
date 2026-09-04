@@ -145,6 +145,9 @@ internal class PipelineServiceAccountProvisioningServiceTests
         // Without the delegation URN Duende rejects an on-behalf-of request before the validator
         // runs, so AB#5031 would need every provisioned tenant touched again.
         await Assert.That(client.AllowedGrantTypes).Contains(Constants.OnBehalfOfGrantType);
+        // AB#5114: the impersonation grant is part of the reconciled baseline — the MayActAs edge,
+        // not this permission, authorizes a concrete actor/target pairing.
+        await Assert.That(client.AllowedGrantTypes).Contains(Constants.ImpersonationGrantType);
         await Assert.That(client.AllowedScopes).IsEquivalentTo(new[] { CommonConstants.OctoApiFullAccess });
         await Assert.That(client.RequireClientSecret).IsTrue();
         await Assert.That(client.ClientSecret).IsNotNull();
