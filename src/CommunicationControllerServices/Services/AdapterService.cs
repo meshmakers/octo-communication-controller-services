@@ -751,18 +751,23 @@ internal class AdapterService(
                             rtAdapter.Configuration, new List<PipelineConfigurationDto>());
 
                         adapterConfigurations.Add(adapterConfig.AdapterRtEntityId, adapterConfig);
-                    }
 
-                    foreach (var deployedPipelineConfigurationDto in adapter.Configuration.Pipelines)
-                    {
-                        // If the pipeline is already deployed, we remove it so the new version can be added
-                        if (deployedPipelineConfigurationDto.DataFlowRtId == dataFlowRtId)
+                        // AB#5138: seed the new configuration ONCE per adapter — every already
+                        // deployed pipeline of OTHER data flows is kept, this data flow's entries
+                        // are dropped so the loop below re-adds their fresh versions. This used to
+                        // run once per pipeline of the data flow, and because
+                        // PipelineConfigurationDto has value equality the repeated
+                        // Remove(oldEntry) also removed the fresh entries added in earlier
+                        // iterations whenever a sibling redeployed UNCHANGED — a multi-pipeline
+                        // data flow deploy (or SetPipelineDebugging, which deploys the whole data
+                        // flow) then silently undeployed every sibling except the last one
+                        // processed, tearing down their FromPipelineDataEvent consumers.
+                        foreach (var deployedPipelineConfigurationDto in adapter.Configuration.Pipelines)
                         {
-                            adapterConfig.Pipelines.Remove(deployedPipelineConfigurationDto);
-                        }
-                        else if (!adapterConfig.Pipelines.Contains(deployedPipelineConfigurationDto))
-                        {
-                            adapterConfig.Pipelines.Add(deployedPipelineConfigurationDto);
+                            if (deployedPipelineConfigurationDto.DataFlowRtId != dataFlowRtId)
+                            {
+                                adapterConfig.Pipelines.Add(deployedPipelineConfigurationDto);
+                            }
                         }
                     }
 
