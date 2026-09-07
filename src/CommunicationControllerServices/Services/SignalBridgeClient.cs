@@ -76,6 +76,16 @@ internal sealed class SignalBridgeClient(
         }
     }
 
+    /// <inheritdoc />
+    public async Task UpdateProfileAsync(string apiUrl, string number, string displayName,
+        CancellationToken cancellationToken = default)
+    {
+        var body = new Dictionary<string, object> { ["name"] = displayName };
+
+        await SendAsync(apiUrl, HttpMethod.Put, $"v1/profiles/{Uri.EscapeDataString(number)}", body,
+            cancellationToken);
+    }
+
     private async Task<string> SendAsync(string apiUrl, HttpMethod method, string relativePath,
         IReadOnlyDictionary<string, object>? body, CancellationToken cancellationToken)
     {

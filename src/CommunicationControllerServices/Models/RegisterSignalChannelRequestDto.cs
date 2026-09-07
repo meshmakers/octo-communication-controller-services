@@ -14,7 +14,14 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 ///     Optional captcha token from signalcaptchas.org (starts with <c>signalcaptcha://</c>) —
 ///     Signal demands one for most fresh registrations.
 /// </param>
+/// <param name="DisplayName">
+///     Optional profile display name, stored on the definition and pushed to the bridge
+///     (<c>PUT /v1/profiles/{number}</c>) once the channel reaches <c>Registered</c> — without
+///     it, Signal users see the number as "Unknown". Changeable later without re-registering via
+///     <c>PUT signal/channel/displayName</c>.
+/// </param>
 public sealed record RegisterSignalChannelRequestDto(
     [Required] string Number,
     string? ApiUrl = null,
-    string? CaptchaToken = null);
+    string? CaptchaToken = null,
+    string? DisplayName = null);

@@ -70,7 +70,7 @@ internal sealed class SignalChannelService(
 
     /// <inheritdoc />
     public async Task<SignalChannelDto> RegisterAsync(string tenantId, SignalChannelActor actor, string? number,
-        string? apiUrl, string? captchaToken)
+        string? apiUrl, string? captchaToken, string? displayName = null)
     {
         var validatedNumber = ValidateNumber(number);
 
@@ -98,6 +98,13 @@ internal sealed class SignalChannelService(
         };
         channel.Number = validatedNumber;
         channel.ApiUrl = resolvedApiUrl;
+        // A provided display name is stored (create AND re-register); null keeps the stored one.
+        var normalizedDisplayName = NormalizeDisplayName(displayName);
+        if (normalizedDisplayName != null)
+        {
+            channel.DisplayName = normalizedDisplayName;
+        }
+
         channel.RegistrationState = RtSignalRegistrationStateEnum.Unregistered;
         channel.RegisteredAt = null;
         channel.LastError = null;
@@ -117,8 +124,15 @@ internal sealed class SignalChannelService(
             channel.RegistrationState = RtSignalRegistrationStateEnum.Registered;
             channel.RegisteredAt = DateTime.UtcNow;
             channel.LastError = null;
+            var profile = await PushProfileOnRegisteredAsync(tenantId, channel);
             AppendHistory(channel, actor, RtSignalRegistrationActionEnum.Adopted,
-                "existing bridge account adopted");
+                "existing bridge account adopted" + profile.DetailSuffix);
+            if (profile.Pushed)
+            {
+                AppendHistory(channel, actor, RtSignalRegistrationActionEnum.ProfileUpdated,
+                    $"display name '{channel.DisplayName}'");
+            }
+
             await communicationRepository.SaveSignalChannelAsync(tenantId, channel, false);
 
             await eventService.StoreInformationEventAsync(tenantId,
@@ -201,11 +215,82 @@ internal sealed class SignalChannelService(
         channel.RegistrationState = RtSignalRegistrationStateEnum.Registered;
         channel.RegisteredAt = DateTime.UtcNow;
         channel.LastError = null;
-        AppendHistory(channel, actor, RtSignalRegistrationActionEnum.CodeVerified, "registered");
+        var profile = await PushProfileOnRegisteredAsync(tenantId, channel);
+        AppendHistory(channel, actor, RtSignalRegistrationActionEnum.CodeVerified,
+            "registered" + profile.DetailSuffix);
+        if (profile.Pushed)
+        {
+            AppendHistory(channel, actor, RtSignalRegistrationActionEnum.ProfileUpdated,
+                $"display name '{channel.DisplayName}'");
+        }
+
         await communicationRepository.SaveSignalChannelAsync(tenantId, channel, false);
 
         await eventService.StoreInformationEventAsync(tenantId,
             $"Signal channel '{number}' verified and registered.");
+
+        return ToDto(channel, null, null);
+    }
+
+    /// <inheritdoc />
+    public async Task<SignalChannelDto> SetDisplayNameAsync(string tenantId, SignalChannelActor actor,
+        string? displayName)
+    {
+        var validated = NormalizeDisplayName(displayName);
+
+        var channel = await FindChannelAsync(tenantId) ?? throw SignalChannelServiceException.ChannelNotFound(tenantId);
+
+        if (validated == null)
+        {
+            // Clear semantics (the UI sends {"displayName": ""}): only the stored attribute is
+            // cleared. Signal profiles need a non-empty name, so the bridge is NOT called — the
+            // previously pushed profile name simply remains on the account.
+            channel.DisplayName = null;
+            AppendHistory(channel, actor, RtSignalRegistrationActionEnum.ProfileUpdated,
+                "display name cleared (bridge profile unchanged)");
+            await communicationRepository.SaveSignalChannelAsync(tenantId, channel, false);
+            return ToDto(channel, null, null);
+        }
+
+        // Persist the attribute FIRST (mirrors the register claim-first pattern): a failed bridge
+        // push then leaves the stored name in place and a plain retry of this endpoint re-pushes.
+        channel.DisplayName = validated;
+
+        if (channel.RegistrationState != RtSignalRegistrationStateEnum.Registered)
+        {
+            // Not registered (yet) — attribute update only; the name is pushed automatically when
+            // the channel reaches Registered via verify success or adoption.
+            AppendHistory(channel, actor, RtSignalRegistrationActionEnum.ProfileUpdated,
+                $"display name '{validated}' stored; pushed to the bridge on registration");
+            await communicationRepository.SaveSignalChannelAsync(tenantId, channel, false);
+            return ToDto(channel, null, null);
+        }
+
+        await communicationRepository.SaveSignalChannelAsync(tenantId, channel, false);
+
+        try
+        {
+            await bridgeClient.UpdateProfileAsync(RequireApiUrl(channel), channel.Number ?? string.Empty,
+                validated);
+        }
+        catch (SignalBridgeException e)
+        {
+            // Unlike the registration flows, the push IS this endpoint's purpose — the failure
+            // surfaces to the caller, but the stored name stays and the attempt is audited.
+            AppendHistory(channel, actor, RtSignalRegistrationActionEnum.ProfileUpdated,
+                $"profile update failed: {e.Message}");
+            await SaveBestEffortAsync(tenantId, channel);
+            await StoreErrorEventBestEffortAsync(tenantId,
+                $"Signal profile display-name update for '{channel.Number}' failed: {e.Message}");
+            throw SignalChannelServiceException.FromBridge(e);
+        }
+
+        AppendHistory(channel, actor, RtSignalRegistrationActionEnum.ProfileUpdated,
+            $"display name '{validated}'");
+        await communicationRepository.SaveSignalChannelAsync(tenantId, channel, false);
+
+        await eventService.StoreInformationEventAsync(tenantId,
+            $"Signal channel '{channel.Number}' profile display name set to '{validated}'.");
 
         return ToDto(channel, null, null);
     }
@@ -399,6 +484,41 @@ internal sealed class SignalChannelService(
         return string.IsNullOrEmpty(trimmed) ? null : trimmed;
     }
 
+    private static string? NormalizeDisplayName(string? displayName)
+    {
+        var trimmed = displayName?.Trim();
+        return string.IsNullOrEmpty(trimmed) ? null : trimmed;
+    }
+
+    /// <summary>
+    ///     Best-effort profile display-name push when a channel reaches <c>Registered</c> (verify
+    ///     success or adoption). A push failure must NOT fail the registration — it is reported as
+    ///     a detail suffix for the transition's history entry instead. Not attempted without a
+    ///     configured display name.
+    /// </summary>
+    private async Task<(bool Pushed, string DetailSuffix)> PushProfileOnRegisteredAsync(string tenantId,
+        RtSignalChannel channel)
+    {
+        if (string.IsNullOrWhiteSpace(channel.DisplayName))
+        {
+            return (false, string.Empty);
+        }
+
+        try
+        {
+            await bridgeClient.UpdateProfileAsync(RequireApiUrl(channel), channel.Number ?? string.Empty,
+                channel.DisplayName);
+            return (true, string.Empty);
+        }
+        catch (SignalBridgeException e)
+        {
+            logger.LogWarning(e,
+                "[{TenantId}] Profile display-name push for '{Number}' failed; the registration stands",
+                tenantId, channel.Number);
+            return (false, $"; profile update failed: {e.Message}");
+        }
+    }
+
     /// <summary>
     ///     Prepends one audit entry to the channel's registration history (newest first) and trims
     ///     to the newest <see cref="MaxHistoryEntries"/>. The list is rebuilt and reassigned —
@@ -474,6 +594,7 @@ internal sealed class SignalChannelService(
         return new SignalChannelDto(
             channel.Number ?? string.Empty,
             channel.ApiUrl ?? string.Empty,
+            channel.DisplayName,
             (int)channel.RegistrationState,
             channel.RegisteredAt,
             channel.LastError,

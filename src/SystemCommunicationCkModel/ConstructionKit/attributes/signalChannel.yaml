@@ -12,6 +12,9 @@ attributes:
   - id: ApiUrl
     valueType: String
     description: 'Base URL of the cluster-shared signal-cli-rest-api bridge this channel is registered against (e.g. http://signal-cli-rest-api.signal-bridge.svc.cluster.local:8080). The bridge API is unauthenticated; only the Communication Controller may call it.'
+  - id: SignalDisplayName
+    valueType: String
+    description: 'Profile display name of the account, shown to Signal users instead of "Unknown". Pushed to the bridge (PUT /v1/profiles/{number}) when the channel reaches Registered (verify success or adoption) and on the displayName self-service endpoint (which also clears it — without a bridge call, since Signal profiles need a non-empty name); stored here so it survives re-registration. Author configuration, not runtime state.'
   - id: RegistrationState
     valueType: Enum
     valueCkEnumId: ${this}/SignalRegistrationState

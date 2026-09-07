@@ -104,7 +104,11 @@ public class SignalChannelController : ControllerBase
     /// wizard attempts without a captcha first and only shows the captcha step on demand (retry
     /// with <c>captchaToken</c>); 429 (with Retry-After when known) on a Signal rate limit.
     /// </summary>
-    /// <param name="request">Number (E.164), optional bridge ApiUrl and captcha token.</param>
+    /// <param name="request">
+    /// Number (E.164), optional bridge ApiUrl, captcha token and profile display name (pushed to
+    /// the bridge once the channel reaches <c>Registered</c>, so Signal users do not see
+    /// "Unknown").
+    /// </param>
     [HttpPost("register")]
     [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
     [ProducesResponseType(typeof(SignalChannelDto), StatusCodes.Status200OK)]
@@ -124,7 +128,7 @@ public class SignalChannelController : ControllerBase
         try
         {
             return Ok(await _signalChannelService.RegisterAsync(tenantId, BuildActor(), request.Number,
-                request.ApiUrl, request.CaptchaToken));
+                request.ApiUrl, request.CaptchaToken, request.DisplayName));
         }
         catch (SignalChannelServiceException e)
         {
@@ -172,6 +176,50 @@ public class SignalChannelController : ControllerBase
             _logger.LogError(e, "[{TenantId}] Verifying the Signal channel failed", tenantId);
             return BadRequest(new ErrorResponse
                 { ErrorMessage = $"Verifying the Signal channel failed: {e.Message}" });
+        }
+    }
+
+    /// <summary>
+    /// Changes the profile display name WITHOUT re-registering (camelCase sub-route — pinned by
+    /// the Studio frontend, which calls <c>PUT .../signal/channel/displayName</c>). A non-empty
+    /// name updates the stored attribute; when the channel is <c>Registered</c> the profile is
+    /// additionally pushed to the bridge (<c>PUT /v1/profiles/{number}</c>) — a push failure keeps
+    /// the stored name (retry by calling again) and surfaces as 400/429. When not registered, the
+    /// name is stored only and pushed automatically once the channel reaches <c>Registered</c>.
+    /// An empty/whitespace name clears the stored attribute WITHOUT a bridge call — Signal
+    /// profiles need a non-empty name, so the previously pushed profile name remains on the
+    /// account.
+    /// </summary>
+    /// <param name="request">The profile display name Signal users should see; empty to clear.</param>
+    [HttpPut("displayName")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(typeof(SignalChannelDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status429TooManyRequests)]
+    public async Task<IActionResult> SetDisplayName(
+        [Required][FromBody] UpdateSignalChannelDisplayNameRequestDto request)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        try
+        {
+            return Ok(await _signalChannelService.SetDisplayNameAsync(tenantId, BuildActor(),
+                request.DisplayName));
+        }
+        catch (SignalChannelServiceException e)
+        {
+            return MapServiceError(e);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "[{TenantId}] Updating the Signal display name failed", tenantId);
+            return BadRequest(new ErrorResponse
+                { ErrorMessage = $"Updating the Signal display name failed: {e.Message}" });
         }
     }
 

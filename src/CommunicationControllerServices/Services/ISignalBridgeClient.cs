@@ -40,4 +40,12 @@ internal interface ISignalBridgeClient
     ///     <c>GET /v1/accounts</c> — the phone numbers currently registered on the bridge.
     /// </summary>
     Task<IReadOnlyList<string>> GetAccountsAsync(string apiUrl, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    ///     <c>PUT /v1/profiles/{number}</c> with <c>{"name": ...}</c> (→ 204) — sets the
+    ///     account's profile display name so Signal users see it instead of "Unknown". Only
+    ///     meaningful for a number that is registered on the bridge.
+    /// </summary>
+    Task UpdateProfileAsync(string apiUrl, string number, string displayName,
+        CancellationToken cancellationToken = default);
 }

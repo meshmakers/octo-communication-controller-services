@@ -454,12 +454,15 @@ it**; the browser talks exclusively to the tenant-scoped REST endpoints below.
 | `GET {tenantId}/v1/signal/channel` | ReadOnly | The definition + live bridge cross-check (`bridgeRegistered` from `GET /v1/accounts`; `null` + `warning` when the bridge is unreachable) + `history` (registration audit trail, newest first, newest 50). 404 without a definition. |
 | `POST {tenantId}/v1/signal/channel/register` | ReadWrite | Body `{number, apiUrl?, captchaToken?}`. Creates the singleton, claims the number, then checks `GET /v1/accounts`: a number the bridge already holds is **adopted** (state `Registered` immediately, no verify — clients detect `registrationState=2` in the answer); otherwise bridge `POST /v1/register/{number}` → state `CodePending`. 409 while Registered (number immutable) and when ANY other tenant claims the number. **422 when Signal demands a captcha** (machine-readable for the Studio wizard: attempt without a captcha first, show the captcha step only on demand, retry with `captchaToken`). 429 passthrough (with Retry-After) on Signal rate limits. |
 | `POST {tenantId}/v1/signal/channel/verify` | ReadWrite | Body `{code}`. Bridge `POST /v1/register/{number}/verify/{code}` → `Registered` + `RegisteredAt=utcnow`; a wrong code keeps `CodePending` with `LastError` set. |
+| `PUT {tenantId}/v1/signal/channel/displayName` | ReadWrite | Body `{displayName}` (camelCase segment — pinned by the Studio frontend). Changes the profile display name WITHOUT re-registering. Non-empty: attribute stored (persisted before the push, so a failed push is retried by calling again), pushed to the bridge (`PUT /v1/profiles/{number}`) only while `Registered` — push failures surface as 400/422/429 there. Empty/whitespace: clears the stored attribute WITHOUT a bridge call (Signal profiles need a non-empty name; the previously pushed profile name remains on the account). `ProfileUpdated` history entry in every case. |
 | `DELETE {tenantId}/v1/signal/channel` | ReadWrite | Works from EVERY state. The bridge account is only unregistered (`POST /v1/unregister/{number}`, `delete_local_data: true`, best-effort — "not registered" / unreachable never blocks) when the definition **owns** the registration, i.e. its state is `Registered`; a CodePending/Failed/Unregistered definition may reference a working bridge account it does not own (the adopt scenario), which must not be destroyed. Then Erase-deletes the definition **including its history** — the number becomes claimable again, and a fresh definition starts with a fresh history. |
 
 Pieces:
 
 - **CK type `System.Communication/SignalChannel`** (model 3.34.0, singleton per tenant, derived
-  from `${System}/Configuration`): `Number` (E.164), `ApiUrl`, the runtime-state trio
+  from `${System}/Configuration`): `Number` (E.164), `ApiUrl`, `DisplayName` (optional profile
+  display name — attribute id `SignalDisplayName` to keep the shared attribute pool
+  collision-free; without it Signal shows "Unknown"), the runtime-state trio
   `RegistrationState` (enum `SignalRegistrationState`: 0 Unregistered, 1 CodePending,
   2 Registered, 3 Failed), `RegisteredAt`, `LastError`, and the runtime-state
   `RegistrationHistory` (RecordArray of `SignalRegistrationEvent`, see below). No migration script
@@ -468,7 +471,7 @@ Pieces:
 - **Registration audit trail (WI rev 4)** — `RegistrationHistory` holds `SignalRegistrationEvent`
   records `{At (UTC), User, Action, Detail?}` with enum `SignalRegistrationAction`
   (0 RegisterRequested, 1 RegisterFailed, 2 CodeVerified, 3 VerifyFailed, 4 Deleted,
-  5 DeleteFailed, 6 Adopted). The service appends server-side for EVERY register/verify/delete
+  5 DeleteFailed, 6 Adopted, 7 ProfileUpdated). The service appends server-side for EVERY register/verify/delete
   attempt — bridge failures answered as 4xx/429 included (the `RegisterRequested` entry rides
   along with the pre-bridge claim save; the failure entry is appended exactly once and saved
   best-effort). Newest first, capped at the newest 50 on append (rebuild + reassign, never
@@ -506,6 +509,14 @@ Pieces:
   Studio wizard can attempt without a captcha and show the captcha step only on demand. The
   Failed state, LastError and the RegisterFailed history entry are identical to a plain 400
   rejection.
+- **Profile display name** — when a channel with a `DisplayName` reaches `Registered` (verify
+  success OR adoption), the service pushes the profile to the bridge
+  (`PUT /v1/profiles/{number}` with `{"name": ...}` → 204, `SignalBridgeClient.UpdateProfileAsync`).
+  Best-effort on the registration paths: a push failure must NOT fail the registration — it is
+  recorded as a `"; profile update failed: ..."` detail suffix on the transition's
+  `CodeVerified`/`Adopted` history entry; a successful push appends a `ProfileUpdated` entry. The
+  dedicated `displayName` endpoint (row above) is where push failures DO surface; clearing the
+  name there never touches the bridge profile.
 - **`CommunicationControllerOptions.SignalBridgeApiUrl`** is the instance default ApiUrl
   (`http://signal-cli-rest-api.signal-bridge.svc.cluster.local:8080`); a register request may
   override per tenant, and an existing definition's ApiUrl wins over the default.

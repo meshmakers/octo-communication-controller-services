@@ -1,7 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 enums:
 - enumId: SignalRegistrationAction
-  description: 'Audited action of a Signal channel registration attempt (AB#5143). Every register/verify/delete attempt against the tenant''s SignalChannel — including failed ones — appends one entry with this action to the channel''s RegistrationHistory. Adopted means the bridge already held a working account for the number, so register/verify were skipped and the definition went straight to Registered. Deleted is part of the audit vocabulary but a persisted Deleted entry never survives: a successful DELETE erases the definition including its history (fresh definition = fresh history); the system event trail still records the deletion.'
+  description: 'Audited action of a Signal channel registration attempt (AB#5143). Every register/verify/delete attempt against the tenant''s SignalChannel — including failed ones — appends one entry with this action to the channel''s RegistrationHistory. Adopted means the bridge already held a working account for the number, so register/verify were skipped and the definition went straight to Registered. ProfileUpdated records a display-name profile push (PUT /v1/profiles/{number}) — its detail carries the pushed name, the failure text for a rejected push on the displayName endpoint, or the cleared note (clearing never touches the bridge profile). Deleted is part of the audit vocabulary but a persisted Deleted entry never survives: a successful DELETE erases the definition including its history (fresh definition = fresh history); the system event trail still records the deletion.'
   useFlags: false
   values:
   - key: 0
@@ -18,3 +18,5 @@ enums:
     name: DeleteFailed
   - key: 6
     name: Adopted
+  - key: 7
+    name: ProfileUpdated

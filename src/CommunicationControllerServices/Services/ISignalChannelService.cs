@@ -36,10 +36,11 @@ public interface ISignalChannelService
     ///     leaves the definition at <c>Failed</c> with <c>LastError</c> set (and still throws).
     ///     Audit: a <c>RegisterRequested</c> entry is appended with the persisted claim (before
     ///     the bridge call); a bridge failure additionally persists a <c>RegisterFailed</c> entry
-    ///     even though the call throws.
+    ///     even though the call throws. An optional display name is stored on the definition and
+    ///     pushed to the bridge once the channel reaches <c>Registered</c>.
     /// </summary>
     Task<SignalChannelDto> RegisterAsync(string tenantId, SignalChannelActor actor, string? number, string? apiUrl,
-        string? captchaToken);
+        string? captchaToken, string? displayName = null);
 
     /// <summary>
     ///     Verifies the SMS code against the bridge. On success the state becomes
@@ -49,6 +50,19 @@ public interface ISignalChannelService
     ///     failure even though the call throws.
     /// </summary>
     Task<SignalChannelDto> VerifyAsync(string tenantId, SignalChannelActor actor, string? code);
+
+    /// <summary>
+    ///     Changes the profile display name WITHOUT re-registering. Non-empty: the attribute is
+    ///     updated (persisted first, so a failed push can be retried by calling again); when the
+    ///     channel is <c>Registered</c> the profile is additionally pushed to the bridge
+    ///     (<c>PUT /v1/profiles/{number}</c>) — a push failure then surfaces as a bridge error
+    ///     while the stored name is kept. Empty/whitespace/null clears the stored attribute
+    ///     WITHOUT a bridge call (Signal profiles need a non-empty name; a previously pushed
+    ///     profile name remains on the account). Audit: a <c>ProfileUpdated</c> entry carrying
+    ///     the pushed name, the failure detail, a stored-only note when not registered, or the
+    ///     cleared note.
+    /// </summary>
+    Task<SignalChannelDto> SetDisplayNameAsync(string tenantId, SignalChannelActor actor, string? displayName);
 
     /// <summary>
     ///     Deletes the definition from every state. The bridge unregister

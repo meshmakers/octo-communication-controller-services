@@ -3,11 +3,15 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 /// <summary>
 ///     Answer of the tenant Signal-channel endpoints (AB#5143,
 ///     <c>{tenantId}/v1/signal/channel</c>). Serialized camelCase for the Studio UI:
-///     <c>{number, apiUrl, registrationState, registeredAt, lastError, bridgeRegistered, warning,
-///     history}</c>.
+///     <c>{number, apiUrl, displayName, registrationState, registeredAt, lastError,
+///     bridgeRegistered, warning, history}</c>.
 /// </summary>
 /// <param name="Number">The claimed phone number in E.164 format.</param>
 /// <param name="ApiUrl">Base URL of the signal-cli-rest-api bridge the channel targets.</param>
+/// <param name="DisplayName">
+///     Profile display name pushed to the bridge on registration (Signal users see it instead of
+///     "Unknown"); <c>null</c> when none is configured.
+/// </param>
 /// <param name="RegistrationState">
 ///     <c>RtSignalRegistrationStateEnum</c> as an integer: 0 Unregistered, 1 CodePending,
 ///     2 Registered, 3 Failed.
@@ -31,6 +35,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 public sealed record SignalChannelDto(
     string Number,
     string ApiUrl,
+    string? DisplayName,
     int RegistrationState,
     DateTime? RegisteredAt,
     string? LastError,

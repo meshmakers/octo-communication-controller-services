@@ -9,6 +9,9 @@ types:
         name: Number
       - id: ${this}/ApiUrl
         name: ApiUrl
+      - id: ${this}/SignalDisplayName
+        name: DisplayName
+        isOptional: true
       - id: ${this}/RegistrationState
         name: RegistrationState
       - id: ${this}/RegisteredAt
