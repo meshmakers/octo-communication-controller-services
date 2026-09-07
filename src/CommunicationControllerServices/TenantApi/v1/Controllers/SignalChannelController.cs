@@ -95,9 +95,14 @@ public class SignalChannelController : ControllerBase
     /// state is <c>CodePending</c> and Signal sends an SMS verification code. When the bridge
     /// already holds an account for the number, the definition adopts it instead: the answer's
     /// <c>registrationState</c> is <c>Registered</c> (2) right away and no verification is needed.
-    /// Creates the singleton definition when absent. 409 when the channel is already
-    /// <c>Registered</c> (number immutable — delete first) or when another tenant on this instance
-    /// already claims the number; 429 (with Retry-After when known) on a Signal rate limit.
+    /// Creates the singleton definition when absent.
+    /// Responses: 200 with the state telling what happened (<c>Registered</c> = adopted,
+    /// <c>CodePending</c> = SMS code under way); 400 on any other bridge rejection or validation
+    /// failure; 409 when the channel is already <c>Registered</c> (number immutable — delete
+    /// first) or when another tenant on this instance already claims the number;
+    /// <b>422 when Signal demands a captcha</b> — machine-readable on purpose, so the Studio
+    /// wizard attempts without a captcha first and only shows the captcha step on demand (retry
+    /// with <c>captchaToken</c>); 429 (with Retry-After when known) on a Signal rate limit.
     /// </summary>
     /// <param name="request">Number (E.164), optional bridge ApiUrl and captcha token.</param>
     [HttpPost("register")]
@@ -106,6 +111,7 @@ public class SignalChannelController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status429TooManyRequests)]
     public async Task<IActionResult> Register([Required][FromBody] RegisterSignalChannelRequestDto request)
     {
@@ -230,8 +236,9 @@ public class SignalChannelController : ControllerBase
 
     /// <summary>
     /// Maps the service's error kinds onto the fixed HTTP contract: NotFound → 404,
-    /// Validation / BridgeRejected / BridgeUnreachable → 400, Conflict → 409, and
-    /// BridgeRateLimited → 429 passthrough with Retry-After when the bridge sent one.
+    /// Validation / BridgeRejected / BridgeUnreachable → 400, Conflict → 409,
+    /// BridgeCaptchaRequired → 422 (typed flag from the bridge client — no error-text parsing
+    /// here), and BridgeRateLimited → 429 passthrough with Retry-After when the bridge sent one.
     /// </summary>
     private IActionResult MapServiceError(SignalChannelServiceException e)
     {
@@ -241,6 +248,8 @@ public class SignalChannelController : ControllerBase
                 return NotFound(new ErrorResponse { ErrorMessage = e.Message });
             case SignalChannelErrorKind.Conflict:
                 return Conflict(new ErrorResponse { ErrorMessage = e.Message });
+            case SignalChannelErrorKind.BridgeCaptchaRequired:
+                return UnprocessableEntity(new ErrorResponse { ErrorMessage = e.Message });
             case SignalChannelErrorKind.BridgeRateLimited:
                 if (e.RetryAfter is { } retryAfter && retryAfter > TimeSpan.Zero)
                 {

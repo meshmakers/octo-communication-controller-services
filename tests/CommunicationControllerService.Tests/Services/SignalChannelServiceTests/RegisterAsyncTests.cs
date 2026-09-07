@@ -180,14 +180,14 @@ internal class RegisterAsyncTests : SignalChannelServiceTestsBase
         RtSignalChannel? saved = null;
         await CommunicationRepository.SaveSignalChannelAsync(TenantId, Arg.Do<RtSignalChannel>(c => saved = c),
             Arg.Any<bool>());
-        BridgeClient.RegisterAsync(ApiUrl, Number, null).ThrowsAsync(BridgeRejected("captcha required"));
+        BridgeClient.RegisterAsync(ApiUrl, Number, null).ThrowsAsync(BridgeRejected("number blocked"));
 
         var exception = await Assert.ThrowsAsync<SignalChannelServiceException>(
             () => Service.RegisterAsync(TenantId, Actor, Number, ApiUrl, null));
 
         await Assert.That(exception!.Kind).IsEqualTo(SignalChannelErrorKind.BridgeRejected);
         await Assert.That(saved!.RegistrationState).IsEqualTo(RtSignalRegistrationStateEnum.Failed);
-        await Assert.That(saved.LastError).Contains("captcha required");
+        await Assert.That(saved.LastError).Contains("number blocked");
     }
 
     [Test]

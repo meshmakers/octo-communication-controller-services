@@ -52,7 +52,7 @@ internal class RegistrationHistoryTests : SignalChannelServiceTestsBase
         var snapshots = new List<List<RtSignalRegistrationEventRecord>>();
         await CommunicationRepository.SaveSignalChannelAsync(TenantId,
             Arg.Do<RtSignalChannel>(c => snapshots.Add(History(c))), Arg.Any<bool>());
-        BridgeClient.RegisterAsync(ApiUrl, Number, null).ThrowsAsync(BridgeRejected("captcha required"));
+        BridgeClient.RegisterAsync(ApiUrl, Number, null).ThrowsAsync(BridgeRejected("number blocked"));
 
         await Assert.ThrowsAsync<SignalChannelServiceException>(
             () => Service.RegisterAsync(TenantId, Actor, Number, ApiUrl, null));
@@ -64,7 +64,7 @@ internal class RegistrationHistoryTests : SignalChannelServiceTestsBase
         // Failure save: newest first, the failure appended exactly once.
         await Assert.That(snapshots[1].Count).IsEqualTo(2);
         await Assert.That(snapshots[1][0].Action).IsEqualTo(RtSignalRegistrationActionEnum.RegisterFailed);
-        await Assert.That(snapshots[1][0].Detail).Contains("captcha required");
+        await Assert.That(snapshots[1][0].Detail).Contains("number blocked");
         await Assert.That(snapshots[1][1].Action).IsEqualTo(RtSignalRegistrationActionEnum.RegisterRequested);
         await Assert.That(snapshots[1]
                 .Count(e => e.Action == RtSignalRegistrationActionEnum.RegisterFailed))

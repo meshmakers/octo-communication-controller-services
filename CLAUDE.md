@@ -452,7 +452,7 @@ it**; the browser talks exclusively to the tenant-scoped REST endpoints below.
 | Route | Policy | Behaviour |
 |---|---|---|
 | `GET {tenantId}/v1/signal/channel` | ReadOnly | The definition + live bridge cross-check (`bridgeRegistered` from `GET /v1/accounts`; `null` + `warning` when the bridge is unreachable) + `history` (registration audit trail, newest first, newest 50). 404 without a definition. |
-| `POST {tenantId}/v1/signal/channel/register` | ReadWrite | Body `{number, apiUrl?, captchaToken?}`. Creates the singleton, claims the number, then checks `GET /v1/accounts`: a number the bridge already holds is **adopted** (state `Registered` immediately, no verify — clients detect `registrationState=2` in the answer); otherwise bridge `POST /v1/register/{number}` → state `CodePending`. 409 while Registered (number immutable) and when ANY other tenant claims the number. 429 passthrough (with Retry-After) on Signal rate limits. |
+| `POST {tenantId}/v1/signal/channel/register` | ReadWrite | Body `{number, apiUrl?, captchaToken?}`. Creates the singleton, claims the number, then checks `GET /v1/accounts`: a number the bridge already holds is **adopted** (state `Registered` immediately, no verify — clients detect `registrationState=2` in the answer); otherwise bridge `POST /v1/register/{number}` → state `CodePending`. 409 while Registered (number immutable) and when ANY other tenant claims the number. **422 when Signal demands a captcha** (machine-readable for the Studio wizard: attempt without a captcha first, show the captcha step only on demand, retry with `captchaToken`). 429 passthrough (with Retry-After) on Signal rate limits. |
 | `POST {tenantId}/v1/signal/channel/verify` | ReadWrite | Body `{code}`. Bridge `POST /v1/register/{number}/verify/{code}` → `Registered` + `RegisteredAt=utcnow`; a wrong code keeps `CodePending` with `LastError` set. |
 | `DELETE {tenantId}/v1/signal/channel` | ReadWrite | Works from EVERY state. The bridge account is only unregistered (`POST /v1/unregister/{number}`, `delete_local_data: true`, best-effort — "not registered" / unreachable never blocks) when the definition **owns** the registration, i.e. its state is `Registered`; a CodePending/Failed/Unregistered definition may reference a working bridge account it does not own (the adopt scenario), which must not be destroyed. Then Erase-deletes the definition **including its history** — the number becomes claimable again, and a fresh definition starts with a fresh history. |
 
@@ -498,7 +498,14 @@ Pieces:
   register attempts keep `Unregistered` (retry-able); only a bridge rejection is `Failed`.
 - **`SignalBridgeClient`** (named `HttpClient`, 60s timeout — a bridge register can take 10-30s)
   maps bridge answers into `SignalBridgeException` kinds (Rejected / RateLimited with Retry-After
-  / Unreachable); the controller maps those onto 400 / 429 / 400 and conflicts onto 409.
+  / Unreachable); the controller maps those onto 400 / 429 / 400 and conflicts onto 409. A
+  Rejected answer additionally carries the typed `IsCaptchaRequired` flag — set in
+  `SignalBridgeException.Rejected`, the ONLY place matching signal-cli's stable
+  "Captcha required" message text — which the service surfaces as
+  `SignalChannelErrorKind.BridgeCaptchaRequired` → **422** (same ErrorResponse envelope), so the
+  Studio wizard can attempt without a captcha and show the captcha step only on demand. The
+  Failed state, LastError and the RegisterFailed history entry are identical to a plain 400
+  rejection.
 - **`CommunicationControllerOptions.SignalBridgeApiUrl`** is the instance default ApiUrl
   (`http://signal-cli-rest-api.signal-bridge.svc.cluster.local:8080`); a register request may
   override per tenant, and an existing definition's ApiUrl wins over the default.

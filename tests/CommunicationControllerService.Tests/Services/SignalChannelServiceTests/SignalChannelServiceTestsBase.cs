@@ -101,6 +101,16 @@ internal abstract class SignalChannelServiceTestsBase
         return SignalBridgeException.Rejected(400, error);
     }
 
+    /// <summary>
+    /// Signal demanding a captcha, with signal-cli's real message text — the rejection the
+    /// controller answers as 422 so the Studio wizard shows the captcha step only on demand.
+    /// </summary>
+    protected static SignalBridgeException BridgeCaptchaRequired()
+    {
+        return SignalBridgeException.Rejected(400,
+            "Captcha required for verification, use --captcha CAPTCHA");
+    }
+
     protected static SignalBridgeException BridgeRateLimited(TimeSpan? retryAfter = null)
     {
         return SignalBridgeException.RateLimited("rate limited", retryAfter);

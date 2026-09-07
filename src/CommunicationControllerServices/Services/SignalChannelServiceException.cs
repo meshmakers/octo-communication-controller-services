@@ -2,7 +2,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
 /// <summary>
 ///     How a <see cref="ISignalChannelService"/> operation failed — the controller maps these onto
-///     the HTTP contract (404 / 400 / 409 / 429).
+///     the HTTP contract (404 / 400 / 409 / 422 / 429).
 /// </summary>
 internal enum SignalChannelErrorKind
 {
@@ -22,7 +22,15 @@ internal enum SignalChannelErrorKind
     BridgeRateLimited = 4,
 
     /// <summary>The bridge could not be reached at all → 400.</summary>
-    BridgeUnreachable = 5
+    BridgeUnreachable = 5,
+
+    /// <summary>
+    ///     Signal demands a captcha for this registration → 422. Machine-readable on purpose: the
+    ///     Studio wizard attempts register WITHOUT a captcha first and only shows the captcha step
+    ///     when this comes back. Otherwise behaves exactly like
+    ///     <see cref="BridgeRejected"/> (state machine, history entry, error message).
+    /// </summary>
+    BridgeCaptchaRequired = 6
 }
 
 /// <summary>
@@ -96,6 +104,8 @@ internal class SignalChannelServiceException : Exception
         {
             SignalBridgeErrorKind.RateLimited => SignalChannelErrorKind.BridgeRateLimited,
             SignalBridgeErrorKind.Unreachable => SignalChannelErrorKind.BridgeUnreachable,
+            SignalBridgeErrorKind.Rejected when bridgeException.IsCaptchaRequired =>
+                SignalChannelErrorKind.BridgeCaptchaRequired,
             _ => SignalChannelErrorKind.BridgeRejected
         };
 

@@ -34,10 +34,24 @@ internal class SignalBridgeException : Exception
     /// <summary>The bridge's Retry-After on a 429, when present.</summary>
     internal TimeSpan? RetryAfter { get; private init; }
 
+    /// <summary>
+    ///     True when a <see cref="SignalBridgeErrorKind.Rejected"/> answer is Signal demanding a
+    ///     captcha for the registration. Typed here so the Studio wizard gets a machine-readable
+    ///     422 (attempt without a captcha first, show the captcha step only on demand) without any
+    ///     caller ever string-matching the error text.
+    /// </summary>
+    internal bool IsCaptchaRequired { get; private init; }
+
     internal static SignalBridgeException Rejected(int statusCode, string error)
     {
         return new SignalBridgeException(SignalBridgeErrorKind.Rejected,
-            $"The Signal bridge rejected the request (HTTP {statusCode}): {error}");
+            $"The Signal bridge rejected the request (HTTP {statusCode}): {error}")
+        {
+            // The ONLY place that matches the bridge payload text: signal-cli reports the captcha
+            // demand as "Captcha required for verification (...)" — stable output of signal-cli,
+            // tracked here. Everything downstream uses the typed flag.
+            IsCaptchaRequired = error.Contains("captcha required", StringComparison.OrdinalIgnoreCase)
+        };
     }
 
     internal static SignalBridgeException RateLimited(string error, TimeSpan? retryAfter)
