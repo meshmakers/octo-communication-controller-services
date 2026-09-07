@@ -73,6 +73,15 @@ public class CommunicationControllerOptions
     public LogLevelDto MinLogLevel { get; set; }
 
     /// <summary>
+    /// Base URL of the cluster-shared signal-cli-rest-api bridge (AB#5143), used as the default
+    /// ApiUrl when a tenant registers a Signal channel without specifying one. The bridge API is
+    /// unauthenticated and cluster-internal — this controller is the only component allowed to
+    /// call it. Override per environment via OCTO_COMMUNICATIONCONTROLLER__SIGNALBRIDGEAPIURL.
+    /// </summary>
+    public string SignalBridgeApiUrl { get; set; } =
+        "http://signal-cli-rest-api.signal-bridge.svc.cluster.local:8080";
+
+    /// <summary>
     /// Gets or sets the number of days after which execution records are deleted unconditionally.
     /// Safety net behind the hourly fold (see PipelineExecutionRetentionHours): catches orphaned
     /// executions whose pipeline no longer exists and which therefore never get folded.

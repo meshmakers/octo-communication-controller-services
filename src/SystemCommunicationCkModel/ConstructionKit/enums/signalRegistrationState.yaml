@@ -1,0 +1,14 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+- enumId: SignalRegistrationState
+  description: 'Registration state of a tenant''s Signal phone number against the Signal bridge (AB#5143). Unregistered means a definition exists but no registration was started (or a rate-limited attempt is pending retry). CodePending means the bridge accepted the register call and Signal sent an SMS verification code. Registered means the verify call succeeded and the number can send/receive. Failed means the last register attempt was rejected by the bridge (see LastError); a new register attempt is allowed.'
+  useFlags: false
+  values:
+  - key: 0
+    name: Unregistered
+  - key: 1
+    name: CodePending
+  - key: 2
+    name: Registered
+  - key: 3
+    name: Failed

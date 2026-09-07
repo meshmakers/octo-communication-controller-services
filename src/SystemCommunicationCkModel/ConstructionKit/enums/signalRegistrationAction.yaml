@@ -1,0 +1,20 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+- enumId: SignalRegistrationAction
+  description: 'Audited action of a Signal channel registration attempt (AB#5143). Every register/verify/delete attempt against the tenant''s SignalChannel — including failed ones — appends one entry with this action to the channel''s RegistrationHistory. Adopted means the bridge already held a working account for the number, so register/verify were skipped and the definition went straight to Registered. Deleted is part of the audit vocabulary but a persisted Deleted entry never survives: a successful DELETE erases the definition including its history (fresh definition = fresh history); the system event trail still records the deletion.'
+  useFlags: false
+  values:
+  - key: 0
+    name: RegisterRequested
+  - key: 1
+    name: RegisterFailed
+  - key: 2
+    name: CodeVerified
+  - key: 3
+    name: VerifyFailed
+  - key: 4
+    name: Deleted
+  - key: 5
+    name: DeleteFailed
+  - key: 6
+    name: Adopted

@@ -161,6 +161,32 @@ public interface ICommunicationRepository
         RtServiceAccountConfiguration serviceAccount, bool isNewEntity);
 
     /// <summary>
+    /// AB#5143: every <c>SignalChannel</c> entity of the tenant. By invariant at most one exists
+    /// (singleton per tenant, enforced by <c>SignalChannelService</c>); the list shape keeps the
+    /// repository honest about what is actually stored.
+    /// </summary>
+    Task<IReadOnlyCollection<RtSignalChannel>> GetSignalChannelsAsync(string tenantId);
+
+    /// <summary>
+    /// AB#5143: inserts or updates the tenant's <c>SignalChannel</c> definition. The singleton and
+    /// cross-tenant number-claim invariants live in <c>SignalChannelService</c>, not here.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="signalChannel">The channel to persist.</param>
+    /// <param name="isNewEntity">
+    ///     <c>true</c> to insert, <c>false</c> to update the entity carrying
+    ///     <c>signalChannel.RtId</c>.
+    /// </param>
+    Task SaveSignalChannelAsync(string tenantId, RtSignalChannel signalChannel, bool isNewEntity);
+
+    /// <summary>
+    /// AB#5143: deletes the tenant's <c>SignalChannel</c> definition for real (Erase, no archive
+    /// tombstone) — the stored definitions are the instance-wide number-claim registry, and an
+    /// archived copy must not keep a number blocked.
+    /// </summary>
+    Task DeleteSignalChannelAsync(string tenantId, RtEntityId signalChannelRtEntityId);
+
+    /// <summary>
     /// Lists every <see cref="RtDeployableWorkload"/> in the tenant whose
     /// <c>ChartName</c> equals <paramref name="chartName"/>. Returns an
     /// empty collection when the chart is not used in this tenant — the

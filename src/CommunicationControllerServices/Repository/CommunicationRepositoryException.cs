@@ -77,6 +77,25 @@ internal class CommunicationRepositoryException : Exception
             exception);
     }
 
+    internal static Exception CommonFailedGettingSignalChannels(string tenantId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get Signal channels", exception);
+    }
+
+    internal static Exception CommonFailedSavingSignalChannel(string tenantId, OctoObjectId signalChannelRtId,
+        Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to save Signal channel '{signalChannelRtId}'", exception);
+    }
+
+    internal static Exception CommonFailedDeletingSignalChannel(string tenantId, OctoObjectId signalChannelRtId,
+        Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to delete Signal channel '{signalChannelRtId}'", exception);
+    }
+
     internal static Exception CommonOperationFailed(OperationResult operationResult)
     {
         return new CommunicationRepositoryException($"Operation failed with with messages: " +

@@ -1,0 +1,22 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+  - typeId: SignalChannel
+    derivedFromCkTypeId: ${System}/Configuration
+    description: 'Tenant-owned Signal phone-number channel (AB#5143). Exactly ONE per tenant (singleton, enforced by the Communication Controller service layer), and a number may be claimed by only one tenant per instance. Managed exclusively through the tenant self-service REST endpoints ({tenant}/v1/signal/channel) — the controller is the only component allowed to talk to the unauthenticated signal-cli-rest-api bridge.'
+    isFinal: true
+    attributes:
+      - id: ${this}/PhoneNumber
+        name: Number
+      - id: ${this}/ApiUrl
+        name: ApiUrl
+      - id: ${this}/RegistrationState
+        name: RegistrationState
+      - id: ${this}/RegisteredAt
+        name: RegisteredAt
+        isOptional: true
+      - id: ${this}/LastError
+        name: LastError
+        isOptional: true
+      - id: ${this}/RegistrationHistory
+        name: RegistrationHistory
+        isOptional: true

@@ -1,0 +1,20 @@
+using System.ComponentModel.DataAnnotations;
+
+namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
+
+/// <summary>
+///     Body of <c>POST {tenantId}/v1/signal/channel/register</c> (AB#5143).
+/// </summary>
+/// <param name="Number">Phone number to claim and register, E.164 (+ followed by digits).</param>
+/// <param name="ApiUrl">
+///     Optional bridge base URL. Defaults to the existing definition's ApiUrl, then to the
+///     instance-wide <c>CommunicationController:SignalBridgeApiUrl</c> setting.
+/// </param>
+/// <param name="CaptchaToken">
+///     Optional captcha token from signalcaptchas.org (starts with <c>signalcaptcha://</c>) —
+///     Signal demands one for most fresh registrations.
+/// </param>
+public sealed record RegisterSignalChannelRequestDto(
+    [Required] string Number,
+    string? ApiUrl = null,
+    string? CaptchaToken = null);

@@ -487,6 +487,100 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyCollection<RtSignalChannel>> GetSignalChannelsAsync(string tenantId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtSignalChannel>(session,
+                RtEntityQueryOptions.Create());
+
+            return resultSet.Items.ToList();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingSignalChannels(tenantId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task SaveSignalChannelAsync(string tenantId, RtSignalChannel signalChannel, bool isNewEntity)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtSignalChannel>>
+            {
+                isNewEntity
+                    ? EntityUpdateInfo<RtSignalChannel>.CreateInsert(signalChannel)
+                    : EntityUpdateInfo<RtSignalChannel>.CreateUpdate(signalChannel.ToRtEntityId(), signalChannel)
+            };
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedSavingSignalChannel(tenantId, signalChannel.RtId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task DeleteSignalChannelAsync(string tenantId, RtEntityId signalChannelRtEntityId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtSignalChannel>>
+            {
+                EntityUpdateInfo<RtSignalChannel>.CreateDelete(signalChannelRtEntityId)
+            };
+
+            // Erase, not the default Archive: the stored SignalChannel entities are the
+            // instance-wide number-claim registry (AB#5143) — an archived tombstone must not keep
+            // the number blocked for the next claimant.
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, DeleteOptions.Erase,
+                operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedDeletingSignalChannel(tenantId,
+                signalChannelRtEntityId.RtId, e);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyCollection<RtDeployableWorkload>> GetWorkloadsByChartNameAsync(string tenantId,
         string chartName)
     {

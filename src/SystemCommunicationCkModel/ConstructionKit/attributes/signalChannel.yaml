@@ -1,0 +1,53 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+attributes:
+  # AB#5143 — tenant self-service activation of a Signal phone number. PhoneNumber and ApiUrl are
+  # AUTHOR configuration (set through the self-service REST endpoints, but they describe WHAT the
+  # channel is). The registration state machine (RegistrationState / RegisteredAt / LastError) is
+  # written exclusively by the controller as bridge calls succeed or fail — runtime state per the
+  # "Runtime-State Attributes" convention, so a blueprint re-apply can never flip a Registered
+  # number back to Unregistered or wipe its error history.
+  - id: PhoneNumber
+    valueType: String
+    description: 'Phone number in E.164 format (+ followed by digits, e.g. +436641234567). Unique per OctoMesh instance: exactly one tenant may claim a number.'
+  - id: ApiUrl
+    valueType: String
+    description: 'Base URL of the cluster-shared signal-cli-rest-api bridge this channel is registered against (e.g. http://signal-cli-rest-api.signal-bridge.svc.cluster.local:8080). The bridge API is unauthenticated; only the Communication Controller may call it.'
+  - id: RegistrationState
+    valueType: Enum
+    valueCkEnumId: ${this}/SignalRegistrationState
+    isRuntimeState: true
+    description: 'Current registration state of the number against the Signal bridge. Driven by the register/verify/delete self-service flow (AB#5143).'
+    defaultValues:
+      - 0
+  - id: RegisteredAt
+    valueType: DateTime
+    isRuntimeState: true
+    description: 'UTC timestamp of the successful verification (transition to Registered).'
+  - id: LastError
+    valueType: String
+    isRuntimeState: true
+    description: 'Last error reported by the Signal bridge for a register or verify attempt. Cleared on the next successful transition.'
+  # Registration audit trail (AB#5143, WI rev 4). RegistrationHistory holds SignalRegistrationEvent
+  # records, appended server-side by the controller for EVERY register/verify/delete attempt —
+  # including bridge failures that the API surfaces as 4xx/429. Newest first, capped at 50.
+  # Runtime state: written exclusively by the service; a blueprint re-apply must never wipe it.
+  - id: RegistrationEventAt
+    valueType: DateTime
+    description: 'UTC timestamp of the audited registration attempt (SignalRegistrationEvent record).'
+  - id: RegistrationEventUser
+    valueType: String
+    description: 'Acting user of the audited attempt, resolved from the authenticated principal: display name and/or subject id ("Name (subject)"), or "unknown" for a principal without either claim.'
+  - id: RegistrationEventAction
+    valueType: Enum
+    valueCkEnumId: ${this}/SignalRegistrationAction
+    description: 'What was attempted and how it ended (SignalRegistrationAction: RegisterRequested, RegisterFailed, CodeVerified, VerifyFailed, Deleted, DeleteFailed).'
+    defaultValues:
+      - 0
+  - id: RegistrationEventDetail
+    valueType: String
+    description: 'Outcome detail of the audited attempt, e.g. the bridge message ("captcha required", "rate limited (retry after 30s)", "wrong code") or "registered" on a successful verification.'
+  - id: RegistrationHistory
+    valueType: RecordArray
+    valueCkRecordId: ${this}/SignalRegistrationEvent
+    isRuntimeState: true
+    description: 'Capped audit trail of registration attempts (AB#5143): SignalRegistrationEvent records, newest first, the newest 50 kept. Appended server-side only; deleted together with the definition (a fresh definition starts with a fresh history).'

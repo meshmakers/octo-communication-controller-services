@@ -100,6 +100,15 @@ try
     // Pure tenant-repository reads (System.Communication and System.Identity RT collections),
     // no identity REST involved.
     builder.Services.AddSingleton<IServiceAccountRightsAnalysisService, ServiceAccountRightsAnalysisService>();
+
+    // AB#5143: tenant self-service Signal channel. The bridge (bbernhard/signal-cli-rest-api) is
+    // unauthenticated and cluster-internal — this controller is the ONLY component allowed to call
+    // it. A bridge register can legitimately take 10-30s while signal-cli talks to the Signal
+    // servers, hence the 60s timeout.
+    builder.Services.AddHttpClient(SignalBridgeClient.HttpClientName,
+        client => client.Timeout = TimeSpan.FromSeconds(60));
+    builder.Services.AddSingleton<ISignalBridgeClient, SignalBridgeClient>();
+    builder.Services.AddSingleton<ISignalChannelService, SignalChannelService>();
     builder.Services.AddSingleton<IWorkloadHostnameIndex, WorkloadHostnameIndex>();
     builder.Services.AddSingleton<IAdapterConnectionTracker, AdapterConnectionTracker>();
     builder.Services.AddSingleton<IPipelineSchemaValidator, PipelineSchemaValidator>();
