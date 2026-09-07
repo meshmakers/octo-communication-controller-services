@@ -131,7 +131,21 @@ internal abstract class AdapterServiceTestsBase
         InitAdapterCache();
         InitAdapterServiceAccount();
         InitIdentityClientReader();
+        InitSignalChannels();
         SimulateAdapterDeploymentCallback();
+    }
+
+    /// <summary>
+    /// AB#5145: the configuration projection reads the tenant's SignalChannel on every pipeline —
+    /// default to "no channel" explicitly so the pre-existing suites keep their configuration
+    /// shapes. Projection tests re-stub <c>GetSignalChannelsAsync</c>.
+    /// </summary>
+    [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]
+    private void InitSignalChannels()
+    {
+        CommunicationRepository
+            .GetSignalChannelsAsync(Arg.Any<string>())
+            .Returns([]);
     }
     
     [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]

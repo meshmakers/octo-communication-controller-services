@@ -531,6 +531,23 @@ bridge failure, newest-first ordering, the 50-cap trim, the GET projection and t
 formatting; `RegisterAdoptionTests` pinning the adopt-existing-bridge-account flow and that
 every guard runs before adoption).
 
+#### SignalChannel projection into every pipeline configuration (AB#5145)
+
+The tenant's SignalChannel singleton is **always** mixed into every pipeline's projected
+configuration list — no `Uses` association required — by
+`AdapterService.AddSignalChannelConfigurationAsync` (the authoritative cross-repo contract doc
+lives on that method). The adapter keys its per-pipeline `GlobalConfiguration` by
+`RtWellKnownName`, so the Signal nodes (`FromSignal@1` / `SignalSender@1` in octo-mesh-adapter,
+shared `SignalChannelEndpointResolver`) look the entry up under `"signal-channel"` and use its
+`Number`/`ApiUrl` only while `RegistrationState == Registered` — the entity is shipped in EVERY
+state on purpose so the node can warn "present but not registered" instead of silently reading
+nothing. Guards: no channel → nothing added; a same-rtId/same-well-known-name entry already in
+the list (legacy `Uses` edge) is never duplicated; a repository failure (e.g. a tenant whose CK
+model predates 3.34.0) is logged and skipped, never failing the deploy. Like every projected
+configuration it is cached at pipeline registration — a channel registered later reaches the
+nodes on the next redeploy. Tests:
+`Services/AdapterServiceTests/SignalChannelProjectionTests.cs`.
+
 ### Docker
 
 ```bash

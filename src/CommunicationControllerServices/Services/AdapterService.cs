@@ -1408,6 +1408,9 @@ internal class AdapterService(
             }
         }
 
+        // AB#5145: the tenant's SignalChannel singleton is always projected — no Uses edge needed.
+        await AddSignalChannelConfigurationAsync(tenantId, pipelineConfigurations);
+
         // AB#5111: resolve the IssuerUri deploy-time token before the configuration is serialised
         // for the adapter — the projection is the consumption point of the entity, so this is
         // where {{service.authority}} has to become a concrete URL.
@@ -1427,6 +1430,90 @@ internal class AdapterService(
             rtPipeline.IsDebuggingEnabled ?? false,
             pipelineDefinition ?? rtPipeline.PipelineDefinition,
             configurationsDto);
+    }
+
+    /// <summary>
+    ///     AB#5145 — the cross-repo contract for the Signal channel nodes (this doc is the one
+    ///     authoritative place; the adapter side references it from
+    ///     <c>SignalChannelEndpointResolver</c> in octo-mesh-adapter).
+    ///
+    ///     <para>
+    ///     The tenant's <c>System.Communication/SignalChannel</c> singleton (the AB#5143
+    ///     self-service entity, created with <c>RtWellKnownName</c> <c>"signal-channel"</c> —
+    ///     <see cref="SignalChannelService.ChannelWellKnownName" />) is ALWAYS projected into every
+    ///     pipeline's configuration list, no <c>Uses</c> association required. The adapter
+    ///     materialises the list into its per-pipeline <c>GlobalConfiguration</c> dictionary keyed
+    ///     by <c>RtWellKnownName</c>, so the Signal nodes (<c>FromSignal@1</c> /
+    ///     <c>SignalSender@1</c>) look the entry up under the key <c>"signal-channel"</c> and read
+    ///     <c>Number</c> / <c>ApiUrl</c> from its serialized <c>attributes</c> — but only act on it
+    ///     while <c>RegistrationState == Registered (2)</c>. The entity is shipped in EVERY state
+    ///     on purpose: only the shipped state lets the node distinguish "present but not
+    ///     registered" (warn precisely) from "no channel at all" (stay idle quietly).
+    ///     </para>
+    ///
+    ///     <para>
+    ///     Guards: no SignalChannel → nothing added, no error. A configuration with the same rtId
+    ///     or well-known name already in the list (e.g. a legacy <c>Uses</c> edge to the channel)
+    ///     is never duplicated — the well-known name is the adapter-side dictionary key and a
+    ///     duplicate would throw there. A repository failure is logged and skipped rather than
+    ///     failing the deploy: the channel projection is an optional enrichment, and a tenant
+    ///     whose CK model predates 3.34.0 (no SignalChannel type) must keep deploying.
+    ///     </para>
+    ///
+    ///     NOTE: like every projected configuration, the adapter caches it at pipeline
+    ///     registration — a channel registered later reaches the nodes on the next redeploy of the
+    ///     pipeline / data flow (or an adapter restart).
+    /// </summary>
+    private async Task AddSignalChannelConfigurationAsync(string tenantId,
+        List<RtConfiguration> pipelineConfigurations)
+    {
+        IReadOnlyCollection<RtSignalChannel> channels;
+        try
+        {
+            channels = await communicationRepository.GetSignalChannelsAsync(tenantId);
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e,
+                "[{TenantId}] Could not read the tenant's SignalChannel for the pipeline configuration projection; the configuration is built without it",
+                tenantId);
+            return;
+        }
+
+        if (channels.Count == 0)
+        {
+            return;
+        }
+
+        // The service layer enforces the singleton; break a hand-crafted tie deterministically so
+        // every pod and every redeploy agrees.
+        var channel = channels.OrderBy(c => c.RtId.ToString(), StringComparer.Ordinal).First();
+        if (channels.Count > 1)
+        {
+            Logger.Warn(
+                "[{TenantId}] Tenant carries {Count} SignalChannel definitions; projecting '{RtId}'. The channel is a singleton — remove the others.",
+                tenantId, channels.Count, channel.RtId);
+        }
+
+        if (string.IsNullOrWhiteSpace(channel.RtWellKnownName))
+        {
+            // Never produced by the self-service; a hand-crafted entity without the key would fail
+            // the whole deploy at the ConfigurationDto guard below — skip it instead.
+            Logger.Warn(
+                "[{TenantId}] SignalChannel '{RtId}' carries no RtWellKnownName and is not projected",
+                tenantId, channel.RtId);
+            return;
+        }
+
+        if (pipelineConfigurations.Any(c => c.RtId == channel.RtId ||
+                                            c.RtWellKnownName == channel.RtWellKnownName))
+        {
+            // Already reachable through the pipeline's own Uses edges — never insert the same
+            // well-known name twice (adapter-side dictionary key).
+            return;
+        }
+
+        pipelineConfigurations.Add(channel);
     }
 
     /// <summary>

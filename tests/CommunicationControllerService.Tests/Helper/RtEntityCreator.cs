@@ -113,6 +113,27 @@ internal static class RtEntityCreator
         };
     }
 
+    /// <summary>
+    /// AB#5145: a SignalChannel definition as the AB#5143 self-service creates it — well-known
+    /// name "signal-channel" (the adapter-side GlobalConfiguration key), Number/ApiUrl set
+    /// (mandatory getters throw on null and Serialize() reads them).
+    /// </summary>
+    public static RtSignalChannel CreateSignalChannel(
+        RtSignalRegistrationStateEnum registrationState = RtSignalRegistrationStateEnum.Registered,
+        string? wellKnownName = null, string? id = null)
+    {
+        id ??= OctoObjectId.GenerateNewId().ToString();
+        return new RtSignalChannel
+        {
+            RtId = new OctoObjectId(id),
+            CkTypeId = SystemCommunicationCkIds.RtCkSignalChannelTypeId,
+            RtWellKnownName = wellKnownName ?? "signal-channel",
+            Number = "+43677123456789",
+            ApiUrl = "http://signal-cli-rest-api.signal-bridge.svc.cluster.local:8080",
+            RegistrationState = registrationState
+        };
+    }
+
     public static RtPipelineExecution CreatePipelineExecution(
         string? executionId = null,
         RtPipelineExecutionStatusEnum status = RtPipelineExecutionStatusEnum.Running,
