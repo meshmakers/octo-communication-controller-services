@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Security.Claims;
 using Asp.Versioning;
-using IdentityModel;
+using Duende.IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts;

@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
-using IdentityModel;
+using Duende.IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
