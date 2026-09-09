@@ -118,7 +118,7 @@ again.
    ```bash
    kubectl exec -n mongodb octo-mongodb-0 -c mongod -- mongosh "$CONN" --quiet \
      --eval '
-       ["sbeg","maco","begdemo","meshtest","voest"].forEach(t => {
+       ["sbeg","maco","meshtest","voest"].forEach(t => {
          const e = db.getSiblingDB(t)
            .RtEntity_SystemCommunicationDeployableEntity
            .findOne({_id: ObjectId("670000000000000000000002")});

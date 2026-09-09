@@ -20,10 +20,10 @@
 #   - Two separate test steps:
 #       1. Unit tests (TUnit) excluding *IntegrationTests.csproj.
 #       2. Integration tests (xUnit) with publishTestResults: false —
-#          xunit.v3 3.2.2 targets MTP v1 but the private NuGet feed only
-#          carries Microsoft.Testing.Extensions.TrxReport 2.x (MTP v2);
-#          without the extension the --report-trx flag the ADO task
-#          appends fails with "Unknown option".
+#          the project does not reference Microsoft.Testing.Extensions.TrxReport,
+#          so the --report-trx flag the ADO task appends fails with
+#          "Unknown option". (xunit.v3 4.x runs on MTP v2, the same line the
+#          private feed carries, so the extension could now be added.)
 #   - Docker diagnostics + MongoDB pre-pull (mongo:8.0.15) before the
 #     integration tests — they spin up Testcontainers MongoDB; pre-pull
 #     avoids pull-time-out failures on cold agents.
@@ -170,10 +170,11 @@ stages:
               command: 'test'
               arguments: '--configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false'
               projects: '**/*IntegrationTests.csproj'
-              # publishTestResults disabled: xunit.v3 3.2.2 targets MTP v1 and the
-              # private NuGet feed only carries Microsoft.Testing.Extensions.TrxReport 2.x
-              # (MTP v2). Without the extension, the --report-trx flag the Azure DevOps
-              # task appends fails with "Unknown option".
+              # publishTestResults disabled: the project does not reference
+              # Microsoft.Testing.Extensions.TrxReport, so the --report-trx flag the
+              # Azure DevOps task appends fails with "Unknown option". xunit.v3 4.x runs
+              # on MTP v2 (the line the private feed carries), so the extension could be
+              # added to re-enable publishing.
               publishTestResults: false
             env:
               DOCKER_HOST: unix:///var/run/docker.sock
