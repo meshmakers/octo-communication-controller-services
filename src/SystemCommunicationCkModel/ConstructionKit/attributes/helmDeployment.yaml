@@ -1,8 +1,12 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 attributes:
+# AB#5187 — NOT runtime state: which chart a workload runs IS the blueprint author's
+# statement (ChartVersion next to it is runtime state because CD writes it back). A new app
+# version that renames its chart must be able to correct existing tenants.
 - id: ChartName
   valueType: String
   description: 'Helm chart name within the repository (e.g. voest-app, octo-mesh-adapter).'
+  isRuntimeState: false
 - id: ChartVersion
   valueType: String
   description: 'Helm chart version (e.g. 1.2.3). Runtime-state (AB#4706): set by the CD pipeline (UpdateWorkloadChartVersion) or the operator, not blueprint configuration - a blueprint re-apply preserves the live value instead of resetting it to the seeded version.'
@@ -11,13 +15,19 @@ attributes:
   valueType: String
   description: 'Full values.yaml content as a YAML string. Edited in a code editor or uploaded as a file in the Studio. Acts as the base layer of Helm values; ValueOverrides are deep-merged on top. Runtime-state (AB#4706): operator-managed, preserved across blueprint re-apply.'
   isRuntimeState: true
+# AB#5187 — NOT runtime state: a blueprint OWNS the HelmRepositoryConfiguration entity it
+# references (see CLAUDE.md, AB#4706), so the repository URL and channel are exactly what a
+# version bump has to be able to move. The repo's Username/Password come from
+# attributes/configuration.yaml and ARE preserved.
 - id: RepositoryUrl
   valueType: String
   description: 'HTTP(S) URL of a Helm repository index, e.g. https://meshmakers.github.io/octo-helm-core (public) or a private GitHub Pages site.'
+  isRuntimeState: false
 - id: Channel
   valueType: Enum
   valueCkEnumId: ${this}/HelmChannel
   description: 'Helm chart distribution channel (Dev or Release). Pure label for UI colour-coding; the operator does not derive behavior from it.'
+  isRuntimeState: false
   defaultValues:
     - 0
 - id: IngressEnabled
@@ -30,15 +40,20 @@ attributes:
   valueType: String
   description: 'Public hostname used when IngressEnabled=true (e.g. adapter.staging.octo-mesh.com). Adapters get a tenant-scoped path automatically (https://<hostname>/<tenantId>); Applications use the root path. Ignored when IngressEnabled=false. Runtime-state (AB#4706): the productive hostname is tenant-specific (e.g. <tenant>.meshmakers.cloud) and operator-managed - a blueprint re-apply preserves it instead of resetting to the seeded default and silently breaking the deployed ingress/DNS.'
   isRuntimeState: true
+# AB#5187 — NOT runtime state, confirming what AB#4914 already documented in the description
+# below: LifecycleMode and IdleTimeoutMinutes are the author's policy, and LifecycleState /
+# LastActivityAt further down are the runtime half of the same feature.
 - id: LifecycleMode
   valueType: Enum
   valueCkEnumId: ${this}/LifecycleMode
   description: 'Lifecycle policy of the workload (AB#4914). AlwaysOn (default) keeps it running permanently; OnDemand allows the controller to scale it to 0 replicas when idle and wake it on demand. Author configuration — a blueprint re-apply may reset it, so blueprints that opt workloads into OnDemand should seed the value.'
+  isRuntimeState: false
   defaultValues:
     - 0
 - id: IdleTimeoutMinutes
   valueType: Int
   description: 'Minutes without pipeline activity before an OnDemand workload is drained and scaled to 0 replicas (AB#4914). Ignored for AlwaysOn workloads.'
+  isRuntimeState: false
   defaultValues:
     - 30
 - id: LifecycleState
@@ -62,15 +77,21 @@ attributes:
   valueType: String
   description: 'Human-readable reasons why the workload is not OnDemandCapable (AB#4984), e.g. "pipeline X uses process-bound trigger FromPolling@1". Empty when OnDemandCapable=true. Computed by the Communication Controller; shown in the Studio next to the LifecycleMode setting. Runtime-state: preserved across blueprint re-apply.'
   isRuntimeState: true
+# AB#5187 — members of the ValueOverride record, i.e. of the `Values` RecordArray below,
+# which AB#4706 already marks as operator-managed runtime state. Preservation acts on the
+# enclosing entity attribute, so the record must be classified as one unit.
 - id: Path
   valueType: String
   description: 'Dotted Helm values path for a ValueOverride entry (e.g. image.tag, service.port, oauth.clientId).'
+  isRuntimeState: true
 - id: Value
   valueType: String
   description: 'String value of a ValueOverride entry. Encrypted at rest when the entry is flagged IsSecret.'
+  isRuntimeState: true
 - id: IsSecret
   valueType: Boolean
   description: 'When true, the ValueOverride.Value is encrypted at rest in MongoDB and rendered as a Kubernetes Secret reference at deploy time.'
+  isRuntimeState: true
   defaultValues:
     - false
 - id: Values

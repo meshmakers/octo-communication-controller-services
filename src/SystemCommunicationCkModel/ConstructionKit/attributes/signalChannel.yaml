@@ -6,14 +6,23 @@ attributes:
   # written exclusively by the controller as bridge calls succeed or fail — runtime state per the
   # "Runtime-State Attributes" convention, so a blueprint re-apply can never flip a Registered
   # number back to Unregistered or wipe its error history.
+  #
+  # AB#5187 sweep: that position is kept and made explicit. Nothing seeds a SignalChannel —
+  # the singleton is created only by the self-service register endpoint — so PhoneNumber /
+  # ApiUrl / SignalDisplayName stay author-owned (a future blueprint that DOES pre-provision a
+  # channel must be able to correct the bridge URL and the display name), while the whole
+  # registration state machine and its audit trail stay runtime state.
   - id: PhoneNumber
     valueType: String
+    isRuntimeState: false
     description: 'Phone number in E.164 format (+ followed by digits, e.g. +436641234567). Unique per OctoMesh instance: exactly one tenant may claim a number.'
   - id: ApiUrl
     valueType: String
+    isRuntimeState: false
     description: 'Base URL of the cluster-shared signal-cli-rest-api bridge this channel is registered against (e.g. http://signal-cli-rest-api.signal-bridge.svc.cluster.local:8080). The bridge API is unauthenticated; only the Communication Controller may call it.'
   - id: SignalDisplayName
     valueType: String
+    isRuntimeState: false
     description: 'Profile display name of the account, shown to Signal users instead of "Unknown". Pushed to the bridge (PUT /v1/profiles/{number}) when the channel reaches Registered (verify success or adoption) and on the displayName self-service endpoint (which also clears it — without a bridge call, since Signal profiles need a non-empty name); stored here so it survives re-registration. Author configuration, not runtime state.'
   - id: RegistrationState
     valueType: Enum
@@ -34,20 +43,27 @@ attributes:
   # records, appended server-side by the controller for EVERY register/verify/delete attempt —
   # including bridge failures that the API surfaces as 4xx/429. Newest first, capped at 50.
   # Runtime state: written exclusively by the service; a blueprint re-apply must never wipe it.
+  # AB#5187: the four SignalRegistrationEvent record members below are marked with the record
+  # array they belong to — preservation acts on the enclosing entity attribute, so the record
+  # has to be classified as one unit.
   - id: RegistrationEventAt
     valueType: DateTime
+    isRuntimeState: true
     description: 'UTC timestamp of the audited registration attempt (SignalRegistrationEvent record).'
   - id: RegistrationEventUser
     valueType: String
+    isRuntimeState: true
     description: 'Acting user of the audited attempt, resolved from the authenticated principal: display name and/or subject id ("Name (subject)"), or "unknown" for a principal without either claim.'
   - id: RegistrationEventAction
     valueType: Enum
     valueCkEnumId: ${this}/SignalRegistrationAction
+    isRuntimeState: true
     description: 'What was attempted and how it ended (SignalRegistrationAction: RegisterRequested, RegisterFailed, CodeVerified, VerifyFailed, Deleted, DeleteFailed).'
     defaultValues:
       - 0
   - id: RegistrationEventDetail
     valueType: String
+    isRuntimeState: true
     description: 'Outcome detail of the audited attempt, e.g. the bridge message ("captcha required", "rate limited (retry after 30s)", "wrong code") or "registered" on a successful verification.'
   - id: RegistrationHistory
     valueType: RecordArray

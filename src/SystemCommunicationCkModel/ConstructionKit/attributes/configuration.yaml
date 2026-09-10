@@ -1,98 +1,173 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 attributes:
+  # AB#5187 — this file holds the SHARED connection/credential attribute pool of every
+  # ${System}/Configuration subtype in this model (SAP, SFTP, EMail sender+receiver, Loxone,
+  # WeClapp, FinApi, MicrosoftGraph, Discord, Ai, HelmRepository). Blueprints seed these
+  # entities with PLACEHOLDERS (`<finapi-client-id-here>`, `<anthropic-api-key-here>`, …) —
+  # see meshmakers-app/src/blueprints/MeshmakersAccounting-1.0.0/seed-data/entities.yaml —
+  # and a re-apply is an ImportStrategy.Upsert, i.e. a full ReplaceOne. Everything that
+  # identifies or authenticates against the TENANT's external system is therefore
+  # isRuntimeState: true, so the operator's values survive. Behaviour knobs with a sensible
+  # author default (intervals, trace level, model/token settings) stay false — a blueprint
+  # version bump must be able to correct those.
+  #
+  # Host/Port/Username/Password/IsSslEnabled are marked as ONE unit on purpose: preserving
+  # half of a connection tuple while resetting the other half is exactly the failure mode
+  # this sweep exists to remove (FinApi kept its ClientSecret but lost its ClientId).
   - id: Host
     valueType: String
+    isRuntimeState: true
     description: 'The host name is the name of the server on which the external system is running.'
   - id: Port
     valueType: Int
+    isRuntimeState: true
     description: 'The port number is the number of the port on which the external system is listening for incoming connections.'
   - id: Username
     valueType: String
+    isRuntimeState: true
     description: 'The username is the name of the user that is used to authenticate with the external system.'
   - id: Password
     valueType: String
+    isRuntimeState: true
     description: 'The password is the secret that is used to authenticate with the external system.'
   - id: IsSslEnabled
     valueType: Boolean
+    isRuntimeState: true
     description: 'The Secure Sockets Layer (SSL) protocol is used to secure communication between a client and a server.'
+  # AB#5187 — the customer's SAP landscape coordinates (which system, which client, which
+  # gateway, which registered program). Operator-supplied per tenant; a seed can only carry a
+  # placeholder. The tuning knobs further down (Language, Trace, RegistrationCount,
+  # MaxConcurrentConnections) stay author-owned.
   - id: SystemNumber
     valueType: String
+    isRuntimeState: true
     description: 'The system number is a two-digit number assigned to an SAP system during installation. It is used to identify the SAP service (e.g. Dispatcher) on a specific port.'
   - id: SystemId
     valueType: String
+    isRuntimeState: true
     description: 'The System ID (SID) is the unique technical name of an SAP system. It consists of three letters and uniquely identifies a system within a landscape.'
   - id: SapClient
     valueType: String
+    isRuntimeState: true
     description: 'A client is a tenant instance in an SAP system. SAP is multi-tenant, which means that multiple organizations or departments can work on the same system without sharing data with each other.'
   - id: SapLanguage
     valueType: String
+    isRuntimeState: false
     description: 'The language key is a two-character code that identifies the language in which the user interface is displayed.'
   - id: SapTrace
     valueType: String
+    isRuntimeState: false
     defaultValues:
       - 8
     description: 'The trace level is a number that determines the amount of information that is logged during communication with the SAP system.'
   - id: SapGatewayHost
     valueType: String
+    isRuntimeState: true
     description: 'An SAP gateway host is a server that provides communication services between SAP systems or between SAP systems and external applications.'
   - id: SapGatewayService
     valueType: String
+    isRuntimeState: true
     description: 'An SAP gateway service provides communication services that are used between SAP systems or between SAP systems and external applications.'
   - id: SapProgramId
     valueType: String
+    isRuntimeState: true
     description: 'A program ID is a unique identifier that is used to register a program on an SAP gateway server.'
   - id: SapRegistrationCount
     valueType: Int
+    isRuntimeState: false
     description: 'The registration count is the number of times a program is registered on an SAP gateway server.'
   - id: MaxConcurrentConnections
     valueType: Int
+    isRuntimeState: false
     description: 'The maximum number of concurrent connections is the maximum number of connections that can be established with an external system at the same time.'
+  # AB#5187 — SFTP key material. Secrets in the strictest sense: pasted in by an operator
+  # after install, only ever a placeholder in a seed.
   - id: PrivateKey
     valueType: String
+    isRuntimeState: true
     description: 'The private key is a secret key that is used in asymmetric encryption to authenticate with the external system.'
   - id: PrivateKeyPassphrase
     valueType: String
+    isRuntimeState: true
     description: 'The private key passphrase is a secret that is used to protect the private key.'
+  # AB#5187 — the tenant's own mailbox folder (EMailReceiverConfiguration). Tenant-specific
+  # mailbox configuration an operator fills in, so it must survive a re-apply.
   - id: Folder
     valueType: String
+    isRuntimeState: true
     description: 'The mailbox folder to monitor for incoming emails (e.g. INBOX).'
+  # AB#5187 — the third value of the Microsoft Graph app-registration triple
+  # (AzureTenantId + ClientId + ClientSecret). The reported incident reset all three to the
+  # seed's placeholders; all three are runtime state now.
   - id: AzureTenantId
     valueType: String
+    isRuntimeState: true
     description: 'The Azure Active Directory tenant ID (GUID) for OAuth2 authentication.'
   - id: PollIntervalSeconds
     valueType: Int
+    isRuntimeState: false
     description: 'Interval in seconds between polling cycles.'
     defaultValues:
       - 30
+  # NOT runtime state, deliberately (AB#5027, re-confirmed in the AB#5187 sweep): IssuerUri is
+  # per-environment AUTHOR configuration. When the identity host moves or a split-horizon
+  # issuer has to be corrected, a blueprint re-apply must be able to fix it on every existing
+  # tenant; marking it would freeze a wrong issuer forever. AB#5115 additionally gives the
+  # EMPTY value a meaning ("the adapter's own installation"), which the reconcile converges to
+  # — a preservation marker would fight that convergence.
   - id: IssuerUri
     valueType: String
+    isRuntimeState: false
     description: 'URI of the OAuth2/OpenID Connect authorization server (e.g. https://identity.example.com)'
+  # AB#5187 — written back at runtime: the BuildMappingTargets pipeline node populates this
+  # array from the tenant's DataPointMappings. A seed value would be overwritten by the next
+  # run anyway; preserving it keeps the adapter from losing its resolved targets on re-apply.
   - id: MappingTargets
     valueType: RecordArray
     valueCkRecordId: ${this}/MappingTarget
+    isRuntimeState: true
     description: 'Resolved mapping targets for data acquisition. Populated automatically by the BuildMappingTargets pipeline node from DataPointMappings.'
+  # AB#5187 — Discord bot credentials/coordinates of the TENANT's own bot and server. The bot
+  # token is a bearer credential; the guild id identifies the customer's Discord server.
   - id: BotToken
     valueType: String
+    isRuntimeState: true
     description: 'The bot token used as the `Authorization: Bot {token}` header when calling the Discord REST API.'
   - id: GuildId
     valueType: String
+    isRuntimeState: true
     description: 'The Discord guild (server) snowflake ID. Reserved for future channel-name resolution; not read by the ToDiscord node in v1.'
+  # AB#5187 — THE reported incident: re-applying the MeshmakersAccounting blueprint on meshdev
+  # reset the Anthropic API key to `<anthropic-api-key-here>`. The key is issued by the
+  # external provider and pasted in by an operator; a blueprint can only ever seed a
+  # placeholder. Shared with WeClappConfiguration (API token), same reasoning.
   - id: ApiKey
     valueType: String
+    isRuntimeState: true
     description: 'API key for authenticating with an external service (e.g. Anthropic sk-ant-... key, WeClapp API token). Stored as configuration attribute, not exposed in pipeline data context.'
+  # NOT runtime state: the model id is author configuration and MUST stay correctable — a
+  # pinned dated snapshot gets retired (HTTP 404), and the fix is a blueprint version bump
+  # that pushes a current model id to every tenant. Same for the generation knobs below.
   - id: AiModel
     valueType: String
+    isRuntimeState: false
     description: 'AI model identifier to use (e.g. claude-sonnet-4-6, claude-opus-4-1). Mandatory and has no default: a pinned model id goes out of date (a retired "-20250514" snapshot returns HTTP 404), so it must be set explicitly on each AiConfiguration.'
   - id: MaxTokens
     valueType: Int
+    isRuntimeState: false
     description: 'Maximum number of tokens for the AI response.'
     defaultValues:
       - 4000
   - id: Temperature
     valueType: Double
+    isRuntimeState: false
     description: 'Temperature for AI response generation (0.0 = deterministic, 1.0 = creative).'
     defaultValues:
       - 0.1
+  # NOT runtime state: this points at an OctoMesh platform service of the installation, not at
+  # a tenant-owned system — same class as IssuerUri. When the MCP server moves, the seed must
+  # be able to correct it everywhere.
   - id: McpServerUrl
     valueType: String
+    isRuntimeState: false
     description: 'URL of the OctoMesh MCP server for AI tool use (e.g. https://localhost:5017). The tenant ID is appended automatically.'

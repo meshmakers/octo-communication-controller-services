@@ -13,6 +13,13 @@
              second run hits remote catalogs again, which has hung CI builds for the full HttpClient timeout. -->
         <OctoPublishCkModel Condition="'$(TargetFramework)' == 'net10.0' AND '$(_IsPacking)' != 'true'">true</OctoPublishCkModel>
         <OctoGenerateCkDocumentation Condition="'$(TargetFramework)' == 'net10.0' AND '$(_IsPacking)' != 'true'">true</OctoGenerateCkDocumentation>
+        <!-- AB#5187: the isRuntimeState marker sweep of ConstructionKit/attributes/*.yaml is complete
+             (every declaration takes an explicit position), so the CkLintRuntimeStateMarkers task is
+             armed for this model. From here on a new attribute without the marker FAILS the build
+             (OCTO-CK001) instead of silently defaulting to seed-managed — which is how a blueprint
+             re-apply came to reset live credentials (the Anthropic key, the finAPI and Microsoft
+             Graph credentials) to the seed's placeholders on an existing tenant. -->
+        <OctoEnforceRuntimeStateMarkers>true</OctoEnforceRuntimeStateMarkers>
     </PropertyGroup>
 
     <ItemGroup>

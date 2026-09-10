@@ -1,96 +1,158 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 attributes:
+  # AB#5187 — EnergyCommunityConfiguration is ONE community's own settings: its market
+  # identifiers, its tariffs, its bank account, its branding. An EnergyCommunity app blueprint
+  # seeds the entity once and a re-apply upserts it (full ReplaceOne), so everything the
+  # community itself owns is isRuntimeState: true. What stays author-owned (false) is the
+  # small set of values that ship WITH the application and must be correctable by a version
+  # bump: the report template names, the well-known name wiring, the statutory default rates
+  # and the request-delay default.
+  #
+  # AB#5187 — the community's identity in the EDA market. Assigned to the tenant by the market
+  # partner, not by the blueprint author; a reset silently detaches the community from every
+  # EDA message it exchanges.
   - id: EnergyCommunityId
     valueType: String
+    isRuntimeState: true
     description: "ID of the energy community"
   - id: NetworkPartnerId
     valueType: String
+    isRuntimeState: true
     description: "ID of the network partner (Marktpartner"
+  # AB#5187 — tenant-uploaded branding assets (BinaryLinked references to the tenant's own
+  # uploads). A seeded default that overwrites them on re-apply loses the customer's logo.
   - id: HeaderLogo
     valueType: BinaryLinked
+    isRuntimeState: true
     description: "Icon for the app header"
   - id: FooterLogo
     valueType: BinaryLinked
+    isRuntimeState: true
     description: "Icon for the app footer"
   - id: EmailFooterImage
     valueType: BinaryLinked
+    isRuntimeState: true
     description: "Image placed in the footer or imprint block of outgoing e-mails. Separate from FooterLogo, which brands the web application - the two are set independently on purpose."
+  # NOT runtime state: a process default that ships with the application logic.
   - id: ConsumptionRecordRequestDelay
     valueType: Int
+    isRuntimeState: false
     description: "Delay in days before automatic consumption record requests are sent"
     defaultValues:
       - 5
+  # AB#5187 — the community's tariffs. Set and adjusted by the operator; these feed billing, so
+  # a re-apply that resets them corrupts money, silently.
   - id: ConsumerPrice
     valueType: Double
+    isRuntimeState: true
     description: "Price per kWh for consumers in the energy community"
   - id: ProducerPrice
     valueType: Double
+    isRuntimeState: true
     description: "Price per kWh for producers in the energy community"
+  # AB#5187 — theme colours of the community's own web app. Members of the UiThemeColors
+  # record, which is itself runtime state (preservation acts on the enclosing entity
+  # attribute, so the whole record is classified as one unit).
   - id: PrimaryColor
     valueType: String
+    isRuntimeState: true
     description: The primary color of the theme
   - id: SecondaryColor
     valueType: String
+    isRuntimeState: true
     description: The secondary color of the theme
   - id: TertiaryColor
     valueType: String
+    isRuntimeState: true
     description: The tertiary color of the theme
   - id: NeutralColor
     valueType: String
+    isRuntimeState: true
     description: The neutral color of the theme
   - id: UiThemeColors
     valueType: Record
     valueCkRecordId: ${this}/UiThemeColors
+    isRuntimeState: true
     description: Theme color configuration for an application
+  # AB#5187 — the community's own naming and branding of its web app, set per tenant.
   - id: AppTitle
     valueType: String
+    isRuntimeState: true
     description: "Browser tab title of the web application"
   - id: AppHeading
     valueType: String
+    isRuntimeState: true
     description: "Heading displayed in the application header bar"
+  # NOT runtime state: the Telerik report template and its file naming ship with the
+  # application. Renaming a template in a new app version must reach existing tenants.
   - id: BillingReportName
     valueType: String
+    isRuntimeState: false
     description: "Name of the Telerik billing report template (e.g. Billing.trdp)"
   - id: BillingReportFilePrefix
     valueType: String
+    isRuntimeState: false
     description: "Filename prefix for generated billing report files (e.g. Billing_)"
+  # NOT runtime state: a well-known-name reference into entities the same blueprint seeds —
+  # author-owned wiring, and re-pointing it is exactly what a version bump is for.
   - id: BillingMailServerConfiguration
     valueType: String
+    isRuntimeState: false
     description: "Well-known name of the EMailSenderConfiguration used for outbound billing mail"
+  # AB#5187 — branding, see the colour block above.
   - id: HeaderGradientStart
     valueType: String
+    isRuntimeState: true
     description: "Start color of the header gradient"
   - id: HeaderGradientEnd
     valueType: String
+    isRuntimeState: true
     description: "End color of the header gradient"
   - id: FooterGradientStart
     valueType: String
+    isRuntimeState: true
     description: "Start color of the footer gradient"
   - id: FooterGradientEnd
     valueType: String
+    isRuntimeState: true
     description: "End color of the footer gradient"
   - id: BackgroundColor
     valueType: String
+    isRuntimeState: true
     description: "Background color of the web application"
   - id: Favicon
     valueType: BinaryLinked
+    isRuntimeState: true
     description: "Favicon icon for the web application"
+  # AB#5187 — seed-initialised, then tenant-owned. The defaults below are the statutory
+  # starting point a fresh community gets; from the first install on, the rate belongs to
+  # the tenant (a negotiated or corrected rate must survive every re-apply, and getting it
+  # silently reset is a billing error nobody sees until an invoice is wrong). A legislative
+  # change therefore does NOT arrive via a blueprint bump for existing communities — it is a
+  # deliberate per-tenant edit. Product decision, 2026-09-10.
   - id: TaxRate
     valueType: Double
+    isRuntimeState: true
     description: "Tax rate applied to energy transactions in the community"
     defaultValues:
       - 20.0
   - id: FarmerTaxRate
     valueType: Double
+    isRuntimeState: true
     description: "Tax rate applied to farmers in the energy community"
     defaultValues:
       - 13.0
+  # AB#5187 — the community's own mailbox and bank account. Tenant data in the strictest
+  # sense; a seeded placeholder replacing the IBAN would misroute member payments.
   - id: NotificationEmailContact
     valueType: String
+    isRuntimeState: true
     description: "Email address for notifications related to EDA processes and messages"
   - id: BankAccountIban
     valueType: String
+    isRuntimeState: true
     description: "IBAN of the energy community's own account - the one members are asked to pay into. Distinct from Customer.BankAccount, which holds a MEMBER's account and is used for payouts in the opposite direction."
   - id: BankAccountHolder
     valueType: String
+    isRuntimeState: true
     description: "Account holder of the energy community's own account, as it must appear on a transfer"
