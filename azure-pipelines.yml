@@ -51,6 +51,19 @@ parameters:
     default: 'auto'
 
 resources:
+  # Chain link: exactly ONE upstream pipeline resource per repo. Pipeline
+  # resource triggers do NOT batch, so a repo with two trigger parents is
+  # started twice per main cascade. The chain is therefore a single-parent
+  # tree; artificial ordering edges (marked below) resolve real DAG joins.
+  # Full picture: octo-mesh-deployment/pipelines/orchestrator-ci.yml.
+  # bot-services publishes the System.Bot CK model this repo restores.
+  pipelines:
+    - pipeline: octo-bot-services
+      source: octo-bot-services-CI
+      trigger:
+        branches:
+          include:
+            - main
   repositories:
     - repository: pipelineTemplates
       type: github
