@@ -1,8 +1,13 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 attributes:
+  # AB#5187 — NOT runtime state. A Tag entity is a label taxonomy: if a blueprint ships tags,
+  # renaming or correcting them in a later version must reach existing tenants. Nothing in the
+  # platform writes these back at runtime, and they carry no tenant secret.
   - id: Tag
     valueType: String
+    isRuntimeState: false
     description: The tag value used for categorization and filtering.
   - id: Name
     valueType: String
+    isRuntimeState: false
     description: Optional display name for the tag.

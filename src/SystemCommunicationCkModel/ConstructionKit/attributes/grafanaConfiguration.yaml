@@ -1,20 +1,37 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 attributes:
+  # AB#5187 — GrafanaUrl + AdminUser + AdminPassword are one unit: the address of the Grafana
+  # instance this tenant is provisioned into and the server-admin credentials for exactly that
+  # instance. An operator supplies them after install (a seed can only carry a placeholder),
+  # and preserving the credentials while resetting the URL — or vice versa — leaves a
+  # half-configured entity that fails at the first provisioning call.
   - id: GrafanaUrl
     valueType: String
+    isRuntimeState: true
     description: "Base URL of the Grafana instance."
   - id: AdminUser
     valueType: String
+    isRuntimeState: true
     description: "Grafana Server Admin username for organization management API."
   - id: AdminPassword
     valueType: String
+    isRuntimeState: true
     description: "Grafana Server Admin password."
+  # NOT runtime state: these two point back at OctoMesh's OWN platform services, not at
+  # anything the tenant owns — same class as ${this}/IssuerUri. When the installation moves,
+  # a blueprint version bump has to be able to correct them on every existing tenant.
   - id: OctoMeshUrl
     valueType: String
+    isRuntimeState: false
     description: "URL of the OctoMesh Asset Repository for provisioned datasource configuration."
   - id: IdentityServerUrl
     valueType: String
+    isRuntimeState: false
     description: "URL of the OctoMesh Identity Server for provisioned datasource OAuth configuration."
+  # AB#5187 — an OAuth client id registered for this tenant's Grafana datasource. Same
+  # classification as ${this}/ClientId (see attributes/finApiConfiguration.yaml): issued per
+  # installation/tenant, never something a seed can know.
   - id: OAuthClientId
     valueType: String
+    isRuntimeState: true
     description: "OAuth client ID for the Grafana datasource plugin."

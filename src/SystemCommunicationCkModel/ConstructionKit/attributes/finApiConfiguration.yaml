@@ -1,8 +1,25 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 attributes:
+  # AB#5187. Runtime state, correcting the AB#5027 split: ClientSecret was marked and ClientId
+  # was not, so a blueprint re-apply preserved the live secret and RESET the client id to the
+  # seed's `<finapi-client-id-here>` placeholder — half a credential, which fails exactly like
+  # no credential at all but looks configured in the Studio. A client id is issued to the
+  # TENANT by the external provider (finAPI) or by an Azure app registration; a blueprint can
+  # only ever seed a placeholder.
+  #
+  # BLAST RADIUS: shared with ServiceAccountConfiguration and MicrosoftGraphConfiguration.
+  #   * MicrosoftGraph — the tenant's own app-registration id, part of the reported incident.
+  #     Unambiguously correct.
+  #   * ServiceAccountConfiguration — the client id of the pipeline service account, which
+  #     PipelineServiceAccountProvisioningService derives from the adapter rtId and writes at
+  #     runtime; no service-managed blueprint seeds that entity. The cost is that an app
+  #     blueprint which does seed one (e.g. MeshmakersAccounting's `accounting-ai-prompt`)
+  #     can no longer RENAME the client on an existing tenant — rename through Studio or the
+  #     reconcile endpoint instead.
   - id: ClientId
     valueType: String
-    description: "OAuth2 Client ID for authenticating with the external API."
+    isRuntimeState: true
+    description: "OAuth2 Client ID for authenticating with the external API. Runtime state (AB#5187): issued to the tenant by the external provider, preserved across blueprint re-apply — a seed can only carry a placeholder."
   # AB#5027. Runtime state, NOT author configuration: a client secret is issued by the
   # identity provider (or pasted in by an admin) *after* the entity exists — a blueprint
   # can only ever seed a placeholder for it. Without this marker every service-managed
@@ -24,6 +41,11 @@ attributes:
     valueType: String
     isRuntimeState: true
     description: "OAuth2 Client Secret for authenticating with the external API. Runtime state (AB#5027): issued/rotated at runtime, preserved across blueprint re-apply."
+  # AB#5187 — the last member of the finAPI connection tuple. finAPI credentials are
+  # environment-bound (a sandbox client id does not work against live), so this flag belongs
+  # to the same unit as Host / ClientId / ClientSecret / Username / Password, all of which are
+  # preserved. Resetting it alone would point a live credential at the sandbox host.
   - id: IsSandbox
     valueType: Boolean
-    description: "If true, the adapter connects to the sandbox environment instead of production."
+    isRuntimeState: true
+    description: "If true, the adapter connects to the sandbox environment instead of production. Runtime state (AB#5187): part of the tenant's finAPI connection tuple, preserved with it."

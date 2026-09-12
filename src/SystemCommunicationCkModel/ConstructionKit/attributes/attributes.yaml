@@ -1,5 +1,10 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 attributes:
+# AB#5187 — every attribute in this model now carries an explicit isRuntimeState marker and
+# the CkLintRuntimeStateMarkers lint is enforced for this project (see the csproj). Rule:
+# `true` = the value belongs to the tenant or to a running service and a blueprint re-apply
+# (ImportStrategy.Upsert = full ReplaceOne) must never overwrite it; `false` = the seed owns
+# it and a blueprint version bump must be able to correct it on existing tenants.
 - id: CommunicationStateTimestamp
   valueType: DateTime
   isRuntimeState: true
@@ -28,14 +33,17 @@ attributes:
 - id: Environment
   valueType: Enum
   valueCkEnumId: ${this}/Environment
+  isRuntimeState: false
   description: Where the pool's adapter workloads are hosted. Edge (default) means an external operator installs and runs the pool; Cloud means the central Communication Operator auto-deploys it into the OctoMesh cluster.
   defaultValues:
     - 0
 - id: AdapterConfiguration
   valueType: String
+  isRuntimeState: false
   description: JSON-serialized adapter-specific configuration that is deployed to the adapter.
 - id: PipelineDefinition
   valueType: String
+  isRuntimeState: false
   description: JSON-serialized pipeline node graph that defines the data processing logic.
   defaultValues:
     - ""
@@ -59,141 +67,182 @@ attributes:
   valueType: DateTime
   isRuntimeState: true
   description: Timestamp of the LastConfigurationError. Set when LastConfigurationError is set, cleared when LastConfigurationError is cleared.
+# AB#5187 — the tenant's own sender mailbox on EMailSenderConfiguration. An operator fills it
+# in after install; a blueprint can only seed a placeholder, and resetting it silently
+# redirects (or breaks) every outgoing mail of the tenant.
 - id: SenderEmail
   valueType: String
+  isRuntimeState: true
   description: Email address used as the sender (From) for outgoing emails.
 
 # Pipeline Execution attributes
+# AB#5187 — all runtime state: RtPipelineExecution entities are created and completed
+# exclusively by the controller (PipelineExecutionService / AdapterHub reports). Nothing
+# seeds them, so the markers are a no-op today and a guard against a future seed.
 - id: ExecutionId
   valueType: String
+  isRuntimeState: true
   description: Unique identifier (GUID) for this execution
 - id: ExecutionStatus
   valueType: Enum
   valueCkEnumId: ${this}/PipelineExecutionStatus
+  isRuntimeState: true
   description: Current status of the pipeline execution (Running, Completed, Failed, Interrupted, Cancelled).
   defaultValues:
     - 0
 - id: TriggerType
   valueType: Enum
   valueCkEnumId: ${this}/PipelineTriggerType
+  isRuntimeState: true
   description: How this pipeline execution was initiated (Manual, Scheduled, Event, or Startup).
   defaultValues:
     - 0
 - id: StartedAt
   valueType: DateTime
+  isRuntimeState: true
   description: Timestamp when execution started
 - id: CompletedAt
   valueType: DateTime
+  isRuntimeState: true
   description: Timestamp when execution completed
 - id: DurationMs
   valueType: Int
+  isRuntimeState: true
   description: Execution duration in milliseconds
 - id: ErrorMessage
   valueType: String
+  isRuntimeState: true
   description: Error message if execution failed
 - id: InputData
   valueType: String
+  isRuntimeState: true
   description: Optional input data (JSON) for debugging
 - id: OutputData
   valueType: String
+  isRuntimeState: true
   description: Optional output data (JSON) from pipeline execution result
 # Pipeline Statistics attributes
+# AB#5187 — all runtime state: every counter below is computed by the controller
+# (PipelineExecutionService.UpdateStatisticsAsync / the AB#4370 execution fold). A seed that
+# reset them would destroy the durable record of a pipeline's execution history.
 - id: LastHourSuccessCount
   valueType: Int
+  isRuntimeState: true
   description: Successful executions in the last hour
   defaultValues:
     - 0
 - id: LastHourFailureCount
   valueType: Int
+  isRuntimeState: true
   description: Failed executions in the last hour
   defaultValues:
     - 0
 - id: LastHourAvgDurationMs
   valueType: Int
+  isRuntimeState: true
   description: Average execution duration in the last hour (ms)
   defaultValues:
     - 0
 - id: Last12HoursSuccessCount
   valueType: Int
+  isRuntimeState: true
   description: Successful executions in the last 12 hours
   defaultValues:
     - 0
 - id: Last12HoursFailureCount
   valueType: Int
+  isRuntimeState: true
   description: Failed executions in the last 12 hours
   defaultValues:
     - 0
 - id: Last12HoursAvgDurationMs
   valueType: Int
+  isRuntimeState: true
   description: Average execution duration in the last 12 hours (ms)
   defaultValues:
     - 0
 - id: Last24HoursSuccessCount
   valueType: Int
+  isRuntimeState: true
   description: Successful executions in the last 24 hours
   defaultValues:
     - 0
 - id: Last24HoursFailureCount
   valueType: Int
+  isRuntimeState: true
   description: Failed executions in the last 24 hours
   defaultValues:
     - 0
 - id: Last24HoursAvgDurationMs
   valueType: Int
+  isRuntimeState: true
   description: Average execution duration in the last 24 hours (ms)
   defaultValues:
     - 0
 - id: Last30DaysSuccessCount
   valueType: Int
+  isRuntimeState: true
   description: Successful executions in the last 30 days
   defaultValues:
     - 0
 - id: Last30DaysFailureCount
   valueType: Int
+  isRuntimeState: true
   description: Failed executions in the last 30 days
   defaultValues:
     - 0
 - id: Last30DaysAvgDurationMs
   valueType: Int
+  isRuntimeState: true
   description: Average execution duration in the last 30 days (ms)
   defaultValues:
     - 0
 - id: LastUpdatedAt
   valueType: DateTime
+  isRuntimeState: true
   description: When statistics were last calculated
 - id: LastExecutionAt
   valueType: DateTime
+  isRuntimeState: true
   description: Timestamp of the most recent execution
 
 # Pipeline Statistics hourly-bucket attributes (AB#4370). Executions are folded
 # into per-hour buckets before their entities are pruned; the buckets are the
 # durable source for the sliding-window counters.
+# AB#5187 — runtime state for the same reason as the window counters above: the buckets ARE
+# the durable execution history once the raw executions have been erased.
 - id: HourStartAt
   valueType: DateTime
+  isRuntimeState: true
   description: Start of the hour this bucket covers (UTC, minute/second zeroed)
 - id: SuccessCount
   valueType: Int
+  isRuntimeState: true
   description: Successful executions folded into this bucket
   defaultValues:
     - 0
 - id: FailureCount
   valueType: Int
+  isRuntimeState: true
   description: Failed executions folded into this bucket
   defaultValues:
     - 0
 - id: TotalDurationMs
   valueType: Int64
+  isRuntimeState: true
   description: Sum of execution durations folded into this bucket (ms)
   defaultValues:
     - 0
 - id: DurationCount
   valueType: Int
+  isRuntimeState: true
   description: Number of folded executions that carried a duration
   defaultValues:
     - 0
 - id: HourlyBuckets
   valueType: RecordArray
   valueCkRecordId: ${this}/PipelineStatisticsHourBucket
+  isRuntimeState: true
   description: Per-hour aggregation buckets (rolling 30 days). Written by the execution fold; the window counters are derived from these plus the still-retained recent executions.
 
 # Adapter offline sync attribute
@@ -213,16 +262,24 @@ attributes:
 # Workload security
 - id: ReceivesClusterSecrets
   valueType: Boolean
+  isRuntimeState: false
   description: 'When true, the Communication Operator injects cluster-internal credentials (MongoDB user/admin passwords, CrateDB password) into the workload''s Helm release as secret-flagged value overrides. Applies to Adapters and Applications (e.g. backend services that talk to the core MongoDB / CrateDB). Defaults to false so untrusted or edge workloads do not receive cluster credentials by accident; enable only for workloads that run in the same cluster as the OctoMesh core services and need to talk to them directly. The RabbitMQ broker password is NOT controlled by this flag — it is injected unconditionally because every workload needs the controller-to-workload command bus.'
   defaultValues:
     - false
 
 # DataPoint / MappingTarget record attributes
+# AB#5187 — SourceIdentifier and ExternalId are members of the DataPoint / MappingTarget
+# records, which live in the MappingTargets RecordArray that the BuildMappingTargets pipeline
+# node writes back at runtime. Marked to match their already-runtime-state siblings
+# (CurrentValue / LastUpdate) — preservation acts on the enclosing entity attribute, so the
+# whole record must be classified the same way.
 - id: SourceIdentifier
   valueType: String
+  isRuntimeState: true
   description: Identifier of the source entity (e.g. Loxone Control UUID, MQTT device ID)
 - id: ExternalId
   valueType: String
+  isRuntimeState: true
   description: External identifier of the data point (e.g. Loxone State UUID, MQTT Topic, OPC-UA NodeId, Modbus Register)
 - id: CurrentValue
   valueType: String
@@ -234,12 +291,17 @@ attributes:
   description: Timestamp of the last value update for this data point
 
 # Data point mapping
+# AB#5187 — author configuration: a DataPointMapping entity IS the mapping definition a
+# blueprint ships, so a version bump must be able to correct these paths and expressions.
 - id: SourceAttributePath
   valueType: String
+  isRuntimeState: false
   description: Path to the source attribute to read (e.g., CurrentValue, or nested record.field). If not set, the adapter determines the default.
 - id: TargetAttributePath
   valueType: String
+  isRuntimeState: false
   description: Path to the target attribute to update on the mapped entity (e.g., Temperature, Humidity, or nested record.field)
 - id: MappingExpression
   valueType: String
+  isRuntimeState: false
   description: 'Optional mXparser expression to transform the source value. Variable value contains the source value.'
