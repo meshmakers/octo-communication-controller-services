@@ -144,7 +144,7 @@ Still to measure: first-execution latency on a large tenant CK model with/withou
 
 ## 8. Out of scope / follow-ups
 
-HTTP activator (AB#4923, two-tier: app wake-interceptor first), shared multi-tenant runtime for platform-owned adapters (AB#4924 evaluation), KEDA integration (deliberately not in the core path — per-pipeline queue names churn, interactive path invisible to KEDA, edge clusters would need KEDA installs).
+HTTP activator (AB#4923, two-tier: app wake-interceptor first), shared multi-tenant runtime for platform-owned adapters (AB#4924 evaluation — designed out in `shared-adapter-leasing.md`, which replaces the multiplexing assumption with a lease model), KEDA integration (deliberately not in the core path — per-pipeline queue names churn, interactive path invisible to KEDA, edge clusters would need KEDA installs).
 
 ## 9. As built (addendum, 2026-08-29)
 
