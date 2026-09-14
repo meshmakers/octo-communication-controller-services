@@ -56,7 +56,13 @@ resources:
       type: github
       name: meshmakers/octo-pipeline-templates
       endpoint: meshmakers-access-token
-      ref: refs/tags/tpl-v0.5.0
+      # tpl-v0.5.3 derives the octo-ckc version from this build's own version line
+      # ($(MajorVersion).$(MinorVersion).*) instead of letting `dotnet tool install`
+      # resolve the globally-highest stable version. Without it the 0.2 dev lane
+      # installs octo-ckc 3.4.115 — 3.4.115 > 0.2.x — whose migration schema predates
+      # the RenameAssociationRole transform, so validate-ck-versions rejects the
+      # System.Communication 4.0.0 migration before restore even runs (build 46257).
+      ref: refs/tags/tpl-v0.5.3
 
 trigger:
   batch: true
