@@ -1959,6 +1959,70 @@ reason that has nothing to do with the metric.
 
 ---
 
+## 11a. Increment 10 — Refinery Studio authoring 🔴
+
+**Repo:** `octo-frontend-refinery-studio`.
+
+### 11a.1 Why this is a section at all
+
+The plan gave the Studio exactly one job (§10: the queue, in all three surfaces) and nothing else.
+That was not a decision, it was an omission, and it followed from increment 5: pools are created by
+the **operator**, so nobody asked how a human creates one. For operations that may be right. For
+"I want to try this", it is not — and it surfaced the moment the local runbook had to say
+"Refinery Studio **or** `octo-cli -c ImportRt`" without either route having been walked.
+
+What exists after increment 8: the queue panel, and `QUEUED` in the execution-history status filter
+and badge. That is all.
+
+🔴 **Correction to an earlier claim.** It is tempting to think the lifecycle-mode dropdown just needs
+a third entry, because `adapters-form.component` already offers *Always On* / *On Demand* with an
+idle-timeout field. It does not: those values come from `SystemCommunicationLifecycleModeDto`, a
+**generated** type. Adding `Leased` is codegen work, exactly like `AdapterPool` itself. The same is
+true of the lending attributes and of `managedBy` → `hostedBy`. The dividing line is not
+"new entity vs. existing field" — it is **GraphQL vs. REST**.
+
+### 11a.2 The split, and what draws it
+
+`schema.graphql` in the Studio predates CK 4.0.0, and §10 deliberately couples the codegen re-run to
+the model train so the Studio is not broken in between. Everything reading CK entities therefore
+waits; everything reading a controller REST endpoint does not.
+
+**Part A — buildable now, REST only**
+
+| What | Endpoint | Why it matters |
+|---|---|---|
+| Per-tenant **communication lifecycle** surface: scale-to-zero (AB#4914) *and* leasing (AB#4924), read and write | `GET` / `PUT {tenantId}/v1/communication/lifecycle` | This screen does **not exist today in any form** — scale-to-zero has never had one either. Both are the per-tenant emergency stops, and an emergency stop that lives only in `octo-cli` is not one when it is needed. The PUT replaces the whole record, so the UI must read-modify-write; sending one flag alone silently resets the other, which is the trap `octo-cli` already had to fix. |
+| **Pool members** of an adapter pool | `GET {tenantId}/v1/adapterPool/{id}/members` | Which members exist, which is draining, which holds a lease. The queue panel shows work; this shows the capacity serving it, and the two questions are asked together. |
+
+Part A must also state, in the UI itself, that leasing needs the flag on **both** the lending and
+the borrowing tenant. That rule is invisible from one tenant's screen and is the most likely reason
+someone concludes leasing "does not work".
+
+**Part B — after the model train re-runs the codegen**
+
+- `AdapterPool` authoring: create/edit, `MinReplicas`/`MaxReplicas`, the four `PoolMember*` sizing
+  values, `AdapterSharingMode`.
+- `Leased` in the lifecycle dropdown, and the lending attributes on the lending side.
+- `Pool` → `DeploymentSite` across `communication/pools/` — the rename §10 already flags as an
+  unavoidable separate pass, sequenced with the train, not with a feature increment.
+- `QueuedAt`, `LeaseWaitMs`, `ExecutionClass` in the execution history.
+
+**Consequence to state plainly rather than work around:** until Part B, a pool cannot be created in
+the Studio at all. `ImportRt` is the only route, and the local runbook says so.
+
+### 11a.3 Tests
+
+Vitest, per the repo's conventions, and mutation-proven. The two that carry weight:
+
+- the lifecycle screen **preserves the flag it was not asked to change** — a test that passes when
+  the UI PUTs a single field would be exactly the defect `octo-cli` already shipped once;
+- the both-tenants rule is stated where a user turning leasing on will read it, not only in a doc.
+
+⚠️ `isolate: false` lets one spec pollute later files — a failure may surface in a file you did not
+touch. Verify in isolation before attributing it.
+
+---
+
 ## 12. Open decisions
 
 Concept §8 closes with "None" — every design question is decided. These are the three that
