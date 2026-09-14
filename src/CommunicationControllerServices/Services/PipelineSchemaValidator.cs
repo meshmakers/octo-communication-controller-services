@@ -1,7 +1,5 @@
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using Meshmakers.Octo.Communication.Contracts.Serialization;
 using NJsonSchema;
-using YamlDotNet.Serialization;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
@@ -24,29 +22,25 @@ internal class PipelineSchemaValidator : IPipelineSchemaValidator
     /// <inheritdoc />
     public IReadOnlyList<string> Validate(string pipelineDefinition, string pipelineSchemaJson)
     {
-        var jsonString = ConvertToJson(pipelineDefinition);
+        string jsonString;
+        try
+        {
+            // Shared with the MCP server's validate_pipeline_definition tool, so a definition gets
+            // the same verdict here and there. The previous local conversion deserialized YAML
+            // untyped, which turned every scalar into a string and failed the schema's number /
+            // integer / boolean types on any definition carrying one (AB#5240).
+            jsonString = YamlToJsonConverter.ToJsonNodeAutoDetect(pipelineDefinition)?.ToJsonString() ?? "null";
+        }
+        catch (Exception e)
+        {
+            // A definition that does not parse cannot be schema-validated; report it as a finding
+            // rather than letting the exception escape into the deploy path.
+            return [$"The pipeline definition could not be parsed as YAML or JSON: {e.Message}"];
+        }
 
         var schema = JsonSchema.FromJsonAsync(pipelineSchemaJson).GetAwaiter().GetResult();
         var validationErrors = schema.Validate(jsonString);
 
         return validationErrors.Select(e => e.ToString()).ToList();
-    }
-
-    private static string ConvertToJson(string input)
-    {
-        // Try JSON first
-        try
-        {
-            JToken.Parse(input);
-            return input;
-        }
-        catch (JsonReaderException)
-        {
-            // Not valid JSON, try YAML
-        }
-
-        var deserializer = new DeserializerBuilder().Build();
-        var yamlObject = deserializer.Deserialize<object>(input);
-        return JsonConvert.SerializeObject(yamlObject);
     }
 }

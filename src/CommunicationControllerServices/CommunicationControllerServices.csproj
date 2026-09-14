@@ -26,6 +26,7 @@
         <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.11" />
         <PackageReference Include="NJsonSchema" Version="11.6.1" />
         <PackageReference Include="NLog.Web.AspNetCore" Version="6.2.0" />
+        <!-- Still used directly by PipelineDefinitionService and CommunicationRepository. -->
         <PackageReference Include="YamlDotNet" Version="18.1.0" />
     </ItemGroup>
 
@@ -38,6 +39,10 @@
     <ItemGroup>
         <ProjectReference Include="..\CommunicationControllerServices.Resources\CommunicationControllerServices.Resources.csproj" />
         <PackageReference Include="Meshmakers.Octo.Sdk.Common" Version="$(OctoCoreLibVersion)" />
+        <!-- Direct reference: PipelineSchemaValidator uses Serialization.YamlToJsonConverter from it.
+             Transitive resolution would pin the lowest version an intermediate package was built
+             against, hiding newly added members. -->
+        <PackageReference Include="Meshmakers.Octo.Communication.Contracts" Version="$(OctoCoreLibVersion)" />
         <PackageReference Include="Meshmakers.Octo.Services.Swagger" Version="$(OctoCoreLibVersion)" />
         <PackageReference Include="Meshmakers.Octo.Services.Infrastructure" Version="$(OctoCoreLibVersion)" />
         <PackageReference Include="Meshmakers.Octo.Services.Observability" Version="$(OctoCoreLibVersion)" />
