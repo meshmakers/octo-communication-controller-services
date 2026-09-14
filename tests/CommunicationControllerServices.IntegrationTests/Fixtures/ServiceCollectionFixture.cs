@@ -59,6 +59,11 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         // implementation is pure over the repository/cache/parser registered above, so the
         // integration tests exercise the real trigger classification.
         Services.AddSingleton<IWorkloadOnDemandCapabilityService, WorkloadOnDemandCapabilityService>();
+        // AB#4924: AdapterService takes the execution-class resolver, which classifies a
+        // pipeline's trigger nodes when the definition is saved. Real implementation over the
+        // node-descriptor cache registered above, so the integration tests exercise the real
+        // classification rather than a stub that cannot disagree with production.
+        Services.AddSingleton<IPipelineExecutionClassService, PipelineExecutionClassService>();
         // AB#5027: AdapterService takes the pipeline service-account resolver. Real implementation
         // over the repository registered above, so the association traversal is exercised for real.
         Services.AddSingleton<IPipelineServiceAccountResolver, PipelineServiceAccountResolver>();
