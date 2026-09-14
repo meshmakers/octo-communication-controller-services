@@ -1,0 +1,13 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+records:
+  - recordId: HttpHeader
+    description: A single custom HTTP request header for an Sse/Http MCP server. Name is the header field name (e.g. x-api-key, X-Org-Id); Value is the header value. When IsSecret is true, Value is stored encrypted at rest and never surfaced in the pipeline data context. Mirrors the ValueOverride pattern.
+    isFinal: true
+    isAbstract: false
+    attributes:
+      - id: ${System}/Name
+        name: Name
+      - id: ${this}/Value
+        name: Value
+      - id: ${this}/IsSecret
+        name: IsSecret
