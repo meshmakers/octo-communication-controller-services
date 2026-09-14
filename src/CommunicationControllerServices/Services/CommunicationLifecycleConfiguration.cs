@@ -22,7 +22,7 @@ public class CommunicationLifecycleConfiguration
     public bool ScaleToZeroEnabled { get; set; }
 
     /// <summary>
-    ///     Master switch for adapter-pool leasing on this tenant (AB#4924 §13). Default false.
+    ///     Master switch for adapter-pool leasing on this tenant (AB#4924 §14). Default false.
     /// </summary>
     /// <remarks>
     ///     <para>
@@ -37,7 +37,7 @@ public class CommunicationLifecycleConfiguration
     ///         tenant's pools hand their members out"; on a <b>borrowing</b> tenant it reads "this
     ///         tenant's <c>Leased</c> adapters get scheduled". A lease needs both ends on, because
     ///         lending is the lender's capability and borrowing is the borrower's and neither tenant
-    ///         can assert the other's. That is what concept §13 asks for in one line.
+    ///         can assert the other's. That is what the plan's §14 asks for in one line.
     ///     </para>
     ///     <para>
     ///         🔴 <b>Switching it off HOLDS the queue.</b> Work already <c>Queued</c> stays

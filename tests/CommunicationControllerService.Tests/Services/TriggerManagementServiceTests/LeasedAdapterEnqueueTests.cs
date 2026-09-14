@@ -1,3 +1,5 @@
+using System.Diagnostics.Metrics;
+using System.Runtime.CompilerServices;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Communication.Contracts.MessageObjects;
@@ -15,13 +17,33 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 ///     than sent to the execute queue. A manual adapter is untouched: it has no queue and executes
 ///     immediately, and that asymmetry is intended (concept §5).
 /// </summary>
+/// <remarks>
+///     🔴 <b><c>[NotInParallel]</c> is load-bearing, not tidiness.</b> Every test in this file opens a
+///     <see cref="System.Diagnostics.Metrics.MeterListener"/> over process-wide instruments, and a
+///     listener being started or disposed on one thread mutates the very subscription lists another
+///     thread's <c>Add</c> is walking. The symptom is a measurement that is simply never delivered —
+///     one refusal short of sixteen, once in a few dozen runs. A metrics test that loses a
+///     measurement at random is worse than no test: it fails for a reason that has nothing to do with
+///     the metric. Every class in this repository that opens a listener shares this constraint key.
+/// </remarks>
+[NotInParallel(nameof(MeterListener))]
 internal class LeasedAdapterEnqueueTests : TriggerManagementServiceTestsBase
 {
+    /// <summary>
+    ///     A pool rtId unique to this test instance. The increment 9 leasing metrics are process-wide
+    ///     statics tagged by it, and the suite runs concurrently.
+    /// </summary>
+    private readonly string _poolRtId = OctoObjectId.GenerateNewId().ToString();
+
+    private const string LenderTenantId = "lender";
+
     private RtAdapter ArrangeAdapter(RtLifecycleModeEnum lifecycleMode, OctoObjectId pipelineRtId)
     {
         var adapter = RtEntityCreator.CreateAdapter();
         adapter.Name = "an-adapter";
         adapter.LifecycleMode = lifecycleMode;
+        adapter.LentFromTenantId = LenderTenantId;
+        adapter.LentFromPoolRtId = _poolRtId;
 
         CommunicationRepository
             .GetAdapterByPipelineAsync(TenantId,
@@ -119,7 +141,7 @@ internal class LeasedAdapterEnqueueTests : TriggerManagementServiceTestsBase
     }
 
     /// <summary>
-    ///     AB#4924 §13 — the per-tenant leasing kill switch, <b>enqueue</b> half. With leasing off the
+    ///     AB#4924 §14 — the per-tenant leasing kill switch, <b>enqueue</b> half. With leasing off the
     ///     work is refused with a named reason and <b>nothing is written</b>: no execution entity, no
     ///     <c>QueuedAt</c>, no event that looks like progress.
     /// </summary>
@@ -172,5 +194,100 @@ internal class LeasedAdapterEnqueueTests : TriggerManagementServiceTestsBase
         await Assert.That(result).IsNotNull();
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
             .EnqueueExecutionAsync(default!, default!, default!, default!, default);
+    }
+
+    /// <summary>
+    ///     AB#4924 increment 9 (plan §11) — the queue's in-rate. Read against
+    ///     <c>octo.lease.granted.count</c> (the out-rate) this is the only honest answer to "is the
+    ///     queue growing or draining"; the depth gauge shows the level but not which way it moves.
+    /// </summary>
+    [Test]
+    public async Task AQueuedWorkItem_IsCountedAgainstThePoolItWillBeLeasedFrom()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+        ArrangeAdapter(RtLifecycleModeEnum.Leased, pipelineRtId);
+
+        var recorded = await CollectAsync(() =>
+            TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: "{\"x\":1}"));
+
+        var enqueued = recorded.Single(r => r.Instrument == "octo.lease.enqueued.count");
+
+        using var _ = Assert.Multiple();
+        await Assert.That(enqueued.Value).IsEqualTo(1);
+        await Assert.That(enqueued.Tags["octo.tenant.id"]).IsEqualTo(TenantId);
+        await Assert.That(enqueued.Tags["octo.pool.tenant_id"]).IsEqualTo(LenderTenantId);
+    }
+
+    /// <summary>
+    ///     AB#4924 increment 9. The enqueue half of the kill switch is counted at its own stage and
+    ///     named as the BORROWER's half: the lender's is checked at grant, and during a staged
+    ///     rollout an operator has to be able to tell which of the two they are looking at.
+    /// </summary>
+    [Test]
+    public async Task WithLeasingDisabled_TheRefusalIsCountedAtTheEnqueueStage()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+        ArrangeAdapter(RtLifecycleModeEnum.Leased, pipelineRtId);
+        LifecycleConfigurationService.IsLeasingEnabledAsync(TenantId).Returns(false);
+
+        var recorded = await CollectAsync(async () =>
+        {
+            try
+            {
+                await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId,
+                    pipelineInput: null);
+            }
+            catch (TriggerManagementServiceException)
+            {
+                // The refusal is the subject; the throw is asserted by the test above.
+            }
+        });
+
+        var refused = recorded.Single(r => r.Instrument == "octo.lease.refused.count");
+
+        using var _ = Assert.Multiple();
+        await Assert.That(refused.Tags["octo.lease.stage"]).IsEqualTo("enqueue");
+        await Assert.That(refused.Tags["octo.lease.refusal_reason"]).IsEqualTo("leasing_disabled_borrower");
+        await Assert.That(recorded.Any(r => r.Instrument == "octo.lease.enqueued.count")).IsFalse();
+    }
+
+    private sealed record Recorded(string Instrument, double Value, Dictionary<string, string> Tags);
+
+    private async Task<List<Recorded>> CollectAsync(Func<Task> act)
+    {
+        var recorded = new List<Recorded>();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Meter.Name == AdapterLeasingMetrics.MeterName)
+            {
+                l.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
+            recorded.Add(new Recorded(instrument.Name, value, ToDictionary(tags))));
+        // 🔴 The instruments have to EXIST before the listener starts. They are static fields of
+        // AdapterLeasingMetrics, so the first test in the process to touch that class is the one
+        // that creates them — and if that happens inside the act below, it happens while this
+        // listener is already running and racing its own subscription. Forcing the class
+        // constructor here makes every run look like the second one.
+        RuntimeHelpers.RunClassConstructor(typeof(AdapterLeasingMetrics).TypeHandle);
+
+        listener.Start();
+
+        await act();
+
+        return recorded.Where(r => r.Tags.GetValueOrDefault("octo.pool.rt_id") == _poolRtId).ToList();
+    }
+
+    private static Dictionary<string, string> ToDictionary(ReadOnlySpan<KeyValuePair<string, object?>> tags)
+    {
+        var map = new Dictionary<string, string>();
+        foreach (var tag in tags)
+        {
+            map[tag.Key] = tag.Value?.ToString() ?? string.Empty;
+        }
+
+        return map;
     }
 }

@@ -45,7 +45,7 @@ public class TriggerManagementServiceException : Exception
     }
 
     /// <summary>
-    ///     AB#4924 §13 — the pipeline runs on a <c>Leased</c> adapter and adapter-pool leasing is
+    ///     AB#4924 §14 — the pipeline runs on a <c>Leased</c> adapter and adapter-pool leasing is
     ///     switched off for the tenant.
     /// </summary>
     /// <remarks>

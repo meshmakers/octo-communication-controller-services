@@ -1,5 +1,6 @@
 using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
@@ -144,7 +145,8 @@ internal class LeaseOutcomeAndRequeueTests : LeaseServiceTestsBase
         var before = DateTime.UtcNow.AddSeconds(-1);
 
         var lease = ConnectionManager.TryGetMember(ConnectionId)!.ActiveLease!;
-        await LeaseService.InterruptAndRequeueAsync(lease, "the lease expired");
+        await LeaseService.InterruptAndRequeueAsync(lease, LeaseInterruptReason.TtlExpiry,
+            "the lease expired");
 
         await CommunicationRepository.Received(1).TryInterruptLeasedExecutionAsync(BorrowerTenantId, ExecutionId,
             Arg.Is<DateTime>(d => d >= before && d <= DateTime.UtcNow.AddSeconds(1)),
@@ -162,7 +164,8 @@ internal class LeaseOutcomeAndRequeueTests : LeaseServiceTestsBase
         ArrangeInterruptible(RtPipelineTriggerTypeEnum.Scheduled, "{\"a\":1}");
 
         var lease = ConnectionManager.TryGetMember(ConnectionId)!.ActiveLease!;
-        await LeaseService.InterruptAndRequeueAsync(lease, "the lease expired");
+        await LeaseService.InterruptAndRequeueAsync(lease, LeaseInterruptReason.TtlExpiry,
+            "the lease expired");
 
         await CommunicationRepository.Received(1).EnqueueExecutionAsync(BorrowerTenantId,
             Arg.Is<RtPipelineExecution>(e =>
@@ -182,7 +185,8 @@ internal class LeaseOutcomeAndRequeueTests : LeaseServiceTestsBase
             Arg.Any<DateTime>(), Arg.Any<string>()).Returns((InterruptedLeasedExecution?)null);
 
         var lease = ConnectionManager.TryGetMember(ConnectionId)!.ActiveLease!;
-        var requeued = await LeaseService.InterruptAndRequeueAsync(lease, "the lease expired");
+        var requeued = await LeaseService.InterruptAndRequeueAsync(lease, LeaseInterruptReason.TtlExpiry,
+            "the lease expired");
 
         using var _ = Assert.Multiple();
         await Assert.That(requeued).IsNull();

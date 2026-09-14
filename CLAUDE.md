@@ -2085,12 +2085,78 @@ a work item may wait. The window applies to the **depth** signal only — the wa
 time-integrated. Samples are retained for **twice** the window: pruning at exactly the window drops
 the sample that proves the history is long enough, and the signal then never fires.
 
-### 🔴 Still missing for end-to-end leasing
+### ✅ The lease carries the work (§9.9 / D4)
 
-A lease carries `ExecutionId` and nothing else about the work — no pipeline, no input — and
-`IAdapterLeaseWorkItem` is still `NoAdapterLeaseWorkItem`. The controller queues, rotates, grants,
-claims, reaps and re-queues correctly; a member that receives a lease has nothing to run. See the
-plan §9.9 / D4 — a multi-repo decision, not a controller detail.
+This section used to say a lease carried `ExecutionId` and nothing else, so a member that received
+one had nothing to run. Resolved: `LeaseDto` carries the pipeline rtId, the input and the projected
+`PipelineConfigurationDto`, and `octo-mesh-adapter` implements the work item. `LeaseService` refuses
+the lease — **before a member is reserved** — when the pipeline cannot be projected.
+
+## Leasing: metrics, alerts and rollout operability (AB#4924 increment 9)
+
+Plan: `docs/concepts/shared-adapter-leasing-implementation.md` §11. Alert rules live in
+**`meshmakers-infrastructure`**, not here (§11.5).
+
+`Services/AdapterLeasingMetrics` (static, mirroring `WorkloadLifecycleMetrics`) emits 18 instruments
+on the meter **`Meshmakers.Octo.Communication`** — the same meter AB#4919 uses, so
+octo-common-services' `ObservabilityBuilder` already registers it and nothing had to be wired up.
+
+| Instrument | Kind | Purpose |
+|---|---|---|
+| `octo.lease.held.duration` | histogram (s) | `LeaseGrantedAt` → release; the span that prices the borrower |
+| `octo.lease.work.duration` | histogram (s) | what the member reported it spent running the pipeline |
+| `octo.lease.overhead.duration` | histogram (s) | held − work — **the amortisation number** |
+| `octo.lease.granted.count` / `octo.lease.queue.wait` | counter / histogram (s) | served count and wait distribution per borrowing tenant — the two halves of fairness |
+| `octo.lease.enqueued.count` | counter | the queue's in-rate against `granted.count` |
+| `octo.lease.queue.depth` | gauge | waiting items **per pool and per borrowing tenant** |
+| `octo.lease.queue.oldest_wait` | gauge (s) | what the wait signal thresholds |
+| `octo.lease.pool.members` | gauge | members on *this* controller pod, by `available` / `leased` / `draining` |
+| `octo.lease.scaleup.signal` / `.window` / `.count` | gauge / gauge (s) / counter | the signals, the window in force, and the decision they produced |
+| `octo.lease.pool.undersized` | gauge | 1 while the pool should grow and is at `MaxReplicas` — the alertable condition |
+| `octo.lease.refused.count` | counter | by `octo.lease.stage` and `octo.lease.refusal_reason` |
+| `octo.lease.released.count` / `.interrupted.count` / `.requeued.count` / `.member_drained.count` | counters | outcomes, mid-lease failures, at-least-once retries, member churn |
+
+Tags on every series: `octo.tenant.id` (the **borrowing** tenant), `octo.pool.tenant_id`,
+`octo.pool.rt_id`, `octo.pool.name`.
+
+Five decisions worth keeping:
+
+- 🔴 **The work span is measured by the MEMBER and travels on the release**
+  (`LeaseResultDto.WorkDurationMs`, set by `AdapterPoolClient`). The controller cannot measure it:
+  it stamps `StartedAt` at claim time, so its own view of the two spans is identical by construction
+  and the overhead would read as zero forever. Null when the work item never ran — no fabricated
+  zero, which would say the pool spent 100 % of the lease on overhead.
+- 🔴 **A refusal reason is an enum, not the message.** `LeaseGrantResult.Reason`
+  (`LeaseRefusalReason`) is the label; `StatusMessage` names the tenant and the adapter and stays
+  free text. Every refusal path goes through `LeaseService.Refuse(...)`, so a reason added later
+  cannot be forgotten on the metric.
+- 🔴 **The member id is never a label.** Bounded at any instant by `MaxReplicas`, unbounded over
+  time — and draining is precisely the path that restarts members, so the label set would grow
+  fastest while the drain counter fires. Drains and expiries are counted per **pool**.
+- **`octo.lease.pool.undersized` publishes the answer, not the inputs** — same pattern, and the same
+  reason, as `octo.workload.offline_unexpected`. ⚠️ It is computed from the members on *this* pod,
+  inheriting increment 7's per-instance ceiling arithmetic; `max by (pool)` in the alert is a
+  mitigation, not a fix.
+- ⚠️ **Log volume.** A lease is frequent. Depth, wait, member states and signals are metrics and are
+  logged nowhere; `ScheduleForPoolAsync`'s "no idle member" line fires once on the **transition**
+  into exhaustion rather than on every five-second round.
+
+**Pool observations expire, they are not evicted.** `SweepStalePools` drops a pool no round has
+observed for three minutes. "Evict everything this round's topology did not contain" is wrong with
+more than one controller pod: each sees a different subset.
+
+**Traces: a lease cannot be traced end to end.** `ObservabilityBuilder` has no `AddSource(...)` at
+all and nothing in the estate propagates trace context over SignalR. Correlation is by lease id and
+execution id in the logs. See plan §11.3 before anyone builds half of it.
+
+Tests: `Services/AdapterLeasingMetricsTests` (the instrument shapes),
+`Services/LeaseServiceTests/LeasingMetricsTests`,
+`Services/LeaseSchedulerServiceTests/SchedulerMetricsTests`, and the two increment 9 cases in
+`Services/TriggerManagementServiceTests/LeasedAdapterEnqueueTests`. 🔴 All four carry
+`[NotInParallel(nameof(MeterListener))]`, and so does `WorkloadLifecycleMetricsTests`: a listener
+started or disposed on one thread mutates the subscription lists another thread's `Add` is walking,
+and the symptom is a measurement that is never delivered — one short of sixteen, once in a few dozen
+runs. Each harness also forces the metrics class constructor before starting its listener.
 
 ## Pipeline Service Account — mandatory execution identity (Epic AB#4979; AB#5027 phases 1 + 2)
 

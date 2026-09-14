@@ -48,6 +48,13 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     /// <summary>When each pool last had a scale-up requested, so one signal does not fire a burst.</summary>
     private readonly ConcurrentDictionary<PoolKey, DateTime> _lastScaleUpUtc = new();
 
+    /// <summary>
+    ///     Pools currently observed with queued work and no idle member, so the condition is logged
+    ///     once when it starts rather than on every five-second round while it lasts (AB#4924
+    ///     increment 9).
+    /// </summary>
+    private readonly ConcurrentDictionary<PoolKey, DateTime> _exhaustedPools = new();
+
     public LeaseSchedulerService(IAdapterCache adapterCache,
         ICommunicationRepository communicationRepository,
         IAdapterPoolConnectionManager connectionManager,
@@ -93,6 +100,13 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
             }
         }
 
+        // 🔴 A pool that left the topology must stop publishing rather than freeze at its last
+        // reading. A depth gauge stuck at "12 queued" for a pool whose last borrower was re-pointed
+        // is an alert that can never clear, and the first thing anyone does with an alert that never
+        // clears is stop reading it. By age, not by "not in this round's topology" — several
+        // controller pods sweep independently and each sees a different subset.
+        AdapterLeasingMetrics.SweepStalePools();
+
         return granted;
     }
 
@@ -118,6 +132,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
                 lease.LeaseId, lease.TenantId, member.MemberId, lease.ExpiresAtUtc);
 
             var requeuedExecutionId = await _leaseService.InterruptAndRequeueAsync(lease,
+                LeaseInterruptReason.TtlExpiry,
                 $"The lease on pool member '{member.MemberId}' expired before the member released it.");
 
             // 🔴 Free the lease BEFORE draining, so the member is not left holding a lease that no
@@ -127,6 +142,12 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
             _connectionManager.ReleaseLease(member.ConnectionId, lease.LeaseId);
             await _leaseService.DrainMemberAsync(member.ConnectionId,
                 $"its lease '{lease.LeaseId}' expired without a release");
+
+            // Counted here rather than inside DrainMemberAsync, which only knows a connection id:
+            // the drain counter is scoped to the POOL, because a drain loop is a property of the
+            // pool and the member id changes on every restart the loop causes.
+            AdapterLeasingMetrics.RecordMemberDrained(member.PoolTenantId, member.PoolRtId,
+                LeaseDrainReason.TtlExpiry);
 
             await _eventService.StoreErrorEventAsync(lease.TenantId,
                 $"The adapter pool lease serving execution '{lease.ExecutionId}' expired before the pool member " +
@@ -296,24 +317,66 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
             : DateTime.UtcNow - byTenant.Values.SelectMany(i => i).Min(i => i.Queued.QueuedAtUtc);
 
         var members = _connectionManager.GetMembers(key.LenderTenantId, key.PoolRtId);
-        await EvaluateScaleUpAsync(key, pool, depth, oldestWait, members.Count);
+
+        // Named before anything can be counted for this pool, so every series carries something a
+        // human can read from the first measurement rather than from the second round onwards.
+        AdapterLeasingMetrics.NamePool(key.LenderTenantId, key.PoolRtId, pool?.Name);
+
+        var scaleUp = await EvaluateScaleUpAsync(key, pool, depth, oldestWait, members.Count);
+
+        // 🔴 AB#4924 increment 9 (plan §11). Everything continuous about this pool is published
+        // here, once per round, as gauges — depth per borrowing tenant, the oldest wait, the member
+        // states, the scale-up signals and the window that produced them. Deliberately NOT logged:
+        // a scheduling round runs every 5 s per pool, and a log line per round per pool is exactly
+        // the shape of the adapter log-level flood this estate has already lived through.
+        var available = members.Count(m => m.IsAvailable);
+        AdapterLeasingMetrics.ObserveRound(key.LenderTenantId, key.PoolRtId,
+            byTenant.ToDictionary(kv => kv.Key, kv => kv.Value.Count, StringComparer.OrdinalIgnoreCase),
+            oldestWait,
+            // Mutually exclusive on purpose, so the three sum to the member count: a member that is
+            // draining while it still holds a lease counts as leased, because that is what it is
+            // doing — it stops taking work when the lease ends.
+            (available,
+                members.Count(m => m.ActiveLease is not null),
+                members.Count(m => m is { IsDraining: true, ActiveLease: null })),
+            scaleUp.Window, scaleUp.DepthSignal, scaleUp.WaitSignal, scaleUp.Undersized);
 
         if (depth == 0)
         {
+            _exhaustedPools.TryRemove(key, out _);
             return 0;
         }
 
-        var available = members.Count(m => m.IsAvailable);
         if (available == 0)
         {
             // Concept §6, "Pool exhausted": the queue simply grows and stays visible. Work is never
             // dropped and never rejected because no member happens to be free.
-            Logger.Debug(
-                "Adapter pool {PoolRtId} of tenant '{LenderTenantId}' has {Depth} work item(s) queued and no idle " +
-                "member on this controller instance",
-                key.PoolRtId, key.LenderTenantId, depth);
+            //
+            // Counted per borrowing tenant, because "which tenant is not being served" is the
+            // question this state raises and an aggregate cannot answer it.
+            foreach (var tenantId in byTenant.Keys)
+            {
+                AdapterLeasingMetrics.RecordRefused(tenantId, key.LenderTenantId, key.PoolRtId,
+                    LeaseStage.Schedule, LeaseRefusalReason.PoolExhausted);
+            }
+
+            // 🔴 Logged on the TRANSITION into exhaustion, not on every round. At a five-second
+            // cadence the previous form produced twelve lines a minute per pool for as long as the
+            // condition lasted — which is precisely when nobody can read the log. The continuous
+            // signal is octo.lease.pool.members / octo.lease.queue.depth; this line only says when
+            // it started.
+            if (_exhaustedPools.TryAdd(key, DateTime.UtcNow))
+            {
+                Logger.Info(
+                    "Adapter pool {PoolRtId} of tenant '{LenderTenantId}' has {Depth} work item(s) queued and no " +
+                    "idle member on this controller instance",
+                    key.PoolRtId, key.LenderTenantId, depth);
+            }
+
             return 0;
         }
+
+        _exhaustedPools.TryRemove(key, out _);
 
         var activePerTenant = members
             .Where(m => m.ActiveLease is not null)
@@ -355,7 +418,11 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
                 if (perTenantCap is { } cap && activePerTenant.GetValueOrDefault(tenantId) >= cap)
                 {
                     // LendingMaxConcurrentLeasesPerTenant caps CONCURRENCY, not queue depth: the
-                    // excess stays Queued and visible rather than being rejected.
+                    // excess stays Queued and visible rather than being rejected. Counted so that
+                    // "this tenant's work is slow" can be told apart from "the pool is full" —
+                    // the two look identical in the queue view and have opposite remedies.
+                    AdapterLeasingMetrics.RecordRefused(tenantId, key.LenderTenantId, key.PoolRtId,
+                        LeaseStage.Schedule, LeaseRefusalReason.PerTenantCap);
                     blocked.Add(tenantId);
                     continue;
                 }
@@ -370,6 +437,13 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
                     blocked.Add(tenantId);
                     continue;
                 }
+
+                // 🔴 The wait is recorded here and nowhere else: only queued work has a wait, and
+                // LeaseService also serves the hand-driven POST .../lease, which has no QueuedAt to
+                // measure from. Per borrowing tenant, because an equal served-count with a wildly
+                // unequal wait is not fairness.
+                AdapterLeasingMetrics.RecordQueueWait(tenantId, key.LenderTenantId, key.PoolRtId,
+                    DateTime.UtcNow - candidate.Queued.QueuedAtUtc);
 
                 items.RemoveAt(0);
                 activePerTenant[tenantId] = activePerTenant.GetValueOrDefault(tenantId) + 1;
@@ -534,12 +608,15 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     ///         globally once increment 9 has produced real queue-depth data.
     ///     </para>
     /// </remarks>
-    private async Task EvaluateScaleUpAsync(PoolKey key, RtAdapterPool? pool, int depth, TimeSpan oldestWait,
-        int membersHere)
+    private async Task<ScaleUpEvaluation> EvaluateScaleUpAsync(PoolKey key, RtAdapterPool? pool, int depth,
+        TimeSpan oldestWait, int membersHere)
     {
         if (pool is null)
         {
-            return;
+            // No entity, no thresholds, so no signal was evaluated. Depth, wait and member counts
+            // are still real observations and are still published by the caller; only the window
+            // and the signals read as "not evaluated" (window 0), which is what they are.
+            return ScaleUpEvaluation.Unknown;
         }
 
         var now = DateTime.UtcNow;
@@ -578,9 +655,21 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
             _ => depthSignal || waitSignal
         };
 
+        var evaluation = new ScaleUpEvaluation(window, depthSignal, waitSignal,
+            // 🔴 The alertable condition, decided where the knowledge lives. "The queue is waiting"
+            // and "the pool is at its ceiling" are two facts that live in different places, and an
+            // alert rule joining them would be a second implementation of the judgement this method
+            // already makes every round — the same reasoning as octo.workload.offline_unexpected.
+            //
+            // ⚠️ Read with the same caveat the scale-up arithmetic below carries: membersHere counts
+            // the members connected to THIS controller instance. With more than one controller pod
+            // each sees a subset, so each underestimates the pool and this flag under-reports. That
+            // is a property of increment 7's scale-up, not of the metric; see plan §11.8.
+            Undersized: fires && Math.Max(pool.MinReplicas, membersHere) + 1 > pool.MaxReplicas);
+
         if (!fires)
         {
-            return;
+            return evaluation;
         }
 
         // One scale-up per window per pool. Kubernetes needs longer than a scheduling round to make
@@ -588,7 +677,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
         // already responding to.
         if (_lastScaleUpUtc.TryGetValue(key, out var last) && now - last < window)
         {
-            return;
+            return evaluation;
         }
 
         var desired = Math.Max(pool.MinReplicas, membersHere) + 1;
@@ -606,7 +695,9 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
                 $"Adapter pool '{pool.Name}' is at its ceiling of {pool.MaxReplicas} member(s) while " +
                 $"{depth} work item(s) wait for a lease. Raise MaxReplicas, or move a borrower to a dedicated " +
                 "adapter.");
-            return;
+            AdapterLeasingMetrics.RecordScaleUp(key.LenderTenantId, key.PoolRtId,
+                AdapterLeasingMetrics.ScaleUpOutcomes.AtCeiling);
+            return evaluation;
         }
 
         _lastScaleUpUtc[key] = now;
@@ -617,6 +708,8 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
             // and its MinReplicas..MaxReplicas clamp (increment 5). A second clamp written here
             // would be a second opinion about the pool's declared range, and the two would drift.
             var effective = await _poolService.ScaleAdapterPoolAsync(key.LenderTenantId, pool.RtId, desired);
+            AdapterLeasingMetrics.RecordScaleUp(key.LenderTenantId, key.PoolRtId,
+                AdapterLeasingMetrics.ScaleUpOutcomes.Scaled);
             Logger.Info(
                 "Adapter pool '{PoolName}' ({PoolRtId}) of tenant '{LenderTenantId}' scaling to {Effective} " +
                 "member(s): depth={Depth} (threshold {Threshold}, window {WindowSeconds}s, signal={DepthSignal}), " +
@@ -626,11 +719,33 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
         }
         catch (Exception e)
         {
+            AdapterLeasingMetrics.RecordScaleUp(key.LenderTenantId, key.PoolRtId,
+                AdapterLeasingMetrics.ScaleUpOutcomes.Failed);
             Logger.Warn(e,
                 "Could not scale adapter pool '{PoolName}' ({PoolRtId}) of tenant '{LenderTenantId}' to " +
                 "{Desired} member(s)",
                 pool.Name, key.PoolRtId, key.LenderTenantId, desired);
         }
+
+        return evaluation;
+    }
+
+    /// <summary>
+    ///     What one round's scale-up evaluation saw, so the gauges can publish the inputs next to
+    ///     the decision they produced (AB#4924 increment 9, concept §8 Q14).
+    /// </summary>
+    /// <param name="Window">The depth-averaging window in force for this pool.</param>
+    /// <param name="DepthSignal">Whether averaged queue depth cleared the pool's threshold.</param>
+    /// <param name="WaitSignal">Whether the oldest wait cleared the pool's threshold.</param>
+    /// <param name="Undersized">
+    ///     Whether the pool wants to grow and is already at <c>MaxReplicas</c> — it cannot self-heal
+    ///     and needs a human.
+    /// </param>
+    private readonly record struct ScaleUpEvaluation(TimeSpan Window, bool DepthSignal, bool WaitSignal,
+        bool Undersized)
+    {
+        /// <summary>A round that could not read the pool entity and therefore evaluated nothing.</summary>
+        public static ScaleUpEvaluation Unknown => new(TimeSpan.Zero, false, false, false);
     }
 
     /// <summary>

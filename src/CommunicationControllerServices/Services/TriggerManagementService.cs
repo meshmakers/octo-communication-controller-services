@@ -149,7 +149,7 @@ internal class TriggerManagementService(
             return null;
         }
 
-        // 🔴 AB#4924 §13 — the per-tenant kill switch, enqueue half. Nothing is written: no execution
+        // 🔴 AB#4924 §14 — the per-tenant kill switch, enqueue half. Nothing is written: no execution
         // entity, no QueuedAt, no event that looks like progress. The other half sits in
         // LeaseService.GrantLeaseAsync, and both are needed — a switch that stopped only new enqueues
         // would leave the existing queue draining after somebody turned leasing off, which is not what
@@ -157,6 +157,14 @@ internal class TriggerManagementService(
         // nobody is going to serve.
         if (!await lifecycleConfigurationService.IsLeasingEnabledAsync(tenantId))
         {
+            // 🔴 AB#4924 increment 9 (plan §11). Counted at the ENQUEUE stage and with the
+            // borrowing half named, because "leasing is off" is two different operator decisions on
+            // two different tenants and an aggregate cannot tell them apart. This half is always
+            // the borrower's own switch — the lender's is checked at grant, in LeaseService.
+            AdapterLeasingMetrics.RecordRefused(tenantId, adapter.LentFromTenantId ?? string.Empty,
+                adapter.LentFromPoolRtId ?? string.Empty, LeaseStage.Enqueue,
+                LeaseRefusalReason.LeasingDisabledBorrower);
+
             logger.LogWarning(
                 "[{TenantId}] Pipeline '{PipelineRtId}' is executed by leased adapter '{AdapterName}', but adapter " +
                 "pool leasing is disabled for this tenant; nothing was queued",
@@ -182,6 +190,13 @@ internal class TriggerManagementService(
             new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipelineRtId),
             new RtEntityId(adapter.CkTypeId ?? SystemCommunicationCkIds.RtCkAdapterTypeId, adapter.RtId),
             queuedAt);
+
+        // The queue's in-rate. Against octo.lease.granted.count (the out-rate) this is the only
+        // honest answer to "is the queue growing or draining"; a depth gauge alone shows the level
+        // but not which way it is moving. Re-queued attempts are counted separately on
+        // octo.lease.requeued.count, so the full in-rate is the sum of the two.
+        AdapterLeasingMetrics.RecordEnqueued(tenantId, adapter.LentFromTenantId ?? string.Empty,
+            adapter.LentFromPoolRtId ?? string.Empty);
 
         logger.LogInformation(
             "[{TenantId}] Pipeline '{PipelineRtId}' is executed by leased adapter '{AdapterName}'; queued as " +

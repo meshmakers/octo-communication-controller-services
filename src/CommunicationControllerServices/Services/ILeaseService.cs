@@ -48,10 +48,20 @@ public record LeaseRequest(
 ///     <c>LeasedOnMemberId</c>. Null when nothing was granted.
 /// </param>
 /// <param name="StatusMessage">Why nothing was granted, or a note on what was.</param>
-public record LeaseGrantResult(bool Granted, string? LeaseId, string? MemberId, string? StatusMessage)
+/// <param name="Reason">
+///     🔴 The <b>machine-readable</b> half of the refusal (AB#4924 increment 9, plan §11).
+///     <see cref="StatusMessage" /> names the tenant, the adapter and the pool so a human can act,
+///     and that is exactly what makes it useless as a metric label — it would produce one series per
+///     name that ever appeared in a message. The enum is what <c>octo.lease.refused.count</c> is
+///     tagged with. Keeping both is what lets a dashboard say "refusals are up, and they are all
+///     pipeline projection failures" while the log line still says which borrower.
+/// </param>
+public record LeaseGrantResult(bool Granted, string? LeaseId, string? MemberId, string? StatusMessage,
+    LeaseRefusalReason Reason = LeaseRefusalReason.None)
 {
     /// <summary>A refusal with a named reason. Never a bare false — a caller has to be able to act.</summary>
-    public static LeaseGrantResult Refused(string reason) => new(false, null, null, reason);
+    public static LeaseGrantResult Refused(LeaseRefusalReason reason, string message) =>
+        new(false, null, null, message, reason);
 }
 
 /// <summary>
@@ -127,8 +137,15 @@ public interface ILeaseService
     ///     entity; see <see cref="Repository.InterruptedLeasedExecution" /> for why it cannot be the
     ///     old one moved back to <c>Queued</c>.
     /// </remarks>
+    /// <param name="lease">The lease that ended without a release.</param>
+    /// <param name="interruptReason">
+    ///     Which of the two mid-lease failures this is. Separate from <paramref name="reason" />
+    ///     because that one is prose for the tenant's event log and this one is the metric label
+    ///     (AB#4924 increment 9).
+    /// </param>
+    /// <param name="reason">Human-readable explanation, stored on the interrupted attempt.</param>
     /// <returns>The execution id of the re-queued attempt, or null when nothing was re-queued.</returns>
-    Task<string?> InterruptAndRequeueAsync(LeaseDto lease, string reason);
+    Task<string?> InterruptAndRequeueAsync(LeaseDto lease, LeaseInterruptReason interruptReason, string reason);
 
     /// <summary>
     ///     Tells a member to drain: it finishes what it holds, takes no further lease and exits, so

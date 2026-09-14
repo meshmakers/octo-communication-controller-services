@@ -14,6 +14,16 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services;
 ///     Recorded through a real <see cref="MeterListener"/> rather than a seam, because the point of
 ///     the assertions is the instrument names and tags the exporter will actually publish.
 /// </summary>
+/// <remarks>
+///     🔴 <b><c>[NotInParallel]</c> is load-bearing, not tidiness.</b> Every test in this file opens a
+///     <see cref="System.Diagnostics.Metrics.MeterListener"/> over process-wide instruments, and a
+///     listener being started or disposed on one thread mutates the very subscription lists another
+///     thread's <c>Add</c> is walking. The symptom is a measurement that is simply never delivered —
+///     one refusal short of sixteen, once in a few dozen runs. A metrics test that loses a
+///     measurement at random is worse than no test: it fails for a reason that has nothing to do with
+///     the metric. Every class in this repository that opens a listener shares this constraint key.
+/// </remarks>
+[NotInParallel(nameof(MeterListener))]
 internal class WorkloadLifecycleMetricsTests
 {
     private sealed record Recorded(string Instrument, double Value, Dictionary<string, string> Tags);

@@ -19,7 +19,7 @@ public interface ILifecycleConfigurationService
     Task<bool> IsScaleToZeroEnabledAsync(string tenantId);
 
     /// <summary>
-    ///     Convenience gate: true iff adapter-pool leasing is enabled for the tenant (AB#4924 §13).
+    ///     Convenience gate: true iff adapter-pool leasing is enabled for the tenant (AB#4924 §14).
     ///     Cached, same 30 s TTL. Both the lending and the borrowing tenant have to answer true
     ///     before a lease is granted — see <c>LeaseService.CheckLeasingEnabledAsync</c>.
     /// </summary>

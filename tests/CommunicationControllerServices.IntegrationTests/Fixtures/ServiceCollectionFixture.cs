@@ -132,7 +132,7 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         // (same pattern as the command clients above).
         Services.AddSingleton(Substitute.For<IWorkloadLifecycleService>());
 
-        // AB#4924 §13: TriggerManagementService and LeaseService now take the lifecycle configuration
+        // AB#4924 §14: TriggerManagementService and LeaseService now take the lifecycle configuration
         // service for the per-tenant leasing kill switch. The REAL one, not a substitute — it reads
         // the tenant key-value store this fixture already provides, and a substitute would make every
         // integration assertion about the switch a tautology about the substitute. A tenant that never

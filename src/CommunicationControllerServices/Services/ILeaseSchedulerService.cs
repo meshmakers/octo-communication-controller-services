@@ -25,7 +25,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 /// <param name="LeasedOnMemberId">
 ///     The member holding this item, when it is leased; null while it waits. A member id may name a
 ///     process that no longer exists — nothing enforces referential integrity on it (implementation
-///     plan §12.1) — so a surface must render it as text, never resolve it.
+///     plan §13.1) — so a surface must render it as text, never resolve it.
 /// </param>
 /// <param name="LeaseExpiresAtUtc">When the holding lease expires; null while the item waits.</param>
 public sealed record AdapterPoolQueueEntry(

@@ -100,7 +100,7 @@ internal class LifecycleConfigurationServiceTests
     }
 
     /// <summary>
-    ///     AB#4924 §13 — <b>default off</b> on a tenant that has never set it. The switch was pulled
+    ///     AB#4924 §14 — <b>default off</b> on a tenant that has never set it. The switch was pulled
     ///     forward from increment 9 precisely so that a tenant which happens to own an
     ///     <c>AdapterPool</c> and a <c>Leased</c> adapter is not scheduled the moment the controller
     ///     rolls out; a default of true would give away the whole point.

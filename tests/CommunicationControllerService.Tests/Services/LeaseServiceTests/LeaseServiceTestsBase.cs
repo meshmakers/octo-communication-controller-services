@@ -29,7 +29,13 @@ internal abstract class LeaseServiceTestsBase
     protected const string PipelineInput = "{\"invoiceNumber\":\"BORROWER-PRIVATE-4711\"}";
     protected const string ConfigurationSecret = "cfgSecret-9F2a7Lq0ZxBv3TnE8Rd1Yh6Ks4Mw5Pu2";
 
-    protected static readonly OctoObjectId PoolRtId = new("6ad562f3ff7c40ff80275b84");
+    /// <summary>
+    ///     A fresh pool per test instance, not a shared constant. The increment 9 leasing metrics are
+    ///     process-wide statics tagged by pool rtId and TUnit runs these tests concurrently, so a
+    ///     shared id would let one test read another's measurements.
+    /// </summary>
+    protected readonly OctoObjectId PoolRtId = OctoObjectId.GenerateNewId();
+
     protected static readonly OctoObjectId PipelineRtId = new("6ad562f3ff7c40ff80275b85");
 
     protected readonly IAdapterPoolConnectionManager ConnectionManager = new AdapterPoolConnectionManager();
@@ -51,7 +57,7 @@ internal abstract class LeaseServiceTestsBase
     protected readonly IAdapterService AdapterService = Substitute.For<IAdapterService>();
 
     /// <summary>
-    ///     AB#4924 §13 — the per-tenant leasing kill switch. Default <b>on</b> for both tenants, so
+    ///     AB#4924 §14 — the per-tenant leasing kill switch. Default <b>on</b> for both tenants, so
     ///     every test written before it existed still exercises what it meant to; the gate's own suite
     ///     turns it off explicitly, one tenant at a time.
     /// </summary>

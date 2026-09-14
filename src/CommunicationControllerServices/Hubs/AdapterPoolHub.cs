@@ -21,7 +21,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 ///         <c>AdapterHubAuthorizationFilter</c> (AB#5063) exists to bind a connection to its route
 ///         tenant. A pool member belongs to no tenant, so it cannot use that route — and relaxing the
 ///         filter so that it could would remove the only tenant check the adapter data plane has
-///         (implementation plan §12.6).
+///         (implementation plan §13.6).
 ///     </para>
 ///     <para>
 ///         The member's connection is authorized against the <b>lending</b> tenant and proves

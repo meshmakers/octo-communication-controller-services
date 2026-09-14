@@ -6,7 +6,7 @@ using NSubstitute;
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.LeaseServiceTests;
 
 /// <summary>
-///     AB#4924 §13 — the per-tenant leasing kill switch, <b>grant</b> half.
+///     AB#4924 §14 — the per-tenant leasing kill switch, <b>grant</b> half.
 /// </summary>
 /// <remarks>
 ///     <para>
@@ -20,7 +20,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 ///         the lender "this tenant's pools hand their members out", on the borrower "this tenant's
 ///         <c>Leased</c> adapters get scheduled". Lending is the lender's capability and borrowing is
 ///         the borrower's, and neither tenant can assert the other's, so one <c>true</c> is never
-///         enough. That is concept §13's "both the lender and the borrower tenant must have it on",
+///         enough. That is the plan's §14 "both the lender and the borrower tenant must have it on",
 ///         made enforceable.
 ///     </para>
 ///     <para>

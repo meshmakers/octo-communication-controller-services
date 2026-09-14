@@ -213,7 +213,7 @@ workloads with `LifecycleMode = Leased`", which contradicts §2: `Leased` means 
 and a member **is** the process. Both cannot carry the same mode. Members are **replicas of the pool workload
 itself**, which is a `DeployableWorkload` in its own right; they need no entity, no author configuration and no
 lifecycle of their own. `Leased` stays unambiguously the **borrower's** mode, set on `Adapter`. See the
-implementation plan §12.2. The pool — not the
+implementation plan §13.2. The pool — not the
 AB#4918 idle watchdog — owns their lifecycle: the watchdog drains a workload from *its own*
 pipelines' `LastExecutionAt`, and a pool member has no pipelines of its own. This resolves the
 contradiction the on-demand concept would otherwise run into.
@@ -383,7 +383,7 @@ the queue path.
   two pages earlier. It is **not** the mechanism and cannot be: the exchange is user-only — it rejects a
   `subject_token` without `sub`/`tenant_id`, which is exactly the shape of a client-credentials token, and it
   mints an `xt_` shadow user, which is not what a service identity wants. The lease carries the borrower's own
-  `PipelineServiceAccount` credential instead (Q6). See the implementation plan §12.5.
+  `PipelineServiceAccount` credential instead (Q6). See the implementation plan §13.5.
 - **AB#5151 `GET /tenants/descendants`** — the lending scope resolver.
 
 ## 8. Decisions and open questions
@@ -409,7 +409,7 @@ the queue path.
 | Q18 | Rename sequencing | Ships **together** with leasing — one major bump, one migration |
 | Q14 | Scale-up trigger | Queue depth **or** wait time crossing a threshold; averaging window measured during implementation and kept configurable — ✅ implemented as a controller option whose default *derives* the window from the pool's own `ScaleUpQueueWaitSeconds` rather than inventing a constant; see the implementation plan, D3 |
 | Q19 | How a leased member learns what to run | The **lease carries the work**: pipeline rtId, input, and the pipeline configuration the controller already projects for a dedicated adapter. One execution entity from enqueue to release — the member runs *against* the queued execution and reports no execution start (implementation plan §9.9 / D4) |
-| Q20 | When the per-tenant kill switch ships | **With the scheduler, not after it.** `LeasingEnabled` on the existing AB#4914 `communicationLifecycle` record, default off, enforced at both the enqueue and the grant. Work already queued is **held**, never drained and never cancelled (implementation plan §13.1 / D5) |
+| Q20 | When the per-tenant kill switch ships | **With the scheduler, not after it.** `LeasingEnabled` on the existing AB#4914 `communicationLifecycle` record, default off, enforced at both the enqueue and the grant. Work already queued is **held**, never drained and never cancelled (implementation plan §14.1 / D5) |
 
 ### Still open
 

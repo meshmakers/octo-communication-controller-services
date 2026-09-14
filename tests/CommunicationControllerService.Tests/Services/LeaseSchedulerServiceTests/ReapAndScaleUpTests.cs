@@ -1,4 +1,5 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
@@ -23,7 +24,7 @@ internal class ReapAndScaleUpTests : LeaseSchedulerServiceTestsBase
     public async Task AnExpiredLease_IsInterruptedRequeuedAndTheMemberIsDrained()
     {
         var connectionId = ArrangeBusyMember(TenantA, expiresAtUtc: DateTime.UtcNow.AddSeconds(-1));
-        LeaseService.InterruptAndRequeueAsync(Arg.Any<LeaseDto>(), Arg.Any<string>())
+        LeaseService.InterruptAndRequeueAsync(Arg.Any<LeaseDto>(), Arg.Any<LeaseInterruptReason>(), Arg.Any<string>())
             .Returns("retry-execution-id");
 
         var reaped = await Scheduler.ReapExpiredLeasesAsync();
@@ -31,7 +32,7 @@ internal class ReapAndScaleUpTests : LeaseSchedulerServiceTestsBase
         using var _ = Assert.Multiple();
         await Assert.That(reaped).IsEqualTo(1);
         await LeaseService.Received(1).InterruptAndRequeueAsync(
-            Arg.Is<LeaseDto>(l => l.TenantId == TenantA), Arg.Any<string>());
+            Arg.Is<LeaseDto>(l => l.TenantId == TenantA), LeaseInterruptReason.TtlExpiry, Arg.Any<string>());
         await LeaseService.Received(1).DrainMemberAsync(connectionId, Arg.Any<string>());
         // Drained AND no longer holding the lease: both, or the member is either re-used or wedged.
         await Assert.That(ConnectionManager.TryGetMember(connectionId)!.ActiveLease).IsNull();
@@ -53,7 +54,7 @@ internal class ReapAndScaleUpTests : LeaseSchedulerServiceTestsBase
 
         using var _ = Assert.Multiple();
         await Assert.That(reaped).IsEqualTo(0);
-        await LeaseService.DidNotReceive().InterruptAndRequeueAsync(Arg.Any<LeaseDto>(), Arg.Any<string>());
+        await LeaseService.DidNotReceive().InterruptAndRequeueAsync(Arg.Any<LeaseDto>(), Arg.Any<LeaseInterruptReason>(), Arg.Any<string>());
         await Assert.That(ConnectionManager.TryGetMember(connectionId)!.ActiveLease).IsNotNull();
     }
 

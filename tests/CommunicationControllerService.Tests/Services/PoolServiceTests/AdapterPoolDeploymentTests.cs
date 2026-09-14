@@ -11,7 +11,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 /// <summary>
 ///     AB#4924 §7 — the controller half of adapter-pool deployment: deploy, undeploy and scale.
 ///
-///     A pool is <b>one workload with a replica range</b> (§12.2), so it rides the existing
+///     A pool is <b>one workload with a replica range</b> (§13.2), so it rides the existing
 ///     1:1 workload ↔ helm release path and the AB#4917 scale verb. What is new is that the
 ///     operator has to be able to tell it apart from a tenant workload — it lands in a different
 ///     namespace, it gets an owner reference, and it must not be handed the cluster's shared

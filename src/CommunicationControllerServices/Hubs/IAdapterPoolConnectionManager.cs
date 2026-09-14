@@ -9,7 +9,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 /// <param name="MemberId">
 ///     Stable identity of the member process across reconnects. Recorded on a borrower's execution as
 ///     <c>LeasedOnMemberId</c> — it is deliberately <b>not</b> an RtId: members are replicas of one
-///     pool workload, not separate entities (implementation plan §12.1/§12.2).
+///     pool workload, not separate entities (implementation plan §13.1/§13.2).
 /// </param>
 /// <param name="PoolTenantId">The lending tenant that owns the pool.</param>
 /// <param name="PoolRtId">RtId of the <c>AdapterPool</c> in <paramref name="PoolTenantId" />.</param>

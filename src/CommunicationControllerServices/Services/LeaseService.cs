@@ -53,7 +53,7 @@ internal class LeaseService : ILeaseService
         ArgumentException.ThrowIfNullOrWhiteSpace(lenderTenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.BorrowerTenantId);
 
-        // 🔴 AB#4924 §13 — the per-tenant kill switch, BOTH halves, and this is the choke point that
+        // 🔴 AB#4924 §14 — the per-tenant kill switch, BOTH halves, and this is the choke point that
         // makes "off" mean off. Every grant goes through here: the scheduler's and the hand-driven
         // POST {tenantId}/v1/adapterPool/{id}/lease alike. Gating only the enqueue would leave a full
         // queue draining for as long as it takes after somebody turned leasing off, which is not what
@@ -64,7 +64,8 @@ internal class LeaseService : ILeaseService
         var leasingRefusal = await CheckLeasingEnabledAsync(lenderTenantId, request.BorrowerTenantId);
         if (leasingRefusal != null)
         {
-            return LeaseGrantResult.Refused(leasingRefusal);
+            return Refuse(lenderTenantId, poolRtId, request, leasingRefusal.Value.Reason,
+                leasingRefusal.Value.Message);
         }
 
         // 🔴 The order of the three checks below is the order of least trust. The borrowing
@@ -73,14 +74,15 @@ internal class LeaseService : ILeaseService
         var borrower = await ReadBorrowerAdapterAsync(request.BorrowerTenantId, request.BorrowerAdapterRtId);
         if (borrower is null)
         {
-            return LeaseGrantResult.Refused(
+            return Refuse(lenderTenantId, poolRtId, request, LeaseRefusalReason.BorrowerAdapterUnknown,
                 $"Tenant '{request.BorrowerTenantId}' has no adapter with rtId {request.BorrowerAdapterRtId}.");
         }
 
         var declarationRefusal = CheckBorrowerDeclaration(borrower, lenderTenantId, poolRtId, request);
         if (declarationRefusal != null)
         {
-            return LeaseGrantResult.Refused(declarationRefusal);
+            return Refuse(lenderTenantId, poolRtId, request, declarationRefusal.Value.Reason,
+                declarationRefusal.Value.Message);
         }
 
         // The lender's half. Both halves are required and neither implies the other: the borrower
@@ -91,7 +93,7 @@ internal class LeaseService : ILeaseService
             .TryGetAdapterPoolLendingScopeAsync(lenderTenantId, poolRtId.ToString());
         if (lendingScope is null)
         {
-            return LeaseGrantResult.Refused(
+            return Refuse(lenderTenantId, poolRtId, request, LeaseRefusalReason.PoolUnknown,
                 $"Tenant '{lenderTenantId}' has no adapter pool with rtId {poolRtId}, or it cannot be read.");
         }
 
@@ -104,7 +106,7 @@ internal class LeaseService : ILeaseService
             await _eventService.StoreErrorEventAsync(request.BorrowerTenantId,
                 $"Refused a lease of adapter pool {poolRtId} in tenant '{lenderTenantId}': that pool does not " +
                 "lend to this tenant. Check the pool's SharingMode and LendingAllowedTenantIds.");
-            return LeaseGrantResult.Refused(
+            return Refuse(lenderTenantId, poolRtId, request, LeaseRefusalReason.LendingScopeDenied,
                 $"Adapter pool {poolRtId} in tenant '{lenderTenantId}' does not lend to tenant " +
                 $"'{request.BorrowerTenantId}'.");
         }
@@ -112,7 +114,7 @@ internal class LeaseService : ILeaseService
         var credential = await ResolveBorrowerCredentialAsync(request.BorrowerTenantId, borrower);
         if (credential is null)
         {
-            return LeaseGrantResult.Refused(
+            return Refuse(lenderTenantId, poolRtId, request, LeaseRefusalReason.BorrowerCredentialMissing,
                 $"Adapter '{borrower.Name}' in tenant '{request.BorrowerTenantId}' has no usable pipeline " +
                 "service account; a pool member cannot act as a borrower without one.");
         }
@@ -137,7 +139,7 @@ internal class LeaseService : ILeaseService
                 await _eventService.StoreErrorEventAsync(request.BorrowerTenantId,
                     $"Refused a lease for pipeline '{pipelineRtId}': it is not deployed to adapter " +
                     $"'{borrower.Name}', is disabled, or carries no definition. The work item stays queued.");
-                return LeaseGrantResult.Refused(
+                return Refuse(lenderTenantId, poolRtId, request, LeaseRefusalReason.PipelineProjectionFailed,
                     $"Pipeline '{pipelineRtId}' of tenant '{request.BorrowerTenantId}' could not be projected for " +
                     $"adapter '{borrower.Name}'; it is not deployed there, disabled, or has no definition.");
             }
@@ -171,7 +173,7 @@ internal class LeaseService : ILeaseService
         {
             // Nothing is parked here. A caller driving this by hand is told plainly; the scheduler
             // (increment 7) leaves the work item Queued, which is where the queue actually lives.
-            return LeaseGrantResult.Refused(
+            return Refuse(lenderTenantId, poolRtId, request, LeaseRefusalReason.NoIdleMember,
                 $"No idle member of adapter pool {poolRtId} in tenant '{lenderTenantId}' is connected to this " +
                 "controller instance.");
         }
@@ -192,13 +194,14 @@ internal class LeaseService : ILeaseService
                     "The admission gate for lease '{LeaseId}' of tenant '{BorrowerTenantId}' threw; the member " +
                     "reservation was undone",
                     lease.LeaseId, lease.TenantId);
-                return LeaseGrantResult.Refused($"The lease admission gate failed: {e.Message}");
+                return Refuse(lenderTenantId, poolRtId, request, LeaseRefusalReason.AdmissionGateFailed,
+                    $"The lease admission gate failed: {e.Message}");
             }
 
             if (!admitted)
             {
                 _connectionManager.ReleaseLease(member.ConnectionId, lease.LeaseId);
-                return LeaseGrantResult.Refused(
+                return Refuse(lenderTenantId, poolRtId, request, LeaseRefusalReason.AdmissionGateDeclined,
                     $"The work item '{lease.ExecutionId}' of tenant '{lease.TenantId}' was no longer available " +
                     "when the member was reserved; it was taken by another controller instance or cancelled.");
             }
@@ -219,7 +222,7 @@ internal class LeaseService : ILeaseService
                 "Failed to push lease '{LeaseId}' to pool member '{MemberId}' (connection '{ConnectionId}'); " +
                 "the claim was undone and the member stays available",
                 lease.LeaseId, member.MemberId, member.ConnectionId);
-            return LeaseGrantResult.Refused(
+            return Refuse(lenderTenantId, poolRtId, request, LeaseRefusalReason.MemberDispatchFailed,
                 $"Pool member '{member.MemberId}' could not be handed the lease: {e.Message}");
         }
 
@@ -232,7 +235,25 @@ internal class LeaseService : ILeaseService
             lease.LeaseId, lease.PoolRtId, lease.PoolTenantId, lease.TenantId, member.MemberId,
             lease.ExpiresAtUtc);
 
+        AdapterLeasingMetrics.RecordGranted(lease.TenantId, lenderTenantId, poolRtId.ToString());
+
         return new LeaseGrantResult(true, lease.LeaseId, member.MemberId, null);
+    }
+
+    /// <summary>
+    ///     Counts a refusal and returns it (AB#4924 increment 9, plan §11).
+    /// </summary>
+    /// <remarks>
+    ///     Every refusal path goes through here so that a reason added later cannot be forgotten on
+    ///     the metric — the enum argument is what makes leaving it out a compile error rather than a
+    ///     silently missing series.
+    /// </remarks>
+    private static LeaseGrantResult Refuse(string lenderTenantId, OctoObjectId poolRtId, LeaseRequest request,
+        LeaseRefusalReason reason, string message)
+    {
+        AdapterLeasingMetrics.RecordRefused(request.BorrowerTenantId, lenderTenantId, poolRtId.ToString(),
+            LeaseStage.Grant, reason);
+        return LeaseGrantResult.Refused(reason, message);
     }
 
     /// <inheritdoc />
@@ -249,6 +270,15 @@ internal class LeaseService : ILeaseService
         Logger.Info(
             "Lease '{LeaseId}' of tenant '{BorrowerTenantId}' released by its member: {Reason}, success={Success}",
             released.LeaseId, released.TenantId, result.Reason, result.Success);
+
+        // 🔴 AB#4924 increment 9 — the amortisation triple (plan §11). Held comes from this
+        // controller's clock, work from the member's; the difference is the per-lease warm-up
+        // concept §2.3 exists to make measurable. Recorded BEFORE the outcome is applied, so a
+        // repository failure below cannot cost the sample.
+        AdapterLeasingMetrics.RecordReleased(released.TenantId, released.PoolTenantId, released.PoolRtId,
+            ReleaseReasonTag(result.Reason), result.Success,
+            DateTime.UtcNow - released.GrantedAtUtc,
+            result.WorkDurationMs is { } ms ? TimeSpan.FromMilliseconds(ms) : null);
 
         await ApplyLeaseOutcomeAsync(released, result.Success, result.StatusMessage, result.OutputData);
 
@@ -276,7 +306,7 @@ internal class LeaseService : ILeaseService
 
         // Concept §6: at-least-once. The attempt is marked Interrupted with its lease span closed,
         // and a fresh attempt takes its place in the queue.
-        var requeuedExecutionId = await InterruptAndRequeueAsync(lease,
+        var requeuedExecutionId = await InterruptAndRequeueAsync(lease, LeaseInterruptReason.MemberLost,
             $"The adapter pool member '{member.MemberId}' disconnected while holding this execution's lease.");
 
         await _eventService.StoreErrorEventAsync(lease.TenantId,
@@ -344,8 +374,15 @@ internal class LeaseService : ILeaseService
     }
 
     /// <inheritdoc />
-    public async Task<string?> InterruptAndRequeueAsync(LeaseDto lease, string reason)
+    public async Task<string?> InterruptAndRequeueAsync(LeaseDto lease, LeaseInterruptReason interruptReason,
+        string reason)
     {
+        // Counted even when there is no execution behind the lease: a member that died holding a
+        // hand-driven lease is the same fault, and a counter that silently skipped those would
+        // under-report exactly the mid-lease failures it exists to surface.
+        AdapterLeasingMetrics.RecordInterrupted(lease.TenantId, lease.PoolTenantId, lease.PoolRtId,
+            interruptReason, DateTime.UtcNow - lease.GrantedAtUtc);
+
         if (string.IsNullOrWhiteSpace(lease.ExecutionId))
         {
             return null;
@@ -371,6 +408,9 @@ internal class LeaseService : ILeaseService
 
             await _communicationRepository.EnqueueExecutionAsync(lease.TenantId, retry,
                 interrupted.PipelineRtEntityId, interrupted.AdapterRtEntityId, DateTime.UtcNow);
+
+            AdapterLeasingMetrics.RecordRequeued(lease.TenantId, lease.PoolTenantId, lease.PoolRtId,
+                interruptReason);
 
             Logger.Info(
                 "[{BorrowerTenantId}] Interrupted leased execution '{ExecutionId}' and re-queued it as " +
@@ -411,8 +451,21 @@ internal class LeaseService : ILeaseService
     }
 
     /// <summary>
+    ///     The metric label for a release reason, written out rather than taken from
+    ///     <c>ToString</c>: renaming the DTO enum member for readability must not silently rename a
+    ///     label every dashboard is built on.
+    /// </summary>
+    private static string ReleaseReasonTag(LeaseReleaseReasonDto reason) => reason switch
+    {
+        LeaseReleaseReasonDto.Completed => "completed",
+        LeaseReleaseReasonDto.Failed => "failed",
+        LeaseReleaseReasonDto.Drained => "drained",
+        _ => "unknown"
+    };
+
+    /// <summary>
     ///     Whether adapter-pool leasing is switched on for <b>both</b> tenants, or the reason it is
-    ///     not (AB#4924 §13).
+    ///     not (AB#4924 §14).
     /// </summary>
     /// <remarks>
     ///     🔴 <b>Whose switch it is.</b> Both tenants', and the flag means a different thing on each:
@@ -424,18 +477,21 @@ internal class LeaseService : ILeaseService
     ///     switch flipped off stops granting within half a minute rather than instantly, and the
     ///     already-granted lease was always going to run to its end anyway.
     /// </remarks>
-    private async Task<string?> CheckLeasingEnabledAsync(string lenderTenantId, string borrowerTenantId)
+    private async Task<(LeaseRefusalReason Reason, string Message)?> CheckLeasingEnabledAsync(string lenderTenantId,
+        string borrowerTenantId)
     {
         if (!await _lifecycleConfiguration.IsLeasingEnabledAsync(lenderTenantId))
         {
-            return $"Adapter pool leasing is disabled for the lending tenant '{lenderTenantId}'. " +
-                   "Enable it with octo-cli SetCommunicationLifecycle -le true.";
+            return (LeaseRefusalReason.LeasingDisabledLender,
+                $"Adapter pool leasing is disabled for the lending tenant '{lenderTenantId}'. " +
+                "Enable it with octo-cli SetCommunicationLifecycle -le true.");
         }
 
         if (!await _lifecycleConfiguration.IsLeasingEnabledAsync(borrowerTenantId))
         {
-            return $"Adapter pool leasing is disabled for the borrowing tenant '{borrowerTenantId}'. " +
-                   "Enable it with octo-cli SetCommunicationLifecycle -le true.";
+            return (LeaseRefusalReason.LeasingDisabledBorrower,
+                $"Adapter pool leasing is disabled for the borrowing tenant '{borrowerTenantId}'. " +
+                "Enable it with octo-cli SetCommunicationLifecycle -le true.");
         }
 
         return null;
@@ -469,25 +525,28 @@ internal class LeaseService : ILeaseService
     ///     descendant that never asked for it, and the borrower's own pipelines would run under an
     ///     identity it did not intend to hand out.
     /// </remarks>
-    private static string? CheckBorrowerDeclaration(RtAdapter borrower, string lenderTenantId,
-        OctoObjectId poolRtId, LeaseRequest request)
+    private static (LeaseRefusalReason Reason, string Message)? CheckBorrowerDeclaration(RtAdapter borrower,
+        string lenderTenantId, OctoObjectId poolRtId, LeaseRequest request)
     {
         if (borrower.LifecycleMode != RtLifecycleModeEnum.Leased)
         {
-            return $"Adapter '{borrower.Name}' in tenant '{request.BorrowerTenantId}' is not Leased " +
-                   $"(LifecycleMode={borrower.LifecycleMode}); only a Leased adapter borrows a process.";
+            return (LeaseRefusalReason.BorrowerNotLeased,
+                $"Adapter '{borrower.Name}' in tenant '{request.BorrowerTenantId}' is not Leased " +
+                $"(LifecycleMode={borrower.LifecycleMode}); only a Leased adapter borrows a process.");
         }
 
         if (!string.Equals(borrower.LentFromTenantId, lenderTenantId, StringComparison.OrdinalIgnoreCase))
         {
-            return $"Adapter '{borrower.Name}' in tenant '{request.BorrowerTenantId}' borrows from tenant " +
-                   $"'{borrower.LentFromTenantId ?? "<unset>"}', not from '{lenderTenantId}'.";
+            return (LeaseRefusalReason.BorrowerNamesAnotherLender,
+                $"Adapter '{borrower.Name}' in tenant '{request.BorrowerTenantId}' borrows from tenant " +
+                $"'{borrower.LentFromTenantId ?? "<unset>"}', not from '{lenderTenantId}'.");
         }
 
         if (!string.Equals(borrower.LentFromPoolRtId, poolRtId.ToString(), StringComparison.OrdinalIgnoreCase))
         {
-            return $"Adapter '{borrower.Name}' in tenant '{request.BorrowerTenantId}' borrows from pool " +
-                   $"{borrower.LentFromPoolRtId ?? "<unset>"}, not from {poolRtId}.";
+            return (LeaseRefusalReason.BorrowerNamesAnotherPool,
+                $"Adapter '{borrower.Name}' in tenant '{request.BorrowerTenantId}' borrows from pool " +
+                $"{borrower.LentFromPoolRtId ?? "<unset>"}, not from {poolRtId}.");
         }
 
         return null;

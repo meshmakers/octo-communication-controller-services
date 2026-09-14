@@ -37,7 +37,7 @@ internal class AdapterPoolHubWiringTests
     ///     🔴 The route is tenant-free. A pool member belongs to no tenant, and mounting this hub
     ///     under <c>{tenantId:tenantId}</c> would make the member's connection tenant-addressed —
     ///     which is exactly the property that forced a new hub rather than a relaxed
-    ///     <c>AdapterHub</c> (implementation plan §12.6).
+    ///     <c>AdapterHub</c> (implementation plan §13.6).
     /// </summary>
     [Test]
     public async Task TheRouteCarriesNoTenant()

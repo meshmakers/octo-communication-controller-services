@@ -36,7 +36,12 @@ internal abstract class LeaseSchedulerServiceTestsBase
     protected const string TenantB = "tenant-b";
     protected const string TenantC = "tenant-c";
 
-    protected static readonly OctoObjectId PoolRtId = new("6ad562f3ff7c40ff80275b84");
+    /// <summary>
+    ///     A fresh pool per test instance, not a shared constant. The leasing metrics of increment 9
+    ///     are process-wide statics tagged by pool rtId, and TUnit runs these tests concurrently — a
+    ///     shared pool id would let one test read another's measurements.
+    /// </summary>
+    protected readonly OctoObjectId PoolRtId = OctoObjectId.GenerateNewId();
 
     protected readonly IAdapterCache AdapterCache = Substitute.For<IAdapterCache>();
     protected readonly ICommunicationRepository CommunicationRepository =
@@ -244,13 +249,14 @@ internal abstract class LeaseSchedulerServiceTestsBase
                 var member = ConnectionManager.TryClaimMember(lenderTenantId, poolRtId.ToString(), lease);
                 if (member is null)
                 {
-                    return LeaseGrantResult.Refused("No idle member.");
+                    return LeaseGrantResult.Refused(LeaseRefusalReason.NoIdleMember, "No idle member.");
                 }
 
                 if (gate is not null && !await gate(lease, member, CancellationToken.None))
                 {
                     ConnectionManager.ReleaseLease(member.ConnectionId, lease.LeaseId);
-                    return LeaseGrantResult.Refused("The work item was taken by somebody else.");
+                    return LeaseGrantResult.Refused(LeaseRefusalReason.AdmissionGateDeclined,
+                        "The work item was taken by somebody else.");
                 }
 
                 return new LeaseGrantResult(true, lease.LeaseId, member.MemberId, null);
