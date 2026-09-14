@@ -1,0 +1,83 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+# AB#4924 §4a — a pool of interchangeable adapter processes, owned by ONE tenant and leased
+# out to tenants in its subtree one work item at a time.
+#
+# 🔴 Naming: this is the type the word "pool" now means in System.Communication. The old
+# type called `Pool` was a deployment LOCATION and was renamed to DeploymentSite in the same
+# 4.0.0 bump precisely so the two never coexist under one name (concept §8, Q16 + Q18).
+#
+# 🔴 An AdapterPool is ONE workload with a replica range, not N Adapter entities.
+#
+# Concept §4a says "members are ordinary adapter workloads with LifecycleMode = Leased",
+# which cannot be right as written: §2 defines Leased as the mode of an adapter that has NO
+# process of its own, i.e. the BORROWER. A member is the opposite — it is the process. The
+# model resolves this by making the pool itself a DeployableWorkload whose members are
+# replicas of it, so:
+#   - members need no Adapter entity, no author configuration and no lifecycle of their own;
+#   - MinReplicas / MaxReplicas are a replica range of one Helm release, which is what the
+#     operator's one-workload-one-release model already supports;
+#   - Leased stays unambiguously the borrower's mode, set on Adapter.
+# The only operator assumption that still has to break is the one §4b actually names: one
+# workload per TENANT NAMESPACE, because members run in a platform namespace with the
+# lending tenant as owner reference so that consumption is billed to the tenant whose work
+# ran, not to the lender.
+#
+# The pool — not the AB#4918 idle watchdog — owns its members' lifecycle. The watchdog
+# drains a workload based on ITS OWN pipelines' LastExecutionAt, and a pool has no pipelines
+# of its own: every pipeline it runs belongs to a borrower in a different tenant database.
+# MinReplicas and IdleTimeoutMinutes (inherited from DeployableWorkload) are what drain a
+# member instead.
+- typeId: AdapterPool
+  description: 'A pool of interchangeable adapter processes owned by one tenant and leased to tenants in its subtree, one work item per lease (AB#4924). The pool declares how many members may exist (MinReplicas..MaxReplicas), how big each member is, what queue pressure starts another one, and which tenants may borrow. Members are replicas of this one workload rather than separate entities: a lease binds a member to a tenant for the duration of one work item and the member retains nothing tenant-scoped afterwards. Not to be confused with DeploymentSite, which is where a workload is deployed and which was itself called Pool before 4.0.0.'
+  derivedFromCkTypeId: ${this}/DeployableWorkload
+  isFinal: true
+  attributes:
+    # Size and shape of the pool.
+    - id: ${this}/MinReplicas
+      name: MinReplicas
+    - id: ${this}/MaxReplicas
+      name: MaxReplicas
+    - id: ${this}/PoolMemberCpuRequest
+      name: PoolMemberCpuRequest
+      isOptional: true
+    - id: ${this}/PoolMemberCpuLimit
+      name: PoolMemberCpuLimit
+      isOptional: true
+    - id: ${this}/PoolMemberMemoryRequest
+      name: PoolMemberMemoryRequest
+      isOptional: true
+    - id: ${this}/PoolMemberMemoryLimit
+      name: PoolMemberMemoryLimit
+      isOptional: true
+    - id: ${this}/PoolScaleUpPolicy
+      name: ScaleUpPolicy
+    - id: ${this}/ScaleUpQueueDepthThreshold
+      name: ScaleUpQueueDepthThreshold
+    - id: ${this}/ScaleUpQueueWaitSeconds
+      name: ScaleUpQueueWaitSeconds
+    # Lending scope — who may borrow a member. Moved here off Adapter: lending is a
+    # property of the thing that owns processes. See attributes/adapterLeasing.yaml.
+    - id: ${this}/AdapterSharingMode
+      name: SharingMode
+    - id: ${this}/LendingAllowedTenantIds
+      name: LendingAllowedTenantIds
+      isOptional: true
+    - id: ${this}/LendingMaxConcurrentLeasesPerTenant
+      name: LendingMaxConcurrentLeasesPerTenant
+      isOptional: true
+  associations:
+    # The identity a member presents when it opens its MANAGEMENT connection to
+    # /adapterPoolHub. It is NOT the identity work executes under: each lease carries the
+    # BORROWER's own PipelineServiceAccount credential (concept §4, Q6), TTL-scoped and
+    # never persisted by the member, so the member acts exactly as the borrower's own
+    # adapter would and no standing grant is created in any borrower tenant.
+    #
+    # 🔴 A DEDICATED role, deliberately not the existing PipelineServiceAccount role. Adding
+    # a second origin type to that role changes the inverse union view on
+    # ServiceAccountConfiguration, and the CK engine then drops SystemConfigurationInterface
+    # from the generated GraphQL schema for every Configuration subtype — the exact failure
+    # already documented on the HelmRepository link in types/deployableWorkload.yaml and on
+    # the PipelineServiceAccount role itself.
+    - id: ${this}/PoolServiceAccount
+      targetCkTypeId: ${this}/ServiceAccountConfiguration

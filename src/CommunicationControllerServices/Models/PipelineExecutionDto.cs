@@ -1,5 +1,5 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 
@@ -36,7 +36,9 @@ public record PipelineExecutionDto
     /// <summary>
     /// When the execution started
     /// </summary>
-    public required DateTime StartedAt { get; init; }
+    /// AB#4924: nullable since System.Communication 4.0.0. A Queued execution has not
+    /// started yet — see QueuedAt for when it entered the pool queue.
+    public required DateTime? StartedAt { get; init; }
 
     /// <summary>
     /// When the execution completed (null if still running)

@@ -5,7 +5,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -50,7 +50,7 @@ internal class ServiceAccountHealthEndpointTests
     private AdapterController CreateAdapterSut()
     {
         return WithHttpContext(new AdapterController(NullLogger<AdapterController>.Instance, _repo,
-            Substitute.For<IAdapterService>()));
+            Substitute.For<IAdapterService>(), Substitute.For<ITenantLendingScopeResolver>()));
     }
 
     // ---------------------------------------------------------------- configuration-bound

@@ -1,0 +1,60 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+# AB#4924 §4a — the adapter pool's own configuration: how many members may exist, how big
+# each one is, and what makes another one start.
+#
+# A pool replaces "how many adapter processes exist" as a repeated human decision with a
+# declared range plus a policy. Everything here is AUTHOR CONFIGURATION (isRuntimeState:
+# false): concept §8 Q9 requires a parent tenant's blueprint to be able to declare a pool and
+# its range, so a re-apply must reassert these values rather than preserve whatever the last
+# scale-up left behind. The pool's observed state (how many members are up right now) is NOT
+# modelled here — it is the operator's Kubernetes reality, read through the existing
+# DeploymentState / LifecycleState inherited from DeployableWorkload, exactly like every
+# other workload.
+attributes:
+- id: MinReplicas
+  valueType: Int
+  isRuntimeState: false
+  defaultValues:
+    - 1
+  description: 'Lower bound on adapter pool members (AB#4924). The default of 1 is the point of the pool: one member stays hot, so the FIRST work item of the day does not pay a cold start — which is exactly the cost that makes plain OnDemand unattractive for periodic work (adapter boot 13 s, or 4.2 s with the AB#4920 warm-up). 0 is permitted and turns the pool into a scale-to-zero pool where every burst pays one cold start; choose it only where work is genuinely rare.'
+- id: MaxReplicas
+  valueType: Int
+  isRuntimeState: false
+  defaultValues:
+    - 3
+  description: 'Hard ceiling on adapter pool members (AB#4924). The pool never starts a member beyond this count no matter what the queue does — a pool that could grow without bound would reintroduce, as a cluster-capacity incident, exactly the per-tenant process sprawl this feature exists to remove. When the ceiling is reached the queue simply grows and stays visible in all three surfaces (concept §6, "Pool exhausted"): scale the pool, or move the tenant to a dedicated adapter.'
+- id: PoolMemberCpuRequest
+  valueType: String
+  isRuntimeState: false
+  description: 'Kubernetes CPU request of EACH pool member, e.g. "200m" (AB#4924). One sizing per pool, applied identically to every member it starts (concept §8, Q15) — members are interchangeable by construction, so per-member sizing would have no meaning: the scheduler can hand any lease to any member. Absent means the chart default applies. A string rather than a number because Kubernetes quantities are a notation ("200m", "1", "1.5"), and re-deriving that notation from a number is how sizing bugs get introduced.'
+- id: PoolMemberCpuLimit
+  valueType: String
+  isRuntimeState: false
+  description: 'Kubernetes CPU limit of each pool member, e.g. "1" (AB#4924). See PoolMemberCpuRequest for why this is one value per pool and why it is a string.'
+- id: PoolMemberMemoryRequest
+  valueType: String
+  isRuntimeState: false
+  description: 'Kubernetes memory request of each pool member, e.g. "512Mi" (AB#4924). This is the number the whole feature is measured against: the prod-1 baseline in concept §1 is 170-200 Mi of pure .NET runtime per process for tenants that execute NOTHING, and a pool exists to stop paying that per tenant. Together with the lease spans (LeaseGrantedAt..LeaseReleasedAt) it is also what prices a borrower''s consumption in concept §4b, so it is read for attribution and not only for scheduling.'
+- id: PoolMemberMemoryLimit
+  valueType: String
+  isRuntimeState: false
+  description: 'Kubernetes memory limit of each pool member, e.g. "1Gi" (AB#4924). See PoolMemberMemoryRequest. Size it against the LARGEST tenant that may borrow the pool, not the average: a member serves one tenant at a time but serves each of them in full.'
+- id: PoolScaleUpPolicy
+  valueType: Enum
+  valueCkEnumId: ${this}/PoolScaleUpPolicy
+  isRuntimeState: false
+  defaultValues:
+    - 0
+  description: 'Which queue signal starts another member (AB#4924). Default QueueDepthOrWaitSeconds. Scaling is driven by the queue and never by CPU: a member waiting for a lease is I/O-bound, so its CPU utilisation carries no information about whether work is piling up behind it (concept §4a).'
+- id: ScaleUpQueueDepthThreshold
+  valueType: Int
+  isRuntimeState: false
+  defaultValues:
+    - 5
+  description: 'Number of work items waiting for a lease that makes the pool start another member, when PoolScaleUpPolicy includes the depth signal (AB#4924). Measured across the whole pool queue, not per borrowing tenant — the pool scales because IT is saturated, whereas a single tenant''s burst is bounded by round-robin and LendingMaxConcurrentLeasesPerTenant instead.'
+- id: ScaleUpQueueWaitSeconds
+  valueType: Int
+  isRuntimeState: false
+  defaultValues:
+    - 60
+  description: 'How long the OLDEST waiting work item may wait before the pool starts another member, when PoolScaleUpPolicy includes the wait signal (AB#4924). Catches the case depth alone misses: two items behind one long-running lease never reach a depth threshold but can still wait for minutes. Concept §8 Q14 leaves the averaging window over which this is evaluated to be MEASURED during implementation rather than guessed, which is why the threshold is configuration and not a constant.'

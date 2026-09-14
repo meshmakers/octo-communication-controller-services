@@ -1,7 +1,7 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using NSubstitute;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.PoolServiceTests;
@@ -14,12 +14,12 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 /// </summary>
 internal class DeployWorkloadLifecycleValidationTests : PoolServiceTestsBase
 {
-    private (RtPool Pool, RtAdapter Adapter) GivenEdgePoolWithAdapter(RtLifecycleModeEnum lifecycleMode)
+    private (RtDeploymentSite Pool, RtAdapter Adapter) GivenEdgePoolWithAdapter(RtLifecycleModeEnum lifecycleMode)
     {
-        var rtPool = new RtPool
+        var rtPool = new RtDeploymentSite
         {
             RtId = PoolRtId,
-            CkTypeId = SystemCommunicationCkIds.RtCkPoolTypeId,
+            CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
             Name = PoolName,
             // Edge routing keeps the arrange minimal — validation runs before any
             // operator-connection routing either way.
@@ -97,10 +97,10 @@ internal class DeployWorkloadLifecycleValidationTests : PoolServiceTestsBase
     [Test]
     public async Task DeployWorkloadAsync_OnDemandApplication_IsRejected()
     {
-        var rtPool = new RtPool
+        var rtPool = new RtDeploymentSite
         {
             RtId = PoolRtId,
-            CkTypeId = SystemCommunicationCkIds.RtCkPoolTypeId,
+            CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
             Name = PoolName,
             Environment = RtEnvironmentEnum.Edge,
         };

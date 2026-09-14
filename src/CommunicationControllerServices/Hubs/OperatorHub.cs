@@ -3,7 +3,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Microsoft.AspNetCore.SignalR;
 using NLog;
 
@@ -210,7 +210,7 @@ public class OperatorHub : Hub, IOperatorHub
             if (rtPool == null)
             {
                 Logger.Warn(
-                    "Rejecting RegisterPool: no RtPool with rtId {PoolRtId} for tenant '{TenantId}' " +
+                    "Rejecting RegisterPool: no RtDeploymentSite with rtId {PoolRtId} for tenant '{TenantId}' " +
                     "(connection '{ConnectionId}')",
                     poolRtId, tenantId, Context.ConnectionId);
                 await _eventService.StoreErrorEventAsync(tenantId,

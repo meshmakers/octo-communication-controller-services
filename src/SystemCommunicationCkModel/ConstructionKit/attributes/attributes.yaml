@@ -97,6 +97,56 @@ attributes:
   description: How this pipeline execution was initiated (Manual, Scheduled, Event, or Startup).
   defaultValues:
     - 0
+# AB#4924 — the lease lifecycle of an execution on a Leased workload, in four timestamps.
+# PipelineExecutionStatus gained Queued (key 5) rather than a separate queue entity, so one
+# work item is one RtPipelineExecution from enqueue to completion and the three surfaces
+# (Studio, octo-cli, MCP) render a continuous history instead of joining two sources.
+#
+#   QueuedAt        -> how long has this been waiting
+#   LeaseGrantedAt  -> when did a pool member actually take it
+#   StartedAt       -> when did the PIPELINE start (after the member loaded the tenant)
+#   CompletedAt     -> when did the pipeline finish
+#   LeaseReleasedAt -> when was the member handed back
+#
+# LeaseGrantedAt..LeaseReleasedAt and StartedAt..CompletedAt are DELIBERATELY not the same
+# span: the difference between them is exactly the per-lease warm-up (token, tenant
+# repository, pipeline definitions) that the pool exists to amortise, and concept §4 rests
+# on that overhead being small at ~16 executions/h and prohibitive at 4089/h. Keeping both
+# pairs is what makes that claim measurable instead of asserted.
+#
+# All of them stay unset on a dedicated (AlwaysOn / OnDemand) adapter, which never queues
+# and never leases — its execution is created already Running.
+- id: QueuedAt
+  valueType: DateTime
+  isRuntimeState: true
+  description: 'Timestamp when the work item entered the pool queue (AB#4924). Set together with ExecutionStatus=Queued on a Leased workload and never overwritten afterwards, so QueuedAt..LeaseGrantedAt is the queue wait. Unset on a dedicated adapter, which is created Running.'
+- id: LeaseGrantedAt
+  valueType: DateTime
+  isRuntimeState: true
+  description: 'Timestamp when a pool member was assigned this execution''s tenant (AB#4924) — "when did it actually start" as opposed to "when did it stop waiting to be scheduled". Concept §8 Q5. Written on the Queued -> Running transition together with LeaseWaitMs. Unset on a dedicated adapter.'
+- id: LeaseReleasedAt
+  valueType: DateTime
+  isRuntimeState: true
+  description: 'Timestamp when the pool member was handed back after this execution (AB#4924) — "how long did it hold the process". LeaseGrantedAt..LeaseReleasedAt is the span a member was held for one tenant, and concept §4b makes that span, multiplied by the pool''s per-member sizing, the exact consumption attributed to the borrowing tenant. It is therefore a BILLING input, not only a diagnostic: it must be stamped on the release path including the TTL-expiry and crash paths, where FinishedAt may never arrive. Unset on a dedicated adapter.'
+# AB#4924 §5 — the scheduling class of a pipeline, resolved from its TRIGGER node when the
+# pipeline is saved and persisted here.
+#
+# Deriving it at schedule time instead would mean parsing the pipeline YAML on every dequeue
+# and would leave the class invisible until something ran. Persisting it means the scheduler
+# reads a field, all three surfaces can show WHY a job sits where it does, and a pipeline
+# whose class changed is visible as a change rather than as behaviour that quietly shifted.
+#
+# This mirrors OnDemandCapable exactly — likewise computed from the trigger nodes and
+# likewise persisted for display — and inherits the same caveat: a pipeline edited to a
+# different trigger changes class ON SAVE, so every surface must show the current value
+# rather than cache it.
+- id: PipelineExecutionClass
+  valueType: Enum
+  valueCkEnumId: ${this}/PipelineExecutionClass
+  isRuntimeState: true
+  defaultValues:
+    - 1
+  description: 'Scheduling class of this pipeline on a leased adapter pool (AB#4924), derived from its trigger node on save. Interactive is work a human is waiting for, Batch is everything scheduled or event-driven; within one tenant''s turn in the round-robin rotation Interactive is served first, and across tenants the class has no effect at all. Default Batch: a pipeline whose trigger declares no class must never jump a queue. Computed and persisted rather than author-set, exactly like OnDemandCapable — the trigger-node descriptor contract carries the class the way it already carries RequiresRunningProcess (AB#4914 §5), so the reflection-based descriptor scan picks it up and future or third-party nodes self-describe without a controller-side list. Meaningful only for pipelines deployed to a Leased adapter; harmless and ignored everywhere else.'
 - id: StartedAt
   valueType: DateTime
   isRuntimeState: true
@@ -109,6 +159,10 @@ attributes:
   valueType: Int
   isRuntimeState: true
   description: Execution duration in milliseconds
+- id: LeaseWaitMs
+  valueType: Int
+  isRuntimeState: true
+  description: 'Milliseconds the work item spent waiting for a lease (AB#4924), i.e. LeaseGrantedAt - QueuedAt, written once when the lease is granted. Stored rather than derived so it survives the AB#4370 execution fold, which erases the raw execution and keeps only the statistics — without it the queue latency of a leased pool would be unmeasurable a few hours after the fact. Unset on a dedicated adapter.'
 - id: ErrorMessage
   valueType: String
   isRuntimeState: true

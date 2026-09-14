@@ -45,13 +45,18 @@ entities:
         value: ""
 
   # ---------------------------------------------------------------------------
-  # Pool — Cloud-environment pool that the central Communication Operator owns.
+  # DeploymentSite (called Pool before 4.0.0) — the Cloud location the central
+  # Communication Operator serves.
   # The pool is the deployment target for the Adapter workload below. Shares its
   # rtId with the System.Communication.MainLatest variant so a tenant moving
-  # between channels keeps the same Pool entity.
+  # between channels keeps the same DeploymentSite entity.
   # ---------------------------------------------------------------------------
   - rtId: '670000000000000000000001'
-    ckTypeId: System.Communication/Pool
+    ckTypeId: System.Communication/DeploymentSite
+    # 🔴 The well-known name stays CommunicationPool across the 4.0.0 rename. It is
+    # IDENTITY, not display text — this blueprint re-applies against it, and renaming
+    # it here would create a SECOND deployment site on every already-provisioned
+    # tenant and orphan the adapters attached to the first one.
     rtWellKnownName: CommunicationPool
     attributes:
       - id: System/Name
@@ -75,7 +80,7 @@ entities:
         value: 0   # Unconfigured
 
   # ---------------------------------------------------------------------------
-  # Adapter — Mesh-style adapter managed by the Cloud pool above. ChartVersion
+  # Adapter — Mesh-style adapter deployed to the Cloud site above. ChartVersion
   # is pinned to ${octo.version} on this variant — the release-channel chart's
   # version matches OctoMesh's appVersion 1:1 (both derived from the same r-tag),
   # so the first Deploy on a freshly attached tenant lands a working chart pull.
@@ -86,9 +91,9 @@ entities:
     ckTypeId: System.Communication/Adapter
     rtWellKnownName: MeshAdapter
     associations:
-      - roleId: System.Communication/Manages
+      - roleId: System.Communication/Hosts
         targetRtId: '670000000000000000000001'
-        targetCkTypeId: System.Communication/Pool
+        targetCkTypeId: System.Communication/DeploymentSite
       - roleId: System.Communication/HelmRepository
         targetRtId: '670000000000000000000004'
         targetCkTypeId: System.Communication/HelmRepositoryConfiguration
@@ -98,7 +103,7 @@ entities:
       - id: System/Description
         value: >-
           Mesh adapter created by the Communication blueprint (OctoMesh
-          ${octo.version}). Runs in the Communication Pool and hosts pipelines that
+          ${octo.version}). Runs at the Communication deployment site and hosts pipelines that
           the Communication Controller deploys. Connects to the AdapterHub via
           SignalR once deployed; while still Unregistered, no pipeline executions
           can run.

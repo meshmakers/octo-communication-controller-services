@@ -4,7 +4,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Runtime.Contracts;
 using NSubstitute;
@@ -218,9 +218,12 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
                 config.Pipelines.First().NodeConfiguration == customDefinition &&
                 config.Pipelines.First().IsDebuggingEnabled == false));
 
-        // Should persist the custom pipeline definition to the RT entity
+        // Should persist the custom pipeline definition to the RT entity, together with the
+        // AB#4924 execution class resolved from that same definition — one update, so the class
+        // and the YAML it describes can never disagree. The fixture's definition carries no
+        // interactive trigger, so the resolved class is Batch (key 1).
         await CommunicationRepository.Received(1)
-            .SetPipelineDefinitionAsync(TenantId, rtPipeline.ToRtEntityId(), customDefinition);
+            .SetPipelineDefinitionAsync(TenantId, rtPipeline.ToRtEntityId(), customDefinition, 1);
     }
 
     [Test]

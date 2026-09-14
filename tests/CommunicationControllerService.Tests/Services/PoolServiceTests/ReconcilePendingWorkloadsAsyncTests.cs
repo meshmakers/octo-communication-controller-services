@@ -1,6 +1,6 @@
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
@@ -15,14 +15,14 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 /// </summary>
 internal class ReconcilePendingWorkloadsAsyncTests : PoolServiceTestsBase
 {
-    private RtPool _rtPool = null!;
+    private RtDeploymentSite _rtPool = null!;
 
     private RtAdapter GivenPoolWithAdapterInState(RtDeploymentStateEnum state)
     {
-        _rtPool = new RtPool
+        _rtPool = new RtDeploymentSite
         {
             RtId = PoolRtId,
-            CkTypeId = SystemCommunicationCkIds.RtCkPoolTypeId,
+            CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
             Name = PoolName,
             Environment = RtEnvironmentEnum.Cloud,
         };

@@ -4,7 +4,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
@@ -52,10 +52,10 @@ internal class EnsureWorkloadRunningTests
 
     private void GivenWorkloadIsInPool()
     {
-        var pool = new RtPool
+        var pool = new RtDeploymentSite
         {
             RtId = new OctoObjectId(PoolRtId),
-            CkTypeId = SystemCommunicationCkIds.RtCkPoolTypeId,
+            CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
             Name = "cloud-pool",
             Environment = RtEnvironmentEnum.Cloud,
         };

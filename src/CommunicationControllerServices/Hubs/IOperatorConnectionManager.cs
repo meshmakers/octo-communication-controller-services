@@ -19,7 +19,7 @@ public interface IOperatorConnectionManager
     /// <c>false</c> = edge operator (Edge pools only), <c>null</c> = legacy
     /// operator that did not declare a mode (no enforcement). Read back by
     /// <c>OperatorHub.RegisterPoolAsync</c> via <see cref="GetOperatorMode"/>
-    /// to validate pool ownership against <c>RtPool.Environment</c>.
+    /// to validate pool ownership against <c>RtDeploymentSite.Environment</c>.
     /// </summary>
     void SetOperatorMode(string connectionId, bool? autoManagePools);
 

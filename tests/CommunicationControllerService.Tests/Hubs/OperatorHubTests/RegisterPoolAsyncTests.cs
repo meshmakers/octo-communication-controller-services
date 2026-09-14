@@ -2,7 +2,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Microsoft.AspNetCore.SignalR;
 using NSubstitute;
 
@@ -46,10 +46,10 @@ internal class RegisterPoolAsyncTests : IDisposable
 
     private void GivenPoolWithEnvironment(RtEnvironmentEnum environment, string name = "test-pool")
     {
-        var pool = new RtPool
+        var pool = new RtDeploymentSite
         {
             RtId = new OctoObjectId(ValidPoolRtId),
-            CkTypeId = SystemCommunicationCkIds.RtCkPoolTypeId,
+            CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
             Name = name,
             Environment = environment,
         };
@@ -155,7 +155,7 @@ internal class RegisterPoolAsyncTests : IDisposable
     public async Task ModeSet_PoolNotFound_RejectsAndAudits()
     {
         _connectionManager.GetOperatorMode(ConnectionId).Returns(false);
-        _repository.GetPoolsAsync(TenantId).Returns(Array.Empty<RtPool>());
+        _repository.GetPoolsAsync(TenantId).Returns(Array.Empty<RtDeploymentSite>());
 
         await Assert.That(async () => await _hub.RegisterPoolAsync(TenantId, ValidPoolRtId))
             .Throws<HubException>();

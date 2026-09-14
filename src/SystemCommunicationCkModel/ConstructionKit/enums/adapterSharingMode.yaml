@@ -1,0 +1,16 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+# AB#4924 — the LENDER side of shared adapter leasing. Set on the Adapter that owns the
+# pool process; it declares WHICH tenants of the owner's subtree may be handed a lease on
+# it. The trust direction is fixed by the tenant tree and is never configurable upwards:
+# a descendant can not lend to its ancestors (docs/concepts/shared-adapter-leasing.md §3).
+- enumId: AdapterSharingMode
+  description: 'Whether and to whom an adapter lends its process as a leasable pool member (AB#4924). NotShared (default) keeps the adapter private to its own tenant — the behaviour of every adapter in the estate today. Descendants lends to any descendant of the owning tenant, direct or indirect, resolved by the same breadth-first tenant walk as GET {tenantId}/v1/tenants/descendants (AB#5151). DescendantsAndSiblings additionally lends to tenants that share the owning tenant''s parent. In every mode the optional LendingAllowedTenantIds allow-list narrows the resolved set further; it never widens it, so a tenant outside the subtree can not be granted a lease by listing it.'
+  useFlags: false
+  values:
+  - key: 0
+    name: NotShared
+  - key: 1
+    name: Descendants
+  - key: 2
+    name: DescendantsAndSiblings

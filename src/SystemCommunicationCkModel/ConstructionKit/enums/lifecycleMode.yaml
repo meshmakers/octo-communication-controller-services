@@ -1,7 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 enums:
 - enumId: LifecycleMode
-  description: 'Author-configured lifecycle policy of a deployable workload. AlwaysOn (default) keeps the workload running permanently. OnDemand lets the controller scale it to 0 replicas when idle and wake it on demand (AB#4914); only valid for workloads whose deployed pipelines use exclusively wake-capable triggers. Auto is reserved for a future controller-decided mode and is rejected by validation until implemented.'
+  description: 'Author-configured lifecycle policy of a deployable workload. AlwaysOn (default) keeps the workload running permanently. OnDemand lets the controller scale it to 0 replicas when idle and wake it on demand (AB#4914); only valid for workloads whose deployed pipelines use exclusively wake-capable triggers. Auto is reserved for a future controller-decided mode and is rejected by validation until implemented. Leased (AB#4924) means the workload has no process of its own at all: its pipelines execute on an AdapterPool lent by an ancestor or sibling tenant, one lease per work item — see LentFromTenantId / LentFromPoolRtId and docs/concepts/shared-adapter-leasing.md. Leased is the BORROWER''s mode and only ever that; an AdapterPool is its own workload type with a replica range and is not itself Leased.'
   useFlags: false
   values:
   - key: 0
@@ -10,3 +10,8 @@ enums:
     name: OnDemand
   - key: 2
     name: Auto
+  # AB#4924: 3 is the next free key — 2 Auto stays reserved for the controller-decided
+  # mode (AB#4984) and must not be reused. Requires OnDemandCapable == true, exactly like
+  # OnDemand: a lease can only be handed to a process whose triggers are wake-capable.
+  - key: 3
+    name: Leased

@@ -1,7 +1,7 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using NSubstitute;
 
@@ -11,10 +11,10 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
 {
     private async Task GivenCloudPool()
     {
-        var rtPool = new RtPool
+        var rtPool = new RtDeploymentSite
         {
             RtId = PoolRtId,
-            CkTypeId = SystemCommunicationCkIds.RtCkPoolTypeId,
+            CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
             Name = PoolName,
             Environment = RtEnvironmentEnum.Cloud,
         };
@@ -27,10 +27,10 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
 
     private async Task GivenEdgePool()
     {
-        var rtPool = new RtPool
+        var rtPool = new RtDeploymentSite
         {
             RtId = PoolRtId,
-            CkTypeId = SystemCommunicationCkIds.RtCkPoolTypeId,
+            CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
             Name = PoolName,
             Environment = RtEnvironmentEnum.Edge,
         };
@@ -400,12 +400,12 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
                 && w.WorkloadType == WorkloadTypeDto.Adapter));
     }
 
-    private async Task<(RtPool Pool, RtAdapter Adapter)> GivenCloudPoolWithAdapter(bool receivesClusterSecrets)
+    private async Task<(RtDeploymentSite Pool, RtAdapter Adapter)> GivenCloudPoolWithAdapter(bool receivesClusterSecrets)
     {
-        var rtPool = new RtPool
+        var rtPool = new RtDeploymentSite
         {
             RtId = PoolRtId,
-            CkTypeId = SystemCommunicationCkIds.RtCkPoolTypeId,
+            CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
             Name = PoolName,
             Environment = RtEnvironmentEnum.Cloud,
         };
@@ -439,13 +439,13 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         return (rtPool, adapter);
     }
 
-    private async Task<(RtPool Pool, RtApplication Application)> GivenCloudPoolWithApplication(
+    private async Task<(RtDeploymentSite Pool, RtApplication Application)> GivenCloudPoolWithApplication(
         bool receivesClusterSecrets = false)
     {
-        var rtPool = new RtPool
+        var rtPool = new RtDeploymentSite
         {
             RtId = PoolRtId,
-            CkTypeId = SystemCommunicationCkIds.RtCkPoolTypeId,
+            CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
             Name = PoolName,
             Environment = RtEnvironmentEnum.Cloud,
         };

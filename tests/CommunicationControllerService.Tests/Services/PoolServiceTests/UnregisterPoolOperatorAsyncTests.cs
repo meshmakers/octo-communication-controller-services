@@ -1,5 +1,5 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using NSubstitute;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.PoolServiceTests;
@@ -114,10 +114,10 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
     {
         CommunicationRepository.GetPoolsAsync(TenantId).Returns(new[]
         {
-            new RtPool
+            new RtDeploymentSite
             {
                 RtId = PoolRtId,
-                CkTypeId = SystemCommunicationCkIds.RtCkPoolTypeId,
+                CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
                 Name = PoolName,
                 DeploymentState = deploymentState,
                 Environment = environment

@@ -8,7 +8,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Microsoft.AspNetCore.Http;
@@ -116,6 +116,9 @@ internal abstract class AdapterServiceTestsBase
         AdapterService = new AdapterService(CommunicationRepository, AdapterCache, AdapterHubCallbacks,
             CommunicationEventService, PipelineSchemaValidator, PipelineDefinitionService,
             AdapterConnectionTracker, options, WorkloadLifecycleService, OnDemandCapabilityService,
+            // Real service (AB#4924): the execution class is resolved from real YAML on the deploy
+            // path, so a substitute would hide exactly the wiring this is meant to exercise.
+            new PipelineExecutionClassService(AdapterCache, PipelineDefinitionService),
             ServiceAccountResolver,
             // Real resolver (AB#5111), same reasoning as the service-account resolver above: the
             // IssuerUri token resolution in the configuration projection runs the real machinery.

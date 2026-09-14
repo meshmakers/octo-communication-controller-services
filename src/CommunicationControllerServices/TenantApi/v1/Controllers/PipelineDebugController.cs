@@ -78,7 +78,9 @@ public class PipelineDebugController : ControllerBase
                 persistedExecutions = dbExecutions.Select(e => new PipelineExecutionDataDto
                 {
                     Id = Guid.TryParse(e.ExecutionId, out var id) ? id : Guid.Empty,
-                    DateTime = e.StartedAt,
+                    // AB#4924: a Queued execution has no StartedAt; its QueuedAt is the moment it
+                    // became visible, which is what the history should order it by.
+                    DateTime = e.StartedAt ?? e.QueuedAt ?? DateTime.MinValue,
                     Status = (PipelineExecutionStatus)(int)e.Status,
                     DurationMs = e.DurationMs,
                     ErrorMessage = e.ErrorMessage,
@@ -143,7 +145,8 @@ public class PipelineDebugController : ControllerBase
                     return Ok(new PipelineExecutionDataDto
                     {
                         Id = Guid.TryParse(latest.ExecutionId, out var id) ? id : Guid.Empty,
-                        DateTime = latest.StartedAt,
+                        // AB#4924: see above — fall back to the queue time for a not-yet-started entry.
+                        DateTime = latest.StartedAt ?? latest.QueuedAt ?? DateTime.MinValue,
                         Status = (PipelineExecutionStatus)(int)latest.Status,
                         DurationMs = latest.DurationMs,
                         ErrorMessage = latest.ErrorMessage,

@@ -7,7 +7,7 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts.DataTransferObjects;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
@@ -30,6 +30,7 @@ internal class AdapterService(
     IOptions<CommunicationControllerOptions> communicationControllerOptions,
     IWorkloadLifecycleService workloadLifecycleService,
     IWorkloadOnDemandCapabilityService onDemandCapabilityService,
+    IPipelineExecutionClassService pipelineExecutionClassService,
     IPipelineServiceAccountResolver serviceAccountResolver,
     IWorkloadTemplateResolver templateResolver,
     IIdentityClientReader identityClientReader,
@@ -634,15 +635,33 @@ internal class AdapterService(
                 // Persist the pipeline definition to the RT entity so it is visible in the UI
                 if (pipelineDefinition != null)
                 {
+                    // AB#4924 — resolve the execution class from the definition being saved and
+                    // write it in the same update. Resolved here rather than in the repository
+                    // because it needs the ADAPTER's live node descriptors, which the repository
+                    // has no business knowing about.
+                    var executionClass = pipelineExecutionClassService.ResolveForAdapter(tenantId,
+                        adapterRtEntityId, pipelineDefinition);
+
                     // SetPipelineDefinitionAsync also syncs SendsDataTo associations
                     await communicationRepository.SetPipelineDefinitionAsync(tenantId, pipelineRtEntityId,
-                        pipelineDefinition);
+                        pipelineDefinition, executionClass);
                 }
                 else if (!string.IsNullOrEmpty(pipeline.PipelineDefinition))
                 {
                     // Sync SendsDataTo associations from existing definition (e.g. after import)
                     await communicationRepository.SyncPipelineDataConnectionsAsync(tenantId, pipelineRtEntityId,
                         pipeline.PipelineDefinition);
+
+                    // AB#4924 — a redeploy without a new definition (MovePipelinesToAdapter, an
+                    // import) still has to re-resolve: the class depends on the ADAPTER's
+                    // descriptors as well as the YAML, so moving a pipeline to an adapter running a
+                    // different SDK can legitimately change it. Skipping this is how the persisted
+                    // class drifts from the definition it claims to describe. A single-field write,
+                    // NOT a definition rewrite — deploy must not persist a definition it was not
+                    // given.
+                    await communicationRepository.SetPipelineExecutionClassAsync(tenantId, pipelineRtEntityId,
+                        pipelineExecutionClassService.ResolveForAdapter(tenantId, adapterRtEntityId,
+                            pipeline.PipelineDefinition));
                 }
 
                 await StoreDeprecatedNodeWarningEventsAsync(tenantId, adapter, pipelineRtEntityId,

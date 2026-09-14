@@ -1,8 +1,8 @@
 $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
-blueprintId: System.Communication.MainLatest-1.5.0
+blueprintId: System.Communication.MainLatest-2.0.0
 description: |
   Service-managed Communication seed for dev and test clusters. Seeds the default
-  Cloud Pool and the managed Mesh Adapter with an empty ChartVersion — the
+  Cloud deployment site and the managed Mesh Adapter with an empty ChartVersion — the
   Communication Operator's HelmRunner skips the --version argument when the value
   is empty, so the first Deploy on a freshly attached tenant pulls the newest chart
   from the configured Helm repository (dev/test clusters wire their adapter's
@@ -34,8 +34,13 @@ description: |
 # CommunicationControllerServices Program.cs — NOT by this range. Raise the floor only when this
 # blueprint's SEED needs a type/attribute introduced in a specific version; a plain CK model bump
 # needs no change here.
+# 🔴 AB#4924: raised to [4.0,5.0) because System.Communication went to 4.0.0. Unlike every
+# previous bump this was NOT optional — [3.22.0,4.0) excludes 4.0.0 outright, so leaving
+# the floor alone would have made this blueprint unsatisfiable rather than merely stale.
+# The seed below also genuinely needs 4.0.0 now: it creates a DeploymentSite, a type that
+# does not exist before it.
 ckModelDependencies:
-  - System.Communication-[3.22.0,4.0)
+  - System.Communication-[4.0,5.0)
 
 seedDataPath: seed-data/entities.yaml
 

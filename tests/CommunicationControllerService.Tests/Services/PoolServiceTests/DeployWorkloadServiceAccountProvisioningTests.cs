@@ -1,7 +1,7 @@
 using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Runtime.Contracts;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
@@ -16,19 +16,19 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 /// </summary>
 internal class DeployWorkloadServiceAccountProvisioningTests : PoolServiceTestsBase
 {
-    private RtPool ArrangeCloudPool()
+    private RtDeploymentSite ArrangeCloudPool()
     {
-        var pool = new RtPool
+        var pool = new RtDeploymentSite
         {
             RtId = OctoObjectId.GenerateNewId(),
-            CkTypeId = SystemCommunicationCkIds.RtCkPoolTypeId,
+            CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
             Name = "cloud-pool",
             Environment = RtEnvironmentEnum.Cloud
         };
         return pool;
     }
 
-    private void ArrangeDeployableWorkload(RtPool pool, RtDeployableWorkload workload)
+    private void ArrangeDeployableWorkload(RtDeploymentSite pool, RtDeployableWorkload workload)
     {
         workload.ChartName = "octo-mesh-adapter";
         workload.ChartVersion = "1.0.0";

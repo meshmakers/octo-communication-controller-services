@@ -5,7 +5,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using NSubstitute;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.PoolServiceTests;
@@ -26,6 +26,8 @@ internal abstract class PoolServiceTestsBase
     protected readonly IWorkloadOnDemandCapabilityService OnDemandCapabilityService;
     protected readonly IPipelineServiceAccountProvisioningService ServiceAccountProvisioningService;
     protected readonly IPipelineServiceAccountResolver ServiceAccountResolver;
+    /// <summary>AB#4924 — substituted; the real walk is covered by TenantLendingScopeResolverTests.</summary>
+    protected readonly ITenantLendingScopeResolver LendingScopeResolver = Substitute.For<ITenantLendingScopeResolver>();
     protected readonly IPoolCachePublish PoolCachePublish;
     protected readonly PoolTenant PoolTenant;
     protected readonly PoolService PoolService;
@@ -101,7 +103,8 @@ internal abstract class PoolServiceTestsBase
             TemplateResolver,
             OnDemandCapabilityService,
             ServiceAccountProvisioningService,
-            ServiceAccountResolver);
+            ServiceAccountResolver,
+            LendingScopeResolver);
     }
 
     [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]

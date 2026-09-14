@@ -103,10 +103,10 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         // Register CK models BEFORE AddMongoDbRuntimeRepository() to ensure BSON class maps
         // are available. Since BSON class maps are static/global, the first call to
         // AddMongoDbRuntimeRepository() in the process freezes the discriminator convention.
-        // Without CK models registered at that point, types like RtPool cannot be deserialized.
+        // Without CK models registered at that point, types like RtDeploymentSite cannot be deserialized.
         services.AddCkModelSystemV2();
         services.AddCkModelSystemBotV3();
-        services.AddCkModelSystemCommunicationV3();
+        services.AddCkModelSystemCommunicationV4();
         services.AddCkModelSystemNotificationV2();
 
         services.AddRuntimeEngine()

@@ -1,6 +1,6 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 
@@ -86,7 +86,7 @@ internal class GetActiveDeploymentsAsyncTests : PoolServiceTestsBase
             .Throws<InvalidOperationException>();
     }
 
-    private void GivenPools(params RtPool[] pools)
+    private void GivenPools(params RtDeploymentSite[] pools)
     {
         CommunicationRepository.GetPoolsAsync(TenantId).Returns(pools);
     }
@@ -96,12 +96,12 @@ internal class GetActiveDeploymentsAsyncTests : PoolServiceTestsBase
         CommunicationRepository.GetWorkloadsAsync(TenantId).Returns(workloads);
     }
 
-    private static RtPool Pool(string? name, RtDeploymentStateEnum state, RtEnvironmentEnum environment)
+    private static RtDeploymentSite Pool(string? name, RtDeploymentStateEnum state, RtEnvironmentEnum environment)
     {
-        return new RtPool
+        return new RtDeploymentSite
         {
             RtId = OctoObjectId.GenerateNewId(),
-            CkTypeId = SystemCommunicationCkIds.RtCkPoolTypeId,
+            CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
             Name = name,
             DeploymentState = state,
             Environment = environment

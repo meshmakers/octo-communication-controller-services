@@ -1,0 +1,33 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+associationRoles:
+  # AB#4924 — renamed from `Manages` / `ManagedBy` in System.Communication 4.0.0, together with
+  # the type rename Pool -> DeploymentSite (concept §8, Q16 + Q18). The old name described the
+  # relationship backwards: a deployment location does not "manage" anything, the Communication
+  # Operator does. `DeploymentSite.Hosts -> N workloads` and `Adapter.HostedBy -> ZeroOrOne
+  # DeploymentSite` both say what is actually true.
+  #
+  # Why `Hosts` / `HostedBy` and not `Deploys` / `DeployedTo`: the site does not deploy anything
+  # either — the operator deploys TO the site — so an active `Deploys` on the site side would
+  # repeat the same mistake with a different verb. Hosting is the relationship that survives once
+  # the deployment is over, which is exactly what this edge records. The pair also keeps the
+  # model's dominant convention of an active verb inbound and its passive inverse outbound
+  # (`Executes`/`ExecutedBy`, `MapsTo`/`MappedAsTarget`, `SendsDataTo`/`ReceivesDataFrom`), and
+  # it is a minimal cognitive delta from `Manages`/`ManagedBy` so review diffs stay legible.
+  #
+  # 🔴 This rename changes THREE independent identifiers at once, each with its own blast radius:
+  #   `id`            -> the persisted `roleId` in seed/runtime data AND the generated C#
+  #                      constant `SystemCommunicationCkIds.RtCkHostsRoleId` -> `RtCkHostsRoleId`
+  #   `inboundName`   -> the GraphQL field `manages` and the union type `..._ManagesUnion*`
+  #   `outboundName`  -> the GraphQL field `managedBy` and `..._ManagedByUnion*`
+  #
+  # 🔴 The `id` half is the one with persisted data behind it. `RtAssociation.AssociationRoleId`
+  # is stored on EVERY edge, so without a migration every existing edge is orphaned — silently,
+  # because the navigation simply returns nothing. The CK engine had no transform for this; one
+  # was added (`RenameAssociationRole`, see migrations/3.35.0-to-4.0.0.yaml and
+  # octo-construction-kit-engine/docs/ck-model-migrations.md).
+  - id: Hosts
+    description: Links a deployment site to the workloads deployed there. A workload is hosted by at most one site. Renamed from Manages/ManagedBy in 4.0.0 together with the target type Pool -> DeploymentSite.
+    inboundName: Hosts
+    inboundMultiplicity: N
+    outboundName: HostedBy
+    outboundMultiplicity: ZeroOrOne

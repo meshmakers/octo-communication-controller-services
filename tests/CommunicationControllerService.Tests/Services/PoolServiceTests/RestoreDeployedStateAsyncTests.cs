@@ -1,6 +1,6 @@
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using NSubstitute;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.PoolServiceTests;
@@ -18,12 +18,12 @@ internal class RestoreDeployedStateAsyncTests : PoolServiceTestsBase
     private const string OperatorConnectionId = "op-conn-1";
     private static readonly OctoObjectId WorkloadRtId = OctoObjectId.GenerateNewId();
 
-    private RtPool MakePool(RtEnvironmentEnum environment, RtDeploymentStateEnum state, string name = "pool-a")
+    private RtDeploymentSite MakePool(RtEnvironmentEnum environment, RtDeploymentStateEnum state, string name = "pool-a")
     {
-        return new RtPool
+        return new RtDeploymentSite
         {
             RtId = PoolRtId,
-            CkTypeId = SystemCommunicationCkIds.RtCkPoolTypeId,
+            CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
             Name = name,
             Environment = environment,
             DeploymentState = state,
@@ -133,7 +133,7 @@ internal class RestoreDeployedStateAsyncTests : PoolServiceTestsBase
         // Operator reports a pool the controller has no record of (entity
         // deleted while operator was offline). Skip the entry, don't blow up
         // the whole reverse-sync — other reported pools still need restoring.
-        CommunicationRepository.GetPoolsAsync(TenantId).Returns(Array.Empty<RtPool>());
+        CommunicationRepository.GetPoolsAsync(TenantId).Returns(Array.Empty<RtDeploymentSite>());
 
         await PoolService.RestoreDeployedStateAsync(OperatorConnectionId, SinglePoolReport());
 

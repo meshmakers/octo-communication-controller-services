@@ -1,0 +1,23 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+# AB#4924 §5 "Priority — interactive ahead of batch". TWO classes, never a numeric priority:
+# a number needs somebody to assign it and makes "why is my job not running" unanswerable in
+# the queue view, whereas two classes stay explainable — your interactive job runs before
+# your batch jobs, and tenants take turns.
+#
+# 🔴 The keys are ordered so that ASCENDING key order == scheduling order. A scheduler that
+# sorts by the raw enum value therefore gets the right answer by accident rather than the
+# wrong one; the default is nevertheless the conservative class (Batch), so a pipeline whose
+# trigger node does not declare a class can never jump a queue.
+#
+# The class is NOT a priority across tenants. Round-robin decides between tenants; the class
+# only orders work INSIDE one tenant's turn, so it cannot reintroduce the starvation that
+# round-robin exists to prevent (concept §8, Q3).
+- enumId: PipelineExecutionClass
+  description: 'Scheduling class of a pipeline on a leased adapter pool (AB#4924), resolved from the pipeline''s trigger node when the pipeline is SAVED and persisted here — not parsed from the YAML at dequeue time, so the scheduler reads a field and the Studio / octo-cli / MCP surfaces can show WHY a job sits where it does. Interactive is work a human is waiting for (HTTP request, manual run, Studio "execute now"). Batch is everything scheduled or event-driven. Within one tenant''s turn in the round-robin rotation, Interactive is served before Batch; across tenants the class has no effect whatsoever. Mirrors OnDemandCapable: computed, persisted for display, and re-resolved whenever the pipeline is saved — so a pipeline edited to a different trigger changes class visibly, as a change, rather than as behaviour that quietly shifts.'
+  useFlags: false
+  values:
+  - key: 0
+    name: Interactive
+  - key: 1
+    name: Batch

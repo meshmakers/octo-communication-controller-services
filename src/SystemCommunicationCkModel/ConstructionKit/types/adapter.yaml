@@ -1,7 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
 - typeId: Adapter
-  description: An external client that connects via SignalR to execute data pipelines. Adapters manage pools and receive pipeline configurations from the Communication Controller. Deployed to Kubernetes by the Communication Operator via Helm (chart/values inherited from DeployableWorkload).
+  description: An external client that connects via SignalR to execute data pipelines. Adapters are assigned to a deployment site and receive pipeline configurations from the Communication Controller. Deployed to Kubernetes by the Communication Operator via Helm (chart/values inherited from DeployableWorkload). An adapter with LifecycleMode = Leased has no process of its own and borrows one per work item from an AdapterPool in another tenant (AB#4924).
   derivedFromCkTypeId: ${this}/DeployableWorkload
   attributes:
     - id: ${this}/CommunicationStateTimestamp
@@ -22,6 +22,26 @@ types:
       isOptional: true
     - id: ${this}/LastSyncedSequenceNumber
       name: LastSyncedSequenceNumber
+    # AB#4924 shared adapter leasing — BORROWER half only. An Adapter never lends: lending
+    # is declared on the AdapterPool that owns the processes (types/adapterPool.yaml), which
+    # is the only thing that has processes to lend. Carrying a lending scope here, as the
+    # first cut of this model did, would have let two Adapters in one tenant declare
+    # different lending scopes over what is really one set of processes.
+    #
+    # Declared on Adapter and not on DeployableWorkload because only an Adapter runs
+    # pipelines, so only an Adapter can borrow a process to run them on — an Application has
+    # nothing to lease. Same reasoning as PipelineServiceAccount below.
+    #
+    # Both values are set as a PAIR on an adapter whose LifecycleMode is Leased, meaningless
+    # in every other mode, and validated as a pair at deploy time. Full rationale, including
+    # why they are attributes instead of an association: attributes/adapterLeasing.yaml and
+    # docs/concepts/shared-adapter-leasing.md.
+    - id: ${this}/LentFromTenantId
+      name: LentFromTenantId
+      isOptional: true
+    - id: ${this}/LentFromPoolRtId
+      name: LentFromPoolRtId
+      isOptional: true
   associations:
     # AB#5027: the service account every pipeline of this adapter executes as, unless
     # the pipeline carries its own ServiceAccountConfiguration on the generic Uses role.
@@ -35,6 +55,9 @@ types:
     # associations/pipelineServiceAccount.yaml for the full rationale.
     - id: ${this}/PipelineServiceAccount
       targetCkTypeId: ${this}/ServiceAccountConfiguration
-  # Manages → Pool moved up to DeployableWorkload, so Application inherits the
-  # same association. Existing runtime entities of type Adapter retain their
-  # Manages relations because the association role id is unchanged.
+  # Hosts → DeploymentSite moved up to DeployableWorkload, so Application and AdapterPool
+  # inherit the same association. The 4.0.0 migration rewrites BOTH halves of every existing
+  # edge: ChangeCkType rewrites the stored originCkTypeId/targetCkTypeId (Pool ->
+  # DeploymentSite) and RenameAssociationRole rewrites the stored associationRoleId
+  # (Manages -> Hosts). Neither is optional — the role id and the type ids are persisted per
+  # edge, so skipping either orphans the edge silently. See migrations/3.35.0-to-4.0.0.yaml.

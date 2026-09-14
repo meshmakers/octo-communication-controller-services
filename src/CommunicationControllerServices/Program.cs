@@ -80,6 +80,12 @@ try
     builder.Services.AddSingleton<ILifecycleConfigurationService, LifecycleConfigurationService>();
     builder.Services.AddSingleton<IWorkloadLifecycleService, WorkloadLifecycleService>();
     builder.Services.AddSingleton<IWorkloadOnDemandCapabilityService, WorkloadOnDemandCapabilityService>();
+    // AB#4924 - resolves the tenant subtree an adapter pool may lend to. Singleton because it
+    // caches the tenant-tree walk for 30s; the walk opens an admin session per descendant and
+    // must not run per work item.
+    builder.Services.AddSingleton<ITenantLendingScopeResolver, TenantLendingScopeResolver>();
+    // AB#4924 - resolves a pipeline's scheduling class from its trigger node, on save.
+    builder.Services.AddSingleton<IPipelineExecutionClassService, PipelineExecutionClassService>();
     builder.Services.AddSingleton<IPipelineServiceAccountResolver, PipelineServiceAccountResolver>();
     builder.Services
         .AddSingleton<IPipelineServiceAccountProvisioningService, PipelineServiceAccountProvisioningService>();
@@ -233,7 +239,7 @@ try
         // the per-startup auto-update can't detect "already applied at this version".
         .AddMongoBlueprintSupport();
 
-    builder.Services.AddCkModelSystemCommunicationV3();
+    builder.Services.AddCkModelSystemCommunicationV4();
     // Auto-import System.Communication at its embedded version into every tenant on resolve (engine
     // descriptor mechanism), decoupled from the blueprint floors. Production previously imported the
     // model only via the System.Communication.Release/MainLatest blueprint floors, so a CK-model bump
@@ -241,7 +247,7 @@ try
     // the embedded version. Bumping ConstructionKit/ckModel.yaml now propagates on its own.
     builder.Services.AddSingleton<IServiceManagedCkModelDescriptor>(
         _ => new ServiceManagedCkModelDescriptor(
-            Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3
+            Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4
                 .SystemCommunicationCkIds.CkModelId));
 
     // Register the System.Communication blueprint embedded with the CK-model package. OctoMesh
@@ -252,8 +258,8 @@ try
     // GitHub) — not embedded here.
     // Embedded blueprints — both registered, DefaultConfigurationCreatorService picks
     // the right one per tenant via each blueprint's requires.octo.environment block.
-    builder.Services.AddBlueprintSystemCommunicationReleaseV1();
-    builder.Services.AddBlueprintSystemCommunicationMainLatestV1();
+    builder.Services.AddBlueprintSystemCommunicationReleaseV2();
+    builder.Services.AddBlueprintSystemCommunicationMainLatestV2();
 
     builder.Services.AddOctoNotification();
 

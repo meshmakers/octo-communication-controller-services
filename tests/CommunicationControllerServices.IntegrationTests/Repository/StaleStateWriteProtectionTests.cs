@@ -2,7 +2,7 @@ using FluentAssertions;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Runtime.Contracts;
 using Xunit;
 
@@ -109,7 +109,7 @@ public class StaleStateWriteProtectionTests(CommunicationControllerFixture fixtu
         using (var session = await tenantRepository.GetSessionAsync())
         {
             session.StartTransaction();
-            var rtPool = await tenantRepository.CreateTransientRtEntityAsync<RtPool>();
+            var rtPool = await tenantRepository.CreateTransientRtEntityAsync<RtDeploymentSite>();
             rtPool.RtId = poolRtId;
             rtPool.Name = $"stale-write-pool-{Guid.NewGuid():N}";
             rtPool.CommunicationState = RtCommunicationStateEnum.Online;

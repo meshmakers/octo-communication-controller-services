@@ -54,6 +54,17 @@ public interface IPipelineDefinitionService
     bool TryGetAllNodes(string pipelineDefinition, out IReadOnlyList<PipelineNodeProperties> nodes);
 
     /// <summary>
+    ///     Returns only the nodes in the pipeline's <c>triggers:</c> section (AB#4924).
+    /// </summary>
+    /// <remarks>
+    ///     Distinct from <see cref="TryGetAllNodes" />, which flattens triggers and transformations
+    ///     into one list. The execution class describes how the work arrived, so only a trigger can
+    ///     declare it.
+    /// </remarks>
+    /// <returns><c>false</c> when the definition is malformed YAML, as for <see cref="TryGetAllNodes" />.</returns>
+    bool TryGetTriggerNodes(string pipelineDefinition, out IReadOnlyList<PipelineNodeProperties> triggers);
+
+    /// <summary>
     /// Updates the properties of a specific node in a YAML pipeline definition.
     /// Finds the node by type and occurrence index, then merges the provided properties.
     /// </summary>

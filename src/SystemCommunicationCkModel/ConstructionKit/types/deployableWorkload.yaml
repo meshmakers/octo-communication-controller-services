@@ -47,8 +47,11 @@ types:
     # subtype. The dedicated role keeps both inverse views distinct.
     - id: ${this}/HelmRepository
       targetCkTypeId: ${this}/HelmRepositoryConfiguration
-    # The pool a workload belongs to. Inherited by Adapter and Application,
-    # so a Cloud pool deploys both kinds via the same association. Inbound
-    # role name on Pool is "Manages" (Pool.Manages -> N workloads).
-    - id: ${this}/Manages
-      targetCkTypeId: ${this}/Pool
+    # The deployment site a workload is hosted at. Inherited by Adapter,
+    # Application and AdapterPool, so one Cloud site hosts all three kinds via the
+    # same association. AB#4924 renamed BOTH halves in 4.0.0: the type
+    # Pool -> DeploymentSite and the role Manages/ManagedBy -> Hosts/HostedBy, in
+    # one migration rather than two (concept §8, Q18). See associations/hosts.yaml
+    # for why `Hosts` and not `Deploys`, and for the three identifiers this moves.
+    - id: ${this}/Hosts
+      targetCkTypeId: ${this}/DeploymentSite

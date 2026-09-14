@@ -51,7 +51,7 @@ internal class ServiceAccountRightsAnalysisEndpointTests
     private AdapterController CreateAdapterSut()
     {
         return WithHttpContext(new AdapterController(NullLogger<AdapterController>.Instance, _repo,
-            Substitute.For<IAdapterService>()));
+            Substitute.For<IAdapterService>(), Substitute.For<ITenantLendingScopeResolver>()));
     }
 
     // ---------------------------------------------------------------- configuration-bound

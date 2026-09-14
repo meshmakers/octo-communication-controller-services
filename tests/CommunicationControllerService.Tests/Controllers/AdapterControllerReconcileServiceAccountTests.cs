@@ -31,7 +31,7 @@ internal class AdapterControllerReconcileServiceAccountTests
     private AdapterController CreateSut(params string[] callerRoles)
     {
         var sut = new AdapterController(NullLogger<AdapterController>.Instance, _repo,
-            Substitute.For<IAdapterService>());
+            Substitute.For<IAdapterService>(), Substitute.For<ITenantLendingScopeResolver>());
 
         var httpContext = new DefaultHttpContext();
         httpContext.Request.RouteValues["tenantId"] = TenantId;

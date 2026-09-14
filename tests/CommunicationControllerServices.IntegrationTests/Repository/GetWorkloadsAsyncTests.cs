@@ -2,7 +2,7 @@ using FluentAssertions;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Xunit;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTests.Repository;

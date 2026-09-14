@@ -1,4 +1,4 @@
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
@@ -40,7 +40,16 @@ internal static class PipelineStatisticsFolder
 
         foreach (var exec in executions)
         {
-            var hour = FloorToHour(exec.StartedAt);
+            // AB#4924: a Queued execution has no StartedAt and must not fold into the
+            // statistics before it actually runs — it would land in whatever bucket a
+            // default timestamp falls into and inflate that hour's counts. It is folded
+            // on the lease grant, when StartedAt is stamped.
+            if (exec.StartedAt is not { } startedAt)
+            {
+                continue;
+            }
+
+            var hour = FloorToHour(startedAt);
             if (!deltas.TryGetValue(hour, out var acc))
             {
                 acc = new BucketAccumulator();

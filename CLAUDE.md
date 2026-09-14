@@ -1659,6 +1659,188 @@ Tests: `Services/WorkloadLifecycleServiceTests/*`, `Services/LifecycleConfigurat
 `Hubs/OperatorConnectionManagerTests`, `BackgroundServices/WorkloadLifecycleWatchdogTests`,
 plus gate assertions in the AdapterService / TriggerManagementService test folders.
 
+## Shared Adapter Leasing — CK model 4.0.0 (Epic AB#4914; AB#4924)
+
+A parent tenant runs an adapter pool its descendants borrow: a pool member is **leased** to a
+tenant for the duration of one work item, then released. Design doc:
+`docs/concepts/shared-adapter-leasing.md`; the increment plan, the measured bump cascade and
+the places where the design does not survive contact with the code:
+`docs/concepts/shared-adapter-leasing-implementation.md`.
+
+**Only the CK model has landed so far (4.0.0).** Nothing reads these values yet — validation,
+the pool workload, the lease protocol and the scheduler are increments 2–9 of the plan.
+
+### 🔴 This is a MAJOR bump: 3.35.0 → 4.0.0, with a migration
+
+3.36.0 (the first, additive cut) is **withdrawn**. The major is forced by one rename:
+
+| Element | Where | Meaning |
+|---|---|---|
+| **`Pool` → `DeploymentSite`** | `types/deploymentSite.yaml` (was `pool.yaml`) | it is a deployment *location* (`Default Cloud`, `k8sfirmianstrasse`), never a pool of anything — and the name collided head-on with the new `AdapterPool`. Ships **with** leasing so the estate takes one migration, not two (concept §8, Q16 + Q18). |
+| **`Manages`/`ManagedBy` → `Hosts`/`HostedBy`** | `associations/hosts.yaml` (was `manages.yaml`) | a deployment location does not *manage* anything — the Communication Operator does. Renamed in the **same** migration as the type, so the estate migrates once. `Deploys`/`DeployedTo` was rejected: the site does not deploy either, it is deployed *to*. |
+| `AdapterPool` | `types/adapterPool.yaml` | a pool of interchangeable adapter processes: `MinReplicas`/`MaxReplicas`, per-member sizing, queue-driven scale-up, lending scope. **One workload with a replica range**, not N `Adapter` entities. |
+| `LifecycleMode` `3 Leased` | `enums/lifecycleMode.yaml` | the **borrower's** mode and only ever that: no process of its own. `2 Auto` stays reserved (AB#4984). |
+| `PipelineExecutionStatus` `5 Queued` | `enums/pipelineExecutionStatus.yaml` | appended, never inserted — the numeric keys are persisted on every entity. |
+| `PipelineExecutionClass` (`Interactive`/`Batch`) | `enums/pipelineExecutionClass.yaml` | on `Pipeline.ExecutionClass`, resolved from the trigger node **on save** and persisted, like `OnDemandCapable`. Keys ordered so ascending == scheduling order; default `Batch`. |
+| `AdapterSharingMode`, `LendingAllowedTenantIds`, `LendingMaxConcurrentLeasesPerTenant` | `attributes/adapterLeasing.yaml` → **`AdapterPool`** | lender side. Moved off `Adapter` in the rework: lending is a property of the thing that owns processes. The allow-list **intersects** the resolved subtree and can never widen it. |
+| `LentFromTenantId`, `LentFromPoolRtId` | `attributes/adapterLeasing.yaml` → `Adapter` | borrower side, set as a pair. Names the **pool**, not a member — membership is elastic. |
+| `QueuedAt`, `LeaseGrantedAt`, `LeaseReleasedAt`, `LeaseWaitMs` | `attributes/attributes.yaml` → `PipelineExecution` | four timestamps, all runtime state. `LeaseGrantedAt..LeaseReleasedAt` ≠ `StartedAt..CompletedAt`: the difference is the per-lease warm-up the pool exists to amortise, and it is also the **billing** span (concept §4b), so it must be stamped on the TTL-expiry and crash paths too. |
+| `LeasedFromTenantId`, `LeasedFromPoolRtId`, `LeasedOnMemberId` | `attributes/adapterLeasing.yaml` → `PipelineExecution` | which pool and member served it. |
+| **`StartedAt` relaxed to optional** | `types/pipelineExecution.yaml` | a `Queued` execution has no start time (concept §8, Q5). |
+| New index on `QueuedAt` | `types/pipelineExecution.yaml` | the queue read is `(status = Queued) ordered by QueuedAt`; it cannot ride the `StartedAt` index. |
+| `migrations/3.35.0-to-4.0.0.yaml` + two meta entries | `migrations/` | `ChangeCkType Pool → DeploymentSite`, post-validation at `severity: Error`. |
+
+🔴 **The borrower half and the execution's member reference are attributes, not associations,
+and they have to be.** A CK association resolves inside one tenant database; the pool lives in
+the lending tenant's and both the borrowing `Adapter` and its `PipelineExecution` live in the
+borrower's. Concept §5's "an association from the execution to the assigned member" describes
+an edge the engine has no database to store. There is therefore no referential integrity
+behind these values — an unresolvable pool is detected at **lease** time, not at write time.
+
+🔴 **The role rename moves THREE identifiers with disjoint blast radii.** `id` drives the
+persisted `roleId` in seed data *and* the generated constant
+`SystemCommunicationCkIds.RtCkManagesRoleId` → `RtCkHostsRoleId`; `inboundName` drives the
+GraphQL field `manages` and `…_ManagesUnion*`; `outboundName` drives `managedBy` and
+`…_ManagedByUnion*`. Only the `id` half has persisted data behind it. Measured blast radius:
+**20 source files, 38 occurrences** — C# is *one* file (`CommunicationRepository.cs`, 4 call
+sites); the operator, `octo-cli`, the MCP server and every C# test are **zero**; 17 of the 38
+are hand-written Studio TypeScript. Separately, **59 generated/published artifacts must not be
+hand-edited**, including the published catalog JSONs, which keep `Pool`/`Manages` forever.
+
+🔴 **The role rename required a NEW CK engine transform.** `RtAssociation.AssociationRoleId` is
+persisted on every edge and none of the seven existing transforms touches it, so renaming the
+role without one orphans every deployment-site↔workload edge **silently** — the navigation just
+returns nothing. `RenameAssociationRole` was added to `octo-construction-kit-engine`
+(+ `-mongodb`); see `docs/ck-model-migrations.md` there. **It must ship before the CK model**:
+the CK compiler validates migration YAML against the schema in the *installed* engine package,
+so until it is published the model fails with
+`Schema validation failed at '/steps/1/transform/type' … "RenameAssociationRole"`.
+(`ChangeCkType` already rewrites `originCkTypeId`/`targetCkTypeId` on edges, so the *type* half
+of the migration needed nothing new — verified in `TenantRepository`, not assumed.)
+
+🔴 **`rtWellKnownName: CommunicationPool` stays** on the seeded entity. It is identity, not
+display text: the service-managed blueprints re-apply against it, and renaming it would create
+a *second* deployment site on every provisioned tenant.
+
+### Bump cascade — measured 2026-09-14, not estimated
+
+Scope matters here. In **this `dev` checkout**, **65 files** carry a `System.Communication`
+version pin (61 source + 4 `.octo` artifacts), of which **46 source files are blueprint files**.
+Estate-wide (all checkouts, including repos not cloned here) it is **203 blocking pins + 7
+open-ended**. 🔴 The ~70 pins in the **published catalog** (`meshmakers.github.io` and the local
+mirrors under `.octo/local-catalog/.../System.Communication/3/`) are immutable history — they
+must keep saying `Pool`/`Manages` and must never be edited. 56 of the 61 hard-block at `<4.0`; the other 5
+are open-ended (`[3.6,)`, `[3.12,)`, `[3.13,)`, all in `demo-energy-iq/data/`, which is on
+branch `main`) and **silently absorb 4.0.0** — the more dangerous half.
+
+- 🔴 **Blueprint `ckModelDependencies` floors are NOT "satisfiability floors only" under a major bump.** `[3.22.0,4.0)` *excludes* 4.0.0: the blueprint becomes unsatisfiable. Both embedded blueprints are therefore raised to `[4.0,5.0)` and bumped `1.5.0` → **`2.0.0`**, and their seed now creates a `DeploymentSite`. The same applies to the 8 other `blueprint.yaml` files and 36 seed-data files in `octo-construction-kit`, `octo-office-integration` and `meshmakers-app`.
+- 🔴 **Both dependent CK models need MAJOR bumps, not minor ones.** `ck-semver-rules.md` classifies "dependency switched to a new major" as Major. `System.Ai-3.7.0` → **4.0.0** (which in turn breaks `System.Ai.Default`'s `System.Ai-[3.1.2,4.0)` pin); `Loxone-4.3.1` → **5.0.0** with its range widened off `[3.31,3.32)`.
+- 🔴 **Loxone must move WITH the bump.** The exact pin `[3.31,3.32)` (from `499e55d`, AB#5196) resolves to 3.31.0 and is unaffected by 3.x bumps — which is what makes it dangerous. `CkModelId` is name+version and `CkModelMigrationService` refuses to migrate across names, so a tenant holds exactly **one** version of `System.Communication`: a prod-1 tenant running Loxone cannot take 4.0.0 at all while the pin stands. Third repeat of AB#4696 / AB#4999 / AB#5196.
+
+### 🔴 Two traps specific to this bump
+
+**A major bump renames the generated C# namespace.** `…Generated.System.Communication.v3` →
+`.v4` breaks **123** `.cs` files (122 here, 1 in `octo-ai-services`) — far more than the 26
+that the `RtPool` → `RtDeploymentSite` rename itself touches. Also renamed:
+`AddCkModelSystemCommunicationV3()` → `…V4()`, and — because the blueprint went to 2.0.0 —
+`AddBlueprintSystemCommunication{Release,MainLatest}V1()` → `…V2()`.
+`octo-sdk`'s `CommunicationCkTypeIds.Pool = "System.Communication/Pool"` is a `const string`,
+so it compiles fine and is simply **wrong at runtime** — grep for it explicitly.
+
+**A stale build artifact makes the rename look free.** The CK output directory holds one
+compiled model per major, and the source generator emits `Rt*` classes for *every* file it
+finds there. A leftover `ck-system.communication-3.yaml` next to the new `-4.yaml` makes it
+emit `RtPool` **and** `RtDeploymentSite`: the repo compiles clean, all 917 tests pass, and
+`RtPool` silently refers to a type the installed model no longer defines. Deleting
+`bin/DebugL` + `obj/DebugL` turned "0 errors" into **506**. Never trust a green *incremental*
+build of a major CK bump — validate after `git clean -xfd`.
+
+**Migration entry points.** `CkModelMigrationService.FindBridgedMigrationPathAsync` picks
+candidate entry points as "every `fromVersion` **greater than** the installed version", so the
+entry hangs off `3.35.0` (not off the 3.1.1 chain end, which would drag modern tenants back
+through four obsolete DataFlow scripts). A tenant on the **withdrawn 3.36.0** sits above every
+entry point, falls through to the post-chain schema-only bridge and would **skip the rename
+silently** — 3.36.0 is in `dev/.octo/local-catalog`, so `migration-meta.yaml` carries a second,
+deletable `3.36.0 → 4.0.0` entry pointing at the same idempotent script.
+
+### Out of scope of the rename, deliberately
+
+The operator's `CommunicationPool` **CRD** (its Kind is a hardcoded literal; the link to the CK
+entity is by RtId, not by name), the Helm value names `operator.{autoManagePools,poolNamespace,defaultPoolName}`,
+the REST route `{tenantId}/v1/pool`, the `octo-cli` `GetPools`/`DeployPool`/`UndeployPool`
+commands and the MCP `get_pools`/`undeploy_pool` tools. The GraphQL type
+`SystemCommunicationPool`, however, is derived from the CkTypeId and **renames itself** on
+publish — ~66 frontend files across the Studio, `octo-frontend-libraries` and `meshmakers-app`
+break without anyone editing them, so codegen must be re-run in the same train.
+
+## Leasing: lending scope and execution class (AB#4924 increments 2 + 4)
+
+Plan: `docs/concepts/shared-adapter-leasing-implementation.md` §4 and §6.
+
+### Lending scope — `ITenantLendingScopeResolver`
+
+Resolves which tenants an `AdapterPool` may lend to. `Services/TenantLendingScopeResolver.cs`,
+singleton, 30 s cache (the walk opens an admin session per descendant and must not run per work
+item).
+
+🔴 **It does not call `GET {tenantId}/v1/tenants/descendants`.** This service has no
+`Sdk.ServiceClient` reference and a background scheduler has no caller token to forward. It
+re-implements the same breadth-first `ITenantContext` walk in process.
+
+🔴 **Copying `GetDescendants` verbatim is necessary but NOT sufficient.** Its `visited` set stops the
+walk from looping; it does **not** stop an ancestor from appearing in the result. With a corrupted
+registry (parent `P` lists child `C`, and `C` also lists `P`), the walk from `C` adds `P` — never
+visited, so nothing rejects it. For a listing endpoint that is tolerable; here the same set decides
+whether one tenant may execute work **inside** another, so it would be an upward privilege
+escalation. The resolver subtracts the lender's ancestor chain, walked via `ParentTenantId` — a path
+independent of the child records a cycle corrupts. `ARegistryCycleCannotMakeAnAncestorBorrowable`
+fails, **and nothing else does**, if that subtraction is removed.
+
+Also: an unresolvable lender lends to **nobody** (never a wider scope), a root tenant has **no**
+siblings, and `LendingAllowedTenantIds` intersects — it can never widen past the subtree.
+
+### Deploy guards (`PoolService.EnsureLeasingConfigurationIsValidAsync`)
+
+Same enforcement rationale as the AB#4984 `LifecycleMode` block: all of this is plain CK author
+configuration with no service-layer hook, so the deploy is the net. `Leased` requires
+`OnDemandCapable` (reusing `IWorkloadOnDemandCapabilityService`, never a duplicated trigger list);
+`LentFromTenantId`/`LentFromPoolRtId` are validated as a pair and against the resolver;
+`LentFrom*` set without `Leased` is an error, because a value that silently does nothing reads like
+the workload borrows a process when it runs its own; an `AdapterPool` may never itself be `Leased`.
+
+Read surface: `GET {tenantId}/v1/adapter/lending?adapterPoolRtId=…` → `AdapterLendingScopeDto`.
+
+### Execution class — `IPipelineExecutionClassService`
+
+The trigger node declares its class via `[NodeExecutionClass]` (SDK), the reflection descriptor scan
+picks it up, and it travels on `NodeDescriptorDto.ExecutionClass` — appended and defaulted, the same
+wire-compat trick `RequiresRunningProcess` uses.
+
+🔴 **Persisted in the same update as the definition it was derived from**
+(`SetPipelineDefinitionAsync`), so the class and the YAML can never disagree. This is *not* where
+`OnDemandCapable` is written — that is per-workload, after deploy, best-effort, and is not a
+pipeline-save hook at all. The redeploy path (unchanged YAML, possibly different adapter
+descriptors) uses the single-field `SetPipelineExecutionClassAsync`; rewriting the definition there
+would break the "deploy must not persist a definition it was not given" invariant, which a test pins.
+
+🔴 **`TryGetTriggerNodes`, not `TryGetAllNodes`.** The latter flattens `triggers:` and
+`transformations:` — correct for on-demand capability, wrong here: the class describes how the work
+*arrived*, so only a trigger may declare it.
+
+⚠️ **Known wart, adopted deliberately.** Node descriptors are never persisted and are null for any
+adapter that has not registered in this process, so `KnownInteractiveTriggerNames` mirrors
+`KnownProcessBoundTriggerNames`. Bounded: two entries, a descriptor always wins, and drift degrades
+to `Batch`, never to a wrong `Interactive`.
+
+⚠️ **Pre-existing AB#4984 defect found while doing this:** `octo-adapter-loxone`'s
+`LoxonePollTrigger@1` is process-bound but carries no `[NodeRequiresRunningProcess]` and is **missing
+from `KnownProcessBoundTriggerNames`** — a workload whose only trigger is that node is classified
+on-demand capable and would be hibernated. `FromLoxoneStateChange` is listed; this one was missed.
+Needs its own work item.
+
+⚠️ A pipeline edited to a different trigger changes class **on save**, so every surface must read the
+current value rather than cache it — the same caveat `OnDemandCapable` carries.
+
 ## Pipeline Service Account — mandatory execution identity (Epic AB#4979; AB#5027 phases 1 + 2)
 
 Pipeline execution runs under a real identity instead of anonymously. Granularity:

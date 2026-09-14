@@ -1,0 +1,91 @@
+$schema: https://schemas.meshmakers.cloud/ck-migration.schema.json
+sourceVersion: "3.35.0"
+targetVersion: "4.0.0"
+description: |
+  Migration from System.Communication 3.35.0 to 4.0.0 (AB#4924).
+
+  Renames the CK type Pool to DeploymentSite. The type never described a pool of
+  anything: it is the LOCATION a workload is deployed to ("Default Cloud",
+  "k8sfirmianstrasse"), and the operator serving that location registers against it.
+  The name became actively dangerous in 4.0.0, which introduces AdapterPool — a real
+  pool of adapter processes. Two unrelated concepts called "Pool" in one model is the
+  kind of ambiguity that gets read wrong during an incident, so the rename ships WITH
+  the feature that would otherwise collide with it: one major bump and one migration
+  for the estate instead of two (concept §8, Q16 + Q18).
+
+  The association role linking a workload to its site is renamed in the SAME migration:
+  Manages / ManagedBy -> Hosts / HostedBy. A deployment location does not "manage"
+  anything — the Communication Operator does — so the old role name described the
+  relationship backwards, and fixing the type name while leaving the role would have
+  guaranteed a second major migration later (concept §8, Q18: the estate migrates once).
+
+  Every existing Pool entity becomes a DeploymentSite entity: rtId, rtWellKnownName and
+  attribute values are preserved, only the CkTypeId changes.
+
+  🔴 Both halves of every existing edge have to be rewritten, and for different reasons:
+
+    - ChangeCkType rewrites the stored originCkTypeId / targetCkTypeId on associations.
+      The engine does this automatically as part of the step (see
+      TenantRepository.UpdateAssociationCkTypeIdsForMigrationAsync) — verified, not assumed.
+
+    - RenameAssociationRole rewrites the stored associationRoleId. NOTHING does this
+      automatically: the role id is persisted on every edge and no other transform touches
+      it. Without this step every deployment-site-to-workload edge in every tenant would be
+      orphaned SILENTLY — the model would no longer define the role the data refers to, the
+      navigation would simply return nothing, and no error would be raised anywhere. The
+      transform did not exist in the CK engine and was added for this migration.
+
+  🔴 The seeded entity keeps rtWellKnownName "CommunicationPool". That name is IDENTITY,
+  not display text: the service-managed blueprints re-apply against it, and renaming it
+  here while the blueprint looked for the new name would create a SECOND deployment site
+  on every tenant and silently orphan the adapters attached to the first one.
+
+steps:
+  - stepId: migrate-pool-to-deployment-site
+    description: "Change CkTypeId from Pool to DeploymentSite for all Pool entities"
+    action: Transform
+    target:
+      ckTypeId: System.Communication/Pool
+      blueprintSourceOnly: false
+    transform:
+      type: ChangeCkType
+      newCkTypeId: System.Communication/DeploymentSite
+    onConflict: Skip
+    # Deliberately NOT continueOnError. The three 3.0.x/3.1.x scripts tolerate errors
+    # because they are retries of an already-partially-applied rename. This one is the
+    # first and only attempt, and a Pool entity left behind is an adapter that can no
+    # longer resolve its deployment site — a failure that must stop the migration and be
+    # seen, not be logged and stepped over.
+    continueOnError: false
+
+  # Step 2: rename the association role on every stored edge.
+  #
+  # Order relative to step 1 does not matter: the two steps rewrite DIFFERENT fields of the
+  # same association documents (ckTypeIds vs roleId), so neither can undo the other. It is
+  # listed second only because the type rename is the headline change.
+  #
+  # This step takes no `target`: it rewrites the association collection rather than entities
+  # of one CK type, so there is no meaningful target.ckTypeId to supply.
+  - stepId: rename-manages-role-to-hosts
+    description: "Rename association role Manages to Hosts on every stored edge"
+    action: Transform
+    transform:
+      type: RenameAssociationRole
+      sourceAssociationRoleId: System.Communication/Manages
+      targetAssociationRoleId: System.Communication/Hosts
+    # Idempotent by construction — the rewrite matches only edges that still carry the OLD
+    # role id, so a retry after a partial failure finishes the job rather than double-applying.
+    continueOnError: false
+
+postValidations:
+  - validationId: no-legacy-pools
+    description: "Ensure no Pool entities remain"
+    type: NoEntitiesOfType
+    target:
+      ckTypeId: System.Communication/Pool
+    # Error, not Warning. A surviving Pool entity means a workload's Manages edge points at
+    # a type that no longer exists in the model, and nothing downstream would report it. There is no
+    # equivalent post-validation for the role rename: NoEntitiesOfType checks entities, and the
+    # role rewrite touches associations, which no validation type can currently assert over.
+    # The step returns the number of rewritten edges in the migration history instead.
+    severity: Error

@@ -3,7 +3,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
@@ -27,18 +27,18 @@ internal class DeployWorkloadServiceAccountCredentialsTests : PoolServiceTestsBa
     private const string ChartClientIdPath = "serviceAccountClientId";
     private const string ChartClientSecretPath = "secrets.serviceAccountClientSecret";
 
-    private RtPool ArrangeCloudPool()
+    private RtDeploymentSite ArrangeCloudPool()
     {
-        return new RtPool
+        return new RtDeploymentSite
         {
             RtId = OctoObjectId.GenerateNewId(),
-            CkTypeId = SystemCommunicationCkIds.RtCkPoolTypeId,
+            CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
             Name = "cloud-pool",
             Environment = RtEnvironmentEnum.Cloud
         };
     }
 
-    private void ArrangeDeployableWorkload(RtPool pool, RtDeployableWorkload workload)
+    private void ArrangeDeployableWorkload(RtDeploymentSite pool, RtDeployableWorkload workload)
     {
         workload.ChartName = "octo-mesh-adapter";
         workload.ChartVersion = "1.0.0";

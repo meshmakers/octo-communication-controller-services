@@ -1,8 +1,9 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 
@@ -68,11 +69,21 @@ public interface ICommunicationRepository
         string? blockingReasons);
 
     /// <summary>
-    /// Walks the <c>Manages</c> association from a workload back to its
-    /// parent <c>RtPool</c>. Returns <c>null</c> when the workload is not
+    /// Walks the <c>Hosts</c> association from a workload back to its
+    /// parent <c>RtDeploymentSite</c>. Returns <c>null</c> when the workload is not
     /// currently in any pool.
     /// </summary>
-    Task<RtPool?> GetPoolForWorkloadAsync(string tenantId, OctoObjectId workloadRtId);
+    /// <summary>
+    ///     Reads the lending configuration of an <c>AdapterPool</c> that lives in another tenant
+    ///     (AB#4924). Returns null when the tenant, the RtId or the pool cannot be resolved — the
+    ///     caller treats "no such pool" and "does not lend here" identically.
+    /// </summary>
+    Task<LendingScope?> TryGetAdapterPoolLendingScopeAsync(string lenderTenantId, string poolRtId);
+
+    /// <summary>
+    ///     Returns the deployment site a workload is hosted at, or null when it is not assigned.
+    /// </summary>
+    Task<RtDeploymentSite?> GetPoolForWorkloadAsync(string tenantId, OctoObjectId workloadRtId);
 
     /// <summary>
     /// Resolves the <c>HelmRepositoryConfiguration</c> referenced by a
@@ -251,7 +262,7 @@ public interface ICommunicationRepository
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <returns>List of pools of the tenant</returns>
-    Task<IReadOnlyCollection<RtPool>> GetPoolsAsync(string tenantId);
+    Task<IReadOnlyCollection<RtDeploymentSite>> GetPoolsAsync(string tenantId);
 
 
     /// <summary>
@@ -260,7 +271,7 @@ public interface ICommunicationRepository
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolName">Name of the pool</param>
     /// <returns>List of pools with the given name</returns>
-    Task<IReadOnlyCollection<RtPool>> GetPoolByNameAsync(string tenantId, string poolName);
+    Task<IReadOnlyCollection<RtDeploymentSite>> GetPoolByNameAsync(string tenantId, string poolName);
 
     /// <summary>
     /// Creates a pool
@@ -349,7 +360,7 @@ public interface ICommunicationRepository
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="adapterRtEntityId">Adapter id</param>
     /// <returns></returns>
-    Task<RtPool> GetPoolOfAdapterAsync(string tenantId, RtEntityId adapterRtEntityId);
+    Task<RtDeploymentSite> GetPoolOfAdapterAsync(string tenantId, RtEntityId adapterRtEntityId);
 
     /// <summary>
     /// Returns true if a tenant exists
@@ -439,9 +450,24 @@ public interface ICommunicationRepository
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="pipelineRtEntityId">Object id of the pipeline</param>
     /// <param name="pipelineDefinition">Pipeline definition YAML</param>
+    /// <param name="executionClass">
+    ///     Optional <c>PipelineExecutionClass</c> key resolved from the definition's trigger node
+    ///     (AB#4924), written in the SAME update so the class and the YAML it describes can never
+    ///     disagree. Null leaves the persisted value untouched.
+    /// </param>
     /// <returns></returns>
     Task SetPipelineDefinitionAsync(string tenantId, RtEntityId pipelineRtEntityId,
-        string pipelineDefinition);
+        string pipelineDefinition, int? executionClass = null);
+
+    /// <summary>
+    ///     Writes only the <c>PipelineExecutionClass</c> of a pipeline (AB#4924), for the redeploy
+    ///     path where the definition is unchanged but the resolved class may not be. Best-effort:
+    ///     never throws, because a display/scheduling hint must not fail a deploy.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="pipelineRtEntityId">Object id of the pipeline</param>
+    /// <param name="executionClass">The resolved <c>PipelineExecutionClass</c> key</param>
+    Task SetPipelineExecutionClassAsync(string tenantId, RtEntityId pipelineRtEntityId, int executionClass);
 
     /// <summary>
     /// Sets the debugging enabled state of a pipeline

@@ -1,0 +1,17 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+# AB#4924 §4a — what starts an additional pool member. Scaling is driven by the QUEUE, never
+# by CPU: a pool member waiting for a lease is I/O-bound, so its CPU utilisation says nothing
+# about whether work is piling up behind it. Concept §8 Q14 decided depth OR wait time, with
+# the averaging window left to be measured during implementation rather than guessed — which
+# is why the window is a configuration value on the pool, not a constant in this enum.
+- enumId: PoolScaleUpPolicy
+  description: 'Which queue signal makes an adapter pool start another member (AB#4924). QueueDepth scales when the number of work items waiting for a lease crosses ScaleUpQueueDepthThreshold. QueueWaitSeconds scales when the oldest waiting item has waited longer than ScaleUpQueueWaitSeconds. QueueDepthOrWaitSeconds (default) scales on whichever fires first, which is the behaviour a pool wants in practice: depth catches a burst, wait time catches a slow trickle behind one long-running lease. CPU-based scaling is deliberately absent — a member waiting for a lease is idle by construction.'
+  useFlags: false
+  values:
+  - key: 0
+    name: QueueDepthOrWaitSeconds
+  - key: 1
+    name: QueueDepth
+  - key: 2
+    name: QueueWaitSeconds

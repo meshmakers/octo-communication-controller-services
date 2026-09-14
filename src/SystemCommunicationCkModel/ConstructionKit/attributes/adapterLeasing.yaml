@@ -1,0 +1,92 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+# Shared adapter leasing (AB#4924) — see docs/concepts/shared-adapter-leasing.md and the
+# increment plan next to it.
+#
+# THREE parties, and keeping them apart is the whole point of this file:
+#
+#   POOL     (AdapterPool, in the LENDING tenant) — owns the processes and declares WHO may
+#            borrow them: AdapterSharingMode + LendingAllowedTenantIds +
+#            LendingMaxConcurrentLeasesPerTenant, plus the sizing in attributes/adapterPool.yaml.
+#   BORROWER (Adapter, in the borrowing tenant) — has NO process of its own:
+#            LifecycleMode = Leased + LentFromTenantId + LentFromPoolRtId.
+#   EXECUTION(PipelineExecution, in the BORROWING tenant) — records which pool and which
+#            member actually served it: LeasedFromTenantId + LeasedFromPoolRtId +
+#            LeasedOnMemberId, alongside QueuedAt / LeaseGrantedAt / LeaseReleasedAt.
+#
+# 🔴 EVERY cross-party reference here is a plain value, never an association, and it has to
+# be. A CK association resolves inside ONE tenant database. The pool lives in the lending
+# tenant's database and both the borrowing Adapter and its PipelineExecution live in the
+# borrower's, so there is no database in which such an edge could exist. The controller is
+# the only component that sees both tenants, so it is the only component that can resolve
+# these — and nothing enforces that a target still exists. A deleted or no-longer-lending
+# pool is detected at LEASE time, not at write time (concept §6, "Parent tenant deleted
+# while lending" → the borrower falls back to Deployed=false with a blocking reason).
+#
+# This applies to concept §5's "an association from the execution to the assigned member"
+# as well: the execution is the borrower's entity and the member is the lender's, so that
+# sentence describes an edge the engine cannot store. LeasedOnMemberId carries it instead.
+#
+# AB#5187 ownership classification, and it splits cleanly:
+#   isRuntimeState: false — the lending scope and the borrowing declaration. Both are
+#     deliberate statements about a tenant tree, exactly like LifecycleMode and
+#     IdleTimeoutMinutes in attributes/helmDeployment.yaml, and concept §8 Q9 decided them
+#     to be author configuration so a blueprint can seed BOTH halves: a parent tenant's
+#     blueprint declares the pool and its range, a child tenant's declares that it borrows.
+#   isRuntimeState: true — everything written by a running lease. None of it is seedable and
+#     a blueprint re-apply must never touch it.
+attributes:
+
+# ---------------------------------------------------------------------------------------
+# POOL side — who may borrow. Assigned to AdapterPool, NOT to Adapter.
+#
+# These moved off Adapter in the reworked increment 1. Lending is a property of the POOL,
+# which is the thing that owns processes; an individual Adapter never lends, it either owns
+# a private process or borrows one. Carrying the lending scope on Adapter (as the first cut
+# of this model did) would have allowed two adapters in the same tenant to declare different
+# lending scopes over what is really one set of processes.
+# ---------------------------------------------------------------------------------------
+- id: AdapterSharingMode
+  valueType: Enum
+  valueCkEnumId: ${this}/AdapterSharingMode
+  description: 'Whether and to whom an adapter pool lends its members, i.e. which part of the tenant tree may be handed a lease on it (AB#4924). NotShared (default) makes the pool private to its owning tenant, which is a legitimate configuration — a pool is still useful as a way to run one tenant''s own workloads elastically. The trust direction is fixed by the tenant tree and is never configurable upwards: a descendant can not lend to its ancestors (concept §3).'
+  isRuntimeState: false
+  defaultValues:
+    - 0
+- id: LendingAllowedTenantIds
+  valueType: StringArray
+  description: 'Optional allow-list narrowing the tenants an adapter pool with AdapterSharingMode != NotShared lends to (AB#4924). Absent or empty means "every tenant the sharing mode resolves to". A listed tenant that the sharing mode does NOT resolve to is ignored, never granted — the allow-list is an INTERSECTION with the tenant subtree, never a way around it, so the lending scope can not be widened past the trust boundary the tenant tree establishes.'
+  isRuntimeState: false
+- id: LendingMaxConcurrentLeasesPerTenant
+  valueType: Int
+  description: 'Optional upper bound on how many of this pool''s leases a single borrowing tenant may hold at the same time (AB#4924). Unset means no per-tenant cap — MaxReplicas and the round-robin rotation are the real bounds, which is why concept §8 Q11 deliberately left it without a default rather than inventing a number. Set it where one borrower is known to produce bursts (concept §6, "A borrowed tenant floods the queue"). It caps CONCURRENCY, not queue depth: excess work items stay Queued and visible in all three surfaces instead of being rejected.'
+  isRuntimeState: false
+
+# ---------------------------------------------------------------------------------------
+# BORROWER side — assigned to Adapter. Set as a pair on an adapter whose LifecycleMode is
+# Leased, meaningless in every other mode, validated as a pair by the controller.
+# ---------------------------------------------------------------------------------------
+- id: LentFromTenantId
+  valueType: String
+  description: 'Borrower side of shared adapter leasing (AB#4924): the tenant whose adapter pool executes this adapter''s pipelines. Set together with LentFromPoolRtId on an adapter whose LifecycleMode is Leased; both are ignored in every other mode and the controller rejects either one appearing alone. An ATTRIBUTE rather than an association because the named tenant is a different tenant database — see the file header. The controller re-validates on every lease that the named tenant still lends to this one; a value naming a tenant outside the lending scope is refused at deploy time, never silently honoured.'
+  isRuntimeState: false
+- id: LentFromPoolRtId
+  valueType: String
+  description: 'Borrower side of shared adapter leasing (AB#4924): the RtId of the AdapterPool entity inside LentFromTenantId whose members execute this adapter''s pipelines. Stored as the bare 24-character hexadecimal RtId without a CkTypeId — the target is always an AdapterPool. It names the POOL and not an individual member on purpose: membership is elastic, so a reference to a member would dangle the moment that member is drained (concept §5, "the queue belongs to the pool, not to the member"). An ATTRIBUTE rather than an association for the cross-tenant-database reason in the file header, so nothing enforces that the target exists; the controller resolves it per lease and surfaces an unresolvable pool as a blocking reason.'
+  isRuntimeState: false
+
+# ---------------------------------------------------------------------------------------
+# EXECUTION side — runtime state written by the lease, on PipelineExecution in the
+# BORROWING tenant. Never seeded, never author-set.
+# ---------------------------------------------------------------------------------------
+- id: LeasedFromTenantId
+  valueType: String
+  isRuntimeState: true
+  description: 'The lending tenant whose adapter pool served this execution (AB#4924). Written when the lease is granted. Together with LeasedFromPoolRtId it is what makes concept §4b''s attribution exact: consumption is billed to the tenant whose work ran — this execution''s own tenant — and the pool named here is where the per-member sizing that prices it comes from. Unset on a dedicated (AlwaysOn / OnDemand) adapter, which never leases.'
+- id: LeasedFromPoolRtId
+  valueType: String
+  isRuntimeState: true
+  description: 'RtId of the AdapterPool inside LeasedFromTenantId that served this execution (AB#4924). Bare 24-character hexadecimal RtId. Recorded per execution rather than read back from the adapter''s LentFromPoolRtId because the borrowing adapter can be re-pointed at a different pool later, and a cost report over past executions must reflect where the work actually ran.'
+- id: LeasedOnMemberId
+  valueType: String
+  isRuntimeState: true
+  description: 'Identity of the individual pool member (the process) that held the lease for this execution (AB#4924). This is what concept §5 calls "an association from the execution to the assigned member" — it can NOT be an association, because the member belongs to the lending tenant''s database and this execution to the borrower''s (see the file header). It is also not an RtId: members are replicas of one pool workload, not separate entities, so the value is the member''s stable runtime identity (its pool-hub registration id). It exists so the per-adapter queue view — "what is this member holding, what waits behind it" — can be projected out of the pool queue.'

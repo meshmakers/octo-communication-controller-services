@@ -43,7 +43,7 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         // to ensure BSON class maps are available for typed entity deserialization
         Services.AddCkModelSystemV2();
         Services.AddCkModelSystemBotV3();
-        Services.AddCkModelSystemCommunicationV3();
+        Services.AddCkModelSystemCommunicationV4();
         Services.AddCkModelSystemNotificationV2();
 
         // Add runtime engine with MongoDB AFTER CK models

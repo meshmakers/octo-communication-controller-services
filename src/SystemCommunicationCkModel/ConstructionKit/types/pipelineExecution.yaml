@@ -1,13 +1,21 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
 - typeId: PipelineExecution
-  description: Records an individual pipeline execution with its status, timing, trigger type, and optional input/output data. Linked to the executed pipeline and the adapter that performed the execution.
+  description: Records an individual pipeline execution with its status, timing, trigger type, and optional input/output data. Linked to the executed pipeline and the adapter that performed the execution. On a leased adapter pool (AB#4924) the entity exists from the moment the work item is enqueued, so one work item is one PipelineExecution from Queued through Running to completion.
   derivedFromCkTypeId: ${System}/Entity
   indexes:
   - indexType: "Ascending"
     fields:
       - attributePaths:
         - StartedAt
+  # AB#4924 — the pool queue is read as (ExecutionStatus = Queued) ordered by QueuedAt, once
+  # per scheduling round per pool. It can not reuse the StartedAt index above: a Queued
+  # execution has no StartedAt at all now, so those entities sit in the null bucket of that
+  # index in arrival-independent order.
+  - indexType: "Ascending"
+    fields:
+      - attributePaths:
+        - QueuedAt
   - indexType: "Ascending"
     fields:
       - attributePaths:
@@ -19,13 +27,64 @@ types:
       name: Status
     - id: ${this}/TriggerType
       name: TriggerType
+    # AB#4924 — the lease lifecycle. See attributes/attributes.yaml for why there are four
+    # timestamps and not two. All optional: a dedicated (AlwaysOn / OnDemand) adapter never
+    # queues and never leases, and every existing RtPipelineExecution in every tenant
+    # predates them.
+    - id: ${this}/QueuedAt
+      name: QueuedAt
+      isOptional: true
+    - id: ${this}/LeaseGrantedAt
+      name: LeaseGrantedAt
+      isOptional: true
+    - id: ${this}/LeaseReleasedAt
+      name: LeaseReleasedAt
+      isOptional: true
+    - id: ${this}/LeaseWaitMs
+      name: LeaseWaitMs
+      isOptional: true
+    # AB#4924, concept §8 Q5 — StartedAt is RELAXED from mandatory to optional here.
+    #
+    # A Queued execution has no start time, and the two obvious workarounds are both worse
+    # than a nullable field. Stamping StartedAt at enqueue makes it lie for the whole queue
+    # wait, and both the AB#4280 stuck reaper and the AB#4280 orphan resolver use it as
+    # their AGE key — so a work item that waited 20 minutes in a healthy queue would be
+    # reaped as a stuck execution. A separate queue entity contradicts §5's "one execution
+    # is one entity" and forces every surface to join two sources for one history.
+    #
+    # Relaxing required -> optional is a MINOR change on its own (ck-semver-rules.md,
+    # "Attribute changed from required to optional"); it is only shipping inside 4.0.0
+    # because the Pool -> DeploymentSite rename in the same bump is what forces the major.
+    #
+    # 🔴 The cost is a nullable ripple that must be worked through deliberately, not
+    # absorbed by the compiler's null-forgiving operator: ~16 read sites in
+    # CommunicationRepository (StartedAt is the sort key of every execution query), the
+    # AB#4280 reaper, the AB#4280 orphan resolver, PipelineStatisticsFolder (a Queued
+    # execution must not fold into RtPipelineStatistics before it runs) and two DTOs
+    # (PipelineExecutionDto, BufferedPipelineExecution). Each of those filters is
+    # ExecutionStatus-based today and has to name Queued explicitly.
     - id: ${this}/StartedAt
       name: StartedAt
+      isOptional: true
     - id: ${this}/CompletedAt
       name: CompletedAt
       isOptional: true
     - id: ${this}/DurationMs
       name: DurationMs
+      isOptional: true
+    # AB#4924 — which pool, and which member of it, served this execution. Values rather
+    # than an association: this entity lives in the BORROWING tenant's database and the pool
+    # lives in the LENDING tenant's, so concept §5's "association from the execution to the
+    # assigned member" is an edge the engine has no database to store it in. See the header
+    # of attributes/adapterLeasing.yaml.
+    - id: ${this}/LeasedFromTenantId
+      name: LeasedFromTenantId
+      isOptional: true
+    - id: ${this}/LeasedFromPoolRtId
+      name: LeasedFromPoolRtId
+      isOptional: true
+    - id: ${this}/LeasedOnMemberId
+      name: LeasedOnMemberId
       isOptional: true
     - id: ${this}/ErrorMessage
       name: ErrorMessage
@@ -39,5 +98,8 @@ types:
   associations:
     - id: ${this}/ExecutedPipeline
       targetCkTypeId: ${this}/Pipeline
+    # The adapter this execution BELONGS to — the borrower's own Adapter entity, in this
+    # same tenant. It is unchanged by leasing and is NOT the pool member that ran the work
+    # (that is LeasedOnMemberId above, and it lives in another tenant entirely).
     - id: ${this}/ExecutingAdapter
       targetCkTypeId: ${this}/Adapter

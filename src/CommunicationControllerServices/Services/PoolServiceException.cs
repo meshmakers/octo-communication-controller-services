@@ -1,5 +1,5 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
@@ -153,6 +153,112 @@ internal class PoolServiceException : Exception
             $"{string.Join("; ", blockingReasons)}. Process-bound triggers stop silently while the workload is hibernated " +
             "(AB#4984). Either set the workload back to AlwaysOn or migrate the pipelines to wake-capable triggers " +
             "(cron PipelineTrigger, FromHttpRequest, FromPipelineDataEvent).");
+    }
+
+    // ---- AB#4924 shared adapter leasing -------------------------------------------------------
+    //
+    // Same enforcement rationale as the AB#4984 block above: LifecycleMode, SharingMode and the
+    // LentFrom* pair are plain CK author configuration, writable via GraphQL and seedable by a
+    // blueprint with no service-layer hook. The deploy is therefore the net, and every message
+    // below names what to change and where, because the alternative is a workload that deploys
+    // successfully and then never executes anything.
+
+    internal static Exception WorkloadLeasedNotSupportedForType(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': LifecycleMode 'Leased' " +
+            "is supported for adapter workloads only — only an Adapter runs pipelines, and only pipelines can be " +
+            "executed on a borrowed process (AB#4924). Set the workload to AlwaysOn in the Refinery Studio.");
+    }
+
+    internal static Exception AdapterPoolCannotBeLeased(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Cannot deploy adapter pool '{workloadName ?? workloadRtId.ToString()}' with LifecycleMode " +
+            "'Leased' (AB#4924). 'Leased' is the BORROWER's mode — it means the workload has no process of its own. " +
+            "A pool is the opposite: it owns the processes that are lent out. Set the pool to AlwaysOn and control its " +
+            "size with MinReplicas / MaxReplicas instead.");
+    }
+
+    internal static Exception WorkloadLeasedNotOnDemandCapable(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName, IReadOnlyList<string> blockingReasons)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}' with LifecycleMode 'Leased': " +
+            $"{string.Join("; ", blockingReasons)}. A lease can only be handed to a process whose triggers are " +
+            "wake-capable — a process-bound trigger would need a process of its own, which is exactly what a leased " +
+            "workload does not have (AB#4924). Same gate as LifecycleMode 'OnDemand'.");
+    }
+
+    internal static Exception LeasedWorkloadLenderIncomplete(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}' with LifecycleMode 'Leased': " +
+            "LentFromTenantId and LentFromPoolRtId must be set together (AB#4924). One without the other names no " +
+            "resolvable pool, and there is no referential integrity behind these values — they point into a different " +
+            "tenant's database, so nothing but this check can catch a half-configured borrower.");
+    }
+
+    internal static Exception LeasedWorkloadWithoutLender(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}' with LifecycleMode 'Leased': " +
+            "it names no adapter pool to borrow from. Set LentFromTenantId and LentFromPoolRtId to the lending tenant " +
+            "and the AdapterPool inside it (AB#4924).");
+    }
+
+    internal static Exception LentFromSetWithoutLeasedMode(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': LentFromTenantId / " +
+            "LentFromPoolRtId are set but LifecycleMode is not 'Leased' (AB#4924). The values would do nothing, and a " +
+            "value that silently does nothing is worse than an error — it reads like the workload borrows a process " +
+            "when it actually runs its own. Either set LifecycleMode to 'Leased' or clear both values.");
+    }
+
+    internal static Exception LenderDoesNotLendToThisTenant(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName, string lenderTenantId)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}' with LifecycleMode 'Leased': " +
+            $"tenant '{lenderTenantId}' does not lend to tenant '{tenantId}' (AB#4924). Lending follows the tenant tree " +
+            "and never flows upwards: a pool lends to its owner's descendants, and to siblings under a shared parent " +
+            $"when its SharingMode is 'DescendantsAndSiblings'. Check the pool's SharingMode and its " +
+            "LendingAllowedTenantIds allow-list in tenant '" + lenderTenantId + "'.");
+    }
+
+    internal static Exception AdapterPoolNotOnDemandCapable(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Cannot deploy adapter pool '{workloadName ?? workloadRtId.ToString()}' with a SharingMode " +
+            "other than 'NotShared': the pool is not on-demand capable (AB#4924). A lease is handed to a process " +
+            "between work items, so a pool whose own workload carries a process-bound trigger cannot serve one.");
+    }
+
+    internal static Exception AdapterPoolReplicaRangeInvalid(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName, int minReplicas, int maxReplicas)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Cannot deploy adapter pool '{workloadName ?? workloadRtId.ToString()}': the replica range " +
+            $"MinReplicas={minReplicas} / MaxReplicas={maxReplicas} is invalid (AB#4924). MaxReplicas must be at least 1 " +
+            "and at least MinReplicas; MinReplicas must not be negative. MinReplicas=0 is permitted and turns the pool " +
+            "into a scale-to-zero pool where every burst pays one cold start.");
+    }
+
+    internal static Exception AdapterPoolLeaseCapInvalid(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName, int cap)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Cannot deploy adapter pool '{workloadName ?? workloadRtId.ToString()}': " +
+            $"LendingMaxConcurrentLeasesPerTenant is {cap} (AB#4924). Leave it unset for no per-tenant cap — " +
+            "MaxReplicas and the round-robin rotation are the real bounds — or set a value of at least 1. A cap of 0 " +
+            "would let a borrower queue work that can never be leased.");
     }
 }
 

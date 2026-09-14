@@ -1,7 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 enums:
 - enumId: PipelineExecutionStatus
-  description: Status of a pipeline execution lifecycle, from running through completion or failure.
+  description: 'Status of a pipeline execution lifecycle, from queued or running through completion or failure. Queued (AB#4924) precedes Running on a Leased workload: the execution entity exists from the moment the work item is enqueued, so one execution stays one entity from enqueue to completion and the Studio renders a continuous history instead of joining a queue and an execution source.'
   useFlags: false
   values:
   - key: 0
@@ -14,3 +14,8 @@ enums:
     name: Interrupted
   - key: 4
     name: Cancelled
+  # AB#4924: appended, never inserted — the numeric keys are persisted on every
+  # RtPipelineExecution entity, so Queued must take the next free key rather than a
+  # position that reads nicely in a state diagram.
+  - key: 5
+    name: Queued

@@ -1,6 +1,6 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Microsoft.Extensions.Logging;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Runtime.Contracts;
@@ -9,6 +9,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 
@@ -39,8 +40,8 @@ internal class CommunicationRepository : ICommunicationRepository
         using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPool, RtAdapter>(session,
-                [poolRtId] , SystemCommunicationCkIds.RtCkManagesRoleId,
+            var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtDeploymentSite, RtAdapter>(session,
+                [poolRtId] , SystemCommunicationCkIds.RtCkHostsRoleId,
                 GraphDirections.Inbound, null, RtEntityQueryOptions.Create());
 
             if (!resultSet.Any())
@@ -68,8 +69,8 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             // RtDeployableWorkload is abstract — the runtime engine returns the
             // concrete RtAdapter / RtApplication instances polymorphically.
-            var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPool, RtDeployableWorkload>(session,
-                [poolRtId], SystemCommunicationCkIds.RtCkManagesRoleId,
+            var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtDeploymentSite, RtDeployableWorkload>(session,
+                [poolRtId], SystemCommunicationCkIds.RtCkHostsRoleId,
                 GraphDirections.Inbound, null, RtEntityQueryOptions.Create());
 
             if (!resultSet.Any())
@@ -219,17 +220,64 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
-    public async Task<RtPool?> GetPoolForWorkloadAsync(string tenantId, OctoObjectId workloadRtId)
+    /// <inheritdoc />
+    public async Task<LendingScope?> TryGetAdapterPoolLendingScopeAsync(string lenderTenantId, string poolRtId)
+    {
+        // AB#4924 — reads an AdapterPool in a DIFFERENT tenant than the caller's. That is the
+        // whole point: the borrower's Adapter carries LentFromTenantId / LentFromPoolRtId as plain
+        // values because a CK association cannot cross a tenant database, so the controller is the
+        // only component that can resolve the reference, and it does it here.
+        //
+        // Returns null for every "cannot resolve" case rather than throwing, because the caller
+        // treats an unresolvable pool and a pool that does not lend here identically: both are a
+        // refused deploy with a named reason (concept §6, "Parent tenant deleted while lending").
+        if (!OctoObjectId.TryParse(poolRtId, out var rtId))
+        {
+            _logger.LogWarning("[{LenderTenantId}] LentFromPoolRtId '{PoolRtId}' is not a valid RtId",
+                lenderTenantId, poolRtId);
+            return null;
+        }
+
+        var tenantRepository = await _systemContext.TryFindTenantRepositoryAsync(lenderTenantId);
+        if (tenantRepository is null)
+        {
+            _logger.LogWarning("Lending tenant '{LenderTenantId}' cannot be resolved", lenderTenantId);
+            return null;
+        }
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            var pool = await tenantRepository.GetRtEntityByRtIdAsync<RtAdapterPool>(session, rtId);
+            if (pool is null)
+            {
+                return null;
+            }
+
+            // Materialise the attribute value list into a plain collection before it leaves the
+            // session: IAttributeValueList is a live view over the entity, and the resolver
+            // caches what it is handed.
+            return new LendingScope((int)pool.SharingMode, pool.LendingAllowedTenantIds?.ToList());
+        }
+        catch (Exception e)
+        {
+            _logger.LogWarning(e, "[{LenderTenantId}] Failed to read adapter pool '{PoolRtId}'",
+                lenderTenantId, poolRtId);
+            return null;
+        }
+    }
+
+    public async Task<RtDeploymentSite?> GetPoolForWorkloadAsync(string tenantId, OctoObjectId workloadRtId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
         using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            // Workload's outbound Manages association points at the parent pool.
+            // Workload's outbound HostedBy association points at the deployment site it runs at.
             var resultSet = await tenantRepository
-                .GetRtAssociationTargetsAsync<RtDeployableWorkload, RtPool>(session,
-                    [workloadRtId], SystemCommunicationCkIds.RtCkManagesRoleId,
+                .GetRtAssociationTargetsAsync<RtDeployableWorkload, RtDeploymentSite>(session,
+                    [workloadRtId], SystemCommunicationCkIds.RtCkHostsRoleId,
                     GraphDirections.Outbound, null, RtEntityQueryOptions.Create());
 
             if (!resultSet.Any())
@@ -356,7 +404,7 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             // Inbound over the dedicated PipelineServiceAccount role: the edge lives on the
             // adapter, so from the configuration's side it is the incoming direction — same
-            // pattern as GetAdaptersAsync resolves Pool→Adapter over the Manages role.
+            // pattern as GetAdaptersAsync resolves DeploymentSite→Adapter over the Hosts role.
             var resultSet = await tenantRepository
                 .GetRtAssociationTargetsAsync<RtServiceAccountConfiguration, RtAdapter>(session,
                     [serviceAccountRtId], SystemCommunicationCkIds.RtCkPipelineServiceAccountRoleId,
@@ -824,7 +872,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task<IReadOnlyCollection<RtPool>> GetPoolsAsync(string tenantId)
+    public async Task<IReadOnlyCollection<RtDeploymentSite>> GetPoolsAsync(string tenantId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -832,7 +880,7 @@ internal class CommunicationRepository : ICommunicationRepository
         try
         {
             var dataQueryOperation = RtEntityQueryOptions.Create();
-            var poolResultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPool>(session, dataQueryOperation);
+            var poolResultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtDeploymentSite>(session, dataQueryOperation);
 
             return poolResultSet.Items.ToList();
         }
@@ -843,7 +891,7 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyCollection<RtPool>> GetPoolByNameAsync(string tenantId, string poolName)
+    public async Task<IReadOnlyCollection<RtDeploymentSite>> GetPoolByNameAsync(string tenantId, string poolName)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -851,9 +899,9 @@ internal class CommunicationRepository : ICommunicationRepository
         try
         {
             var dataQueryOperation = RtEntityQueryOptions.Create()
-                .FieldFilter(nameof(RtPool.Name), FieldFilterOperator.Equals, poolName);
+                .FieldFilter(nameof(RtDeploymentSite.Name), FieldFilterOperator.Equals, poolName);
 
-            var poolResultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPool>(session, dataQueryOperation);
+            var poolResultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtDeploymentSite>(session, dataQueryOperation);
 
             return poolResultSet.Items.ToList();
         }
@@ -873,7 +921,7 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             session.StartTransaction();
 
-            var rtPool = new RtPool
+            var rtPool = new RtDeploymentSite
             {
                 CommunicationState = RtCommunicationStateEnum.Offline,
                 DeploymentState = RtDeploymentStateEnum.Undeployed,
@@ -881,9 +929,9 @@ internal class CommunicationRepository : ICommunicationRepository
                 Name = poolName
             };
 
-            var entityUpdateInfoList = new List<EntityUpdateInfo<RtPool>>
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtDeploymentSite>>
             {
-                EntityUpdateInfo<RtPool>.CreateInsert(rtPool)
+                EntityUpdateInfo<RtDeploymentSite>.CreateInsert(rtPool)
             };
 
             OperationResult operationResult = new();
@@ -915,15 +963,15 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             session.StartTransaction();
 
-            var rtPool = new RtPool
+            var rtPool = new RtDeploymentSite
             {
                 RtId = poolRtId,
                 DeploymentState = deploymentState
             };
 
-            var entityUpdateInfoList = new List<EntityUpdateInfo<RtPool>>
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtDeploymentSite>>
             {
-                EntityUpdateInfo<RtPool>.CreateUpdate(rtPool.ToRtEntityId(), rtPool)
+                EntityUpdateInfo<RtDeploymentSite>.CreateUpdate(rtPool.ToRtEntityId(), rtPool)
             };
 
             OperationResult operationResult = new();
@@ -961,7 +1009,7 @@ internal class CommunicationRepository : ICommunicationRepository
             // a parallel writer — e.g. a controller pod mid-shutdown — is rejected at the
             // MongoDB filter level).
             var newTimestamp = DateTime.UtcNow;
-            var rtPool = new RtPool
+            var rtPool = new RtDeploymentSite
             {
                 RtId = poolRtId,
                 CommunicationState = communicationState,
@@ -969,9 +1017,9 @@ internal class CommunicationRepository : ICommunicationRepository
             };
 
             var guard = new AttributeNewerThanGuard("attributes.communicationStateTimestamp", newTimestamp);
-            var entityUpdateInfoList = new List<EntityUpdateInfo<RtPool>>
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtDeploymentSite>>
             {
-                EntityUpdateInfo<RtPool>.CreateConditionalUpdate(rtPool.ToRtEntityId(), rtPool, guard)
+                EntityUpdateInfo<RtDeploymentSite>.CreateConditionalUpdate(rtPool.ToRtEntityId(), rtPool, guard)
             };
 
             OperationResult operationResult = new();
@@ -1168,16 +1216,16 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
-    public async Task<RtPool> GetPoolOfAdapterAsync(string tenantId, RtEntityId adapterRtEntityId)
+    public async Task<RtDeploymentSite> GetPoolOfAdapterAsync(string tenantId, RtEntityId adapterRtEntityId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
         using var session = await tenantRepository.GetSessionAsync();
         try
         {
-            var poolResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtAdapter, RtPool>(session,
+            var poolResultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtAdapter, RtDeploymentSite>(session,
                 [adapterRtEntityId.RtId],
-                SystemCommunicationCkIds.RtCkManagesRoleId,
+                SystemCommunicationCkIds.RtCkHostsRoleId,
                 GraphDirections.Inbound, null, RtEntityQueryOptions.Create());
 
             if (poolResultSet.Any())
@@ -1503,9 +1551,18 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task SetPipelineDefinitionAsync(string tenantId, RtEntityId pipelineRtEntityId,
-        string pipelineDefinition)
+    /// <inheritdoc />
+    public async Task SetPipelineExecutionClassAsync(string tenantId, RtEntityId pipelineRtEntityId,
+        int executionClass)
     {
+        // AB#4924 — single-field writer for the redeploy path, where the YAML is unchanged but the
+        // class may not be: it depends on the ADAPTER's descriptors as well as the definition, so
+        // moving a pipeline to an adapter on a different SDK can legitimately change it.
+        //
+        // Deliberately NOT a SetPipelineDefinitionAsync call with the existing definition: that
+        // would rewrite PipelineDefinition on every redeploy, which breaks the invariant
+        // "deploy must not persist a definition when none was provided" (AB#4364's neighbour, and
+        // a test pins it).
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
         using var session = await tenantRepository.GetSessionAsync();
@@ -1515,8 +1572,54 @@ internal class CommunicationRepository : ICommunicationRepository
 
             var pipeline = new RtPipeline
             {
+                ExecutionClass = (RtPipelineExecutionClassEnum)executionClass
+            };
+
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtPipeline>>
+            {
+                EntityUpdateInfo<RtPipeline>.CreateUpdate(pipelineRtEntityId, pipeline)
+            };
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (Exception e)
+        {
+            await session.AbortTransactionAsync();
+            _logger.LogWarning(e, "[{TenantId}] Failed to set execution class on pipeline '{PipelineRtEntityId}'",
+                tenantId, pipelineRtEntityId);
+        }
+    }
+
+    public async Task SetPipelineDefinitionAsync(string tenantId, RtEntityId pipelineRtEntityId,
+        string pipelineDefinition, int? executionClass = null)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            // AB#4924 — the execution class is written in the SAME update as the definition it was
+            // derived from, deliberately, so the two can never disagree. A separate write would
+            // leave a window in which the persisted class describes the previous YAML, and that
+            // window is exactly when somebody reads the queue to ask why their job is waiting.
+            var pipeline = new RtPipeline
+            {
                 PipelineDefinition = pipelineDefinition
             };
+
+            if (executionClass.HasValue)
+            {
+                pipeline.ExecutionClass = (RtPipelineExecutionClassEnum)executionClass.Value;
+            }
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtPipeline>>
             {
@@ -2501,7 +2604,13 @@ internal class CommunicationRepository : ICommunicationRepository
                         Status = RtPipelineExecutionStatusEnum.Failed,
                         ErrorMessage = errorMessage,
                         CompletedAt = now,
-                        DurationMs = (int)Math.Max(0, (now - e.StartedAt).TotalMilliseconds)
+                        // AB#4924: StartedAt is optional since 4.0.0. An execution failed
+                        // without ever having started has no duration — report 0 rather
+                        // than measuring from a substituted timestamp, which would show up
+                        // as a fabricated runtime in the statistics.
+                        DurationMs = e.StartedAt is { } startedAt
+                            ? (int)Math.Max(0, (now - startedAt).TotalMilliseconds)
+                            : 0
                     };
                     return EntityUpdateInfo<RtPipelineExecution>.CreateUpdate(e.ToRtEntityId(), updated);
                 })

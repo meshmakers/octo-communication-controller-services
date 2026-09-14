@@ -83,6 +83,37 @@ internal class PipelineDefinitionService : IPipelineDefinitionService
         return true;
     }
 
+    /// <inheritdoc />
+    public bool TryGetTriggerNodes(string pipelineDefinition, out IReadOnlyList<PipelineNodeProperties> triggers)
+    {
+        // AB#4924 — deliberately NOT CollectAllNodes, which merges `triggers:` and
+        // `transformations:` into one flat list. The execution class is a property of how the work
+        // ARRIVED, so only the trigger section can answer it; a transform node that happened to be
+        // named like a trigger would otherwise vote on the class.
+        Dictionary<object, object>? root;
+        try
+        {
+            root = _deserializer.Deserialize<Dictionary<object, object>>(pipelineDefinition);
+        }
+        catch
+        {
+            triggers = [];
+            return false;
+        }
+
+        if (root == null || !root.TryGetValue(TriggersKey, out var triggersObj) ||
+            triggersObj is not List<object> triggerList)
+        {
+            triggers = [];
+            return true;
+        }
+
+        var nodes = new List<PipelineNodeProperties>();
+        CollectAllNodes(triggerList, nodes, new Dictionary<string, int>());
+        triggers = nodes;
+        return true;
+    }
+
     private static IReadOnlyList<PipelineNodeProperties> CollectAllNodes(Dictionary<object, object> root)
     {
         var nodes = new List<PipelineNodeProperties>();

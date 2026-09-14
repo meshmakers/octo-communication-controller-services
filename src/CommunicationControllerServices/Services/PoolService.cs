@@ -4,7 +4,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Runtime.Contracts;
 using NLog;
 
@@ -22,6 +22,7 @@ internal class PoolService : IPoolService
     private readonly IWorkloadOnDemandCapabilityService _onDemandCapabilityService;
     private readonly IPipelineServiceAccountProvisioningService _serviceAccountProvisioningService;
     private readonly IPipelineServiceAccountResolver _serviceAccountResolver;
+    private readonly ITenantLendingScopeResolver _lendingScopeResolver;
 
     /// <summary>
     /// Helm values path carrying the adapter's own OAuth client id (AB#5072). Must stay in lockstep
@@ -53,6 +54,7 @@ internal class PoolService : IPoolService
     /// <param name="onDemandCapabilityService">Validates LifecycleMode=OnDemand against the workload's trigger classification at deploy time (AB#4984)</param>
     /// <param name="serviceAccountProvisioningService">Provisions the adapter's pipeline service account on deploy (AB#5027)</param>
     /// <param name="serviceAccountResolver">Reads the adapter's provisioned service account so its credentials can be projected into the workload's Helm values (AB#5072)</param>
+    /// <param name="lendingScopeResolver">Resolves which tenants an adapter pool may lend to, so a Leased workload naming an out-of-scope lender is refused at deploy time (AB#4924)</param>
     public PoolService(ICommunicationRepository communicationRepository, IPoolCache poolCache,
         ICommunicationEventService eventService,
         IOperatorConnectionManager operatorConnectionManager,
@@ -60,7 +62,8 @@ internal class PoolService : IPoolService
         IWorkloadTemplateResolver templateResolver,
         IWorkloadOnDemandCapabilityService onDemandCapabilityService,
         IPipelineServiceAccountProvisioningService serviceAccountProvisioningService,
-        IPipelineServiceAccountResolver serviceAccountResolver)
+        IPipelineServiceAccountResolver serviceAccountResolver,
+        ITenantLendingScopeResolver lendingScopeResolver)
     {
         _communicationRepository = communicationRepository;
         _poolCache = poolCache;
@@ -71,6 +74,7 @@ internal class PoolService : IPoolService
         _onDemandCapabilityService = onDemandCapabilityService;
         _serviceAccountProvisioningService = serviceAccountProvisioningService;
         _serviceAccountResolver = serviceAccountResolver;
+        _lendingScopeResolver = lendingScopeResolver;
     }
     
     /// <inheritdoc />
@@ -123,7 +127,7 @@ internal class PoolService : IPoolService
 
         await _eventService.StoreInformationEventAsync(tenantId,
             $"Pool operator for pool '{poolName}' unregistered.",
-            new RtEntityId(SystemCommunicationCkIds.RtCkPoolTypeId, poolDescription.PoolRtId));
+            new RtEntityId(SystemCommunicationCkIds.RtCkDeploymentSiteTypeId, poolDescription.PoolRtId));
 
         Logger.Info("[{TenantId}] Operator for pool '{PoolRtId}' unregistered", tenantId, poolRtId);
     }
@@ -553,6 +557,13 @@ internal class PoolService : IPoolService
             }
         }
 
+        // AB#4924 leasing validation. Same enforcement rationale as the AB#4984 block above:
+        // LifecycleMode, SharingMode and the LentFrom* pair are plain CK author configuration with
+        // no service-layer hook, so the deploy is the net. A leasing misconfiguration is
+        // particularly worth failing loudly on, because its silent failure mode is a workload that
+        // deploys successfully and then never executes anything.
+        await EnsureLeasingConfigurationIsValidAsync(tenantId, workload);
+
         // AB#5027, deliberately NOT guarded here: the mandatory-service-account check lives on
         // the pipeline / data-flow deploy paths in AdapterService, not on the workload deploy.
         // Reasons: (a) this method also validates Applications, which execute no pipelines and
@@ -627,8 +638,8 @@ internal class PoolService : IPoolService
     }
 
     /// <summary>
-    /// Resolves the pool name for a workload by walking the <c>Manages</c>
-    /// association back to its parent <c>RtPool</c>. Returns null when the
+    /// Resolves the deployment site name for a workload by walking the <c>Hosts</c>
+    /// association back to its parent <c>RtDeploymentSite</c>. Returns null when the
     /// workload isn't currently in any pool.
     /// </summary>
     private async Task<string?> ResolvePoolNameForWorkloadAsync(string tenantId, RtDeployableWorkload workload)
@@ -1031,7 +1042,7 @@ internal class PoolService : IPoolService
             $"Notified central Communication Operator to undeploy {trackedWorkloads.Count} workload(s) and {deployedPools.Count} Cloud pool(s) for tenant cleanup.");
     }
 
-    private async Task<RtPool> GetPoolByRtIdAsync(string tenantId, OctoObjectId poolRtId)
+    private async Task<RtDeploymentSite> GetPoolByRtIdAsync(string tenantId, OctoObjectId poolRtId)
     {
         var pools = await _communicationRepository.GetPoolsAsync(tenantId);
         var rtPool = pools.FirstOrDefault(p => p.RtId == poolRtId);
@@ -1227,7 +1238,7 @@ internal class PoolService : IPoolService
         var triggersUpdated = 0;
 
         // 1) Pools: Edge → Disabled, Cloud → leave (controller-managed lifecycle)
-        IReadOnlyCollection<RtPool> pools;
+        IReadOnlyCollection<RtDeploymentSite> pools;
         try
         {
             pools = await _communicationRepository.GetPoolsAsync(tenantId);
@@ -1420,7 +1431,7 @@ internal class PoolService : IPoolService
     /// transitions to Disabled only via the Undeploy command path.
     /// </summary>
     private async Task<RtDeploymentStateEnum?> ComputeWorkloadTargetStateAsync(string tenantId,
-        RtDeployableWorkload workload, RtPool pool)
+        RtDeployableWorkload workload, RtDeploymentSite pool)
     {
         // Only touch resting states. Deployed/Pending/Error must stay — those reflect
         // real operator-managed resources in the cluster, regardless of whether the
@@ -1439,6 +1450,141 @@ internal class PoolService : IPoolService
         return await IsWorkloadHelmDeployableAsync(tenantId, workload)
             ? RtDeploymentStateEnum.Undeployed
             : RtDeploymentStateEnum.Disabled;
+    }
+
+    /// <summary>
+    ///     Validates the AB#4924 leasing configuration of a workload at deploy time.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Three shapes are checked, in the order a reader would ask about them: is this
+    ///         workload allowed to be <c>Leased</c> at all, does it name a pool that actually lends
+    ///         to it, and — for an <see cref="RtAdapterPool" /> — is the pool itself coherent.
+    ///     </para>
+    ///     <para>
+    ///         🔴 The borrower half has <b>no referential integrity behind it</b>: LentFromTenantId
+    ///         and LentFromPoolRtId point into a different tenant's database, where a CK association
+    ///         cannot reach. This method is the only thing in the system that can catch a
+    ///         half-configured or out-of-scope borrower before a lease is attempted.
+    ///     </para>
+    /// </remarks>
+    private async Task EnsureLeasingConfigurationIsValidAsync(string tenantId, RtDeployableWorkload workload)
+    {
+        var isLeased = workload.LifecycleMode == RtLifecycleModeEnum.Leased;
+
+        if (workload is RtAdapterPool pool)
+        {
+            // A pool is never itself Leased. Leased means "has no process of its own"; a pool is
+            // the thing that owns the processes. Catching this explicitly matters because the
+            // concept text once described pool members as Leased, so it is a mistake an author is
+            // actively invited to make.
+            if (isLeased)
+            {
+                throw PoolServiceException.AdapterPoolCannotBeLeased(tenantId, pool.RtId, pool.Name);
+            }
+
+            await EnsureAdapterPoolIsValidAsync(tenantId, pool);
+            return;
+        }
+
+        // The borrower half lives on RtAdapter, not on RtDeployableWorkload: only an Adapter runs
+        // pipelines, so only an Adapter can borrow a process to run them on. An Application that
+        // somehow carries LifecycleMode=Leased is rejected below on exactly that basis.
+        if (workload is not RtAdapter adapter)
+        {
+            if (isLeased)
+            {
+                throw PoolServiceException.WorkloadLeasedNotSupportedForType(tenantId, workload.RtId, workload.Name);
+            }
+
+            return;
+        }
+
+        if (!isLeased)
+        {
+            // A value that silently does nothing is worse than an error: LentFrom* on a workload
+            // that runs its own process reads like it borrows one.
+            if (!string.IsNullOrWhiteSpace(adapter.LentFromTenantId) ||
+                !string.IsNullOrWhiteSpace(adapter.LentFromPoolRtId))
+            {
+                throw PoolServiceException.LentFromSetWithoutLeasedMode(tenantId, adapter.RtId, adapter.Name);
+            }
+
+            return;
+        }
+
+        // Same gate as OnDemand, and for the same reason: a lease is handed to a process BETWEEN
+        // work items, so a process-bound trigger — which only fires while a process of its own is
+        // running — can never be served by one. Reuses the AB#4984 classifier rather than
+        // duplicating the trigger list, so the two modes can never drift apart.
+        var capability = await _onDemandCapabilityService.EvaluateAsync(tenantId,
+            new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, adapter.RtId));
+        if (!capability.IsCapable)
+        {
+            throw PoolServiceException.WorkloadLeasedNotOnDemandCapable(tenantId, adapter.RtId, adapter.Name,
+                capability.BlockingReasons);
+        }
+
+        var hasTenant = !string.IsNullOrWhiteSpace(adapter.LentFromTenantId);
+        var hasPool = !string.IsNullOrWhiteSpace(adapter.LentFromPoolRtId);
+
+        if (!hasTenant && !hasPool)
+        {
+            throw PoolServiceException.LeasedWorkloadWithoutLender(tenantId, adapter.RtId, adapter.Name);
+        }
+
+        if (hasTenant != hasPool)
+        {
+            throw PoolServiceException.LeasedWorkloadLenderIncomplete(tenantId, adapter.RtId, adapter.Name);
+        }
+
+        var lenderTenantId = adapter.LentFromTenantId!;
+
+        // Resolve the pool in the LENDING tenant and ask whether it lends here. Both halves are
+        // needed: a pool that does not exist, and a pool that exists but whose SharingMode or
+        // allow-list excludes this tenant, are different misconfigurations with the same symptom.
+        var lendingScope = await _communicationRepository
+            .TryGetAdapterPoolLendingScopeAsync(lenderTenantId, adapter.LentFromPoolRtId!);
+        if (lendingScope is null ||
+            !await _lendingScopeResolver.MayLendAsync(lenderTenantId, tenantId, lendingScope.Value))
+        {
+            throw PoolServiceException.LenderDoesNotLendToThisTenant(tenantId, adapter.RtId, adapter.Name,
+                lenderTenantId);
+        }
+    }
+
+    /// <summary>
+    ///     Validates an <see cref="RtAdapterPool" />'s own configuration (AB#4924 §4a).
+    /// </summary>
+    private async Task EnsureAdapterPoolIsValidAsync(string tenantId, RtAdapterPool pool)
+    {
+        if (pool.MinReplicas < 0 || pool.MaxReplicas < 1 || pool.MaxReplicas < pool.MinReplicas)
+        {
+            throw PoolServiceException.AdapterPoolReplicaRangeInvalid(tenantId, pool.RtId, pool.Name,
+                pool.MinReplicas, pool.MaxReplicas);
+        }
+
+        if (pool.LendingMaxConcurrentLeasesPerTenant is { } cap && cap < 1)
+        {
+            // Unset means "no per-tenant cap" and is the documented default (concept §8, Q11).
+            // Zero is not that — it is a cap that can never be satisfied, so work would queue
+            // forever with no error anywhere.
+            throw PoolServiceException.AdapterPoolLeaseCapInvalid(tenantId, pool.RtId, pool.Name, cap);
+        }
+
+        if (pool.SharingMode == RtAdapterSharingModeEnum.NotShared)
+        {
+            return;
+        }
+
+        // A pool that lends must be able to hand its process to a borrower between work items,
+        // which is the same requirement OnDemand makes of a workload.
+        var capability = await _onDemandCapabilityService.EvaluateAsync(tenantId,
+            new RtEntityId(SystemCommunicationCkIds.RtCkAdapterPoolTypeId, pool.RtId));
+        if (!capability.IsCapable)
+        {
+            throw PoolServiceException.AdapterPoolNotOnDemandCapable(tenantId, pool.RtId, pool.Name);
+        }
     }
 
     /// <summary>
@@ -1507,7 +1653,7 @@ internal class PoolService : IPoolService
                 await _eventService.StoreInformationEventAsync(report.TenantId,
                     $"Pool '{rtPool.Name}' DeploymentState restored to Deployed by operator reverse-sync " +
                     $"(was {rtPool.DeploymentState}).",
-                    new RtEntityId(SystemCommunicationCkIds.RtCkPoolTypeId, rtPool.RtId));
+                    new RtEntityId(SystemCommunicationCkIds.RtCkDeploymentSiteTypeId, rtPool.RtId));
                 Logger.Info(
                     "[{TenantId}] Reverse-sync: pool '{PoolName}' restored to Deployed (was {OldState})",
                     report.TenantId, rtPool.Name, rtPool.DeploymentState);

@@ -3,7 +3,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Common.DistributionEventHub;
 using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using NSubstitute;
 

@@ -12,6 +12,14 @@ types:
       - id: ${this}/IsDebuggingEnabled
         name: IsDebuggingEnabled
         isOptional: true
+      # AB#4924 §5 — computed on save from the trigger node, not author-set. Mandatory with
+      # a default so every existing pipeline in every tenant gets the conservative class
+      # (Batch) at migration time and nothing silently acquires queue priority; the deploy
+      # path recomputes it. Marked isRuntimeState so a blueprint re-apply does not overwrite
+      # a value the controller derived — the seed carries the PipelineDefinition, and the
+      # class follows from it.
+      - id: ${this}/PipelineExecutionClass
+        name: ExecutionClass
     associations:
       - id: ${System}/ParentChild
         targetCkTypeId: ${this}/DataFlow

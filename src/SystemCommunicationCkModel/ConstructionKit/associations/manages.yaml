@@ -1,8 +1,0 @@
-$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
-associationRoles:
-  - id: Manages
-    description: Links an adapter to the pools it manages. A pool can be managed by at most one adapter.
-    inboundName: Manages
-    inboundMultiplicity: N
-    outboundName: ManagedBy
-    outboundMultiplicity: ZeroOrOne

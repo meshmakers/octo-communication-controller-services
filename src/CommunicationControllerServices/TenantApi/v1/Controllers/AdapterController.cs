@@ -24,6 +24,7 @@ public class AdapterController : ControllerBase
 {
     private readonly ILogger<AdapterController> _logger;
     private readonly ICommunicationRepository _communicationRepository;
+    private readonly ITenantLendingScopeResolver _lendingScopeResolver;
     private readonly IAdapterService _adapterService;
 
     /// <summary>
@@ -32,10 +33,13 @@ public class AdapterController : ControllerBase
     /// <param name="logger">Logging object</param>
     /// <param name="communicationRepository"></param>
     /// <param name="adapterService">Adapter management service instance</param>
-    public AdapterController(ILogger<AdapterController> logger, ICommunicationRepository communicationRepository, IAdapterService adapterService)
+    /// <param name="lendingScopeResolver">Resolves which tenants an adapter pool may lend to (AB#4924)</param>
+    public AdapterController(ILogger<AdapterController> logger, ICommunicationRepository communicationRepository,
+        IAdapterService adapterService, ITenantLendingScopeResolver lendingScopeResolver)
     {
         _logger = logger;
         _communicationRepository = communicationRepository;
+        _lendingScopeResolver = lendingScopeResolver;
         _adapterService = adapterService;
     }
     
@@ -82,6 +86,57 @@ public class AdapterController : ControllerBase
         return Ok(config);
     }
     
+    /// <summary>
+    ///     Returns the adapter pools this tenant may borrow from, and — for an adapter pool owned by
+    ///     this tenant — the tenants it lends to (AB#4924).
+    /// </summary>
+    /// <remarks>
+    ///     Answers the two questions the Studio, octo-cli and the MCP server all need before a
+    ///     leasing configuration can be edited with any confidence: "who will accept me as a
+    ///     borrower" and "who can borrow from me". Both are derived from the tenant tree and the
+    ///     pool's SharingMode, and neither can be read off a CK association, because the two halves
+    ///     live in different tenant databases.
+    /// </remarks>
+    /// <param name="adapterPoolRtId">
+    ///     RtId of an adapter pool in THIS tenant whose lending scope should be resolved.
+    /// </param>
+    [HttpGet("lending")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(typeof(AdapterLendingScopeDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetLendingScope([FromQuery] string? adapterPoolRtId)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        if (string.IsNullOrWhiteSpace(adapterPoolRtId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "adapterPoolRtId is required" });
+        }
+
+        var scope = await _communicationRepository.TryGetAdapterPoolLendingScopeAsync(tenantId, adapterPoolRtId);
+        if (scope is null)
+        {
+            return NotFound(new ErrorResponse
+            {
+                ErrorMessage = $"Adapter pool '{adapterPoolRtId}' was not found in tenant '{tenantId}'"
+            });
+        }
+
+        var lendableTenants = await _lendingScopeResolver.ResolveLendableTenantsAsync(tenantId, scope.Value);
+
+        return Ok(new AdapterLendingScopeDto
+        {
+            AdapterPoolRtId = adapterPoolRtId,
+            SharingMode = scope.Value.Mode,
+            AllowedTenantIds = scope.Value.AllowedTenantIds?.ToList() ?? [],
+            LendableTenantIds = lendableTenants.OrderBy(t => t, StringComparer.OrdinalIgnoreCase).ToList()
+        });
+    }
+
     /// <summary>
     /// Returns aggregated node descriptors from all connected adapters.
     /// Used by Refinery Studio to populate the visual pipeline editor.

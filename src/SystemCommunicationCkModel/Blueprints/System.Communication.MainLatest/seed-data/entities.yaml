@@ -33,7 +33,7 @@ entities:
   # app charts to helm-chart-build's gh-pages alongside the platform
   # charts), staging/production get https://meshmakers.github.io/apps
   # (r-tag publishes). A tenant migrating dev/test→staging automatically
-  # switches channels — same contract as the Pool/Adapter rtIds above.
+  # switches channels — same contract as the DeploymentSite/Adapter rtIds above.
   # ---------------------------------------------------------------------------
   - rtId: '670000000000000000000005'
     ckTypeId: System.Communication/HelmRepositoryConfiguration
@@ -49,12 +49,17 @@ entities:
         value: ""
 
   # ---------------------------------------------------------------------------
-  # Pool — Cloud-environment pool that the central Communication Operator owns.
+  # DeploymentSite (called Pool before 4.0.0) — the Cloud location the central
+  # Communication Operator serves.
   # Shares its rtId with the System.Communication.Release variant so a tenant
-  # moving between channels keeps the same Pool entity.
+  # moving between channels keeps the same DeploymentSite entity.
   # ---------------------------------------------------------------------------
   - rtId: '670000000000000000000001'
-    ckTypeId: System.Communication/Pool
+    ckTypeId: System.Communication/DeploymentSite
+    # 🔴 The well-known name stays CommunicationPool across the 4.0.0 rename. It is
+    # IDENTITY, not display text — this blueprint re-applies against it, and renaming
+    # it here would create a SECOND deployment site on every already-provisioned
+    # tenant and orphan the adapters attached to the first one.
     rtWellKnownName: CommunicationPool
     attributes:
       - id: System/Name
@@ -78,7 +83,7 @@ entities:
         value: 0   # Unconfigured
 
   # ---------------------------------------------------------------------------
-  # Adapter — Mesh-style adapter managed by the Cloud pool above. ChartVersion
+  # Adapter — Mesh-style adapter deployed to the Cloud site above. ChartVersion
   # is left empty: HelmRunner skips the --version arg in that case and helm
   # pulls the newest chart from the configured repo. On dev/test clusters the
   # workload's HelmRepository points at the rolling dev channel
@@ -90,9 +95,9 @@ entities:
     ckTypeId: System.Communication/Adapter
     rtWellKnownName: MeshAdapter
     associations:
-      - roleId: System.Communication/Manages
+      - roleId: System.Communication/Hosts
         targetRtId: '670000000000000000000001'
-        targetCkTypeId: System.Communication/Pool
+        targetCkTypeId: System.Communication/DeploymentSite
       - roleId: System.Communication/HelmRepository
         targetRtId: '670000000000000000000003'
         targetCkTypeId: System.Communication/HelmRepositoryConfiguration
@@ -102,7 +107,7 @@ entities:
       - id: System/Description
         value: >-
           Mesh adapter created by the Communication blueprint (${octo.environment}
-          channel, OctoMesh ${octo.version}). Runs in the Communication Pool and
+          channel, OctoMesh ${octo.version}). Runs at the Communication deployment site and
           hosts pipelines that the Communication Controller deploys. ChartVersion
           starts empty so the first Deploy uses the newest chart from the
           configured dev-channel Helm repository; the CD pipeline updates this

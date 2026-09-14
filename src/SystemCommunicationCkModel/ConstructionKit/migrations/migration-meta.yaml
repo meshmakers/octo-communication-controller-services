@@ -1,5 +1,9 @@
 $schema: https://schemas.meshmakers.cloud/ck-migration-meta.schema.json
-ckModelId: System.Communication-3.1.1
+# AB#4924: the history now reaches 4.0.0, so this id moves with it. Between 3.1.1 and
+# 3.35.0 every bump was additive and rode the engine's schema-only bridge, which is why
+# this file sat at 3.1.1 while the model was already at 3.35.0 ("schema-ahead-of-history").
+# 4.0.0 renames a type, so it needs a real script and the history catches up.
+ckModelId: System.Communication-4.0.0
 migrations:
   - fromVersion: "3.0.1"
     toVersion: "3.0.2"
@@ -20,4 +24,40 @@ migrations:
     toVersion: "3.1.1"
     scriptPath: 3.1.0-to-3.1.1.yaml
     description: "Merge EdgeAdapter/MeshAdapter into Adapter, EdgePipeline/MeshPipeline into Pipeline (retry after engine fix)"
+    breaking: true
+  # AB#4924 — Pool -> DeploymentSite.
+  #
+  # 🔴 Why the entry point is 3.35.0 and not 3.1.1, i.e. why this does not simply extend the
+  # chain above. CkModelMigrationService.FindBridgedMigrationPathAsync collects candidate
+  # entry points as "every fromVersion GREATER than the version the tenant has installed"
+  # and then bridges the start gap with a no-op. A tenant on any 3.x below 3.35.0 therefore
+  # bridges straight to 3.35.0 and runs this script; it does NOT get dragged back through
+  # the 3.0.x DataFlow renames. Hanging the entry off 3.1.1 instead would make every modern
+  # tenant replay four obsolete scripts to reach it.
+  - fromVersion: "3.35.0"
+    toVersion: "4.0.0"
+    scriptPath: 3.35.0-to-4.0.0.yaml
+    description: "Rename CK type Pool to DeploymentSite (AB#4924)"
+    breaking: true
+  # 🔴 Defensive duplicate entry for 3.36.0, and it is NOT redundant.
+  #
+  # 3.36.0 was the first cut of this work and was published into dev/.octo/local-catalog
+  # before the design moved to a major bump. It is not on any cluster, but any local dev
+  # tenant that installed it sits ABOVE every fromVersion in the chain — and for such a
+  # tenant the bridging logic finds no candidate entry point at all and falls through to
+  # CkModelMigrationService's final "post-chain schema-only bridge", which upgrades the
+  # schema and SKIPS THE RENAME SILENTLY. The tenant would then hold Pool entities of a
+  # type the model no longer defines, with no error anywhere.
+  #
+  # This is the same class of failure as the frozen CK dependency pin behind AB#4696 /
+  # AB#4999 / AB#5196: a version that resolves correctly right up to the moment it does not,
+  # and reports nothing when it does not. The script is idempotent (the Transform matches no
+  # entities once the rename has happened, and the post-validation then passes trivially),
+  # so a second entry pointing at the same script costs nothing and closes the hole.
+  #
+  # Delete this entry only once no environment can be at 3.36.0 any more.
+  - fromVersion: "3.36.0"
+    toVersion: "4.0.0"
+    scriptPath: 3.35.0-to-4.0.0.yaml
+    description: "Rename CK type Pool to DeploymentSite (AB#4924) — entry point for tenants that installed the withdrawn 3.36.0"
     breaking: true
