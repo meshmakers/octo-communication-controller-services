@@ -951,12 +951,24 @@ version-stripped matching, and both cache-hit and cache-miss paths of `ResolveFo
 Plan 1.0 listed this as **blocked**. Q1 and Q2 unblocked it and, at the same time, set its
 scope precisely.
 
-### 7.1 What Q1 decided, and what it costs
+### 7.1 What Q1 decided — and what this section wrongly derived from it
 
-Pool members run in a **platform namespace with the lending tenant as owner reference**, not
-in the lender's tenant namespace. The deciding argument is attribution: consumption is billed
-to the tenant whose work executed, and a member sitting in the lender's namespace would charge
-every borrower's load to the lender.
+🔴 **Corrected 2026-09-14, after the fact.** This section opened by asserting that pool members must
+run in a platform namespace because "a member sitting in the lender's namespace would charge every
+borrower's load to the lender", and treated that as the deciding argument for the whole increment.
+
+**Q1 was about billing, not about Kubernetes namespaces.** The decision was that consumption is
+billed to the tenant whose work executed; that is an accounting rule to be implemented in OctoMesh,
+computed from the lease spans the model already carries (concept §4b). The account follows the
+lease, not the pod — so where a member runs says nothing about who is charged for it, and the
+namespace argument in this section never followed from the decision it cited.
+
+What survives: the implementation defaults `PlatformNamespace` to `PoolNamespace`, which is where
+every other workload already runs. That was arrived at for the owner-reference reason in §7.1a and
+it is also what the operational grounds point at on their own, so the built behaviour is unaffected
+by withdrawing the argument. What does *not* survive is the framing that the operator cost below was
+forced by an attribution requirement — it was not, and a future proposal to move pool members
+elsewhere cannot be refused on billing grounds.
 
 🔴 **Four things this section asserted about the code turned out to be wrong.** They were
 corrected during implementation (2026-09-14) rather than worked around; the paragraph below is what

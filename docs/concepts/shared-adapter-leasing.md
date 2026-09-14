@@ -221,18 +221,39 @@ depth and queue wait time (§5).
 
 ## 4b. Where pool members run, and who pays for them
 
-Pool members run in a **platform namespace with the lending tenant as owner reference**, not in
-the lender's tenant namespace. The deciding argument is attribution: consumption is billed to
-the tenant whose work executed, and a member sitting in the lender's namespace would charge
-every borrower's load to the lender.
+This section used to run two independent questions together. They are separated here.
 
-The lease timestamps make that attribution exact without new machinery: `LeaseGrantedAt` to
-`LeaseReleasedAt` is the span a member was held for one tenant, and the pool declares what each
-member costs (§4a). Consumption per borrower is the sum of its lease spans times the member
-sizing — derived from data the model already carries, not from a separate metering pipeline.
+### Who pays
 
-The cost is in the operator. This work is accepted deliberately — the alternative loses per-tenant
-attribution, which is not negotiable.
+Q1: consumption is billed to the tenant **whose work executed**, not to the tenant that owns the
+adapter. That is an accounting rule inside OctoMesh, and the lease timestamps make it exact without
+new machinery: `LeaseGrantedAt` to `LeaseReleasedAt` is the span a member was held for one borrower,
+and the pool declares what each member costs (§4a). Consumption per borrower is the sum of its lease
+spans times the member sizing — derived from data the model already carries, not from a separate
+metering pipeline.
+
+🔴 **Nothing computes or exposes this yet.** Increment 1 put the spans on the model; turning them
+into per-tenant consumption is deferred OctoMesh work and is not part of increments 5–9 as planned.
+Stated here so the attribution is not mistaken for delivered.
+
+### Where the members run
+
+🔴 **Corrected 2026-09-14.** The first draft derived the placement from the billing rule: pool
+members had to sit in a platform namespace because "a member sitting in the lender's namespace would
+charge every borrower's load to the lender". **That inference was wrong, and it was never what Q1
+decided.** Billing is computed in OctoMesh from lease spans; the account follows the lease, not the
+pod. Where a member runs has no bearing on who is charged for it.
+
+With the billing argument withdrawn, placement is an operational question alone — and the
+operational grounds point at leaving things where they already are:
+
+- Everything the operator deploys already lands in one namespace (`OperatorOptions.PoolNamespace`,
+  default `octo`), separated by release name. A pool is not special enough to need its own.
+- It is the only namespace that contains an object representing a tenant — its `CommunicationPool`
+  CR — which is what makes the owner reference and its garbage collection possible at all.
+
+A distinct platform namespace remains supported for whoever wants that topology, at the cost of the
+owner reference (see below). It is no longer something the design asks for.
 
 🔴 **Corrected 2026-09-14, during increment 5.** The first draft of this paragraph said
 `WorkloadReconciler` and `WorkloadHostnameIndex` assume *one workload per tenant namespace*. There
@@ -243,8 +264,7 @@ to break is "one namespace for everything the operator deploys". And the RBAC li
 `octo-mesh-communication-operator` Helm chart in `octo-helm-core`, where the default cluster-scoped
 binding already covers any namespace.
 
-One consequence of Q1 is not negotiable either way: **Kubernetes forbids cross-namespace owner
-references** — a dependent whose owner lives elsewhere is treated as having no owner and is deleted.
+Independent of all of the above: **Kubernetes forbids cross-namespace owner references** — a dependent whose owner lives elsewhere is treated as having no owner and is deleted.
 Since the object that represents a tenant is its `CommunicationPool` CR in the operator's own
 namespace, "platform namespace" and "owned by the lending tenant" are only simultaneously satisfiable
 while the platform namespace *is* that namespace. That is what the implementation defaults to; a
