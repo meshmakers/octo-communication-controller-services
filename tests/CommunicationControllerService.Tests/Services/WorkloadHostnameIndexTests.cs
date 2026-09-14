@@ -162,4 +162,49 @@ internal class WorkloadHostnameIndexTests
         await Assert.That(name.Length).IsLessThanOrEqualTo(53);
         await Assert.That(name.EndsWith('-')).IsFalse();
     }
+
+    [Test]
+    public async Task AdapterPool_IsNeverIndexed_EvenWithIngressEnabled()
+    {
+        // AB#4924. This index publishes an address built from the release name alone, resolved in
+        // the CONTROLLER's namespace — and a pool runs in the platform namespace. An entry for one
+        // would point the activator at a Service that is not there, or at a same-named one that is.
+        // A pool is reached by being leased, never by an inbound request, so it has no hostname to
+        // claim in the first place.
+        var pool = new RtAdapterPool
+        {
+            RtId = Meshmakers.Octo.ConstructionKit.Contracts.OctoObjectId.GenerateNewId(),
+            CkTypeId = SystemCommunicationCkIds.RtCkAdapterPoolTypeId,
+            Name = "acme-pool",
+            IngressEnabled = true,
+            Hostname = "pool-acme.test-2.mm.cloud",
+        };
+        ReturnWorkloads(pool);
+
+        await _index.RefreshAsync();
+
+        await Assert.That(_index.TryResolve("pool-acme.test-2.mm.cloud", out _)).IsFalse();
+    }
+
+    [Test]
+    public async Task AdapterPool_DoesNotDisplaceAnAdapterClaimingTheSameHostname()
+    {
+        // The pool is skipped before the first-one-wins map insert, so an adapter that legitimately
+        // owns the hostname keeps it regardless of enumeration order.
+        var pool = new RtAdapterPool
+        {
+            RtId = Meshmakers.Octo.ConstructionKit.Contracts.OctoObjectId.GenerateNewId(),
+            CkTypeId = SystemCommunicationCkIds.RtCkAdapterPoolTypeId,
+            Name = "acme-pool",
+            IngressEnabled = true,
+            Hostname = "shared.test-2.mm.cloud",
+        };
+        var adapter = IngressWorkload("shared.test-2.mm.cloud");
+        ReturnWorkloads(pool, adapter);
+
+        await _index.RefreshAsync();
+
+        await Assert.That(_index.TryResolve("shared.test-2.mm.cloud", out var target)).IsTrue();
+        await Assert.That(target!.WorkloadRtId).IsEqualTo(adapter.RtId);
+    }
 }

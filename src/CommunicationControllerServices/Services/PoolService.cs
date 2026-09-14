@@ -1,3 +1,4 @@
+using System.Globalization;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
@@ -23,6 +24,7 @@ internal class PoolService : IPoolService
     private readonly IPipelineServiceAccountProvisioningService _serviceAccountProvisioningService;
     private readonly IPipelineServiceAccountResolver _serviceAccountResolver;
     private readonly ITenantLendingScopeResolver _lendingScopeResolver;
+    private readonly IWorkloadLifecycleService _workloadLifecycleService;
 
     /// <summary>
     /// Helm values path carrying the adapter's own OAuth client id (AB#5072). Must stay in lockstep
@@ -55,6 +57,7 @@ internal class PoolService : IPoolService
     /// <param name="serviceAccountProvisioningService">Provisions the adapter's pipeline service account on deploy (AB#5027)</param>
     /// <param name="serviceAccountResolver">Reads the adapter's provisioned service account so its credentials can be projected into the workload's Helm values (AB#5072)</param>
     /// <param name="lendingScopeResolver">Resolves which tenants an adapter pool may lend to, so a Leased workload naming an out-of-scope lender is refused at deploy time (AB#4924)</param>
+    /// <param name="workloadLifecycleService">Carries the AB#4917 scale verb to the operator owning the workload's pool; reused for adapter-pool scaling so the MinReplicas floor is enforced in one place (AB#4924)</param>
     public PoolService(ICommunicationRepository communicationRepository, IPoolCache poolCache,
         ICommunicationEventService eventService,
         IOperatorConnectionManager operatorConnectionManager,
@@ -63,7 +66,8 @@ internal class PoolService : IPoolService
         IWorkloadOnDemandCapabilityService onDemandCapabilityService,
         IPipelineServiceAccountProvisioningService serviceAccountProvisioningService,
         IPipelineServiceAccountResolver serviceAccountResolver,
-        ITenantLendingScopeResolver lendingScopeResolver)
+        ITenantLendingScopeResolver lendingScopeResolver,
+        IWorkloadLifecycleService workloadLifecycleService)
     {
         _communicationRepository = communicationRepository;
         _poolCache = poolCache;
@@ -75,6 +79,7 @@ internal class PoolService : IPoolService
         _serviceAccountProvisioningService = serviceAccountProvisioningService;
         _serviceAccountResolver = serviceAccountResolver;
         _lendingScopeResolver = lendingScopeResolver;
+        _workloadLifecycleService = workloadLifecycleService;
     }
     
     /// <inheritdoc />
@@ -445,6 +450,16 @@ internal class PoolService : IPoolService
                     await _communicationRepository.SetApplicationDeploymentStateAsync(tenantId, rtEntityId, deploymentState);
                     break;
                 }
+            // AB#4924: without this arm a pool's deploy left DeploymentState at its default, so the
+            // UI never showed a pool as deployed and Undeploy refused it as "already not deployed"
+            // — a workload that deploys and then cannot be taken down again.
+            case RtAdapterPool:
+                {
+                    var rtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkAdapterPoolTypeId, workload.RtId);
+                    await _communicationRepository.SetAdapterPoolDeploymentStateAsync(tenantId, rtEntityId,
+                        deploymentState);
+                    break;
+                }
             default:
                 // Defensive — if a new DeployableWorkload subtype is added without a
                 // dedicated setter, we'd silently skip the write. Make that visible
@@ -614,9 +629,7 @@ internal class PoolService : IPoolService
             PoolRtId = pool.RtId.ToString(),
             WorkloadRtId = workload.RtId.ToString(),
             WorkloadName = workload.Name ?? string.Empty,
-            WorkloadType = workload is RtApplication
-                ? WorkloadTypeDto.Application
-                : WorkloadTypeDto.Adapter,
+            WorkloadType = WorkloadWireMapping.ResolveWorkloadType(workload),
         });
 
         // Compute resting state. If the workload can no longer be deployed
@@ -635,6 +648,47 @@ internal class PoolService : IPoolService
 
         await _eventService.StoreInformationEventAsync(tenantId,
             $"Workload '{workload.Name}' undeploy requested (resting state: {restingState}).");
+    }
+
+    /// <inheritdoc />
+    public async Task<int> ScaleAdapterPoolAsync(string tenantId, OctoObjectId poolWorkloadRtId, int replicas)
+    {
+        Logger.Info("[{TenantId}] Scaling adapter pool '{PoolWorkloadRtId}' to {Replicas} member(s)",
+            tenantId, poolWorkloadRtId, replicas);
+
+        var workload = await _communicationRepository.GetWorkloadByRtIdAsync(tenantId, poolWorkloadRtId);
+        if (workload == null)
+        {
+            throw PoolServiceException.WorkloadNotFound(tenantId, poolWorkloadRtId);
+        }
+
+        if (workload is not RtAdapterPool pool)
+        {
+            throw PoolServiceException.WorkloadIsNotAnAdapterPool(tenantId, poolWorkloadRtId, workload.Name);
+        }
+
+        // Pending counts as scalable: a deploy that is still rolling out already has its
+        // Deployments, and refusing here would make the first scale after a deploy a race.
+        if (pool.DeploymentState != RtDeploymentStateEnum.Deployed &&
+            pool.DeploymentState != RtDeploymentStateEnum.Pending)
+        {
+            throw PoolServiceException.AdapterPoolNotDeployed(tenantId, poolWorkloadRtId, pool.Name,
+                pool.DeploymentState);
+        }
+
+        // The clamp lives in RequestScaleAsync, not here: every caller of the scale verb has to be
+        // held to the pool's range, and a guard that only covers the caller you thought of is the
+        // guard that is missing during the incident.
+        var effective = Math.Clamp(replicas, pool.MinReplicas, Math.Max(pool.MinReplicas, pool.MaxReplicas));
+        await _workloadLifecycleService.RequestScaleAsync(tenantId, pool, replicas);
+
+        await _eventService.StoreInformationEventAsync(tenantId,
+            $"Adapter pool '{pool.Name}' scale to {effective} member(s) requested" +
+            (effective == replicas
+                ? "."
+                : $" ({replicas} was outside the declared range {pool.MinReplicas}..{pool.MaxReplicas})."));
+
+        return effective;
     }
 
     /// <summary>
@@ -810,6 +864,7 @@ internal class PoolService : IPoolService
             .ToArray();
 
         overrides = await AppendPipelineServiceAccountOverridesAsync(tenantId, workload, overrides);
+        overrides = AppendAdapterPoolMemberOverrides(workload, overrides);
 
         return new WorkloadDeployedDto
         {
@@ -817,9 +872,7 @@ internal class PoolService : IPoolService
             PoolRtId = poolRtId.ToString(),
             WorkloadName = workload.Name ?? string.Empty,
             WorkloadRtId = workload.RtId.ToString(),
-            WorkloadType = workload is RtApplication
-                ? WorkloadTypeDto.Application
-                : WorkloadTypeDto.Adapter,
+            WorkloadType = WorkloadWireMapping.ResolveWorkloadType(workload),
             RepositoryUrl = repo.RepositoryUrl,
             RepositoryUsername = repo.Username,
             RepositoryPassword = string.IsNullOrEmpty(repo.Password)
@@ -842,7 +895,13 @@ internal class PoolService : IPoolService
             // Lives on DeployableWorkload so both Adapter and Application can
             // opt in. Applications with a backend (e.g. energy-community,
             // voest-app) need cluster credentials just like in-cluster adapters.
-            ReceivesClusterSecrets = workload.ReceivesClusterSecrets,
+            // 🔴 AB#4924: never for an adapter pool, whatever the entity says. The flag hands the
+            // workload the cluster's SHARED Mongo / CrateDB credentials, and a pool member runs
+            // work for tenants other than the one that owns it — a standing credential to every
+            // tenant's data would make the lease that grants it one tenant at a time meaningless.
+            // The operator refuses the same thing independently; either gate alone is one edit
+            // away from silence.
+            ReceivesClusterSecrets = workload is not RtAdapterPool && workload.ReceivesClusterSecrets,
             // Public-ingress opt-in. The operator projects ingress.enabled=true
             // and publicUri into the workload's Helm values when this is set —
             // cluster-wide ingress defaults (className, cluster-issuer, TLS)
@@ -964,6 +1023,66 @@ internal class PoolService : IPoolService
                 return;
             }
             target.Add(new ValueOverrideDto { Path = path, Value = value, IsSecret = isSecret });
+        }
+    }
+
+    /// <summary>
+    ///     Projects an <see cref="RtAdapterPool" />'s replica range and per-member sizing onto the
+    ///     chart values every member is rendered from (AB#4924 §7.2, concept §8 Q15).
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         A pool is <b>one workload with a replica range</b>, not N entities — so there is no new
+    ///         deployment concept here, only <c>replicaCount</c> plus the four <c>resources.*</c>
+    ///         paths on the same Helm release the operator already installs 1:1. Q15's "one sizing per
+    ///         pool" is literally what a chart value is: it renders identically into every replica.
+    ///     </para>
+    ///     <para>
+    ///         The release starts at <c>MinReplicas</c>. Everything above that is a scaling decision
+    ///         driven by queue pressure and carried by the AB#4917 <c>ScaleWorkloadDto</c> verb, which
+    ///         patches replicas without touching the release — so a scaled-up pool is not reverted by
+    ///         the next unrelated reconcile the way a value-file replica count would be.
+    ///     </para>
+    ///     <para>
+    ///         An override the author pinned on the entity wins, same last-wins rule as the service
+    ///         account credentials: a value that silently overrules a deliberate pin is worse than a
+    ///         value that is absent.
+    ///     </para>
+    /// </remarks>
+    private static ValueOverrideDto[] AppendAdapterPoolMemberOverrides(RtDeployableWorkload workload,
+        ValueOverrideDto[] overrides)
+    {
+        if (workload is not RtAdapterPool pool)
+        {
+            return overrides;
+        }
+
+        var result = new List<ValueOverrideDto>(overrides);
+
+        AddUnlessPinned(result, "replicaCount", pool.MinReplicas.ToString(CultureInfo.InvariantCulture));
+        AddUnlessPinned(result, "resources.requests.cpu", pool.PoolMemberCpuRequest);
+        AddUnlessPinned(result, "resources.limits.cpu", pool.PoolMemberCpuLimit);
+        AddUnlessPinned(result, "resources.requests.memory", pool.PoolMemberMemoryRequest);
+        AddUnlessPinned(result, "resources.limits.memory", pool.PoolMemberMemoryLimit);
+
+        return result.ToArray();
+
+        static void AddUnlessPinned(List<ValueOverrideDto> target, string path, string? value)
+        {
+            // An unset sizing attribute means "whatever the chart defaults to", not "empty string":
+            // rendering `resources.requests.cpu: ""` into the values file makes the pod spec invalid
+            // and the release fails on admission.
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return;
+            }
+
+            if (target.Any(v => string.Equals(v.Path, path, StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+
+            target.Add(new ValueOverrideDto { Path = path, Value = value, IsSecret = false });
         }
     }
 
@@ -1711,9 +1830,7 @@ internal class PoolService : IPoolService
                     PoolRtId = report.PoolRtId,
                     WorkloadRtId = workloadRtIdString,
                     WorkloadName = workload.Name ?? string.Empty,
-                    WorkloadType = workload is RtApplication
-                        ? WorkloadTypeDto.Application
-                        : WorkloadTypeDto.Adapter,
+                    WorkloadType = WorkloadWireMapping.ResolveWorkloadType(workload),
                 });
             }
         }

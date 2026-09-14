@@ -17,6 +17,7 @@ Repositories involved, all on `test/0.2-dev`:
 | `octo-communication-sdk` | adapter host: `AdapterOptions`, `AdapterExecutionService`, trigger-node descriptors |
 | `octo-mesh-adapter` | the pool member process: tenant repository, identity, HTTP routes |
 | `octo-communication-operator` | pool workload deployment into a platform namespace |
+| `octo-sdk` (again, increment 5) | `WorkloadTypeDto.AdapterPool` — the operator cannot route a pool without it (§7.1b) |
 | `octo-frontend-refinery-studio` | queue surface #1 |
 | `octo-cli` | queue surface #2 |
 | `octo-mcp-service` | queue surface #3 |
@@ -50,7 +51,7 @@ graph TD
     I2["2 · Authoring + validation<br/>controller-services"]
     I3["3 · Isolation invariant<br/>SDK + mesh-adapter + octo-sdk<br/>🔴 highest risk"]
     I4["4 · Trigger-node execution class<br/>octo-communication-sdk + controller"]
-    I5["5 · AdapterPool + operator<br/>operator + controller"]
+    I5["5 · AdapterPool + operator<br/>operator + controller + octo-sdk"]
     I6["6 · Lease wire contract<br/>octo-sdk + controller + SDK"]
     I7["7 · Queue + scheduler<br/>controller-services"]
     I8["8 · Three queue surfaces<br/>studio + octo-cli + MCP"]
@@ -77,7 +78,7 @@ cause a cross-tenant data incident, and everything else waits on it before it ca
 | 2 | `Leased` and `AdapterPool` authorable and validated | yes (unit) | a misconfigured `Leased` adapter is refused at deploy with a named reason |
 | 3 | process retains nothing tenant-scoped between executions | partly — see §5.5: the 2-tenant integration form needs a lease | none — single-tenant behaviour identical |
 | 4 | trigger nodes declare an execution class, resolved on save | yes (unit) | `ExecutionClass` visible on every pipeline; nothing reads it yet |
-| 5 | pool workloads deploy into a platform namespace | yes (kind e2e) | a pool runs N members that no tenant can reach yet |
+| 5 ✅ | pool workloads deploy into a platform namespace, scale within `MinReplicas..MaxReplicas`, and are invisible to the idle watchdog | yes (kind e2e) | a pool runs N members that no tenant can reach yet |
 | 6 | management connection + `Lease`/`Release` verbs | yes (hub tests + a manual lease) | a pool member can be leased by hand |
 | 7 | queue, round-robin, priority, TTL, `Queued` executions | yes (unit + integration) | leasing actually executes work |
 | 8 | queue visible and cancellable in all three surfaces | yes (vitest + CLI + MCP tests) | the queue is operable |
@@ -957,11 +958,56 @@ in the lender's tenant namespace. The deciding argument is attribution: consumpt
 to the tenant whose work executed, and a member sitting in the lender's namespace would charge
 every borrower's load to the lender.
 
-The cost is in the operator, and it is real:
+🔴 **Four things this section asserted about the code turned out to be wrong.** They were
+corrected during implementation (2026-09-14) rather than worked around; the paragraph below is what
+the estate actually looks like.
 
-- `WorkloadReconciler` and `WorkloadHostnameIndex` assume **one workload per tenant namespace**. That assumption has to break for the platform namespace specifically, without weakening it for tenant namespaces.
-- New RBAC for the platform namespace itself, plus owner-reference handling so a deleted lending tenant garbage-collects its pool.
-- The secret-injection tier changes: a member in a platform namespace cannot pick up tenant-namespace secrets.
+| Asserted | Actually |
+|---|---|
+| `WorkloadReconciler` and `WorkloadHostnameIndex` assume one workload per **tenant namespace** | There are no tenant namespaces. `WorkloadReconciler` deploys **every** workload of **every** tenant into the single `OperatorOptions.PoolNamespace` (default `octo`); tenants are separated by release name `{tenantId}-{workloadRtId}`, not by namespace. The string "tenant namespace" appears nowhere in the code. |
+| `WorkloadHostnameIndex` is operator work | It lives in the **controller** (`src/CommunicationControllerServices/Services/WorkloadHostnameIndex.cs`). The operator has no such type. |
+| New RBAC for the platform namespace, in the operator | The operator's Role/ClusterRole is a chart template in **`octo-helm-core`** (`src/octo-mesh-communication-operator/templates/operator-role.yaml`). With the default `rbac.scope: cluster` nothing changes at all; only a `rbac.scope: namespace` install with a *distinct* platform namespace needs a Role + RoleBinding there. |
+| "A member in a platform namespace cannot pick up tenant-namespace secrets" | There are no tenant-namespace secrets to pick up. The real question is which of the operator's three injection tiers a member gets, and the answer is: the RabbitMQ command bus and the TLS trust anchor yes, the cluster's **shared** Mongo/CrateDB credentials never — see §7.4. |
+
+So the operator cost is smaller than stated in one respect and sharper in another: the assumption
+that breaks is "one namespace for everything the operator deploys", and the thing that has to not
+weaken is that ordinary Adapter and Application workloads keep landing in `PoolNamespace`.
+
+### 7.1a 🔴 Cross-namespace owner references are forbidden by Kubernetes
+
+Q1 asks for two things at once — *a platform namespace* and *the lending tenant as owner
+reference* — and they are only simultaneously satisfiable when the owner object lives in that same
+namespace. Kubernetes disallows cross-namespace owner references: a namespaced dependent whose owner
+is in another namespace is treated as having a **missing** owner and is *deleted* by the garbage
+collector. Writing one would not merely fail to clean up after a deleted tenant; it would delete a
+live tenant's pool seconds after the deploy.
+
+The only object that represents a tenant in the cluster is its `CommunicationPool` CR, and that CR
+lives in `PoolNamespace`. Implemented accordingly:
+
+- `OperatorOptions.PlatformNamespace` is **empty by default and resolves to `PoolNamespace`** — which
+  is already a platform namespace rather than a tenant namespace, so the default satisfies both
+  halves of Q1.
+- Setting a distinct platform namespace is supported and moves the release there, but the operator
+  then **refuses** to write the owner reference and logs why, once per deploy. Garbage collection is
+  a safety net behind the controller's undeploy cascade; a silently invalid reference would be worse
+  than no reference.
+- Restoring garbage collection in a distinct platform namespace needs an owner object *in* that
+  namespace. That was not invented here — it is a design question for whoever wants that topology.
+
+### 7.1b 🔴 The operator has to be told, and the discriminator lives in `octo-sdk`
+
+§7.3 lists two repos. It needs three. The operator routes a pool to a different namespace, gives it
+an owner reference and withholds cluster credentials — none of which it can do without knowing that
+the workload *is* a pool, and `WorkloadTypeDto` (`octo-sdk/src/Communication.Contracts/
+DataTransferObjects/WorkloadTypeDto.cs`) had exactly two values, `Adapter` and `Application`. An
+`RtAdapterPool` reached the operator as an `Adapter`.
+
+Implemented as one appended enum value, `AdapterPool = 2`. It is additive on the wire (the value
+travels as an integer and an operator that pre-dates it only uses `WorkloadType` for log output),
+but it is still a contract change and the usual rule applies: **`octo-sdk` publishes before its
+consumers build in CI.** The alternative — resequencing increment 5 behind increment 6, which owns
+the rest of the wire contract — was available and rejected as more disruptive than one enum member.
 
 ### 7.2 What the model makes easier than the concept suggests
 
@@ -975,15 +1021,92 @@ clusters would need KEDA installs).
 The per-member sizing (`PoolMemberCpuRequest` etc.) becomes chart values applied identically
 to every replica, which is exactly Q15's "one sizing per pool".
 
-### 7.3 Work
+### 7.3 Work ✅ implemented
 
-- Operator: platform-namespace reconciliation path, owner references, RBAC, `WorkloadHostnameIndex` scoping.
-- Controller: `AdapterPool` → deploy/undeploy/scale, honouring `MinReplicas` as a floor the idle path must not cross.
-- 🔴 **The AB#4918 idle watchdog must not see pool members.** It drains a workload from *its own* pipelines' `LastExecutionAt`, and a pool has no pipelines of its own — every pipeline it runs belongs to a borrower in a different tenant database. Left alone it would drain a healthy pool to zero. Exclude `AdapterPool` from the watchdog explicitly and let `MinReplicas` + `IdleTimeoutMinutes` + queue pressure own the lifecycle instead (concept §4a). This also closes plan 1.0's Q7.
+**`octo-sdk`** (§7.1b): `WorkloadTypeDto.AdapterPool = 2`.
 
-**Tests:** operator TUnit coverage for the platform-namespace path and owner-reference
-garbage collection; a kind e2e that scales a pool 1 → 3 → 1; a watchdog test asserting an
-`AdapterPool` is never drained below `MinReplicas`.
+**Operator** (`octo-communication-operator`):
+
+| Piece | Where |
+|---|---|
+| `PlatformNamespace` option + `ResolveNamespace`, applied to deploy / undeploy / scale / secret | `Options/OperatorOptions.cs`, `Reconcilers/WorkloadReconciler.cs` |
+| Owner reference to the tenant's `CommunicationPool` CR, on the per-release Secret and — after the install — on the release's Deployments | `WorkloadReconciler.TryResolvePoolOwnerReferenceAsync` / `ApplyPoolOwnerReferenceAsync`, `Services/CommunicationPoolKubernetesGateway.cs` |
+| Cross-namespace refusal (§7.1a) | `WorkloadReconciler.TryResolvePoolOwnerReferenceAsync` |
+| Pool never receives the shared data-store credentials | `WorkloadReconciler.AppendClusterSecrets` |
+
+**Controller** (`octo-communication-controller-services`):
+
+| Piece | Where |
+|---|---|
+| `WorkloadTypeDto` mapping, one place for all four call sites | `Services/WorkloadWireMapping.cs` |
+| `RtAdapterPool` arms for `DeploymentState` and the lifecycle writers | `PoolService.SetWorkloadDeploymentStateAsync`, `CommunicationRepository.SetAdapterPoolDeploymentStateAsync` / `UpdateWorkloadPolymorphicAsync` |
+| `replicaCount` + per-member sizing as chart values (Q15) | `PoolService.AppendAdapterPoolMemberOverrides` |
+| Scale verb + `MinReplicas` floor | `PoolService.ScaleAdapterPoolAsync`, `WorkloadLifecycleService.ClampToAdapterPoolRange`, `POST {tenantId}/v1/pool/workloads/adapter-pool/scale` |
+| `ReceivesClusterSecrets` forced false for a pool | `PoolService.BuildWorkloadDeployedDtoAsync` |
+| Idle-watchdog exclusion | `WorkloadLifecycleWatchdogBackgroundService.SweepTenantAsync` |
+| Activator index scoping | `WorkloadHostnameIndex.RefreshAsync` |
+
+🔴 **The AB#4918 idle watchdog must not see pool members.** It drains a workload from *its own*
+pipelines' `LastExecutionAt`, and a pool has no pipelines of its own — every pipeline it runs
+belongs to a borrower in a different tenant database. Left alone it would drain a healthy pool to
+zero, and the failure would look like a correctly working idle timeout. `AdapterPool` is excluded
+explicitly, before the `LifecycleMode` filter, at every mode; `MinReplicas` + `IdleTimeoutMinutes` +
+queue pressure own the lifecycle instead (concept §4a). This closes plan 1.0's Q7. See §7.5 for the
+`Waking` path, which that exclusion turned out to be the *only* thing guarding.
+
+**Tests:** `PlatformNamespaceTests` (13, including 8 that pin the one-namespace assumption as
+unchanged for Adapter and Application), `PoolOwnerReferenceTests` (10), `AdapterPoolKindE2ETests`
+(2, against a live cluster — see §7.6), `WorkloadLifecycleWatchdogTests` pool cases (5),
+`AdapterPoolDeploymentTests` (12), `RequestScaleAsyncTests` pool cases (5),
+`WorkloadHostnameIndexTests` pool cases (2), `AppendClusterSecretsTests` pool cases (2).
+
+### 7.4 What a pool member is allowed to pick up
+
+Stated positively, because "cannot pick up tenant-namespace secrets" (§7.1) names something that
+does not exist. The operator injects in three tiers; a pool gets the first two and never the third:
+
+1. `secrets.rabbitmq` — yes. The controller↔adapter command bus; every workload needs it and it
+   carries no tenant authority.
+2. `secrets.rootCa` — yes. The TLS trust anchor for reaching the controller; same reasoning.
+3. `secrets.databaseUser` / `databaseAdmin` / `streamDataPassword` — **never**. These are the
+   cluster's *shared* Mongo and CrateDB credentials: one user, every tenant's data behind it. A pool
+   member executes work for tenants other than the one that owns it, and the lease is the mechanism
+   that grants it exactly one tenant at a time. A standing credential to all of them makes that
+   mechanism decorative, and concept §4's isolation invariant ("between two leases the process must
+   retain nothing tenant-scoped") meaningless.
+
+Beyond those, a member gets its own per-release `{release}-octo-secrets` Secret in the platform
+namespace. Tenant-scoped data access arrives with the lease and leaves with it (increment 6).
+
+The refusal is implemented **twice**, once on each side of the wire — the controller never sets
+`ReceivesClusterSecrets` on a pool, and the operator ignores it if set. Either gate alone is one edit
+away from silence.
+
+### 7.5 🔴 Two holes the pool type fell through before this increment
+
+Both were reachable, neither had a symptom that pointed at its cause.
+
+- **`DeployableWorkload` writers had no `RtAdapterPool` arm.** `PoolService.SetWorkloadDeploymentStateAsync` logged a warning and skipped, and `CommunicationRepository.UpdateWorkloadPolymorphicAsync` threw `WorkloadNotFound`. Net effect: a pool deployed, its `DeploymentState` never moved, Studio never showed it deployed, and Undeploy then refused it as "already not deployed" — a workload that could be deployed and not taken down again.
+- **The watchdog's stale-wake reconcile runs before its `is not RtAdapter` guard.** `ReconcileWakingAsync` is reached from the `LifecycleState` switch at the top of `SweepWorkloadAsync`, i.e. *before* the type test that keeps Applications out of the idle judgement. A pool sitting in `Waking` was therefore written to: `LifecycleState → Hibernated` plus an error event about a wake that never existed. For a **Running** pool the new exclusion is currently redundant with that same type test; for a `Waking` one it is the only guard, and it is the one thing that removing the exclusion alone makes a test fail on.
+
+### 7.6 The kind end-to-end suite
+
+`tests/CommunicationOperator.Tests/E2E/AdapterPoolKindE2ETests` runs against a real apiserver:
+
+```bash
+OCTO_OPERATOR_E2E_KUBECONTEXT=kind-kind \
+  dotnet test --project tests/CommunicationOperator.Tests/CommunicationOperator.Tests.csproj \
+  -c DebugL --filter "/*/*/AdapterPoolKindE2ETests/*"
+```
+
+Two tests: a pool scaled **1 → 3 → 1** through `WorkloadReconciler.ScaleAsync` (asserting both
+`spec.replicas` and the ReplicaSet controller's `status.replicas`, so the cluster agrees rather than
+the spec merely having been accepted), and a pool **garbage-collected** when its tenant's
+`CommunicationPool` CR is deleted. Without the environment variable both report as *skipped*, never
+as passed. Requirements: the `communicationpools.octo-mesh.meshmakers.io` CRD and permission to
+create the `octo-pool-e2e` namespace. Helm is deliberately not in the loop — this increment changed
+nothing in the helm layer, and a directly created Deployment carrying the release's
+`app.kubernetes.io/instance` label is exactly the shape the scale path selects on.
 
 ---
 

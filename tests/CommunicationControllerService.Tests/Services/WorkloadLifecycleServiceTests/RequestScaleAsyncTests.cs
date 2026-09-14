@@ -120,4 +120,83 @@ internal class RequestScaleAsyncTests
         await _connectionManager.Received(1).NotifyWorkloadScaleAsync(
             Arg.Is<ScaleWorkloadDto>(dto => dto.WorkloadName == string.Empty));
     }
+
+    private static RtAdapterPool Pool(int minReplicas, int maxReplicas) => new()
+    {
+        RtId = new OctoObjectId(WorkloadRtId),
+        CkTypeId = SystemCommunicationCkIds.RtCkAdapterPoolTypeId,
+        Name = "meshtest-pool",
+        MinReplicas = minReplicas,
+        MaxReplicas = maxReplicas,
+    };
+
+    [Test]
+    public async Task AdapterPool_MapsToAdapterPoolWorkloadType()
+    {
+        GivenWorkloadIsInPool();
+
+        await _service.RequestScaleAsync(TenantId, Pool(minReplicas: 1, maxReplicas: 3), 2);
+
+        await _connectionManager.Received(1).NotifyWorkloadScaleAsync(Arg.Is<ScaleWorkloadDto>(dto =>
+            dto.WorkloadType == WorkloadTypeDto.AdapterPool
+            && dto.WorkloadName == "meshtest-pool"
+            && dto.Replicas == 2));
+    }
+
+    [Test]
+    public async Task AdapterPool_ScaleToZero_IsHeldAtMinReplicas()
+    {
+        // 🔴 AB#4924 §7.3. MinReplicas is the floor of the pool's own lifecycle: at least one
+        // member stays hot so the first work item does not pay a cold start. A scale-to-0 request
+        // — from the idle path or from anywhere else — is a request the pool cannot honour.
+        GivenWorkloadIsInPool();
+
+        await _service.RequestScaleAsync(TenantId, Pool(minReplicas: 1, maxReplicas: 3), 0);
+
+        await _connectionManager.Received(1).NotifyWorkloadScaleAsync(
+            Arg.Is<ScaleWorkloadDto>(dto => dto.Replicas == 1));
+    }
+
+    [Test]
+    public async Task AdapterPool_ScaleAboveMaxReplicas_IsHeldAtMaxReplicas()
+    {
+        GivenWorkloadIsInPool();
+
+        await _service.RequestScaleAsync(TenantId, Pool(minReplicas: 1, maxReplicas: 3), 9);
+
+        await _connectionManager.Received(1).NotifyWorkloadScaleAsync(
+            Arg.Is<ScaleWorkloadDto>(dto => dto.Replicas == 3));
+    }
+
+    [Test]
+    public async Task AdapterPoolWithMinReplicasZero_MayScaleToZero()
+    {
+        // MinReplicas=0 is a valid, deliberate choice (a scale-to-zero pool where every burst pays
+        // one cold start), so the floor must be the declared value and not a hardcoded 1.
+        GivenWorkloadIsInPool();
+
+        await _service.RequestScaleAsync(TenantId, Pool(minReplicas: 0, maxReplicas: 3), 0);
+
+        await _connectionManager.Received(1).NotifyWorkloadScaleAsync(
+            Arg.Is<ScaleWorkloadDto>(dto => dto.Replicas == 0));
+    }
+
+    [Test]
+    public async Task Adapter_ScaleToZero_IsNotClamped()
+    {
+        // The clamp is a property of a pool's replica range, not of the scale verb. Hibernation of
+        // an ordinary adapter is still exactly scale-to-0.
+        GivenWorkloadIsInPool();
+        var adapter = new RtAdapter
+        {
+            RtId = new OctoObjectId(WorkloadRtId),
+            CkTypeId = SystemCommunicationCkIds.RtCkAdapterTypeId,
+            Name = "meshtest-adapter",
+        };
+
+        await _service.RequestScaleAsync(TenantId, adapter, 0);
+
+        await _connectionManager.Received(1).NotifyWorkloadScaleAsync(
+            Arg.Is<ScaleWorkloadDto>(dto => dto.Replicas == 0));
+    }
 }

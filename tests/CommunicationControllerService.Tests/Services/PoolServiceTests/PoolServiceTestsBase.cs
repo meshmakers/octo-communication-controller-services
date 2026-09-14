@@ -28,6 +28,10 @@ internal abstract class PoolServiceTestsBase
     protected readonly IPipelineServiceAccountResolver ServiceAccountResolver;
     /// <summary>AB#4924 — substituted; the real walk is covered by TenantLendingScopeResolverTests.</summary>
     protected readonly ITenantLendingScopeResolver LendingScopeResolver = Substitute.For<ITenantLendingScopeResolver>();
+
+    /// <summary>AB#4924 — substituted; the scale verb itself is covered by WorkloadLifecycleServiceTests.</summary>
+    protected readonly IWorkloadLifecycleService WorkloadLifecycleService =
+        Substitute.For<IWorkloadLifecycleService>();
     protected readonly IPoolCachePublish PoolCachePublish;
     protected readonly PoolTenant PoolTenant;
     protected readonly PoolService PoolService;
@@ -104,7 +108,8 @@ internal abstract class PoolServiceTestsBase
             OnDemandCapabilityService,
             ServiceAccountProvisioningService,
             ServiceAccountResolver,
-            LendingScopeResolver);
+            LendingScopeResolver,
+            WorkloadLifecycleService);
     }
 
     [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]

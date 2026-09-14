@@ -231,10 +231,25 @@ The lease timestamps make that attribution exact without new machinery: `LeaseGr
 member costs (§4a). Consumption per borrower is the sum of its lease spans times the member
 sizing — derived from data the model already carries, not from a separate metering pipeline.
 
-The cost is in the operator. `WorkloadReconciler` and `WorkloadHostnameIndex` assume **one
-workload per tenant namespace**; a platform namespace hosting members owned by a tenant breaks
-that assumption, and new RBAC is needed for the namespace itself. This work is accepted
-deliberately — the alternative loses per-tenant attribution, which is not negotiable.
+The cost is in the operator. This work is accepted deliberately — the alternative loses per-tenant
+attribution, which is not negotiable.
+
+🔴 **Corrected 2026-09-14, during increment 5.** The first draft of this paragraph said
+`WorkloadReconciler` and `WorkloadHostnameIndex` assume *one workload per tenant namespace*. There
+are no tenant namespaces: the operator deploys every workload of every tenant into one namespace
+(`OperatorOptions.PoolNamespace`, default `octo`), separated by release name, and
+`WorkloadHostnameIndex` is a controller type, not an operator one. The assumption that actually has
+to break is "one namespace for everything the operator deploys". And the RBAC lives in the
+`octo-mesh-communication-operator` Helm chart in `octo-helm-core`, where the default cluster-scoped
+binding already covers any namespace.
+
+One consequence of Q1 is not negotiable either way: **Kubernetes forbids cross-namespace owner
+references** — a dependent whose owner lives elsewhere is treated as having no owner and is deleted.
+Since the object that represents a tenant is its `CommunicationPool` CR in the operator's own
+namespace, "platform namespace" and "owned by the lending tenant" are only simultaneously satisfiable
+while the platform namespace *is* that namespace. That is what the implementation defaults to; a
+distinct platform namespace is supported and forfeits the owner reference, with a warning.
+See the implementation plan §7.1a.
 
 ## 5. Queue
 

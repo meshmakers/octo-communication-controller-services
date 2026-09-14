@@ -216,4 +216,54 @@ public class PoolController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Scales a deployed <c>AdapterPool</c> to the requested number of members (AB#4924).
+    /// The request is held inside the pool's declared <c>MinReplicas..MaxReplicas</c> range; the
+    /// response body carries the member count actually requested from the operator, which differs
+    /// from the input exactly when the input was outside that range.
+    /// </summary>
+    /// <param name="workloadRtId">The runtime id of the AdapterPool workload.</param>
+    /// <param name="replicas">Desired member count.</param>
+    [HttpPost("workloads/adapter-pool/scale")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(typeof(AdapterPoolScaleResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ScaleAdapterPoolAsync([Required][FromQuery] OctoObjectId workloadRtId,
+        [Required][FromQuery] int replicas)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        if (replicas < 0)
+        {
+            return BadRequest(new ErrorResponse { ErrorMessage = "Replicas must not be negative." });
+        }
+
+        if (await RefuseWhileDisabledAsync(tenantId, "adapter pool scale") is { } refusal)
+        {
+            return refusal;
+        }
+
+        try
+        {
+            var effective = await _poolService.ScaleAdapterPoolAsync(tenantId, workloadRtId, replicas);
+            return Ok(new AdapterPoolScaleResultDto(effective));
+        }
+        catch (PoolServiceException e)
+        {
+            _logger.LogError(e, "Error scaling adapter pool");
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
+        }
+    }
 }
+
+/// <summary>
+/// Result of an adapter-pool scale request (AB#4924): the member count actually requested from the
+/// operator after the pool's declared <c>MinReplicas..MaxReplicas</c> range was applied.
+/// </summary>
+/// <param name="Replicas">Effective member count.</param>
+public record AdapterPoolScaleResultDto(int Replicas);

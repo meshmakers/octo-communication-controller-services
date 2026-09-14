@@ -236,15 +236,51 @@ internal class WorkloadLifecycleService(
             throw PoolServiceException.WorkloadNotInPool(tenantId, workload.RtId);
         }
 
+        replicas = ClampToAdapterPoolRange(tenantId, workload, replicas);
+
         await operatorConnectionManager.NotifyWorkloadScaleAsync(new ScaleWorkloadDto
         {
             TenantId = tenantId,
             PoolRtId = pool.RtId.ToString(),
             WorkloadRtId = workload.RtId.ToString(),
             WorkloadName = workload.Name ?? string.Empty,
-            WorkloadType = workload is RtApplication ? WorkloadTypeDto.Application : WorkloadTypeDto.Adapter,
+            WorkloadType = WorkloadWireMapping.ResolveWorkloadType(workload),
             Replicas = replicas,
         });
+    }
+
+    /// <summary>
+    ///     Holds an <see cref="RtAdapterPool" /> inside its declared <c>MinReplicas..MaxReplicas</c>
+    ///     range (AB#4924 §7.3). Non-pool workloads are returned untouched — <c>0</c> and <c>1</c>
+    ///     remain exactly what hibernate and wake mean for them.
+    /// </summary>
+    /// <remarks>
+    ///     This is the second of two guards, and it exists because the first one is a filter. The
+    ///     AB#4918 idle watchdog skips pools outright; this clamp catches every other caller of the
+    ///     scale verb — a future scale-up path, an operator action, a bug. <c>MinReplicas</c> is the
+    ///     floor of the pool's own lifecycle (concept §4a: the pool owns its members, not the
+    ///     watchdog), so a request to go below it is a request the pool cannot honour, not a
+    ///     configuration to obey silently.
+    /// </remarks>
+    private int ClampToAdapterPoolRange(string tenantId, RtDeployableWorkload workload, int replicas)
+    {
+        if (workload is not RtAdapterPool pool)
+        {
+            return replicas;
+        }
+
+        var clamped = Math.Clamp(replicas, pool.MinReplicas, Math.Max(pool.MinReplicas, pool.MaxReplicas));
+        if (clamped == replicas)
+        {
+            return replicas;
+        }
+
+        // Warn, not Debug: somebody asked for something the pool declares it will not do, and the
+        // gap between the request and the outcome is exactly what makes an incident unreadable.
+        logger.LogWarning(
+            "[{TenantId}] Scale request of {Replicas} replica(s) for adapter pool '{PoolName}' ({PoolRtId}) is outside its declared range {MinReplicas}..{MaxReplicas}; scaling to {ClampedReplicas} instead",
+            tenantId, replicas, pool.Name, pool.RtId, pool.MinReplicas, pool.MaxReplicas, clamped);
+        return clamped;
     }
 
     public async Task OnScaleStatusReportedAsync(WorkloadScaleStatusDto status)

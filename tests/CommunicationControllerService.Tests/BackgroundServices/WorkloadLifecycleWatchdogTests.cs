@@ -21,6 +21,7 @@ internal class WorkloadLifecycleWatchdogTests
 {
     private const string TenantId = "meshtest";
     private const string WorkloadRtId = "66004fda527ac79a03ecedd7";
+    private const string PoolWorkloadRtId = "66004fda527ac79a03ecedd8";
 
     private readonly ICommunicationRepository _repository =
         Substitute.For<ICommunicationRepository>();
@@ -318,5 +319,99 @@ internal class WorkloadLifecycleWatchdogTests
         await _repository.DidNotReceiveWithAnyArgs().GetRunningExecutionsForAdapterAsync(
             Arg.Any<string>(), Arg.Any<RtEntityId>());
         await ThenWorkloadIsUntouchedAsync();
+    }
+
+    private static RtAdapterPool CreateAdapterPool(
+        RtLifecycleModeEnum lifecycleMode = RtLifecycleModeEnum.OnDemand,
+        int minReplicas = 1,
+        int maxReplicas = 3,
+        int idleTimeoutMinutes = 30)
+    {
+        return new RtAdapterPool
+        {
+            RtId = new OctoObjectId(PoolWorkloadRtId),
+            CkTypeId = SystemCommunicationCkIds.RtCkAdapterPoolTypeId,
+            Name = "meshtest-pool",
+            LifecycleMode = lifecycleMode,
+            LifecycleState = RtLifecycleStateEnum.Running,
+            DeploymentState = RtDeploymentStateEnum.Deployed,
+            // Idle since before observation began — the state that drains an ordinary adapter.
+            LastActivityAt = null,
+            IdleTimeoutMinutes = idleTimeoutMinutes,
+            MinReplicas = minReplicas,
+            MaxReplicas = maxReplicas,
+        };
+    }
+
+    [Test]
+    [Arguments(RtLifecycleModeEnum.OnDemand)]
+    [Arguments(RtLifecycleModeEnum.AlwaysOn)]
+    public async Task AdapterPool_IsNeverDrainedBelowMinReplicas(RtLifecycleModeEnum lifecycleMode)
+    {
+        // 🔴 AB#4924 §7.3. The sweep judges idleness from the workload's OWN pipelines'
+        // LastExecutionAt. A pool has none — every pipeline it runs belongs to a borrower in
+        // another tenant database — so a busy pool reads as idle forever and would be drained to
+        // zero, taking every borrower's work with it and looking like a correctly working timeout.
+        // No lifecycle write, no scale request, at any lifecycle mode: MinReplicas is never crossed
+        // because the watchdog never touches a pool at all.
+        var pool = CreateAdapterPool(lifecycleMode, minReplicas: 2);
+        GivenWorkloads(pool);
+        GivenNoRunningExecutionsAndNoPipelines();
+
+        await _service.SweepTenantAsync(TenantId);
+
+        await ThenWorkloadIsUntouchedAsync();
+    }
+
+    [Test]
+    public async Task AdapterPoolWithMinReplicasZero_IsStillNotDrainedByTheWatchdog()
+    {
+        // Even where a scale-to-0 would not cross the declared floor, the decision is not the
+        // watchdog's to make: it has no signal about a pool's load, so "0 is allowed here" would be
+        // a guess dressed as a policy. The pool's own lifecycle owns this (concept §4a).
+        var pool = CreateAdapterPool(minReplicas: 0);
+        GivenWorkloads(pool);
+        GivenNoRunningExecutionsAndNoPipelines();
+
+        await _service.SweepTenantAsync(TenantId);
+
+        await ThenWorkloadIsUntouchedAsync();
+    }
+
+    [Test]
+    public async Task AdapterPoolStuckInWaking_IsNotRevertedByTheWatchdog()
+    {
+        // 🔴 The stale-wake reconcile runs BEFORE the `is not RtAdapter` guard that keeps
+        // Applications out of the idle judgement, so without the explicit pool exclusion this path
+        // reaches a pool and writes to it: LifecycleState → Hibernated plus an error event about a
+        // wake that never existed. A pool has no wake — it is woken by nothing and drained by
+        // nothing the watchdog knows about — so every byte of that is fiction, and the state it
+        // leaves behind is a pool the lifecycle believes is down.
+        var pool = CreateAdapterPool();
+        pool.LifecycleState = RtLifecycleStateEnum.Waking;
+        pool.LastActivityAt = null;
+        GivenWorkloads(pool);
+        GivenNoRunningExecutionsAndNoPipelines();
+
+        await _service.SweepTenantAsync(TenantId);
+
+        await ThenWorkloadIsUntouchedAsync();
+    }
+
+    [Test]
+    public async Task AdapterPoolBesideAnIdleAdapter_DoesNotStopTheAdapterFromBeingDrained()
+    {
+        // The exclusion is per workload, not per sweep: a tenant that owns a pool must still get
+        // its ordinary idle adapters hibernated.
+        var pool = CreateAdapterPool();
+        var adapter = CreateOnDemandAdapter(lastActivityAt: DateTime.UtcNow.AddHours(-2));
+        GivenWorkloads(pool, adapter);
+        GivenNoRunningExecutionsAndNoPipelines();
+
+        await _service.SweepTenantAsync(TenantId);
+
+        await _workloadLifecycleService.Received(1).RequestScaleAsync(TenantId, adapter, 0);
+        await _workloadLifecycleService.DidNotReceive().RequestScaleAsync(
+            TenantId, pool, Arg.Any<int>());
     }
 }

@@ -355,6 +355,29 @@ public interface ICommunicationRepository
         RtDeploymentStateEnum deploymentState, string? stateMessage = null);
 
     /// <summary>
+    /// Set the deployment state of an adapter pool (AB#4924). A pool is a
+    /// <c>DeployableWorkload</c> like Adapter and Application and goes through the same
+    /// deploy / undeploy path, so it needs its own writer — <c>EntityUpdateInfo</c> is typed on the
+    /// concrete CK type and there is no common base to write through.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="adapterPoolRtEntityId">Object id of the adapter pool</param>
+    /// <param name="deploymentState">State of the adapter pool</param>
+    /// <param name="stateMessage">Optional human-readable status message, written to <c>StatusMessage</c>.</param>
+    Task SetAdapterPoolDeploymentStateAsync(string tenantId, RtEntityId adapterPoolRtEntityId,
+        RtDeploymentStateEnum deploymentState, string? stateMessage = null);
+
+    /// <summary>
+    /// Set the deployment state of one or more adapter pools in a single transaction (AB#4924).
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="adapterPoolRtEntityIds">Object ids of the adapter pools</param>
+    /// <param name="deploymentState">State of the adapter pools</param>
+    /// <param name="stateMessage">Optional human-readable status message, written to <c>StatusMessage</c>.</param>
+    Task SetAdapterPoolDeploymentStateAsync(string tenantId, ICollection<RtEntityId> adapterPoolRtEntityIds,
+        RtDeploymentStateEnum deploymentState, string? stateMessage = null);
+
+    /// <summary>
     /// Gets the pool of a communication adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>

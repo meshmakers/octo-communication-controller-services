@@ -78,6 +78,23 @@ public interface IPoolService
     Task UndeployWorkloadAsync(string tenantId, OctoObjectId workloadRtId);
 
     /// <summary>
+    /// Scales a deployed <c>AdapterPool</c> to <paramref name="replicas"/> members (AB#4924 §7.2).
+    /// </summary>
+    /// <remarks>
+    /// A pool is one workload with a replica range, so this is the AB#4917 <c>ScaleWorkloadDto</c>
+    /// verb and nothing new: the operator patches the release's Deployments, the release history is
+    /// untouched, and the chart values the members were installed from stay as they are. The
+    /// request is held inside the pool's declared <c>MinReplicas..MaxReplicas</c> range — asking for
+    /// less than <c>MinReplicas</c> is a request the pool cannot honour, not a configuration change.
+    /// Returns the replica count actually requested from the operator, which may differ from
+    /// <paramref name="replicas"/> for exactly that reason.
+    /// </remarks>
+    /// <param name="tenantId">Tenant owning the pool</param>
+    /// <param name="poolWorkloadRtId">The object id of the <c>AdapterPool</c> workload</param>
+    /// <param name="replicas">Desired member count</param>
+    Task<int> ScaleAdapterPoolAsync(string tenantId, OctoObjectId poolWorkloadRtId, int replicas);
+
+    /// <summary>
     /// Re-dispatches every workload of the pool that is stuck in
     /// <c>DeploymentState = Pending</c> (AB#4894). Called when an operator (re-)registers the
     /// pool: a deploy notification sent while the previous operator pod was being replaced is

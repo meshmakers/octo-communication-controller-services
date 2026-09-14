@@ -180,6 +180,14 @@ internal class CommunicationRepositoryException : Exception
             exception);
     }
 
+    internal static Exception CommonFailedSetAdapterPoolDeploymentState(string tenantId,
+        IEnumerable<RtEntityId> adapterPoolRtEntityIds, RtDeploymentStateEnum state, Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to set deployment state of adapter pools '{string.Join(", ", adapterPoolRtEntityIds)}' to '{state}'",
+            exception);
+    }
+
     internal static Exception CommonFailedIsTenantExisting(string tenantId, Exception exception)
     {
         return new CommunicationRepositoryException($"[{tenantId}] Failed to check if tenant exists", exception);

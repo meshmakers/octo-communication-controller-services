@@ -132,6 +132,7 @@ internal class CommunicationRepository : ICommunicationRepository
         await UpdateWorkloadPolymorphicAsync(tenantId, workloadRtId,
             () => new RtAdapter { LifecycleState = lifecycleState, StatusMessage = statusMessage },
             () => new RtApplication { LifecycleState = lifecycleState, StatusMessage = statusMessage },
+            () => new RtAdapterPool { LifecycleState = lifecycleState, StatusMessage = statusMessage },
             e => CommunicationRepositoryException.CommonFailedSetWorkloadLifecycleState(tenantId, workloadRtId,
                 lifecycleState, e));
     }
@@ -143,6 +144,7 @@ internal class CommunicationRepository : ICommunicationRepository
         await UpdateWorkloadPolymorphicAsync(tenantId, workloadRtId,
             () => new RtAdapter { LastActivityAt = lastActivityAtUtc },
             () => new RtApplication { LastActivityAt = lastActivityAtUtc },
+            () => new RtAdapterPool { LastActivityAt = lastActivityAtUtc },
             e => CommunicationRepositoryException.CommonFailedSetWorkloadLastActivity(tenantId, workloadRtId, e));
     }
 
@@ -153,6 +155,7 @@ internal class CommunicationRepository : ICommunicationRepository
         await UpdateWorkloadPolymorphicAsync(tenantId, workloadRtId,
             () => new RtAdapter { OnDemandCapable = onDemandCapable, OnDemandBlockingReasons = blockingReasons },
             () => new RtApplication { OnDemandCapable = onDemandCapable, OnDemandBlockingReasons = blockingReasons },
+            () => new RtAdapterPool { OnDemandCapable = onDemandCapable, OnDemandBlockingReasons = blockingReasons },
             e => CommunicationRepositoryException.CommonFailedSetWorkloadOnDemandCapability(tenantId, workloadRtId, e));
     }
 
@@ -164,6 +167,7 @@ internal class CommunicationRepository : ICommunicationRepository
     /// </summary>
     private async Task UpdateWorkloadPolymorphicAsync(string tenantId, OctoObjectId workloadRtId,
         Func<RtAdapter> adapterUpdateFactory, Func<RtApplication> applicationUpdateFactory,
+        Func<RtAdapterPool> adapterPoolUpdateFactory,
         Func<Exception, Exception> exceptionFactory)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
@@ -195,6 +199,17 @@ internal class CommunicationRepository : ICommunicationRepository
                         var rtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkApplicationTypeId, workloadRtId);
                         await tenantRepository.ApplyChangesAsync(session,
                             [EntityUpdateInfo<RtApplication>.CreateUpdate(rtEntityId, applicationUpdateFactory())],
+                            operationResult);
+                        break;
+                    }
+                // AB#4924: an AdapterPool is a DeployableWorkload too, and it was falling into the
+                // default arm below — every lifecycle write against a pool threw WorkloadNotFound,
+                // which is the least informative way possible to say "this type is not handled".
+                case RtAdapterPool:
+                    {
+                        var rtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkAdapterPoolTypeId, workloadRtId);
+                        await tenantRepository.ApplyChangesAsync(session,
+                            [EntityUpdateInfo<RtAdapterPool>.CreateUpdate(rtEntityId, adapterPoolUpdateFactory())],
                             operationResult);
                         break;
                     }
@@ -1152,6 +1167,63 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             throw CommunicationRepositoryException.CommonFailedSetApplicationDeploymentState(tenantId,
                 applicationRtEntityIds, deploymentState, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task SetAdapterPoolDeploymentStateAsync(string tenantId, RtEntityId adapterPoolRtEntityId,
+        RtDeploymentStateEnum deploymentState, string? stateMessage = null)
+    {
+        await SetAdapterPoolDeploymentStateAsync(tenantId, [adapterPoolRtEntityId], deploymentState, stateMessage);
+    }
+
+    /// <inheritdoc />
+    public async Task SetAdapterPoolDeploymentStateAsync(string tenantId,
+        ICollection<RtEntityId> adapterPoolRtEntityIds, RtDeploymentStateEnum deploymentState,
+        string? stateMessage = null)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var rtAdapterPool = new RtAdapterPool
+            {
+                DeploymentState = deploymentState,
+                StatusMessage = stateMessage
+            };
+            ApplyDeploymentErrorTracking(rtAdapterPool, deploymentState, stateMessage);
+
+            // No ConfigurationState reset here, unlike the adapter path: a pool has no
+            // configuration push of its own. Its members are configured per lease, by the
+            // borrower's definitions, and there is no per-pool config state to invalidate.
+
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtAdapterPool>>();
+            foreach (var adapterPoolRtEntityId in adapterPoolRtEntityIds)
+            {
+                entityUpdateInfoList.Add(
+                    EntityUpdateInfo<RtAdapterPool>.CreateUpdate(adapterPoolRtEntityId, rtAdapterPool));
+            }
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedSetAdapterPoolDeploymentState(tenantId,
+                adapterPoolRtEntityIds, deploymentState, e);
         }
     }
 

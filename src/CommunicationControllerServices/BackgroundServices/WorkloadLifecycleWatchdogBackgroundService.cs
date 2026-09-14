@@ -100,6 +100,31 @@ internal class WorkloadLifecycleWatchdogBackgroundService(
         var workloads = await communicationRepository.GetWorkloadsAsync(tenantId);
         foreach (var workload in workloads)
         {
+            // 🔴 AB#4924: an adapter pool is never swept by this watchdog, at any lifecycle mode.
+            //
+            // The sweep below decides idleness from the workload's OWN pipelines' LastExecutionAt.
+            // A pool has no pipelines of its own — every pipeline it runs belongs to a borrower in
+            // a different tenant database, which this query cannot see and a CK association cannot
+            // reach. So a perfectly busy pool reads as "no pipelines, no activity, idle since
+            // forever" and gets drained to zero on the first sweep, taking every borrower's work
+            // with it. The failure would look like a correctly working idle timeout.
+            //
+            // The pool owns its members' lifecycle instead (concept §4a): MinReplicas is the floor,
+            // IdleTimeoutMinutes and queue pressure decide what happens above it. This is also why
+            // WorkloadLifecycleService.RequestScaleAsync clamps a pool to its declared range — this
+            // filter protects against this caller, the clamp protects against every other one.
+            //
+            // Written as an explicit type test rather than relying on the `workload is not RtAdapter`
+            // guard further down: that guard exists to skip Applications, it happens to catch pools
+            // as a side effect, and a side effect is not a safeguard for a cross-tenant outage.
+            if (workload is RtAdapterPool)
+            {
+                Logger.Debug(
+                    "Workload '{WorkloadName}' (tenant '{TenantId}') is an adapter pool; the idle watchdog does not own its lifecycle (AB#4924)",
+                    workload.Name, tenantId);
+                continue;
+            }
+
             if (workload.LifecycleMode != RtLifecycleModeEnum.OnDemand)
             {
                 continue;

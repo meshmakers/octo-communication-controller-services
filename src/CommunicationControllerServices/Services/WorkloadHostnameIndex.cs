@@ -4,6 +4,7 @@ using System.Text;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Microsoft.Extensions.Options;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -39,6 +40,21 @@ internal sealed class WorkloadHostnameIndex(
             {
                 foreach (var workload in await communicationRepository.GetWorkloadsAsync(tenantId))
                 {
+                    // AB#4924: adapter pools are not reachable through the activator, and this is
+                    // the one place where "one namespace for everything" is still assumed. The
+                    // address this index publishes is built from the release name alone
+                    // (ActivatorWorkloadAddressTemplate defaults to "http://{release}"), which
+                    // resolves in the CONTROLLER's namespace — a pool runs in the platform
+                    // namespace, so an entry for one would point the activator at a Service that
+                    // is not there, or worse at a same-named one that is. A pool is reached by
+                    // being leased, never by an inbound request, so it has no business in a
+                    // hostname map; skipping it is the scoping this increment needs and the
+                    // narrowest change that achieves it.
+                    if (workload is RtAdapterPool)
+                    {
+                        continue;
+                    }
+
                     if (!workload.IngressEnabled || string.IsNullOrWhiteSpace(workload.Hostname))
                     {
                         continue;

@@ -251,6 +251,24 @@ internal class PoolServiceException : Exception
             "into a scale-to-zero pool where every burst pays one cold start.");
     }
 
+    internal static Exception WorkloadIsNotAnAdapterPool(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Workload '{workloadName ?? workloadRtId.ToString()}' is not an adapter pool and cannot be " +
+            "scaled through the pool path (AB#4924). An Adapter or Application is scaled by the on-demand lifecycle " +
+            "(hibernate / wake), which owns its replica count; only a pool has a replica RANGE to move within.");
+    }
+
+    internal static Exception AdapterPoolNotDeployed(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName, RtDeploymentStateEnum deploymentState)
+    {
+        return new PoolServiceException(
+            $"[{tenantId}] Cannot scale adapter pool '{workloadName ?? workloadRtId.ToString()}': it is " +
+            $"'{deploymentState}', so there is no Helm release whose members could be scaled (AB#4924). Deploy the pool " +
+            "first.");
+    }
+
     internal static Exception AdapterPoolLeaseCapInvalid(string tenantId, OctoObjectId workloadRtId,
         string? workloadName, int cap)
     {
