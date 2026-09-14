@@ -472,10 +472,12 @@ consumers** — their hits are 100 % codegen. Only the Studio actually queries t
 generation entirely (they still contain `SystemCommunicationEdgeAdapter`). Both are stale
 *before* this change and are not fixed by it.
 
-### 3.10 🔴 The role rename needs a CK engine change that does not exist yet
+### 3.10 ✅ The role rename needed a CK engine change that did not exist — added
 
 **This is the finding that should have changed the D1 decision, and it was not knowable from
-the design.**
+the design.** The transform has since been implemented and committed (`octo-construction-kit-engine`
+`232220a`, `-mongodb` `cb37496`); it is **not released yet**, which is what the sequencing note at
+the end of this section is about.
 
 Renaming an association role is not migratable with the engine as it stands. The seven
 transform types (`ChangeCkType`, `SetValue`, `RenameAttribute`, `CopyAttribute`,
