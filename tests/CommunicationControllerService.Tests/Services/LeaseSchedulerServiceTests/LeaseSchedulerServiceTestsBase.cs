@@ -143,12 +143,16 @@ internal abstract class LeaseSchedulerServiceTestsBase
     ///     A queue entry. Arrival is expressed in minutes ago so "older" reads as a larger number.
     /// </summary>
     protected static QueuedExecution Entry(string executionId, int minutesAgo,
-        int executionClass = QueuedExecution.BatchClass)
+        int executionClass = QueuedExecution.BatchClass, OctoObjectId? pipelineRtId = null,
+        string? inputData = null)
     {
         return new QueuedExecution(executionId, OctoObjectId.GenerateNewId(),
-            DateTime.UtcNow.AddMinutes(-minutesAgo), OctoObjectId.GenerateNewId(), $"pipeline-{executionId}",
-            executionClass);
+            DateTime.UtcNow.AddMinutes(-minutesAgo), pipelineRtId ?? OctoObjectId.GenerateNewId(),
+            $"pipeline-{executionId}", executionClass, inputData);
     }
+
+    /// <summary>Every <see cref="LeaseRequest" /> the scheduler handed to the lease service, in order.</summary>
+    protected readonly List<LeaseRequest> Requests = [];
 
     /// <summary>
     ///     The pool entity the lender owns. Absent by default — a scheduling round must work without
@@ -222,6 +226,7 @@ internal abstract class LeaseSchedulerServiceTestsBase
                 var lenderTenantId = call.ArgAt<string>(0);
                 var poolRtId = call.ArgAt<OctoObjectId>(1);
                 var request = call.ArgAt<LeaseRequest>(2);
+                Requests.Add(request);
                 var gate = call.ArgAt<Func<LeaseDto, PoolMemberConnection, CancellationToken, Task<bool>>?>(4);
 
                 var lease = new LeaseDto

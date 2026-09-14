@@ -408,18 +408,27 @@ the queue path.
 | Q17 | Execution class | Declared by the trigger node (like `RequiresRunningProcess`), resolved on save and persisted on the pipeline |
 | Q18 | Rename sequencing | Ships **together** with leasing — one major bump, one migration |
 | Q14 | Scale-up trigger | Queue depth **or** wait time crossing a threshold; averaging window measured during implementation and kept configurable — ✅ implemented as a controller option whose default *derives* the window from the pool's own `ScaleUpQueueWaitSeconds` rather than inventing a constant; see the implementation plan, D3 |
+| Q19 | How a leased member learns what to run | The **lease carries the work**: pipeline rtId, input, and the pipeline configuration the controller already projects for a dedicated adapter. One execution entity from enqueue to release — the member runs *against* the queued execution and reports no execution start (implementation plan §9.9 / D4) |
+| Q20 | When the per-tenant kill switch ships | **With the scheduler, not after it.** `LeasingEnabled` on the existing AB#4914 `communicationLifecycle` record, default off, enforced at both the enqueue and the grant. Work already queued is **held**, never drained and never cancelled (implementation plan §13.1 / D5) |
 
 ### Still open
 
-None **of the design questions**. Every question raised during design has been decided; the
+None. Every question raised during design has been decided, and the one question *implementation*
+raised — §9's "which pipeline, and how does the member learn it" — is decided too (Q19). The
 remaining unknowns are implementation measurements (the scale-up averaging window, the wake budget
 for a cold pool member) that are deliberately left to be observed rather than guessed.
 
-🔴 **One question implementation raised and design does not answer**, found in increment 7: the
-lease carries an execution id and nothing else about the work — no pipeline, no input — and no
-member-facing way to ask. §4's sequence diagram says "load tenant repository + pipeline, execute"
-without saying which pipeline, or how the member learns it. See the implementation plan §9.9 and
-D4; it is a multi-repo decision, not a controller detail.
+✅ **The one question implementation raised is now answered** (2026-09-14). Increment 7 found that the
+lease carried an execution id and nothing else about the work — no pipeline, no input, and no
+member-facing way to ask; §4's sequence diagram said "load tenant repository + pipeline, execute"
+without saying which pipeline or how the member learns it. **Decided: the lease carries the work.**
+`LeaseDto` gains the pipeline rtId, the input, and the pipeline configuration the member registers to
+run it, and `octo-mesh-adapter` implements the work item. The alternative — sending an
+`ExecutePipelineRequest` after the grant — was rejected because it produces a **second execution
+entity** for one piece of work: the member's trigger context would report an execution start, and the
+controller's start-report path inserts a new entity rather than updating the queued one, which would
+mean a reconciliation step and two lease spans pricing one run (§4b). See the implementation plan §9.9
+and D4.
 
 ## 9. Out of scope
 

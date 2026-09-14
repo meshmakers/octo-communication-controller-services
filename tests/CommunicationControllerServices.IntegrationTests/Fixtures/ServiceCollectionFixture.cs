@@ -132,6 +132,13 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         // (same pattern as the command clients above).
         Services.AddSingleton(Substitute.For<IWorkloadLifecycleService>());
 
+        // AB#4924 §13: TriggerManagementService and LeaseService now take the lifecycle configuration
+        // service for the per-tenant leasing kill switch. The REAL one, not a substitute — it reads
+        // the tenant key-value store this fixture already provides, and a substitute would make every
+        // integration assertion about the switch a tautology about the substitute. A tenant that never
+        // set the flag answers false, which is exactly the default under test.
+        Services.AddSingleton<ILifecycleConfigurationService, LifecycleConfigurationService>();
+
         // Add mock SignalR hub contexts (required by hub callbacks). PoolHub
         // is gone — its responsibilities collapsed into OperatorHub.
         Services.AddSingleton(Substitute.For<IHubContext<AdapterHub>>());

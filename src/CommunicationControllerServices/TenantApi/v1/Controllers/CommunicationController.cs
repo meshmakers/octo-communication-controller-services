@@ -242,14 +242,18 @@ public class CommunicationController : ControllerBase
         ArgumentNullException.ThrowIfNull(tenantId);
 
         var configuration = await lifecycleConfigurationService.GetConfigurationAsync(tenantId);
-        return Ok(new CommunicationLifecycleDto(configuration.ScaleToZeroEnabled));
+        return Ok(new CommunicationLifecycleDto(configuration.ScaleToZeroEnabled, configuration.LeasingEnabled));
     }
 
     /// <summary>
-    /// Sets the tenant's on-demand lifecycle configuration (AB#4914). Runtime configuration —
-    /// effective without a controller redeploy; gates and watchdog pick it up within the
-    /// configuration cache TTL. Setting <c>ScaleToZeroEnabled=false</c> is the per-tenant
-    /// emergency stop.
+    /// Sets the tenant's communication lifecycle configuration (AB#4914, AB#4924). Runtime
+    /// configuration — effective without a controller redeploy; gates and watchdog pick it up within
+    /// the configuration cache TTL. Setting <c>ScaleToZeroEnabled=false</c> is the per-tenant
+    /// emergency stop for hibernation, <c>LeasingEnabled=false</c> the one for adapter-pool leasing.
+    /// <para>
+    /// 🔴 The body REPLACES the record — a PUT that omits a flag resets it to its default. That is
+    /// why octo-cli reads the current record first and only overwrites the flags it was given.
+    /// </para>
     /// </summary>
     [HttpPut("lifecycle")]
     [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
@@ -261,10 +265,16 @@ public class CommunicationController : ControllerBase
         ArgumentNullException.ThrowIfNull(tenantId);
 
         await lifecycleConfigurationService.SetConfigurationAsync(tenantId,
-            new CommunicationLifecycleConfiguration { ScaleToZeroEnabled = request.ScaleToZeroEnabled });
+            new CommunicationLifecycleConfiguration
+            {
+                ScaleToZeroEnabled = request.ScaleToZeroEnabled,
+                LeasingEnabled = request.LeasingEnabled
+            });
 
-        _logger.LogInformation("Lifecycle configuration set for tenant '{TenantId}': ScaleToZeroEnabled={Enabled}",
-            tenantId, request.ScaleToZeroEnabled);
+        _logger.LogInformation(
+            "Lifecycle configuration set for tenant '{TenantId}': ScaleToZeroEnabled={Enabled}, " +
+            "LeasingEnabled={LeasingEnabled}",
+            tenantId, request.ScaleToZeroEnabled, request.LeasingEnabled);
         return Ok(request);
     }
 }

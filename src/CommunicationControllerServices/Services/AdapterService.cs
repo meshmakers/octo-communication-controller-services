@@ -348,6 +348,58 @@ internal class AdapterService(
         }
     }
 
+    /// <inheritdoc />
+    public async Task<PipelineConfigurationDto?> GetLeasedPipelineConfigurationAsync(string tenantId,
+        RtEntityId adapterRtEntityId, OctoObjectId pipelineRtId)
+    {
+        try
+        {
+            var pipelineRtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipelineRtId);
+            var pipeline = await communicationRepository.GetPipelineAsync(tenantId, pipelineRtEntityId);
+            if (pipeline is null || string.IsNullOrWhiteSpace(pipeline.PipelineDefinition) || pipeline.Enabled == false)
+            {
+                Logger.Warn(
+                    "[{TenantId}] Pipeline '{PipelineRtId}' cannot be leased out: it does not exist, is disabled or " +
+                    "carries no definition",
+                    tenantId, pipelineRtId);
+                return null;
+            }
+
+            // 🔴 The pipeline has to belong to the adapter the lease was granted for. Without this a
+            // work item queued against adapter A could be dispatched to a member acting as adapter B
+            // in the same tenant - the credential on the lease is B's, so the pipeline would run under
+            // an identity its author never chose.
+            var adaptersPipelines = await communicationRepository.GetPipelinesAsync(tenantId, adapterRtEntityId);
+            if (adaptersPipelines.All(p => p.RtId != pipelineRtId))
+            {
+                Logger.Warn(
+                    "[{TenantId}] Pipeline '{PipelineRtId}' is not deployed to adapter '{AdapterRtEntityId}' and is " +
+                    "therefore not leasable through it",
+                    tenantId, pipelineRtId, adapterRtEntityId);
+                return null;
+            }
+
+            var dataFlow = await communicationRepository.GetDataFlowByPipelineAsync(tenantId, pipelineRtId);
+            if (dataFlow == null)
+            {
+                Logger.Warn("[{TenantId}] Data flow for pipeline '{PipelineRtId}' not found; it cannot be leased out",
+                    tenantId, pipelineRtId);
+                return null;
+            }
+
+            return await CreatePipelineConfigurationAsync(tenantId, dataFlow.RtId, adapterRtEntityId.RtId, pipeline);
+        }
+        catch (Exception e)
+        {
+            // Never throws into the lease path: a projection that failed must refuse the lease with a
+            // named reason, not take down the scheduling round for every other tenant in the rotation.
+            Logger.Warn(e,
+                "[{TenantId}] Could not project pipeline '{PipelineRtId}' of adapter '{AdapterRtEntityId}' for a lease",
+                tenantId, pipelineRtId, adapterRtEntityId);
+            return null;
+        }
+    }
+
     public async Task SetAdapterCommunicationStateOnlineAsync(string tenantId, RtEntityId adapterRtEntityId,
         string connectionId)
     {

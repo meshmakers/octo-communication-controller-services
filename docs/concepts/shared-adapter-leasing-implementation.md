@@ -80,7 +80,7 @@ cause a cross-tenant data incident, and everything else waits on it before it ca
 | 4 | trigger nodes declare an execution class, resolved on save | yes (unit) | `ExecutionClass` visible on every pipeline; nothing reads it yet |
 | 5 ✅ | pool workloads deploy into a platform namespace, scale within `MinReplicas..MaxReplicas`, and are invisible to the idle watchdog | yes (kind e2e) | a pool runs N members that no tenant can reach yet |
 | 6 ✅ | management connection + `Lease`/`Release` verbs | yes (hub tests + a manual lease) | a pool member can be leased by hand |
-| 7 ✅ | queue, round-robin, priority, TTL, `Queued` executions | yes (unit + integration) | the controller queues and schedules; a member still needs the work item wired to it (§9.9) |
+| 7 ✅ | queue, round-robin, priority, TTL, `Queued` executions; **the lease carries the work** and the member runs it (§9.9 / D4); **the per-tenant kill switch, pulled forward from 9** (§13 / D5) | yes (unit + integration) | the controller queues and schedules, a leased member executes the queued pipeline end to end, and `LeasingEnabled` (default off) stops it per tenant |
 | 8 ✅ | queue visible and cancellable in all three surfaces, off one endpoint through one SDK client | yes (vitest + CLI + MCP tests) | the queue is operable |
 | 9 | metrics, alerts, per-tenant enablement | yes | rollout becomes operable |
 
@@ -1407,27 +1407,108 @@ rewritten one.
    of the query rather than of the storage engine's comparison semantics, and both comments now say
    so instead of claiming a bug that is not there.
 
-### 9.9 🔴 Open: the lease still carries no work
+### 9.9 ✅ Resolved: the lease now carries the work
 
-A lease carries `ExecutionId`, and nothing else about the work. There is no field naming the
-pipeline or its input, and no controller endpoint a member could ask. `IAdapterLeaseWorkItem` in
-`octo-communication-sdk` is still `NoAdapterLeaseWorkItem` — increment 6 left it as a seam and
-called the scheduler its filler, but §9 scopes increment 7 to
-`octo-communication-controller-services` alone and lists no wire change.
+**Decided 2026-09-14 (D4, option one).** `LeaseDto` gains the pipeline rtId, the input, and the
+pipeline configuration the member needs in order to run it; `octo-mesh-adapter` implements
+`IAdapterLeaseWorkItem` as `LeasedPipelineWorkItem`. The second candidate — sending an
+`ExecutePipelineRequest` to the per-pipeline queue after the grant — was rejected, and the reason is
+the one that mattered most:
 
-So the controller now queues, rotates, grants, claims, reaps and re-queues correctly, and a member
-that receives a lease still has nothing to run. Two candidate resolutions, and this needs a
-decision rather than a guess:
+🔴 **Exactly one execution entity.** The queued `PipelineExecution` already exists and the claim has
+already moved it `Queued → Running` with `LeaseGrantedAt` stamped. The other option would have had
+the member's trigger context report an execution *start*, and
+`PipelineExecutionService.StartExecutionAsync` **inserts** a new entity with a new RtId — it never
+looks an existing one up by `ExecutionId`. Two entities for one piece of work means a reconciliation
+step, two billing spans (concept §4b) and a queue history that no longer joins up.
 
-- extend `LeaseDto` with the pipeline rtId and input, and implement `IAdapterLeaseWorkItem` in
-  `octo-mesh-adapter` to run it directly; or
-- send the existing `ExecutePipelineRequest` to the per-pipeline queue after the grant, relying on
-  `PipelineRegistryLeaseParticipant` having registered the borrower's pipelines — which then needs
-  the adapter-created execution record reconciled with the queued one, or they will double up.
+| Where | What |
+|---|---|
+| `octo-sdk` `LeaseDto` | `PipelineRtId`, `PipelineInput`, `Pipeline` (a `PipelineConfigurationDto`). `ToString` names identifiers only — it renders neither the input nor the configuration, for the same reason it never rendered `ClientSecret` |
+| `octo-sdk` `LeaseResultDto` | `OutputData` — the only route a leased execution's `SetPipelineExecutionResult@1` output has home |
+| controller `QueuedExecution` | `InputData`, read off the entity by `ProjectQueuedExecutionsAsync` |
+| controller `IAdapterService` | `GetLeasedPipelineConfigurationAsync(tenant, adapter, pipeline)` — one pipeline, projected exactly as a dedicated adapter's registration is |
+| controller `LeaseService` | fills the three new fields, and **refuses the lease** when the pipeline cannot be projected — before a member is reserved |
+| controller `LeaseSchedulerService` | passes the queued item's pipeline and input into the `LeaseRequest` |
+| `octo-communication-sdk` | `LeaseWorkOutcome.OutputData`, carried onto the release by `AdapterPoolClient` |
+| `octo-mesh-adapter` | `Leasing/LeasedPipelineWorkItem` |
 
-The first is explicit and costs a contract change; the second reuses the existing path and buys a
-reconciliation problem. Either way it is a multi-repo change, which is why it is reported rather
-than invented here.
+**Why the configuration travels on the lease and is not pulled.** The projection
+(`AdapterService.CreatePipelineConfigurationAsync`) injects the adapter's default pipeline service
+account (AB#5027), projects the tenant's Signal channel (AB#5145) and resolves the deploy-time
+`{{service.authority}}` token (AB#5111). A member rebuilding that from the borrower's entities would
+be a second implementation of a projection that already exists, free to drift from it silently.
+
+**What the work item does, and what it deliberately does not.** It resolves the tenant from
+`IAdapterTenantScope` (never from the lease — it checks the lease *against* the scope and fails on a
+disagreement), registers the borrower's pipeline, builds the ETL context through
+`IContextCreatorService` with **the execution id off the lease**, and runs
+`IEtlDataOrchestrator.ExecutePipelineAsync`. Those are the same three steps
+`MeshAdapterTriggerContext.StartExecutePipelineAsync` takes, minus the execution-report bookkeeping —
+so the increment 3 and 6 isolation work stays on the execution path. It reports **no** execution
+start and **no** execution end: the controller owns that entity's whole lifecycle for a leased
+execution (created `Queued` at enqueue, `Running` at claim, terminal at release), and the member
+could not report one anyway — both report verbs take their tenant and adapter from the *adapter hub
+connection*, and a pool member holds a tenant-free management channel instead.
+
+It also **awaits** the run rather than detaching it. A dedicated adapter detaches so the RabbitMQ ack
+is not held for the pipeline's duration (AB#4279); a lease is the opposite contract — the member holds
+the tenant until the work is done, and releasing while the pipeline still ran would hand the process
+to another tenant mid-execution.
+
+### 9.9a Size limits, measured rather than assumed
+
+The question the enlarged DTO raises is what happens to a large input. Nothing new was invented; this
+is what is actually configured:
+
+| Hop | Limit | Where |
+|---|---|---|
+| controller → member (`LeaseAsync`) | **none applies** | `HubOptions.MaximumReceiveMessageSize` governs what the *server receives*; a lease push is server-to-client |
+| member → controller (`ReleaseLeaseAsync`, incl. `OutputData`) | **100 MiB**, explicit | `Program.cs`: `o.MaximumReceiveMessageSize = 1024 * 1024 * 100` — the ASP.NET Core default would be 32 KiB |
+| adapter SDK hub client | none configured | `SignalRClient.CreateHubConnection()` sets no `MaximumReceiveMessageSize` |
+| the input on its way in (`POST …/pipeline/execute`) | nginx `proxy-body-size: 100m`, then Kestrel's default ~28.6 MB | `octo-helm-core` values, and no `MaxRequestBodySize` override anywhere |
+| `ExecutePipelineRequest` over RabbitMQ | none configured; broker default 128 MiB | no `max_message_size`/`frame_max` in any chart or config |
+
+The empirical argument is stronger than the arithmetic one: **the identical shape already ships.**
+`IAdapterHubCallbacks.AdapterConfigurationUpdatedAsync` pushes a whole `AdapterConfigurationDto` —
+*every* deployed pipeline of an adapter, definitions included — down the same kind of channel to
+every dedicated adapter in the estate. One pipeline on a lease is strictly less than that. No new
+limit was introduced, because there is no measurement yet that would justify picking a number.
+
+### 9.9b 🔴 Two DI-ordering traps the work item walked into
+
+1. **`TryAddSingleton` after `AddAdapterPoolMember()` is a silent no-op.** That call TryAdds the SDK's
+   `NoAdapterLeaseWorkItem`, so registering the mesh work item afterwards changes nothing: every lease
+   reports "nothing to run" and looks perfectly healthy. The registration had to move **before** it —
+   the same trap, in the same file, as the `IAdapterTenantScope` ordering increment 6 documented.
+   Caught by the integration suite, and it is mutation M-M5 below.
+2. **`IContextCreatorService` must be the mesh one, and the pool-member extension cannot guarantee
+   it.** `AddDataPipeline()` registers `DefaultContextCreatorService` with a plain `AddSingleton`, so
+   the last registration wins — and the pool-member extension has to run *before* it for reason 1.
+   `AddOctoMeshAdapter()` registers `MeshContextCreatorService` after `AddDataPipeline()` and settles
+   it for every real host; a composition that skips it fails every lease with *"Etl context type
+   mismatch. Expected IMeshEtlContext"*. Documented on `AddOctoMeshAdapterPoolMember()` rather than
+   papered over.
+
+### 9.9c The mutations that prove the new tests
+
+| Mutation | Turns red |
+|---|---|
+| `LeaseDto.ToString` appends the input and the configuration | the contract's `ToString_RendersNeitherTheInputNorThePipelineConfiguration` |
+| `ToString` drops the pipeline and execution | `ToString_NamesThePipelineAndTheExecution` + `ToString_SaysSoWhenTheLeaseCarriesNoWork` |
+| `Pipeline` marked `[JsonIgnore]` | both JSON round-trip tests |
+| `LeaseResultDto.OutputData` swallowed | `LeaseResult_CarriesTheOutputButStillNoCredential` |
+| **M-C1** `LeaseService` stops filling the three work fields | 3 tests: `LeaseCarriesTheWorkTests` + the enlarged secret probe |
+| **M-C3** the release drops `outputData` | `TheReleaseCarriesThePipelineOutputOntoTheExistingExecution` |
+| **M-C6** the scheduler stops naming the pipeline and input | all 3 `QueuedWorkReachesTheLeaseTests` |
+| **M-C7** the queue projection drops `InputData` | `GetQueuedExecutionsForAdapterAsync_CarriesTheInputTheItemWasQueuedWith` |
+| 🔴 **M-C8** the claim INSERTS a new entity instead of moving the queued one | `OneWorkItemIsOneExecutionEntityFromEnqueueThroughClaimToRelease` (and 5 other queue tests) |
+| **M-M1** the work item invents its own execution id | `AnExecutionIdThatIsNotAGuidFailsTheLeaseInsteadOfInventingOne` |
+| **M-M2** the work item ignores `PipelineInput` | `TheMemberRunsThePipelineTheLeaseNamesWithTheInputTheLeaseCarries` |
+| **M-M3** a lease naming a pipeline it does not carry succeeds quietly | `ALeaseNamingAPipelineItDoesNotCarryFailsRatherThanDoingNothing` |
+| **M-M4** the work item does not read the pipeline output | 2 work-item tests |
+| **M-M5** the work item is registered AFTER `AddAdapterPoolMember()` | 4 of the 5 work-item tests |
+| adding `LeasedPipelineWorkItem` without clearing it | both mesh-adapter DI sweeps — the AB#4924 sweep did its job unprompted |
 
 ---
 
@@ -1592,8 +1673,18 @@ Two properties of the implementation are worth carrying forward:
 Scale-up is also rate-limited to one request per pool per window, because Kubernetes needs longer
 than a scheduling round to make a member ready.
 
-**D4 — How does a leased member learn what to run? 🔴 Open, and it blocks end-to-end leasing.**
-See §9.9.
+**D4 — How does a leased member learn what to run? ✅ Decided 2026-09-14: the lease carries it.**
+`LeaseDto` gains the pipeline rtId, the input and the pipeline configuration, and `octo-mesh-adapter`
+implements `IAdapterLeaseWorkItem`. The alternative — an `ExecutePipelineRequest` after the grant —
+was rejected because it produces a **second execution entity** for one piece of work: the member's
+trigger context would report an execution start, and that path inserts rather than updates. See §9.9.
+
+**D5 — When does the per-tenant kill switch ship? ✅ Decided 2026-09-14: now, not in increment 9.**
+§13 put `LeasingEnabled` under Rollout and increment 9 owned "per-tenant enablement". With increment 7
+merged, a tenant that owns an `AdapterPool` and a `Leased` adapter starts being scheduled the moment
+the controller rolls out, with no way to stop it short of a redeploy — and a kill switch that arrives
+after the thing it switches off is not a kill switch. Built on the existing AB#4914
+`communicationLifecycle` record rather than as a second mechanism. See §13.
 
 ---
 
@@ -1713,11 +1804,69 @@ structural point is unchanged.
 
 ## 13. Rollout
 
-Leasing must be gated the same way scale-to-zero is (AB#4916): the per-tenant
-`communicationLifecycle` configuration record read through `ILifecycleConfigurationService`,
-extended with `LeasingEnabled` (default **false**), so an emergency stop stays an octo-cli
-one-liner per tenant and no release is needed to turn it off. Both the lender and the
-borrower tenant must have it on.
+Leasing is gated the same way scale-to-zero is (AB#4916): the per-tenant `communicationLifecycle`
+configuration record read through `ILifecycleConfigurationService`, extended with `LeasingEnabled`
+(default **false**), so an emergency stop stays an octo-cli one-liner per tenant and no release is
+needed to turn it off. Both the lender and the borrower tenant must have it on.
+
+### 13.1 ✅ Built with increment 7, not with increment 9 (D5)
+
+This section used to describe a switch that increment 9 would own, alongside "per-tenant
+enablement". It was **pulled forward and is implemented**, because with increment 7 merged a tenant
+that owns an `AdapterPool` and a `Leased` adapter starts being scheduled the moment the controller
+rolls out — and the only way to stop it would have been a redeploy. A kill switch that arrives after
+the thing it switches off is not a kill switch.
+
+It extends the **existing** AB#4914 mechanism rather than adding a second one: the same tenant
+key-value record under `Constants.CommunicationLifecycleConfigurationKey`, the same
+`ILifecycleConfigurationService` with its 30 s TTL and its invalidate-on-write, the same
+`GET`/`PUT {tenantId}/v1/communication/lifecycle`, the same `octo-cli` verbs.
+
+| Where | What |
+|---|---|
+| `CommunicationLifecycleConfiguration` | `LeasingEnabled`, default **false**; a record written before AB#4924 deserializes to false, so the estate stays off without a migration |
+| `ILifecycleConfigurationService` | `IsLeasingEnabledAsync(tenantId)`, mirroring `IsScaleToZeroEnabledAsync` |
+| `CommunicationLifecycleDto` | second positional parameter, **defaulted**, so the five existing construction sites keep compiling |
+| `octo-cli` | `SetCommunicationLifecycle -le <true\|false>`, `GetCommunicationLifecycle` prints both |
+
+**Where it is enforced — two places, and both are needed.**
+
+- `TriggerManagementService.StartExecutePipelineAsync` (the enqueue branch). Nothing is written: no
+  execution entity, no `QueuedAt`, no event that looks like progress. It **throws** a named
+  `TriggerManagementServiceException` rather than falling through to the manual-adapter path, which
+  would publish to a per-pipeline queue nothing is listening on and report failure 30 s later with a
+  message about an adapter — which is not what happened.
+- `LeaseService.GrantLeaseAsync`, at the top, **before any credential is read**. Every grant goes
+  through it: the scheduler's and the hand-driven `POST {tenantId}/v1/adapterPool/{id}/lease` alike.
+
+Gating only the enqueue would leave a full queue draining for as long as it takes after somebody
+turned leasing off — not what an operator means by the word. Gating only the grant would keep growing
+a queue nobody is going to serve.
+
+**Whose switch is it — both tenants'.** The flag means a different thing on each: on the **lending**
+tenant "this tenant's pools hand their members out", on the **borrowing** tenant "this tenant's
+`Leased` adapters get scheduled". Lending is the lender's capability and borrowing is the borrower's,
+and neither tenant can assert the other's, so one `true` is never enough. That is what concept §13's
+"both the lender and the borrower tenant must have it on" asks for; the refusal names which half is
+missing.
+
+**What happens to work already queued — it is HELD.** 🔴 Not drained, not cancelled. Entries stay
+`Queued` and stay visible in all three surfaces; nothing new is enqueued and nothing is granted.
+Switching leasing back on resumes the queue in its original order. Draining would mean "off" still
+runs the next hour of work, which is the exact surprise the switch exists to prevent; cancelling
+would destroy work the operator never asked to lose, and a queue entry belongs to the borrower rather
+than to whoever flipped the switch. Holding is the only one of the three that is reversible, and
+`DELETE {tenantId}/v1/adapterPool/{id}/queue/{executionId}` is the explicit way to throw work away.
+
+**One caveat, inherited rather than introduced:** the read is cached for 30 s, so a switch flipped off
+stops granting within half a minute rather than instantly. That is the same window scale-to-zero has
+lived with since AB#4916, and a lease already granted was always going to run to its end.
+
+**The mutations that prove it:** **M-C2** (grant gate removed → 3 `LeasingEnabledGateTests`),
+**M-C4b** (enqueue gate always passes → `LeasedAdapterEnqueueTests`), **M-C5** (`LeasingEnabled`
+defaults to true → both default-off tests), **M-L1** (the CLI stops reading the current record → the
+two "leaves the other flag untouched" tests), **M-L2** (the empty command line writes the defaults),
+**M-L3** (the leasing flag is never sent), **M-L4** (the tenant guard is dropped).
 
 **Wave order:**
 

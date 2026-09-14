@@ -28,13 +28,20 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 ///     <c>0</c> Interactive, <c>1</c> Batch — the numeric keys of the <c>PipelineExecutionClass</c> CK
 ///     enum. Ordered ascending, so Interactive sorts ahead of Batch without a mapping table.
 /// </param>
+/// <param name="InputData">
+///     The pipeline input the trigger supplied, stored on the execution at enqueue. Carried here
+///     because the lease has to carry the work (AB#4924 §9.9 / D4): a member that received only an
+///     execution id had nothing to run. Read from the entity rather than re-derived, so the retry of
+///     an interrupted attempt and its original run the same input.
+/// </param>
 public sealed record QueuedExecution(
     string ExecutionId,
     OctoObjectId ExecutionRtId,
     DateTime QueuedAtUtc,
     OctoObjectId? PipelineRtId,
     string? PipelineName,
-    int ExecutionClass)
+    int ExecutionClass,
+    string? InputData = null)
 {
     /// <summary><c>PipelineExecutionClass.Interactive</c>: work a human is waiting for.</summary>
     public const int InteractiveClass = 0;

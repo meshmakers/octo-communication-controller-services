@@ -103,4 +103,105 @@ internal class LeaseSecretLogTargetTests : LeaseServiceTestsBase
             NLog.LogManager.Configuration = previousConfiguration;
         }
     }
+
+    /// <summary>
+    ///     🔴 AB#4924 §9.9 / D4 — <b>the same assertion, over the enlarged DTO.</b> The lease now also
+    ///     carries the borrowing tenant's pipeline input and that pipeline's resolved configuration
+    ///     entries, and AB#5027 puts a service-account credential into exactly those entries. Adding
+    ///     work to the lease must not have opened a second log or error path that renders the whole
+    ///     object — which is what would happen the first time somebody logged the <c>LeaseDto</c>
+    ///     itself, or interpolated its <c>Pipeline</c> into a diagnostic.
+    /// </summary>
+    [Test]
+    [NotInParallel(nameof(LeaseSecretLogTargetTests))]
+    public async Task GrantLeaseAsync_NeverWritesTheWorkTheLeaseCarriesToAnyLogTarget()
+    {
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+
+        var memoryTarget = new NLog.Targets.MemoryTarget("lease-work-probe")
+        {
+            Layout = "${level}|${message}|${exception:format=ToString}"
+        };
+        var previousConfiguration = NLog.LogManager.Configuration;
+        var probeConfiguration = new NLog.Config.LoggingConfiguration();
+        probeConfiguration.AddRule(NLog.LogLevel.Trace, NLog.LogLevel.Fatal, memoryTarget);
+        NLog.LogManager.Configuration = probeConfiguration;
+        try
+        {
+            var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, AWorkRequest());
+            var lease = CapturePushedLease();
+
+            using var _ = Assert.Multiple();
+            // The work really did travel — otherwise the probe proves nothing.
+            await Assert.That(result.Granted).IsTrue();
+            await Assert.That(lease.PipelineInput).IsEqualTo(PipelineInput);
+            await Assert.That(lease.Pipeline).IsNotNull();
+            await Assert.That(memoryTarget.Logs).IsNotEmpty();
+
+            // The lease's own credential, unchanged from increment 6.
+            await Assert.That(memoryTarget.Logs.Any(l => l.Contains(ClientSecret, StringComparison.Ordinal)))
+                .IsFalse();
+            // The configuration's credential — the one the enlarged DTO added.
+            await Assert.That(memoryTarget.Logs.Any(l => l.Contains(ConfigurationSecret, StringComparison.Ordinal)))
+                .IsFalse();
+            await Assert.That(memoryTarget.Logs
+                    .Any(l => l.Contains(ConfigurationSecret[..8], StringComparison.Ordinal)))
+                .IsFalse();
+            // The borrower's payload. Not a credential, but it is another tenant's data in a process
+            // that serves a third one a second later.
+            await Assert.That(memoryTarget.Logs.Any(l => l.Contains(PipelineInput, StringComparison.Ordinal)))
+                .IsFalse();
+            await Assert.That(memoryTarget.Logs
+                    .Any(l => l.Contains("BORROWER-PRIVATE-4711", StringComparison.Ordinal)))
+                .IsFalse();
+        }
+        finally
+        {
+            NLog.LogManager.Configuration = previousConfiguration;
+        }
+    }
+
+    /// <summary>
+    ///     🔴 The same probe as <c>RenderingTheLeaseObjectItselfDoesNotRevealTheSecret</c>, extended to
+    ///     the work. A record's generated <c>ToString</c> prints every property, so a structured-logging
+    ///     call on the enlarged object would print the input and the whole pipeline configuration too.
+    /// </summary>
+    [Test]
+    [NotInParallel(nameof(LeaseSecretLogTargetTests))]
+    public async Task RenderingTheEnlargedLeaseObjectRevealsNeitherTheInputNorTheConfiguration()
+    {
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, AWorkRequest());
+        var lease = CapturePushedLease();
+
+        var memoryTarget = new NLog.Targets.MemoryTarget("lease-work-tostring-probe") { Layout = "${message}" };
+        var previousConfiguration = NLog.LogManager.Configuration;
+        var probeConfiguration = new NLog.Config.LoggingConfiguration();
+        probeConfiguration.AddRule(NLog.LogLevel.Trace, NLog.LogLevel.Fatal, memoryTarget);
+        NLog.LogManager.Configuration = probeConfiguration;
+        try
+        {
+            NLog.LogManager.GetLogger("probe").Info("A lease travelled: {Lease}", lease);
+
+            using var _ = Assert.Multiple();
+            await Assert.That(memoryTarget.Logs).IsNotEmpty();
+            await Assert.That(memoryTarget.Logs.Any(l => l.Contains(ClientSecret, StringComparison.Ordinal)))
+                .IsFalse();
+            await Assert.That(memoryTarget.Logs.Any(l => l.Contains(ConfigurationSecret, StringComparison.Ordinal)))
+                .IsFalse();
+            await Assert.That(memoryTarget.Logs.Any(l => l.Contains(PipelineInput, StringComparison.Ordinal)))
+                .IsFalse();
+            // It still identifies the work, or the obvious "fix" for a useless line is to print the
+            // object some other way.
+            await Assert.That(memoryTarget.Logs
+                    .Any(l => l.Contains(PipelineRtId.ToString(), StringComparison.Ordinal)))
+                .IsTrue();
+        }
+        finally
+        {
+            NLog.LogManager.Configuration = previousConfiguration;
+        }
+    }
 }

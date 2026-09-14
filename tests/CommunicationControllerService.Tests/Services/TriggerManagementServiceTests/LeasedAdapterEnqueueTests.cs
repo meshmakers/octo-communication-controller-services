@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -115,5 +116,61 @@ internal class LeasedAdapterEnqueueTests : TriggerManagementServiceTestsBase
 
         await CommunicationRepository.DidNotReceive().EnqueueExecutionAsync(Arg.Any<string>(),
             Arg.Any<RtPipelineExecution>(), Arg.Any<RtEntityId>(), Arg.Any<RtEntityId>(), Arg.Any<DateTime>());
+    }
+
+    /// <summary>
+    ///     AB#4924 §13 — the per-tenant leasing kill switch, <b>enqueue</b> half. With leasing off the
+    ///     work is refused with a named reason and <b>nothing is written</b>: no execution entity, no
+    ///     <c>QueuedAt</c>, no event that looks like progress.
+    /// </summary>
+    /// <remarks>
+    ///     🔴 It throws rather than falling through to the manual-adapter path. That path publishes to
+    ///     a per-pipeline queue nothing is listening on and reports failure only after the 30 s
+    ///     MassTransit request timeout, with a message about an adapter — which is not what happened.
+    /// </remarks>
+    [Test]
+    public async Task WithLeasingDisabled_NothingIsQueuedAndTheCallerIsToldWhy()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+        ArrangeAdapter(RtLifecycleModeEnum.Leased, pipelineRtId);
+        LifecycleConfigurationService.IsLeasingEnabledAsync(TenantId).Returns(false);
+
+        var exception = await Assert.ThrowsAsync<TriggerManagementServiceException>(async () =>
+            await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId,
+                pipelineInput: "{\"x\":1}"));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(exception!.Message).Contains("leasing is disabled");
+        await CommunicationRepository.DidNotReceiveWithAnyArgs()
+            .EnqueueExecutionAsync(default!, default!, default!, default!, default);
+        // Not smuggled onto the manual path either — a Leased adapter has no process to send to.
+        await ExecuteMeshPipelineCommandClient.DidNotReceive()
+            .GetResponse<ExecutePipelineResponse>(Arg.Any<string>(), Arg.Any<ExecutePipelineRequest>(),
+                Arg.Any<CancellationToken>(), Arg.Any<TimeSpan?>());
+    }
+
+    /// <summary>
+    ///     The switch is about <b>leasing</b>, not about executing. A manual adapter in a tenant with
+    ///     leasing off keeps running exactly as before — it never had a queue and never needed one.
+    /// </summary>
+    [Test]
+    public async Task WithLeasingDisabled_AManualAdapterIsUnaffected()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+        ArrangeAdapter(RtLifecycleModeEnum.AlwaysOn, pipelineRtId);
+        LifecycleConfigurationService.IsLeasingEnabledAsync(TenantId).Returns(false);
+
+        ExecuteMeshPipelineCommandClient
+            .GetResponse<ExecutePipelineResponse>(Arg.Any<string>(), Arg.Any<ExecutePipelineRequest>(),
+                Arg.Any<CancellationToken>(), Arg.Any<TimeSpan?>())
+            .Returns(new ExecutePipelineResponse(true, null, Guid.NewGuid(), DateTime.UtcNow));
+
+        var result = await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId,
+            pipelineInput: "{\"x\":1}");
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result).IsNotNull();
+        await CommunicationRepository.DidNotReceiveWithAnyArgs()
+            .EnqueueExecutionAsync(default!, default!, default!, default!, default);
     }
 }

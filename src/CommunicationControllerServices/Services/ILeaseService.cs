@@ -21,11 +21,22 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 /// <param name="Ttl">
 ///     How long the lease is valid. Null takes <see cref="ILeaseService.DefaultLeaseTtl" />.
 /// </param>
+/// <param name="PipelineRtId">
+///     The pipeline the member is to run (AB#4924 §9.9 / D4). Null on a hand-driven lease, which
+///     carries no work; the scheduler always names it, because it — not the member — decided which
+///     queued item this lease serves.
+/// </param>
+/// <param name="PipelineInput">
+///     The queued work item's input, carried onto the lease verbatim. Null when the trigger supplied
+///     none.
+/// </param>
 public record LeaseRequest(
     string BorrowerTenantId,
     OctoObjectId BorrowerAdapterRtId,
     string? ExecutionId = null,
-    TimeSpan? Ttl = null);
+    TimeSpan? Ttl = null,
+    OctoObjectId? PipelineRtId = null,
+    string? PipelineInput = null);
 
 /// <summary>
 ///     Outcome of a lease attempt (AB#4924).
@@ -103,7 +114,8 @@ public interface ILeaseService
     ///     always, and a terminal status when nothing else has completed the execution yet
     ///     (AB#4924 §9.1).
     /// </summary>
-    Task ApplyLeaseOutcomeAsync(LeaseDto lease, bool success, string? statusMessage);
+    Task ApplyLeaseOutcomeAsync(LeaseDto lease, bool success, string? statusMessage,
+        string? outputData = null);
 
     /// <summary>
     ///     Marks the attempt a lease was serving <c>Interrupted</c>, stamps <c>LeaseReleasedAt</c>

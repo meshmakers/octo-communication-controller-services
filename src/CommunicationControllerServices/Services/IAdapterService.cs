@@ -98,6 +98,38 @@ public interface IAdapterService
         bool onlyDeployedPipelines);
 
     /// <summary>
+    ///     Projects ONE deployed pipeline of an adapter into what a member needs in order to run it
+    ///     (AB#4924 §9.9 / D4) — the same element a dedicated adapter gets in its
+    ///     <see cref="AdapterConfigurationDto.Pipelines" />.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         🔴 <b>Why the lease carries this rather than the member building it.</b> The projection
+    ///         injects the adapter's default pipeline service account (AB#5027), projects the tenant's
+    ///         Signal channel (AB#5145) and resolves the deploy-time <c>{{service.authority}}</c> token
+    ///         (AB#5111). A pool member rebuilding that from the borrower's entities would be a second
+    ///         implementation of a projection that already exists here, free to drift silently.
+    ///     </para>
+    ///     <para>
+    ///         Unlike <see cref="GetAdapterConfigurationAsync" /> this does <b>not</b> require the
+    ///         tenant to be in the adapter cache. A lease is authorized by the borrower's own
+    ///         declaration intersected with the lender's sharing scope (<c>LeaseService</c>), and
+    ///         making a grant depend on whether some controller pod happens to hold a cache entry
+    ///         would turn a leasing outage into something nobody can explain from the entities.
+    ///     </para>
+    /// </remarks>
+    /// <param name="tenantId">The borrowing tenant.</param>
+    /// <param name="adapterRtEntityId">The borrower's <c>Leased</c> adapter.</param>
+    /// <param name="pipelineRtId">RtId of the pipeline to project.</param>
+    /// <returns>
+    ///     The projection, or <c>null</c> when the pipeline does not exist, is disabled, carries no
+    ///     definition, is not deployed to this adapter or has no data flow — every one of which is a
+    ///     reason to refuse the lease with a named cause rather than to grant one with nothing to run.
+    /// </returns>
+    Task<PipelineConfigurationDto?> GetLeasedPipelineConfigurationAsync(string tenantId,
+        RtEntityId adapterRtEntityId, OctoObjectId pipelineRtId);
+
+    /// <summary>
     /// Sets an adapter online
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>

@@ -26,7 +26,11 @@ internal abstract class LeaseServiceTestsBase
     protected const string MemberId = "octo-pool-0";
     protected const string ClientSecret = "sJ8k2p-QmZ4x7vNb1LcT0aRwEyUiOpAsDfGhJkLzXcVbNm";
 
+    protected const string PipelineInput = "{\"invoiceNumber\":\"BORROWER-PRIVATE-4711\"}";
+    protected const string ConfigurationSecret = "cfgSecret-9F2a7Lq0ZxBv3TnE8Rd1Yh6Ks4Mw5Pu2";
+
     protected static readonly OctoObjectId PoolRtId = new("6ad562f3ff7c40ff80275b84");
+    protected static readonly OctoObjectId PipelineRtId = new("6ad562f3ff7c40ff80275b85");
 
     protected readonly IAdapterPoolConnectionManager ConnectionManager = new AdapterPoolConnectionManager();
     protected readonly ICommunicationRepository CommunicationRepository =
@@ -39,6 +43,20 @@ internal abstract class LeaseServiceTestsBase
         Substitute.For<ITenantLendingScopeResolver>();
     protected readonly IPipelineServiceAccountResolver ServiceAccountResolver =
         Substitute.For<IPipelineServiceAccountResolver>();
+
+    /// <summary>
+    ///     AB#4924 §9.9 / D4 — the lease carries the work, and the projection that produces it is the
+    ///     controller's, not the member's.
+    /// </summary>
+    protected readonly IAdapterService AdapterService = Substitute.For<IAdapterService>();
+
+    /// <summary>
+    ///     AB#4924 §13 — the per-tenant leasing kill switch. Default <b>on</b> for both tenants, so
+    ///     every test written before it existed still exercises what it meant to; the gate's own suite
+    ///     turns it off explicitly, one tenant at a time.
+    /// </summary>
+    protected readonly ILifecycleConfigurationService LifecycleConfiguration =
+        Substitute.For<ILifecycleConfigurationService>();
 
     protected readonly ISingleClientProxy MemberProxy = Substitute.For<ISingleClientProxy>();
     protected readonly ILeaseService LeaseService;
@@ -54,8 +72,11 @@ internal abstract class LeaseServiceTestsBase
         // Decrypt is a pass-through without the `enc:v1:` sentinel, exactly as in production.
         EncryptionService.Decrypt(Arg.Any<string>()).Returns(call => call.Arg<string>());
 
+        LifecycleConfiguration.IsLeasingEnabledAsync(Arg.Any<string>()).Returns(true);
+
         LeaseService = new LeaseService(ConnectionManager, CommunicationRepository, EventService,
-            EncryptionService, HubContext, LendingScopeResolver, ServiceAccountResolver);
+            EncryptionService, HubContext, LendingScopeResolver, ServiceAccountResolver, AdapterService,
+            LifecycleConfiguration);
     }
 
     /// <summary>
@@ -117,6 +138,44 @@ internal abstract class LeaseServiceTestsBase
     protected LeaseRequest ARequest(string? executionId = null, TimeSpan? ttl = null)
     {
         return new LeaseRequest(BorrowerTenantId, Borrower.RtId, executionId, ttl);
+    }
+
+    /// <summary>
+    ///     A request that names work — an execution AND the pipeline to run for it (AB#4924 §9.9 / D4).
+    /// </summary>
+    protected LeaseRequest AWorkRequest(string executionId = "exec-1", string? input = PipelineInput)
+    {
+        return new LeaseRequest(BorrowerTenantId, Borrower.RtId, executionId, null, PipelineRtId, input);
+    }
+
+    /// <summary>
+    ///     The controller's projection of the pipeline the lease is to run. Carries a second secret of
+    ///     its own on purpose: AB#5027 puts the pipeline service account into exactly these entries, so
+    ///     the log-target assertion has something to be about beyond the lease's own credential.
+    /// </summary>
+    protected PipelineConfigurationDto ArrangeProjectablePipeline(string? configurationSecret = ConfigurationSecret)
+    {
+        var configuration = new PipelineConfigurationDto(
+            new OctoObjectId("665f0000000000000000ee24"),
+            new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, PipelineRtId),
+            false,
+            "triggers:\n  - node: FromExecutePipelineCommand@1\n",
+            [
+                new ConfigurationDto(new OctoObjectId("665f0000000000000000ee25"),
+                    SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId, "adapter-service-account",
+                    $"{{\"attributes\":{{\"clientSecret\":\"{configurationSecret}\"}}}}")
+            ]);
+
+        AdapterService.GetLeasedPipelineConfigurationAsync(BorrowerTenantId, Arg.Any<RtEntityId>(), PipelineRtId)
+            .Returns(configuration);
+        return configuration;
+    }
+
+    /// <summary>The projection fails — a pipeline that is gone, disabled, or on another adapter.</summary>
+    protected void ArrangeUnprojectablePipeline()
+    {
+        AdapterService.GetLeasedPipelineConfigurationAsync(BorrowerTenantId, Arg.Any<RtEntityId>(), PipelineRtId)
+            .Returns((PipelineConfigurationDto?)null);
     }
 
     /// <summary>

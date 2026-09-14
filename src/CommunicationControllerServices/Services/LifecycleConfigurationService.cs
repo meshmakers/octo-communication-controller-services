@@ -35,6 +35,11 @@ internal class LifecycleConfigurationService(
         return (await GetConfigurationAsync(tenantId)).ScaleToZeroEnabled;
     }
 
+    public async Task<bool> IsLeasingEnabledAsync(string tenantId)
+    {
+        return (await GetConfigurationAsync(tenantId)).LeasingEnabled;
+    }
+
     public async Task SetConfigurationAsync(string tenantId, CommunicationLifecycleConfiguration configuration)
     {
         var tenantContext = await systemContext.FindTenantContextAsync(tenantId);
@@ -49,8 +54,9 @@ internal class LifecycleConfigurationService(
         _cache.TryRemove(tenantId, out _);
 
         logger.LogInformation(
-            "Lifecycle configuration for tenant '{TenantId}' updated: ScaleToZeroEnabled={ScaleToZeroEnabled}",
-            tenantId, configuration.ScaleToZeroEnabled);
+            "Lifecycle configuration for tenant '{TenantId}' updated: ScaleToZeroEnabled={ScaleToZeroEnabled}, " +
+            "LeasingEnabled={LeasingEnabled}",
+            tenantId, configuration.ScaleToZeroEnabled, configuration.LeasingEnabled);
     }
 
     private async Task<CommunicationLifecycleConfiguration> LoadAsync(string tenantId)

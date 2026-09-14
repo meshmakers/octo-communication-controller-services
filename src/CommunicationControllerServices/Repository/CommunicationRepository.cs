@@ -3090,7 +3090,10 @@ internal class CommunicationRepository : ICommunicationRepository
                 execution.QueuedAt ?? DateTime.MinValue,
                 pipeline?.RtId,
                 pipeline?.Name,
-                executionClass));
+                executionClass,
+                // AB#4924 §9.9 / D4: the input travels to the member on the lease. Read from the
+                // entity, never re-derived - a retry and its original attempt must run the same input.
+                execution.InputData));
         }
 
         return projected;

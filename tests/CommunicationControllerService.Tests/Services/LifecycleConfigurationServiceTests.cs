@@ -98,4 +98,58 @@ internal class LifecycleConfigurationServiceTests
         await _tenantContext.Received(2).GetConfigurationAsync<CommunicationLifecycleConfiguration>(
             _session, Constants.CommunicationLifecycleConfigurationKey, null);
     }
+
+    /// <summary>
+    ///     AB#4924 §13 — <b>default off</b> on a tenant that has never set it. The switch was pulled
+    ///     forward from increment 9 precisely so that a tenant which happens to own an
+    ///     <c>AdapterPool</c> and a <c>Leased</c> adapter is not scheduled the moment the controller
+    ///     rolls out; a default of true would give away the whole point.
+    /// </summary>
+    [Test]
+    public async Task IsLeasingEnabledAsync_ATenantThatNeverSetIt_IsOff()
+    {
+        GivenStoredConfiguration(null);
+
+        await Assert.That(await _service.IsLeasingEnabledAsync(TenantId)).IsFalse();
+    }
+
+    /// <summary>
+    ///     A record written before AB#4924 carries no leasing flag at all. It deserializes to false
+    ///     rather than to anything else — the estate's existing tenants stay off without a migration.
+    /// </summary>
+    [Test]
+    public async Task IsLeasingEnabledAsync_APreExistingRecordWithoutTheFlag_IsOff()
+    {
+        GivenStoredConfiguration(new CommunicationLifecycleConfiguration { ScaleToZeroEnabled = true });
+
+        using var _ = Assert.Multiple();
+        await Assert.That(await _service.IsLeasingEnabledAsync(TenantId)).IsFalse();
+        await Assert.That(await _service.IsScaleToZeroEnabledAsync(TenantId)).IsTrue();
+    }
+
+    [Test]
+    public async Task IsLeasingEnabledAsync_ReflectsStoredConfiguration()
+    {
+        GivenStoredConfiguration(new CommunicationLifecycleConfiguration { LeasingEnabled = true });
+
+        await Assert.That(await _service.IsLeasingEnabledAsync(TenantId)).IsTrue();
+    }
+
+    /// <summary>
+    ///     The two switches are independent: leasing on must not imply scale-to-zero on, or turning a
+    ///     pool on would quietly start hibernating that tenant's dedicated adapters as well.
+    /// </summary>
+    [Test]
+    public async Task TheTwoSwitchesAreIndependent()
+    {
+        GivenStoredConfiguration(new CommunicationLifecycleConfiguration
+        {
+            ScaleToZeroEnabled = false,
+            LeasingEnabled = true
+        });
+
+        using var _ = Assert.Multiple();
+        await Assert.That(await _service.IsLeasingEnabledAsync(TenantId)).IsTrue();
+        await Assert.That(await _service.IsScaleToZeroEnabledAsync(TenantId)).IsFalse();
+    }
 }

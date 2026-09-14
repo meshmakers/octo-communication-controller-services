@@ -20,4 +20,35 @@ public class CommunicationLifecycleConfiguration
     ///     the wake API.
     /// </summary>
     public bool ScaleToZeroEnabled { get; set; }
+
+    /// <summary>
+    ///     Master switch for adapter-pool leasing on this tenant (AB#4924 §13). Default false.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         🔴 <b>Pulled forward from increment 9 deliberately.</b> With increment 7 merged, a
+    ///         tenant that owns an <c>AdapterPool</c> and a <c>Leased</c> adapter starts being
+    ///         scheduled the moment the controller rolls out, and there was no way to stop it short of
+    ///         a redeploy. A kill switch that arrives after the thing it switches off is not a kill
+    ///         switch.
+    ///     </para>
+    ///     <para>
+    ///         <b>One flag, two meanings, both required.</b> On a <b>lending</b> tenant it reads "this
+    ///         tenant's pools hand their members out"; on a <b>borrowing</b> tenant it reads "this
+    ///         tenant's <c>Leased</c> adapters get scheduled". A lease needs both ends on, because
+    ///         lending is the lender's capability and borrowing is the borrower's and neither tenant
+    ///         can assert the other's. That is what concept §13 asks for in one line.
+    ///     </para>
+    ///     <para>
+    ///         🔴 <b>Switching it off HOLDS the queue.</b> Work already <c>Queued</c> stays
+    ///         <c>Queued</c> and stays visible; nothing new is enqueued and nothing is granted.
+    ///         Draining would mean "off" still runs the next hour of work — the exact surprise the
+    ///         switch exists to prevent. Cancelling would destroy work the operator never asked to
+    ///         lose, and a queue entry is the borrower's, not the operator's, to discard. Holding is
+    ///         the only one of the three that is reversible: switching back on resumes the queue in its
+    ///         original order, and <c>DELETE {tenantId}/v1/adapterPool/{id}/queue/{executionId}</c> is
+    ///         the explicit way to throw it away.
+    ///     </para>
+    /// </remarks>
+    public bool LeasingEnabled { get; set; }
 }

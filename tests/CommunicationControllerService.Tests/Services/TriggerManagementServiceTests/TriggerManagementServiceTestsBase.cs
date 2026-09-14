@@ -21,6 +21,14 @@ internal abstract class TriggerManagementServiceTestsBase
     protected readonly ICommunicationEventService CommunicationEventService;
     protected readonly IWorkloadLifecycleService WorkloadLifecycleService = Substitute.For<IWorkloadLifecycleService>();
 
+    /// <summary>
+    ///     AB#4924 §13 — the per-tenant leasing kill switch. Default <b>on</b> in this base so every
+    ///     pre-existing enqueue test keeps asserting what it was written to assert; the gate's own
+    ///     suite turns it off explicitly.
+    /// </summary>
+    protected readonly ILifecycleConfigurationService LifecycleConfigurationService =
+        Substitute.For<ILifecycleConfigurationService>();
+
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
     protected TriggerManagementServiceTestsBase()
     {
@@ -41,7 +49,10 @@ internal abstract class TriggerManagementServiceTestsBase
             ExecuteMeshPipelineCommandClient,
             DistributionEventHubService,
             CommunicationEventService,
-            WorkloadLifecycleService);
+            WorkloadLifecycleService,
+            LifecycleConfigurationService);
+
+        LifecycleConfigurationService.IsLeasingEnabledAsync(Arg.Any<string>()).Returns(true);
 
         // Default: RemoveScheduleAsync returns empty triggers and succeeds
         CommunicationRepository.GetTriggersAsync(TenantId)

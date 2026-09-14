@@ -6,6 +6,8 @@ using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.Syst
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
+using Meshmakers.Octo.Runtime.Contracts.Repositories;
+using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Xunit;
 
@@ -310,6 +312,112 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
         {
             await CleanupAsync(data);
         }
+    }
+
+    /// <summary>
+    ///     AB#4924 §9.9 / D4 — the input the work item was queued with reaches the scheduler, which is
+    ///     what puts it on the lease. Pinned over real MongoDB because the projection reads it off the
+    ///     entity rather than off anything the caller still holds.
+    /// </summary>
+    [Fact]
+    public async Task GetQueuedExecutionsForAdapterAsync_CarriesTheInputTheItemWasQueuedWith()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var data = new TestData();
+
+        try
+        {
+            var (pipeline, adapter) = await CreateWorkAsync(data);
+            const string input = "{\"invoiceNumber\":\"BORROWER-PRIVATE-4711\"}";
+            var withInput = await EnqueueAsync(data, pipeline, adapter, DateTime.UtcNow.AddMinutes(-2), input);
+            var withoutInput = await EnqueueAsync(data, pipeline, adapter, DateTime.UtcNow.AddMinutes(-1));
+
+            var queue = await repository.GetQueuedExecutionsForAdapterAsync(fixture.TestTenantId, adapter, 100);
+
+            queue.Single(q => q.ExecutionId == withInput).InputData.Should().Be(input);
+            // 🔴 Null, not empty. "no input at all" and "an empty input" are different pipeline inputs,
+            // and a node that branches on presence would see the wrong one.
+            queue.Single(q => q.ExecutionId == withoutInput).InputData.Should().BeNull();
+        }
+        finally
+        {
+            await CleanupAsync(data);
+        }
+    }
+
+    /// <summary>
+    ///     🔴 <b>One work item is ONE execution entity, from enqueue through claim to release.</b>
+    /// </summary>
+    /// <remarks>
+    ///     This is the constraint that decided D4. The alternative resolution — sending an
+    ///     <c>ExecutePipelineRequest</c> after the grant — would have had the member's trigger context
+    ///     report an execution start, and <c>PipelineExecutionService.StartExecutionAsync</c> INSERTS a
+    ///     new <c>RtPipelineExecution</c> with a new RtId and never looks an existing one up by
+    ///     <c>ExecutionId</c>. Two entities for one piece of work means a reconciliation step and two
+    ///     billing spans (concept §4b). Counting the entities by <c>ExecutionId</c> over real MongoDB is
+    ///     the only assertion that can actually see a second one appear.
+    /// </remarks>
+    [Fact]
+    public async Task OneWorkItemIsOneExecutionEntityFromEnqueueThroughClaimToRelease()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var data = new TestData();
+
+        try
+        {
+            var (pipeline, adapter) = await CreateWorkAsync(data);
+            var executionId = await EnqueueAsync(data, pipeline, adapter, DateTime.UtcNow.AddSeconds(-30),
+                "{\"x\":1}");
+
+            (await CountEntitiesWithExecutionIdAsync(executionId)).Should().Be(1, "enqueue creates the entity");
+
+            var grantedAt = DateTime.UtcNow;
+            (await repository.TryClaimQueuedExecutionAsync(fixture.TestTenantId, executionId,
+                new LeaseClaim("lease-1", LenderTenantId, PoolRtId, "member-1", grantedAt))).Should().BeTrue();
+
+            (await CountEntitiesWithExecutionIdAsync(executionId)).Should()
+                .Be(1, "the claim moves the SAME entity Queued -> Running");
+
+            // The release, exactly as LeaseService.ApplyLeaseOutcomeAsync performs it.
+            await repository.StampLeaseReleasedAsync(fixture.TestTenantId, executionId, DateTime.UtcNow);
+            await repository.UpdatePipelineExecutionAsync(fixture.TestTenantId, executionId,
+                RtPipelineExecutionStatusEnum.Completed, DateTime.UtcNow, 1234, null, "{\"total\":42}");
+
+            (await CountEntitiesWithExecutionIdAsync(executionId)).Should()
+                .Be(1, "the release completes the SAME entity");
+
+            var loaded = await repository.GetPipelineExecutionAsync(fixture.TestTenantId, executionId);
+            loaded!.Status.Should().Be(RtPipelineExecutionStatusEnum.Completed);
+            loaded.InputData.Should().Be("{\"x\":1}");
+            loaded.OutputData.Should().Be("{\"total\":42}");
+            // The whole lease span is on that one entity, which is what prices the borrower.
+            loaded.QueuedAt.Should().NotBeNull();
+            loaded.LeaseGrantedAt.Should().NotBeNull();
+            loaded.LeaseReleasedAt.Should().NotBeNull();
+        }
+        finally
+        {
+            await CleanupAsync(data);
+        }
+    }
+
+    /// <summary>
+    ///     How many <c>PipelineExecution</c> entities carry this business execution id. Deliberately a
+    ///     COUNT and not a single-read: <c>GetPipelineExecutionAsync</c> returns the first match and
+    ///     would happily report success while a second entity sat next to it.
+    /// </summary>
+    private async Task<int> CountEntitiesWithExecutionIdAsync(string executionId)
+    {
+        var systemContext = fixture.GetSystemContext();
+        var tenantRepository = await systemContext.FindTenantRepositoryAsync(fixture.TestTenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        var queryOptions = RtEntityQueryOptions.Create()
+            .FieldFilter(nameof(RtPipelineExecution.ExecutionId), FieldFilterOperator.Equals, executionId);
+
+        var resultSet =
+            await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(session, queryOptions);
+        return resultSet.Items.Count();
     }
 
     private async Task<(RtEntityId Pipeline, RtEntityId Adapter)> CreateWorkAsync(TestData data)

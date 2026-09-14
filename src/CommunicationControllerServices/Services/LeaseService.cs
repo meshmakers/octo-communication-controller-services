@@ -21,6 +21,8 @@ internal class LeaseService : ILeaseService
     private readonly IHubContext<AdapterPoolHub> _hubContext;
     private readonly ITenantLendingScopeResolver _lendingScopeResolver;
     private readonly IPipelineServiceAccountResolver _serviceAccountResolver;
+    private readonly IAdapterService _adapterService;
+    private readonly ILifecycleConfigurationService _lifecycleConfiguration;
 
     public LeaseService(IAdapterPoolConnectionManager connectionManager,
         ICommunicationRepository communicationRepository,
@@ -28,7 +30,9 @@ internal class LeaseService : ILeaseService
         IWorkloadEncryptionService encryptionService,
         IHubContext<AdapterPoolHub> hubContext,
         ITenantLendingScopeResolver lendingScopeResolver,
-        IPipelineServiceAccountResolver serviceAccountResolver)
+        IPipelineServiceAccountResolver serviceAccountResolver,
+        IAdapterService adapterService,
+        ILifecycleConfigurationService lifecycleConfiguration)
     {
         _connectionManager = connectionManager;
         _communicationRepository = communicationRepository;
@@ -37,6 +41,8 @@ internal class LeaseService : ILeaseService
         _hubContext = hubContext;
         _lendingScopeResolver = lendingScopeResolver;
         _serviceAccountResolver = serviceAccountResolver;
+        _adapterService = adapterService;
+        _lifecycleConfiguration = lifecycleConfiguration;
     }
 
     /// <inheritdoc />
@@ -46,6 +52,20 @@ internal class LeaseService : ILeaseService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(lenderTenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.BorrowerTenantId);
+
+        // 🔴 AB#4924 §13 — the per-tenant kill switch, BOTH halves, and this is the choke point that
+        // makes "off" mean off. Every grant goes through here: the scheduler's and the hand-driven
+        // POST {tenantId}/v1/adapterPool/{id}/lease alike. Gating only the enqueue would leave a full
+        // queue draining for as long as it takes after somebody turned leasing off, which is not what
+        // an operator means by the word.
+        //
+        // Lending is the lender's capability and borrowing is the borrower's, and neither tenant can
+        // assert the other's - so both flags are required and the refusal names which one is missing.
+        var leasingRefusal = await CheckLeasingEnabledAsync(lenderTenantId, request.BorrowerTenantId);
+        if (leasingRefusal != null)
+        {
+            return LeaseGrantResult.Refused(leasingRefusal);
+        }
 
         // 🔴 The order of the three checks below is the order of least trust. The borrowing
         // relationship is checked BEFORE the credential is read, so a request naming an adapter it
@@ -97,6 +117,32 @@ internal class LeaseService : ILeaseService
                 "service account; a pool member cannot act as a borrower without one.");
         }
 
+        // 🔴 AB#4924 §9.9 / D4 — a lease must carry the work. Resolved BEFORE a member is reserved:
+        // a pipeline that cannot be projected is a refusal, and refusing after a member was claimed
+        // would cost the pool a member per round for as long as the pipeline stays broken.
+        PipelineConfigurationDto? pipelineConfiguration = null;
+        if (request.PipelineRtId is { } pipelineRtId)
+        {
+            pipelineConfiguration = await _adapterService.GetLeasedPipelineConfigurationAsync(
+                request.BorrowerTenantId,
+                // Same fallback as AdapterCkTypeId below: Adapter is polymorphic, and an entity read
+                // without its discriminator must stay usable rather than become a null reference.
+                new RtEntityId(borrower.CkTypeId ?? SystemCommunicationCkIds.RtCkAdapterTypeId, borrower.RtId),
+                pipelineRtId);
+            if (pipelineConfiguration is null)
+            {
+                // Audited on the borrower, because this is its pipeline and its work item that is not
+                // going to run; a controller log line would leave the tenant staring at a queue entry
+                // that never moves with no explanation anywhere it can see.
+                await _eventService.StoreErrorEventAsync(request.BorrowerTenantId,
+                    $"Refused a lease for pipeline '{pipelineRtId}': it is not deployed to adapter " +
+                    $"'{borrower.Name}', is disabled, or carries no definition. The work item stays queued.");
+                return LeaseGrantResult.Refused(
+                    $"Pipeline '{pipelineRtId}' of tenant '{request.BorrowerTenantId}' could not be projected for " +
+                    $"adapter '{borrower.Name}'; it is not deployed there, disabled, or has no definition.");
+            }
+        }
+
         var grantedAt = DateTime.UtcNow;
         var lease = new LeaseDto
         {
@@ -111,6 +157,9 @@ internal class LeaseService : ILeaseService
             // turning into a NullReferenceException inside a hub method.
             AdapterCkTypeId = (borrower.CkTypeId ?? SystemCommunicationCkIds.RtCkAdapterTypeId).ToString(),
             ExecutionId = request.ExecutionId ?? string.Empty,
+            PipelineRtId = request.PipelineRtId?.ToString() ?? string.Empty,
+            PipelineInput = request.PipelineInput,
+            Pipeline = pipelineConfiguration,
             ClientId = credential.Value.ClientId,
             ClientSecret = credential.Value.ClientSecret,
             GrantedAtUtc = grantedAt,
@@ -201,7 +250,7 @@ internal class LeaseService : ILeaseService
             "Lease '{LeaseId}' of tenant '{BorrowerTenantId}' released by its member: {Reason}, success={Success}",
             released.LeaseId, released.TenantId, result.Reason, result.Success);
 
-        await ApplyLeaseOutcomeAsync(released, result.Success, result.StatusMessage);
+        await ApplyLeaseOutcomeAsync(released, result.Success, result.StatusMessage, result.OutputData);
 
         if (result is { Success: false, Reason: not LeaseReleaseReasonDto.Drained })
         {
@@ -240,7 +289,8 @@ internal class LeaseService : ILeaseService
     }
 
     /// <inheritdoc />
-    public async Task ApplyLeaseOutcomeAsync(LeaseDto lease, bool success, string? statusMessage)
+    public async Task ApplyLeaseOutcomeAsync(LeaseDto lease, bool success, string? statusMessage,
+        string? outputData = null)
     {
         if (string.IsNullOrWhiteSpace(lease.ExecutionId))
         {
@@ -276,7 +326,12 @@ internal class LeaseService : ILeaseService
             await _communicationRepository.UpdatePipelineExecutionAsync(lease.TenantId, lease.ExecutionId,
                 success ? RtPipelineExecutionStatusEnum.Completed : RtPipelineExecutionStatusEnum.Failed,
                 completedAt, durationMs,
-                success ? null : statusMessage ?? "The leased execution failed without a reported reason.");
+                success ? null : statusMessage ?? "The leased execution failed without a reported reason.",
+                // 🔴 The release is the ONLY route a leased execution's output has. A dedicated adapter
+                // reports it on IAdapterHub.ReportExecutionEndAsync, whose tenant and adapter come from
+                // the connection - a pool member holds a tenant-free management channel and has no such
+                // connection to report on (AB#4924 §9.9 / D4).
+                outputData);
         }
         catch (Exception e)
         {
@@ -353,6 +408,37 @@ internal class LeaseService : ILeaseService
                 "marked draining on this controller and takes no further lease",
                 connectionId, reason);
         }
+    }
+
+    /// <summary>
+    ///     Whether adapter-pool leasing is switched on for <b>both</b> tenants, or the reason it is
+    ///     not (AB#4924 §13).
+    /// </summary>
+    /// <remarks>
+    ///     🔴 <b>Whose switch it is.</b> Both tenants', and the flag means a different thing on each:
+    ///     on the lender it says "this tenant's pools hand their members out", on the borrower "this
+    ///     tenant's <c>Leased</c> adapters get scheduled". Lending is the lender's capability and
+    ///     borrowing is the borrower's; neither tenant can assert the other's, so one <c>true</c> is
+    ///     never enough. The read goes through <c>ILifecycleConfigurationService</c>, which caches for
+    ///     30 s — the same window scale-to-zero has lived with since AB#4916, and the same trade: a
+    ///     switch flipped off stops granting within half a minute rather than instantly, and the
+    ///     already-granted lease was always going to run to its end anyway.
+    /// </remarks>
+    private async Task<string?> CheckLeasingEnabledAsync(string lenderTenantId, string borrowerTenantId)
+    {
+        if (!await _lifecycleConfiguration.IsLeasingEnabledAsync(lenderTenantId))
+        {
+            return $"Adapter pool leasing is disabled for the lending tenant '{lenderTenantId}'. " +
+                   "Enable it with octo-cli SetCommunicationLifecycle -le true.";
+        }
+
+        if (!await _lifecycleConfiguration.IsLeasingEnabledAsync(borrowerTenantId))
+        {
+            return $"Adapter pool leasing is disabled for the borrowing tenant '{borrowerTenantId}'. " +
+                   "Enable it with octo-cli SetCommunicationLifecycle -le true.";
+        }
+
+        return null;
     }
 
     /// <summary>

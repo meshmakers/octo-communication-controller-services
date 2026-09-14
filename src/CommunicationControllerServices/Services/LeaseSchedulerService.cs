@@ -398,8 +398,12 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     private async Task<string?> TryGrantAsync(PoolKey key, OctoObjectId poolRtId, QueueCandidate candidate,
         TimeSpan ttl, CancellationToken cancellationToken)
     {
+        // 🔴 AB#4924 §9.9 / D4 — the lease carries the work. The scheduler decided WHICH queued item
+        // this lease serves, so it names the pipeline and the input; a member re-deriving either from
+        // the tenant's queue could pick a different one, and the claim below would then have latched a
+        // different work item than the one that runs.
         var request = new LeaseRequest(candidate.Borrower.TenantId, candidate.Borrower.AdapterRtEntityId.RtId,
-            candidate.Queued.ExecutionId, ttl);
+            candidate.Queued.ExecutionId, ttl, candidate.Queued.PipelineRtId, candidate.Queued.InputData);
 
         var result = await _leaseService.GrantLeaseAsync(key.LenderTenantId, poolRtId, request, cancellationToken,
             // The admission gate — see ILeaseService.GrantLeaseAsync. This is where the work item

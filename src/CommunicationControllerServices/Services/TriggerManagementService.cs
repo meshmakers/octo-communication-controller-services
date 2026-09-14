@@ -17,7 +17,8 @@ internal class TriggerManagementService(
     IRoutedCommandClient<ExecutePipelineRequest> executeMeshPipelineCommandClient,
     IDistributionEventHubService distributionEventHubService,
     ICommunicationEventService eventService,
-    IWorkloadLifecycleService workloadLifecycleService)
+    IWorkloadLifecycleService workloadLifecycleService,
+    ILifecycleConfigurationService lifecycleConfigurationService)
     : ITriggerManagementService
 {
     public async Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId,
@@ -146,6 +147,24 @@ internal class TriggerManagementService(
         if (adapter is null || adapter.LifecycleMode != RtLifecycleModeEnum.Leased)
         {
             return null;
+        }
+
+        // 🔴 AB#4924 §13 — the per-tenant kill switch, enqueue half. Nothing is written: no execution
+        // entity, no QueuedAt, no event that looks like progress. The other half sits in
+        // LeaseService.GrantLeaseAsync, and both are needed — a switch that stopped only new enqueues
+        // would leave the existing queue draining after somebody turned leasing off, which is not what
+        // an operator means by "off"; a switch that stopped only grants would keep growing a queue
+        // nobody is going to serve.
+        if (!await lifecycleConfigurationService.IsLeasingEnabledAsync(tenantId))
+        {
+            logger.LogWarning(
+                "[{TenantId}] Pipeline '{PipelineRtId}' is executed by leased adapter '{AdapterName}', but adapter " +
+                "pool leasing is disabled for this tenant; nothing was queued",
+                tenantId, pipelineRtId, adapter.Name);
+            await eventService.StoreErrorEventAsync(tenantId,
+                $"Pipeline '{pipelineRtId}' was NOT queued: adapter pool leasing is disabled for this tenant.");
+            throw TriggerManagementServiceException.LeasingDisabled(tenantId, pipelineRtId,
+                adapter.Name ?? adapter.RtId.ToString());
         }
 
         var executionId = Guid.NewGuid();
