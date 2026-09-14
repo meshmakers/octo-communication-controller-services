@@ -41,7 +41,8 @@ internal class LeaseService : ILeaseService
 
     /// <inheritdoc />
     public async Task<LeaseGrantResult> GrantLeaseAsync(string lenderTenantId, OctoObjectId poolRtId,
-        LeaseRequest request, CancellationToken cancellationToken = default)
+        LeaseRequest request, CancellationToken cancellationToken = default,
+        Func<LeaseDto, PoolMemberConnection, CancellationToken, Task<bool>>? admissionGate = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(lenderTenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.BorrowerTenantId);
@@ -119,11 +120,39 @@ internal class LeaseService : ILeaseService
         var member = _connectionManager.TryClaimMember(lenderTenantId, poolRtId.ToString(), lease);
         if (member is null)
         {
-            // No queue in this increment — see the remarks on ILeaseService. The caller is told
-            // plainly rather than being left waiting on something that will never arrive.
+            // Nothing is parked here. A caller driving this by hand is told plainly; the scheduler
+            // (increment 7) leaves the work item Queued, which is where the queue actually lives.
             return LeaseGrantResult.Refused(
                 $"No idle member of adapter pool {poolRtId} in tenant '{lenderTenantId}' is connected to this " +
                 "controller instance.");
+        }
+
+        if (admissionGate is not null)
+        {
+            bool admitted;
+            try
+            {
+                admitted = await admissionGate(lease, member, cancellationToken);
+            }
+            catch (Exception e)
+            {
+                // A gate that threw decided nothing, so the member must go back — otherwise the
+                // pool quietly loses a member per failed round until it has none left.
+                _connectionManager.ReleaseLease(member.ConnectionId, lease.LeaseId);
+                Logger.Warn(e,
+                    "The admission gate for lease '{LeaseId}' of tenant '{BorrowerTenantId}' threw; the member " +
+                    "reservation was undone",
+                    lease.LeaseId, lease.TenantId);
+                return LeaseGrantResult.Refused($"The lease admission gate failed: {e.Message}");
+            }
+
+            if (!admitted)
+            {
+                _connectionManager.ReleaseLease(member.ConnectionId, lease.LeaseId);
+                return LeaseGrantResult.Refused(
+                    $"The work item '{lease.ExecutionId}' of tenant '{lease.TenantId}' was no longer available " +
+                    "when the member was reserved; it was taken by another controller instance or cancelled.");
+            }
         }
 
         try
@@ -172,6 +201,8 @@ internal class LeaseService : ILeaseService
             "Lease '{LeaseId}' of tenant '{BorrowerTenantId}' released by its member: {Reason}, success={Success}",
             released.LeaseId, released.TenantId, result.Reason, result.Success);
 
+        await ApplyLeaseOutcomeAsync(released, result.Success, result.StatusMessage);
+
         if (result is { Success: false, Reason: not LeaseReleaseReasonDto.Drained })
         {
             await _eventService.StoreErrorEventAsync(released.TenantId,
@@ -194,13 +225,134 @@ internal class LeaseService : ILeaseService
             "the work item is interrupted",
             member.MemberId, lease.LeaseId, lease.TenantId);
 
-        // Concept §6: at-least-once. The execution is re-queued by the scheduler (increment 7); what
-        // this increment owes the borrower is the record that its work stopped, in its own event log,
-        // rather than a lease that silently evaporates.
+        // Concept §6: at-least-once. The attempt is marked Interrupted with its lease span closed,
+        // and a fresh attempt takes its place in the queue.
+        var requeuedExecutionId = await InterruptAndRequeueAsync(lease,
+            $"The adapter pool member '{member.MemberId}' disconnected while holding this execution's lease.");
+
         await _eventService.StoreErrorEventAsync(lease.TenantId,
             $"The adapter pool member '{member.MemberId}' holding this tenant's lease " +
             $"(pool {lease.PoolRtId} of tenant '{lease.PoolTenantId}') disconnected before releasing it. " +
-            "Any pipeline execution it was running is interrupted.");
+            "Any pipeline execution it was running is interrupted" +
+            (requeuedExecutionId is null
+                ? "."
+                : $" and was re-queued as execution '{requeuedExecutionId}'."));
+    }
+
+    /// <inheritdoc />
+    public async Task ApplyLeaseOutcomeAsync(LeaseDto lease, bool success, string? statusMessage)
+    {
+        if (string.IsNullOrWhiteSpace(lease.ExecutionId))
+        {
+            // A hand-driven lease with no work item behind it. Nothing to stamp, and inventing an
+            // execution to stamp it on would be worse than doing nothing.
+            return;
+        }
+
+        var releasedAt = DateTime.UtcNow;
+
+        try
+        {
+            await _communicationRepository.StampLeaseReleasedAsync(lease.TenantId, lease.ExecutionId, releasedAt);
+
+            // 🔴 The lease release is the controller's LAST resort for completing the execution, not
+            // its first. An execution the member already reported through the normal adapter path is
+            // terminal by now and is left exactly as it is; one that is still Running when the
+            // member hands the process back would otherwise stay Running forever and be reaped as
+            // stuck fifteen minutes later, with a message about an adapter restart that never
+            // happened.
+            var execution = await _communicationRepository.GetPipelineExecutionAsync(lease.TenantId,
+                lease.ExecutionId);
+            if (execution is null || execution.Status != RtPipelineExecutionStatusEnum.Running)
+            {
+                return;
+            }
+
+            var completedAt = DateTime.UtcNow;
+            var durationMs = execution.StartedAt is { } startedAt
+                ? (int)Math.Max(0, Math.Round((completedAt - startedAt).TotalMilliseconds))
+                : 0;
+
+            await _communicationRepository.UpdatePipelineExecutionAsync(lease.TenantId, lease.ExecutionId,
+                success ? RtPipelineExecutionStatusEnum.Completed : RtPipelineExecutionStatusEnum.Failed,
+                completedAt, durationMs,
+                success ? null : statusMessage ?? "The leased execution failed without a reported reason.");
+        }
+        catch (Exception e)
+        {
+            // Never throws out of a hub method or a background sweep: a release that could not be
+            // recorded must not also cost the member its connection.
+            Logger.Warn(e,
+                "[{BorrowerTenantId}] Could not apply the outcome of lease '{LeaseId}' to execution '{ExecutionId}'",
+                lease.TenantId, lease.LeaseId, lease.ExecutionId);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<string?> InterruptAndRequeueAsync(LeaseDto lease, string reason)
+    {
+        if (string.IsNullOrWhiteSpace(lease.ExecutionId))
+        {
+            return null;
+        }
+
+        try
+        {
+            var interrupted = await _communicationRepository.TryInterruptLeasedExecutionAsync(lease.TenantId,
+                lease.ExecutionId, DateTime.UtcNow, reason);
+            if (interrupted is null)
+            {
+                return null;
+            }
+
+            var retryExecutionId = Guid.NewGuid().ToString();
+            var retry = new RtPipelineExecution
+            {
+                RtId = OctoObjectId.GenerateNewId(),
+                ExecutionId = retryExecutionId,
+                TriggerType = interrupted.TriggerType,
+                InputData = interrupted.InputData
+            };
+
+            await _communicationRepository.EnqueueExecutionAsync(lease.TenantId, retry,
+                interrupted.PipelineRtEntityId, interrupted.AdapterRtEntityId, DateTime.UtcNow);
+
+            Logger.Info(
+                "[{BorrowerTenantId}] Interrupted leased execution '{ExecutionId}' and re-queued it as " +
+                "'{RetryExecutionId}': {Reason}",
+                lease.TenantId, lease.ExecutionId, retryExecutionId, reason);
+
+            return retryExecutionId;
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e,
+                "[{BorrowerTenantId}] Could not interrupt and re-queue execution '{ExecutionId}' of lease '{LeaseId}'",
+                lease.TenantId, lease.ExecutionId, lease.LeaseId);
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task DrainMemberAsync(string connectionId, string reason)
+    {
+        // Local first, push second. A member that cannot be reached is exactly the member that must
+        // not be handed another tenant, so the bookkeeping must not depend on the push succeeding.
+        _connectionManager.MarkDraining(connectionId);
+
+        try
+        {
+            await _hubContext.Clients.Client(connectionId)
+                .SendAsync(nameof(IAdapterPoolHubCallbacks.DrainAsync));
+            Logger.Info("Told pool member on connection '{ConnectionId}' to drain: {Reason}", connectionId, reason);
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e,
+                "Could not tell the pool member on connection '{ConnectionId}' to drain ({Reason}); it stays " +
+                "marked draining on this controller and takes no further lease",
+                connectionId, reason);
+        }
     }
 
     /// <summary>

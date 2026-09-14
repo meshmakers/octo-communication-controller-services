@@ -1,7 +1,9 @@
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
+using Microsoft.AspNetCore.SignalR;
 using NSubstitute;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.LeaseServiceTests;
@@ -283,6 +285,75 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
         using var _ = Assert.Multiple();
         await Assert.That(second.Granted).IsFalse();
         await Assert.That(second.StatusMessage).Contains("No idle member");
+    }
+
+    /// <summary>
+    ///     AB#4924 increment 7 — the admission gate runs AFTER a member is reserved and BEFORE the
+    ///     lease is pushed. That position is the whole point: the scheduler's claim needs the member
+    ///     id, and it has to land before the member is handed anything.
+    /// </summary>
+    [Test]
+    public async Task TheAdmissionGate_SeesTheReservedMemberAndRunsBeforeThePush()
+    {
+        ArrangeGrantableLease();
+        PoolMemberConnection? seen = null;
+        var memberWasReservedWhenTheGateRan = false;
+        var pushedBeforeTheGate = false;
+
+        var granted = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1"),
+            CancellationToken.None,
+            (_, member, _) =>
+            {
+                seen = member;
+                memberWasReservedWhenTheGateRan = ConnectionManager.TryGetMember(ConnectionId)!.ActiveLease != null;
+                pushedBeforeTheGate = MemberProxy.ReceivedCalls()
+                    .Any(c => c.GetMethodInfo().Name == nameof(IClientProxy.SendCoreAsync));
+                return Task.FromResult(true);
+            });
+
+        using var _ = Assert.Multiple();
+        await Assert.That(granted.Granted).IsTrue();
+        await Assert.That(seen!.MemberId).IsEqualTo(MemberId);
+        await Assert.That(memberWasReservedWhenTheGateRan).IsTrue();
+        await Assert.That(pushedBeforeTheGate).IsFalse();
+    }
+
+    /// <summary>
+    ///     🔴 A gate that declines must put the member back. Otherwise every work item another
+    ///     controller instance claimed first costs this one a member, and the pool shrinks to zero
+    ///     usable members while every entity still reads Deployed.
+    /// </summary>
+    [Test]
+    public async Task ARefusedAdmissionGate_PutsTheMemberBack()
+    {
+        ArrangeGrantableLease();
+
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1"),
+            CancellationToken.None, (_, _, _) => Task.FromResult(false));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.Granted).IsFalse();
+        await Assert.That(ConnectionManager.TryGetMember(ConnectionId)!.IsAvailable).IsTrue();
+        // And nothing was pushed: the member must never learn about a lease it is not going to serve.
+        await Assert.That(MemberProxy.ReceivedCalls()
+            .Any(c => c.GetMethodInfo().Name == nameof(IClientProxy.SendCoreAsync))).IsFalse();
+    }
+
+    /// <summary>
+    ///     A gate that throws decided nothing, so the member goes back too.
+    /// </summary>
+    [Test]
+    public async Task AThrowingAdmissionGate_PutsTheMemberBack()
+    {
+        ArrangeGrantableLease();
+
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1"),
+            CancellationToken.None,
+            (_, _, _) => throw new InvalidOperationException("the tenant database went away"));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.Granted).IsFalse();
+        await Assert.That(ConnectionManager.TryGetMember(ConnectionId)!.IsAvailable).IsTrue();
     }
 
     /// <summary>

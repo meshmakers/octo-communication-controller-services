@@ -53,7 +53,7 @@ graph TD
     I4["4 · Trigger-node execution class<br/>octo-communication-sdk + controller"]
     I5["5 · AdapterPool + operator<br/>operator + controller + octo-sdk"]
     I6["6 ✅ · Lease wire contract<br/>octo-sdk + controller + SDK + mesh-adapter"]
-    I7["7 · Queue + scheduler<br/>controller-services"]
+    I7["7 ✅ · Queue + scheduler<br/>controller-services"]
     I8["8 · Three queue surfaces<br/>studio + octo-cli + MCP"]
     I9["9 · Observability + rollout"]
     I1 --> I2
@@ -80,7 +80,7 @@ cause a cross-tenant data incident, and everything else waits on it before it ca
 | 4 | trigger nodes declare an execution class, resolved on save | yes (unit) | `ExecutionClass` visible on every pipeline; nothing reads it yet |
 | 5 ✅ | pool workloads deploy into a platform namespace, scale within `MinReplicas..MaxReplicas`, and are invisible to the idle watchdog | yes (kind e2e) | a pool runs N members that no tenant can reach yet |
 | 6 ✅ | management connection + `Lease`/`Release` verbs | yes (hub tests + a manual lease) | a pool member can be leased by hand |
-| 7 | queue, round-robin, priority, TTL, `Queued` executions | yes (unit + integration) | leasing actually executes work |
+| 7 ✅ | queue, round-robin, priority, TTL, `Queued` executions | yes (unit + integration) | the controller queues and schedules; a member still needs the work item wired to it (§9.9) |
 | 8 | queue visible and cancellable in all three surfaces | yes (vitest + CLI + MCP tests) | the queue is operable |
 | 9 | metrics, alerts, per-tenant enablement | yes | rollout becomes operable |
 
@@ -1283,7 +1283,7 @@ would fail nowhere and enforce no lease at all.
 
 ---
 
-## 9. Increment 7 — queue and scheduler
+## 9. Increment 7 — queue and scheduler ✅ implemented
 
 **Repo:** `octo-communication-controller-services`.
 
@@ -1322,7 +1322,7 @@ second number is the scheduler's rotation cursor and exists only server-side —
 - Lease TTL + re-queue; on TTL expiry the previous attempt becomes `Interrupted` (existing status) and the member is **drained and restarted, not re-used**, because its post-lease cleanliness is unproven (concept §6).
 - `Repository/CommunicationRepository.cs` — `EnqueueExecutionAsync`, queue reads by `(tenant, status = Queued)` ordered by `QueuedAt` (the new index), and a per-tenant position query.
 - `BackgroundServices/` — a lease reaper on the `ExecutionCleanupBackgroundService` cadence.
-- 🔴 A `Queued` execution must be invisible to the AB#4280 stuck reaper (which fails stale non-`Online` work) and must not fold into `RtPipelineStatistics` before it runs. Both filters are `ExecutionStatus`-based and both need `Queued` named **explicitly**. The statistics half is already done (§3.5); the reaper half is this increment's.
+- 🔴 A `Queued` execution must be invisible to the AB#4280 stuck reaper (which fails stale non-`Online` work) and must not fold into `RtPipelineStatistics` before it runs. Both filters are `ExecutionStatus`-based and both need `Queued` named **explicitly**. The statistics half is already done (§3.5); the reaper half is this increment's. — 🔴 **Both halves of that sentence turned out to be wrong about the code; see §9.8.**
 
 ### 9.4 Scale-up
 
@@ -1345,6 +1345,90 @@ pool exhaustion grows the queue rather than dropping work, `LeaseWaitMs` arithme
 `LeaseReleasedAt` stamped on the TTL path, integration coverage in
 `FailStuckAndOrphanedExecutionsTests` that a `Queued` execution is never reaped.
 
+### 9.6 What was actually built
+
+| Where | What |
+|---|---|
+| `Services/LeaseSchedulerService` + `ILeaseSchedulerService` | one queue per pool, round-robin rotation with a per-pool cursor, `Interactive`-before-`Batch` inside a turn, `LendingMaxConcurrentLeasesPerTenant`, TTL reaper, queue-driven scale-up, the queue projection and the cancel verb |
+| `BackgroundServices/LeaseSchedulerBackgroundService` | the scheduling round, on `LeaseSchedulerIntervalSeconds` (default **5 s**) |
+| `BackgroundServices/ExecutionCleanupBackgroundService` | the **lease reaper**, on that service's existing cadence, next to the AB#4280 stuck reaper |
+| `Services/TriggerManagementService.StartExecutePipelineAsync` | a `Leased` adapter's work is created `Queued` with `QueuedAt` instead of being sent to the execute queue |
+| `Services/LeaseService` | `ApplyLeaseOutcomeAsync` (stamps `LeaseReleasedAt`, completes a still-`Running` execution), `InterruptAndRequeueAsync`, `DrainMemberAsync`, and the **admission gate** parameter on `GrantLeaseAsync` |
+| `Repository/CommunicationRepository` | `EnqueueExecutionAsync`, `GetQueuedExecutionsForAdapterAsync`, `GetQueuedExecutionPositionAsync`, `TryClaimQueuedExecutionAsync`, `TryCancelQueuedExecutionAsync`, `StampLeaseReleasedAsync`, `TryInterruptLeasedExecutionAsync`, `GetExecutionQueueEntryAsync` |
+| `TenantApi/v1/Controllers/AdapterPoolController` | `GET {tenantId}/v1/adapterPool/{id}/queue` and `DELETE …/queue/{executionId}` — the shared contract §10 asks for, built here |
+| `Options/CommunicationControllerOptions` | `LeaseSchedulerIntervalSeconds`, `LeaseTopologyRefreshSeconds`, `LeaseTtlMinutes`, `LeaseQueueReadLimitPerAdapter`, `LeaseScaleUpAveragingWindowSeconds` |
+
+**The admission gate is the shape of the increment.** `GrantLeaseAsync` gained an optional
+callback that runs **after** an idle member is reserved and **before** the lease is pushed to it.
+That position is forced by two requirements at once: the claim writes `LeasedOnMemberId`, which
+does not exist until a member is reserved; and a second controller pod that claimed the same work
+item first has to be able to stop this one from dispatching it. A gate that declines — or throws —
+puts the member back, because otherwise every lost race costs the pool a member.
+
+**The claim is latched, not merely checked.** `TryClaimQueuedExecutionAsync` writes the
+`Queued → Running` transition through `CreateConditionalUpdate` with an
+`AttributeNewerThanGuard("attributes.leaseGrantedAt", DateTime.MinValue)` — "apply only while
+unclaimed", since any real grant time is greater. The pre-read alone is not enough: two pods can
+both read `Queued` before either writes. A conditional update reports nothing about whether it
+applied, so the claim re-reads and confirms it owns the row.
+
+### 9.7 🔴 A re-queue is a NEW execution entity
+
+Concept §6 asks for two things in one sentence — *"the controller re-queues the execution"* and
+*"marks the previous attempt `Interrupted`"* — and one entity cannot hold both states at once.
+
+Resolved by keeping each **attempt** as one entity: the interrupted attempt keeps its own
+`LeaseGrantedAt`/`LeaseReleasedAt` span, which is what makes the §4b billing input honest about
+time a member really was held, and the retry is enqueued as a fresh execution with its own
+`QueuedAt` and therefore its own honest `LeaseWaitMs`. Reusing the entity would erase both and
+would also erase the `Interrupted` record §6 explicitly asks for. The surfaces show attempt 1
+`Interrupted` and attempt 2 `Queued → Running`, which is a continuous history rather than a
+rewritten one.
+
+### 9.8 🔴 Three corrections to what §9.3 assumed about the reapers
+
+1. **The stuck reaper never needed a `Queued` clause.** `FailStuckExecutionsAsync` reads
+   `Status == Interrupted` and `Status == Running` as **exact** filters, so `Queued` is excluded by
+   construction — as are `TimeoutStaleExecutionsAsync` (`Status == Running`) and
+   `FailOrphanedExecutionsForAdapterAsync`. §9.3's "the reaper half is this increment's" describes
+   work that did not exist.
+2. **The statistics half was not done either — and did not need to be.** `§3.5` records that
+   `PipelineStatisticsFolder` skips an execution without a `StartedAt`, which is true, but
+   `FoldAndPrunePipelineAsync` then **erases every row of the batch it drained**, and
+   `GetTerminalExecutionsOlderThanAsync` selects on `Status != Running` — which does not exclude
+   `Queued`. `DeleteOldExecutionsAsync` is worse: it filters on **no status at all**. On paper both
+   therefore matched a queued execution and deleted it.
+3. **They do not, and the reason is not in this repository.** Null sorts below every date in BSON
+   *ordering*, but MongoDB's range **operators are type-bracketed**: `StartedAt < cutoff` never
+   matches a null or missing value. Measured, not reasoned about — removing the explicit `Queued`
+   exclusion from either query leaves
+   `FailStuckAndOrphanedExecutionsTests.AQueuedExecutionIsInvisibleToEveryReaperAndSweep` green.
+   The exclusions are kept as defence in depth so that a queued work item's survival is a property
+   of the query rather than of the storage engine's comparison semantics, and both comments now say
+   so instead of claiming a bug that is not there.
+
+### 9.9 🔴 Open: the lease still carries no work
+
+A lease carries `ExecutionId`, and nothing else about the work. There is no field naming the
+pipeline or its input, and no controller endpoint a member could ask. `IAdapterLeaseWorkItem` in
+`octo-communication-sdk` is still `NoAdapterLeaseWorkItem` — increment 6 left it as a seam and
+called the scheduler its filler, but §9 scopes increment 7 to
+`octo-communication-controller-services` alone and lists no wire change.
+
+So the controller now queues, rotates, grants, claims, reaps and re-queues correctly, and a member
+that receives a lease still has nothing to run. Two candidate resolutions, and this needs a
+decision rather than a guess:
+
+- extend `LeaseDto` with the pipeline rtId and input, and implement `IAdapterLeaseWorkItem` in
+  `octo-mesh-adapter` to run it directly; or
+- send the existing `ExecutePipelineRequest` to the per-pipeline queue after the grant, relying on
+  `PipelineRegistryLeaseParticipant` having registered the borrower's pipelines — which then needs
+  the adapter-created execution record reconciled with the queued one, or they will double up.
+
+The first is explicit and costs a contract change; the second reuses the existing path and buys a
+reconciliation problem. Either way it is a multi-repo change, which is why it is reported rather
+than invented here.
+
 ---
 
 ## 10. Increment 8 — the queue in all three surfaces
@@ -1353,13 +1437,26 @@ Concept §5 is explicit that the queue is operable from **Refinery Studio, `octo
 MCP server** — "the same surface in all three, not a Studio-only view". Plan 1.0 had only the
 Studio; this is a three-repo increment.
 
-**Shared server contract, built once in increment 7:**
+**Shared server contract, ✅ built in increment 7:**
 `GET {tenantId}/v1/adapterPool/{id}/queue` returning, per entry: execution id, pipeline,
 borrowing tenant, `ExecutionClass`, `QueuedAt`, position within the tenant, tenants ahead in
 the rotation, and the assigned member when leased. Plus
 `DELETE …/queue/{executionId}` for cancellation. All three surfaces consume this one endpoint
 — a GraphQL query cannot serve it, because the rotation cursor is scheduler state, not entity
-state.
+state, **and** because the entries span tenant databases: the pool belongs to the lender and
+every execution to a borrower.
+
+Three things the surfaces have to honour, decided by what the endpoint returns:
+
+- The response carries **no global rank**, deliberately. `PositionInTenant` plus
+  `TenantsAheadInRotation` is the only truthful pair under round-robin; a single number would
+  contradict the order work actually runs in.
+- The list also contains the entries the pool currently has **leased** (`LeasedOnMemberId` set,
+  `PositionInTenant = 0`). That is what the waiting entries are waiting behind, and it is the only
+  place a member id ever appears.
+- `DELETE` answers **409 Conflict** for an execution that already holds a lease, rather than
+  silently doing the other thing. Interrupting a running pipeline is a different operation and the
+  difference has to stay visible (concept §5, "Cancellation").
 
 | Surface | Repo | Work |
 |---|---|---|
@@ -1398,8 +1495,28 @@ catalog and accept that a dev tenant already at 3.36.0 is unrecoverable without 
 intervention. Keeping the entry is cheaper and is what is implemented; the decision is when to
 remove it.
 
-**D3 — What scale-up averaging window?** Q14 explicitly defers this to measurement. It must
-not be frozen into a constant before increment 9 has produced a week of queue-depth data.
+**D3 — What scale-up averaging window? ✅ Answered without inventing a constant (increment 7).**
+Q14 explicitly defers this to measurement, so freezing a number would have been the one move the
+decision rules out. `CommunicationControllerOptions.LeaseScaleUpAveragingWindowSeconds` defaults to
+**0**, which means *derive it per pool from that pool's own `ScaleUpQueueWaitSeconds`* (itself
+defaulted to 60 s on the CK attribute). The derived value is not a guess: the pool's author has
+already declared how long a work item may wait before the pool ought to grow, and a burst that
+clears faster than that is by their own definition not worth another member. Setting the option to
+a positive value overrides every pool at once, which is what increment 9's measurement will use.
+
+Two properties of the implementation are worth carrying forward:
+
+- **The window applies to the depth signal only.** The wait signal needs none — an item that has
+  waited sixty seconds has already integrated sixty seconds of pressure.
+- **Samples are retained for twice the window, not for the window.** Pruning at exactly the window
+  drops the very sample that proves the history is long enough, and the signal can then never fire.
+  Found by a test, not by review.
+
+Scale-up is also rate-limited to one request per pool per window, because Kubernetes needs longer
+than a scheduling round to make a member ready.
+
+**D4 — How does a leased member learn what to run? 🔴 Open, and it blocks end-to-end leasing.**
+See §9.9.
 
 ---
 

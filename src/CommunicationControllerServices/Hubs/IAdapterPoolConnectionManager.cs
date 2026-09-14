@@ -74,6 +74,13 @@ public interface IAdapterPoolConnectionManager
     IReadOnlyCollection<PoolMemberConnection> GetMembers(string poolTenantId, string poolRtId);
 
     /// <summary>
+    ///     Every member registered on this controller instance, across all pools. The lease reaper
+    ///     (AB#4924 §9.3) needs this: an expired lease is found by walking what is held, not by
+    ///     knowing which pool to ask about.
+    /// </summary>
+    IReadOnlyCollection<PoolMemberConnection> GetAllMembers();
+
+    /// <summary>
     ///     Claims an idle member of the pool for <paramref name="lease" /> and returns it, or null
     ///     when every member is busy, draining or absent.
     /// </summary>

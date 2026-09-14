@@ -367,7 +367,7 @@ the queue path.
 
 | Failure | Handling |
 |---|---|
-| Lease holder crashes mid-execution | Lease has a TTL; controller re-queues the execution and marks the previous attempt `Interrupted` (existing status). At-least-once, so pipelines must stay idempotent — same contract as today. |
+| Lease holder crashes mid-execution | Lease has a TTL; controller re-queues the execution and marks the previous attempt `Interrupted` (existing status). At-least-once, so pipelines must stay idempotent — same contract as today. 🔴 **Clarified during increment 7:** the re-queue is a **new** `PipelineExecution`, not the old one moved back to `Queued`. One entity cannot be `Interrupted` and `Queued` at once, and reusing it would erase both the interrupted record this row asks for and the lease span that prices it (§4b). Each *attempt* is one entity; the history reads attempt 1 `Interrupted`, attempt 2 `Queued → Running`. |
 | Release never arrives | TTL expiry releases the lease server-side; the process is drained and restarted rather than re-used, because its post-lease cleanliness is unproven. |
 | A borrowed tenant floods the queue | Round-robin bounds its share; a per-tenant concurrency cap bounds it further. |
 | Pool exhausted | Queue grows, visible in Studio. Scale the pool, or move the tenant to a dedicated adapter. |
@@ -407,13 +407,19 @@ the queue path.
 | Q16 | Naming | Rename the existing `Pool` to `DeploymentSite` — it is a location, and things should be called what they are |
 | Q17 | Execution class | Declared by the trigger node (like `RequiresRunningProcess`), resolved on save and persisted on the pipeline |
 | Q18 | Rename sequencing | Ships **together** with leasing — one major bump, one migration |
-| Q14 | Scale-up trigger | Queue depth **or** wait time crossing a threshold; averaging window measured during implementation and kept configurable |
+| Q14 | Scale-up trigger | Queue depth **or** wait time crossing a threshold; averaging window measured during implementation and kept configurable — ✅ implemented as a controller option whose default *derives* the window from the pool's own `ScaleUpQueueWaitSeconds` rather than inventing a constant; see the implementation plan, D3 |
 
 ### Still open
 
-None. Every question raised during design has been decided; the remaining unknowns are
-implementation measurements (the scale-up averaging window, the wake budget for a cold pool
-member) that are deliberately left to be observed rather than guessed.
+None **of the design questions**. Every question raised during design has been decided; the
+remaining unknowns are implementation measurements (the scale-up averaging window, the wake budget
+for a cold pool member) that are deliberately left to be observed rather than guessed.
+
+🔴 **One question implementation raised and design does not answer**, found in increment 7: the
+lease carries an execution id and nothing else about the work — no pipeline, no input — and no
+member-facing way to ask. §4's sequence diagram says "load tenant repository + pipeline, execute"
+without saying which pipeline, or how the member learns it. See the implementation plan §9.9 and
+D4; it is a multi-repo decision, not a controller detail.
 
 ## 9. Out of scope
 

@@ -27,6 +27,17 @@ internal class TriggerManagementService(
         logger.LogInformation("[{TenantId}] Executing pipeline '{PipelineRtId}' (dry-run={IsDryRun})",
             tenantId, pipelineRtId, isDryRun);
 
+        // AB#4924 §9.1 — a Leased adapter has no process of its own, so there is nothing to send the
+        // execute command to. The work item is ENQUEUED instead and the scheduler starts it when a
+        // pool member is leased to this tenant. Everything below this branch is the manual-adapter
+        // path and is unchanged: a manual adapter has no queue and executes immediately, and that
+        // asymmetry is intended (concept §5, "One queue per pool").
+        var queued = await TryEnqueueForLeasedAdapterAsync(tenantId, pipelineRtId, pipelineInput, isDryRun);
+        if (queued is not null)
+        {
+            return queued;
+        }
+
         // AB#4918 wake gate — MUST complete before the send below: the execute-pipeline queue is
         // non-durable/auto-delete, so publishing while the adapter is scaled to 0 silently drops
         // the message. No-op unless the tenant has scale-to-zero on and the adapter is OnDemand.
@@ -86,6 +97,84 @@ internal class TriggerManagementService(
         logger.LogError("[{TenantId}] Execution of pipeline '{PipelineRtId}' failed: {ErrorMessage}"
             , tenantId, pipelineRtId, r.ErrorMessage);
         throw TriggerManagementServiceException.ExecutePipelineFailed(tenantId, pipelineRtId, r.ErrorMessage);
+    }
+
+    /// <summary>
+    ///     Enqueues the work item when the pipeline's adapter borrows its process from a pool, or
+    ///     returns null when it does not (AB#4924 §9.1).
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         🔴 <b>The execution entity is created here, in <c>Queued</c>, before anything runs.</b>
+    ///         That is what makes one work item one <c>PipelineExecution</c> from enqueue to
+    ///         completion (concept §5) — the three surfaces show a continuous history instead of
+    ///         joining a queue to an execution log.
+    ///     </para>
+    ///     <para>
+    ///         A dry run is deliberately <b>not</b> queued. A dry run is a synchronous answer to a
+    ///         caller holding the request open; parking it behind a rotation would turn "validate
+    ///         this pipeline" into something that returns minutes later, and the leased adapter has
+    ///         no process to answer it from anyway. It falls through to the normal path, which fails
+    ///         it with the established "no adapter" error rather than pretending to have run.
+    ///     </para>
+    /// </remarks>
+    private async Task<PipelineExecutionDataDto?> TryEnqueueForLeasedAdapterAsync(string tenantId,
+        OctoObjectId pipelineRtId, string? pipelineInput, bool isDryRun)
+    {
+        if (isDryRun)
+        {
+            return null;
+        }
+
+        RtAdapter? adapter;
+        try
+        {
+            adapter = await communicationRepository.GetAdapterByPipelineAsync(tenantId,
+                new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipelineRtId));
+        }
+        catch (Exception e)
+        {
+            // Let the established path produce its own error for an unreadable pipeline rather than
+            // inventing a second one here.
+            logger.LogWarning(e,
+                "[{TenantId}] Could not resolve the adapter of pipeline '{PipelineRtId}' while checking whether it " +
+                "is leased",
+                tenantId, pipelineRtId);
+            return null;
+        }
+
+        if (adapter is null || adapter.LifecycleMode != RtLifecycleModeEnum.Leased)
+        {
+            return null;
+        }
+
+        var executionId = Guid.NewGuid();
+        var queuedAt = DateTime.UtcNow;
+
+        var execution = new RtPipelineExecution
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            ExecutionId = executionId.ToString(),
+            TriggerType = RtPipelineTriggerTypeEnum.Manual,
+            InputData = pipelineInput
+        };
+
+        await communicationRepository.EnqueueExecutionAsync(tenantId, execution,
+            new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipelineRtId),
+            new RtEntityId(adapter.CkTypeId ?? SystemCommunicationCkIds.RtCkAdapterTypeId, adapter.RtId),
+            queuedAt);
+
+        logger.LogInformation(
+            "[{TenantId}] Pipeline '{PipelineRtId}' is executed by leased adapter '{AdapterName}'; queued as " +
+            "execution '{ExecutionId}'",
+            tenantId, pipelineRtId, adapter.Name, executionId);
+
+        await eventService.StoreInformationEventAsync(tenantId,
+            $"Pipeline '{pipelineRtId}' was queued for an adapter pool lease (ExecutionId: {executionId}).");
+
+        // The DateTime a caller gets back is the QUEUE time, not a start time — the execution has
+        // not started and StartedAt is deliberately unset (concept §8, Q5).
+        return new PipelineExecutionDataDto { Id = executionId, DateTime = queuedAt };
     }
 
     public async Task RemoveScheduleAsync(string tenantId)

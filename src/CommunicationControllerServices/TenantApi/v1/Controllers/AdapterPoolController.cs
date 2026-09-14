@@ -37,6 +37,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.C
 public class AdapterPoolController : ControllerBase
 {
     private readonly IAdapterPoolConnectionManager _connectionManager;
+    private readonly ILeaseSchedulerService _leaseScheduler;
     private readonly ILeaseService _leaseService;
     private readonly ILogger<AdapterPoolController> _logger;
 
@@ -44,12 +45,15 @@ public class AdapterPoolController : ControllerBase
     ///     Constructor.
     /// </summary>
     /// <param name="connectionManager">Registry of pool members connected to this instance.</param>
+    /// <param name="leaseScheduler">Owns the pool queue and its rotation.</param>
     /// <param name="leaseService">Grants leases.</param>
     /// <param name="logger">Logging object.</param>
     public AdapterPoolController(IAdapterPoolConnectionManager connectionManager,
+        ILeaseSchedulerService leaseScheduler,
         ILeaseService leaseService, ILogger<AdapterPoolController> logger)
     {
         _connectionManager = connectionManager;
+        _leaseScheduler = leaseScheduler;
         _leaseService = leaseService;
         _logger = logger;
     }
@@ -104,6 +108,115 @@ public class AdapterPoolController : ControllerBase
             MemberId = result.MemberId,
             StatusMessage = result.StatusMessage
         });
+    }
+
+    /// <summary>
+    ///     The queue of this adapter pool: everything waiting for a lease, plus everything this
+    ///     controller instance currently has leased out of it.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         🔴 <b>The shared server contract of increment 8, built here in increment 7 because all
+    ///         three surfaces consume this one endpoint</b> — Refinery Studio, <c>octo-cli</c> and the
+    ///         MCP server, the same view in all three rather than a Studio-only one (concept §5). It
+    ///         is an endpoint and not a GraphQL query for two independent reasons: the rotation
+    ///         position is scheduler state rather than entity state, and the entries span tenant
+    ///         databases — the pool belongs to the lender and every execution to a borrower.
+    ///     </para>
+    ///     <para>
+    ///         🔴 <b>Position is reported per tenant plus tenants-ahead, never as one global rank.</b>
+    ///         Round-robin has no global rank to report, and a single number would contradict the
+    ///         order work actually runs in.
+    ///     </para>
+    ///     <para>
+    ///         A <b>manual</b> adapter has no queue at all and therefore no equivalent of this
+    ///         endpoint. That asymmetry is intended (concept §5).
+    ///     </para>
+    /// </remarks>
+    /// <param name="adapterPoolRtId">RtId of the <c>AdapterPool</c> in the route tenant.</param>
+    [HttpGet("{adapterPoolRtId}/queue")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(typeof(IEnumerable<AdapterPoolQueueEntryDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetQueueAsync([Required] OctoObjectId adapterPoolRtId)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        var entries = await _leaseScheduler.GetQueueAsync(tenantId, adapterPoolRtId, HttpContext.RequestAborted);
+
+        return Ok(entries.Select(e => new AdapterPoolQueueEntryDto
+        {
+            ExecutionId = e.ExecutionId,
+            BorrowerTenantId = e.BorrowerTenantId,
+            PipelineRtId = e.PipelineRtId,
+            PipelineName = e.PipelineName,
+            ExecutionClass = e.ExecutionClass,
+            QueuedAtUtc = e.QueuedAtUtc,
+            PositionInTenant = e.PositionInTenant,
+            TenantsAheadInRotation = e.TenantsAheadInRotation,
+            LeasedOnMemberId = e.LeasedOnMemberId,
+            LeaseExpiresAtUtc = e.LeaseExpiresAtUtc
+        }).ToList());
+    }
+
+    /// <summary>
+    ///     Cancels one entry that is still waiting for a lease.
+    /// </summary>
+    /// <remarks>
+    ///     🔴 <b>This cancels a QUEUE entry, not a running pipeline.</b> An execution that already
+    ///     holds a lease answers <c>409 Conflict</c> here on purpose: interrupting a running pipeline
+    ///     is a different operation with different consequences, and collapsing the two into one verb
+    ///     would hide from the operator which of them they just performed (concept §5,
+    ///     "Cancellation"). The surfaces must make that difference visible rather than retry.
+    /// </remarks>
+    /// <param name="adapterPoolRtId">RtId of the <c>AdapterPool</c> in the route tenant.</param>
+    /// <param name="executionId">The queued execution to cancel.</param>
+    [HttpDelete("{adapterPoolRtId}/queue/{executionId}")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> CancelQueuedExecutionAsync([Required] OctoObjectId adapterPoolRtId,
+        [Required] string executionId)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        var result = await _leaseScheduler.CancelQueuedExecutionAsync(tenantId, adapterPoolRtId, executionId,
+            HttpContext.RequestAborted);
+
+        switch (result)
+        {
+            case QueueCancellationResult.Cancelled:
+                _logger.LogInformation(
+                    "Cancelled queued execution '{ExecutionId}' of adapter pool {AdapterPoolRtId} in tenant " +
+                    "'{TenantId}'",
+                    executionId, adapterPoolRtId, tenantId);
+                return NoContent();
+
+            case QueueCancellationResult.AlreadyLeased:
+                return Conflict(new ErrorResponse
+                {
+                    ErrorMessage =
+                        $"Execution '{executionId}' already holds a lease and is no longer queued. Cancelling it " +
+                        "means interrupting a running pipeline, which is a different operation."
+                });
+
+            default:
+                return NotFound(new ErrorResponse
+                {
+                    ErrorMessage =
+                        $"No queued execution '{executionId}' belongs to adapter pool {adapterPoolRtId} of tenant " +
+                        $"'{tenantId}'."
+                });
+        }
     }
 
     /// <summary>

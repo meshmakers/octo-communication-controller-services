@@ -75,8 +75,60 @@ public interface ILeaseService
     ///     Grants a lease on a member of <paramref name="poolRtId" /> in
     ///     <paramref name="lenderTenantId" /> to the borrower named in <paramref name="request" />.
     /// </summary>
+    /// <param name="lenderTenantId">Tenant that owns the pool.</param>
+    /// <param name="poolRtId">RtId of the <c>AdapterPool</c> in that tenant.</param>
+    /// <param name="request">Which borrower, which adapter, for how long.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="admissionGate">
+    ///     <para>
+    ///         Optional last check, run <b>after</b> an idle member has been reserved and
+    ///         <b>before</b> the lease is pushed to it. Returning <c>false</c> undoes the reservation
+    ///         and refuses the grant.
+    ///     </para>
+    ///     <para>
+    ///         🔴 That position in the sequence is the whole point, and it is why this is a seam
+    ///         rather than something the caller does around this method. The scheduler (increment 7)
+    ///         uses it to take the work item out of the queue: the claim needs the member id, which
+    ///         does not exist until a member is reserved, and it must land before the member is
+    ///         handed the lease, because a second controller pod claiming the same work item first
+    ///         has to be able to stop this one from dispatching it.
+    ///     </para>
+    /// </param>
     Task<LeaseGrantResult> GrantLeaseAsync(string lenderTenantId, OctoObjectId poolRtId,
-        LeaseRequest request, CancellationToken cancellationToken = default);
+        LeaseRequest request, CancellationToken cancellationToken = default,
+        Func<LeaseDto, PoolMemberConnection, CancellationToken, Task<bool>>? admissionGate = null);
+
+    /// <summary>
+    ///     Applies everything a release implies on the borrower's execution: <c>LeaseReleasedAt</c>
+    ///     always, and a terminal status when nothing else has completed the execution yet
+    ///     (AB#4924 §9.1).
+    /// </summary>
+    Task ApplyLeaseOutcomeAsync(LeaseDto lease, bool success, string? statusMessage);
+
+    /// <summary>
+    ///     Marks the attempt a lease was serving <c>Interrupted</c>, stamps <c>LeaseReleasedAt</c>
+    ///     on it, and enqueues a fresh attempt in its place (AB#4924 §9.3, concept §6).
+    /// </summary>
+    /// <remarks>
+    ///     At-least-once, as the concept states: the contract with pipeline authors — idempotency —
+    ///     is unchanged from today's adapter disconnect path. The retry is a <b>new</b> execution
+    ///     entity; see <see cref="Repository.InterruptedLeasedExecution" /> for why it cannot be the
+    ///     old one moved back to <c>Queued</c>.
+    /// </remarks>
+    /// <returns>The execution id of the re-queued attempt, or null when nothing was re-queued.</returns>
+    Task<string?> InterruptAndRequeueAsync(LeaseDto lease, string reason);
+
+    /// <summary>
+    ///     Tells a member to drain: it finishes what it holds, takes no further lease and exits, so
+    ///     the pool workload replaces it with a fresh process.
+    /// </summary>
+    /// <remarks>
+    ///     🔴 Concept §6: a member whose lease expired server-side is drained and restarted rather
+    ///     than re-used, because its post-lease cleanliness is unproven. That is a state change, not
+    ///     a logged shrug — the member is marked draining locally even if the push fails, so this
+    ///     controller never hands it another tenant.
+    /// </remarks>
+    Task DrainMemberAsync(string connectionId, string reason);
 
     /// <summary>
     ///     Applies a member's release. A release naming a lease the member no longer holds is stale

@@ -660,6 +660,100 @@ public interface ICommunicationRepository
 
     #endregion
 
+    #region Adapter pool queue (AB#4924 increment 7)
+
+    /// <summary>
+    /// Creates a pipeline execution in <c>Queued</c> state with <c>QueuedAt</c> stamped, instead of
+    /// sending the work to the execute queue (AB#4924 §9.1). This is the only writer of
+    /// <c>Queued</c>: a manual adapter has no queue and executes immediately, exactly as today.
+    /// </summary>
+    /// <remarks>
+    /// <c>StartedAt</c> is deliberately left unset. Stamping it here would make it lie for the whole
+    /// queue wait, and both AB#4280 reapers use it as their age key — a work item that waited
+    /// twenty minutes in a healthy queue would be reaped as stuck (concept §8, Q5).
+    /// </remarks>
+    /// <param name="tenantId">The BORROWING tenant — the execution is its entity</param>
+    /// <param name="execution">The execution entity to create; Status and QueuedAt are set here</param>
+    /// <param name="pipelineRtEntityId">Pipeline that will be executed</param>
+    /// <param name="adapterRtEntityId">The borrower's own Leased adapter</param>
+    /// <param name="queuedAtUtc">Enqueue timestamp</param>
+    Task EnqueueExecutionAsync(string tenantId, RtPipelineExecution execution,
+        RtEntityId pipelineRtEntityId, RtEntityId adapterRtEntityId, DateTime queuedAtUtc);
+
+    /// <summary>
+    /// Reads the work items of one borrowing adapter that are waiting for a lease, oldest first
+    /// (AB#4924 §9.3). Ordered by <c>QueuedAt</c> — the index added on that attribute in 4.0.0, not
+    /// the <c>StartedAt</c> index, which a queued execution does not populate at all.
+    /// </summary>
+    /// <param name="tenantId">Borrowing tenant</param>
+    /// <param name="adapterRtEntityId">The borrower's Leased adapter</param>
+    /// <param name="take">Maximum entries to return</param>
+    Task<IReadOnlyList<QueuedExecution>> GetQueuedExecutionsForAdapterAsync(string tenantId,
+        RtEntityId adapterRtEntityId, int take);
+
+    /// <summary>
+    /// Position of one work item inside its own tenant's queue, 1-based; <c>0</c> when the execution
+    /// is not (or no longer) queued.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 Per tenant, never global. Round-robin has no global rank to report, and inventing one
+    /// would be a number the scheduler does not act on (concept §5, "Fairness").
+    /// </remarks>
+    Task<int> GetQueuedExecutionPositionAsync(string tenantId, string executionId);
+
+    /// <summary>
+    /// Takes one work item out of the queue and marks it running under a lease:
+    /// <c>Queued → Running</c>, <c>LeaseGrantedAt</c> / <c>StartedAt</c> stamped,
+    /// <c>LeaseWaitMs = LeaseGrantedAt - QueuedAt</c>, and the lease provenance recorded
+    /// (AB#4924 §9.1).
+    /// </summary>
+    /// <remarks>
+    /// Returns <c>false</c> when the claim did not apply because someone else already took it —
+    /// another controller pod, or a cancellation that landed first. Callers must undo whatever they
+    /// reserved in anticipation (a pool member, above all) rather than treat the grant as done.
+    /// </remarks>
+    /// <returns><c>true</c> when this caller now owns the work item</returns>
+    Task<bool> TryClaimQueuedExecutionAsync(string tenantId, string executionId, LeaseClaim claim);
+
+    /// <summary>
+    /// Cancels a work item that is still waiting for a lease: <c>Queued → Cancelled</c>
+    /// (AB#4924 §9.5). Returns <c>false</c> when the execution no longer exists or has left the
+    /// queue — cancelling an execution that already HOLDS a lease is a different operation and
+    /// follows the existing cancellation path.
+    /// </summary>
+    Task<bool> TryCancelQueuedExecutionAsync(string tenantId, string executionId, string? reason);
+
+    /// <summary>
+    /// Stamps <c>LeaseReleasedAt</c> on a leased execution (AB#4924 §9.1).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 Called on every release path including TTL expiry and crash, because the span
+    /// <c>LeaseGrantedAt..LeaseReleasedAt</c> is a billing input (concept §4b) and a span stamped
+    /// only on the happy path silently under-bills exactly the failures a borrower did pay for.
+    /// Never changes the status — the status transition belongs to whoever caused the release.
+    /// </remarks>
+    Task StampLeaseReleasedAsync(string tenantId, string executionId, DateTime releasedAtUtc);
+
+    /// <summary>
+    /// Marks a leased attempt <c>Interrupted</c> and stamps <c>LeaseReleasedAt</c> (AB#4924 §9.3,
+    /// concept §6). Used on TTL expiry and on a member that vanished mid-lease.
+    /// </summary>
+    /// <returns>
+    /// The pipeline and adapter the attempt belonged to, so the caller can enqueue a fresh attempt,
+    /// or <c>null</c> when the execution could not be read or had already reached a terminal state.
+    /// </returns>
+    Task<InterruptedLeasedExecution?> TryInterruptLeasedExecutionAsync(string tenantId, string executionId,
+        DateTime releasedAtUtc, string reason);
+
+    /// <summary>
+    /// Reads one execution as a queue entry — pipeline and execution class attached — whatever its
+    /// status. Used by the pool queue surface to describe an entry that is already leased and
+    /// therefore no longer part of a queue read.
+    /// </summary>
+    Task<QueuedExecution?> GetExecutionQueueEntryAsync(string tenantId, string executionId);
+
+    #endregion
+
     #region Pipeline Statistics
 
     /// <summary>

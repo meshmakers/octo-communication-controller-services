@@ -340,6 +340,25 @@ dotnet test --project tests/CommunicationControllerService.Tests/CommunicationCo
 The xUnit integration tests additionally accept `--filter` (VSTest syntax) and
 `--filter-class` / `--filter-method`; see "Running Integration Tests" below.
 
+🔴 **`dotnet test` and `-p:BaseOutputPath` do not mix here — it reports "no tests ran", exit code 5,
+not an error.** Both test projects land in the same `<base>/DebugL/net10.0` folder, and the MTP
+runner then discovers nothing at all: no filter, still zero tests, green-looking log. It is a false
+negative in the direction that hides work. Build with the scratch output path and **run the built
+assembly directly** instead:
+
+```bash
+dotnet build tests/CommunicationControllerService.Tests/CommunicationControllerService.Tests.csproj \
+  -c DebugL -p:BaseOutputPath=$SCRATCH/bo-unit/ -nodeReuse:false
+cd $SCRATCH/bo-unit/DebugL/net10.0
+dotnet Meshmakers.Octo.Backend.CommunicationControllerService.Tests.dll --treenode-filter "/*/*/FairnessTests/*"
+
+# the xUnit integration assembly takes -class / -method, NOT --filter
+dotnet CommControllerServices.IntegrationTests.dll -class "*AdapterPoolQueueTests"
+```
+
+Give each test project its **own** `BaseOutputPath` (`bo-unit`, `bo-int`) — sharing one flattens two
+different runners' assemblies into one directory.
+
 ### Run the Service
 
 ```bash
@@ -1993,6 +2012,85 @@ arrives with a lease and leaves with it (increment 6).
 the activator at a Service that is not there — or at a same-named one that is. A pool is reached by
 being leased, never by an inbound request, so it is skipped before the hostname map is built. This
 is the only place in the controller that still assumes one namespace for everything.
+
+## Leasing: the pool queue and its scheduler (AB#4924 increment 7)
+
+Plan: `docs/concepts/shared-adapter-leasing-implementation.md` §9.
+
+| Piece | Where |
+|---|---|
+| One queue per pool, rotation, priority, cap, TTL reaper, scale-up, queue projection, cancel | `Services/LeaseSchedulerService.cs` |
+| Scheduling round (default every **5 s**) | `BackgroundServices/LeaseSchedulerBackgroundService.cs` |
+| Lease reaper (on the cleanup service's cadence, next to the AB#4280 stuck reaper) | `BackgroundServices/ExecutionCleanupBackgroundService.cs` |
+| `Queued` is written here and nowhere else | `TriggerManagementService.StartExecutePipelineAsync` → `CommunicationRepository.EnqueueExecutionAsync` |
+| `LeaseReleasedAt`, terminal-state fallback, interrupt + re-queue, drain | `Services/LeaseService.cs` |
+| `GET/DELETE {tenantId}/v1/adapterPool/{id}/queue` — the shared contract all three surfaces consume | `TenantApi/v1/Controllers/AdapterPoolController.cs` |
+
+🔴 **A `Leased` adapter never reaches the execute queue.** `StartExecutePipelineAsync` branches
+*before* the AB#4918 wake gate: there is no workload to wake, and the per-pipeline execute queue has
+no consumer, so a send would be a message nobody reads. A **dry run** deliberately does not queue —
+it is a synchronous answer to a caller holding the request open, and parking it behind a rotation
+would turn "validate this pipeline" into something that returns minutes later.
+
+🔴 **Fairness is round-robin across tenants, never global FIFO — and the class never crosses a
+tenant boundary.** Both halves are load-bearing and both have a test that a global FIFO would fail:
+`FairnessTests` arranges the starving tenant's work to be **older** than everyone else's, so arrival
+order and fair order disagree. A fairness test a global FIFO would also pass proves nothing, and a
+silent regression to global FIFO is the most likely way this scheduler stops being fair.
+
+🔴 **The admission gate.** `ILeaseService.GrantLeaseAsync` takes an optional callback that runs after
+an idle member is reserved and before the lease is pushed. The scheduler claims the work item there.
+That position is forced: the claim writes `LeasedOnMemberId`, which needs a reserved member, and it
+has to land before the member is handed anything, so a second controller pod that claimed the same
+item first can stop this one from dispatching it. A gate that declines **or throws** puts the member
+back — otherwise every lost race costs the pool a member.
+
+🔴 **The claim is latched at the MongoDB filter level**, not merely checked. `CreateConditionalUpdate`
+with `AttributeNewerThanGuard("attributes.leaseGrantedAt", DateTime.MinValue)` means "apply only
+while unclaimed". The pre-read is not enough: two pods can both read `Queued` before either writes.
+A conditional update reports nothing about whether it applied, so the claim re-reads and confirms.
+
+🔴 **A re-queue is a NEW execution entity.** Concept §6 wants the previous attempt `Interrupted` *and*
+the work re-queued; one entity cannot be both. Each attempt is one entity, so the interrupted one
+keeps its own `LeaseGrantedAt`/`LeaseReleasedAt` span (a billing input, §4b) and the retry gets its
+own `QueuedAt` and therefore its own honest `LeaseWaitMs`.
+
+🔴 **`LeaseReleasedAt` is stamped on every release path**, TTL and crash included. A span stamped
+only on the happy path silently under-bills exactly the failures a borrower did pay for. The release
+is also the controller's **last-resort** completion signal: an execution still `Running` when the
+member hands the process back is completed/failed from the lease result, but one that already
+reached a terminal state through the normal adapter path is left strictly alone.
+
+### 🔴 A `Queued` execution and the five sweeps — measured, and it corrected the plan
+
+Three sweeps filter on an **exact** status (`FailStuckExecutionsAsync`,
+`TimeoutStaleExecutionsAsync`, `FailOrphanedExecutionsForAdapterAsync`), so `Queued` is excluded by
+construction and no clause was needed — contrary to the plan, the "reaper half" was already done.
+
+Two do not: `GetTerminalExecutionsOlderThanAsync` (`Status != Running`) and
+`DeleteOldExecutionsAsync` (**no status filter at all**). Both key off `StartedAt < cutoff`, both
+**erase** what they match, and a queued execution has no `StartedAt`. On paper that is silent work
+loss. It is not, and the reason is not in this repo: **MongoDB's range operators are type-bracketed**
+— `$lt` against a date never matches a null or missing value, even though null sorts below every
+date in BSON *ordering*. Removing either explicit `Queued` exclusion leaves
+`FailStuckAndOrphanedExecutionsTests.AQueuedExecutionIsInvisibleToEveryReaperAndSweep` green. They
+are kept so the invisibility is a property of the query rather than of the storage engine.
+
+### Scale-up: the window is derived, not invented
+
+`LeaseScaleUpAveragingWindowSeconds` defaults to **0** = "derive per pool from that pool's own
+`ScaleUpQueueWaitSeconds`". Q14 defers the window to measurement, so a hard-coded constant would be
+the one thing the decision rules out; the derived value is the author's own declaration of how long
+a work item may wait. The window applies to the **depth** signal only — the wait signal is already
+time-integrated. Samples are retained for **twice** the window: pruning at exactly the window drops
+the sample that proves the history is long enough, and the signal then never fires.
+
+### 🔴 Still missing for end-to-end leasing
+
+A lease carries `ExecutionId` and nothing else about the work — no pipeline, no input — and
+`IAdapterLeaseWorkItem` is still `NoAdapterLeaseWorkItem`. The controller queues, rotates, grants,
+claims, reaps and re-queues correctly; a member that receives a lease has nothing to run. See the
+plan §9.9 / D4 — a multi-repo decision, not a controller detail.
 
 ## Pipeline Service Account — mandatory execution identity (Epic AB#4979; AB#5027 phases 1 + 2)
 

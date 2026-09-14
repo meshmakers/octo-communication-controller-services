@@ -110,6 +110,89 @@ public class FailStuckAndOrphanedExecutionsTests(CommunicationControllerFixture 
         }
     }
 
+    /// <summary>
+    ///     🔴 AB#4924 — a <c>Queued</c> execution must be invisible to every reaper and every sweep.
+    ///     A queued work item reaped as "stuck" is silent work loss: the borrower's pipeline never
+    ///     ran, nothing says so, and the execution reads as a failure of a run that never happened.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Five sweeps, and they are safe for two different reasons. The three that filter on an
+    ///         exact status — the stuck reaper, the orphan resolver, the stale timeout — exclude
+    ///         <c>Queued</c> by construction. The two that do not —
+    ///         <c>GetTerminalExecutionsOlderThanAsync</c> (<c>Status != Running</c>) and
+    ///         <c>DeleteOldExecutionsAsync</c> (no status filter at all) — key off
+    ///         <c>StartedAt &lt; cutoff</c>, and a queued execution has no <c>StartedAt</c> at all.
+    ///     </para>
+    ///     <para>
+    ///         🔴 That second reason was checked, not assumed, and the check changed the answer.
+    ///         Null sorts below every date in BSON <i>ordering</i>, which suggests those two sweeps
+    ///         would match a queued execution and then ERASE it — both do delete what they match.
+    ///         They do not: MongoDB's range operators are <b>type-bracketed</b>, so <c>$lt</c>
+    ///         against a date never matches a null or missing value. Removing the explicit
+    ///         <c>Queued</c> exclusions from either of them leaves this test green. They are kept as
+    ///         defence in depth, so that a queued work item's survival is a property of the query
+    ///         rather than of the storage engine's comparison semantics.
+    ///     </para>
+    /// </remarks>
+    [Fact]
+    public async Task AQueuedExecutionIsInvisibleToEveryReaperAndSweep()
+    {
+        var tenantId = fixture.TestTenantId;
+        var repository = fixture.GetService<ICommunicationRepository>();
+
+        var data = new TestData();
+        var adapter = await CreateAdapterAsync(data, RtCommunicationStateEnum.Offline);
+        var dataFlow = await CreateDataFlowAsync(data);
+        var pipeline = await CreatePipelineWithAdapterAsync(data, dataFlow, adapter);
+
+        try
+        {
+            // Queued an hour ago — far past every grace period and cutoff below.
+            var queuedAt = DateTime.UtcNow.AddHours(-1);
+            var executionId = Guid.NewGuid().ToString();
+            var execution = new RtPipelineExecution
+            {
+                RtId = OctoObjectId.GenerateNewId(),
+                ExecutionId = executionId,
+                TriggerType = RtPipelineTriggerTypeEnum.Manual
+            };
+            await repository.EnqueueExecutionAsync(tenantId, execution, pipeline, adapter, queuedAt);
+            data.Executions.Add(new RtEntityId(SystemCommunicationCkIds.RtCkPipelineExecutionTypeId, execution.RtId));
+
+            var cutoff = DateTime.UtcNow.AddMinutes(-15);
+
+            // 1. The AB#4280 connection-aware stuck reaper. The adapter is deliberately OFFLINE, so
+            //    a Running execution in its place WOULD be failed here.
+            await repository.FailStuckExecutionsAsync(tenantId, cutoff);
+            await AssertStatus(repository, executionId, RtPipelineExecutionStatusEnum.Queued);
+
+            // 2. The AB#4280 orphan resolver, driven by a fresh adapter process start time.
+            await repository.FailOrphanedExecutionsForAdapterAsync(tenantId, adapter, DateTime.UtcNow);
+            await AssertStatus(repository, executionId, RtPipelineExecutionStatusEnum.Queued);
+
+            // 3. The stale-execution timeout.
+            await repository.TimeoutStaleExecutionsAsync(tenantId, cutoff);
+            await AssertStatus(repository, executionId, RtPipelineExecutionStatusEnum.Queued);
+
+            // 4. The AB#4370 statistics fold — which does not merely skip what it cannot fold, it
+            //    ERASES every row of the batch it drained.
+            var foldBatch = await repository.GetTerminalExecutionsOlderThanAsync(tenantId, pipeline,
+                DateTime.UtcNow, take: 500);
+            foldBatch.Should().NotContain(e => e.ExecutionId == executionId);
+
+            // 5. The daily retention sweep, which filters on no status at all.
+            await repository.DeleteOldExecutionsAsync(tenantId, cutoff);
+            var afterRetention = await repository.GetPipelineExecutionAsync(tenantId, executionId);
+            afterRetention.Should().NotBeNull();
+            afterRetention!.Status.Should().Be(RtPipelineExecutionStatusEnum.Queued);
+        }
+        finally
+        {
+            await CleanupAsync(data);
+        }
+    }
+
     private async Task AssertStatus(ICommunicationRepository repository, string executionId,
         RtPipelineExecutionStatusEnum expected)
     {

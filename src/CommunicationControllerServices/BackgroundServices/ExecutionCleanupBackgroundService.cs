@@ -12,6 +12,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.BackgroundServ
 internal class ExecutionCleanupBackgroundService : BackgroundService
 {
     private readonly IAdapterCache _adapterCache;
+    private readonly ILeaseSchedulerService _leaseScheduler;
     private readonly IPipelineExecutionService _pipelineExecutionService;
     private readonly CommunicationControllerOptions _options;
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
@@ -24,10 +25,12 @@ internal class ExecutionCleanupBackgroundService : BackgroundService
     /// </summary>
     public ExecutionCleanupBackgroundService(
         IAdapterCache adapterCache,
+        ILeaseSchedulerService leaseScheduler,
         IPipelineExecutionService pipelineExecutionService,
         IOptions<CommunicationControllerOptions> options)
     {
         _adapterCache = adapterCache;
+        _leaseScheduler = leaseScheduler;
         _pipelineExecutionService = pipelineExecutionService;
         _options = options.Value;
     }
@@ -63,6 +66,20 @@ internal class ExecutionCleanupBackgroundService : BackgroundService
                 catch (Exception ex)
                 {
                     Logger.Error(ex, "Error failing stuck executions");
+                }
+
+                // AB#4924 §9.3 — the lease reaper, on this service's cadence and deliberately not on
+                // the scheduler's: a lease TTL is minutes, so walking every member's lease every few
+                // seconds would be work for nothing. An expired lease means the previous attempt
+                // becomes Interrupted with its lease span closed, the work is re-queued, and the
+                // member is drained and restarted rather than re-used (concept §6).
+                try
+                {
+                    await _leaseScheduler.ReapExpiredLeasesAsync(stoppingToken);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, "Error reaping expired adapter pool leases");
                 }
 
                 // Fold terminal executions older than the retention window into the hourly

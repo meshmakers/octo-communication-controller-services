@@ -264,6 +264,60 @@ public class CommunicationControllerOptions
     public Dictionary<string, string> ServiceUrls { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Interval in SECONDS of the adapter-pool lease scheduler (AB#4924 §9). Seconds rather than
+    /// minutes because this is the latency a borrower's work waits before it starts, and the
+    /// Interactive execution class only means anything if the rotation turns quickly. A round
+    /// touches only pools that have borrowers with queued work, and only those borrowers'
+    /// databases; the expensive part — discovering which adapters borrow from which pool — is
+    /// rebuilt on the slower <see cref="LeaseTopologyRefreshSeconds"/> cadence instead.
+    /// </summary>
+    public int LeaseSchedulerIntervalSeconds { get; set; } = 5;
+
+    /// <summary>
+    /// How often (SECONDS) the scheduler rebuilds its map of which adapters borrow from which pool.
+    /// That map is a read of every enabled tenant's workloads, so it must not run on the scheduling
+    /// cadence. A newly deployed Leased adapter starts being served within this interval; the
+    /// borrower-declaration and lending-scope checks still run per lease, so a stale map can never
+    /// grant something the tenant tree does not allow.
+    /// </summary>
+    public int LeaseTopologyRefreshSeconds { get; set; } = 60;
+
+    /// <summary>
+    /// How long (MINUTES) a scheduler-granted lease is valid before the reaper reclaims it
+    /// (AB#4924 §9.3). Matches <c>ILeaseService.DefaultLeaseTtl</c>: long enough for a normal work
+    /// item including its warm-up, short enough that a member that died without releasing is
+    /// reclaimed within one operator's attention span. On expiry the attempt becomes
+    /// <c>Interrupted</c>, the work is re-queued, and the member is drained and restarted rather
+    /// than re-used.
+    /// </summary>
+    public int LeaseTtlMinutes { get; set; } = 15;
+
+    /// <summary>
+    /// Maximum queue entries read per borrowing adapter per scheduling round. A bound, not a
+    /// policy: a queue deeper than this is already saturated and the scale-up signal and the queue
+    /// surfaces are both reporting it, so reading further would only make the round slower without
+    /// changing which work item goes next.
+    /// </summary>
+    public int LeaseQueueReadLimitPerAdapter { get; set; } = 200;
+
+    /// <summary>
+    /// Window in SECONDS over which an adapter pool's queue DEPTH is averaged before a scale-up
+    /// fires (AB#4924 §9.4).
+    ///
+    /// 🔴 Default 0 means "derive it per pool from that pool's own <c>ScaleUpQueueWaitSeconds</c>",
+    /// and that is deliberate. Concept §8 Q14 leaves this window to be MEASURED during
+    /// implementation rather than guessed, so shipping an invented constant here would be the one
+    /// thing the decision rules out. The derived value is not a guess: the pool's author has
+    /// already declared how long a work item may wait before the pool ought to grow, and a burst
+    /// that clears faster than that is, by their own definition, not worth another member. Set this
+    /// option to override every pool at once once increment 9 has produced real queue-depth data.
+    ///
+    /// The window applies to the depth signal only. The wait signal needs none — an item that has
+    /// waited sixty seconds has already integrated sixty seconds of pressure.
+    /// </summary>
+    public int LeaseScaleUpAveragingWindowSeconds { get; set; }
+
+    /// <summary>
     /// Symmetric AES-256-GCM master key used to encrypt secret attributes
     /// at rest (e.g. <c>ValueOverride.Value</c> for secret-flagged Helm value
     /// overrides, <c>HelmRepositoryConfiguration.Password</c>). Base64-encoded

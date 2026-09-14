@@ -2234,11 +2234,30 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             // Oldest first so repeated drain batches make monotonic progress. Running executions
             // are excluded — they are folded/pruned only after they reach a terminal state.
+            //
+            // 🔴 AB#4924: Queued is named EXPLICITLY, as defence in depth — measured, not assumed.
+            // This filter is currently redundant, and the reason it is redundant is a MongoDB
+            // subtlety rather than anything in this file: a queued execution has no StartedAt, and
+            // MongoDB's range operators are TYPE-BRACKETED, so `StartedAt < olderThan` does not
+            // match a null or missing value even though null sorts below every date. Verified by
+            // mutation: removing this clause leaves
+            // FailStuckAndOrphanedExecutionsTests.AQueuedExecutionIsInvisibleToEveryReaperAndSweep
+            // green.
+            //
+            // It stays because of what is downstream. PipelineStatisticsFolder skips an execution
+            // without a StartedAt, but FoldAndPrunePipelineAsync then ERASES every row of the batch
+            // it drained — so if that bracketing ever stopped holding, the failure mode would be
+            // silent deletion of work items still waiting for a lease. This makes the invisibility a
+            // property of the query rather than of the storage engine's comparison semantics.
             var queryOptions = RtEntityQueryOptions.Create()
                 .SortOrder(nameof(RtPipelineExecution.StartedAt), SortOrders.Ascending)
                 .FieldFilter(nameof(RtPipelineExecution.StartedAt), FieldFilterOperator.LessThan, olderThan)
-                .FieldFilter(nameof(RtPipelineExecution.Status), FieldFilterOperator.NotEquals,
-                    (int)RtPipelineExecutionStatusEnum.Running);
+                .FieldFilter(nameof(RtPipelineExecution.Status), FieldFilterOperator.NotIn,
+                    new[]
+                    {
+                        (int)RtPipelineExecutionStatusEnum.Running,
+                        (int)RtPipelineExecutionStatusEnum.Queued
+                    });
 
             var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtPipeline, RtPipelineExecution>(
                 session,
@@ -2408,8 +2427,19 @@ internal class CommunicationRepository : ICommunicationRepository
             // default Archive strategy, which only sets rtState=Archived and leaves the
             // documents in MongoDB forever (the collection grew to 1M+ docs per tenant).
             // includeArchived drains the tombstones accumulated by earlier archive-only runs.
+            // 🔴 AB#4924: Queued is excluded explicitly. Same defence-in-depth reasoning as in
+            // GetTerminalExecutionsOlderThanAsync, and this query needs it more: it has NO status
+            // filter at all, so the only thing standing between a queued work item and the daily
+            // retention ERASE is MongoDB's type bracketing on `StartedAt < olderThan`. That does
+            // hold today (verified by mutation), and a sweep that deletes work nobody saw go is not
+            // something to leave resting on it.
+            //
+            // The cost is that a queued execution whose pipeline was deleted is never swept: a
+            // visible leak in a queue view, which is strictly better than silent work loss.
             var queryOptions = RtEntityQueryOptions.Create()
                 .FieldFilter(nameof(RtPipelineExecution.StartedAt), FieldFilterOperator.LessThan, olderThan)
+                .FieldFilter(nameof(RtPipelineExecution.Status), FieldFilterOperator.NotEquals,
+                    (int)RtPipelineExecutionStatusEnum.Queued)
                 .Global(includeArchived: true);
 
             var totalDeleted = 0;
@@ -2530,6 +2560,19 @@ internal class CommunicationRepository : ICommunicationRepository
 
             using (var session = await tenantRepository.GetSessionAsync())
             {
+                // 🔴 AB#4924 — a Queued execution is invisible here, and it is worth saying WHY
+                // rather than relying on a reader noticing. Both reads below filter on an EXACT
+                // status (Interrupted, Running), so Queued is excluded by construction: this is the
+                // half the plan calls out, and it needs no new clause. Swapping either status for
+                // Queued fails
+                // FailStuckAndOrphanedExecutionsTests.AQueuedExecutionIsInvisibleToEveryReaperAndSweep
+                // and nothing else, which is how that was checked rather than assumed.
+                //
+                // The two sibling sweeps in this file — GetTerminalExecutionsOlderThanAsync and
+                // DeleteOldExecutionsAsync — are safe for a different and much less obvious reason
+                // (MongoDB type bracketing on a missing StartedAt) and now name Queued explicitly
+                // so that they do not depend on it. See the comments there.
+                //
                 // Interrupted executions past the grace period imply the owning adapter disconnected
                 // and never reported a final result (fresh restart or gone for good) -> orphaned.
                 interrupted = await GetExecutionsByStatusOlderThanAsync(
@@ -2597,6 +2640,505 @@ internal class CommunicationRepository : ICommunicationRepository
             throw CommunicationRepositoryException.CommonFailedTimeoutStaleExecutions(tenantId, beforeUtc, e);
         }
     }
+
+    #region Adapter pool queue (AB#4924 increment 7)
+
+    /// <inheritdoc />
+    public async Task EnqueueExecutionAsync(string tenantId, RtPipelineExecution execution,
+        RtEntityId pipelineRtEntityId, RtEntityId adapterRtEntityId, DateTime queuedAtUtc)
+    {
+        // 🔴 Status and QueuedAt are written HERE rather than by the caller, so there is exactly one
+        // place in the controller that can produce a Queued execution and exactly one place that
+        // decides a queued execution has no StartedAt. A caller that forgot either would produce an
+        // entity the scheduler never picks up, or one the AB#4280 reaper ages out.
+        execution.Status = RtPipelineExecutionStatusEnum.Queued;
+        execution.QueuedAt = queuedAtUtc;
+        execution.StartedAt = null;
+
+        await CreatePipelineExecutionAsync(tenantId, execution, pipelineRtEntityId, adapterRtEntityId);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<QueuedExecution>> GetQueuedExecutionsForAdapterAsync(string tenantId,
+        RtEntityId adapterRtEntityId, int take)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            var queued = await ReadQueuedExecutionEntitiesAsync(tenantRepository, session, take);
+            if (queued.Count == 0)
+            {
+                return [];
+            }
+
+            // Reversed query, for the same reason GetExecutionsForAdapterByStatusAsync uses one:
+            // queued executions are few, an adapter's association fan-out is not.
+            var associationResult = await tenantRepository.GetRtAssociationTargetsAsync<RtPipelineExecution, RtAdapter>(
+                session,
+                queued.Select(e => e.RtId).ToList(),
+                SystemCommunicationCkIds.RtCkExecutingAdapterRoleId,
+                GraphDirections.Outbound,
+                [adapterRtEntityId.RtId],
+                RtEntityQueryOptions.Create());
+
+            var forThisAdapter = new HashSet<OctoObjectId>();
+            foreach (var entry in associationResult)
+            {
+                if (entry.Value.Items.Any())
+                {
+                    forThisAdapter.Add(entry.Key.RtId);
+                }
+            }
+
+            var mine = queued.Where(e => forThisAdapter.Contains(e.RtId)).ToList();
+            return await ProjectQueuedExecutionsAsync(tenantRepository, session, mine);
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGetRunningExecutions(tenantId, adapterRtEntityId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<int> GetQueuedExecutionPositionAsync(string tenantId, string executionId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            var queued = await ReadQueuedExecutionEntitiesAsync(tenantRepository, session, MaxQueueReadBatch);
+            if (queued.Count == 0)
+            {
+                return 0;
+            }
+
+            // 🔴 Ordered the way the SCHEDULER orders, not merely by QueuedAt. A position computed
+            // from arrival time alone would tell an Interactive job it is tenth when it is about to
+            // run first — a number that contradicts the behaviour is worse than no number.
+            var ordered = (await ProjectQueuedExecutionsAsync(tenantRepository, session, queued))
+                .Order(QueuedExecution.SchedulingOrder)
+                .ToList();
+
+            var index = ordered.FindIndex(e => string.Equals(e.ExecutionId, executionId, StringComparison.Ordinal));
+            return index < 0 ? 0 : index + 1;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGetPipelineExecution(tenantId, executionId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> TryClaimQueuedExecutionAsync(string tenantId, string executionId, LeaseClaim claim)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        try
+        {
+            RtPipelineExecution? execution;
+            using (var readSession = await tenantRepository.GetSessionAsync())
+            {
+                execution = await FindExecutionAsync(tenantRepository, readSession, executionId);
+            }
+
+            if (execution is null || execution.Status != RtPipelineExecutionStatusEnum.Queued)
+            {
+                return false;
+            }
+
+            var queuedAt = execution.QueuedAt ?? claim.GrantedAtUtc;
+            var waitMs = (int)Math.Max(0, Math.Round((claim.GrantedAtUtc - queuedAt).TotalMilliseconds));
+
+            var claimed = new RtPipelineExecution
+            {
+                Status = RtPipelineExecutionStatusEnum.Running,
+                // StartedAt and LeaseGrantedAt are the same instant but NOT the same span: StartedAt
+                // is what every existing execution query and both AB#4280 reapers key off, and
+                // LeaseGrantedAt is one end of the lease-held span that prices the borrower
+                // (concept §2.3 / §4b). Writing only one of them would break one of the two.
+                StartedAt = claim.GrantedAtUtc,
+                LeaseGrantedAt = claim.GrantedAtUtc,
+                LeaseWaitMs = waitMs,
+                LeasedFromTenantId = claim.LenderTenantId,
+                LeasedFromPoolRtId = claim.PoolRtId,
+                LeasedOnMemberId = claim.MemberId
+            };
+
+            // 🔴 The claim latch. The guard applies the write only while the persisted
+            // leaseGrantedAt is missing, null or <= the guard value; DateTime.MinValue is therefore
+            // "not claimed yet", because any real grant time is greater. Two controller pods — each
+            // holding different members of the same pool — can reach this line for the same work
+            // item, and without the latch both would dispatch it. MongoDB decides, at the filter
+            // level, which one wins.
+            var guard = new AttributeNewerThanGuard("attributes.leaseGrantedAt", DateTime.MinValue);
+
+            using (var session = await tenantRepository.GetSessionAsync())
+            {
+                session.StartTransaction();
+
+                OperationResult operationResult = new();
+                await tenantRepository.ApplyChangesAsync(session,
+                    new List<EntityUpdateInfo<RtPipelineExecution>>
+                    {
+                        EntityUpdateInfo<RtPipelineExecution>.CreateConditionalUpdate(execution.ToRtEntityId(),
+                            claimed, guard)
+                    },
+                    operationResult);
+                if (operationResult.HasErrors || operationResult.HasFatalErrors)
+                {
+                    throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+                }
+
+                await session.CommitTransactionAsync();
+            }
+
+            // A conditional update reports nothing about whether it applied, so the only way to know
+            // is to look. Cheap, and it is the one read that decides whether a member was handed
+            // work somebody else is already running.
+            using (var verifySession = await tenantRepository.GetSessionAsync())
+            {
+                var reloaded = await FindExecutionAsync(tenantRepository, verifySession, executionId);
+                return reloaded is not null
+                       && reloaded.Status == RtPipelineExecutionStatusEnum.Running
+                       && string.Equals(reloaded.LeasedOnMemberId, claim.MemberId, StringComparison.Ordinal);
+            }
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedUpdatePipelineExecution(tenantId, executionId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> TryCancelQueuedExecutionAsync(string tenantId, string executionId, string? reason)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var execution = await FindExecutionAsync(tenantRepository, session, executionId);
+            if (execution is null || execution.Status != RtPipelineExecutionStatusEnum.Queued)
+            {
+                // 🔴 Not an error, and deliberately not a status transition either. An execution that
+                // already HOLDS a lease is cancelled by interrupting the running pipeline, which is
+                // the existing cancellation path; collapsing the two here would make "cancel" mean
+                // two different things depending on a race (concept §5, "Cancellation").
+                await session.CommitTransactionAsync();
+                return false;
+            }
+
+            var cancelled = new RtPipelineExecution
+            {
+                Status = RtPipelineExecutionStatusEnum.Cancelled,
+                CompletedAt = DateTime.UtcNow,
+                // Never started, so never took any time. 0 rather than a duration measured from a
+                // substituted start timestamp.
+                DurationMs = 0,
+                ErrorMessage = string.IsNullOrWhiteSpace(reason)
+                    ? "Cancelled while waiting for an adapter pool lease."
+                    : reason
+            };
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session,
+                new List<EntityUpdateInfo<RtPipelineExecution>>
+                {
+                    EntityUpdateInfo<RtPipelineExecution>.CreateUpdate(execution.ToRtEntityId(), cancelled)
+                },
+                operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+            return true;
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedUpdatePipelineExecution(tenantId, executionId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task StampLeaseReleasedAsync(string tenantId, string executionId, DateTime releasedAtUtc)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var execution = await FindExecutionAsync(tenantRepository, session, executionId);
+            if (execution is null)
+            {
+                await session.CommitTransactionAsync();
+                return;
+            }
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session,
+                new List<EntityUpdateInfo<RtPipelineExecution>>
+                {
+                    EntityUpdateInfo<RtPipelineExecution>.CreateUpdate(execution.ToRtEntityId(),
+                        new RtPipelineExecution { LeaseReleasedAt = releasedAtUtc })
+                },
+                operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedUpdatePipelineExecution(tenantId, executionId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<InterruptedLeasedExecution?> TryInterruptLeasedExecutionAsync(string tenantId,
+        string executionId, DateTime releasedAtUtc, string reason)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var execution = await FindExecutionAsync(tenantRepository, session, executionId);
+            if (execution is null || execution.Status is RtPipelineExecutionStatusEnum.Completed
+                    or RtPipelineExecutionStatusEnum.Failed or RtPipelineExecutionStatusEnum.Cancelled)
+            {
+                await session.CommitTransactionAsync();
+                return null;
+            }
+
+            var interrupted = new RtPipelineExecution
+            {
+                Status = RtPipelineExecutionStatusEnum.Interrupted,
+                ErrorMessage = reason,
+                // 🔴 Stamped on the failure path too. The member really was held for this span and
+                // the borrower really is charged for it (concept §4b); a LeaseReleasedAt written
+                // only when everything went well under-bills precisely the incidents.
+                LeaseReleasedAt = releasedAtUtc
+            };
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session,
+                new List<EntityUpdateInfo<RtPipelineExecution>>
+                {
+                    EntityUpdateInfo<RtPipelineExecution>.CreateUpdate(execution.ToRtEntityId(), interrupted)
+                },
+                operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+
+            var pipeline = await ReadSinglePipelineOfExecutionAsync(tenantRepository, execution.RtId);
+            var adapter = await ReadSingleAdapterOfExecutionAsync(tenantRepository, execution.RtId);
+
+            if (pipeline is null || adapter is null)
+            {
+                // The attempt is recorded as interrupted either way; what cannot be done without
+                // both edges is enqueue a replacement, and inventing one would be worse than telling
+                // the caller there is nothing to re-queue.
+                _logger.LogWarning(
+                    "[{TenantId}] Interrupted leased execution '{ExecutionId}' cannot be re-queued: pipeline={HasPipeline}, adapter={HasAdapter}",
+                    tenantId, executionId, pipeline is not null, adapter is not null);
+                return null;
+            }
+
+            return new InterruptedLeasedExecution(
+                new RtEntityId(pipeline.CkTypeId ?? SystemCommunicationCkIds.RtCkPipelineTypeId, pipeline.RtId),
+                new RtEntityId(adapter.CkTypeId ?? SystemCommunicationCkIds.RtCkAdapterTypeId, adapter.RtId),
+                execution.TriggerType,
+                execution.InputData);
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedUpdatePipelineExecution(tenantId, executionId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<QueuedExecution?> GetExecutionQueueEntryAsync(string tenantId, string executionId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            var execution = await FindExecutionAsync(tenantRepository, session, executionId);
+            if (execution is null)
+            {
+                return null;
+            }
+
+            var projected = await ProjectQueuedExecutionsAsync(tenantRepository, session, [execution]);
+            return projected.FirstOrDefault();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGetPipelineExecution(tenantId, executionId, e);
+        }
+    }
+
+    /// <summary>
+    /// Upper bound on one queue read. A pool queue that is longer than this is already an incident
+    /// the scale-up policy and the surfaces are shouting about; reading further would only make the
+    /// scheduling round slower without changing which work item goes next.
+    /// </summary>
+    private const int MaxQueueReadBatch = 1000;
+
+    /// <summary>
+    /// Every execution of the tenant that is waiting for a lease, oldest first.
+    /// </summary>
+    private static async Task<List<RtPipelineExecution>> ReadQueuedExecutionEntitiesAsync(
+        ITenantRepository tenantRepository, IOctoSession session, int take)
+    {
+        // Ordered by QueuedAt, which is the index 4.0.0 added for exactly this read. The StartedAt
+        // index is useless here: a queued execution has no StartedAt at all, so every one of them
+        // sits in that index's null bucket in arrival-independent order.
+        var queryOptions = RtEntityQueryOptions.Create()
+            .SortOrder(nameof(RtPipelineExecution.QueuedAt), SortOrders.Ascending)
+            .FieldFilter(nameof(RtPipelineExecution.Status), FieldFilterOperator.Equals,
+                (int)RtPipelineExecutionStatusEnum.Queued);
+
+        var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(session, queryOptions,
+            skip: 0, take: Math.Clamp(take, 1, MaxQueueReadBatch));
+        return resultSet.Items.ToList();
+    }
+
+    /// <summary>
+    /// Attaches each queued execution's pipeline and that pipeline's <c>ExecutionClass</c>.
+    /// </summary>
+    private static async Task<List<QueuedExecution>> ProjectQueuedExecutionsAsync(
+        ITenantRepository tenantRepository, IOctoSession session, IReadOnlyList<RtPipelineExecution> executions)
+    {
+        if (executions.Count == 0)
+        {
+            return [];
+        }
+
+        var associationResult = await tenantRepository.GetRtAssociationTargetsAsync<RtPipelineExecution, RtPipeline>(
+            session,
+            executions.Select(e => e.RtId).ToList(),
+            SystemCommunicationCkIds.RtCkExecutedPipelineRoleId,
+            GraphDirections.Outbound,
+            null,
+            RtEntityQueryOptions.Create());
+
+        var pipelineByExecution = new Dictionary<OctoObjectId, RtPipeline>();
+        foreach (var entry in associationResult)
+        {
+            var pipeline = entry.Value.Items.FirstOrDefault();
+            if (pipeline != null)
+            {
+                pipelineByExecution[entry.Key.RtId] = pipeline;
+            }
+        }
+
+        var projected = new List<QueuedExecution>(executions.Count);
+        foreach (var execution in executions)
+        {
+            if (execution.ExecutionId is null)
+            {
+                continue;
+            }
+
+            pipelineByExecution.TryGetValue(execution.RtId, out var pipeline);
+
+            // A pipeline that cannot be resolved degrades to Batch, the same conservative answer
+            // IPipelineExecutionClassService gives for a definition nobody could classify: an
+            // unknown job must never jump a queue.
+            var executionClass = pipeline is null
+                ? QueuedExecution.BatchClass
+                : (int)pipeline.ExecutionClass;
+
+            projected.Add(new QueuedExecution(
+                execution.ExecutionId,
+                execution.RtId,
+                execution.QueuedAt ?? DateTime.MinValue,
+                pipeline?.RtId,
+                pipeline?.Name,
+                executionClass));
+        }
+
+        return projected;
+    }
+
+    /// <summary>
+    /// Finds one execution by its business <c>ExecutionId</c>, or null.
+    /// </summary>
+    private static async Task<RtPipelineExecution?> FindExecutionAsync(ITenantRepository tenantRepository,
+        IOctoSession session, string executionId)
+    {
+        var queryOptions = RtEntityQueryOptions.Create()
+            .FieldFilter(nameof(RtPipelineExecution.ExecutionId), FieldFilterOperator.Equals, executionId);
+
+        var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(session, queryOptions);
+        return resultSet.Items.FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Reads the pipeline one execution belongs to, or null.
+    /// </summary>
+    private static async Task<RtPipeline?> ReadSinglePipelineOfExecutionAsync(ITenantRepository tenantRepository,
+        OctoObjectId executionRtId)
+    {
+        using var session = await tenantRepository.GetSessionAsync();
+        var result = await tenantRepository.GetRtAssociationTargetsAsync<RtPipelineExecution, RtPipeline>(
+            session, [executionRtId], SystemCommunicationCkIds.RtCkExecutedPipelineRoleId,
+            GraphDirections.Outbound, null, RtEntityQueryOptions.Create());
+
+        return result.Count == 0 ? null : result.First().Value.Items.FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Reads the borrower's own adapter one execution belongs to, or null.
+    /// </summary>
+    private static async Task<RtAdapter?> ReadSingleAdapterOfExecutionAsync(ITenantRepository tenantRepository,
+        OctoObjectId executionRtId)
+    {
+        using var session = await tenantRepository.GetSessionAsync();
+        var result = await tenantRepository.GetRtAssociationTargetsAsync<RtPipelineExecution, RtAdapter>(
+            session, [executionRtId], SystemCommunicationCkIds.RtCkExecutingAdapterRoleId,
+            GraphDirections.Outbound, null, RtEntityQueryOptions.Create());
+
+        return result.Count == 0 ? null : result.First().Value.Items.FirstOrDefault();
+    }
+
+    #endregion
+
 
     private static async Task<List<RtPipelineExecution>> GetExecutionsByStatusOlderThanAsync(
         ITenantRepository tenantRepository, IOctoSession session,

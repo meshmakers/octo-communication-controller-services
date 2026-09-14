@@ -65,6 +65,11 @@ internal class AdapterPoolConnectionManager : IAdapterPoolConnectionManager
             .ToList();
     }
 
+    public IReadOnlyCollection<PoolMemberConnection> GetAllMembers()
+    {
+        return _membersByConnection.Values.ToList();
+    }
+
     public PoolMemberConnection? TryClaimMember(string poolTenantId, string poolRtId, LeaseDto lease)
     {
         lock (_claimLock)

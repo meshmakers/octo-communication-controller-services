@@ -140,6 +140,7 @@ try
     // increment 7.
     builder.Services.AddSingleton<IAdapterPoolConnectionManager, AdapterPoolConnectionManager>();
     builder.Services.AddSingleton<ILeaseService, LeaseService>();
+    builder.Services.AddSingleton<ILeaseSchedulerService, LeaseSchedulerService>();
     builder.Services.AddSingleton<IAdapterHubCallbacks, AdapterHubCallbacks>();
 
     // Add background service for pipeline execution metrics. Statistics folding runs inside
@@ -150,6 +151,7 @@ try
     // Reconciles adapters stuck at a stale Online state with no live SignalR connection (AB#4699).
     builder.Services.AddHostedService<AdapterOfflineReconciliationBackgroundService>();
     builder.Services.AddHostedService<WorkloadLifecycleWatchdogBackgroundService>();
+    builder.Services.AddHostedService<LeaseSchedulerBackgroundService>();
 
     // HTTP activator (AB#4923): hostname index plus the client that forwards a held request to the
     // woken workload. The client gets no timeout of its own — the wake already ran to completion by

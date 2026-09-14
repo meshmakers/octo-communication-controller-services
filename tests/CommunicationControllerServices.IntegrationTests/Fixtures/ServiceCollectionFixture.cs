@@ -145,6 +145,11 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         Services.AddSingleton<IAdapterPoolConnectionManager, AdapterPoolConnectionManager>();
         Services.AddSingleton<ILeaseService, LeaseService>();
 
+        // AB#4924 increment 7: the queue and its scheduler. Same rule as the line above — the host
+        // resolves ILeaseSchedulerService from ExecutionCleanupBackgroundService and from
+        // AdapterPoolController, so a fixture that does not register it fails somewhere unrelated.
+        Services.AddSingleton<ILeaseSchedulerService, LeaseSchedulerService>();
+
         // Add logging with xUnit output
         Services.AddLogging(loggingBuilder =>
         {
