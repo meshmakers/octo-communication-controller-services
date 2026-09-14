@@ -54,7 +54,7 @@ graph TD
     I5["5 · AdapterPool + operator<br/>operator + controller + octo-sdk"]
     I6["6 ✅ · Lease wire contract<br/>octo-sdk + controller + SDK + mesh-adapter"]
     I7["7 ✅ · Queue + scheduler<br/>controller-services"]
-    I8["8 · Three queue surfaces<br/>studio + octo-cli + MCP"]
+    I8["8 ✅ · Three queue surfaces<br/>octo-sdk + studio + octo-cli + MCP"]
     I9["9 · Observability + rollout"]
     I1 --> I2
     I1 --> I4
@@ -81,7 +81,7 @@ cause a cross-tenant data incident, and everything else waits on it before it ca
 | 5 ✅ | pool workloads deploy into a platform namespace, scale within `MinReplicas..MaxReplicas`, and are invisible to the idle watchdog | yes (kind e2e) | a pool runs N members that no tenant can reach yet |
 | 6 ✅ | management connection + `Lease`/`Release` verbs | yes (hub tests + a manual lease) | a pool member can be leased by hand |
 | 7 ✅ | queue, round-robin, priority, TTL, `Queued` executions | yes (unit + integration) | the controller queues and schedules; a member still needs the work item wired to it (§9.9) |
-| 8 | queue visible and cancellable in all three surfaces | yes (vitest + CLI + MCP tests) | the queue is operable |
+| 8 ✅ | queue visible and cancellable in all three surfaces, off one endpoint through one SDK client | yes (vitest + CLI + MCP tests) | the queue is operable |
 | 9 | metrics, alerts, per-tenant enablement | yes | rollout becomes operable |
 
 ---
@@ -1431,7 +1431,7 @@ than invented here.
 
 ---
 
-## 10. Increment 8 — the queue in all three surfaces
+## 10. Increment 8 — the queue in all three surfaces ✅ implemented
 
 Concept §5 is explicit that the queue is operable from **Refinery Studio, `octo-cli` and the
 MCP server** — "the same surface in all three, not a Studio-only view". Plan 1.0 had only the
@@ -1460,9 +1460,86 @@ Three things the surfaces have to honour, decided by what the endpoint returns:
 
 | Surface | Repo | Work |
 |---|---|---|
-| Refinery Studio | `octo-frontend-refinery-studio` | Queue panel on the pool view. Extend `pipeline-execution-history-dialog.component.ts`: add `QUEUED` to the `status` filter items (~line 420) and to the status-badge colour switch (~line 527); surface `QueuedAt`, `LeaseWaitMs`, `ExecutionClass`. Cancel action. `ng lint` + `npm test` after every change. |
+| Refinery Studio | `octo-frontend-refinery-studio` | Queue panel (`tenants/communication/adapter-pool-queue/`) + `QUEUED` in the `pipeline-execution-history-dialog.component.ts` `status` filter items (~line 420) and status-badge colour switch (~line 527). Cancel action. `ng lint` + `npm test` after every change. |
 | `octo-cli` | `octo-cli` | `GetAdapterPoolQueue` / `CancelQueuedExecution` in the `CommunicationServices` group, alongside the existing `GetPools` family. |
 | MCP | `octo-mcp-service` | `get_adapter_pool_queue` / `cancel_queued_execution` tools with the right `McpRisk` classification (the cancel is destructive). |
+| *(contract)* | `octo-sdk` | 🔴 **A fourth repo, unavoidably.** Both the CLI and the MCP server reach the controller through `ICommunicationServicesClient`, so `GetAdapterPoolQueueAsync` / `CancelQueuedExecutionAsync` and the DTOs live here. |
+
+### 10.1 What was actually built
+
+| Where | What |
+|---|---|
+| `octo-sdk` `Communication.Contracts` | `AdapterPoolQueueEntryDto` (mirror of the controller's `Models/AdapterPoolQueueEntryDto`), `AdapterPoolQueueCancellationOutcome` + `…ResultDto` |
+| `octo-sdk` `Sdk.ServiceClient` | `GetAdapterPoolQueueAsync`, `CancelQueuedExecutionAsync` — **409 and 404 are outcomes, not exceptions** |
+| `octo-cli` | `GetAdapterPoolQueueCommand` (human rendering + `-j`), `CancelQueuedExecutionCommand` (confirmation gate + `-y`) |
+| `octo-mcp-service` | `get_adapter_pool_queue` (Low) and `cancel_queued_execution` (**High**, `confirm=true`) in `DataFlowTriggerPoolTools` |
+| `octo-frontend-refinery-studio` | `AdapterPoolQueueService` (interim `HttpClient` client), `AdapterPoolQueuePanelComponent`, its route under `communication/adapter-pool-queue/:adapterPoolRtId`, and `QUEUED` in the execution-history dialog |
+
+**The 409 travels as a value, in all three surfaces.** The client maps it to
+`AdapterPoolQueueCancellationOutcome.AlreadyLeased` instead of throwing, because every surface has to
+be able to say *nothing was cancelled, and interrupting it is the other operation*. An exception
+collapses that into "the call failed" and invites a retry, which is precisely the wrong next move.
+`404` gets the same treatment; anything else still throws.
+
+### 10.2 🔴 Three corrections to what this section assumed
+
+1. **It is a four-repo increment, not three.** See the table above: the shared contract has to exist
+   in `octo-sdk` before two of the three surfaces can call it. Nothing in the concept is wrong about
+   this — the plan simply listed the surfaces and not the client they share.
+2. **The Studio cannot surface `QueuedAt`, `LeaseWaitMs` and `ExecutionClass` in this increment.**
+   They are CK 4.0.0 *entity* attributes and therefore GraphQL fields, and this section's own warning
+   defers the codegen re-run to the model train. The checked-in `schema.graphql` is pre-4.0.0: it has
+   no `queuedAt`/`leaseWaitMs`/`executionClass`, and `SystemCommunicationPipelineExecutionStatus` has
+   no `QUEUED` member. What *is* codegen-free — and was done — is the `QUEUED` filter item and the
+   badge colour, both plain strings that never touch a generated type. The three attributes land with
+   the same pass that renames `SystemCommunicationPool`. `LeaseWaitMs` is additionally not on the
+   queue endpoint at all: it is stamped on the execution at lease grant, so it belongs to the history
+   view, not to the queue view.
+3. **"Queue panel on the pool view" has no pool view to sit on yet.** `AdapterPool` becomes a GraphQL
+   type only with 4.0.0, so there is no adapter-pool list or detail page in the Studio to host the
+   panel. It ships as a self-contained component addressed by the pool's rtId
+   (`communication/adapter-pool-queue/:adapterPoolRtId`), taking that id as a component input so the
+   detail view can host `<app-adapter-pool-queue-panel>` unchanged once it exists. No part of it
+   depends on the generated schema.
+
+### 10.3 The mutations that prove the tests
+
+Every new test was verified to fail against a deliberate mutation, per surface:
+
+| Mutation | Test it turned red |
+|---|---|
+| Add a `Rank` property to `AdapterPoolQueueEntryDto` | `AdapterPoolQueueEntryDtoTests.CarriesNoGlobalRankShapedMember` |
+| `TenantsAheadInRotation => 0` | `AdapterPoolQueueClientTests.GetQueue_ReportsPositionInTenantAndTenantsAhead_NotAGlobalRank` |
+| Drop the `Conflict` case from `CancelQueuedExecutionAsync` | `…CancelQueuedExecution_AlreadyLeased_IsItsOwnOutcomeAndNotAnException` |
+| CLI prints `rank=tenantsAhead*100+position` | `AdapterPoolQueueCommandTests.Queue_PrintsPositionInTenantAndTenantsAhead_NotAGlobalRank` |
+| CLI logs an error on an empty queue | `…Queue_Empty_ReadsAsAnIdlePoolRatherThanAnError` |
+| CLI drops `member=` from the leased row | `…Queue_LeasedEntry_ShowsItsMemberAndSaysItCannotBeCancelledHere` |
+| CLI folds `AlreadyLeased` into the success branch | `…Cancel_AlreadyLeased_SaysInterruptingIsADifferentOperation` |
+| MCP reports `AlreadyLeased` as `IsSuccess = false` | `AdapterPoolQueueToolsTests.Cancel_AlreadyLeased_…` (+ the `NotFound` twin) |
+| MCP answers an empty queue with `IsSuccess = false` | `…GetQueue_EmptyPool_IsSuccessAndSaysSo` |
+| `cancel_queued_execution` downgraded to `Medium` | `…QueueRead_IsLow_AndCancel_IsHigh` |
+| Add `HighestRank` to `GetAdapterPoolQueueResponse` | `…GetQueue_HappyPath_ReportsPositionInTenantAndTenantsAhead` |
+| Studio renders `#tenantsAhead*100+position` | `AdapterPoolQueuePanelComponent … renders position within the tenant plus tenants ahead` |
+| Studio shows the 409 via `showError` | `… reports a 409 as "already leased, interrupting is a different operation"` |
+| Studio gives leased rows a Cancel button | `… shows the member of a leased entry and offers no cancel button for it` |
+| Studio turns an empty queue into a load error | `… renders an empty queue as an idle pool, not as an error` |
+| Studio service drops the 409 mapping | `AdapterPoolQueueService … maps 409 to AlreadyLeased …` |
+| Remove the `QUEUED` filter item / badge colour | `PipelineExecutionHistoryDialogComponent` (both tests) |
+
+### 10.4 🔴 A Vitest spec leak the new spec files exposed
+
+Adding three spec files to the Studio turned four tests red in
+`tenants/ai/new-session-dialog.component.spec.ts`, a file this increment does not touch. The cause
+was not the new specs: the unit-test builder runs with `isolate: false`, and
+`node-field.component.spec.ts` stubbed the clipboard with
+`vi.stubGlobal('navigator', {...navigator, clipboard: …})`. The spread copies only *own* enumerable
+properties, so the replacement carries no `userAgent`, and the stub is not undone between files — a
+later file in the same worker then dies inside Angular's `DefaultValueAccessor`, whose `_isAndroid`
+reads `navigator.userAgent.toLowerCase()`. New files merely changed which worker runs what.
+
+Fixed at the source by defining the one property on the real `navigator`
+(`Object.defineProperty(navigator, 'clipboard', …)`, as `signal-channel.component.spec.ts` already
+did) rather than replacing the global. Suite back to green: 116 files, 1863 tests.
 
 ⚠️ The rename in increment 1 also forces a **separate, unavoidable** frontend pass: the
 GraphQL type `SystemCommunicationPool` renames itself when 4.0.0 publishes (§3.8). Sequence

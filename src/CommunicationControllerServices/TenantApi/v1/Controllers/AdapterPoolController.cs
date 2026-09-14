@@ -124,6 +124,12 @@ public class AdapterPoolController : ControllerBase
     ///         databases — the pool belongs to the lender and every execution to a borrower.
     ///     </para>
     ///     <para>
+    ///         The entry shape is <c>Communication.Contracts</c>'s <see cref="AdapterPoolQueueEntryDto" />
+    ///         — increment 7 declared a controller-local copy because no client existed yet, and
+    ///         increment 8 replaced it with the shared one, the way <c>PoolSummaryDto</c> and the rest
+    ///         of the communication contract already work. One wire shape, one declaration.
+    ///     </para>
+    ///     <para>
     ///         🔴 <b>Position is reported per tenant plus tenants-ahead, never as one global rank.</b>
     ///         Round-robin has no global rank to report, and a single number would contradict the
     ///         order work actually runs in.
