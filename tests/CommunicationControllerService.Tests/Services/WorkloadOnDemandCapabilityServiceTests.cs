@@ -223,4 +223,133 @@ internal class WorkloadOnDemandCapabilityServiceTests
 
         await _service.RefreshWorkloadCapabilityAsync(TenantId, _rtAdapter.ToRtEntityId());
     }
+
+    #region AB#5228 — adapter-trigger audit (both classification paths)
+
+    // The triggers the AB#5228 audit reclassified as process-bound, with the repo they live in.
+    // Every one of them now carries [NodeRequiresRunningProcess] at the source AND a base name in
+    // KnownProcessBoundTriggerNames; the two tests below pin one classification path each.
+    //
+    //   LoxonePollTrigger@1        octo-adapter-loxone — in-process poll loop (the reported defect)
+    //   FromLoxoneStateChange@1    octo-adapter-loxone — WebSocket state-cache subscription
+    //   MqttTrigger@1              octo-adapter-mqtt   — long-lived MQTT client subscription
+    //   DemoTrigger@1              octo-adapter-mqtt + octo-adapter-demos — TCP listener
+    //   FromZenonCel@1             octo-plug-zenon     — in-process runtime subscription
+    //   FromZenonVariableChanged@1 octo-plug-zenon     — in-process runtime subscription
+    //   FromZenonAml@1             octo-plug-zenon     — in-process runtime subscription
+    //   FromRfcServerCall@1        octo-adapter-sap    — RFC server hosted in the process
+
+    /// <summary>
+    /// Old-SDK path: the adapter sends no descriptors at all, so only the name fallback can
+    /// classify the trigger. Dropping a name from <c>KnownProcessBoundTriggerNames</c> fails here.
+    /// </summary>
+    [Test]
+    [Arguments("LoxonePollTrigger@1")]
+    [Arguments("FromLoxoneStateChange@1")]
+    [Arguments("MqttTrigger@1")]
+    [Arguments("DemoTrigger@1")]
+    [Arguments("FromZenonCel@1")]
+    [Arguments("FromZenonVariableChanged@1")]
+    [Arguments("FromZenonAml@1")]
+    [Arguments("FromRfcServerCall@1")]
+    public async Task GetProcessBoundNodes_FallbackNameList_NoDescriptors_ClassifiesProcessBound(
+        string nodeType)
+    {
+        var definition = $"""
+                          triggers:
+                            - type: {nodeType}
+                          """;
+
+        var processBound = _service.GetProcessBoundNodes(definition, null);
+
+        await Assert.That(processBound).Contains(nodeType);
+    }
+
+    /// <summary>
+    /// New-SDK path: the node is spelled with an "X" prefix so no fallback name can answer, and the
+    /// descriptor alone carries <c>RequiresRunningProcess</c>. Removing
+    /// <c>[NodeRequiresRunningProcess]</c> at the source is what makes an adapter stop sending this
+    /// flag — which is exactly the state this test describes when it goes red.
+    /// </summary>
+    [Test]
+    [Arguments("XLoxonePollTrigger")]
+    [Arguments("XFromLoxoneStateChange")]
+    [Arguments("XMqttTrigger")]
+    [Arguments("XDemoTrigger")]
+    [Arguments("XFromZenonCel")]
+    [Arguments("XFromZenonVariableChanged")]
+    [Arguments("XFromZenonAml")]
+    [Arguments("XFromRfcServerCall")]
+    public async Task GetProcessBoundNodes_DescriptorFlag_WithoutFallbackName_ClassifiesProcessBound(
+        string nodeName)
+    {
+        var nodeType = $"{nodeName}@1";
+        var definition = $"""
+                          triggers:
+                            - type: {nodeType}
+                          """;
+        var descriptors = new[]
+        {
+            new NodeDescriptorDto(nodeName, 1, "Trigger", true, false, "{}",
+                RequiresRunningProcess: true)
+        };
+
+        // Sanity: without the descriptor flag the same node is classified capable, so the assertion
+        // below can only be satisfied by the descriptor path.
+        await Assert.That(_service.GetProcessBoundNodes(definition, null)).IsEmpty();
+
+        var processBound = _service.GetProcessBoundNodes(definition, descriptors);
+
+        await Assert.That(processBound).Contains(nodeType);
+    }
+
+    /// <summary>
+    /// Negative case — the audit must not have made everything process-bound. These five are
+    /// wake-capable by evidence in the code: the HTTP activator holds the request through the wake
+    /// (AB#4923), the cron trigger queue is durable and the controller co-wakes on the same cron
+    /// (AB#4918), the execute-pipeline send is wake-gated in
+    /// <c>TriggerManagementService.StartExecutePipelineAsync</c>, and chaining stays classified
+    /// capable by design (see the doc note in this test's AB#5228 report).
+    /// </summary>
+    [Test]
+    [Arguments("FromHttpRequest@1")]
+    [Arguments("FromHttpRequest@2")]
+    [Arguments("FromPipelineTriggerEvent@1")]
+    [Arguments("FromExecutePipelineCommand@1")]
+    [Arguments("FromPipelineDataEvent@1")]
+    public async Task GetProcessBoundNodes_WakeCapableTrigger_StaysCapable(string nodeType)
+    {
+        var definition = $"""
+                          triggers:
+                            - type: {nodeType}
+                          """;
+
+        var processBound = _service.GetProcessBoundNodes(definition, null);
+
+        await Assert.That(processBound).IsEmpty();
+    }
+
+    /// <summary>
+    /// The reported defect, end to end: a pipeline on LoxonePollTrigger@1 must make its workload
+    /// not on-demand capable, with a reason a human can read.
+    /// </summary>
+    [Test]
+    public async Task EvaluateAsync_LoxonePollTrigger_NotCapableWithReason()
+    {
+        GivenPipelines(CreatePipeline("loxone-poll",
+            """
+            triggers:
+              - type: LoxonePollTrigger@1
+            """));
+
+        var result = await _service.EvaluateAsync(TenantId, _rtAdapter.ToRtEntityId());
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.IsCapable).IsFalse();
+        await Assert.That(result.BlockingReasons.Count).IsEqualTo(1);
+        await Assert.That(result.BlockingReasons[0]).Contains("loxone-poll");
+        await Assert.That(result.BlockingReasons[0]).Contains("LoxonePollTrigger@1");
+    }
+
+    #endregion
 }

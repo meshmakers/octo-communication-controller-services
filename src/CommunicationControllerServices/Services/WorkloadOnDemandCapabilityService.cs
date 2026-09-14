@@ -30,7 +30,18 @@ internal class WorkloadOnDemandCapabilityService(
         "FromSignal",
         "FromTeamsBot",
         "FromSendNotification",
-        "FromLoxoneStateChange"
+        "FromLoxoneStateChange",
+        // AB#5228 — the audit that followed the LoxonePollTrigger@1 miss. Every name below is a
+        // trigger whose firing depends on THIS adapter process staying alive; each one now also
+        // carries [NodeRequiresRunningProcess] in its own repo, so a current SDK self-describes it
+        // and this list only covers adapters still on an SDK older than 3.4.105 / 0.2-dev.
+        "LoxonePollTrigger",        // octo-adapter-loxone: in-process poll loop
+        "MqttTrigger",              // octo-adapter-mqtt: long-lived MQTT client subscription
+        "DemoTrigger",              // octo-adapter-mqtt + octo-adapter-demos (identical source): TCP listener
+        "FromZenonCel",             // octo-plug-zenon: in-process zenon runtime subscription
+        "FromZenonVariableChanged", // octo-plug-zenon: in-process zenon runtime subscription
+        "FromZenonAml",             // octo-plug-zenon: in-process zenon runtime subscription
+        "FromRfcServerCall"         // octo-adapter-sap: RFC server socket hosted in the process
     };
 
     public async Task<OnDemandCapabilityResult> EvaluateAsync(string tenantId, RtEntityId adapterRtEntityId)
