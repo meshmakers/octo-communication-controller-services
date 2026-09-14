@@ -24,11 +24,46 @@ internal class PipelineDebugService : IPipelineDebugService
                 debugPoint.SequenceNumber)
             {
                 Messages = debugPoint.Messages,
-                Input = debugPoint.Input != null ? JsonDocument.Parse(debugPoint.Input).RootElement : null,
-                Output = debugPoint.Output != null ? JsonDocument.Parse(debugPoint.Output).RootElement : null
+                Input = ToElement(debugPoint.Input),
+                Output = ToElement(debugPoint.Output)
             };
 
             _debugInfo.AddOrUpdate(nodePath, debugInfo, (_, _) => debugInfo);
+        }
+
+        /// <summary>
+        /// Turns an adapter-supplied snapshot into a <see cref="JsonElement" />, tolerating
+        /// values that are not JSON.
+        /// </summary>
+        /// <remarks>
+        /// The adapter is supposed to send JSON here, but its debug capture substitutes plain
+        /// text placeholders such as <c>&lt;debug snapshot omitted: total debug capture budget
+        /// exhausted&gt;</c> whenever a snapshot exceeds one of its size limits (AB#4272,
+        /// AB#4662). Those start with '&lt;' and make <see cref="JsonDocument.Parse(string,
+        /// JsonDocumentOptions)" /> throw. Because the adapter transmits its debug points one
+        /// by one over a request/response hub call without per-point error handling, a single
+        /// throw here discarded EVERY debug point of the execution, and the read API reported
+        /// the result as an empty list — so the capture looked inert rather than broken.
+        /// Keeping the raw text as a JSON string is strictly better than losing the execution:
+        /// the placeholder is exactly the diagnostic the caller needs to see.
+        /// </remarks>
+        private static JsonElement? ToElement(string? raw)
+        {
+            if (raw == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                // RootElement stays valid only while its JsonDocument lives, so the document is
+                // deliberately not disposed here — it is owned by the cached DebugPointDataDto.
+                return JsonDocument.Parse(raw).RootElement;
+            }
+            catch (JsonException)
+            {
+                return JsonSerializer.SerializeToElement(raw);
+            }
         }
 
         public DebugPointDataDto? Get(string nodeId)
