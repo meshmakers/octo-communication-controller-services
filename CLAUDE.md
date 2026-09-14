@@ -31,6 +31,9 @@ This is the **Octo Communication Controller Services** - an ASP.NET Core web ser
 2. **Pools**: Groups of managed devices/entities. Pool operators register via SignalR to handle device communication.
 3. **SignalR Hubs**: Real-time bidirectional communication channels:
    - `AdapterHub` at `/{tenantId}/adapterHub` - manages adapter lifecycle and pipeline debugging
+   - `AdapterPoolHub` at `/adapterPoolHub` - **tenant-free** management channel of adapter pool
+     members; grants and releases leases (AB#4924). Not a variant of `AdapterHub`: a pool member
+     belongs to no tenant, so it cannot use a tenant-addressed route.
    - `PoolHub` at `/{tenantId}/poolHub` - manages pool operator connections
 4. **Caches**: In-memory synchronized state for Adapters and Pools across service nodes
 5. **Repository Layer**: `CommunicationRepository` - abstracts MongoDB persistence via Octo Runtime Engine
@@ -182,6 +185,75 @@ connection without a route tenant refused; default is `LogOnly`) and
 `Configuration/AdapterHubAuthorizationWiringTests.cs` (filter registration pinned at the `Program.cs`
 source, mode operator-settable, default when the section is absent, and that the two hub gates keep
 distinct configuration sections).
+
+#### The adapter **pool** hub — a third gate, and why it is not one of the other two (AB#4924)
+
+`/adapterPoolHub` (`Hubs/AdapterPoolHub`) is the management channel of **adapter pool members**:
+processes that belong to **no tenant** and are handed one per lease (shared adapter leasing, see
+`docs/concepts/shared-adapter-leasing.md` §4). Mounted next to `/operatorHub`, i.e. with no tenant in
+the route — which is the whole reason it exists as a separate hub.
+
+🔴 **Neither existing gate fits, and the reasons are worth knowing before anyone "simplifies" this.**
+`/operatorHub`'s gate applies `SystemCommunicationApiPolicy` — system authority over every tenant.
+A pool member runs pipelines; it does not administer the estate, and giving the whole pool fleet
+system authority to save a file is the wrong trade (concept §4 rejects it explicitly).
+`/{tenantId}/adapterHub`'s gate has the right *policy* but binds the connection to a **route** tenant,
+and this route deliberately has none. So: the adapter gate's policy
+(`TenantCommunicationApiReadWritePolicy`), bound to the tenant **in the token**.
+
+The binding is completed in **two places**, on purpose:
+
+1. `AdapterPoolHubAuthorizationFilter` resolves the principal at connect time and stores its
+   `tenant_id` on the connection (`Context.Items`, key `AdapterPoolHubAuthorizationFilter.ConnectionTenantIdItemKey`).
+   It fails closed when there is no tenant to store. The filter cannot do more: it runs before any hub
+   method, so no pool has been declared yet.
+2. `AdapterPoolHub.RegisterPoolMemberAsync` refuses a registration whose declared `PoolTenantId` is a
+   different tenant. **No parent/ancestor allowance**, same stance as AB#5063 — a member registered
+   into another tenant's pool would receive leases carrying a *third* tenant's service-account secret.
+
+Staged exactly like the other two: `OCTO_ADAPTERPOOLHUBAUTHORIZATION__MODE`, `LogOnly` default,
+`Enforce` per environment without a release. The three sections are deliberately distinct so they can
+be armed independently — pinned by `AdapterPoolHubWiringTests.TheThreeHubGates_HaveDistinctSections`.
+
+🔴 **Authorization for a *borrower* never comes from this connection.** It arrives on the lease as the
+borrower's own `PipelineServiceAccount` credential (AB#5027, concept §8 Q6) and dies with the lease.
+That is what keeps a pool member from being a standing cross-tenant credential.
+
+`Services/LeaseService` grants and releases. **Lending is consensual in both directions**: the pool's
+`SharingMode` + allow-list say who *may* borrow (via `ITenantLendingScopeResolver`), and the borrowing
+adapter's own `LentFromTenantId` / `LentFromPoolRtId` say from whom it *does*. Either half alone is not
+enough — without the borrower half a lender could push executions into any descendant that never asked
+for them, under an identity that descendant never intended to hand out. The borrower's credential is
+read **after** both checks, so a request naming an adapter it has no business naming never reaches the
+code that decrypts a client secret.
+
+🔴 **There is no queue in this increment, deliberately.** A lease request that finds no idle member is
+*refused with a reason*, not parked — scheduling (round-robin across tenants, interactive before batch
+within a tenant's turn, the per-tenant cap) is increment 7, and half of it built here would be a second
+scheduling policy nobody intended to write.
+
+`POST {tenantId}/v1/adapterPool/{adapterPoolRtId}/lease` and `GET …/members`
+(`TenantApi/v1/Controllers/AdapterPoolController`) are a **test and diagnostic surface**, not the
+production path. They exist so the whole mechanism is exercisable end to end on a real two-tenant pair
+one increment before the scheduler. The member list is **per controller instance** — a member's SignalR
+connection lives on one pod — which is the same property `IOperatorConnectionManager` has.
+
+🔴 **A client secret now travels over the hub as well as over the deploy path.** The AB#5027 guard
+`DeployWorkloadAsync_NeverWritesTheClientSecretToAnyLogTarget` is mirrored for the lease path in
+`Services/LeaseServiceTests/LeaseSecretLogTargetTests` — same shape (NLog `MemoryTarget`, real path,
+assertions on the **rendered** output, neither the value nor an eight-character prefix), plus a second
+test that rendering a `LeaseDto` **as an object** does not reveal it. `LeaseDto` overrides `ToString`
+for exactly that reason: a record's generated one prints every property, so the first
+`logger.LogDebug("… {Lease}", lease)` would leak the secret without anybody noticing.
+
+Tests: `Hubs/AdapterPoolHubTests/` (registration + the tenant-binding matrix in both modes, the
+`IShutdownState` refusal, lease routing to a member, a second lease never landing on a claimed member,
+release, stale release, disconnect mid-lease, draining, heartbeat),
+`Hubs/AdapterPoolHubAuthorizationFilterTests.cs` (the AB#5063 matrix for this gate, plus that the
+connection tenant is recorded in **both** modes), `Services/LeaseServiceTests/` (grant, the consent
+matrix, the credential, TTL, the no-idle-member refusal, a failed push undoing the claim, release and
+disconnect) and `Configuration/AdapterPoolHubWiringTests.cs` (mount, filter, section binding, the route
+carrying no tenant, and that the **adapter** hub keeps its own gate and its route tenant).
 
 ### External Dependencies
 

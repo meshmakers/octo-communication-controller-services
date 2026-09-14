@@ -133,6 +133,13 @@ try
     builder.Services.AddSingletonMultipleInterfaces<AdapterCache, IAdapterCache, IAdapterCachePublish>();
 
     builder.Services.AddSingleton<IOperatorConnectionManager, OperatorConnectionManager>();
+    // AB#4924 increment 6 - the lease wire contract. The connection manager is a singleton for the
+    // same reason IOperatorConnectionManager is: a SignalR connection lives on one controller pod, so
+    // the registry of who is reachable is per instance by construction. LeaseService owns the grant
+    // and release transitions on top of it; it deliberately holds no queue - scheduling is
+    // increment 7.
+    builder.Services.AddSingleton<IAdapterPoolConnectionManager, AdapterPoolConnectionManager>();
+    builder.Services.AddSingleton<ILeaseService, LeaseService>();
     builder.Services.AddSingleton<IAdapterHubCallbacks, AdapterHubCallbacks>();
 
     // Add background service for pipeline execution metrics. Statistics folding runs inside
@@ -185,13 +192,23 @@ try
         // AdapterHubAuthorizationOptions.
         // Both filters are registered per hub rather than globally: the two hubs evaluate different
         // policies and only one of them is tenant-addressed.
-        .AddHubOptions<AdapterHub>(o => o.AddFilter<AdapterHubAuthorizationFilter>());
+        .AddHubOptions<AdapterHub>(o => o.AddFilter<AdapterHubAuthorizationFilter>())
+        // AB#4924: /adapterPoolHub is the management channel of adapter pool members. It is mounted
+        // next to /operatorHub rather than under /{tenantId}/adapterHub because a pool member belongs
+        // to NO tenant - it is handed one per lease - and AdapterHubAuthorizationFilter exists
+        // precisely to bind a connection to its route tenant. Its own gate applies the adapter hub's
+        // read-write policy (concept Q4 rejected the system policy as too much authority) and binds
+        // the connection to the LENDING tenant in its token; the borrower's authority arrives on the
+        // lease instead. Staged behind OCTO_ADAPTERPOOLHUBAUTHORIZATION__MODE like the other two.
+        .AddHubOptions<AdapterPoolHub>(o => o.AddFilter<AdapterPoolHubAuthorizationFilter>());
 
     // AB#5059 / AB#5063: bound as configuration so an environment can be armed without a release.
     builder.Services.Configure<OperatorHubAuthorizationOptions>(
         builder.Configuration.GetSection(OperatorHubAuthorizationOptions.SectionName));
     builder.Services.Configure<AdapterHubAuthorizationOptions>(
         builder.Configuration.GetSection(AdapterHubAuthorizationOptions.SectionName));
+    builder.Services.Configure<AdapterPoolHubAuthorizationOptions>(
+        builder.Configuration.GetSection(AdapterPoolHubAuthorizationOptions.SectionName));
 
     // AB#5112: rollout switch of the hardened deploy guard's identity-client check — bound as
     // configuration for the same reason as the hub gates above: an environment can be loosened
@@ -376,6 +393,7 @@ try
 
     app.MapHub<AdapterHub>("/{tenantId:tenantId}/adapterHub");
     app.MapHub<OperatorHub>("/operatorHub");
+    app.MapHub<AdapterPoolHub>("/adapterPoolHub");
     app.MapControllerRoute(name: "default",
         pattern: "{tenantId:tenantId}/system/v{version:apiVersion}/{controller}/{action}/{id?}");
 

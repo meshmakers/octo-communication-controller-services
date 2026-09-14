@@ -157,8 +157,9 @@ the opposite of what leasing is for.
 
 The management connection terminates on a new `/adapterPoolHub`, not on
 `/{tenantId}/adapterHub` — that route binds the connection to a tenant by construction
-(`SignalRClient.GetHubUri()` throws on a blank tenant, and `AdapterHubAuthorizationFilter`
-from AB#5063 enforces it).
+(`SignalRClient.BuildServiceUri()` throws on a blank tenant, and `AdapterHubAuthorizationFilter`
+from AB#5063 enforces it — 🔴 the method is called `BuildServiceUri`, not `GetHubUri`; corrected
+2026-09-14 during increment 6).
 
 The pool hub evaluates the **lending tenant's** read-write policy plus a filter binding the
 connection to that tenant. Authorization for a borrower comes from the lease, not from the
@@ -207,7 +208,12 @@ AdapterPool
   IdleTimeoutMinutes     when a member above MinReplicas is drained again
 ```
 
-Members are ordinary adapter workloads with `LifecycleMode = Leased`. The pool — not the
+🔴 **Corrected 2026-09-14, during increment 6.** This paragraph used to open "members are ordinary adapter
+workloads with `LifecycleMode = Leased`", which contradicts §2: `Leased` means *"has no process of its own"*,
+and a member **is** the process. Both cannot carry the same mode. Members are **replicas of the pool workload
+itself**, which is a `DeployableWorkload` in its own right; they need no entity, no author configuration and no
+lifecycle of their own. `Leased` stays unambiguously the **borrower's** mode, set on `Adapter`. See the
+implementation plan §12.2. The pool — not the
 AB#4918 idle watchdog — owns their lifecycle: the watchdog drains a workload from *its own*
 pipelines' `LastExecutionAt`, and a pool member has no pipelines of its own. This resolves the
 contradiction the on-demand concept would otherwise run into.
@@ -372,7 +378,12 @@ the queue path.
 - **AB#4914 / on-demand-adapter-lifecycle.md** — leasing sits beside `OnDemand`, not instead of it. A pool member may itself be `OnDemand`.
 - **AB#4924** — this supersedes its multiplexing assumption; the cost/latency comparison it asks for stays valid as input.
 - **AB#5027 `PipelineServiceAccount`** — the execution identity is already decoupled from the tenant; leasing needs the token exchange on top.
-- **AB#4338 RFC 8693 token exchange** — the mechanism for acquiring the target-tenant token.
+- **AB#4338 RFC 8693 token exchange** — 🔴 **corrected 2026-09-14, during increment 6.** This bullet used
+  to call the exchange "the mechanism for acquiring the target-tenant token", which contradicted §4 and Q6
+  two pages earlier. It is **not** the mechanism and cannot be: the exchange is user-only — it rejects a
+  `subject_token` without `sub`/`tenant_id`, which is exactly the shape of a client-credentials token, and it
+  mints an `xt_` shadow user, which is not what a service identity wants. The lease carries the borrower's own
+  `PipelineServiceAccount` credential instead (Q6). See the implementation plan §12.5.
 - **AB#5151 `GET /tenants/descendants`** — the lending scope resolver.
 
 ## 8. Decisions and open questions

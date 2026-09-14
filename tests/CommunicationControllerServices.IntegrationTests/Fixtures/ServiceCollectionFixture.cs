@@ -137,6 +137,14 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         Services.AddSingleton(Substitute.For<IHubContext<AdapterHub>>());
         Services.AddSingleton(Substitute.For<IHubContext<OperatorHub>>());
 
+        // AB#4924 increment 6: the lease path. Registered here as well as in Program.cs because this
+        // fixture composes the graph by hand — a service the host resolves but this fixture does not
+        // register fails at resolution time, in a test that has nothing to do with the change. That
+        // gap has already shipped four red integration tests on this branch once.
+        Services.AddSingleton(Substitute.For<IHubContext<AdapterPoolHub>>());
+        Services.AddSingleton<IAdapterPoolConnectionManager, AdapterPoolConnectionManager>();
+        Services.AddSingleton<ILeaseService, LeaseService>();
+
         // Add logging with xUnit output
         Services.AddLogging(loggingBuilder =>
         {

@@ -52,7 +52,7 @@ graph TD
     I3["3 · Isolation invariant<br/>SDK + mesh-adapter + octo-sdk<br/>🔴 highest risk"]
     I4["4 · Trigger-node execution class<br/>octo-communication-sdk + controller"]
     I5["5 · AdapterPool + operator<br/>operator + controller + octo-sdk"]
-    I6["6 · Lease wire contract<br/>octo-sdk + controller + SDK"]
+    I6["6 ✅ · Lease wire contract<br/>octo-sdk + controller + SDK + mesh-adapter"]
     I7["7 · Queue + scheduler<br/>controller-services"]
     I8["8 · Three queue surfaces<br/>studio + octo-cli + MCP"]
     I9["9 · Observability + rollout"]
@@ -79,7 +79,7 @@ cause a cross-tenant data incident, and everything else waits on it before it ca
 | 3 | process retains nothing tenant-scoped between executions | partly — see §5.5: the 2-tenant integration form needs a lease | none — single-tenant behaviour identical |
 | 4 | trigger nodes declare an execution class, resolved on save | yes (unit) | `ExecutionClass` visible on every pipeline; nothing reads it yet |
 | 5 ✅ | pool workloads deploy into a platform namespace, scale within `MinReplicas..MaxReplicas`, and are invisible to the idle watchdog | yes (kind e2e) | a pool runs N members that no tenant can reach yet |
-| 6 | management connection + `Lease`/`Release` verbs | yes (hub tests + a manual lease) | a pool member can be leased by hand |
+| 6 ✅ | management connection + `Lease`/`Release` verbs | yes (hub tests + a manual lease) | a pool member can be leased by hand |
 | 7 | queue, round-robin, priority, TTL, `Queued` executions | yes (unit + integration) | leasing actually executes work |
 | 8 | queue visible and cancellable in all three surfaces | yes (vitest + CLI + MCP tests) | the queue is operable |
 | 9 | metrics, alerts, per-tenant enablement | yes | rollout becomes operable |
@@ -703,8 +703,12 @@ Plus two singletons that hold tenant-derived *values* rather than the tenant id:
    `AdapterOptions.DedicatedTenantId` (name it differently on purpose — a property called
    `TenantId` invites the old assumption back); for a pool member it is set by the lease and
    cleared by the release.
-3. `SignalRClient.GetHubUri()` grows a tenant-free variant for the management connection
-   (increment 6). The dedicated path keeps today's URI.
+3. 🔴 **Corrected during increment 6.** The method is `SignalRClient.BuildServiceUri()`, not
+   `GetHubUri()`, and it is **already `protected virtual`** with a doc comment inviting exactly
+   this override ("Override in subclasses to customize URL construction (e.g., for non-tenant-scoped
+   hubs)") — `OperatorHubClient` has overridden it for the tenant-free `/operatorHub` since AB#5059.
+   So `octo-sdk`'s core needed no tenant-free variant at all: `AdapterPoolHubClient` overrides
+   `BuildServiceUri` and the dedicated path keeps today's URI unchanged.
 4. **Per-lease scope**: a lease opens a DI scope; everything tenant-derived resolves from it.
    The token holder, the `HttpRequestService` route prefix and the communication service
    client all move from singleton to scoped.
@@ -803,12 +807,12 @@ listed there, not here. What was built now is everything that can be built now.
 |---|---|---|
 | 1 | Compiler / source guard | ✅ `AdapterOptionsTenantIdRemovalTests` — reflection over all members incl. non-public, static and inherited, so a re-added `TenantId` fails by any route |
 | 2 | DI sweep over singletons against a cleared allow-list | ✅ `SingletonTenantFreedomSweepTests` — **SDK singletons only**, see the caveat below |
-| 3 | Two-tenant interleave asserting on **pipeline output**, real MongoDB | ⚠️ **scope-level only.** `ConcurrentExecutionsEachSeeOnlyTheirOwnTenant`: 12 tenants × 25 interleaved awaits. The pipeline-output form needs a lease → increment 6 |
-| 4 | Poison canary | ⚠️ **scope-level only.** `ThePoisonCanaryNeverCrosses` — a value no other execution may observe |
+| 3 | Two-tenant interleave asserting on **pipeline output**, real MongoDB | ✅ **delivered in increment 6** — `octo-mesh-adapter` `LeasedTenantIsolationTests.ConsecutiveLeasesEachSeeOnlyTheirOwnTenantsData`, over two real tenant databases. The increment-3 scope-level form stays as the concurrency probe |
+| 4 | Poison canary | ✅ **delivered in increment 6** — `ThePoisonCanaryNeverCrossesATenantBoundary`, a value seeded only into tenant A's database |
 | 5 | Randomised interleavings | ✅ at scope level. `RandomisedInterleavingsHoldOverManyRuns` — 200 executions over 4 tenants |
-| 6 | Post-release state assertion (CK cache unloaded, token holder empty, scope disposed) | ❌ there is no release without a lease → increment 6 |
-| 7 | Log-target assertion (tenant B's rendered log contains no tenant A id) | ❌ needs two tenants in one process → increment 6 |
-| 8 | Identity assertion (`tenant_id=B` on B's token) | ❌ needs the lease credential → increment 6 |
+| 6 | Post-release state assertion (CK cache unloaded, token holder empty, scope disposed) | ✅ `AfterAReleaseTheProcessRetainsNothingOfTheReleasedTenant` — plus "no registration left behind", which needed the work item to actually register one first (see §8) |
+| 7 | Log-target assertion (tenant B's rendered log contains no tenant A id) | ✅ `TenantBsRenderedExecutionLogNeverNamesTenantA` |
+| 8 | Identity assertion (`tenant_id=B` on B's token) | ✅ `TheTokenPresentedDuringALeaseBelongsToTheLeasedTenant`, and — more usefully — the **production** guard in `BorrowerIdentityLeaseParticipant` that refuses the lease on a mismatch |
 | 9 | Staged rollout with `IsPoolMember` false | ✅ that is what this increment ships; see §13 |
 
 **What the scope-level tests are and are not.** They are not a proxy for the real thing and must not
@@ -827,6 +831,14 @@ nothing, and on this increment that distinction is the difference between verifi
 repository are invisible from `octo-communication-sdk`, so the same sweep has to exist on the
 `octo-mesh-adapter` side over its own registration extension **before** leasing is enabled. That is
 an increment-6 entry criterion, not an optional follow-up: the mesh adapter is where the caches are.
+
+✅ **Delivered in increment 6** as `MeshAdapterSingletonTenantFreedomSweepTests`, over
+`AddOctoMeshAdapterPoolMember()` **and** `AddOctoMeshAdapter()`. It found eleven domain singletons
+that mention a tenant and now carry a written reason; the one worth knowing about is
+`CrateDbConnectionAccess`, which caches a CrateDB datasource **per tenant schema**. Keyed, so
+isolation-safe by construction — but unbounded across leases, exactly the shape the CK model cache
+had before this increment. Sockets and memory, not leakage; the next candidate for a lease
+participant if a member ever leases stream-data tenants at scale.
 
 ### 5.6 `octo-sdk` is not touched by this increment
 
@@ -1122,10 +1134,13 @@ nothing in the helm layer, and a directly created Deployment carrying the releas
 
 ---
 
-## 8. Increment 6 — lease wire contract
+## 8. Increment 6 — lease wire contract ✅ implemented
 
 **Repos:** `octo-sdk` (contracts first — publish before consumers), then
-`octo-communication-controller-services` and `octo-communication-sdk`.
+`octo-communication-controller-services`, `octo-communication-sdk` and — 🔴 **a fourth repo this
+section did not list** — `octo-mesh-adapter`, which the entry criteria below require by name (the
+DI sweep) and which is where every piece of tenant-scoped state a release has to drop actually
+lives.
 
 - `octo-sdk/src/Communication.Contracts/Hubs/` — new `IAdapterPoolHub` (adapter → controller:
   `RegisterPoolMemberAsync`, `ReleaseLeaseAsync(result)`, heartbeat) and
@@ -1173,6 +1188,98 @@ directions use the once-only `HubException` degrade pattern.
 disconnect mid-lease, `IShutdownState` guard), `Hubs/AdapterPoolHubAuthorizationFilterTests`
 (the AB#5063 matrix), SDK-side lease/release scope tests, and a log-target test that the
 borrower credential never reaches a log.
+
+### 8.1 What was actually built
+
+| Where | What |
+|---|---|
+| `octo-sdk/src/Communication.Contracts/Hubs/` | `IAdapterPoolHub` (`RegisterPoolMemberAsync`, `ReleaseLeaseAsync`, `HeartbeatAsync`) + `IAdapterPoolHubCallbacks` (`LeaseAsync`, `DrainAsync`) |
+| `octo-sdk/…/DataTransferObjects/` | `LeaseDto`, `LeaseResultDto`, `LeaseReleaseReasonDto`, `PoolMemberRegistrationDto`, `PoolMemberRegistrationResultDto`, `PoolMemberHeartbeatDto` |
+| `octo-sdk/src/Sdk.ServiceClient/CommunicationControllerServices/` | `AdapterPoolHubClient` + options + interface — a tenant-free `BuildServiceUri` override, mirroring `OperatorHubClient` |
+| `octo-communication-controller-services` | `Hubs/AdapterPoolHub`, `Hubs/AdapterPoolHubAuthorizationFilter` + `Options/AdapterPoolHubAuthorizationOptions` (staged `LogOnly`\|`Enforce`), `Hubs/AdapterPoolConnectionManager`, `Services/LeaseService`, `TenantApi/v1/Controllers/AdapterPoolController` (`POST {tenantId}/v1/adapterPool/{id}/lease` + `GET …/members`), `Program.cs` wiring |
+| `octo-communication-sdk` | `AdapterPoolTenantScope` + `IAdapterLeaseScope`, `AdapterPoolClient`, `IAdapterLeaseParticipant`, `IAdapterLeaseWorkItem` + `NoAdapterLeaseWorkItem`, `AdapterPoolMemberOptions`, `AddAdapterPoolMember()` |
+| `octo-mesh-adapter` | `Leasing/BorrowerIdentityLeaseParticipant`, `Leasing/CkModelCacheLeaseParticipant`, `Leasing/PipelineRegistryLeaseParticipant`, `AddOctoMeshAdapterPoolMember()`, `tenant_id` added to `JwtPayloadReader` |
+
+**Two nested notions of "the current tenant", and keeping them apart is the design of
+`AdapterPoolTenantScope`.** A *lease* binds the whole process to one borrowing tenant; an
+*execution* is one pipeline run inside it. The lease tenant has to be a **process-wide field** and
+not an `AsyncLocal` — the lease arrives on a hub callback and the executions it serves run on
+entirely different async call chains, so an `AsyncLocal` set by the callback would never reach them.
+That is precisely the process-wide tenant value concept §4 warns about, and it is safe here for one
+reason only: **it is null between leases**. "Isolation is a property of time" stops being a slogan
+at that line. Two further guards make it enforced rather than documented: a second `BeginLease`
+while one is held **throws**, and an execution for a tenant other than the leased one **throws**.
+
+**The ordering inside `AdapterPoolClient` is the invariant.** Participants are entered in
+registration order, the work item runs, participants are left in **reverse** order, the lease scope
+is left — and only then is the release reported. Reporting first would open exactly the window the
+design exists to close, because the controller's next act is to hand the member another tenant. A
+participant whose *leave* throws puts the member into **draining**: concept §6 says a member whose
+post-lease cleanliness is unproven is drained rather than re-used, and that is a state change, not a
+logged shrug.
+
+**`IAdapterLeaseParticipant` is the isolation invariant made composable.** The SDK cannot see the
+caches an adapter repository owns, so each of them registers a participant instead of the SDK
+carrying a hard-coded list it would have to keep in step. "Did this member really drop everything"
+becomes a question a test can answer by enumerating participants.
+
+### 8.2 🔴 Four corrections to what this section assumed
+
+1. **`SignalRClient.GetHubUri()` does not exist.** The method is `BuildServiceUri()`, it is already
+   `protected virtual`, and its own doc comment invites this exact override — `OperatorHubClient`
+   has used it for the tenant-free `/operatorHub` since AB#5059. `octo-sdk`'s core therefore needed
+   no change at all for the tenant-free URI. §5.2 item 3 and §12.6 are corrected.
+2. **The section lists three repos; the entry criteria require four.** The DI sweep is named for
+   `octo-mesh-adapter`, and so are the CK-cache unload, the token holder and the pipeline registry —
+   none of which the SDK can reach.
+3. **A pool member is a composition in its own right.** `AddAdapterPoolMember()` has to register
+   `IPipelineRegistryService` itself: it used to come from `AdapterBuilder`, which a pool member does
+   not run. Found by the integration test, not by review — the DI sweep enumerates *descriptors* and
+   never builds the provider, so it cannot see a missing registration.
+4. **"No registration left behind" was vacuous until the work item registered one.** An empty
+   registry stays empty whether or not anything drops it. The integration work item now registers a
+   real pipeline (behind a no-op probe trigger, because a registration requires a trigger) so the
+   assertion has something to be about.
+
+### 8.3 The entry criteria, and the mutations that prove them
+
+Every test below was checked against a deliberate mutation, not merely run. The decisive one is the
+last: it produces a genuine cross-tenant **read**, and the interleave suite fails on the *pipeline
+output*.
+
+| Mutation | Turns red |
+|---|---|
+| `AdapterPoolTenantScope` never clears the lease on dispose | 8 SDK tests **and all 7** integration tests |
+| `BeginExecution` drops the cross-tenant guard | 2 SDK scope tests |
+| `AdapterPoolClient` reports the release before unwinding | 4 SDK client tests |
+| `AddDataPipeline` stops registering `IAdapterTenantScope` | 12 SDK tests, incl. the orchestrator's own |
+| `CkModelCacheLeaseParticipant` does not unload | the post-release assertion |
+| `PipelineRegistryLeaseParticipant` does not unregister | the post-release assertion |
+| `BorrowerIdentityLeaseParticipant` does not clear the token holder | the post-release assertion + 1 unit test |
+| `BorrowerIdentityLeaseParticipant` drops `acr_values` | 1 unit test + **all 7** integration tests (the production guard refuses the lease) |
+| `LeaseDto` loses its `ToString` override | the secret-rendering test |
+| `AdapterPoolConnectionManager` drops the stale-release check | exactly the 2 stale-release tests |
+| `LeaseService` skips the borrower declaration check | exactly the 5 consent tests |
+| The gate stops recording the connection tenant | 3 filter tests |
+| The hub trusts the declared pool tenant | 2 registration tests |
+| 🔴 **The process keeps the first tenant it ever served** | `ConsecutiveLeasesEachSeeOnlyTheirOwnTenantsData`, `ThePoisonCanaryNeverCrossesATenantBoundary`, `RandomisedInterleavingsHold`, `TenantBsRenderedExecutionLogNeverNamesTenantA` — on the pipeline output |
+
+### 8.4 What the `GetService` tolerance turned out to protect
+
+Increment 3 (§5.4) left `EtlDataOrchestrator` resolving `IAdapterTenantScope` with `GetService`
+"so adapter repos that do not register it keep working". Replacing it with `GetRequiredService`
+outright would have broken **every host that composes the pipeline without an adapter builder** —
+`IAdapterTenantScope` was registered only in `AdapterBuilder` and `WebAdapterBuilder`, while
+`AddDataPipeline()` (which registers the orchestrator) did not register it at all. That set is:
+`octo-adapter-sap`'s `Program.cs`, `octo-plug-zenon`'s `AdapterInstanceEntryPoint`, both SDK samples
+(`Sdk.Plugs.Sample`, `Sdk.Socket.WebSample`), and roughly a dozen test fixtures across
+`octo-communication-sdk`, `octo-mesh-adapter` and `octo-adapter-weclapp`.
+
+The fix was to move the registration to where the requirement is: `AddDataPipeline()` now
+`TryAddSingleton`s the dedicated scope next to the orchestrator, so anything that can resolve an
+`IEtlDataOrchestrator` can resolve what it requires. `TryAdd` rather than `Add`, so a pool member
+that registered the lease-aware scope first is not silently overwritten by the dedicated one — which
+would fail nowhere and enforce no lease at all.
 
 ---
 
@@ -1391,7 +1498,8 @@ credential) is the right resolution; §7's bullet should be updated to match.
 ### 12.6 The management connection cannot reuse `AdapterHub`
 
 `app.MapHub<AdapterHub>("/{tenantId:tenantId}/adapterHub")` and
-`SignalRClient.GetHubUri()` (`octo-sdk/src/Sdk.ServiceClient/SignalRClient.cs:477`), which
+`SignalRClient.BuildServiceUri()` (`octo-sdk/src/Sdk.ServiceClient/SignalRClient.cs:470` — 🔴 named
+`GetHubUri` in earlier drafts of this plan, corrected during increment 6), which
 *throws* `ServiceConfigurationMissingException` when `Options.TenantId` is blank, both make a
 tenant-free adapter connection impossible on the existing route — and
 `AdapterHubAuthorizationFilter` (AB#5063) exists to enforce exactly that binding. §4's "one
