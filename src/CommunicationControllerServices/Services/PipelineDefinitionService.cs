@@ -1,5 +1,8 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using Meshmakers.Octo.Communication.Contracts.Serialization;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
@@ -15,17 +18,18 @@ internal class PipelineDefinitionService : IPipelineDefinitionService
     private const string TransformationsKey = "transformations";
     private const string TriggersKey = "triggers";
 
+    /// <summary>Throwaway mapping key for the plain-scalar round-trip probe.</summary>
+    private const string RoundTripProbeKey = "v";
+
+    // Read-only on purpose: UpdateNodeProperties edits the definition line by line so comments and
+    // formatting survive, so nothing here ever re-serializes a parsed document. (A SerializerBuilder
+    // used to be built alongside this one and was never called.)
     private readonly IDeserializer _deserializer;
-    private readonly ISerializer _serializer;
 
     public PipelineDefinitionService()
     {
         _deserializer = new DeserializerBuilder()
             .WithNamingConvention(CamelCaseNamingConvention.Instance)
-            .Build();
-        _serializer = new SerializerBuilder()
-            .WithNamingConvention(CamelCaseNamingConvention.Instance)
-            .ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull)
             .Build();
     }
 
@@ -375,12 +379,80 @@ internal class PipelineDefinitionService : IPipelineDefinitionService
         {
             null => "null",
             bool b => b ? "true" : "false",
-            string s => s.Contains(':') || s.Contains('#') || s.Contains('"') || s.Contains('\'')
-                         || s.StartsWith(' ') || s.EndsWith(' ')
-                ? $"\"{s.Replace("\"", "\\\"")}\""
-                : s,
+            string s => FormatStringValue(s),
+            // Invariant culture: a German-locale server would otherwise write `1,5`, which reads
+            // back as the string "1,5" instead of the number the caller sent.
+            IFormattable f => f.ToString(null, CultureInfo.InvariantCulture),
             _ => value.ToString() ?? ""
         };
+    }
+
+    /// <summary>
+    ///     Emits a string value as a YAML scalar, quoting it unless the plain (unquoted) form reads
+    ///     back as exactly the same string.
+    /// </summary>
+    /// <remarks>
+    ///     The round-trip is checked against <see cref="YamlToJsonConverter" /> — the same reader the
+    ///     deploy-time schema validation and the MCP server use — so the write path and the read path
+    ///     cannot disagree about what a scalar means. The previous heuristic only looked for
+    ///     <c>:</c>, <c>#</c>, quotes and surrounding spaces, which let a string that merely LOOKS
+    ///     like another YAML type through unquoted: <c>"true"</c> came back as a boolean,
+    ///     <c>"3"</c> as a number, <c>"null"</c> and <c>"~"</c> as null (the value simply gone), and
+    ///     a value opening with a block-sequence indicator such as <c>"- x"</c> made the whole
+    ///     definition unparseable.
+    /// </remarks>
+    private static string FormatStringValue(string value)
+    {
+        return PlainFormRoundTrips(value) ? value : QuoteScalar(value);
+    }
+
+    private static bool PlainFormRoundTrips(string value)
+    {
+        if (value.Length == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            var probe = YamlToJsonConverter.ToJsonNode($"{RoundTripProbeKey}: {value}");
+            return probe?[RoundTripProbeKey] is JsonValue scalar
+                   && scalar.GetValueKind() == JsonValueKind.String
+                   && scalar.GetValue<string>() == value;
+        }
+        catch (Exception)
+        {
+            // The plain form does not even parse (a leading `-`, an embedded `: `, …) — quote it.
+            return false;
+        }
+    }
+
+    /// <summary>Emits a YAML double-quoted scalar, which can carry any string content.</summary>
+    private static string QuoteScalar(string value)
+    {
+        var builder = new StringBuilder(value.Length + 2).Append('"');
+        foreach (var c in value)
+        {
+            switch (c)
+            {
+                case '\\': builder.Append("\\\\"); break;
+                case '"': builder.Append("\\\""); break;
+                case '\n': builder.Append("\\n"); break;
+                case '\r': builder.Append("\\r"); break;
+                case '\t': builder.Append("\\t"); break;
+                default:
+                    if (char.IsControl(c))
+                    {
+                        builder.Append("\\x").Append(((int)c).ToString("x2", CultureInfo.InvariantCulture));
+                    }
+                    else
+                    {
+                        builder.Append(c);
+                    }
+                    break;
+            }
+        }
+        return builder.Append('"').ToString();
     }
 
     /// <summary>
