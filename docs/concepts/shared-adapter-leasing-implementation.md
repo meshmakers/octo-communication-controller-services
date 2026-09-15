@@ -316,11 +316,12 @@ bumped `1.5.0` → `2.0.0` in this increment, and their seed data now creates a 
 
 | Model | Path | Declares | Required action |
 |---|---|---|---|
-| `System.Ai-3.7.0` | `octo-ai-services/src/SystemAiCkModel/ConstructionKit/ckModel.yaml` | `System.Communication-[3.0,4.0)` | 🔴 **major bump to 4.0.0**, republished in the same train |
+| `System.Ai-3.7.0` | `octo-ai-services/src/SystemAiCkModel/ConstructionKit/ckModel.yaml` | `System.Communication-[3.0,4.0)` | ✅ **done** — now `System.Ai-4.0.0` with `System.Communication-[4.0,5.0)`; blueprint `System.Ai.Default` 1.1.4 → 2.0.0 |
 | `Loxone-4.3.1` | `octo-adapter-loxone/src/AdapterEdgeLoxone.CkModel/ConstructionKit/ckModel.yaml` | `System.Communication-[3.31,3.32)` | 🔴 **major bump to 5.0.0**, range widened to `[4.0,5.0)` |
 
-🔴 **`System.Ai` is still unbumped on `test/0.2-dev`, and it is the reason a 4.0.0 tenant has no AI
-types at all** (measured during §11a.2 part B). The AI service retries and gives up with
+✅ **`System.Ai` has been bumped to 4.0.0** (`System.Communication-[4.0,5.0)`) — done during §11a.2
+part B, because it was the reason a 4.0.0 tenant had no AI types at all. What it looked like before:
+the AI service retried and gave up with
 *"Dependencies 'System.Communication-[3.36.0]' are unknown construction kit model libraries"* —
 note it resolves to the **withdrawn** 3.36.0 of §3.6, so the compiled artifact points at a version
 that does not exist either. Consequence beyond this repo: **any frontend schema introspected from a
@@ -330,6 +331,18 @@ into `System.Communication` (its `Pool` strings are its own `SystemAiWorkspaceMo
 `SystemAiCredentialKind` enum values), so the bump is purely version arithmetic — importing the
 compiled `ck-system.ai-3.yaml` with the dependency rewritten to `System.Communication-4.0.0`
 installs cleanly and produces a complete schema.
+
+What the bump actually cost, for the next model that has to cross a major: the source generator
+versions the generated **namespace** by the model's major, so `…Generated.System.Ai.v3` → `…v4`
+touched **54 C# files** in `octo-ai-services` and renamed `AddCkModelSystemAiV3()` → `…V4()`. The
+blueprint floor `System.Ai-[3.1.2,4.0)` **excluded** 4.0.0, so `System.Ai.Default` had to go
+`1.1.4` → `2.0.0` (renaming `AddBlueprintSystemAiDefaultV1()` → `…V2()`), and its seed's exact
+`dependencies:` pin moved too. **No migration file was needed** — nothing in the model changed, so
+the engine's no-migrations bridge carried a tenant from 3.7.0 straight to 4.0.0, verified against a
+tenant that held 3.7.0. Also measured: this repo's own integration suite had been **123 of 214 red**
+on `test/0.2-dev` because `ServiceCollectionFixture` already called `AddCkModelSystemCommunicationV4()`
+next to `AddCkModelSystemAiV3()`; it is 215/215 green after the bump. The cascade is mechanical and
+the CI of the dependent repo tells you about it immediately — if you let it run.
 
 **Both are major bumps, not minor ones.** `ck-semver-rules.md` classifies "dependency
 switched to a new **major** version" as Major — so the cascade does not stop at
@@ -2025,18 +2038,48 @@ someone concludes leasing "does not work".
 **Part B — after the model train re-runs the codegen**
 
 - ✅ **`Pool` → `DeploymentSite` across `communication/pools/`** — done. See "Part B, as built" below.
-- ⬜ `AdapterPool` authoring: create/edit, `MinReplicas`/`MaxReplicas`, the four `PoolMember*` sizing
-  values, `AdapterSharingMode`. The *types* are in the generated schema now
-  (`SystemCommunicationAdapterPool`, `SystemCommunicationAdapterSharingMode`,
-  `SystemCommunicationPoolScaleUpPolicy`); no screen consumes them.
-- ⬜ `Leased` in the lifecycle dropdown, and the lending attributes on the lending side.
-  `SystemCommunicationLifecycleModeDto` now carries `LEASED`; `adapters-form.component` still offers
-  only *Always On* / *On Demand*.
+- ✅ **`AdapterPool` authoring** — done: `tenants/communication/adapter-pools/` (list + form),
+  `MinReplicas`/`MaxReplicas`, the four `PoolMember*` sizing values, `AdapterSharingMode`, the two
+  lending caps and the scale-up trigger. See "Part B, the AdapterPool screens" below.
+- ⬜ `Leased` in the **adapter** lifecycle dropdown. `SystemCommunicationLifecycleModeDto` now
+  carries `LEASED`; `adapters-form.component` still offers only *Always On* / *On Demand*. (The
+  lending attributes landed with the pool form above — the two halves were listed together here and
+  belong to different screens.)
 - ⬜ `QueuedAt`, `LeaseWaitMs`, `ExecutionClass` in the execution history. All three are on
   `SystemCommunicationPipelineExecution` in the schema; the dialog does not select them yet.
 
-**Consequence to state plainly rather than work around:** an `AdapterPool` still cannot be created in
-the Studio. `ImportRt` is the only route, and the local runbook says so.
+**The consequence this section used to state is retired:** an `AdapterPool` *can* now be created in
+the Studio, and the runbook's step 4 has been corrected accordingly.
+
+### 11a.2b Part B, the AdapterPool screens
+
+🔴 **`AdapterPool` and `DeploymentSite` get separate routes, drawer entries and icons.** They share
+the CK base type `DeployableWorkload`, which is exactly the reason to keep them apart on screen: a
+deployment site is *where* workloads run, a pool is leasable *capacity* borrowing tenants take turns
+on. The cheapest wrong simplification available to a future reader is to fold them into one list.
+
+Four form decisions are pinned by tests because each is a plausible "cleanup":
+
+- **Re-hosting a pool emits `DELETE` + `CREATE` on `hostedBy`.** The role is `ZeroOrOne`; a lone
+  `CREATE` is a mutation that *succeeds* and leaves the pool on both sites.
+- **The both-tenants rule is standing body text on the form**, not a tooltip — the same decision the
+  lifecycle screen made, for the same reason. Creating a pool does nothing until leasing is on for
+  the lending *and* the borrowing tenant.
+- **`MaxReplicas < MinReplicas` is refused client-side.** The scheduler cannot honour that band.
+- **The lending allow-list drops blanks**, so a trailing comma is not an empty tenant id.
+
+🔴 **No Deploy/Undeploy button anywhere on these screens.** §7.1a forbids the cross-namespace owner
+reference, so a pool is rolled out by the operator *from its deployment site*; a Deploy button here
+would promise something the Studio cannot do. Delete is guarded to `UNDEPLOYED`/`DISABLED` only.
+
+The queue panel built in increment 8 "so the adapter-pool detail view can host it once it exists"
+is now actually hosted there — which is what makes the `ngOnInit` input read of §11a load-bearing
+rather than hypothetical.
+
+**Navigation icons moved with the model.** *Deployment Sites* took Kendo's `locationsIcon` (a site is
+a place) and the swimming-pool glyph went to *Adapter Pools*, the only thing still called a pool. Two
+entries in one drawer section must not share a glyph — that is precisely what broke the moment a
+second pool-ish concept appeared.
 
 ### 11a.2a Part B, the rename — as built
 
@@ -2057,18 +2100,18 @@ reads as if the Studio could move alone. It cannot: the Studio's codegen sets
 in the same pass, from the same tenant. Refreshing one repo and not the other does not fail at
 codegen — it fails at `tsc` with "has no exported member named …".
 
-🔴 **`System.Ai` blocks a complete schema, and the train has not fixed it.** §3.4 says `System.Ai-3.7.0`
-(`System.Communication-[3.0,4.0)`) needs a major bump in the same train. It has not happened on
-`test/0.2-dev`, so on any 4.0.0 tenant the AI service logs
+✅ **`System.Ai` blocked a complete schema until it was bumped — it has since been done.** §3.4 said
+`System.Ai-3.7.0` (`System.Communication-[3.0,4.0)`) needed a major bump in the same train; it had
+not happened, so on a 4.0.0 tenant the AI service logged
 *"Dependencies 'System.Communication-[3.36.0]' are unknown construction kit model libraries"* and
-`System.Ai` never installs. Introspecting such a tenant silently **drops all 419 `SystemAi*` lines**
-from `schema.graphql` and breaks the four AI documents in the Studio. Verified fact worth keeping:
-the model *content* is already compatible — `System.Ai` has **zero** structural references into
-`System.Communication` (its only `Pool` strings are its own `SystemAiWorkspaceMode.Pool` and
-`SystemAiCredentialKind.MeshmakersPool` enum values). Installing a copy of the compiled
-`ck-system.ai-3.yaml` with its hard-resolved `System.Communication-3.36.0` changed to `4.0.0`
-succeeds unchanged, which is how the schema above was produced. **The real fix is still owed by
-`octo-ai-services`: it is a version-range problem only.**
+`System.Ai` never installed. Introspecting such a tenant silently **drops all 419 `SystemAi*` lines**
+from `schema.graphql` and breaks the four AI documents in the Studio — a deletion with no error
+anywhere. `System.Ai` is now **4.0.0** with `System.Communication-[4.0,5.0)`, and the schema above
+carries its types. Two facts worth keeping from doing it: the model *content* was already
+compatible (`System.Ai` has **zero** structural references into `System.Communication` — its only
+`Pool` strings are its own `SystemAiWorkspaceMode.Pool` and `SystemAiCredentialKind.MeshmakersPool`
+enum values), and **`GetTenantFeatures` reported *AI Services: Enabled* the whole time the model was
+absent**, so the feature flag is not evidence that a model is installed.
 
 **What the Studio rename actually covers.** Nine `.graphql` documents, seven of them renamed — and
 note that two of them, `getSystemCommunicationAdapter.graphql` and `getApplicationDetails.graphql`,

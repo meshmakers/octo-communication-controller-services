@@ -90,22 +90,25 @@ An answer means 4.0.0 is live. If `systemCommunicationPool` answers instead, the
 install — and if the *new* name is absent the endpoint returns **HTTP 400**, not an empty result, so
 a naive "did it error?" check reads backwards.
 
-🔴 **`System.Ai` cannot install on a 4.0.0 tenant** — `System.Ai-3.7.0` still pins
-`System.Communication-[3.0,4.0)` (plan §3.4, not yet bumped on `test/0.2-dev`). The AI service logs
+✅ **`System.Ai` is at 4.0.0 and installs on a 4.0.0 tenant** (plan §3.4). Until that bump it did
+not: `System.Ai-3.7.0` pinned `System.Communication-[3.0,4.0)`, the AI service logged
 *"Dependencies 'System.Communication-[3.36.0]' are unknown construction kit model libraries"* and
-gives up. The tenant feature still reports *AI Services: Enabled* while the model is absent, so
-`GetTenantFeatures` is not evidence — list the installed models. This matters far beyond the AI
-adapter: a frontend `schema.graphql` introspected from such a tenant silently loses every
-`SystemAi*` type.
+gave up. ⚠️ **The tenant feature reported *AI Services: Enabled* the whole time while the model was
+absent**, so `GetTenantFeatures` is not evidence that a model is installed — list the models. Worth
+keeping because it generalises: a frontend `schema.graphql` introspected from a tenant with a
+missing model silently loses every type of that model, without any error anywhere.
 
 ## 4. An `AdapterPool` in the lender, a `Leased` adapter in the borrower
 
 There is no `CreateAdapterPool` CLI verb — increment 5 creates pools through the operator, which
 locally means Kubernetes. For a hand-run, either:
 
-- ~~**Refinery Studio**, against the local asset repository~~ — 🔴 **not available.** The Studio has
-  no `AdapterPool` screen (plan §11a.2, part B), only the queue and members panels, which read an
-  existing pool. This route was a hypothesis and is now ruled out.
+- ✅ **Refinery Studio**, against the local asset repository: *Communication → Adapter Pools → New*
+  (plan §11a.2b). Name, deployment site, Min/Max replicas, the four `PoolMember*` sizing values,
+  `SharingMode` + the two lending caps, and the scale-up trigger. The detail page then shows the
+  pool's queue and members inline, so steps 7–8 can be watched from the same screen. Take the
+  pool's `rtId` from the browser URL — every later step needs it. **Deploying** the pool is still
+  not a Studio action (§7.1a), so on `Start-Octo` keep running the member by hand as in step 6.
 - **`octo-cli -c ImportRt`** with a small runtime-model YAML declaring the `AdapterPool` (with
   `MinReplicas`/`MaxReplicas` and the `PoolMember*` sizing) in `lender`, and an adapter with
   `LifecycleMode = Leased` in `borrower`.
@@ -197,8 +200,8 @@ operation and deliberately not the same verb.
   fields. ✅ The Studio's `schema.graphql` has been refreshed against a 4.0.0 tenant and codegen
   re-run (plan §11a.2a), so the fields exist in the generated types — but the execution-history
   dialog does not select them yet, so the queue is still fully operable from `octo-cli` and MCP and
-  only partially visible in the Studio. Same for `AdapterPool`: a GraphQL type now, still no screen,
-  so step 4's "Refinery Studio" route **does not exist** — `octo-cli -c ImportRt` is the only one.
+  only partially visible in the Studio. `AdapterPool` itself now has full authoring screens
+  (§11a.2b), so step 4's Refinery Studio route is real.
 - **End-to-end traces.** There are none, for anything, in this estate — `ObservabilityBuilder`
   registers no `ActivitySource` and no trace context is propagated. Correlate on lease id and
   execution id in the logs.
