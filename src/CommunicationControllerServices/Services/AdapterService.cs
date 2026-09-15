@@ -31,6 +31,7 @@ internal class AdapterService(
     IWorkloadLifecycleService workloadLifecycleService,
     IWorkloadOnDemandCapabilityService onDemandCapabilityService,
     IPipelineExecutionClassService pipelineExecutionClassService,
+    IAdapterNodeCapabilityService adapterNodeCapabilityService,
     IPipelineServiceAccountResolver serviceAccountResolver,
     IWorkloadTemplateResolver templateResolver,
     IIdentityClientReader identityClientReader,
@@ -633,6 +634,41 @@ internal class AdapterService(
         throw AdapterServiceException.AdapterNotLoaded(tenantId, adapterRtEntityId);
     }
 
+    /// <summary>
+    ///     Deploys a single pipeline to its adapter.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         🔴 <b>AB#4924 — this method has two halves, and only the first one is universal.</b>
+    ///     </para>
+    ///     <list type="number">
+    ///         <item>
+    ///             <description>
+    ///                 <b>Validate and persist</b> (<see cref="ValidateAndPersistPipelineAsync" />):
+    ///                 schema validation, the AB#4984 process-bound-trigger gate, the AB#5027
+    ///                 mandatory-service-account gate, the AB#5128 elevation authorization, then the
+    ///                 definition, the resolved <c>ExecutionClass</c>, the <c>SendsDataTo</c> sync and
+    ///                 the deprecated-node warnings. This half runs for <b>every</b> adapter — a
+    ///                 <c>Leased</c> one no less than a dedicated one. It is the reason a leased deploy
+    ///                 is a deploy at all: a pipeline that skipped it would be executed by a borrowed
+    ///                 process that never checked whether its service account resolves, and never
+    ///                 checked whether the caller was entitled to the privilege elevation it asks for.
+    ///             </description>
+    ///         </item>
+    ///         <item>
+    ///             <description>
+    ///                 <b>Push</b>: project the adapter configuration and send it down the adapter's
+    ///                 SignalR connection. Skipped for a <c>Leased</c> adapter, because there is
+    ///                 nothing to send and nobody to send it to — a leased adapter has no process of
+    ///                 its own and never registers on <c>/{tenantId}/adapterHub</c>, and the definition
+    ///                 travels on the <c>LeaseDto</c> at execution time (plan §9.9 / D4). Refusing the
+    ///                 deploy outright and letting the lease carry an unvalidated definition was
+    ///                 considered and rejected: it leaves all four gates above unrun, and one of them
+    ///                 is a security control.
+    ///             </description>
+    ///         </item>
+    ///     </list>
+    /// </remarks>
     public async Task DeployPipelineAsync(string tenantId, RtEntityId adapterRtEntityId, RtEntityId pipelineRtEntityId,
         string? pipelineDefinition = null)
     {
@@ -640,84 +676,52 @@ internal class AdapterService(
             "[{TenantId}] AdapterRtId='{AdapterRtId}', PipelineRtEntityId='{PipelineRtEntityId}' deploy pipeline configuration",
             tenantId, adapterRtEntityId, pipelineRtEntityId);
 
-        // AB#4918 wake gate — see DeployAdapterConfigurationAsync.
-        await workloadLifecycleService.EnsureWorkloadRunningAsync(tenantId, adapterRtEntityId.RtId);
+        // Read the workload FIRST. Whether this adapter owns a process decides all three of: is there
+        // anything to wake, whose node descriptors answer the validation questions, and is there
+        // anybody to push to. Asking the adapter cache first would bake "dedicated" into the shape.
+        var workload = await communicationRepository.GetWorkloadByRtIdAsync(tenantId, adapterRtEntityId.RtId);
+        var leasedAdapter = workload is RtAdapter { LifecycleMode: RtLifecycleModeEnum.Leased } borrower
+            ? borrower
+            : null;
+
+        if (leasedAdapter == null)
+        {
+            // AB#4918 wake gate — see DeployAdapterConfigurationAsync.
+            await workloadLifecycleService.EnsureWorkloadRunningAsync(tenantId, adapterRtEntityId.RtId);
+        }
+        else
+        {
+            // 🔴 AB#4924: NOT a no-op by accident. EnsureWorkloadRunningAsync would return without
+            // doing anything today purely because Leased != OnDemand, which is a coincidence of the
+            // mode check rather than a decision. Stated here instead: a Leased adapter has no
+            // workload of its own to wake — the pool it borrows from is a separate workload in a
+            // different tenant, woken (or scaled) by its own lender, and waking it from a borrower's
+            // deploy would let any borrower spin up the lender's capacity by pressing "deploy".
+            Logger.Debug(
+                "[{TenantId}] Adapter '{AdapterRtId}' is Leased; skipping the wake gate — it has no workload of its own",
+                tenantId, adapterRtEntityId);
+        }
+
+        // AB#4924: the descriptors and pipeline schema of whatever will actually execute this
+        // pipeline — the adapter itself when dedicated, the lending pool's members when leased.
+        var capabilities = adapterNodeCapabilityService.Resolve(tenantId, adapterRtEntityId, leasedAdapter);
+
+        if (leasedAdapter != null)
+        {
+            await DeployLeasedPipelineAsync(tenantId, adapterRtEntityId, pipelineRtEntityId, pipelineDefinition,
+                leasedAdapter, capabilities);
+            return;
+        }
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
             if (adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
             {
-                if (pipelineDefinition != null)
-                {
-                    ValidatePipelineDefinition(tenantId, adapterRtEntityId, adapter, pipelineDefinition);
-                }
+                // ---- half 1: validate and persist (shared with the leased path) ----
+                var (pipeline, dataFlow) = await ValidateAndPersistPipelineAsync(tenantId, adapterRtEntityId,
+                    pipelineRtEntityId, pipelineDefinition, workload, capabilities, leasedAdapter: null);
 
-                var pipeline = await communicationRepository.GetPipelineAsync(tenantId, pipelineRtEntityId);
-                if (pipeline == null)
-                {
-                    throw AdapterServiceException.PipelineNotFound(tenantId, pipelineRtEntityId);
-                }
-
-                var dataFlow =
-                    await communicationRepository.GetDataFlowByPipelineAsync(tenantId, pipeline.RtId);
-                if (dataFlow == null)
-                {
-                    throw AdapterServiceException.DataFlowNotFound(tenantId, pipelineRtEntityId);
-                }
-
-                // AB#4984: deploying a process-bound-trigger pipeline to an OnDemand workload
-                // is rejected — hibernation would silently stop the trigger (explicit beats silent).
-                var workload = await communicationRepository.GetWorkloadByRtIdAsync(tenantId, adapterRtEntityId.RtId);
-                EnsurePipelineIsOnDemandCompatible(tenantId, workload, adapter.NodeDescriptors,
-                    pipelineRtEntityId, pipelineDefinition ?? pipeline.PipelineDefinition);
-
-                // AB#5027: a pipeline must have a resolvable service account before it may run.
-                // Like the AB#4984 gate this runs BEFORE the first state write below, so a
-                // rejected deploy leaves no half-applied definition behind.
-                await EnsurePipelineHasServiceAccountAsync(tenantId, pipelineRtEntityId, adapterRtEntityId.RtId,
-                    workload?.Name);
-
-                // AB#5128 (Epic AB#4979): authorize privilege elevation. A pipeline running any
-                // node under Identity=ServiceAccount/System escalates beyond the caller's rights,
-                // so an unauthorized caller is refused here — before the first state write, like
-                // the guards above. The confused-deputy lint (advisory) runs on the same walk.
-                await EnsurePipelineElevationAuthorizedAsync(tenantId, pipelineRtEntityId,
-                    pipelineDefinition ?? pipeline.PipelineDefinition);
-
-                // Persist the pipeline definition to the RT entity so it is visible in the UI
-                if (pipelineDefinition != null)
-                {
-                    // AB#4924 — resolve the execution class from the definition being saved and
-                    // write it in the same update. Resolved here rather than in the repository
-                    // because it needs the ADAPTER's live node descriptors, which the repository
-                    // has no business knowing about.
-                    var executionClass = pipelineExecutionClassService.ResolveForAdapter(tenantId,
-                        adapterRtEntityId, pipelineDefinition);
-
-                    // SetPipelineDefinitionAsync also syncs SendsDataTo associations
-                    await communicationRepository.SetPipelineDefinitionAsync(tenantId, pipelineRtEntityId,
-                        pipelineDefinition, executionClass);
-                }
-                else if (!string.IsNullOrEmpty(pipeline.PipelineDefinition))
-                {
-                    // Sync SendsDataTo associations from existing definition (e.g. after import)
-                    await communicationRepository.SyncPipelineDataConnectionsAsync(tenantId, pipelineRtEntityId,
-                        pipeline.PipelineDefinition);
-
-                    // AB#4924 — a redeploy without a new definition (MovePipelinesToAdapter, an
-                    // import) still has to re-resolve: the class depends on the ADAPTER's
-                    // descriptors as well as the YAML, so moving a pipeline to an adapter running a
-                    // different SDK can legitimately change it. Skipping this is how the persisted
-                    // class drifts from the definition it claims to describe. A single-field write,
-                    // NOT a definition rewrite — deploy must not persist a definition it was not
-                    // given.
-                    await communicationRepository.SetPipelineExecutionClassAsync(tenantId, pipelineRtEntityId,
-                        pipelineExecutionClassService.ResolveForAdapter(tenantId, adapterRtEntityId,
-                            pipeline.PipelineDefinition));
-                }
-
-                await StoreDeprecatedNodeWarningEventsAsync(tenantId, adapter, pipelineRtEntityId,
-                    pipelineDefinition ?? pipeline.PipelineDefinition);
+                // ---- half 2: push (dedicated adapters only) ----
 
                 // Deploying never changes the debug state (AB#4364): the pushed configuration
                 // carries the persisted IsDebuggingEnabled as-is, so a pipeline in debug stays
@@ -774,6 +778,146 @@ internal class AdapterService(
         }
 
         throw AdapterServiceException.AdapterNotLoaded(tenantId, adapterRtEntityId);
+    }
+
+    /// <summary>
+    ///     AB#4924 — the deploy of a pipeline whose adapter borrows its process from a pool.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Runs the whole validate-and-persist half and stops there. The push half is not skipped
+    ///         because it is inconvenient here — it is <b>vacuous</b>: the borrower has no adapter-hub
+    ///         connection, and the pool member that will run the pipeline is handed the definition on
+    ///         the <c>LeaseDto</c> when the lease is granted (plan §9.9 / D4), read fresh from the
+    ///         repository by <see cref="GetLeasedPipelineConfigurationAsync" />. Pushing the same
+    ///         bytes down a second channel would create a second source of truth for no gain.
+    ///     </para>
+    ///     <para>
+    ///         🔴 <b>The deployment state goes straight to <c>Deployed</c>, never through
+    ///         <c>Pending</c>.</b> <c>Pending</c> means "a push is in flight and may still fail"; there
+    ///         is no push here, so the state would never leave it. And persisting IS the deployment on
+    ///         this path — from the moment the definition and its execution class are written, the very
+    ///         next lease runs exactly that. Leaving the pipeline <c>Undeployed</c> would be the
+    ///         dishonest answer, not the cautious one: it would claim work is still outstanding when
+    ///         there is none, and every surface reads this field to decide what to offer the user. The
+    ///         status message names the difference, so nobody reads this <c>Deployed</c> as "a pod
+    ///         acknowledged it".
+    ///     </para>
+    /// </remarks>
+    private async Task DeployLeasedPipelineAsync(string tenantId, RtEntityId adapterRtEntityId,
+        RtEntityId pipelineRtEntityId, string? pipelineDefinition, RtAdapter leasedAdapter,
+        AdapterNodeCapabilities capabilities)
+    {
+        Logger.Info(
+            "[{TenantId}] Adapter '{AdapterRtId}' is Leased from pool {PoolRtId} of tenant '{LenderTenantId}'; " +
+            "validating and persisting pipeline '{PipelineRtEntityId}' without a push. Node capabilities: {Source}",
+            tenantId, adapterRtEntityId, leasedAdapter.LentFromPoolRtId ?? "<unset>",
+            leasedAdapter.LentFromTenantId ?? "<unset>", pipelineRtEntityId, capabilities.Source);
+
+        await ValidateAndPersistPipelineAsync(tenantId, adapterRtEntityId, pipelineRtEntityId, pipelineDefinition,
+            leasedAdapter, capabilities, leasedAdapter);
+
+        await communicationRepository.SetPipelineDeploymentStateAsync(tenantId, pipelineRtEntityId,
+            RtDeploymentStateEnum.Deployed,
+            "Deployed on a leased adapter: the definition is persisted and travels on the lease (AB#4924). " +
+            "There is no adapter process to push it to.");
+
+        // AB#4984 / AB#4924: the deployed pipeline set changed. Still meaningful here — "Leased"
+        // requires on-demand capability (PoolService refuses a leased workload that is not capable),
+        // so this is the value that explains a later refusal to deploy the workload.
+        await onDemandCapabilityService.RefreshWorkloadCapabilityAsync(tenantId, adapterRtEntityId);
+
+        await eventService.StoreInformationEventAsync(tenantId,
+            $"Pipeline '{pipelineRtEntityId}' was deployed to leased adapter '{adapterRtEntityId}'. " +
+            "Nothing was pushed: the definition travels on the adapter pool lease.",
+            adapterRtEntityId);
+    }
+
+    /// <summary>
+    ///     AB#4924 — the half of a pipeline deploy that runs whatever executes the pipeline: every
+    ///     validation gate, then the persistence.
+    /// </summary>
+    /// <remarks>
+    ///     Order is load-bearing and unchanged from the dedicated path: all four gates run BEFORE the
+    ///     first state write, so a rejected deploy leaves no half-applied definition behind.
+    /// </remarks>
+    /// <returns>The pipeline and its data flow, which the push half needs to project a configuration.</returns>
+    private async Task<(RtPipeline Pipeline, RtDataFlow DataFlow)> ValidateAndPersistPipelineAsync(string tenantId,
+        RtEntityId adapterRtEntityId, RtEntityId pipelineRtEntityId, string? pipelineDefinition,
+        RtDeployableWorkload? workload, AdapterNodeCapabilities capabilities, RtAdapter? leasedAdapter)
+    {
+        if (pipelineDefinition != null)
+        {
+            ValidatePipelineDefinition(tenantId, adapterRtEntityId, capabilities, pipelineDefinition);
+        }
+
+        var pipeline = await communicationRepository.GetPipelineAsync(tenantId, pipelineRtEntityId);
+        if (pipeline == null)
+        {
+            throw AdapterServiceException.PipelineNotFound(tenantId, pipelineRtEntityId);
+        }
+
+        var dataFlow = await communicationRepository.GetDataFlowByPipelineAsync(tenantId, pipeline.RtId);
+        if (dataFlow == null)
+        {
+            throw AdapterServiceException.DataFlowNotFound(tenantId, pipelineRtEntityId);
+        }
+
+        // AB#4984: deploying a process-bound-trigger pipeline to an OnDemand workload
+        // is rejected — hibernation would silently stop the trigger (explicit beats silent).
+        // AB#4924 extends the same gate to Leased, where the argument is strictly stronger.
+        EnsurePipelineIsOnDemandCompatible(tenantId, workload, capabilities.NodeDescriptors,
+            pipelineRtEntityId, pipelineDefinition ?? pipeline.PipelineDefinition);
+
+        // AB#5027: a pipeline must have a resolvable service account before it may run.
+        // Like the AB#4984 gate this runs BEFORE the first state write below, so a
+        // rejected deploy leaves no half-applied definition behind.
+        await EnsurePipelineHasServiceAccountAsync(tenantId, pipelineRtEntityId, adapterRtEntityId.RtId,
+            workload?.Name);
+
+        // AB#5128 (Epic AB#4979): authorize privilege elevation. A pipeline running any
+        // node under Identity=ServiceAccount/System escalates beyond the caller's rights,
+        // so an unauthorized caller is refused here — before the first state write, like
+        // the guards above. The confused-deputy lint (advisory) runs on the same walk.
+        await EnsurePipelineElevationAuthorizedAsync(tenantId, pipelineRtEntityId,
+            pipelineDefinition ?? pipeline.PipelineDefinition);
+
+        // Persist the pipeline definition to the RT entity so it is visible in the UI
+        if (pipelineDefinition != null)
+        {
+            // AB#4924 — resolve the execution class from the definition being saved and
+            // write it in the same update. Resolved here rather than in the repository
+            // because it needs the live node descriptors of whatever will execute the pipeline,
+            // which the repository has no business knowing about.
+            var executionClass = pipelineExecutionClassService.ResolveForAdapter(tenantId,
+                adapterRtEntityId, pipelineDefinition, leasedAdapter);
+
+            // SetPipelineDefinitionAsync also syncs SendsDataTo associations
+            await communicationRepository.SetPipelineDefinitionAsync(tenantId, pipelineRtEntityId,
+                pipelineDefinition, executionClass);
+        }
+        else if (!string.IsNullOrEmpty(pipeline.PipelineDefinition))
+        {
+            // Sync SendsDataTo associations from existing definition (e.g. after import)
+            await communicationRepository.SyncPipelineDataConnectionsAsync(tenantId, pipelineRtEntityId,
+                pipeline.PipelineDefinition);
+
+            // AB#4924 — a redeploy without a new definition (MovePipelinesToAdapter, an
+            // import) still has to re-resolve: the class depends on the executing process's
+            // descriptors as well as the YAML, so moving a pipeline to an adapter running a
+            // different SDK — or to a leased adapter borrowing a differently built pool — can
+            // legitimately change it. Skipping this is how the persisted class drifts from the
+            // definition it claims to describe. A single-field write, NOT a definition rewrite —
+            // deploy must not persist a definition it was not given.
+            await communicationRepository.SetPipelineExecutionClassAsync(tenantId, pipelineRtEntityId,
+                pipelineExecutionClassService.ResolveForAdapter(tenantId, adapterRtEntityId,
+                    pipeline.PipelineDefinition, leasedAdapter));
+        }
+
+        await StoreDeprecatedNodeWarningEventsAsync(tenantId, capabilities.NodeDescriptors, pipelineRtEntityId,
+            pipelineDefinition ?? pipeline.PipelineDefinition);
+
+        return (pipeline, dataFlow);
     }
 
     public async Task DeployDataFlowAsync(string tenantId, OctoObjectId dataFlowRtId)
@@ -861,7 +1005,8 @@ internal class AdapterService(
                         await CreatePipelineConfigurationAsync(tenantId, dataFlowRtId, rtAdapter.RtId,
                             rtDeployPipeline));
 
-                    await StoreDeprecatedNodeWarningEventsAsync(tenantId, adapter, rtDeployPipeline.ToRtEntityId(),
+                    await StoreDeprecatedNodeWarningEventsAsync(tenantId, adapter.NodeDescriptors,
+                        rtDeployPipeline.ToRtEntityId(),
                         rtDeployPipeline.PipelineDefinition);
                 }
                 else
@@ -888,11 +1033,25 @@ internal class AdapterService(
     /// AB#4984: rejects deploying a pipeline whose triggers are process-bound (would silently
     /// stop at 0 replicas) to a workload with LifecycleMode=OnDemand. No-op for AlwaysOn
     /// workloads or when the workload entity cannot be resolved.
+    ///
+    /// <para>
+    /// 🔴 AB#4924 extends the same gate to <c>Leased</c>, and the argument there is strictly
+    /// stronger: an OnDemand workload has a process that is merely allowed to hibernate, while a
+    /// Leased adapter has no process of its own <b>at all</b> — it is handed one BETWEEN work items
+    /// and gives it back. A trigger that only fires while a process of its own is running can
+    /// therefore never fire on a leased adapter. The same guard is applied at workload-deploy time
+    /// by <c>PoolService.EnsureLeasingConfigurationIsValidAsync</c>, over the adapter's whole
+    /// pipeline set; without this per-pipeline arm a NEW process-bound pipeline could be deployed
+    /// to an already deployed leased adapter and would only be caught at the next workload deploy —
+    /// i.e. it would sit in the queue and never run. Deliberately reuses
+    /// <c>GetProcessBoundNodes</c> rather than duplicating the trigger list, so the two modes can
+    /// never drift apart.
+    /// </para>
     /// </summary>
     private void EnsurePipelineIsOnDemandCompatible(string tenantId, RtDeployableWorkload? workload,
         IReadOnlyList<NodeDescriptorDto>? nodeDescriptors, RtEntityId pipelineRtEntityId, string? pipelineDefinition)
     {
-        if (workload is not { LifecycleMode: RtLifecycleModeEnum.OnDemand })
+        if (workload is not { LifecycleMode: RtLifecycleModeEnum.OnDemand or RtLifecycleModeEnum.Leased })
         {
             return;
         }
@@ -900,8 +1059,11 @@ internal class AdapterService(
         var processBoundNodes = onDemandCapabilityService.GetProcessBoundNodes(pipelineDefinition, nodeDescriptors);
         if (processBoundNodes.Count > 0)
         {
-            throw AdapterServiceException.PipelineNotOnDemandCompatible(tenantId, pipelineRtEntityId,
-                workload.Name, processBoundNodes);
+            throw workload.LifecycleMode == RtLifecycleModeEnum.Leased
+                ? AdapterServiceException.PipelineNotLeasable(tenantId, pipelineRtEntityId, workload.Name,
+                    processBoundNodes)
+                : AdapterServiceException.PipelineNotOnDemandCompatible(tenantId, pipelineRtEntityId,
+                    workload.Name, processBoundNodes);
         }
     }
 
@@ -1825,17 +1987,18 @@ internal class AdapterService(
     /// Deprecation is reported by the adapter via its node descriptors
     /// (see <see cref="NodeDescriptorDto.IsDeprecated"/>). Best-effort: never fails the deploy.
     /// </summary>
-    private async Task StoreDeprecatedNodeWarningEventsAsync(string tenantId, Adapter adapter,
+    private async Task StoreDeprecatedNodeWarningEventsAsync(string tenantId,
+        IReadOnlyList<NodeDescriptorDto>? nodeDescriptors,
         RtEntityId pipelineRtEntityId, string? pipelineDefinition)
     {
-        if (string.IsNullOrEmpty(pipelineDefinition) || adapter.NodeDescriptors == null) return;
+        if (string.IsNullOrEmpty(pipelineDefinition) || nodeDescriptors == null) return;
 
         try
         {
             // TryAdd tolerates duplicate descriptors (same NodeName@Version, incl. casing variants)
             var deprecatedByQualifiedName =
                 new Dictionary<string, NodeDescriptorDto>(StringComparer.OrdinalIgnoreCase);
-            foreach (var descriptor in adapter.NodeDescriptors)
+            foreach (var descriptor in nodeDescriptors)
             {
                 if (!descriptor.IsDeprecated) continue;
                 deprecatedByQualifiedName.TryAdd($"{descriptor.NodeName}@{descriptor.Version}", descriptor);
@@ -1869,13 +2032,19 @@ internal class AdapterService(
         }
     }
 
+    /// <summary>
+    ///     Validates a definition against the pipeline schema of whatever will execute it (AB#4924:
+    ///     the adapter itself when dedicated, the lending pool's members when leased). A leased
+    ///     pipeline used to be validated against no schema at all, which is strictly worse than
+    ///     validating it against the pool's — the pool is the process that has to parse it.
+    /// </summary>
     private void ValidatePipelineDefinition(string tenantId, RtEntityId adapterRtEntityId,
-        Adapter adapter, string pipelineDefinition)
+        AdapterNodeCapabilities capabilities, string pipelineDefinition)
     {
         if (!communicationControllerOptions.Value.EnablePipelineSchemaValidation) return;
-        if (adapter.PipelineSchemaJson == null) return;
+        if (capabilities.PipelineSchemaJson == null) return;
 
-        var errors = pipelineSchemaValidator.Validate(pipelineDefinition, adapter.PipelineSchemaJson);
+        var errors = pipelineSchemaValidator.Validate(pipelineDefinition, capabilities.PipelineSchemaJson);
         if (errors.Count > 0)
         {
             Logger.Warn("[{TenantId}] Pipeline schema validation failed for adapter '{AdapterRtId}': {Errors}",

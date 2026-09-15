@@ -1,12 +1,12 @@
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
 /// <inheritdoc cref="IPipelineExecutionClassService" />
 internal class PipelineExecutionClassService(
-    IAdapterCache adapterCache,
+    IAdapterNodeCapabilityService adapterNodeCapabilityService,
     IPipelineDefinitionService pipelineDefinitionService)
     : IPipelineExecutionClassService
 {
@@ -86,16 +86,16 @@ internal class PipelineExecutionClassService(
         return Batch;
     }
 
-    public int ResolveForAdapter(string tenantId, RtEntityId adapterRtEntityId, string? pipelineDefinition)
+    public int ResolveForAdapter(string tenantId, RtEntityId adapterRtEntityId, string? pipelineDefinition,
+        RtAdapter? adapter = null)
     {
-        IReadOnlyList<NodeDescriptorDto>? descriptors = null;
-        if (adapterCache.TryGetTenant(tenantId, out var adapterTenant) &&
-            adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
-        {
-            descriptors = adapter.NodeDescriptors;
-        }
-
-        return Resolve(pipelineDefinition, descriptors);
+        // 🔴 AB#4924: for a Leased adapter this resolves against the LENDING POOL's member
+        // descriptors, not against AdapterById. A leased adapter never holds an adapter-hub
+        // connection, so the old cache lookup always missed and every leased pipeline was persisted
+        // with the CK default Batch — which made the Interactive-before-Batch ordering of the
+        // scheduler unobservable on the only path where it matters.
+        var capabilities = adapterNodeCapabilityService.Resolve(tenantId, adapterRtEntityId, adapter);
+        return Resolve(pipelineDefinition, capabilities.NodeDescriptors);
     }
 
     private static string StripVersion(string nodeType)

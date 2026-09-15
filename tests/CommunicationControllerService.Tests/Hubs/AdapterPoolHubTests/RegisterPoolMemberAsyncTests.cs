@@ -23,8 +23,32 @@ internal class RegisterPoolMemberAsyncTests : AdapterPoolHubTestsBase
         PoolTenantId = poolTenantId,
         PoolRtId = poolRtId,
         MemberId = memberId,
-        NodeNames = ["SetJson", "ForEach"]
+        NodeDescriptors =
+        [
+            new NodeDescriptorDto("SetJson", 1, "Transform", false, false, "{}"),
+            new NodeDescriptorDto("ForEach", 1, "Control", false, true, "{}")
+        ],
+        PipelineSchemaJson = "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\"}"
     };
+
+    [Test]
+    public async Task MemberOfItsOwnTenantsPool_ItsNodeDescriptorsReachTheController()
+    {
+        ArrangeConnectionTenant(LenderTenantId);
+
+        await Hub.RegisterPoolMemberAsync(ARegistration());
+
+        // 🔴 AB#4924: before this, PoolMemberRegistrationDto carried a NodeNames string list that no
+        // member ever filled and no controller ever read, and AdapterPoolConnectionManager stored no
+        // descriptors at all. A BORROWER's DeployPipeline therefore had nothing to resolve an
+        // execution class or a pipeline schema against.
+        var capabilities = ConnectionManager.TryGetPoolCapabilities(LenderTenantId, PoolRtId);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(capabilities).IsNotNull();
+        await Assert.That(capabilities!.NodeDescriptors.Select(d => d.NodeName)).Contains("SetJson");
+        await Assert.That(capabilities.PipelineSchemaJson).IsNotNull();
+    }
 
     [Test]
     public async Task MemberOfItsOwnTenantsPool_IsRegisteredAndBecomesLeasable()

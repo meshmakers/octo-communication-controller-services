@@ -117,6 +117,22 @@ internal class AdapterServiceException : Exception
             "to a wake-capable trigger (cron PipelineTrigger, FromHttpRequest, FromPipelineDataEvent).");
 
     /// <summary>
+    /// AB#4924: the <c>Leased</c> twin of <see cref="PipelineNotOnDemandCompatible" />. A separate
+    /// message rather than a shared one, because the remedy is different: an OnDemand workload can
+    /// be set back to AlwaysOn, whereas a Leased adapter has no process of its own to switch on —
+    /// it either stops borrowing or stops using that trigger.
+    /// </summary>
+    internal static AdapterServiceException PipelineNotLeasable(string tenantId,
+        RtEntityId pipelineRtEntityId, string? workloadName, IReadOnlyList<string> processBoundNodes) =>
+        new($"[{tenantId}] Cannot deploy pipeline '{pipelineRtEntityId}' to workload '{workloadName}': " +
+            "the workload has LifecycleMode=Leased, but the pipeline uses the process-bound trigger(s) " +
+            $"{string.Join(", ", processBoundNodes.Select(n => $"'{n}'"))} (AB#4924). A leased adapter has no " +
+            "process of its own at all — it borrows one from an adapter pool between work items — so a trigger " +
+            "that only fires while its own process runs can never fire. Either give the adapter a process of its " +
+            "own (LifecycleMode AlwaysOn) or migrate the pipeline to a wake-capable trigger (cron PipelineTrigger, " +
+            "FromHttpRequest, FromPipelineDataEvent).");
+
+    /// <summary>
     /// AB#5027 mandatory-identity guard. Deliberately an <see cref="AdapterServiceException" />
     /// (→ HTTP 404 in <c>PipelineController</c>) rather than a <c>PoolServiceException</c> (→ 400):
     /// it is thrown on the same deploy paths as the AB#4984 gate and must surface identically in

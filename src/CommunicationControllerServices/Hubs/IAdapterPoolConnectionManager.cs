@@ -19,6 +19,15 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 ///     finishes what it holds and exits.
 /// </param>
 /// <param name="LastSeenUtc">When the member last registered or sent a heartbeat.</param>
+/// <param name="NodeDescriptors">
+///     The pipeline nodes this member reported it can execute (AB#4924), in the same shape a
+///     dedicated adapter reports on <c>RegisterAdapterWithSchemaAsync</c>. Null when the member ran
+///     an SDK that predates the descriptor field or could not project its registry.
+/// </param>
+/// <param name="PipelineSchemaJson">
+///     The composite pipeline JSON Schema this member validates against, or null when it reported
+///     none.
+/// </param>
 public record PoolMemberConnection(
     string ConnectionId,
     string MemberId,
@@ -26,11 +35,24 @@ public record PoolMemberConnection(
     string PoolRtId,
     LeaseDto? ActiveLease,
     bool IsDraining,
-    DateTime LastSeenUtc)
+    DateTime LastSeenUtc,
+    IReadOnlyList<NodeDescriptorDto>? NodeDescriptors = null,
+    string? PipelineSchemaJson = null)
 {
     /// <summary>Whether this member could take a lease right now.</summary>
     public bool IsAvailable => ActiveLease is null && !IsDraining;
 }
+
+/// <summary>
+///     What the members of one adapter pool can execute (AB#4924), as reported on registration.
+/// </summary>
+/// <param name="MemberId">The member the answer was taken from — named so a surprising answer is traceable.</param>
+/// <param name="NodeDescriptors">Its node descriptors.</param>
+/// <param name="PipelineSchemaJson">Its composite pipeline JSON Schema, or null.</param>
+public sealed record PoolMemberCapabilities(
+    string MemberId,
+    IReadOnlyList<NodeDescriptorDto> NodeDescriptors,
+    string? PipelineSchemaJson);
 
 /// <summary>
 ///     In-memory registry of the pool members connected to <b>this</b> controller instance
@@ -59,7 +81,36 @@ public interface IAdapterPoolConnectionManager
     ///     of the same connection.
     /// </summary>
     PoolMemberConnection RegisterMember(string connectionId, string memberId, string poolTenantId,
-        string poolRtId);
+        string poolRtId, IReadOnlyList<NodeDescriptorDto>? nodeDescriptors = null,
+        string? pipelineSchemaJson = null);
+
+    /// <summary>
+    ///     What one pool's members can execute, or null when no member of that pool is registered on
+    ///     this controller instance (AB#4924).
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         This is the answer a <b>borrowing</b> tenant's deploy path needs: a <c>Leased</c>
+    ///         adapter has no descriptors of its own — it has no process of its own — so "what can
+    ///         run this pipeline" is a question about the pool.
+    ///     </para>
+    ///     <para>
+    ///         🔴 <b>One member answers for the pool, and the pick is deterministic.</b> Members are
+    ///         replicas of one workload, so their descriptor sets are identical by construction; the
+    ///         only window in which they differ is a rolling upgrade. Draining members are skipped
+    ///         first (during a rollout they are the outgoing version), and the rest are ordered by
+    ///         member id so the same pool gives the same answer twice in a row — a coin flip here
+    ///         would make a pipeline's persisted execution class depend on dictionary order.
+    ///     </para>
+    ///     <para>
+    ///         ⚠️ Per controller <b>instance</b>, like every other answer derived from a SignalR
+    ///         connection: with more than one replica the pod handling the deploy may hold no member
+    ///         of the pool and will answer null. The caller then degrades to the name-based
+    ///         fallback — the same degradation a dedicated adapter that has not connected during
+    ///         this process's lifetime already produces.
+    ///     </para>
+    /// </remarks>
+    PoolMemberCapabilities? TryGetPoolCapabilities(string poolTenantId, string poolRtId);
 
     /// <summary>
     ///     Drops a connection and returns what it was holding, so the caller can re-queue an

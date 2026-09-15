@@ -1,5 +1,6 @@
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
@@ -36,8 +37,17 @@ public interface IPipelineExecutionClassService
     int Resolve(string? pipelineDefinition, IReadOnlyList<NodeDescriptorDto>? nodeDescriptors);
 
     /// <summary>
-    ///     Resolves the class for a pipeline about to be deployed to an adapter, using that
-    ///     adapter's live node descriptors when it is connected.
+    ///     Resolves the class for a pipeline about to be deployed to an adapter, using the live node
+    ///     descriptors of whatever will execute it.
     /// </summary>
-    int ResolveForAdapter(string tenantId, RtEntityId adapterRtEntityId, string? pipelineDefinition);
+    /// <param name="tenantId">The tenant owning the adapter.</param>
+    /// <param name="adapterRtEntityId">The adapter.</param>
+    /// <param name="pipelineDefinition">The definition being saved.</param>
+    /// <param name="adapter">
+    ///     The adapter entity when the caller has it. 🔴 Required to reach a <c>Leased</c> adapter's
+    ///     answer: a leased adapter has no descriptors of its own, and the pool that executes its
+    ///     pipelines is named on the entity. Omitting it resolves the dedicated way.
+    /// </param>
+    int ResolveForAdapter(string tenantId, RtEntityId adapterRtEntityId, string? pipelineDefinition,
+        RtAdapter? adapter = null);
 }

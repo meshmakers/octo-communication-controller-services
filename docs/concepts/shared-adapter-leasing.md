@@ -64,6 +64,42 @@ Deriving the mode automatically was considered and rejected: a mode that flips
 itself when someone deploys a pipeline is the kind of silent automation that is
 hard to reason about during an incident.
 
+## 2b. Deploying a pipeline to a `Leased` adapter
+
+**A `Leased` adapter deploys.** `DeployPipeline` runs every validation and every persistence
+step and skips only the push. Refusing the deploy, and letting the lease carry whatever definition
+happened to be saved, was considered and rejected.
+
+The deploy verb is where four gates live — schema validation, the process-bound-trigger gate
+(AB#4984), the mandatory service account (AB#5027) and the **authorization of privilege elevation**
+(AB#5128). A leased pipeline that never passed through the verb passes none of them, and is then
+executed by a *borrowed* process that never checked whether its service account resolves or whether
+the caller was entitled to the elevation it asks for. One verb, one set of guards, whether the
+executor is dedicated or borrowed.
+
+**The push half is vacuous, not merely skipped.** A leased adapter holds no adapter-hub connection
+and has no process to push to, and the definition travels on the lease (§4, Q19) — read fresh from
+the repository when the lease is granted. There is nothing to send and nobody to send it to.
+
+Three consequences worth stating, because each is a place where "do what the dedicated path does"
+would be wrong:
+
+- **No wake.** A leased adapter has no workload of its own to wake, and the pool it borrows from is
+  a *different tenant's* workload. A borrower must not be able to spin up the lender's capacity by
+  pressing "Deploy".
+- **Deployment state goes straight to `Deployed`.** `Pending` means "a push is in flight and may
+  still fail"; with no push it would never leave that state. Persisting **is** the deployment here:
+  from the moment the definition and its execution class are written, the next lease runs exactly
+  that. The status message says so, so the value is not read as "a pod acknowledged it".
+- **Node descriptors come from the pool.** Execution class and schema validation are questions about
+  the process that will run the pipeline. For a leased adapter that process is a pool member, so the
+  member's descriptors answer — never the borrower's own (possibly stale) adapter-cache entry, and
+  never nothing at all. Pool members therefore report their node descriptors and pipeline schema on
+  registration, in exactly the shape a dedicated adapter reports them.
+
+This is what makes the `Interactive`-before-`Batch` ordering of §5 observable on the leased path at
+all: without it every leased pipeline keeps the CK default `Batch`.
+
 ## 2a. Model version — this is a major bump
 
 Renaming `Pool` to `DeploymentSite` (§8, Q16) makes this a **major** `System.Communication`

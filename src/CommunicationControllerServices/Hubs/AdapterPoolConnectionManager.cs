@@ -19,10 +19,15 @@ internal class AdapterPoolConnectionManager : IAdapterPoolConnectionManager
     private readonly Lock _claimLock = new();
 
     public PoolMemberConnection RegisterMember(string connectionId, string memberId, string poolTenantId,
-        string poolRtId)
+        string poolRtId, IReadOnlyList<NodeDescriptorDto>? nodeDescriptors = null,
+        string? pipelineSchemaJson = null)
     {
         var member = new PoolMemberConnection(connectionId, memberId, poolTenantId, poolRtId,
-            ActiveLease: null, IsDraining: false, LastSeenUtc: DateTime.UtcNow);
+            ActiveLease: null, IsDraining: false, LastSeenUtc: DateTime.UtcNow,
+            // AB#4924: an empty list and "did not report any" are the same thing to every caller,
+            // and null is the value the fallback path already understands.
+            NodeDescriptors: nodeDescriptors is { Count: > 0 } ? nodeDescriptors : null,
+            PipelineSchemaJson: string.IsNullOrWhiteSpace(pipelineSchemaJson) ? null : pipelineSchemaJson);
 
         lock (_claimLock)
         {
@@ -31,10 +36,28 @@ internal class AdapterPoolConnectionManager : IAdapterPoolConnectionManager
 
         Logger.Info(
             "Pool member '{MemberId}' registered on connection '{ConnectionId}' for pool {PoolRtId} " +
-            "of tenant '{PoolTenantId}'; {Count} member(s) now registered on this controller",
-            memberId, connectionId, poolRtId, poolTenantId, _membersByConnection.Count);
+            "of tenant '{PoolTenantId}' with {NodeCount} node descriptor(s) and {SchemaState} pipeline " +
+            "schema; {Count} member(s) now registered on this controller",
+            memberId, connectionId, poolRtId, poolTenantId, member.NodeDescriptors?.Count ?? 0,
+            member.PipelineSchemaJson == null ? "no" : "a", _membersByConnection.Count);
 
         return member;
+    }
+
+    public PoolMemberCapabilities? TryGetPoolCapabilities(string poolTenantId, string poolRtId)
+    {
+        // Deterministic and draining-last; see the interface remarks for why neither half is
+        // cosmetic. No lock: a stale read here can only pick a member that just disconnected, and
+        // its descriptors describe the same workload as its replacement's.
+        var member = _membersByConnection.Values
+            .Where(m => Matches(m, poolTenantId, poolRtId) && m.NodeDescriptors is { Count: > 0 })
+            .OrderBy(m => m.IsDraining)
+            .ThenBy(m => m.MemberId, StringComparer.Ordinal)
+            .FirstOrDefault();
+
+        return member is null
+            ? null
+            : new PoolMemberCapabilities(member.MemberId, member.NodeDescriptors!, member.PipelineSchemaJson);
     }
 
     public PoolMemberConnection? RemoveMember(string connectionId)

@@ -2,6 +2,7 @@
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -63,6 +64,14 @@ internal abstract class AdapterServiceTestsBase
     protected readonly AdapterTenant AdapterTenant;
 
     /// <summary>
+    /// AB#4924: the real pool-member registry. A leased deploy resolves its node descriptors and
+    /// pipeline schema out of this, so the leased suites register a member here instead of adding
+    /// an adapter to <see cref="AdapterTenant" /> — which is the whole point: a leased adapter never
+    /// appears in <c>AdapterById</c>.
+    /// </summary>
+    protected readonly AdapterPoolConnectionManager PoolConnectionManager = new();
+
+    /// <summary>
     /// AB#5111: the options instance behind both the service's IOptions and the real
     /// <see cref="WorkloadTemplateResolver" /> the service uses to resolve the IssuerUri token —
     /// tests mutate <c>ServiceUrls</c> / <c>AuthorityUrl</c> on it (the resolver re-snapshots per
@@ -118,7 +127,11 @@ internal abstract class AdapterServiceTestsBase
             AdapterConnectionTracker, options, WorkloadLifecycleService, OnDemandCapabilityService,
             // Real service (AB#4924): the execution class is resolved from real YAML on the deploy
             // path, so a substitute would hide exactly the wiring this is meant to exercise.
-            new PipelineExecutionClassService(AdapterCache, PipelineDefinitionService),
+            new PipelineExecutionClassService(
+                new AdapterNodeCapabilityService(AdapterCache, PoolConnectionManager), PipelineDefinitionService),
+            // Real service (AB#4924), same reasoning: it decides whether the deploy path validates
+            // and classifies against the adapter's own descriptors or the lending pool's.
+            new AdapterNodeCapabilityService(AdapterCache, PoolConnectionManager),
             ServiceAccountResolver,
             // Real resolver (AB#5111), same reasoning as the service-account resolver above: the
             // IssuerUri token resolution in the configuration projection runs the real machinery.

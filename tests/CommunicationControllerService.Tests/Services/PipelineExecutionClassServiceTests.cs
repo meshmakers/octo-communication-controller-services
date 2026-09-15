@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
@@ -30,14 +31,21 @@ internal class PipelineExecutionClassServiceTests
     private const int Batch = 1;
 
     private readonly IAdapterCache _adapterCache = Substitute.For<IAdapterCache>();
+    // AB#4924: the real pool registry, so a leased resolution runs the real "which member answers
+    // for this pool" pick rather than a stubbed answer.
+    private readonly AdapterPoolConnectionManager _poolConnectionManager = new();
     private readonly PipelineExecutionClassService _service;
     private readonly RtAdapter _rtAdapter;
 
     public PipelineExecutionClassServiceTests()
     {
         // Real parser, deliberately: the classification has to run against real YAML, and the
-        // triggers-vs-transformations distinction it depends on lives in that parser.
-        _service = new PipelineExecutionClassService(_adapterCache, new PipelineDefinitionService());
+        // triggers-vs-transformations distinction it depends on lives in that parser. Real
+        // capability service for the same reason — it is the seam that decides WHOSE descriptors
+        // answer, and a substitute would hide exactly that.
+        _service = new PipelineExecutionClassService(
+            new AdapterNodeCapabilityService(_adapterCache, _poolConnectionManager),
+            new PipelineDefinitionService());
         _rtAdapter = RtEntityCreator.CreateAdapter();
     }
 

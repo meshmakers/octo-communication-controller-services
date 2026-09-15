@@ -2156,6 +2156,196 @@ touch. Verify in isolation before attributing it.
 
 ---
 
+---
+
+## 11b. Increment 11 — `DeployPipeline` on a `Leased` adapter ✅ implemented
+
+**Found by the first end-to-end lease run (15.09.2026).** `octo-cli -c DeployPipeline` against an
+adapter whose `LifecycleMode` is `Leased` answered **404 — "Adapter '…' has no live SignalR
+connection"**. `AdapterService.DeployPipelineAsync` wrapped its **entire** body in
+`adapterTenant.AdapterById.TryGetValue(...)`, and `AdapterById` is only populated for adapters
+holding an open `/{tenantId}/adapterHub` connection. A leased adapter never has one — that is what
+`Leased` means.
+
+### 11b.1 🔴 The 404 was the symptom; the missing gates were the defect
+
+Look at what the method does *before* it pushes anything, in order: `ValidatePipelineDefinition`,
+`EnsurePipelineIsOnDemandCompatible` (AB#4984), `EnsurePipelineHasServiceAccountAsync` (AB#5027),
+`EnsurePipelineElevationAuthorizedAsync` (AB#5128 — authorizes privilege elevation), then
+`SetPipelineDefinitionAsync` with the resolved `ExecutionClass`, the `SendsDataTo` sync and the
+deprecated-node warnings.
+
+**A leased pipeline passed none of them.** It was saved by other means and then executed by a pool
+member that had never checked whether its service account resolves, or whether the caller was
+entitled to the elevation it requests. One of those four is a security control.
+
+It also meant `ExecutionClass` stayed at the CK default `Batch`, so increment 7's
+`Interactive`-before-`Batch` ordering was **not observable at all** on the leased path.
+
+### 11b.2 The decision: a `Leased` adapter deploys
+
+It runs **every** validation and **every** persistence step, and skips **only** the push. The
+alternative — refuse the deploy and let the lease carry the definition — was rejected: it leaves
+those four gates unrun. One verb, one set of guards, whether the executor is dedicated or borrowed.
+
+`DeployPipelineAsync` is therefore split into two named halves:
+
+| Half | Method | Runs for |
+|---|---|---|
+| validate + persist | `ValidateAndPersistPipelineAsync` | every adapter |
+| push | inline in `DeployPipelineAsync` | dedicated adapters only |
+
+and `DeployLeasedPipelineAsync` is the leased entry point: shared half, then deployment state, then
+the capability refresh and the audit event.
+
+**Why the push is not merely skipped but vacuous.** There is no connection and nothing to send: the
+definition travels on the `LeaseDto` (§9.9 / D4), read fresh from the repository by
+`GetLeasedPipelineConfigurationAsync` when the lease is granted. Pushing the same bytes down a second
+channel would create a second source of truth for no gain.
+
+### 11b.3 The three judgement calls, answered explicitly
+
+**The AB#4918 wake gate is skipped, deliberately.** `EnsureWorkloadRunningAsync` was already a no-op
+for a leased adapter — but only *by accident*, because `Leased != OnDemand`. That is a coincidence of
+a mode check, not a decision. It is now an explicit branch with a reason: a `Leased` adapter has no
+workload of its own to wake, and the pool it borrows from is a **different tenant's** workload. Waking
+it from a borrower's deploy would let any borrower spin up the lender's capacity by pressing
+"Deploy".
+
+**`EnsurePipelineIsOnDemandCompatible` now fires on `Leased` too**, which §4.2 specified and
+increment 2 only implemented at *workload*-deploy level (`PoolService`). The argument for `Leased` is
+strictly stronger than for `OnDemand`: an OnDemand workload has a process that is merely allowed to
+hibernate; a leased adapter has no process of its own **at all**. Without the per-pipeline arm a new
+process-bound pipeline could be added to an already deployed leased adapter and would only be caught
+at the next *workload* deploy — i.e. it would sit in the queue and never run. Reuses
+`GetProcessBoundNodes` rather than duplicating the trigger list; the message is its own factory
+(`AdapterServiceException.PipelineNotLeasable`) because the remedy differs — an OnDemand workload can
+be set back to AlwaysOn, a leased one has no process to switch on.
+
+**`SetPipelineDeploymentStateAsync` writes `Deployed` directly, never `Pending`.** `Pending` means "a
+push is in flight and may still fail"; with no push the state would never leave it. And on this path
+**persisting IS the deployment**: from the moment the definition and its class are written, the very
+next lease runs exactly that. Leaving the pipeline `Undeployed` would be the dishonest answer, not
+the cautious one — it claims work is outstanding when there is none, and every surface reads this
+field to decide what to offer. The status message names the difference so nobody reads this
+`Deployed` as "a pod acknowledged it".
+
+### 11b.4 Pool members now report node descriptors
+
+`PoolMemberRegistrationDto.NodeNames` was a seam that was **never filled**: `AdapterPoolClient`
+hard-coded `NodeNames = []`, and `AdapterPoolConnectionManager` did not carry descriptors at all. It
+was also the wrong shape — a bare name cannot answer any of the deploy-time questions (execution
+class, process-boundness, node version, configuration schema).
+
+**It was replaced, not extended.** `NodeNames` → `NodeDescriptors` (`IReadOnlyList<NodeDescriptorDto>`)
+plus a new `PipelineSchemaJson`, both exactly what a dedicated adapter sends on
+`RegisterAdapterWithSchemaAsync`. Keeping the dead field beside the real one would leave two sources
+for one question and invite an author to fill the wrong one.
+
+- **Wire compatibility: unaffected in both directions.** SignalR's JSON hub protocol ignores unknown
+  members and defaults absent ones, and no member ever populated `NodeNames`, so no payload on any
+  wire carried it.
+- **Source compatibility: breaking in `octo-sdk`.** Anything referencing `NodeNames` fails to
+  compile. The skew rule applies as for every hub contract: **`octo-sdk` publishes before
+  `octo-communication-sdk` and `octo-communication-controller-services`**, otherwise `CS0117` — see
+  the `dev_lane_ci_no_chaining_and_tool_skew` note. Only `AdapterPoolClient` and two test files
+  referenced the field in the whole estate.
+
+The member builds them from `INodeSchemaRegistry` through the new
+`AdapterNodeDescriptorProjection` — **the same projection the dedicated path uses**, extracted out of
+`AdapterExecutionService` rather than written a second time. Both registry and generator are optional
+injections, so a host that composed no data pipeline still registers and stays leasable.
+
+### 11b.5 Validation and execution class resolve through the pool
+
+Three deploy-time questions each reached into `AdapterById` on their own and each would have needed
+the same new branch. They now share one seam, `IAdapterNodeCapabilityService`:
+
+```csharp
+AdapterNodeCapabilities Resolve(string tenantId, RtEntityId adapterRtEntityId, RtAdapter? adapter);
+```
+
+- dedicated → the adapter's own cached descriptors and schema;
+- `Leased` → `IAdapterPoolConnectionManager.TryGetPoolCapabilities(LentFromTenantId, LentFromPoolRtId)`.
+
+🔴 **A leased adapter never falls back to its own adapter-cache entry.** A tenant that switched an
+adapter from `AlwaysOn` to `Leased` can still have a stale `AdapterById` entry describing a process
+that no longer exists. Reporting "nothing known" degrades to the name-based fallback, which is
+wrong-but-conservative; reporting a dead process's descriptors would be wrong-and-confident.
+
+**Which member answers for the pool.** Members are replicas of one workload, so their descriptor sets
+are identical by construction; the only window in which they differ is a rolling upgrade. Draining
+members are skipped first (during a rollout they are the *outgoing* version) and the rest are ordered
+by member id, so the same pool gives the same answer twice — a coin flip would make a pipeline's
+persisted execution class depend on dictionary enumeration order.
+
+⚠️ **Per controller instance**, like every answer derived from a SignalR connection. With more than
+one replica the pod handling the deploy may hold no member of the pool and answers "nothing known" —
+the same degradation a dedicated adapter that has not connected during this process's lifetime already
+produces. This is the same >1-replica limitation §9.4 records for scale-up and §10 records for the
+member listing, and it is not fixed here.
+
+### 11b.6 What was built
+
+| Piece | Where |
+|---|---|
+| `NodeDescriptors` + `PipelineSchemaJson` on the registration | `octo-sdk/src/Communication.Contracts/DataTransferObjects/PoolMemberRegistrationDto.cs` |
+| Shared descriptor projection (one source for both paths) | `octo-communication-sdk/src/Sdk.Adapters/AdapterNodeDescriptorProjection.cs` |
+| Member sends them | `octo-communication-sdk/src/Sdk.Adapters/AdapterPoolClient.cs` |
+| Controller stores + answers them per pool | `Hubs/IAdapterPoolConnectionManager.cs`, `Hubs/AdapterPoolConnectionManager.cs`, `Hubs/AdapterPoolHub.cs` |
+| `IAdapterNodeCapabilityService` (dedicated vs. pool) | `Services/IAdapterNodeCapabilityService.cs`, `Services/AdapterNodeCapabilityService.cs` |
+| Pool-aware execution class | `Services/PipelineExecutionClassService.cs` (`ResolveForAdapter` gained an `RtAdapter?`) |
+| Two halves + the leased branch | `Services/AdapterService.cs` |
+| `PipelineNotLeasable` | `Services/AdapterServiceException.cs` |
+
+### 11b.7 The mutations that prove the new tests
+
+Every test below was watched go red under the named mutation and green again after reverting.
+
+| Mutation | Tests it turns red |
+|---|---|
+| **M-D1** `AdapterNodeCapabilityService` drops the `Leased` branch (falls through to the adapter cache) | `PersistsTheDefinitionAndThePoolResolvedExecutionClass`, `RedeployWithoutADefinition_ReResolvesTheClassFromThePool`, `ValidatesTheDefinitionAgainstThePoolsSchema`, `IgnoresAStaleAdapterCacheEntryOfItsOwn` |
+| **M-D2** the AB#5128 elevation gate is removed from the shared half | `ElevatedNode_UnauthorizedCaller_IsRejectedBeforeAnyWrite` |
+| **M-D2b** the elevation gate refuses *everything* | `ElevatedNode_AuthorizedCaller_IsAccepted` |
+| **M-D3** the AB#5027 service-account gate is removed | `WithoutAServiceAccount_IsRejected` |
+| **M-D4** the process-bound gate goes back to `OnDemand` only | `WithAProcessBoundTrigger_IsRejected` |
+| **M-D5** the leased branch pushes a configuration anyway | `PushesNothing`, `IgnoresAStaleAdapterCacheEntryOfItsOwn` |
+| **M-D6** every adapter is treated as leased | `DedicatedAdapter_StillPushes`, `DedicatedAdapter_StillRunsTheWakeGate` |
+| **M-D7** the leased branch never writes a deployment state | `MarksThePipelineDeployedAndSaysWhyNothingWasPushed` |
+| **M-D8** the wake gate is unconditional again (today's behaviour) | `DoesNotTryToWakeAWorkload` |
+| **M-D9** a leased deploy is refused when the pool reported no descriptors | `WithNoPoolMemberRegistered_StillDeploysAndFallsBackToBatch`, `LeasedAdapterWithoutALender_DeploysWithTheFallbackClass` |
+| **M-D10** a half-configured borrower throws instead of degrading | `LeasedAdapterWithoutALender_DeploysWithTheFallbackClass` |
+| **M-D11** `RegisterMember` drops what the member reported | 4 capability tests + the hub test + 3 leased deploy tests |
+| **M-D12** `TryGetPoolCapabilities` stops filtering by pool | `AnotherPoolsMemberNeverAnswers` |
+| **M-D13** a silent member counts as an answer | `AMemberThatReportedNoDescriptorsDoesNotAnswer` |
+| **M-D14** the member pick is reversed (still stable, different member) | `TheAnswerIsStableAcrossCalls` |
+| **M-D15** `AdapterPoolHub` forgets to forward the descriptors | `MemberOfItsOwnTenantsPool_ItsNodeDescriptorsReachTheController` |
+| **M-D16** `AdapterPoolClient` sends `NodeDescriptors = []` (the old seam) | `Registration_CarriesTheMembersNodeDescriptorsAndPipelineSchema` |
+| **M-D17** `AdapterNodeDescriptorProjection` rethrows instead of degrading | `Registration_WithoutAUsableRegistry_StillSucceedsAndReportsNoDescriptors` |
+
+🔴 **A harness trap worth recording.** The mutation script restored each file from a backup whose
+mtime was *older* than the compiled output, so MSBuild considered the assembly up to date and the
+next run executed the **still-mutated** DLL. It showed up as one comm-sdk test failing after every
+mutation had been reverted. Touch the reverted files (or delete the output) before trusting a
+post-mutation run — a stale assembly fails in the direction that looks like a real regression, but it
+could equally have hidden one.
+
+### 11b.8 Not covered
+
+- **`WorkloadOnDemandCapabilityService.EvaluateAsync` still reads only `AdapterById`.** For a leased
+  adapter it therefore classifies with `descriptors = null` — the name-based fallback — both in
+  `PoolService.EnsureLeasingConfigurationIsValidAsync` and in the persisted display value written by
+  `RefreshWorkloadCapabilityAsync`. It degrades conservatively (a self-describing process-bound
+  trigger a member reports is missed, the known-name list still catches the first-party ones), but it
+  is the same blind spot one level up and it was left alone deliberately: `EvaluateAsync` has no
+  adapter entity in hand and giving it one changes a call shape used on several paths.
+- **Nothing exercises a real pool member registering over a real hub connection and a borrower
+  deploying against it.** The two halves are tested against each other through the real
+  `AdapterPoolConnectionManager`, not over SignalR.
+- `DeployDataFlowAsync` has **no** leased branch — a data-flow deploy of a leased adapter's pipelines
+  still falls through the `AdapterById` lookup and silently skips them. Out of scope here; the single
+  `DeployPipeline` verb is what the lease run exercised.
+
 ## 12. Open decisions
 
 Concept §8 closes with "None" — every design question is decided. These are the three that

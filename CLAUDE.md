@@ -1576,7 +1576,9 @@ workload is AlwaysOn, or the workload is Running — Running just stamps `LastAc
   silently dropped.
 - Config/deploy pushes: `AdapterService.DeployAdapterConfigurationAsync`,
   `DeployPipelineAsync`, `DeployDataFlowAsync` (wake-first, before the cache lookup that
-  would throw `AdapterNotLoaded`).
+  would throw `AdapterNotLoaded`). 🔴 **Except a `Leased` adapter** (AB#4924):
+  `DeployPipelineAsync` reads the workload first and skips the gate for one, because a leased
+  adapter has no workload of its own and the pool belongs to another tenant.
 - Manual wake API: `POST {tenantId}/v1/adapter/{workloadRtId}/wake` (Studio "wake now",
   app pre-warm).
 - Cron co-wake: `UpdateScheduleAsync` registers, for every cron trigger whose pipeline runs
@@ -1931,6 +1933,85 @@ Needs its own work item.
 
 ⚠️ A pipeline edited to a different trigger changes class **on save**, so every surface must read the
 current value rather than cache it — the same caveat `OnDemandCapable` carries.
+
+## Deploying a pipeline to a `Leased` adapter (AB#4924)
+
+🔴 **`DeployPipelineAsync` has two named halves, and only the first is universal.**
+
+| Half | Method | Runs for |
+|---|---|---|
+| validate + persist | `ValidateAndPersistPipelineAsync` | **every** adapter |
+| push (project config, send over SignalR, wait for the ack) | inline in `DeployPipelineAsync` | dedicated adapters only |
+
+`DeployLeasedPipelineAsync` is the leased entry point: shared half → `DeploymentState` →
+capability refresh → audit event. Anything added to the deploy verb belongs in the shared half
+unless it is genuinely about pushing bytes to a pod.
+
+**Why this exists.** The method used to wrap its whole body in
+`adapterTenant.AdapterById.TryGetValue(...)`, which is only populated for adapters holding an open
+`/{tenantId}/adapterHub` connection. A `Leased` adapter never has one, so every leased deploy
+answered 404 — and, far worse, **none of the four gates ever ran** on that path
+(schema validation, AB#4984 process-bound triggers, AB#5027 mandatory service account, AB#5128
+elevation authorization). The pipeline was then executed by a borrowed process that had checked
+none of them.
+
+**Three deliberate differences on the leased path:**
+
+- **No AB#4918 wake gate.** It was already a no-op, but only because `Leased != OnDemand` — a
+  coincidence, not a decision. Now an explicit branch: a leased adapter has no workload of its own,
+  and the pool is a *different tenant's* workload. A borrower must not be able to scale the lender
+  by pressing Deploy.
+- **`EnsurePipelineIsOnDemandCompatible` fires on `Leased` too**, with its own message factory
+  `AdapterServiceException.PipelineNotLeasable` (different remedy: an OnDemand workload can go back
+  to AlwaysOn, a leased one has no process to switch on). `PoolService` enforces the same rule at
+  *workload* deploy over the whole pipeline set; without this per-pipeline arm a new process-bound
+  pipeline on an already deployed leased adapter would only be caught at the next workload deploy.
+- **`SetPipelineDeploymentStateAsync` writes `Deployed` directly, never `Pending`.** `Pending` means
+  "a push is in flight"; there is none, so the state would never leave it. Persisting IS the
+  deployment here — the next lease runs exactly what was written. The status message names the
+  difference.
+
+### `IAdapterNodeCapabilityService` — whose descriptors answer
+
+```csharp
+AdapterNodeCapabilities Resolve(string tenantId, RtEntityId adapterRtEntityId, RtAdapter? adapter);
+```
+
+One seam for three deploy-time questions that each used to reach into `AdapterById` on their own:
+schema validation, process-bound classification, and the execution class.
+
+- dedicated → the adapter's cached `NodeDescriptors` / `PipelineSchemaJson`;
+- `Leased` → `IAdapterPoolConnectionManager.TryGetPoolCapabilities(LentFromTenantId, LentFromPoolRtId)`.
+
+🔴 **A leased adapter never falls back to its own adapter-cache entry.** An adapter switched from
+`AlwaysOn` to `Leased` can still have a stale entry describing a process that no longer exists;
+"nothing known" degrades to the name-based fallback (wrong-but-conservative), stale descriptors
+would be wrong-and-confident.
+
+**Which member answers:** draining members last (during a rollout they are the outgoing version),
+then ordered by member id — deterministic, because a pipeline's persisted execution class must not
+depend on dictionary enumeration order.
+
+⚠️ **Per controller instance.** A SignalR connection lives on one pod, so with >1 replica the pod
+handling the deploy may hold no member of the pool and answers "nothing known". Same limitation as
+the member listing and the scale-up evaluation.
+
+⚠️ **Still blind:** `WorkloadOnDemandCapabilityService.EvaluateAsync` reads only `AdapterById`, so
+for a leased adapter it classifies with `descriptors = null` (name-based fallback) both in
+`PoolService.EnsureLeasingConfigurationIsValidAsync` and in the persisted display value.
+`DeployDataFlowAsync` has no leased branch at all — it still falls through the `AdapterById` lookup.
+
+### Pool members report node descriptors
+
+`PoolMemberRegistrationDto.NodeNames` (a `string` list that no member ever filled and no controller
+ever read) was **replaced** by `NodeDescriptors` (`IReadOnlyList<NodeDescriptorDto>`) plus
+`PipelineSchemaJson` — the same values a dedicated adapter sends on
+`RegisterAdapterWithSchemaAsync`, built by the shared
+`AdapterNodeDescriptorProjection` in `octo-communication-sdk` rather than a second projection.
+
+🔴 **Source-breaking in `octo-sdk`, wire-compatible in both directions** (SignalR's JSON protocol
+ignores unknown members and defaults absent ones, and nothing ever populated `NodeNames`). Skew rule
+as for every hub contract: `octo-sdk` publishes before `octo-communication-sdk` and this repo.
 
 ## Leasing: `AdapterPool` deployment, scaling and the watchdog exclusion (AB#4924 increment 5)
 

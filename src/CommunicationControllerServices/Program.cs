@@ -84,6 +84,10 @@ try
     // caches the tenant-tree walk for 30s; the walk opens an admin session per descendant and
     // must not run per work item.
     builder.Services.AddSingleton<ITenantLendingScopeResolver, TenantLendingScopeResolver>();
+    // AB#4924 - answers "whose node descriptors decide what this adapter can run": the adapter's own
+    // when dedicated, the lending pool's members' when Leased. Singleton, and it reads only in-memory
+    // registries (the adapter cache and the pool connection manager).
+    builder.Services.AddSingleton<IAdapterNodeCapabilityService, AdapterNodeCapabilityService>();
     // AB#4924 - resolves a pipeline's scheduling class from its trigger node, on save.
     builder.Services.AddSingleton<IPipelineExecutionClassService, PipelineExecutionClassService>();
     builder.Services.AddSingleton<IPipelineServiceAccountResolver, PipelineServiceAccountResolver>();

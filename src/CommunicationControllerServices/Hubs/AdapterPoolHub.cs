@@ -169,8 +169,11 @@ internal class AdapterPoolHub : Hub, IAdapterPoolHub
             ? connectionId
             : registration.MemberId;
 
+        // AB#4924: the descriptors travel with the registration and are stored per pool, because a
+        // BORROWER's DeployPipeline has to ask "which nodes can this pool run" — its own Leased
+        // adapter has no process, and therefore no descriptors, of its own.
         _connectionManager.RegisterMember(connectionId, memberId, registration.PoolTenantId,
-            registration.PoolRtId);
+            registration.PoolRtId, registration.NodeDescriptors, registration.PipelineSchemaJson);
 
         return new PoolMemberRegistrationResultDto
         {
