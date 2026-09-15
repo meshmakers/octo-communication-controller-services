@@ -5,22 +5,55 @@ borrowing tenant with a `Leased` adapter, one member process, one pipeline execu
 queued, leased, run and released.
 
 🔴 **Status of this document.** Steps 1–3 and 6–8 are derived from code that is tested and were
-checked against the command definitions. **Nothing here has been run end to end yet** — this is the
-runbook for the first attempt, not a report of one. Step 4 in particular names two possible routes
-because the AdapterPool entity has no dedicated CLI verb. Correct this file as you go; a runbook
-that was never walked is a hypothesis.
+checked against the command definitions. **Steps 0–3 have now been walked** (AB#4924 §11a.2 part B,
+which needed a live 4.0.0 tenant for the Studio schema refresh) and are corrected below; steps 4–9
+are still hypothesis. Step 4 in particular names two possible routes because the AdapterPool entity
+has no dedicated CLI verb.
 
 ## 0. What has to be true first
 
 - The whole dev checkout builds: `invoke-buildall -branch dev -configuration DebugL -excludeFrontend $true`.
   26 repos, 0 failures. Leasing spans the SDK, the adapter, the controller and the CK model, so a
   partial build will fail somewhere unhelpful.
-- Docker is up (MongoDB, RabbitMQ).
+- Infrastructure is up (MongoDB, RabbitMQ, CrateDB). ⚠️ **There are two mutually exclusive ways to
+  provide it** and they bind the same host ports (27017 / 5672 / 15672 / 5432 / 4301): the
+  `docker compose` stack (`Start-OctoInfrastructure`) and the local **kind** cluster's `octo-infra`
+  namespace (`Install-OctoKubernetes`, `extraPortMappings`). `Start-OctoInfrastructure` refuses to
+  start while a `*-control-plane` container is running, and that refusal is the *only* hint you get.
+  Check which one holds the local data before switching: `docker volume ls | grep mongo` versus
+  `kubectl --context=kind-kind -n octo-infra get pods`. Either way, `Start-Octo`'s host processes
+  talk to `localhost:27017` and neither knows nor cares which side answers.
+- ⚠️ `kind-control-plane` has restart policy `on-failure:1`, so Docker Desktop brings it back after a
+  reboot and it re-takes the ports. `docker stop` alone is not enough if something restarts it;
+  `docker update --restart=no kind-control-plane` first, and put the policy back afterwards.
+- ⚠️ If the docker-compose Mongo restarts in a loop with *"Read security file failed … /data/file.key:
+  bad file"*, `octo-tools/infrastructure/file.key` is **missing** and Docker has created a *directory*
+  in its place. The key is generated once by `Install-OctoInfrastructure` and is not in git. Remove
+  the bogus directory, regenerate 741 random bytes base64 into `file.key`, and restart. It is the
+  replica set's internal-auth key only — regenerating it does not touch data.
+- ⚠️ With fresh Mongo volumes you also need `Install-OctoInfrastructure` (replica-set `rs.initiate`
+  plus the `octo-system-admin` user), not just `Start-OctoInfrastructure`. And a fresh system
+  database means a fresh identity database: every stored `octo-cli` refresh token is void and
+  `LogIn` falls back to an interactive device flow, which no headless run can complete. Keeping the
+  existing infrastructure is therefore much cheaper than recreating it.
 
 ## 1. Bring the services up
 
 `Start-Octo` — identity, asset repository, communication controller and friends on ports 50xx.
 Do **not** kill individual services under a running `Start-Octo`; restart the set.
+
+- ⚠️ `-reportingService $true` fails on the `dev` checkout: `octo-report-services` is not one of its
+  20 repos and the job dies with *"Cannot find path …/octo-report-services/bin/DebugL/net10.0/"*.
+  It takes the whole `Start-Octo` set down with it, because one Completed job ends the run. Leave
+  reporting off and import `System.Reporting` from the `main` checkout's compiled
+  `ck-system.reporting-2.yaml` with `octo-cli -c ImportCk` if a tenant needs it.
+- ⚠️ Starting the services before Mongo's replica set is actually up gives a misleading
+  `Hangfire.Mongo.MongoConnectException` ("Did not receive ping response … within 5000ms") in
+  `BotServices.log`, and again the whole set exits. Wait for the containers, then start.
+- The binary that `Start-Octo` runs is `<branch>/<repo>/bin/DebugL/net10.0/`; `octo-cli` on PATH may
+  come from a *different* checkout (the octo-tools profile appends
+  `meshmakers/octo-cli/bin/Release/...`). Check the "Executable directory:" line it prints, and use
+  `dev/octo-cli/bin/DebugL/net10.0/osx-arm64/octo-cli` explicitly when the CK engine version matters.
 
 ## 2. Two tenants, and one must be the parent of the other
 
@@ -43,12 +76,36 @@ roles → `Hosts`/`HostedBy`; the role half needs the `RenameAssociationRole` tr
 only in the locally built engine. That is why the whole checkout has to be built from source for
 this exercise.
 
+✅ **Observed.** The long-lived local `meshtest` tenant on the `dev` stack already carries
+`System.Communication-4.0.0`, state `AVAILABLE`, reached by the service-managed path while the
+0.2-dev services were running — the migration was not performed by hand and was not observed step by
+step, so the `RenameAssociationRole` half of it is *not* yet independently verified here. Check the
+result from the tenant's GraphQL endpoint rather than from a log:
+
+```graphql
+{ runtime { systemCommunicationDeploymentSite { totalCount } } }
+```
+
+An answer means 4.0.0 is live. If `systemCommunicationPool` answers instead, the model did not
+install — and if the *new* name is absent the endpoint returns **HTTP 400**, not an empty result, so
+a naive "did it error?" check reads backwards.
+
+🔴 **`System.Ai` cannot install on a 4.0.0 tenant** — `System.Ai-3.7.0` still pins
+`System.Communication-[3.0,4.0)` (plan §3.4, not yet bumped on `test/0.2-dev`). The AI service logs
+*"Dependencies 'System.Communication-[3.36.0]' are unknown construction kit model libraries"* and
+gives up. The tenant feature still reports *AI Services: Enabled* while the model is absent, so
+`GetTenantFeatures` is not evidence — list the installed models. This matters far beyond the AI
+adapter: a frontend `schema.graphql` introspected from such a tenant silently loses every
+`SystemAi*` type.
+
 ## 4. An `AdapterPool` in the lender, a `Leased` adapter in the borrower
 
 There is no `CreateAdapterPool` CLI verb — increment 5 creates pools through the operator, which
 locally means Kubernetes. For a hand-run, either:
 
-- **Refinery Studio**, against the local asset repository, or
+- ~~**Refinery Studio**, against the local asset repository~~ — 🔴 **not available.** The Studio has
+  no `AdapterPool` screen (plan §11a.2, part B), only the queue and members panels, which read an
+  existing pool. This route was a hypothesis and is now ruled out.
 - **`octo-cli -c ImportRt`** with a small runtime-model YAML declaring the `AdapterPool` (with
   `MinReplicas`/`MaxReplicas` and the `PoolMember*` sizing) in `lender`, and an adapter with
   `LifecycleMode = Leased` in `borrower`.
@@ -137,9 +194,11 @@ operation and deliberately not the same verb.
   kind, not `Start-Octo`. Running the member by hand is the more honest instrument anyway — you can
   watch one process take a lease, run someone else's pipeline, and give it back.
 - **Queue in Refinery Studio**: `QueuedAt`, `LeaseWaitMs` and `ExecutionClass` are CK 4.0.0 GraphQL
-  fields and the checked-in `schema.graphql` predates 4.0.0. Until the codegen runs with the model
-  train, the queue is fully operable from `octo-cli` and MCP but only partially visible in the
-  Studio.
+  fields. ✅ The Studio's `schema.graphql` has been refreshed against a 4.0.0 tenant and codegen
+  re-run (plan §11a.2a), so the fields exist in the generated types — but the execution-history
+  dialog does not select them yet, so the queue is still fully operable from `octo-cli` and MCP and
+  only partially visible in the Studio. Same for `AdapterPool`: a GraphQL type now, still no screen,
+  so step 4's "Refinery Studio" route **does not exist** — `octo-cli -c ImportRt` is the only one.
 - **End-to-end traces.** There are none, for anything, in this estate — `ObservabilityBuilder`
   registers no `ActivitySource` and no trace context is propagated. Correlate on lease id and
   execution id in the logs.

@@ -319,6 +319,18 @@ bumped `1.5.0` → `2.0.0` in this increment, and their seed data now creates a 
 | `System.Ai-3.7.0` | `octo-ai-services/src/SystemAiCkModel/ConstructionKit/ckModel.yaml` | `System.Communication-[3.0,4.0)` | 🔴 **major bump to 4.0.0**, republished in the same train |
 | `Loxone-4.3.1` | `octo-adapter-loxone/src/AdapterEdgeLoxone.CkModel/ConstructionKit/ckModel.yaml` | `System.Communication-[3.31,3.32)` | 🔴 **major bump to 5.0.0**, range widened to `[4.0,5.0)` |
 
+🔴 **`System.Ai` is still unbumped on `test/0.2-dev`, and it is the reason a 4.0.0 tenant has no AI
+types at all** (measured during §11a.2 part B). The AI service retries and gives up with
+*"Dependencies 'System.Communication-[3.36.0]' are unknown construction kit model libraries"* —
+note it resolves to the **withdrawn** 3.36.0 of §3.6, so the compiled artifact points at a version
+that does not exist either. Consequence beyond this repo: **any frontend schema introspected from a
+4.0.0 tenant loses all `SystemAi*` types**, which is a silent, 419-line deletion in
+`schema.graphql`. Verified while unblocking that: `System.Ai` has **zero** structural references
+into `System.Communication` (its `Pool` strings are its own `SystemAiWorkspaceMode` /
+`SystemAiCredentialKind` enum values), so the bump is purely version arithmetic — importing the
+compiled `ck-system.ai-3.yaml` with the dependency rewritten to `System.Communication-4.0.0`
+installs cleanly and produces a complete schema.
+
 **Both are major bumps, not minor ones.** `ck-semver-rules.md` classifies "dependency
 switched to a new **major** version" as Major — so the cascade does not stop at
 System.Communication, it propagates as a wave of majors. Plan 1.0 said `System.Ai` needed "a
@@ -547,6 +559,12 @@ readability and leaves `roleId: …/Manages` in the data as a hidden alias.
 - **Documentation follows separately.** 66 genuine markdown files in `octo-documentation` (45 EN + 28 DE, ~15 of them generated from the CK model or CLI metadata), including the doc folder `docs/technologyGuide/communication/pools/` whose URL would need a redirect.
 - **The public REST route `{tenantId}/v1/pool`** comes from `[controller]` on `PoolController`. If the C# class is ever renamed, pin `[Route("pool")]` explicitly or accept a breaking API change. The same applies to the `octo-cli` commands `GetPools` / `DeployPool` / `UndeployPool` and the MCP tools `get_pools` / `undeploy_pool`, all user-facing.
 - **The GraphQL type renames itself.** `SystemCommunicationPool` is derived from the CkTypeId, so publishing 4.0.0 breaks ~66 frontend files across `octo-frontend-refinery-studio` (59), `octo-frontend-libraries` (5) and `meshmakers-app` (2) **without anyone editing the frontend**. Codegen must be re-run in the same train. This is the largest downstream surface in the whole rename and it is invisible from this repo.
+  🔴 **Correction after doing it (§11a.2a):** "codegen must be re-run" understates the coupling.
+  `octo-frontend-libraries` is not a parallel item, it is a **prerequisite** — the Studio's codegen
+  imports its base types from `@meshmakers/octo-services`, and the library's `dist/` (not its
+  sources) is what the Studio compiles against, so the library must be refreshed *and rebuilt*
+  before the Studio compiles at all. Both repos must also be introspected from the **same** tenant.
+  `meshmakers-app` (2 files) is untouched so far and will break the same way.
 
 ---
 
@@ -1543,6 +1561,12 @@ Three things the surfaces have to honour, decided by what the endpoint returns:
 | Surface | Repo | Work |
 |---|---|---|
 | Refinery Studio | `octo-frontend-refinery-studio` | Queue panel (`tenants/communication/adapter-pool-queue/`) + `QUEUED` in the `pipeline-execution-history-dialog.component.ts` `status` filter items (~line 420) and status-badge colour switch (~line 527). Cancel action. `ng lint` + `npm test` after every change. |
+
+✅ **The codegen re-run this section deferred has since happened** — see §11a.2 part B below. The
+Studio's `schema.graphql` now carries `SystemCommunicationDeploymentSite` and
+`SystemCommunicationAdapterPool`, so the sentence "running it early … breaks the Studio in between"
+is history: the window is closed. `AdapterPool` is a GraphQL type there now; what is still missing
+is a screen that uses it.
 | `octo-cli` | `octo-cli` | `GetAdapterPoolQueue` / `CancelQueuedExecution` in the `CommunicationServices` group, alongside the existing `GetPools` family. |
 | MCP | `octo-mcp-service` | `get_adapter_pool_queue` / `cancel_queued_execution` tools with the right `McpRisk` classification (the cancel is destructive). |
 | *(contract)* | `octo-sdk` | 🔴 **A fourth repo, unavoidably.** Both the CLI and the MCP server reach the controller through `ICommunicationServicesClient`, so `GetAdapterPoolQueueAsync` / `CancelQueuedExecutionAsync` and the DTOs live here. |
@@ -2000,15 +2024,81 @@ someone concludes leasing "does not work".
 
 **Part B — after the model train re-runs the codegen**
 
-- `AdapterPool` authoring: create/edit, `MinReplicas`/`MaxReplicas`, the four `PoolMember*` sizing
-  values, `AdapterSharingMode`.
-- `Leased` in the lifecycle dropdown, and the lending attributes on the lending side.
-- `Pool` → `DeploymentSite` across `communication/pools/` — the rename §10 already flags as an
-  unavoidable separate pass, sequenced with the train, not with a feature increment.
-- `QueuedAt`, `LeaseWaitMs`, `ExecutionClass` in the execution history.
+- ✅ **`Pool` → `DeploymentSite` across `communication/pools/`** — done. See "Part B, as built" below.
+- ⬜ `AdapterPool` authoring: create/edit, `MinReplicas`/`MaxReplicas`, the four `PoolMember*` sizing
+  values, `AdapterSharingMode`. The *types* are in the generated schema now
+  (`SystemCommunicationAdapterPool`, `SystemCommunicationAdapterSharingMode`,
+  `SystemCommunicationPoolScaleUpPolicy`); no screen consumes them.
+- ⬜ `Leased` in the lifecycle dropdown, and the lending attributes on the lending side.
+  `SystemCommunicationLifecycleModeDto` now carries `LEASED`; `adapters-form.component` still offers
+  only *Always On* / *On Demand*.
+- ⬜ `QueuedAt`, `LeaseWaitMs`, `ExecutionClass` in the execution history. All three are on
+  `SystemCommunicationPipelineExecution` in the schema; the dialog does not select them yet.
 
-**Consequence to state plainly rather than work around:** until Part B, a pool cannot be created in
-the Studio at all. `ImportRt` is the only route, and the local runbook says so.
+**Consequence to state plainly rather than work around:** an `AdapterPool` still cannot be created in
+the Studio. `ImportRt` is the only route, and the local runbook says so.
+
+### 11a.2a Part B, the rename — as built
+
+**Schema refresh is the whole prerequisite, and it needs a live 4.0.0 tenant.** `codegen.yml` reads
+`schema: - schema.graphql`, a checked-in *generated* file, so `npm run codegen` needs no server — but
+the schema file does. It was refreshed by introspecting `https://localhost:5001/tenants/meshtest/graphQL`
+on a `Start-Octo` stack from the `dev` checkout, verified first with
+`{ runtime { systemCommunicationDeploymentSite { totalCount } } }` (answered; `systemCommunicationPool`
+answered HTTP 400, i.e. the field no longer exists). Counts in the Studio's `schema.graphql`:
+`SystemCommunicationPool` 44 → 3 (all three residual ones are `SystemCommunicationPoolScaleUpPolicy`,
+an **AdapterPool** enum), `DeploymentSite` 0 → 48.
+
+🔴 **`octo-frontend-libraries` is not optional and not a follow-up.** §3.8 counts it (5 files) but
+reads as if the Studio could move alone. It cannot: the Studio's codegen sets
+`baseTypesPath: ~@meshmakers/octo-services`, so `SystemCommunicationDeploymentSiteInputDto` and
+`…InputUpdateDto` must exist in the library *before* the Studio compiles. Its `schema.graphql`,
+`globalTypes.ts`, `possibleTypes.ts` and the built `dist/` (`npm run build:octo-services`) all moved
+in the same pass, from the same tenant. Refreshing one repo and not the other does not fail at
+codegen — it fails at `tsc` with "has no exported member named …".
+
+🔴 **`System.Ai` blocks a complete schema, and the train has not fixed it.** §3.4 says `System.Ai-3.7.0`
+(`System.Communication-[3.0,4.0)`) needs a major bump in the same train. It has not happened on
+`test/0.2-dev`, so on any 4.0.0 tenant the AI service logs
+*"Dependencies 'System.Communication-[3.36.0]' are unknown construction kit model libraries"* and
+`System.Ai` never installs. Introspecting such a tenant silently **drops all 419 `SystemAi*` lines**
+from `schema.graphql` and breaks the four AI documents in the Studio. Verified fact worth keeping:
+the model *content* is already compatible — `System.Ai` has **zero** structural references into
+`System.Communication` (its only `Pool` strings are its own `SystemAiWorkspaceMode.Pool` and
+`SystemAiCredentialKind.MeshmakersPool` enum values). Installing a copy of the compiled
+`ck-system.ai-3.yaml` with its hard-resolved `System.Communication-3.36.0` changed to `4.0.0`
+succeeds unchanged, which is how the schema above was produced. **The real fix is still owed by
+`octo-ai-services`: it is a version-range problem only.**
+
+**What the Studio rename actually covers.** Nine `.graphql` documents, seven of them renamed — and
+note that two of them, `getSystemCommunicationAdapter.graphql` and `getApplicationDetails.graphql`,
+break through the **role** rename (`managedBy` → `hostedBy`), not the root field, so the adapter and
+application detail views are in scope, not just the pool screens. The folder
+`tenants/communication/pools/` became `tenants/communication/deployment-sites/` (components, routes,
+specs, SCSS classes), the route `communication/pools` became `communication/deployment-sites`, and the
+drawer entry *Pools* became **Deployment Sites**. A deployment site *hosts* workloads; the prose
+follows the model.
+
+🔴 **Three things keep the word `Pool` and confusing them with `DeploymentSite` is the one way to get
+this wrong:**
+
+- **`AdapterPool`** is a different CK type. `tenants/communication/adapter-pool-queue/` and every
+  "adapter pool" in prose stay. A *stat badge reading "Adapter Pools" on the old Pools list page* was
+  the sharpest trap — it described the old `Pool`, so under the new names it would have read as the
+  leasing type; it now reads *Workload Hosts*.
+- **`CommunicationService.deployPool()` / `undeployPool()`** in `@meshmakers/octo-services` keep their
+  names because §3.8 keeps the route `{tenantId}/v1/pool/...`. The deployment-site screens still call
+  them, with a comment saying why.
+- **The server's own blocker message** (`"Pool 'edge-a' (Deployed) … pools with UndeployPool"`,
+  `DefaultConfigurationCreatorService.cs:253`) still says *Pool*, and
+  `tenant-features.component.spec.ts` mirrors it verbatim. That string is a contract, not Studio
+  wording — but the controller message *is* now stale against the model and is worth its own item.
+
+**Reproducibility.** The refresh was scripted rather than done in the IDE:
+`octo-frontend-refinery-studio/scripts/om-refresh-schema.mjs <octo-cli-context> schema.graphql`
+(`printSchema(lexicographicSortSchema(buildClientSchema(…)))` — byte-identical to the JetBrains
+plugin's output, verified by re-running it over the installed file). It works for both frontend
+repos, which is what makes "same tenant, same pass" enforceable.
 
 ### 11a.3 Tests
 
