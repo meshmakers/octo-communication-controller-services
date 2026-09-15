@@ -161,10 +161,12 @@ sequenceDiagram
     C->>C: queue work across tenants (round-robin)
     C->>A: Lease(tenantId, executionId)
     C->>A: borrower's PipelineServiceAccount credential (lease-scoped)
+    C->>A: borrower's database name, user and password (lease-scoped)
     A->>I: client_credentials login as the borrower's adapter
+    A->>A: install the database credential for that database only
     A->>A: load tenant repository + pipeline, execute
     A->>C: result, release lease
-    A->>A: drop all tenant-scoped state
+    A->>A: drop all tenant-scoped state, credentials and connections included
 ```
 
 ### Borrower identity — the lease carries the credential
@@ -189,6 +191,66 @@ The alternative — mirroring the pool's account into every borrower — was rej
 the pool a standing credential in every borrower tenant even when no lease is active, which is
 the opposite of what leasing is for.
 
+### Borrower data access — the lease carries the database credential too
+
+**AB#4924.** Identity was only half of "become the borrower". A mesh adapter opens MongoDB
+directly (`AddMongoDbRuntimeRepository()` in its DI), and the Communication Operator deliberately
+refuses an adapter pool the cluster's shared data-store credentials — one Mongo user, one CrateDB
+user, every tenant's data behind them — on the ground that *tenant-scoped data access arrives with
+the lease and leaves with it*.
+
+**That sentence was not true when it was written.** The lease carried an OAuth credential and
+nothing else, so in a real cluster a pool member could execute no pipeline that touched an RT
+entity. The one end-to-end run that appeared to work did so only because the process had been
+started by hand and had inherited a developer's Mongo credentials from its environment — which is
+the same shared-credential situation the refusal exists to prevent, arriving by a different door.
+
+The lease therefore also carries the **borrowing tenant's database name, database user and database
+password**, resolved by the controller from the tenant record and this installation's
+configuration:
+
+- **Three fields, and the user and the password are independent.** The member formats no user name
+  and knows no naming rule. It applies what it is given. Today the *authorisation* is already per
+  tenant — `TenantContext` creates `octo-system-ds-user-{database}` and grants it `readWrite` on
+  that one database — while the *secret* behind every such user is one installation-wide value.
+  **AB#5255** gives each database its own password and changes only where the password comes from:
+  one line in `TenantDatabaseCredentialResolver`, never the wire and never the member.
+- **Installed for one database, not for the process.** A member opens more than the borrower's
+  database — the installation's tenant registry above all — and the borrower's datasource user is
+  authorised on exactly one of them. The credential is published through
+  `ITenantDatabaseCredentialSource`, which the runtime engine consults **per database**; it answers
+  for the leased database and stays silent for every other, so everything else falls back to the
+  process's own configuration exactly as before.
+- **Refused, never blank, on both sides.** A lease whose database credential cannot be resolved is
+  refused with `LeaseRefusalReason.BorrowerDatabaseCredentialUnresolvable` and nothing is granted;
+  a member handed a lease without one refuses to take it. Two gates, one on each side of the wire,
+  for the same reason the operator's refusal has two — a member that silently fell back to whatever
+  credentials its own process holds is exactly the failure this mechanism exists to prevent, and it
+  would look perfectly healthy while doing it.
+- **It leaves with the lease, and so do the connections.** On release the credential is dropped and
+  the engine's cached repository clients for that database are evicted, because a cached client
+  keeps an authenticated connection pool open against the released tenant's database. A member that
+  cannot prove it did both drains instead of taking another lease.
+
+**Stream data (CrateDB) is deliberately not covered, and this is where that is recorded.** There is
+no per-tenant CrateDB principal to carry: the engine holds one connection string per installation
+and separates tenants by *schema*, not by credential. Putting that one credential on the lease
+would be time-scoped but not tenant-scoped — the shape of the mechanism above without its substance
+— and would make the operator's refusal of `secrets.streamDataPassword` decorative in exactly the
+way this work item removed for Mongo. A pool member is given no stream-data password, so **a leased
+pipeline that writes an archive fails to connect rather than reaching another tenant's schema**,
+which is the correct direction for that failure. The prerequisite is a per-tenant CrateDB user —
+the stream-data sibling of AB#5255 — and until it exists, archive-writing pipelines stay on
+dedicated adapters.
+
+**One thing this does not yet give a pool member: access to the tenant *registry*.** Resolving
+`tenantId → database` is a read of the installation's system database, and the per-tenant
+credential the lease carries is by construction not authorised there. A member therefore still
+needs an installation-scoped credential for the system database alone — which today is the same
+shared secret, so the residue is real and named rather than papered over. It is the second thing
+AB#5255 makes separable, and it is why the lease carries the database *name*: the member cannot
+look it up without already holding the credential it is trying to install.
+
 ### Hub authorization
 
 The management connection terminates on a new `/adapterPoolHub`, not on
@@ -210,7 +272,12 @@ one place where a defect is not a bug but a cross-tenant data incident.
 Concretely:
 
 - `FindTenantRepositoryAsync` caches per process today. That cache must become
-  lease-scoped or be dropped on release.
+  lease-scoped or be dropped on release. (§12.4 of the plan: it does not cache the
+  *repository* — but the engine does cache one **repository client**, and its
+  authenticated connection pool, per database. AB#4924 evicts that on both edges of
+  the lease.)
+- The borrower's **database credential** is tenant-scoped state in the most literal
+  sense and is held for one lease, for one database, and dropped on release.
 - The CK-model cache warmed eagerly at startup (AB#4920) is per tenant — it
   cannot simply be kept warm across leases.
 - `AdapterOptions.TenantId` must be **removed**, not merely ignored. As long as a

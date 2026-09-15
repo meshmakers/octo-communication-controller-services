@@ -21,6 +21,7 @@ internal class LeaseService : ILeaseService
     private readonly IHubContext<AdapterPoolHub> _hubContext;
     private readonly ITenantLendingScopeResolver _lendingScopeResolver;
     private readonly IPipelineServiceAccountResolver _serviceAccountResolver;
+    private readonly ITenantDatabaseCredentialResolver _databaseCredentialResolver;
     private readonly IAdapterService _adapterService;
     private readonly ILifecycleConfigurationService _lifecycleConfiguration;
 
@@ -31,6 +32,7 @@ internal class LeaseService : ILeaseService
         IHubContext<AdapterPoolHub> hubContext,
         ITenantLendingScopeResolver lendingScopeResolver,
         IPipelineServiceAccountResolver serviceAccountResolver,
+        ITenantDatabaseCredentialResolver databaseCredentialResolver,
         IAdapterService adapterService,
         ILifecycleConfigurationService lifecycleConfiguration)
     {
@@ -41,6 +43,7 @@ internal class LeaseService : ILeaseService
         _hubContext = hubContext;
         _lendingScopeResolver = lendingScopeResolver;
         _serviceAccountResolver = serviceAccountResolver;
+        _databaseCredentialResolver = databaseCredentialResolver;
         _adapterService = adapterService;
         _lifecycleConfiguration = lifecycleConfiguration;
     }
@@ -119,6 +122,30 @@ internal class LeaseService : ILeaseService
                 "service account; a pool member cannot act as a borrower without one.");
         }
 
+        // 🔴 AB#4924 — the borrower's DATA access, and the reason the operator's refusal of the
+        // cluster's shared data-store credentials to an adapter pool is not merely a gesture. A pool
+        // member opens MongoDB directly (AddMongoDbRuntimeRepository in its DI) and has no standing
+        // credential to any tenant database, so without this the member would execute the borrower's
+        // pipeline against whatever credentials its own process happened to inherit — which on a
+        // developer's machine is everything and in a cluster is nothing. Resolved here, next to the
+        // identity credential and under the same order-of-least-trust rule: both halves of "become the
+        // borrower" are produced only after the borrowing relationship has been proven real.
+        var databaseCredential = await _databaseCredentialResolver
+            .TryResolveAsync(request.BorrowerTenantId, cancellationToken);
+        if (databaseCredential is null)
+        {
+            // Audited on the borrower: its work is not going to run, and a controller log line would
+            // leave the tenant with a queue entry that never moves and no explanation it can see.
+            await _eventService.StoreErrorEventAsync(request.BorrowerTenantId,
+                "Refused a lease: the database credential of this tenant could not be resolved, so a pool " +
+                "member could not be given access to its data. Check that the tenant has a database record " +
+                "and that the controller is configured with the datasource credentials.");
+            return Refuse(lenderTenantId, poolRtId, request,
+                LeaseRefusalReason.BorrowerDatabaseCredentialUnresolvable,
+                $"The database credential of tenant '{request.BorrowerTenantId}' could not be resolved; a pool " +
+                "member cannot reach the borrower's data without it.");
+        }
+
         // 🔴 AB#4924 §9.9 / D4 — a lease must carry the work. Resolved BEFORE a member is reserved:
         // a pipeline that cannot be projected is a refusal, and refusing after a member was claimed
         // would cost the pool a member per round for as long as the pipeline stays broken.
@@ -164,6 +191,11 @@ internal class LeaseService : ILeaseService
             Pipeline = pipelineConfiguration,
             ClientId = credential.Value.ClientId,
             ClientSecret = credential.Value.ClientSecret,
+            // Three fields, filled here and nowhere else. The member formats no user name and knows
+            // no naming rule — it applies what it is given, to the one database it is named.
+            DatabaseName = databaseCredential.Value.DatabaseName,
+            DatabaseUser = databaseCredential.Value.User,
+            DatabasePassword = databaseCredential.Value.Password,
             GrantedAtUtc = grantedAt,
             ExpiresAtUtc = grantedAt + (request.Ttl ?? ILeaseService.DefaultLeaseTtl)
         };
@@ -226,14 +258,17 @@ internal class LeaseService : ILeaseService
                 $"Pool member '{member.MemberId}' could not be handed the lease: {e.Message}");
         }
 
-        // 🔴 The lease object is never logged as a whole and the secret is never named. LeaseDto
-        // overrides ToString for the same reason, but a log statement that interpolated the secret
-        // explicitly would defeat that — so the fields are listed one by one, on purpose.
+        // 🔴 The lease object is never logged as a whole and NEITHER secret is ever named — the
+        // borrower's client secret nor its database password. LeaseDto overrides ToString for the same
+        // reason, but a log statement that interpolated a secret explicitly would defeat that, so the
+        // fields are listed one by one, on purpose. The database it opens and the user it opens it as
+        // are identities and are named: without them a cross-tenant read could not be recognised from
+        // a lease log line at all.
         Logger.Info(
             "Granted lease '{LeaseId}' of pool {PoolRtId} (tenant '{PoolTenantId}') to tenant '{BorrowerTenantId}' " +
-            "on member '{MemberId}', expires {ExpiresAtUtc:O}",
+            "on member '{MemberId}', database '{DatabaseName}' as '{DatabaseUser}', expires {ExpiresAtUtc:O}",
             lease.LeaseId, lease.PoolRtId, lease.PoolTenantId, lease.TenantId, member.MemberId,
-            lease.ExpiresAtUtc);
+            lease.DatabaseName, lease.DatabaseUser, lease.ExpiresAtUtc);
 
         AdapterLeasingMetrics.RecordGranted(lease.TenantId, lenderTenantId, poolRtId.ToString());
 

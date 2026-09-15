@@ -91,6 +91,11 @@ try
     // AB#4924 - resolves a pipeline's scheduling class from its trigger node, on save.
     builder.Services.AddSingleton<IPipelineExecutionClassService, PipelineExecutionClassService>();
     builder.Services.AddSingleton<IPipelineServiceAccountResolver, PipelineServiceAccountResolver>();
+    // AB#4924 - resolves the BORROWER's database credential for a lease. Singleton and stateless; it
+    // reads the tenant record and this installation's datasource configuration. This is the only
+    // place a tenant database credential is produced for a pool member, and the only line AB#5255
+    // has to change.
+    builder.Services.AddSingleton<ITenantDatabaseCredentialResolver, TenantDatabaseCredentialResolver>();
     builder.Services
         .AddSingleton<IPipelineServiceAccountProvisioningService, PipelineServiceAccountProvisioningService>();
 

@@ -30,6 +30,20 @@ internal abstract class LeaseServiceTestsBase
     protected const string ConfigurationSecret = "cfgSecret-9F2a7Lq0ZxBv3TnE8Rd1Yh6Ks4Mw5Pu2";
 
     /// <summary>
+    ///     AB#4924 — the borrowing tenant's database, and the credential that opens it. The password
+    ///     deliberately shares no prefix with <see cref="ClientSecret" />: an assertion that passed
+    ///     only because the client secret was redacted must not be able to pass for this one by
+    ///     accident.
+    /// </summary>
+    protected const string BorrowerDatabaseName = "borrowerdb";
+
+    protected const string BorrowerDatabaseUser = "octo-system-ds-user-borrowerdb";
+    protected const string BorrowerDatabasePassword = "dbPwd-Qv7Xr2Mn8Kt4Ws0Yh3Bd6Lp9Cf1Zg5Ja";
+
+    /// <summary>The LENDER's database credential — what a member must never be handed for a borrower.</summary>
+    protected const string LenderDatabaseUser = "octo-system-ds-user-lenderdb";
+
+    /// <summary>
     ///     A fresh pool per test instance, not a shared constant. The increment 9 leasing metrics are
     ///     process-wide statics tagged by pool rtId and TUnit runs these tests concurrently, so a
     ///     shared id would let one test read another's measurements.
@@ -49,6 +63,15 @@ internal abstract class LeaseServiceTestsBase
         Substitute.For<ITenantLendingScopeResolver>();
     protected readonly IPipelineServiceAccountResolver ServiceAccountResolver =
         Substitute.For<IPipelineServiceAccountResolver>();
+
+    /// <summary>
+    ///     AB#4924 — the borrower's <b>data</b> credential. Substituted for the same reason the
+    ///     service-account resolver is: what matters here is that the lease carries what the resolver
+    ///     produced for the BORROWER, and that a lease is refused rather than granted blank when it
+    ///     produced nothing.
+    /// </summary>
+    protected readonly ITenantDatabaseCredentialResolver DatabaseCredentialResolver =
+        Substitute.For<ITenantDatabaseCredentialResolver>();
 
     /// <summary>
     ///     AB#4924 §9.9 / D4 — the lease carries the work, and the projection that produces it is the
@@ -80,9 +103,19 @@ internal abstract class LeaseServiceTestsBase
 
         LifecycleConfiguration.IsLeasingEnabledAsync(Arg.Any<string>()).Returns(true);
 
+        // Resolvable by default, for the BORROWER only: a test that forgot to arrange it would
+        // otherwise be refused for a reason it never meant to exercise. The lender's tenant resolves
+        // to the lender's own credential, so "the lease carries the borrower's" is a statement a test
+        // can actually falsify.
+        DatabaseCredentialResolver.TryResolveAsync(BorrowerTenantId, Arg.Any<CancellationToken>())
+            .Returns(new TenantDatabaseCredential(BorrowerDatabaseName, BorrowerDatabaseUser,
+                BorrowerDatabasePassword));
+        DatabaseCredentialResolver.TryResolveAsync(LenderTenantId, Arg.Any<CancellationToken>())
+            .Returns(new TenantDatabaseCredential("lenderdb", LenderDatabaseUser, "lenderPwd-not-the-borrowers"));
+
         LeaseService = new LeaseService(ConnectionManager, CommunicationRepository, EventService,
-            EncryptionService, HubContext, LendingScopeResolver, ServiceAccountResolver, AdapterService,
-            LifecycleConfiguration);
+            EncryptionService, HubContext, LendingScopeResolver, ServiceAccountResolver,
+            DatabaseCredentialResolver, AdapterService, LifecycleConfiguration);
     }
 
     /// <summary>
@@ -118,6 +151,14 @@ internal abstract class LeaseServiceTestsBase
         LendingScopeResolver
             .MayLendAsync(LenderTenantId, BorrowerTenantId, scope, Arg.Any<CancellationToken>())
             .Returns(lends);
+    }
+
+    /// <summary>The borrower's database credential cannot be resolved — no tenant record, or no
+    ///     datasource configuration on this controller.</summary>
+    protected void ArrangeUnresolvableBorrowerDatabaseCredential()
+    {
+        DatabaseCredentialResolver.TryResolveAsync(BorrowerTenantId, Arg.Any<CancellationToken>())
+            .Returns((TenantDatabaseCredential?)null);
     }
 
     protected void ArrangeNoPool()

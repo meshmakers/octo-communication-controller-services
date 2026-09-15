@@ -81,6 +81,7 @@ cause a cross-tenant data incident, and everything else waits on it before it ca
 | 4 | trigger nodes declare an execution class, resolved on save | yes (unit) | `ExecutionClass` visible on every pipeline; nothing reads it yet |
 | 5 ✅ | pool workloads deploy into a platform namespace, scale within `MinReplicas..MaxReplicas`, and are invisible to the idle watchdog | yes (kind e2e) | a pool runs N members that no tenant can reach yet |
 | 6 ✅ | management connection + `Lease`/`Release` verbs | yes (hub tests + a manual lease) | a pool member can be leased by hand |
+| 6b ✅ | **the lease carries the borrower's DATABASE credential** — see §8a. Without it the operator's refusal of the cluster's shared data-store credentials to a pool left a member with no authorised way to reach any tenant's data, and the first end-to-end run only worked because the process had inherited a developer's Mongo credentials | yes (unit + a real MongoDB whose borrower password is rotated away from the installation's) | a pool member can execute a pipeline that touches RT entities **in a cluster**, and only for the tenant it was lent |
 | 7 ✅ | queue, round-robin, priority, TTL, `Queued` executions; **the lease carries the work** and the member runs it (§9.9 / D4); **the per-tenant kill switch, pulled forward from 9** (§14 / D5) | yes (unit + integration) | the controller queues and schedules, a leased member executes the queued pipeline end to end, and `LeasingEnabled` (default off) stops it per tenant |
 | 8 ✅ | queue visible and cancellable in all three surfaces, off one endpoint through one SDK client | yes (vitest + CLI + MCP tests) | the queue is operable |
 | 9 ✅ | metrics (the amortisation triple, fairness, queue health, scale-up signals *and* decisions, named refusal reasons, member churn), alert rules in `meshmakers-infrastructure`, and the migration guards §14 wave 2 relies on. Per-tenant enablement already shipped with 7 (D5). **See §11** | yes (unit + mutation) | the rollout is operable: the queue, the rotation and the pool's own sizing are visible, and four of them are alertable |
@@ -1312,6 +1313,163 @@ The fix was to move the registration to where the requirement is: `AddDataPipeli
 `IEtlDataOrchestrator` can resolve what it requires. `TryAdd` rather than `Add`, so a pool member
 that registered the lease-aware scope first is not silently overwritten by the dedicated one — which
 would fail nowhere and enforce no lease at all.
+
+---
+
+## 8a. Increment 6b — the lease carries the borrower's DATABASE credential ✅ implemented
+
+**AB#4924.** Increment 6 gave the member the borrower's *identity*. It did not give it the
+borrower's *data*, and the gap was invisible because of how it was first exercised.
+
+**The evidence.** A mesh adapter opens MongoDB directly — `AddMongoDbRuntimeRepository()` in
+`MeshAdapter.Sdk`'s DI — and the first end-to-end lease run measured **128 MongoDB commands against
+`$db:"salzburgdev"`** during one lease. Meanwhile
+`WorkloadReconciler.AppendClusterSecrets` refuses a pool the cluster's shared data-store
+credentials outright (`if (workloadType == WorkloadTypeDto.AdapterPool) receivesClusterSecrets =
+false;`), with the reasoning *"tenant-scoped data access arrives with the lease and leaves with
+it"*. **That sentence was false.** The lease carried `ClientId`/`ClientSecret` and nothing else, so
+in a real cluster a mesh-adapter pool member could execute no pipeline touching an RT entity; the
+local run only worked because the process was started by hand and inherited a developer's Mongo
+credentials from its environment — the same shared-credential situation the operator's refusal
+exists to prevent, arriving by a different door.
+
+### 8a.1 What the decision was, and what it deliberately is not
+
+Build the mechanism **as if user and password were both per-database**, even though the password is
+installation-wide today. The *authorisation* already is per tenant: `TenantContext` calls
+`CreateUser(admin, {database}, "octo-system-ds-user-{database}", DatabaseUserPassword)` and grants
+`readWrite` on that one database. What is shared is the **secret**.
+
+- `LeaseDto` gains **two independent credential fields** — `DatabaseUser` and `DatabasePassword` —
+  both filled by the controller. Not one derived value, and explicitly **not** "the member formats
+  the name itself": a second copy of the naming rule inside a process that must not be able to name
+  any database but the one it was lent is one edit away from constructing a neighbour's user and
+  finding the shared password still fits.
+- It gains a third, **non-credential** field: `DatabaseName`. That is the scope key, and it has to
+  come from the controller because the member cannot resolve `tenantId → database` without already
+  holding the credential it is trying to install (see §8a.5). Carrying it is what lets the
+  credential be installed for **one** database rather than for the process.
+- **AB#5255** is the follow-up that gives each database its own password. It changes only *where the
+  password comes from* — one line in `TenantDatabaseCredentialResolver` — never the wire and never
+  the member. Nothing on either side derives one value from the other, and
+  `TenantDatabaseCredentialResolverTests` is what says so.
+
+### 8a.2 What was built
+
+| Where | What |
+|---|---|
+| `octo-sdk/…/DataTransferObjects/LeaseDto.cs` | `DatabaseName`, `DatabaseUser`, `DatabasePassword`. `ToString` prints the two identities and **neither secret** — the `ClientSecret` precedent, extended rather than assumed to cover the new field. |
+| `octo-construction-kit-engine-mongodb/…/Configuration/ITenantDatabaseCredentialSource.cs` | The seam: *"the credential for **this** database, if you have one"*. Optional — `UserMongoRepositoryClient` resolves it with `GetService`, so every host that registers none is byte-for-byte unchanged. |
+| `…/Repositories/MongoDb/Generic/UserMongoRepositoryClient.cs` | Consults the source before falling back to `DatabaseUser`/`DatabaseUserPassword`. |
+| `octo-communication-controller-services/…/Services/TenantDatabaseCredentialResolver.cs` | Tenant record → database name; installation configuration → user format + password. The one line AB#5255 changes, and it says so at the assignment. |
+| `…/Services/LeaseService.cs` | Resolves the borrower's credential **after** the two consent checks (order of least trust) and fills the three fields. |
+| `…/Services/AdapterLeasingMetrics.cs` | `LeaseRefusalReason.BorrowerDatabaseCredentialUnresolvable` + its metric label. Distinct from `BorrowerCredentialMissing`: one is identity, the other is data access, and a dashboard that conflated them would send an operator to the wrong half of the system. |
+| `octo-mesh-adapter/…/Leasing/LeasedDatabaseCredentialSource.cs` | Holds one lease's credential, answers **only** for the database the lease named. |
+| `octo-mesh-adapter/…/Leasing/BorrowerDatabaseLeaseParticipant.cs` | Installs it on enter, drops it on leave, and evicts the engine's cached repository clients on **both** edges. |
+| `octo-communication-operator/…/WorkloadReconciler.cs` | The claim in the refusal comment now names the mechanism it depends on, Mongo and CrateDB separately. |
+
+### 8a.3 🔴 Where the participant sits in the order, and why it is forced from both sides
+
+Registration order is entry order and its reverse is leave order:
+**identity → database → CK cache → pipeline registry.**
+
+- **After identity**, because identity is the gate. A member that cannot become the borrower must
+  not touch its data at all, and installing a live credential to a tenant's database *before*
+  knowing whether the token exchange succeeds would put that credential into the process for a lease
+  that is about to fail.
+- **Before the CK cache**, because `CkModelCacheLeaseParticipant`'s warm-up calls
+  `FindTenantRepositoryAsync` — the first thing that opens the borrower's database. This is not a
+  preference: **M-M5 below moves the participant one position later and the lease fails**, which is
+  the mutation that proves the order is load-bearing rather than documented.
+- **And therefore third of four on the way out**: after the registrations and the model are gone,
+  before the token is cleared — the last moment anything could legitimately still need the
+  borrower's database.
+
+### 8a.4 🔴 Per database, not per process — and why a process-wide swap is not an option
+
+The obvious implementation is to swap `OctoSystemConfiguration.DatabaseUser`/`DatabaseUserPassword`
+for the duration of the lease. **It cannot work.** A pool member opens more than the borrower's
+database: `SystemContext.IsSystemTenantExistingAsync` reads the *system* database through the same
+user repository client. Under a process-wide swap that read is attempted as
+`octo-system-ds-user-{borrower}` against `OctoSystem`, which that user is not authorised on, and
+every lease fails at tenant resolution. Mutation **M-M3** demonstrates exactly this: making the
+source answer unconditionally turns the entire pre-existing isolation suite red.
+
+Two further consequences of the engine's caching, both of which the participant handles and a test
+pins:
+
+- The engine caches **one repository client per database for the life of the process**, and builds
+  its connection — credential included — exactly once. A client left over from an earlier lease of
+  the same tenant would keep authenticating with *that* lease's credential. Hence the eviction on
+  **enter**.
+- A cached client holds a live, authenticated connection pool. Leaving one behind after a release is
+  a live connection to the released tenant's data inside a process that serves another tenant a
+  moment later. Hence the eviction on **leave** — and it is deliberately not swallowed: a member
+  that cannot prove it dropped them drains instead of taking another lease (concept §6).
+
+### 8a.5 What this does NOT solve, stated rather than left to be rediscovered
+
+**A pool member still needs an installation-scoped credential for the tenant registry.** Resolving
+`tenantId → database` is a read of the system database (`SystemContext.TryFindTenantContextAsync` →
+admin session + a CK-model read), and the per-tenant credential the lease carries is by construction
+not authorised there. So a cluster pool member needs a credential for `OctoSystem` alone — which
+today is the same shared secret, because there is only one. The residue is real and is named here
+rather than papered over:
+
+- it is why the lease carries the database **name** (the member cannot look it up without already
+  holding the credential it is installing);
+- it is the second thing **AB#5255** makes separable — once each database has its own password, a
+  member can hold the *system* database's password without thereby holding every tenant's;
+- until then the honest statement is: **the lease now supplies all tenant *data* access; registry
+  access is still installation-scoped.**
+
+### 8a.6 CrateDB — deferred, with the reason
+
+**There is nothing per-tenant to carry.** `StreamDataConfiguration` holds one `ConnectionString` for
+the whole installation and `CrateDbConnectionAccess` builds one datasource per tenant from that
+single string; tenants are separated by **schema**, not by credential, and no CrateDB user is ever
+created per tenant. A lease-carried stream-data credential would therefore be time-scoped but not
+tenant-scoped — the shape of the Mongo mechanism without its substance — and would make the
+operator's refusal of `secrets.streamDataPassword` decorative in exactly the way this increment
+removed for Mongo.
+
+Consequence, accepted deliberately: **a leased pipeline that writes an archive fails to connect
+rather than reaching another tenant's schema.** That is the correct direction for the failure.
+Archive-writing pipelines stay on dedicated adapters until a per-tenant CrateDB user exists — the
+stream-data sibling of AB#5255. The seam is shaped so that adding it later touches
+`TenantDatabaseCredentialResolver`, two more lease fields and one more member-side participant, and
+nothing else. Recorded in three places so it cannot be rediscovered by accident: here, in the
+resolver's remarks, and in the `CrateDbConnectionAccess` entry of the mesh adapter's singleton
+sweep.
+
+### 8a.7 The mutations that prove the new tests
+
+| # | Mutation | Turns red |
+|---|---|---|
+| **M-S1** | `LeaseDto.ToString` appends `DatabasePassword` | `ToString_NeverRendersTheDatabasePassword` |
+| **M-S2** | `ToString` drops the database name and user | `ToString_NamesTheDatabaseAndItsUser` |
+| **M-S3** | `DatabasePassword` marked `[JsonIgnore]` | `RoundTripsThroughJson_DatabaseCredentialIncluded` |
+| **M-S4** | `DatabasePassword => DatabaseUser` (one derived value) | `TheDatabaseUserAndPasswordAreIndependentFields`, `RoundTripsThroughJson_DatabaseCredentialIncluded` |
+| **M-R1** | Resolver formats the user from the tenant id instead of the database name | `TheUserIsTheTenantsOwnDatasourceUser`, `TwoTenantsResolveToTwoDifferentUsers` |
+| **M-R2** | A missing datasource password yields a blank credential instead of nothing | `AControllerWithoutADatasourcePasswordResolvesToNothing` |
+| **M-R3** | `TenantDatabaseCredential.ToString` renders the password | `TheCredentialNeverRendersItsPassword` |
+| **M-R4** | An unknown tenant falls back to the tenant id as the database name | `AnUnknownTenantResolvesToNothing`, `ATenantRecordWithoutADatabaseNameResolvesToNothing` |
+| **M-C1** | `LeaseService` resolves the credential for the **lender** | `TheLeaseCarriesTheBorrowersDatabaseCredential`, `TheCredentialIsResolvedForTheBorrowerAndNeverForTheLender` (+3 more) |
+| **M-C2** | The refusal is removed; a blank credential is granted | all three `AnUnresolvableDatabaseCredential_*` |
+| **M-C3** | The grant log line names `DatabasePassword` | `GrantLeaseAsync_NeverWritesTheDatabasePasswordToAnyLogTarget` |
+| **M-M1** | The credential source never answers (the engine seam is dead) | `TheDatabaseCredentialOnTheLeaseIsWhatOpensTheBorrowersDatabase` (integration), `DuringALeaseTheCredentialIsHeldForTheBorrowersDatabaseOnly`, 2 unit |
+| **M-M2** | The credential is not dropped on release | `AfterTheRelease_TheMemberHoldsNoDatabaseCredential`, `AfterAReleaseTheProcessRetainsNothingOfTheReleasedTenant` |
+| **M-M3** | The source answers for **every** database | 3 unit + **9** of the pre-existing isolation tests — the process-wide-swap argument of §8a.4, demonstrated |
+| **M-M4** | A lease with no database credential is accepted | `ALeaseWithoutACompleteDatabaseCredential_IsRefused` (×3), `ALeaseWithNoDatabaseCredentialIsRefusedByTheMember` |
+| **M-M5** | The database participant moved **after** the CK cache | `TheParticipantsAreEnteredInTheDocumentedOrder`, `TheDatabaseCredentialOnTheLeaseIsWhatOpensTheBorrowersDatabase` |
+
+🔴 **The integration substrate is what makes the positive test mean anything.**
+`TwoTenantLeaseFixture` now creates a fourth tenant, `leasetenantrot`, and then **rotates its
+datasource user's password** to a value the member is not configured with. The member still holds
+the installation-wide password — it needs it for the registry — so the *only* way its execution can
+read that tenant's marker is the credential the lease carried. Without the rotation the positive
+test would pass on a member that ignored the lease entirely, on every installation where the two
+values coincide, which is every installation today. It is also a live preview of AB#5255.
 
 ---
 

@@ -70,7 +70,21 @@ public enum LeaseRefusalReason
     ///     Every member of the pool is busy or draining. Scheduler stage: no grant was attempted,
     ///     the queue simply grows (concept §6, "pool exhausted").
     /// </summary>
-    PoolExhausted
+    PoolExhausted,
+
+    /// <summary>
+    ///     🔴 The borrowing tenant's <b>database</b> credential could not be resolved (AB#4924) — no
+    ///     tenant record, no database name, or this controller holds no datasource credential at all.
+    /// </summary>
+    /// <remarks>
+    ///     Separate from <see cref="BorrowerCredentialMissing" /> on purpose: that one is the
+    ///     borrower's OAuth identity and this one is its data access, they fail for entirely different
+    ///     reasons, and a dashboard that could not tell them apart would send an operator to the wrong
+    ///     half of the system. A refusal is the only correct outcome — a lease granted with a blank
+    ///     database credential leaves the member running on whatever credentials its own process
+    ///     happens to hold, which is exactly the failure this mechanism exists to prevent.
+    /// </remarks>
+    BorrowerDatabaseCredentialUnresolvable
 }
 
 /// <summary>
@@ -734,6 +748,8 @@ internal static class AdapterLeasingMetrics
         LeaseRefusalReason.MemberDispatchFailed => "member_dispatch_failed",
         LeaseRefusalReason.PerTenantCap => "per_tenant_cap",
         LeaseRefusalReason.PoolExhausted => "pool_exhausted",
+        LeaseRefusalReason.BorrowerDatabaseCredentialUnresolvable =>
+            "borrower_database_credential_unresolvable",
         _ => "none"
     };
 

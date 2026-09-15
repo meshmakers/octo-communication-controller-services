@@ -204,4 +204,105 @@ internal class LeaseSecretLogTargetTests : LeaseServiceTestsBase
             NLog.LogManager.Configuration = previousConfiguration;
         }
     }
+
+    /// <summary>
+    ///     🔴 AB#4924 — <b>the SECOND secret on the lease, asserted in its own right.</b> The lease now
+    ///     also carries the borrowing tenant's database password, and the point of a separate test is
+    ///     exactly that the assertions above would stay green while this value was written out in full:
+    ///     they only ever looked for <c>ClientSecret</c>. A second secret on the same DTO must not be
+    ///     protected by accident.
+    /// </summary>
+    /// <remarks>
+    ///     Same three properties as the original probe. That the value really travelled — otherwise
+    ///     the probe proves nothing. That neither it nor a prefix of it appears. And that the run
+    ///     logged something, so the assertion is not vacuous. Plus one the original could not make:
+    ///     that the database <i>identities</i> ARE logged, because a lease log line that named no
+    ///     database could not be used to recognise a cross-tenant read.
+    /// </remarks>
+    [Test]
+    [NotInParallel(nameof(LeaseSecretLogTargetTests))]
+    public async Task GrantLeaseAsync_NeverWritesTheDatabasePasswordToAnyLogTarget()
+    {
+        ArrangeGrantableLease();
+
+        var memoryTarget = new NLog.Targets.MemoryTarget("lease-db-secret-probe")
+        {
+            Layout = "${level}|${message}|${exception:format=ToString}"
+        };
+        var previousConfiguration = NLog.LogManager.Configuration;
+        var probeConfiguration = new NLog.Config.LoggingConfiguration();
+        probeConfiguration.AddRule(NLog.LogLevel.Trace, NLog.LogLevel.Fatal, memoryTarget);
+        NLog.LogManager.Configuration = probeConfiguration;
+        try
+        {
+            var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1"));
+            var lease = CapturePushedLease();
+
+            using var _ = Assert.Multiple();
+            // The database password really did travel — otherwise the probe proves nothing.
+            await Assert.That(result.Granted).IsTrue();
+            await Assert.That(lease.DatabasePassword).IsEqualTo(BorrowerDatabasePassword);
+            await Assert.That(memoryTarget.Logs).IsNotEmpty();
+
+            await Assert.That(memoryTarget.Logs
+                    .Any(l => l.Contains(BorrowerDatabasePassword, StringComparison.Ordinal)))
+                .IsFalse();
+            // Not truncated either — a prefix is still secret material.
+            await Assert.That(memoryTarget.Logs
+                    .Any(l => l.Contains(BorrowerDatabasePassword[..8], StringComparison.Ordinal)))
+                .IsFalse();
+            // The identities are the diagnosable half and stay.
+            await Assert.That(memoryTarget.Logs
+                    .Any(l => l.Contains(BorrowerDatabaseUser, StringComparison.Ordinal)))
+                .IsTrue();
+        }
+        finally
+        {
+            NLog.LogManager.Configuration = previousConfiguration;
+        }
+    }
+
+    /// <summary>
+    ///     🔴 The <c>ToString</c> half of the same guard. The most likely future leak of the database
+    ///     password is not a deliberate log of it — it is somebody logging the <see cref="LeaseDto" />
+    ///     itself, whose generated record <c>ToString</c> would print every property.
+    /// </summary>
+    [Test]
+    [NotInParallel(nameof(LeaseSecretLogTargetTests))]
+    public async Task RenderingTheLeaseObjectItselfDoesNotRevealTheDatabasePassword()
+    {
+        ArrangeGrantableLease();
+        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        var lease = CapturePushedLease();
+
+        var memoryTarget = new NLog.Targets.MemoryTarget("lease-db-tostring-probe") { Layout = "${message}" };
+        var previousConfiguration = NLog.LogManager.Configuration;
+        var probeConfiguration = new NLog.Config.LoggingConfiguration();
+        probeConfiguration.AddRule(NLog.LogLevel.Trace, NLog.LogLevel.Fatal, memoryTarget);
+        NLog.LogManager.Configuration = probeConfiguration;
+        try
+        {
+            NLog.LogManager.GetLogger("probe").Info("A lease travelled: {Lease}", lease);
+
+            using var _ = Assert.Multiple();
+            await Assert.That(memoryTarget.Logs).IsNotEmpty();
+            await Assert.That(memoryTarget.Logs
+                    .Any(l => l.Contains(BorrowerDatabasePassword, StringComparison.Ordinal)))
+                .IsFalse();
+            await Assert.That(memoryTarget.Logs
+                    .Any(l => l.Contains(BorrowerDatabasePassword[..8], StringComparison.Ordinal)))
+                .IsFalse();
+            // Still identifies which database this lease opened, and as whom.
+            await Assert.That(memoryTarget.Logs
+                    .Any(l => l.Contains(BorrowerDatabaseName, StringComparison.Ordinal)))
+                .IsTrue();
+            await Assert.That(memoryTarget.Logs
+                    .Any(l => l.Contains(BorrowerDatabaseUser, StringComparison.Ordinal)))
+                .IsTrue();
+        }
+        finally
+        {
+            NLog.LogManager.Configuration = previousConfiguration;
+        }
+    }
 }
