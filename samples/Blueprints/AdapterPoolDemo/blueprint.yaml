@@ -1,0 +1,75 @@
+$schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
+blueprintId: AdapterPoolDemo-1.0.0
+description: |
+  Provisions a LENDING tenant: one `AdapterPool` its descendants can borrow a
+  member from, wired so the Communication Operator can actually deploy it
+  (AB#4924).
+
+  Install on the tenant that should lend — a parent, never a leaf. Its
+  descendants then declare the borrowing side themselves (`LifecycleMode: Leased`
+  plus `LentFromTenantId`/`LentFromPoolRtId` on their own adapter); lending is
+  consensual in both directions and this blueprint only seeds the lender's half.
+
+  WHY THIS EXISTS AS A BLUEPRINT AT ALL
+
+  Because until now it did not, and that was the gap. Both end-to-end walks built
+  the pool by hand with `ImportRt` and ran the member as a HOST PROCESS, so the
+  entity they produced carried no `ChartName`, no `ChartVersion` and no Helm
+  repository — it rested at `DeploymentState: Disabled` and `DeployWorkload`
+  could not act on it. A pool that cannot be deployed cannot have a member pod,
+  and a setup that exists only as a shell transcript cannot be re-provisioned.
+
+  WHAT THE THREE HELM FIELDS ARE FOR
+
+  A pool is ONE workload with a replica range, so it rides the ordinary
+  workload→Helm-release path and needs exactly what any other workload needs: a
+  chart name, a chart version and a repository to pull from. The chart is
+  `octo-mesh-adapter` — the same chart a dedicated adapter uses. It renders a
+  POOL MEMBER instead of a dedicated adapter when `adapterPool.poolTenantId` and
+  `adapterPool.poolRtId` are set, which the controller writes as ValueOverrides
+  at deploy time (`PoolService.AppendAdapterPoolMemberOverrides`); nothing has to
+  be configured here for that.
+
+  🔴 THE CHART VERSION IS PINNED, AND HAS TO BE
+
+  0.2-lane charts are published as SemVer PRERELEASES (`-test-0-2-dev`, AB#4948)
+  precisely so an unpinned `ChartVersion` keeps resolving main's newest STABLE
+  chart — Helm ignores prereleases unless the caller pins one. An empty value
+  here, the contract `System.Communication.MainLatest` relies on, would therefore
+  hand a 0.2 tenant a 0.1 chart that knows nothing about `adapterPool` and
+  silently render a dedicated adapter with no tenant. `ChartVersion` is
+  `isRuntimeState` (AB#4706), so this value applies on a FRESH install only and a
+  re-apply never overwrites what an operator pinned later.
+
+  WHAT IS DELIBERATELY NOT HERE
+
+  No `HelmRepositoryConfiguration` of its own: `670…003` (`meshmakers-dev`) is
+  seeded by the service-managed System.Communication blueprint on every dev/test
+  tenant, and owning a second copy would fight the service for it. No borrower
+  side, for the reason above. And no `ReceivesClusterSecrets`: the controller
+  forces it false for a pool whatever the entity says, and the operator refuses
+  the same thing independently — a member executes work for tenants other than
+  the one that owns it, so a standing credential to every tenant's data would
+  make the lease that grants it one at a time decorative.
+
+  🔴 NO `blueprintDependencies` ON THE SERVICE-MANAGED BLUEPRINT
+
+  The obvious declaration — `System.Communication.MainLatest-[2.0,3.0)`, since
+  that is what seeds the two entities this seed associates to — cannot be
+  resolved and fails the install with `MissingDependency ... no matching version
+  was found in any catalog`. Service-managed blueprints are EMBEDDED resources
+  discovered by `EmbeddedResourceBlueprintCatalog`; they are never published to a
+  catalog the dependency resolver reads. (The `HelloCommunication` sample carries
+  the same declaration and is doubly stale — it still names `System.Communication`
+  from before the Release/MainLatest split.)
+
+  The relationship is therefore expressed the only way that holds: a CK model
+  dependency, plus a seed that names `670…001` and `670…003` directly. Those are
+  applied to every tenant on service start, so the ordering takes care of itself —
+  and if one is somehow absent the association insert fails loudly rather than
+  producing a pool that looks installed and cannot deploy.
+
+ckModelDependencies:
+  - System.Communication-[4.0,5.0)
+
+seedDataPath: seed-data/entities.yaml

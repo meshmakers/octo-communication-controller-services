@@ -1,0 +1,105 @@
+$schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+
+# Required by the runtime-model schema, and NOT a duplicate of the blueprint's
+# ckModelDependencies: this file is also importable on its own with
+# `octo-cli -c ImportRt`, and then it is the only place that says which model the
+# type ids below belong to. Omitting it fails the install with a schema error
+# ("Required properties [\"dependencies\"] are not present") that names the seed
+# file but not the missing key's purpose.
+dependencies:
+  - System.Communication-[4.0,5.0)
+
+# AB#4924 — the lending half of shared adapter leasing.
+#
+# One AdapterPool, hosted at the deployment site the service-managed
+# System.Communication blueprint seeds (670…001), pulling the mesh-adapter chart
+# from the dev-channel Helm repository that blueprint also seeds (670…003).
+#
+# The rtId is fixed rather than generated so a re-apply updates this pool instead
+# of creating a second one, and so a borrower can name it in its own
+# LentFromPoolRtId without a lookup step.
+entities:
+  - rtId: '49240000000000000000aa01'
+    ckTypeId: System.Communication/AdapterPool
+    rtWellKnownName: AdapterPoolDemo
+    associations:
+      # The deployment LOCATION. System.Communication 4.0.0 renamed both halves
+      # of this edge — Pool -> DeploymentSite, Manages -> Hosts — which is why a
+      # 3.x-era seed cannot be reused verbatim here.
+      - roleId: System.Communication/Hosts
+        targetRtId: '670000000000000000000001'
+        targetCkTypeId: System.Communication/DeploymentSite
+      # Without this edge DeployWorkload refuses with "no Helm repository is
+      # linked", which reads like a chart problem and is not one.
+      - roleId: System.Communication/HelmRepository
+        targetRtId: '670000000000000000000003'
+        targetCkTypeId: System.Communication/HelmRepositoryConfiguration
+    attributes:
+      - id: System/Name
+        value: Adapter Pool
+      - id: System/Description
+        value: >-
+          Adapter pool lent to this tenant's descendants (AB#4924). Members run the
+          mesh-adapter chart with no tenant of their own and are handed one borrowing
+          tenant per lease. Deploy it like any other workload; the controller writes
+          the pool identity into the release at deploy time.
+
+      # --- Helm: what makes this deployable at all -------------------------------
+      - id: System.Communication/ChartName
+        value: octo-mesh-adapter
+      # 🔴 Pinned on purpose — see the blueprint description. A 0.2-lane chart is a
+      # SemVer prerelease, so an empty value resolves main's newest STABLE chart,
+      # which predates the adapterPool wiring and would render a dedicated adapter
+      # with no tenant instead of a member. This is the first chart that carries it.
+      - id: System.Communication/ChartVersion
+        value: 0.2.260916022-test-0-2-dev
+      - id: System.Communication/DeploymentState
+        value: 0   # Undeployed — the operator moves it on Deploy
+      # 🔴 No CommunicationState / ConfigurationState here, unlike the seeded
+      # Adapter: those live on `Adapter`, not on `DeployableWorkload`, so an
+      # AdapterPool does not carry them and the seed is refused outright
+      # ("Attribute ... does not exist at type ... AdapterPool-1"). A pool's
+      # members report their own connection state through the pool hub; the pool
+      # entity itself has no connection to describe.
+
+      # --- Size of the pool ------------------------------------------------------
+      # One member is enough to demonstrate a lease and to prove isolation across
+      # two borrowers, because a member serves one tenant at a time by construction:
+      # with a single member the rotation is observable rather than hidden behind
+      # parallelism. MaxReplicas leaves the scale-up path reachable.
+      - id: System.Communication/MinReplicas
+        value: 1
+      - id: System.Communication/MaxReplicas
+        value: 2
+
+      # Per-member sizing. Deliberately small: a member holds one borrower's CK
+      # model at a time and drops it on release.
+      - id: System.Communication/PoolMemberCpuRequest
+        value: 100m
+      - id: System.Communication/PoolMemberCpuLimit
+        value: 500m
+      - id: System.Communication/PoolMemberMemoryRequest
+        value: 256Mi
+      - id: System.Communication/PoolMemberMemoryLimit
+        value: 512Mi
+
+      # --- Scale-up --------------------------------------------------------------
+      - id: System.Communication/PoolScaleUpPolicy
+        value: 0   # QueueDepthOrWaitSeconds
+      - id: System.Communication/ScaleUpQueueDepthThreshold
+        value: 5
+      - id: System.Communication/ScaleUpQueueWaitSeconds
+        value: 60
+
+      # --- Who may borrow --------------------------------------------------------
+      # 🔴 1 = Descendants, and leaving this at its default is the single most
+      # expensive mistake on this entity. The default is 0 = NotShared, for which
+      # TenantLendingScopeResolver returns an empty set WITHOUT walking the tenant
+      # tree at all — the pool then lends to nobody and the refusal names the tenant
+      # tree, which sends the diagnosis in entirely the wrong direction.
+      - id: System.Communication/AdapterSharingMode
+        value: 1
+      # A cap per borrowing tenant, not a global one: it is what stops one busy
+      # descendant from occupying the pool while its siblings queue.
+      - id: System.Communication/LendingMaxConcurrentLeasesPerTenant
+        value: 2
