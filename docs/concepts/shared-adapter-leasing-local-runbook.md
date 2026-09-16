@@ -753,10 +753,9 @@ operation and deliberately not the same verb. ⚠️ **Not exercised by this wal
 
 ## 9. What is still broken, in priority order
 
-Rewritten 2026-09-15 after §11, updated 2026-09-16. Items 1–3 were fixed and verified then; items
-7–9 were fixed on 2026-09-16. **What actually remains is 4, 5 and 6** — and they are in priority
-order: 4 blocks every cluster rollout, 5 runs a borrower's pipeline outside the lease bookkeeping,
-6 caps a member at roughly twelve executions a minute regardless of how small the work is.
+Rewritten 2026-09-15 after §11, updated 2026-09-16. Items 1–3 were fixed then; 7–9, then **4 and 6**,
+on 2026-09-16. **What remains is 5** — a borrower's cron firing during a lease runs its pipeline
+outside the lease bookkeeping.
 
 1. ✅ **`AddAdapterPoolMember()` cannot be resolved** — fixed, `octo-communication-sdk` `26e48f2`
    (`DeferredAdapterPoolHubCallbacks`). A member starts unpatched (§11).
@@ -765,7 +764,25 @@ order: 4 blocks every cluster rollout, 5 runs a borrower's pipeline outside the 
    composition without one; `Configure<IServiceProvider>` + `GetService<IConfiguration>()` is right.
 3. ✅ **`DeployPipeline` has no `Leased` branch** — addressed in `631d0d9` (increment 11). The lease
    path never needed it; what the branch buys is `ExecutionClass` and `OnDemandCapable` resolution.
-4. 🔴 **A pool member cannot run as a pod at all.** Two separate gaps, both found on 2026-09-15:
+4. ✅ **A pool member can run as a pod** — fixed 2026-09-16. It was two independent gaps and both are
+   closed. **Chart + controller:** `PoolService.AppendAdapterPoolMemberOverrides` now writes
+   `adapterPool.poolTenantId` (the lender) and `adapterPool.poolRtId`, the chart renders them as
+   `OCTO_ADAPTERPOOL__*`, and a member gets neither a dedicated tenant nor an adapter RtId; half a
+   configuration renders as a *dedicated* adapter rather than as a broken member, and no member id is
+   sent because it defaults to the pod name. **Credential:** the member no longer resolves the
+   borrower through the installation's registry at all — `LeasedDatabaseCredentialSource` implements
+   `ITenantLocationSource` alongside `ITenantDatabaseCredentialSource`, both fed from the lease, so
+   `SystemContext` skips the admin probe and the registry read, and the pod needs neither
+   `OCTO_SYSTEM__DATABASEUSERPASSWORD` nor `__ADMINUSERPASSWORD`. The chart renders neither for a
+   member — which also mattered mechanically: `octo-mesh.secretEnv` fails on an empty value and the
+   operator withholds that tier, so the render itself used to fail.
+
+   ⚠️ A member now gets a **detached** tenant context: it reads and writes entities but performs none
+   of the model management the registry route performs (system CK-model update, stream-data model,
+   service-managed imports, ownership stamp). Those are writes on behalf of the installation that owns
+   the tenant, and a borrowed process is not it.
+
+   What the two gaps were, for the record:
    - The chart has no pool wiring. `octo-mesh-adapter/src/charts/octo-mesh-adapter` contains no
      `ADAPTERPOOL` value, no `extraEnv` escape hatch; `PoolService.AppendAdapterPoolMemberOverrides`
      sets only `replicaCount` and the sizing values. `OCTO_ADAPTERPOOL__POOLTENANTID` / `POOLRTID` /
@@ -779,9 +796,15 @@ order: 4 blocks every cluster rollout, 5 runs a borrower's pipeline outside the 
      them as environment variables, which is precisely what a pod cannot do.
 5. 🔴 **A leased member subscribes to the borrower's bus triggers** and leaves the queue behind on
    release — see §11.
-6. 🔴 **The scheduler tick is the throughput ceiling**: a release does not wake the scheduler, so
-   grants are exactly `LeaseSchedulerIntervalSeconds` apart regardless of how short the work is
-   (§11 measures 5.11–5.14 s between grants for runs of 0.43–1.36 s).
+6. ✅ **The scheduler tick was the throughput ceiling** — fixed 2026-09-16. `ILeaseSchedulerWakeSignal`
+   lets a lease **release** and a work **enqueue** pull the next round forward; the tick stays as the
+   safety net for TTL expiry, topology changes and events that reached a different controller pod.
+   🔴 The original write-up named only the release. The **enqueue** is the half that decides whether
+   `Interactive` means anything — work arriving while a member is idle *already* otherwise waits a
+   full tick, and no release happens there. §11's rotation walk could not expose it: with two
+   borrowers enqueuing continuously somebody was always working. Coalescing (one pending round) and a
+   minimum gap keep a burst from running a round per work item, each of which reads every borrower's
+   queue. A `Drained` release deliberately wakes nobody.
 7. ✅ **`AdapterOptions.DedicatedTenantId` on a pool member** — §7.2, fixed 2026-09-16. It turned out
    not to be a doc-or-code choice: the property was **never** null on a member (constructor default
    `"meshTest"`, and this runbook told the operator to set the lender), while three call sites in two
