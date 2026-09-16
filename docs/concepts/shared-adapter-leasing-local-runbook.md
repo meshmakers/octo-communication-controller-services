@@ -1058,3 +1058,38 @@ installation, tenants separated by schema. On a lease that credential would be t
 tenant-scoped, which is the shape of the mechanism without its substance. Accepted consequence
 (concept §4): a leased pipeline that writes an archive **fails to connect**. Host and user stay
 rendered so that failure is a refused connection with a named user, not a half-configured process.
+
+### 12.5 The result: a member as a pod, holding nothing
+
+`accounting-49240000000000000000aa01-b5cb6458c-gfqrk`, chart
+`octo-mesh-adapter-0.2.260916033-test-0-2-dev`:
+
+```
+Starting as member '…-gfqrk' of adapter pool 49240000000000000000aa01 in lending tenant 'accounting'
+Registered … with 117 node descriptor(s) and a pipeline schema
+Taking lease '664899fd…' for tenant 'meshmakers' from pool …aa01 of tenant 'accounting'
+This pool member now acts as client 'octo-pipeline-sa-49240000000000000000bb01' of leased tenant 'meshmakers'
+This pool member may now open database 'meshmakers' of leased tenant 'meshmakers' as 'octo-system-ds-user-meshmakers'
+Running leased pipeline …bb03 for tenant 'meshmakers' as execution '9f109579…'
+```
+
+`status=COMPLETED`, `durationMs=959`, `leasedFromTenantId=accounting`,
+`leasedOnMemberId=accounting-…-gfqrk` — the **pod name**, which is the member id precisely because
+nothing configures one.
+
+🔴 **The whole credential environment of that pod:**
+
+```
+OCTO_ADAPTER__BROKERPASSWORD     OCTO_ADAPTERPOOL__POOLRTID
+OCTO_SYSTEM__DATABASEHOST        OCTO_ADAPTERPOOL__POOLTENANTID
+```
+
+No `OCTO_SYSTEM__DATABASEUSERPASSWORD`, no `__ADMINUSERPASSWORD`, no `__STREAMDATAPASSWORD`, no
+`OCTO_ADAPTER__DEDICATEDTENANTID` — and it still resolved the borrower and opened its database, as the
+borrower's own datasource user, from the lease. That is §9.4 settled: the member holds **nothing
+installation-wide**, and the registry walk that used to force an admin credential on it never runs.
+
+🔴 **`leaseWaitMs = 131`.** Every measurement before today sat at a full scheduler tick — 5.11–5.14 s.
+This is §9.6's enqueue-side wake, working: the work arrived while the member was idle and the round
+was pulled forward instead of waiting for the interval. The two fixes are visible in one number each,
+from the same run.

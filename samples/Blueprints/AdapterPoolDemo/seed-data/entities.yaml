@@ -52,7 +52,7 @@ entities:
       # which predates the adapterPool wiring and would render a dedicated adapter
       # with no tenant instead of a member. This is the first chart that carries it.
       - id: System.Communication/ChartVersion
-        value: 0.2.260916022-test-0-2-dev
+        value: 0.2.260916033-test-0-2-dev
       - id: System.Communication/DeploymentState
         value: 0   # Undeployed — the operator moves it on Deploy
       # 🔴 No CommunicationState / ConfigurationState here, unlike the seeded
