@@ -3,7 +3,7 @@ $schema: https://schemas.meshmakers.cloud/ck-migration-meta.schema.json
 # 3.35.0 every bump was additive and rode the engine's schema-only bridge, which is why
 # this file sat at 3.1.1 while the model was already at 3.35.0 ("schema-ahead-of-history").
 # 4.0.0 renames a type, so it needs a real script and the history catches up.
-ckModelId: System.Communication-4.0.0
+ckModelId: System.Communication-4.1.0
 migrations:
   - fromVersion: "3.0.1"
     toVersion: "3.0.2"

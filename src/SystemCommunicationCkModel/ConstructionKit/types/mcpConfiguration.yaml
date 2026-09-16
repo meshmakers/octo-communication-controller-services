@@ -1,0 +1,33 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+  - typeId: McpConfiguration
+    derivedFromCkTypeId: ${System}/Configuration
+    isFinal: true
+    description: >
+      Configuration for a Model Context Protocol (MCP) server connection.
+      Stores transport, endpoint and (optional) authentication for a single
+      MCP server. Referenced by LlmQuery@1 pipeline nodes via the
+      McpConfigurationNames list field — one MCP server can be referenced by
+      many pipelines, and a single pipeline can compose tools from multiple
+      MCP servers.
+    attributes:
+      - id: ${this}/Url
+        name: Url
+        isOptional: true
+      - id: ${this}/Transport
+        name: Transport
+      - id: ${this}/Command
+        name: Command
+        isOptional: true
+      - id: ${this}/Arguments
+        name: Arguments
+        isOptional: true
+      - id: ${this}/BearerToken
+        name: BearerToken
+        isOptional: true
+      - id: ${this}/AdditionalHeaders
+        name: AdditionalHeaders
+        isOptional: true
+      - id: ${this}/AuthServiceAccountConfigurationName
+        name: AuthServiceAccountConfigurationName
+        isOptional: true
