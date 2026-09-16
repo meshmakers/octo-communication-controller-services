@@ -1,0 +1,106 @@
+$schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+
+# Required by the runtime-model schema, and not a duplicate of the blueprint's
+# ckModelDependencies: this file is also importable on its own with ImportRt, and
+# then it is the only place naming the model the type ids below belong to.
+dependencies:
+  - System.Communication-[4.0,5.0)
+
+# AB#4924 — the borrowing half of shared adapter leasing.
+entities:
+  # ---------------------------------------------------------------------------
+  # The Leased adapter. It owns no process: there is no chart, no replica count
+  # and nothing for the operator to deploy. What it carries is a DECLARATION —
+  # "my work runs on a member of that pool over there" — which the controller
+  # checks against the pool's own SharingMode before it grants anything.
+  # ---------------------------------------------------------------------------
+  - rtId: '49240000000000000000bb01'
+    ckTypeId: System.Communication/Adapter
+    rtWellKnownName: LeasedAdapter
+    associations:
+      # Still hosted at a deployment site even though nothing is deployed there:
+      # the site is where the adapter belongs in the topology, and the controller
+      # reads it when it resolves the workload's pool.
+      - roleId: System.Communication/Hosts
+        targetRtId: '670000000000000000000001'
+        targetCkTypeId: System.Communication/DeploymentSite
+    attributes:
+      - id: System/Name
+        value: Leased Adapter
+      - id: System/Description
+        value: >-
+          Adapter whose pipelines run on a borrowed pool member instead of a process of
+          its own (AB#4924). It is never deployed; the lease is what gives it a runtime,
+          one work item at a time.
+      # 🔴 3 = Leased. Together with the two LentFrom* values below this is the
+      # borrower's consent — and the deploy guard validates them as a PAIR, so
+      # setting one without the other is refused rather than half-applied.
+      - id: System.Communication/LifecycleMode
+        value: 3
+      # 🔴 Hard-coded; see the blueprint description. A blueprint cannot derive its
+      # parent — there is no ${octo.parentTenantId}.
+      - id: System.Communication/LentFromTenantId
+        value: accounting
+      # The POOL, not a member: membership is elastic and a member id would be
+      # stale the moment the pool scales.
+      - id: System.Communication/LentFromPoolRtId
+        value: '49240000000000000000aa01'
+      - id: System.Communication/DeploymentState
+        value: 0
+      - id: System.Communication/CommunicationState
+        value: 0
+      - id: System.Communication/ConfigurationState
+        value: 0
+
+  - rtId: '49240000000000000000bb02'
+    ckTypeId: System.Communication/DataFlow
+    rtWellKnownName: LeasingProbeFlow
+    attributes:
+      - id: System/Name
+        value: Leasing Probe
+
+  # ---------------------------------------------------------------------------
+  # The probe. Its job is to answer WHICH TENANT DATABASE the lease ran against,
+  # which a marker string alone cannot do.
+  # ---------------------------------------------------------------------------
+  - rtId: '49240000000000000000bb03'
+    ckTypeId: System.Communication/Pipeline
+    rtWellKnownName: LeasingProbe
+    associations:
+      - roleId: System/ParentChild
+        targetRtId: '49240000000000000000bb02'
+        targetCkTypeId: System.Communication/DataFlow
+      - roleId: System.Communication/Executes
+        targetRtId: '49240000000000000000bb01'
+        targetCkTypeId: System.Communication/Adapter
+    attributes:
+      - id: System/Name
+        value: Leasing Probe
+      - id: System/Enabled
+        value: true
+      - id: System.Communication/DeploymentState
+        value: 0
+      - id: System.Communication/PipelineDefinition
+        value: |
+          triggers:
+            # Not a cron trigger, deliberately: a bus trigger on a leased pipeline
+            # runs OUTSIDE the lease bookkeeping today (runbook §9.5), which would
+            # make this probe's own result untrustworthy.
+            - type: FromExecutePipelineCommand@1
+          transformations:
+            - type: SetPrimitiveValue@1
+              targetPath: $.marker
+              valueType: String
+              value: AB4924-LEASED-PROBE-OK
+            - type: GetRtEntitiesByType@1
+              description: >-
+                Reads the adapters of WHICHEVER tenant database this actually ran
+                against. The lender and the borrower hold different numbers of them,
+                so the output alone settles the isolation question instead of merely
+                proving that something executed.
+              ckTypeId: System.Communication/Adapter
+              targetPath: $.adaptersSeen
+              identity: ServiceAccount
+            - type: SetPipelineExecutionResult@1
+              path: $
+              maxLength: 20000

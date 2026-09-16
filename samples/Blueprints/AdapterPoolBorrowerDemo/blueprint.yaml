@@ -1,0 +1,48 @@
+$schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
+blueprintId: AdapterPoolBorrowerDemo-1.0.0
+description: |
+  Provisions the BORROWING half of shared adapter leasing (AB#4924): a `Leased`
+  adapter that declares which pool it borrows from, plus a data flow and one probe
+  pipeline that proves which tenant database a lease actually ran against.
+
+  Install on a DESCENDANT of the tenant carrying `AdapterPoolDemo-1.0.0`. Lending
+  is consensual in both directions — the pool's `SharingMode` says who MAY borrow,
+  and this half says from whom this tenant DOES. Either alone grants nothing.
+
+  🔴 THE LENDER'S TENANT ID IS HARD-CODED, AND THAT IS THIS SAMPLE'S LIMIT
+
+  `LentFromTenantId` below says `accounting`. It has to say something concrete,
+  and a blueprint has no way to derive it: `DefaultBlueprintVariableProvider`
+  surfaces `octo.tenantId`, `octo.systemTenantId`, `octo.environment*`,
+  `octo.version`, `octo.scheme` and `octo.domain` — and no parent. It reads
+  options only and deliberately holds no tenant-registry access ("without any
+  service-specific knowledge"), so `${octo.parentTenantId}` does not exist and
+  cannot be added without either giving that provider a registry dependency it
+  was designed to avoid, or registering a richer provider in the service.
+
+  So this file is a SAMPLE for the estate it was written against, not a portable
+  artifact. Installing it on a tenant whose parent is not `accounting` produces an
+  adapter that declares a lender it may not borrow from, and the first execution
+  is refused with `LendingScopeDenied` — loudly, at least, rather than silently
+  running somewhere unintended. Making it portable means adding a parent-tenant
+  blueprint variable first; that is a change to the engine's blueprint layer and
+  belongs in its own work item.
+
+  WHY THE PROBE PIPELINE LOOKS LIKE THIS
+
+  `GetRtEntitiesByType@1` over `System.Communication/Adapter` is the cheapest
+  question whose ANSWER DIFFERS between the lender and the borrower, so the
+  pipeline's own output settles which database it ran against — rather than only
+  proving that it ran at all. A marker string alone would prove neither.
+
+  WHAT IS DELIBERATELY NOT HERE
+
+  No `ChartName` / `ChartVersion`: a `Leased` adapter owns no process, and giving
+  it chart fields would make it look deployable. No `PipelineServiceAccount`
+  seed — the controller provisions one per adapter itself, and seeding a client
+  secret is what `isRuntimeState` on `ClientSecret` exists to prevent.
+
+ckModelDependencies:
+  - System.Communication-[4.0,5.0)
+
+seedDataPath: seed-data/entities.yaml
