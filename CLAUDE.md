@@ -2157,6 +2157,58 @@ date in BSON *ordering*. Removing either explicit `Queued` exclusion leaves
 `FailStuckAndOrphanedExecutionsTests.AQueuedExecutionIsInvisibleToEveryReaperAndSweep` green. They
 are kept so the invisibility is a property of the query rather than of the storage engine.
 
+### 🔴 The tick is a floor, not the cadence (AB#4924 §9.6)
+
+`LeaseSchedulerIntervalSeconds` used to be both, and that made it the throughput ceiling. Measured on
+the second local walk: grants came **5.11–5.14 s apart for runs of 0.43–1.36 s**, so the member was
+idle **75–92 %** of the time and no member could exceed roughly **twelve executions a minute** however
+small the work was. For `Interactive` it meant a Studio Execute paid up to a full interval before
+anything started.
+
+`ILeaseSchedulerWakeSignal` lets the two events that can make a grant possible pull the next round
+forward. **Two, not one** — and the second is the one that was missing from the original write-up:
+
+| Event | Where | What it changes |
+|---|---|---|
+| a lease is **released** | `LeaseService.ReleaseLeaseAsync` | a member became available for queued work |
+| work is **enqueued** | `TriggerManagementService.StartExecutePipelineAsync` | work arrived while a member may be idle *already* |
+
+The release side alone looks sufficient and is not: with two borrowers enqueuing continuously
+somebody is always working, which is exactly why the round-robin walk never exposed the enqueue case.
+A Studio Execute against an idle pool is the case that matters, and no release happens there.
+
+Three properties, each load-bearing:
+
+- **Coalescing.** The semaphore has capacity **one**, so at most one round is ever pending. Six
+  executions enqueued in 320 ms — the shape the fairness walk produced — must cost one extra round,
+  not six: a round reads the queue of *every* borrower of the pool.
+- **A minimum gap** (`LeaseSchedulerWakeMinIntervalMilliseconds`, default 250, 0 disables) between
+  requested rounds, measured from the **start** of the previous round so a long round is never
+  followed by a wait it has already served. Without it a burst, or a pool whose members release
+  continuously, runs rounds back to back and makes the scheduler the most expensive thing in the
+  controller — the outcome the interval was chosen to avoid.
+- **The periodic tick stays.** It covers what no signal reaches: TTL expiry, topology changes, and the
+  multi-pod case where the event arrived at a *different* controller instance. Same reasoning as
+  `SweepStalePools` — several controllers act independently and each sees a different subset, so
+  nothing may depend on having observed an event.
+
+🔴 **A `Drained` release wakes nobody.** A draining member takes no further work (concept §6 drains
+and restarts a member whose post-lease cleanliness is unproven), so a round on its account would read
+every borrower's queue and grant nothing.
+
+🔴 **The request is a pending permit, not an event.** A release landing while a round is still running
+has nobody waiting at that instant; dropping it would leave the member it just freed idle until the
+tick — precisely the latency this removes.
+
+The gap is measured with `Stopwatch`, not the wall clock and not an injected `TimeProvider`: it is a
+duration, so it must be monotonic, and `TimeProvider` is registered nowhere in this service — taking
+it as a dependency would be a startup failure the compiler cannot see.
+
+Tests: `Services/LeaseSchedulerWakeSignalTests` (coalescing, the pending permit, re-arming, disposal),
+the wake cases in `Services/LeaseServiceTests/ReleaseAndDisconnectTests` (clean, failed, drained,
+unknown lease) and in `Services/TriggerManagementServiceTests/LeasedAdapterEnqueueTests` (leased
+enqueues wake, a manual adapter does not).
+
 ### Scale-up: the window is derived, not invented
 
 `LeaseScaleUpAveragingWindowSeconds` defaults to **0** = "derive per pool from that pool's own

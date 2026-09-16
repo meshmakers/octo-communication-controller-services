@@ -25,6 +25,8 @@ internal class LeaseService : ILeaseService
     private readonly IAdapterService _adapterService;
     private readonly ILifecycleConfigurationService _lifecycleConfiguration;
 
+    private readonly ILeaseSchedulerWakeSignal _wakeSignal;
+
     public LeaseService(IAdapterPoolConnectionManager connectionManager,
         ICommunicationRepository communicationRepository,
         ICommunicationEventService eventService,
@@ -34,7 +36,8 @@ internal class LeaseService : ILeaseService
         IPipelineServiceAccountResolver serviceAccountResolver,
         ITenantDatabaseCredentialResolver databaseCredentialResolver,
         IAdapterService adapterService,
-        ILifecycleConfigurationService lifecycleConfiguration)
+        ILifecycleConfigurationService lifecycleConfiguration,
+        ILeaseSchedulerWakeSignal wakeSignal)
     {
         _connectionManager = connectionManager;
         _communicationRepository = communicationRepository;
@@ -46,6 +49,7 @@ internal class LeaseService : ILeaseService
         _databaseCredentialResolver = databaseCredentialResolver;
         _adapterService = adapterService;
         _lifecycleConfiguration = lifecycleConfiguration;
+        _wakeSignal = wakeSignal;
     }
 
     /// <inheritdoc />
@@ -322,6 +326,19 @@ internal class LeaseService : ILeaseService
             await _eventService.StoreErrorEventAsync(released.TenantId,
                 $"A leased execution on adapter pool {released.PoolRtId} of tenant '{released.PoolTenantId}' " +
                 $"failed: {result.StatusMessage ?? "no detail reported"}");
+        }
+
+        // 🔴 AB#4924 §9.6 — a member just became available. Without this the next grant waits for the
+        // scheduler's tick however short the work was, which is what capped a member near twelve
+        // executions a minute. Last in the method on purpose: the member is only really free once the
+        // outcome above has been applied, and a round that started earlier could otherwise grant it
+        // a second lease while the first one's execution was still being written.
+        //
+        // Requested for a member that is now idle, NOT for a drain: a draining member takes no
+        // further work, so a round on its account would read every borrower's queue for nothing.
+        if (result.Reason != LeaseReleaseReasonDto.Drained)
+        {
+            _wakeSignal.RequestRound($"lease '{released.LeaseId}' released by its member");
         }
     }
 

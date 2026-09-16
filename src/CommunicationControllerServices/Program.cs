@@ -149,6 +149,9 @@ try
     // increment 7.
     builder.Services.AddSingleton<IAdapterPoolConnectionManager, AdapterPoolConnectionManager>();
     builder.Services.AddSingleton<ILeaseService, LeaseService>();
+    // AB#4924 §9.6 — shared by the scheduler's background service (waiter) and by LeaseService /
+    // TriggerManagementService (requesters), so it must be one instance.
+    builder.Services.AddSingleton<ILeaseSchedulerWakeSignal, LeaseSchedulerWakeSignal>();
     builder.Services.AddSingleton<ILeaseSchedulerService, LeaseSchedulerService>();
     builder.Services.AddSingleton<IAdapterHubCallbacks, AdapterHubCallbacks>();
 

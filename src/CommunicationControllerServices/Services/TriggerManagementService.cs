@@ -18,7 +18,8 @@ internal class TriggerManagementService(
     IDistributionEventHubService distributionEventHubService,
     ICommunicationEventService eventService,
     IWorkloadLifecycleService workloadLifecycleService,
-    ILifecycleConfigurationService lifecycleConfigurationService)
+    ILifecycleConfigurationService lifecycleConfigurationService,
+    ILeaseSchedulerWakeSignal leaseSchedulerWakeSignal)
     : ITriggerManagementService
 {
     public async Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId,
@@ -197,6 +198,16 @@ internal class TriggerManagementService(
         // octo.lease.requeued.count, so the full in-rate is the sum of the two.
         AdapterLeasingMetrics.RecordEnqueued(tenantId, adapter.LentFromTenantId ?? string.Empty,
             adapter.LentFromPoolRtId ?? string.Empty);
+
+        // 🔴 AB#4924 §9.6 — the half that decides whether Interactive means anything. Work has just
+        // arrived, and a member of the pool may be idle ALREADY: without this the execution waits for
+        // the scheduler's next tick before anything starts, so a Studio Execute pays up to a full
+        // interval while nobody is busy. The release-side wake cannot cover it — nothing was released.
+        //
+        // After the enqueue, never before: a round that ran between the two would not see this item
+        // and the wake would be spent on nothing.
+        leaseSchedulerWakeSignal.RequestRound(
+            $"execution '{executionId}' of tenant '{tenantId}' enqueued for a leased adapter");
 
         logger.LogInformation(
             "[{TenantId}] Pipeline '{PipelineRtId}' is executed by leased adapter '{AdapterName}'; queued as " +

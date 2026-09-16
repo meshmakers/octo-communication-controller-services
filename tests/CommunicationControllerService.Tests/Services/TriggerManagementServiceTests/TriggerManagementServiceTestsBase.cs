@@ -29,6 +29,12 @@ internal abstract class TriggerManagementServiceTestsBase
     protected readonly ILifecycleConfigurationService LifecycleConfigurationService =
         Substitute.For<ILifecycleConfigurationService>();
 
+    /// <summary>
+    ///     AB#4924 §9.6 — enqueuing work for a leased adapter must pull the next scheduling round
+    ///     forward; a member of the pool may be idle already.
+    /// </summary>
+    protected readonly ILeaseSchedulerWakeSignal WakeSignal = Substitute.For<ILeaseSchedulerWakeSignal>();
+
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
     protected TriggerManagementServiceTestsBase()
     {
@@ -50,7 +56,8 @@ internal abstract class TriggerManagementServiceTestsBase
             DistributionEventHubService,
             CommunicationEventService,
             WorkloadLifecycleService,
-            LifecycleConfigurationService);
+            LifecycleConfigurationService,
+            WakeSignal);
 
         LifecycleConfigurationService.IsLeasingEnabledAsync(Arg.Any<string>()).Returns(true);
 

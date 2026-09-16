@@ -274,6 +274,23 @@ public class CommunicationControllerOptions
     public int LeaseSchedulerIntervalSeconds { get; set; } = 5;
 
     /// <summary>
+    /// Minimum gap in MILLISECONDS between two scheduling rounds that were pulled forward by a lease
+    /// release or a work enqueue (AB#4924 §9.6). The periodic
+    /// <see cref="LeaseSchedulerIntervalSeconds"/> tick is unaffected — this only bounds how closely
+    /// REQUESTED rounds may follow each other.
+    ///
+    /// A round reads the queue of every borrower of every pool, so without a floor a burst of
+    /// enqueues, or a pool whose members release continuously, would run rounds back to back and
+    /// make the scheduler the most expensive thing in the controller — the very outcome the interval
+    /// was chosen to avoid. Measured from the START of the previous round, so a long round is never
+    /// followed by a wait it has already served.
+    ///
+    /// The default trades at most a quarter second of extra latency for that bound; 0 disables the
+    /// floor and lets every request run a round.
+    /// </summary>
+    public int LeaseSchedulerWakeMinIntervalMilliseconds { get; set; } = 250;
+
+    /// <summary>
     /// How often (SECONDS) the scheduler rebuilds its map of which adapters borrow from which pool.
     /// That map is a read of every enabled tenant's workloads, so it must not run on the scheduling
     /// cadence. A newly deployed Leased adapter starts being served within this interval; the

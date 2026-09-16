@@ -92,6 +92,12 @@ internal abstract class LeaseServiceTestsBase
 
     protected RtAdapter Borrower = null!;
 
+    /// <summary>
+    ///     AB#4924 §9.6 — the scheduler's wake signal. A release makes a member available, and the
+    ///     next grant must not have to wait for the tick.
+    /// </summary>
+    protected readonly ILeaseSchedulerWakeSignal WakeSignal = Substitute.For<ILeaseSchedulerWakeSignal>();
+
     protected LeaseServiceTestsBase()
     {
         var clients = Substitute.For<IHubClients>();
@@ -115,7 +121,7 @@ internal abstract class LeaseServiceTestsBase
 
         LeaseService = new LeaseService(ConnectionManager, CommunicationRepository, EventService,
             EncryptionService, HubContext, LendingScopeResolver, ServiceAccountResolver,
-            DatabaseCredentialResolver, AdapterService, LifecycleConfiguration);
+            DatabaseCredentialResolver, AdapterService, LifecycleConfiguration, WakeSignal);
     }
 
     /// <summary>

@@ -80,6 +80,49 @@ internal class LeasedAdapterEnqueueTests : TriggerManagementServiceTestsBase
                 Arg.Any<CancellationToken>(), Arg.Any<TimeSpan?>());
     }
 
+    /// <summary>
+    ///     🔴 AB#4924 §9.6 — the half that decides whether the <c>Interactive</c> execution class means
+    ///     anything. Work has just arrived and a member of the pool may be idle ALREADY, so without
+    ///     pulling the round forward a Studio Execute waits up to a full
+    ///     <c>LeaseSchedulerIntervalSeconds</c> before anything starts while nobody is busy. The
+    ///     release-side wake cannot cover this case: nothing was released.
+    /// </summary>
+    [Test]
+    public async Task ALeasedAdapter_PullsTheNextSchedulingRoundForward()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+        ArrangeAdapter(RtLifecycleModeEnum.Leased, pipelineRtId);
+
+        await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null);
+
+        WakeSignal.Received(1).RequestRound(Arg.Any<string>());
+    }
+
+    /// <summary>
+    ///     A manual adapter executes immediately and has no queue, so there is no round to pull
+    ///     forward — and waking the scheduler for it would read every borrower's queue in the estate
+    ///     on every ordinary pipeline execution.
+    /// </summary>
+    [Test]
+    [Arguments(RtLifecycleModeEnum.AlwaysOn)]
+    [Arguments(RtLifecycleModeEnum.OnDemand)]
+    public async Task AManualAdapter_PullsNoRoundForward(RtLifecycleModeEnum lifecycleMode)
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+        ArrangeAdapter(lifecycleMode, pipelineRtId);
+
+        // The manual path really sends, so the command client has to answer — without it the send
+        // throws and the test would pass for the wrong reason (no wake because nothing got that far).
+        ExecuteMeshPipelineCommandClient
+            .GetResponse<ExecutePipelineResponse>(Arg.Any<string>(), Arg.Any<ExecutePipelineRequest>(),
+                Arg.Any<CancellationToken>(), Arg.Any<TimeSpan?>())
+            .Returns(new ExecutePipelineResponse(true, null, Guid.NewGuid(), DateTime.UtcNow));
+
+        await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null);
+
+        WakeSignal.DidNotReceive().RequestRound(Arg.Any<string>());
+    }
+
     [Test]
     public async Task ALeasedAdapter_DoesNotRunTheWakeGate()
     {
