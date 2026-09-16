@@ -404,17 +404,35 @@ dotnet Meshmakers.Octo.MeshAdapter.dll --urls="http://0.0.0.0:5031"
 
 Pick ports that are free; 5020/5021 belong to `Start-Octo`'s own mesh-adapter job.
 
-### 7.2 🔴 A pool member DOES need `Adapter:DedicatedTenantId`, set to the LENDING tenant
+### 7.2 🔴 CORRECTED TWICE — a pool member needs NO `Adapter:DedicatedTenantId`, and must not be given one
 
-The previous version said *"There is deliberately **no** `DedicatedTenantId` here"*, and
-`AdapterPoolMemberOptions`' own XML doc says the same. **Both are wrong about what the running code
-needs.** `ConfigureAdapterAuthenticatorOptions` is the *only* place that fills
-`AuthenticatorOptions.TenantId`, and that is the *only* thing that puts `acr_values=tenant:{id}` on
-the member's own client-credentials request. Leave it unset and `AdapterOptions`' constructor default
-`"meshTest"` applies, the member's management token carries `tenant_id: meshtest`, and
-`AdapterPoolHub.CheckConnectionTenantBinding` rejects the registration — or, on the default
-`AdapterPoolHubAuthorizationMode.LogOnly`, silently accepts it and only logs what an enforcing run
-would have refused.
+**History of this section, because both earlier versions were wrong in opposite directions.** The
+first said *"There is deliberately **no** `DedicatedTenantId` here"* and left the member with the
+constructor default `"meshTest"`: `ConfigureAdapterAuthenticatorOptions` is the only place that fills
+`AuthenticatorOptions.TenantId`, which is the only thing that puts `acr_values=tenant:{id}` on the
+member's own client-credentials request, so the management token carried `tenant_id: meshtest` and
+`AdapterPoolHub.CheckConnectionTenantBinding` refused the registration — or, on the default
+`AdapterPoolHubAuthorizationMode.LogOnly`, accepted it silently and only logged what an enforcing run
+would have refused. The second version fixed the symptom by telling the operator to set the key to
+the **lending** tenant, which worked and was worse.
+
+🔴 **Because three call sites in two repositories justify their safety with "it is null on a pool
+member" — and it never was.** `AdapterOptions.DedicatedTenantId` is documented as the process's own
+tenant, and `AdapterExecutionService.CkModelChangedAsync`, `HttpRequestService` (route prefix and
+authorization) and `ServiceAccountTokenService.ResolveTenantId` all read it. The last one is the
+sharp end: a `ServiceAccountConfiguration` that names no tenant falls back to this value, so with the
+lender's id present a **borrower's** leased execution would have acquired a token for the **lender**
+instead of declining.
+
+**Both halves are now settled in code, and neither is the operator's business any more:**
+
+- The member's own connection tenant is derived from `AdapterPool:PoolTenantId` by
+  `ConfigureAdapterAuthenticatorOptions` — two settings that must agree are two settings that can
+  disagree.
+- `ConfigurePoolMemberAdapterTenantId`, registered by `AddAdapterPoolMember()`, **clears**
+  `DedicatedTenantId` whenever the pool configuration is complete, and warns once if an explicit value
+  was configured. Set the variable anyway and it is dropped with that warning; the walk below no
+  longer exports it.
 
 Working configuration, as run:
 
@@ -434,7 +452,8 @@ export OCTO_ADAPTER__IGNORECERTIFICATEVALIDATION=true
 export OCTO_ADAPTER__ISSUERURI=https://localhost:5003/
 export OCTO_ADAPTER__CLIENTID=claude-agent          # any client_credentials client IN THE LENDER
 export OCTO_ADAPTER__CLIENTSECRET=...
-export OCTO_ADAPTER__DEDICATEDTENANTID=accounting   # 🔴 the LENDER; see above
+# 🔴 No OCTO_ADAPTER__DEDICATEDTENANTID. A member has no tenant of its own; its connection tenant
+# is derived from OCTO_ADAPTERPOOL__POOLTENANTID above. See the correction at the top of this section.
 
 export Logging__LogLevel__Default=Debug             # the lease lifecycle lines are DEBUG
 ```
@@ -734,8 +753,10 @@ operation and deliberately not the same verb. ⚠️ **Not exercised by this wal
 
 ## 9. What is still broken, in priority order
 
-Rewritten 2026-09-15 after §11. Items 1, 2 and 3 are **fixed and verified**; what follows them is
-what actually remains.
+Rewritten 2026-09-15 after §11, updated 2026-09-16. Items 1–3 were fixed and verified then; items
+7–9 were fixed on 2026-09-16. **What actually remains is 4, 5 and 6** — and they are in priority
+order: 4 blocks every cluster rollout, 5 runs a borrower's pipeline outside the lease bookkeeping,
+6 caps a member at roughly twelve executions a minute regardless of how small the work is.
 
 1. ✅ **`AddAdapterPoolMember()` cannot be resolved** — fixed, `octo-communication-sdk` `26e48f2`
    (`DeferredAdapterPoolHubCallbacks`). A member starts unpatched (§11).
@@ -761,12 +782,22 @@ what actually remains.
 6. 🔴 **The scheduler tick is the throughput ceiling**: a release does not wake the scheduler, so
    grants are exactly `LeaseSchedulerIntervalSeconds` apart regardless of how short the work is
    (§11 measures 5.11–5.14 s between grants for runs of 0.43–1.36 s).
-7. **`AdapterOptions.DedicatedTenantId` on a pool member** — §7.2. The code requires it; the model
-   comments and this runbook said it must not exist. One of the two has to change: either the doc, or
-   `AddAdapterPoolMember()` grows its own `IConfigureOptions<AuthenticatorOptions>` that projects
-   `AdapterPoolMemberOptions.PoolTenantId` instead.
-8. **The lease refusal is DEBUG-only** — §8, evidence 7.
-9. **`Start-Octo.psm1` passes `--Adapter:TenantId`**, a property increment 3 deleted — §1.
+7. ✅ **`AdapterOptions.DedicatedTenantId` on a pool member** — §7.2, fixed 2026-09-16. It turned out
+   not to be a doc-or-code choice: the property was **never** null on a member (constructor default
+   `"meshTest"`, and this runbook told the operator to set the lender), while three call sites in two
+   repositories name that null as the reason they are safe. `ConfigurePoolMemberAdapterTenantId`,
+   registered by `AddAdapterPoolMember()`, now clears it and warns once if something configured it.
+8. ✅ **The lease refusal was DEBUG-only** — §8, evidence 7; fixed 2026-09-16. It is now INFO on the
+   **transition** — the first refusal of an execution, or a refusal for a different reason than last
+   time — and DEBUG for every repeat, which is the shape the pool-exhaustion line already had. Raising
+   it outright would have produced twelve lines a minute per queued item for as long as the condition
+   lasted.
+9. ✅ **`Start-Octo.psm1` passed `--Adapter:TenantId`**, a property increment 3 deleted — fixed
+   2026-09-16 to `--Adapter:DedicatedTenantId` for both the mesh adapter and the simulation plug. It
+   worked only because `ConfigureLegacyAdapterTenantId` still binds the old key for one release, at
+   the price of a deprecation warning in every local adapter log. The same commit corrects the
+   simulation plug's working directory, which still pointed at `octo-sdk/src/Sdk.Plug.Simulation`
+   after the project moved to `octo-communication-sdk`.
 
 ## 10. The failure modes still unprovoked
 

@@ -55,6 +55,30 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     /// </summary>
     private readonly ConcurrentDictionary<PoolKey, DateTime> _exhaustedPools = new();
 
+    /// <summary>
+    ///     The reason each queued execution was last refused a lease, so the refusal is announced when
+    ///     it starts and when it changes rather than on every round while it lasts.
+    /// </summary>
+    /// <remarks>
+    ///     🔴 <b>Why this exists at all:</b> the refusal used to be logged at DEBUG, which made "why is
+    ///     my queue not moving" invisible at the default level — an operator saw the enqueue and then
+    ///     silence, while the answer ("leasing is disabled on the lending tenant, enable it with
+    ///     octo-cli") was being produced twelve times a minute one level below. Raising it outright
+    ///     would have swapped one problem for the other, so it follows <see cref="_exhaustedPools" />:
+    ///     the transition is INFO, the repeat stays DEBUG.
+    /// </remarks>
+    private readonly ConcurrentDictionary<string, RefusalMemo> _refusedExecutions =
+        new(StringComparer.Ordinal);
+
+    /// <summary>
+    ///     How many scheduling rounds a refusal memo survives without being refreshed. See
+    ///     <see cref="SweepStaleRefusals" />.
+    /// </summary>
+    private const int StaleRefusalRounds = 10;
+
+    /// <summary>The last refusal seen for one queued execution.</summary>
+    private readonly record struct RefusalMemo(LeaseRefusalReason Reason, DateTime LastSeenUtc);
+
     public LeaseSchedulerService(IAdapterCache adapterCache,
         ICommunicationRepository communicationRepository,
         IAdapterPoolConnectionManager connectionManager,
@@ -106,6 +130,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
         // clears is stop reading it. By age, not by "not in this round's topology" — several
         // controller pods sweep independently and each sees a different subset.
         AdapterLeasingMetrics.SweepStalePools();
+        SweepStaleRefusals();
 
         return granted;
     }
@@ -466,6 +491,32 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     }
 
     /// <summary>
+    ///     Forgets refusals of executions that have not been seen in a round for a while, so the memo
+    ///     that suppresses repeat log lines cannot grow for the life of the process.
+    /// </summary>
+    /// <remarks>
+    ///     By age rather than by "not among this round's candidates", for the same reason
+    ///     <c>AdapterLeasingMetrics.SweepStalePools</c> is: several controller pods schedule
+    ///     independently and each sees a different subset, and an execution can also drop out of a
+    ///     queue read that is capped at <c>LeaseQueueReadLimitPerAdapter</c> without having gone
+    ///     anywhere. Forgetting one early costs a single repeated INFO line; the window is generous
+    ///     enough that a still-queued item keeps its memo across the rounds that matter.
+    /// </remarks>
+    private void SweepStaleRefusals()
+    {
+        var cutoff = DateTime.UtcNow - TimeSpan.FromSeconds(
+            Math.Max(1, _options.LeaseSchedulerIntervalSeconds) * StaleRefusalRounds);
+
+        foreach (var (executionId, memo) in _refusedExecutions)
+        {
+            if (memo.LastSeenUtc < cutoff)
+            {
+                _refusedExecutions.TryRemove(executionId, out _);
+            }
+        }
+    }
+
+    /// <summary>
     ///     Grants one lease and takes the work item out of the queue in the same step. Returns the
     ///     member that took it, or null when nothing was granted.
     /// </summary>
@@ -495,13 +546,35 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
 
         if (result.Granted)
         {
+            _refusedExecutions.TryRemove(candidate.Queued.ExecutionId, out _);
             return result.MemberId;
         }
 
-        Logger.Debug(
-            "No lease granted for execution '{ExecutionId}' of tenant '{BorrowerTenantId}' on pool {PoolRtId}: " +
-            "{Reason}",
-            candidate.Queued.ExecutionId, candidate.Borrower.TenantId, key.PoolRtId, result.StatusMessage);
+        // Announced on the TRANSITION — the first refusal of this execution, or a refusal for a
+        // different reason than last time — and left at DEBUG for as long as nothing changes. Both
+        // halves matter: at five seconds a round the repeat is the flood the exhaustion line above was
+        // already rewritten to avoid, and the first line is the only place the queue says why it is
+        // not moving. StatusMessage carries the remedy verbatim, which is why it is logged rather
+        // than the enum alone.
+        var firstOrChanged = !_refusedExecutions.TryGetValue(candidate.Queued.ExecutionId, out var previous)
+                             || previous.Reason != result.Reason;
+        _refusedExecutions[candidate.Queued.ExecutionId] = new RefusalMemo(result.Reason, DateTime.UtcNow);
+
+        if (firstOrChanged)
+        {
+            Logger.Info(
+                "No lease granted for execution '{ExecutionId}' of tenant '{BorrowerTenantId}' on pool {PoolRtId}: " +
+                "{Reason}. The work item stays queued; this is logged again only if the reason changes.",
+                candidate.Queued.ExecutionId, candidate.Borrower.TenantId, key.PoolRtId, result.StatusMessage);
+        }
+        else
+        {
+            Logger.Debug(
+                "No lease granted for execution '{ExecutionId}' of tenant '{BorrowerTenantId}' on pool {PoolRtId}: " +
+                "{Reason}",
+                candidate.Queued.ExecutionId, candidate.Borrower.TenantId, key.PoolRtId, result.StatusMessage);
+        }
+
         return null;
     }
 
