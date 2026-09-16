@@ -59,6 +59,31 @@ internal class AdapterPoolDeploymentTests : PoolServiceTestsBase
         return pool;
     }
 
+    private RtAdapter ArrangePlainAdapter(RtDeploymentSite site)
+    {
+        var adapter = new RtAdapter
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            CkTypeId = SystemCommunicationCkIds.RtCkAdapterTypeId,
+            Name = "plain-adapter",
+            ChartName = "octo-mesh-adapter",
+            ChartVersion = "1.0.0",
+            ValuesYaml = string.Empty,
+            DeploymentState = RtDeploymentStateEnum.Undeployed,
+        };
+
+        CommunicationRepository.GetWorkloadByRtIdAsync(TenantId, adapter.RtId).Returns(adapter);
+        CommunicationRepository.GetPoolForWorkloadAsync(TenantId, adapter.RtId).Returns(site);
+        CommunicationRepository.GetHelmRepositoryForWorkloadAsync(TenantId, adapter.RtId)
+            .Returns(new RtHelmRepositoryConfiguration
+            {
+                RtId = OctoObjectId.GenerateNewId(),
+                CkTypeId = SystemCommunicationCkIds.RtCkHelmRepositoryConfigurationTypeId,
+                RepositoryUrl = "https://charts.example.com",
+            });
+        return adapter;
+    }
+
     private async Task<WorkloadDeployedDto> DeployAndCaptureAsync(RtDeployableWorkload workload)
     {
         await PoolService.DeployWorkloadAsync(TenantId, workload.RtId);
@@ -76,6 +101,77 @@ internal class AdapterPoolDeploymentTests : PoolServiceTestsBase
         var dto = await DeployAndCaptureAsync(pool);
 
         await Assert.That(dto.WorkloadType).IsEqualTo(WorkloadTypeDto.AdapterPool);
+    }
+
+    /// <summary>
+    ///     🔴 AB#4924 §9.4 — without these two values the pod is not a pool member at all. The SDK
+    ///     composes one only when BOTH ids are present; with neither, the process starts, binds
+    ///     <c>AdapterPoolMemberOptions</c> to its defaults, finds <c>IsEnabled</c> false, logs
+    ///     "started without a configured pool … Doing nothing" and stays healthy for ever. Sizing and
+    ///     replica count alone — all this method used to write — produce exactly that pod, which is
+    ///     why every other test in this file passed while no pool member could run in a cluster.
+    /// </summary>
+    [Test]
+    public async Task DeployWorkloadAsync_AdapterPool_SendsThePoolIdentityTheMemberNeedsToRegister()
+    {
+        var pool = ArrangeAdapterPool(ArrangeCloudPool());
+
+        var dto = await DeployAndCaptureAsync(pool);
+
+        await Assert.That(dto.Values.Single(v => v.Path == "adapterPool.poolTenantId").Value)
+            .IsEqualTo(TenantId);
+        await Assert.That(dto.Values.Single(v => v.Path == "adapterPool.poolRtId").Value)
+            .IsEqualTo(pool.RtId.ToString());
+    }
+
+    /// <summary>
+    ///     The tenant is the <b>lender</b> — the member's own connection tenant, never the tenant of
+    ///     any work it executes, which arrives per lease. Pinned separately from the value above
+    ///     because "it happens to be the deploying tenant" is the kind of coincidence a refactor
+    ///     replaces with a borrower id without anything failing.
+    /// </summary>
+    [Test]
+    public async Task DeployWorkloadAsync_AdapterPool_NamesTheLendingTenantAsThePoolTenant()
+    {
+        var pool = ArrangeAdapterPool(ArrangeCloudPool());
+
+        var dto = await DeployAndCaptureAsync(pool);
+
+        await Assert.That(dto.Values.Single(v => v.Path == "adapterPool.poolTenantId").Value)
+            .IsEqualTo(TenantId);
+    }
+
+    /// <summary>
+    ///     🔴 No member id is sent. <c>AdapterPoolMemberOptions.EffectiveMemberId</c> falls back to the
+    ///     machine name, which is the pod name in Kubernetes — so every replica identifies itself
+    ///     correctly and stays correct when one is rescheduled. A value written here would give every
+    ///     replica of the deployment the same member id, and the controller's own registry keys
+    ///     members by it.
+    /// </summary>
+    [Test]
+    public async Task DeployWorkloadAsync_AdapterPool_SendsNoMemberId()
+    {
+        var pool = ArrangeAdapterPool(ArrangeCloudPool());
+
+        var dto = await DeployAndCaptureAsync(pool);
+
+        await Assert.That(dto.Values.Any(v => v.Path.Contains("memberId", StringComparison.OrdinalIgnoreCase)))
+            .IsFalse();
+    }
+
+    /// <summary>
+    ///     An ordinary adapter is not a pool member, and must not be handed a pool identity — the chart
+    ///     would then render it as one and it would stop being reachable on its own tenant route.
+    /// </summary>
+    [Test]
+    public async Task DeployWorkloadAsync_PlainAdapter_SendsNoPoolIdentity()
+    {
+        var adapter = ArrangePlainAdapter(ArrangeCloudPool());
+
+        var dto = await DeployAndCaptureAsync(adapter);
+
+        await Assert.That(dto.Values.Any(v => v.Path.StartsWith("adapterPool.", StringComparison.Ordinal)))
+            .IsFalse();
     }
 
     [Test]

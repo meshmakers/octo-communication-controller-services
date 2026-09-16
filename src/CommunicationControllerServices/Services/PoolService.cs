@@ -864,7 +864,7 @@ internal class PoolService : IPoolService
             .ToArray();
 
         overrides = await AppendPipelineServiceAccountOverridesAsync(tenantId, workload, overrides);
-        overrides = AppendAdapterPoolMemberOverrides(workload, overrides);
+        overrides = AppendAdapterPoolMemberOverrides(tenantId, workload, overrides);
 
         return new WorkloadDeployedDto
         {
@@ -1049,8 +1049,8 @@ internal class PoolService : IPoolService
     ///         value that is absent.
     ///     </para>
     /// </remarks>
-    private static ValueOverrideDto[] AppendAdapterPoolMemberOverrides(RtDeployableWorkload workload,
-        ValueOverrideDto[] overrides)
+    private static ValueOverrideDto[] AppendAdapterPoolMemberOverrides(string tenantId,
+        RtDeployableWorkload workload, ValueOverrideDto[] overrides)
     {
         if (workload is not RtAdapterPool pool)
         {
@@ -1058,6 +1058,24 @@ internal class PoolService : IPoolService
         }
 
         var result = new List<ValueOverrideDto>(overrides);
+
+        // 🔴 AB#4924 §9.4 — without these two the pod is not a pool member at all. It starts, binds
+        // AdapterPoolMemberOptions to its defaults, finds IsEnabled false, logs "started without a
+        // configured pool … Doing nothing" and sits there looking healthy: the SDK composes a member
+        // only when BOTH ids are present. Sizing and replica count alone, which is all this method
+        // used to write, produce exactly that pod.
+        //
+        // The tenant is the LENDER — the tenant that owns the pool entity, i.e. the one this
+        // workload is being deployed for. It is the member's CONNECTION tenant, never the tenant of
+        // any work it executes; that arrives per lease. See AdapterPoolMemberOptions.
+        //
+        // 🔴 No member id. AdapterPoolMemberOptions.EffectiveMemberId falls back to
+        // Environment.MachineName, which in Kubernetes IS the pod name — the value an operator would
+        // search for anyway, and the only one that stays correct when a replica is rescheduled.
+        // Writing a value here would pin every replica of the deployment to the same member id, and
+        // the controller's registry keys members by it.
+        AddUnlessPinned(result, "adapterPool.poolTenantId", tenantId);
+        AddUnlessPinned(result, "adapterPool.poolRtId", pool.RtId.ToString());
 
         AddUnlessPinned(result, "replicaCount", pool.MinReplicas.ToString(CultureInfo.InvariantCulture));
         AddUnlessPinned(result, "resources.requests.cpu", pool.PoolMemberCpuRequest);
