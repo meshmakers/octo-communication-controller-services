@@ -980,3 +980,81 @@ load-bearing; all of it is removable with `RemoveRt` plus `-le false`.
 - **End-to-end traces.** There are none, for anything, in this estate — `ObservabilityBuilder`
   registers no `ActivitySource` and no trace context is propagated. Correlate on lease id and
   execution id in the logs, which is what §8 above does.
+
+## 12. Third walk, 2026-09-16 — a member as a POD, and the blueprints that make it repeatable
+
+Both earlier walks ran the member as a **host process** with hand-exported environment variables. That
+answered "does leasing work" and left "can this exist in a cluster" untouched — §9.4 was open precisely
+because nobody had tried. This walk tries, and the value is in the order the blockers appeared: each
+one hid the next, and none of them announced itself.
+
+### 12.1 The estate is a blueprint now, not a transcript
+
+Two samples in `samples/Blueprints/`:
+
+| Blueprint | Seeds | Install on |
+|---|---|---|
+| `AdapterPoolDemo-1.0.0` | the `AdapterPool`, with the Helm fields that make it deployable | the **lender** |
+| `AdapterPoolBorrowerDemo-1.0.0` | a `Leased` adapter, a data flow, the probe pipeline | a **descendant** |
+
+🔴 **The pool the earlier walks built could never have been deployed.** `ImportRt` produced an entity
+with no `ChartName`, no `ChartVersion` and no Helm repository — it rested at `DeploymentState: Disabled`
+and `DeployWorkload` had nothing to act on. That is not a mistake in those walks; they never needed a
+pod. It does mean the §4 YAML is not a starting point for a cluster.
+
+Three refusals worth knowing before writing either file:
+
+- The seed needs its own `dependencies:` block — it is separately importable, so it is the only place
+  naming the model. Without it the install fails with a schema error naming the file but not the key.
+- An `AdapterPool` has **no** `CommunicationState` / `ConfigurationState`. Those live on `Adapter`;
+  seeding them is refused outright. A pool's members report their own connection state.
+- 🔴 **No `blueprintDependencies` on `System.Communication.MainLatest`**, however natural it reads.
+  Service-managed blueprints are EMBEDDED and never published to a catalog the resolver reads, so the
+  install fails with `MissingDependency`. The `HelloCommunication` sample carries exactly that
+  declaration and is doubly stale — it still names `System.Communication`, from before the split.
+
+⚠️ `AdapterPoolBorrowerDemo` **hard-codes the lender's tenant id**, and cannot do otherwise:
+`DefaultBlueprintVariableProvider` offers `octo.tenantId` and `octo.systemTenantId` but no parent, and
+it holds no registry access by design. A portable borrower blueprint needs a parent-tenant variable
+first — engine work, its own work item.
+
+### 12.2 The chart version must be pinned, and the reason is upside down
+
+0.2-lane charts publish as SemVer **prereleases** (AB#4948) so that an *unpinned* `ChartVersion` keeps
+resolving main's newest **stable** chart. That contract — which `System.Communication.MainLatest`
+depends on — means an empty value hands a 0.2 tenant a **0.1** chart, which knows nothing about
+`adapterPool` and silently renders a dedicated adapter with no tenant. Pin it, and verify the pin by
+pulling the chart and looking for the `adapterPool` block rather than trusting the index timestamp:
+every entry in `index.yaml` carries the *rebuild* time, not its own.
+
+### 12.3 The four blockers, in the order they surfaced
+
+1. **The app blueprints were unsatisfiable.** All three pinned `System.Communication-[3.x,4.0)`, which
+   **excludes** 4.0.0 — and 4.0.0 is what a 0.2 tenant carries. Their seeds also still said `Pool` and
+   `Manages` rather than `DeploymentSite` and `Hosts`. Nothing reported this until an install was
+   attempted.
+2. **The in-cluster operator was three weeks old** (`0.2.2608.28006-dev`, before the AdapterPool
+   support). It dropped the deploy notification **silently** — the same shape as the AB#4917
+   scale-status blocker: SignalR discards a method the client does not implement, without an error on
+   either side. Check the operator's image before concluding anything about a deploy that "did
+   nothing".
+3. **The lender had no `CommunicationPool` CR.** Its `Default Cloud` site had never been deployed, so
+   no operator owned it and the workload notification went into the AB#4371 pending queue instead of
+   to a recipient. `DeployPool` on the lender first, then the workload.
+4. **The chart demanded cluster secrets a pool must not get.** First `secrets.databaseUser`, then —
+   once that was fixed — `secrets.streamDataPassword`. Both are `octo-mesh.secretEnv`, which fails on
+   an empty value, and the operator withholds exactly that tier from an `AdapterPool`; so the *render*
+   failed, before anything was scheduled.
+
+🔴 **The second failure is the useful one.** That the error MOVED from `databaseUser` to
+`streamDataPassword` is what proves the controller's pool identity reached the chart and the member
+branch was taken. A failure that changes shape is evidence; a failure that repeats is not.
+
+### 12.4 CrateDB is withheld, and cannot be handed over
+
+The stream-data secret is now withheld from a member like the two Mongo ones — but for a reason the
+other two do not share: **there is no per-tenant CrateDB principal.** One connection string per
+installation, tenants separated by schema. On a lease that credential would be time-scoped and not
+tenant-scoped, which is the shape of the mechanism without its substance. Accepted consequence
+(concept §4): a leased pipeline that writes an archive **fails to connect**. Host and user stay
+rendered so that failure is a refused connection with a named user, not a half-configured process.
