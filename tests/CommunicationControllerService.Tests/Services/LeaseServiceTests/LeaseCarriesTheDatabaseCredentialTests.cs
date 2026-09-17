@@ -33,7 +33,7 @@ internal class LeaseCarriesTheDatabaseCredentialTests : LeaseServiceTestsBase
     {
         ArrangeGrantableLease();
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1"));
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-1"));
 
         var lease = CapturePushedLease();
         using var _ = Assert.Multiple();
@@ -58,7 +58,7 @@ internal class LeaseCarriesTheDatabaseCredentialTests : LeaseServiceTestsBase
     {
         ArrangeGrantableLease();
 
-        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
 
         using var _ = Assert.Multiple();
         await DatabaseCredentialResolver.Received(1)
@@ -80,7 +80,7 @@ internal class LeaseCarriesTheDatabaseCredentialTests : LeaseServiceTestsBase
         ArrangeGrantableLease();
         ArrangeUnresolvableBorrowerDatabaseCredential();
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1"));
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-1"));
 
         using var _ = Assert.Multiple();
         await Assert.That(result.Granted).IsFalse();
@@ -104,11 +104,11 @@ internal class LeaseCarriesTheDatabaseCredentialTests : LeaseServiceTestsBase
         ArrangeGrantableLease();
         ArrangeUnresolvableBorrowerDatabaseCredential();
 
-        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1"));
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-1"));
 
         using var _ = Assert.Multiple();
         await Assert.That(MemberProxy.ReceivedCalls()).IsEmpty();
-        var member = ConnectionManager.GetMembers(LenderTenantId, PoolRtId.ToString()).Single();
+        var member = ConnectionManager.GetMembers(LenderTenantId, AdapterPoolRtId.ToString()).Single();
         await Assert.That(member.ActiveLease).IsNull();
         await Assert.That(member.IsAvailable).IsTrue();
     }
@@ -123,7 +123,7 @@ internal class LeaseCarriesTheDatabaseCredentialTests : LeaseServiceTestsBase
         ArrangeGrantableLease();
         ArrangeUnresolvableBorrowerDatabaseCredential();
 
-        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1"));
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-1"));
 
         await EventService.Received(1).StoreErrorEventAsync(BorrowerTenantId,
             Arg.Is<string>(m => m.Contains("database credential")));
@@ -142,7 +142,7 @@ internal class LeaseCarriesTheDatabaseCredentialTests : LeaseServiceTestsBase
         ArrangeBorrowerCredential();
         ArrangeConnectedMember();
 
-        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
 
         await DatabaseCredentialResolver.DidNotReceive()
             .TryResolveAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());

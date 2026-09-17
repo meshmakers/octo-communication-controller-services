@@ -15,7 +15,7 @@ internal abstract class PoolServiceTestsBase
     protected const string TenantId = "tenantId";
     protected const string PoolName = "default";
     protected const string ConnectionId = "connectionId";
-    protected static readonly OctoObjectId PoolRtId = OctoObjectId.GenerateNewId();
+    protected static readonly OctoObjectId DeploymentSiteRtId = OctoObjectId.GenerateNewId();
 
     protected readonly ICommunicationRepository CommunicationRepository;
     protected readonly IPoolCache PoolCache;
@@ -132,6 +132,6 @@ internal abstract class PoolServiceTestsBase
 
     protected Pool AddPoolToTenant(string poolName = PoolName, string connectionId = ConnectionId)
     {
-        return PoolTenant.AddPool(poolName, PoolRtId, connectionId);
+        return PoolTenant.AddPool(poolName, DeploymentSiteRtId, connectionId);
     }
 }

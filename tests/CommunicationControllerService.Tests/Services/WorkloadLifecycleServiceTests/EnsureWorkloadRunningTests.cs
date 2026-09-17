@@ -22,7 +22,7 @@ internal class EnsureWorkloadRunningTests
 {
     private const string TenantId = "meshtest";
     private const string WorkloadRtId = "66004fda527ac79a03ecedd7";
-    private const string PoolRtId = "65d5c447b420da3fb12381bc";
+    private const string DeploymentSiteRtId = "65d5c447b420da3fb12381bc";
     private const string PipelineRtId = "66004fda527ac79a03ecedd8";
 
     private readonly ICommunicationRepository _repository =
@@ -54,7 +54,7 @@ internal class EnsureWorkloadRunningTests
     {
         var pool = new RtDeploymentSite
         {
-            RtId = new OctoObjectId(PoolRtId),
+            RtId = new OctoObjectId(DeploymentSiteRtId),
             CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
             Name = "cloud-pool",
             Environment = RtEnvironmentEnum.Cloud,
@@ -161,7 +161,7 @@ internal class EnsureWorkloadRunningTests
         await _connectionManager.Received(1).NotifyWorkloadScaleAsync(Arg.Is<ScaleWorkloadDto>(dto =>
             dto.TenantId == TenantId
             && dto.WorkloadRtId == WorkloadRtId
-            && dto.PoolRtId == PoolRtId
+            && dto.DeploymentSiteRtId == DeploymentSiteRtId
             && dto.Replicas == 1));
     }
 

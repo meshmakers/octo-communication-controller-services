@@ -18,7 +18,7 @@ public interface IOperatorConnectionManager
     /// connection. <c>true</c> = central operator (Cloud pools only),
     /// <c>false</c> = edge operator (Edge pools only), <c>null</c> = legacy
     /// operator that did not declare a mode (no enforcement). Read back by
-    /// <c>OperatorHub.RegisterPoolAsync</c> via <see cref="GetOperatorMode"/>
+    /// <c>OperatorHub.RegisterDeploymentSiteAsync</c> via <see cref="GetOperatorMode"/>
     /// to validate pool ownership against <c>RtDeploymentSite.Environment</c>.
     /// </summary>
     void SetOperatorMode(string connectionId, bool? autoManagePools);
@@ -44,14 +44,14 @@ public interface IOperatorConnectionManager
     /// <summary>
     /// Records that the given operator connection now hosts the pool
     /// identified by <paramref name="poolRtId"/>. Used by
-    /// <c>OperatorHub.RegisterPoolAsync</c> so the controller can reset
+    /// <c>OperatorHub.RegisterDeploymentSiteAsync</c> so the controller can reset
     /// the pool's state when the SignalR connection drops.
     /// </summary>
     void RegisterPoolForConnection(string connectionId, string tenantId, string poolRtId);
 
     /// <summary>
     /// Removes a single (connection, tenant, poolRtId) tuple — called on a
-    /// graceful <c>UnregisterPoolAsync</c> while the operator keeps the
+    /// graceful <c>UnregisterDeploymentSiteAsync</c> while the operator keeps the
     /// connection open for other pools.
     /// </summary>
     void UnregisterPoolForConnection(string connectionId, string tenantId, string poolRtId);
@@ -62,7 +62,7 @@ public interface IOperatorConnectionManager
     /// <c>RegisterOperatorAsync</c> call so it can synchronize its desired
     /// state.
     /// </summary>
-    IEnumerable<DeployedPoolDto> GetDeployedPools();
+    IEnumerable<DeployedDeploymentSiteDto> GetDeployedPools();
 
     /// <summary>
     /// Returns the pool RtIds that this controller has notified operators
@@ -78,7 +78,7 @@ public interface IOperatorConnectionManager
     /// <summary>
     /// Notifies all connected operators that a Cloud pool was deployed.
     /// </summary>
-    Task NotifyPoolDeployedAsync(DeployedPoolDto pool);
+    Task NotifyPoolDeployedAsync(DeployedDeploymentSiteDto pool);
 
     /// <summary>
     /// Notifies all connected operators that a Cloud pool was undeployed.
@@ -121,7 +121,7 @@ public interface IOperatorConnectionManager
     /// Replays workload deploy/undeploy notifications that were queued
     /// because no operator connection owned the target pool at notify time
     /// (AB#4371 — e.g. the operator's pool registration failed transiently
-    /// and it re-registered later). Called by <c>OperatorHub.RegisterPoolAsync</c>
+    /// and it re-registered later). Called by <c>OperatorHub.RegisterDeploymentSiteAsync</c>
     /// right after the (connection, tenant, poolRtId) tuple is registered.
     /// No-op when nothing is pending. A replay that fails to send is
     /// re-queued so the next registration of the pool retries it.
@@ -155,7 +155,7 @@ public interface IOperatorConnectionManager
     /// the previous connection dropped — keeping <c>PreDeleteTenant</c>
     /// cascade and undeploy fan-out working after an operator restart.
     /// </summary>
-    void TrackDeployedPool(DeployedPoolDto pool);
+    void TrackDeployedPool(DeployedDeploymentSiteDto pool);
 
     /// <summary>
     /// Adds <paramref name="workload"/> to the deployed-workload tracking

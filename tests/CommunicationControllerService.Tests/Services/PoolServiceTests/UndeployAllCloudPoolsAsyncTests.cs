@@ -87,7 +87,7 @@ internal class UndeployAllCloudPoolsAsyncTests : PoolServiceTestsBase
             new WorkloadUndeployedDto
             {
                 TenantId = TenantId,
-                PoolRtId = PoolOneRtId,
+                DeploymentSiteRtId = PoolOneRtId,
                 WorkloadRtId = WorkloadRtId1,
                 WorkloadName = "wl-1",
                 WorkloadType = WorkloadTypeDto.Adapter,

@@ -923,7 +923,7 @@ a few seconds, and the old pod's `OperatorHub.OnDisconnectedAsync` /
 `AdapterHub.OnDisconnectedAsync` handlers fire as the operator and adapters
 reconnect to the new pod. Observed sequence on `test-2`:
 
-1. New controller pod starts, `RegisterPoolAsync` from the reconnected
+1. New controller pod starts, `RegisterDeploymentSiteAsync` from the reconnected
    operator writes `Online` at T+0.
 2. Old controller pod (still mid-shutdown) finally processes its dropped
    SignalR connection; its `OnDisconnectedAsync` calls
@@ -1104,7 +1104,7 @@ with `PreUpdatePreDeleteTenantConsumer` (in `octo-common-services`), which
 unloads the CK-cache for the tenant. A repository-based lookup races with
 that unload and throws `CommunicationRepositoryException: Failed to get
 pools` — and the operator is never told to clean up, leaving the
-`CommunicationPool` CR and broker secret orphaned in the cluster.
+`DeploymentSite` CR and broker secret orphaned in the cluster.
 
 Caveat: the map is process-local, so it survives only as long as the
 controller pod. If the controller restarts between deploy and tenant delete,
@@ -1201,7 +1201,7 @@ enabled — no chart change required.
 `NotifyWorkloadUndeployedAsync` route only to the SignalR connection(s)
 that have registered the target `(tenantId, poolName)` via
 `RegisterPoolForConnection` — looked up through the
-`GetConnectionsForPool` helper. Pool-level events (`PoolDeployedAsync`,
+`GetConnectionsForPool` helper. Pool-level events (`DeploymentSiteDeployedAsync`,
 `PreUpdateTenantAsync`) still broadcast to every connected operator,
 because the central operator with `AutoManagePools=true` decides
 whether to create CRs based on the broadcast; edge operators just
@@ -1217,14 +1217,14 @@ events to the one operator that actually owns the target pool.
 **Pending workload notifications (AB#4371).** When `GetConnectionsForPool`
 returns no owner, the workload deploy/undeploy notification is **queued**,
 not dropped. Dropping it caused the prod-1 incident where an undeploy fired
-while the pool was transiently orphaned (the operator's `RegisterPoolAsync`
+while the pool was transiently orphaned (the operator's `RegisterDeploymentSiteAsync`
 had been rejected during a parallel-startup CkCache race and the operator
 never retried — fixed operator-side by its registration retry loop): the
 helm release kept running forever while the entity said Undeployed.
 `OperatorConnectionManager` keeps a per-`(tenant, poolRtId)` map, last-wins
 per workload rtId — an undeploy queued after a deploy of the same workload
 supersedes it (and vice versa), so a stale deploy can never resurrect a
-release. `OperatorHub.RegisterPoolAsync` calls
+release. `OperatorHub.RegisterDeploymentSiteAsync` calls
 `FlushPendingWorkloadNotificationsAsync` right after the pool's state write
 succeeds; a replay whose send fails is re-queued for the pool's next
 registration. The queue is in-memory like the rest of the tracking maps —
@@ -1235,11 +1235,11 @@ tenant-delete cascade sees consistent state whether or not the notification
 was queued. Tests: `Hubs/OperatorConnectionManagerTests` (pending-queue
 section).
 
-**Operator-mode enforcement at registration.** `IOperatorHub.RegisterOperatorAsync(bool? autoManagePools)`
+**Operator-mode enforcement at registration.** `IOperatorHub.RegisterOperatorAsync(bool? autoManageDeploymentSites)`
 carries the calling operator's mode (true = central / Cloud-only,
 false = edge / Edge-only, null = legacy build pre-dating the
 parameter). `OperatorConnectionManager` stores it per connection via
-`SetOperatorMode` / `GetOperatorMode`. `OperatorHub.RegisterPoolAsync`
+`SetOperatorMode` / `GetOperatorMode`. `OperatorHub.RegisterDeploymentSiteAsync`
 then looks up `RtPool.Environment` and rejects with a typed
 `HubException` + writes an Error event via `ICommunicationEventService`
 when an edge operator tries to claim a Cloud pool (or vice versa). A
@@ -1283,7 +1283,7 @@ A workload deploy notification is fire-and-forget SignalR; one sent while the op
 being replaced (e.g. an operator CD mid-rollout) lands on the dying connection and is lost —
 the entity stays `Pending` forever, and neither the AB#4371 pending queue (the pool HAD a
 registered owner at send time) nor the reverse-sync (restores state, never re-dispatches)
-covers it. `OperatorHub.RegisterPoolAsync` therefore calls
+covers it. `OperatorHub.RegisterDeploymentSiteAsync` therefore calls
 `PoolService.ReconcilePendingWorkloadsAsync` after the AB#4371 flush: every workload of the
 pool still in `DeploymentState=Pending` gets its deploy re-dispatched through the normal
 `DeployWorkloadAsync` path. Best effort — lookup or per-workload failures are logged and never
@@ -1315,7 +1315,7 @@ Closes the restart-survival gap on the controller-side in-memory tracking
 maps and on `DeploymentState` drift. The flow:
 
 1. Operator pod restarts (or controller pod restarts).
-2. Operator reconnects and calls `RegisterOperatorAsync(autoManagePools=true)`
+2. Operator reconnects and calls `RegisterOperatorAsync(autoManageDeploymentSites=true)`
    — controller returns the currently-tracked Cloud pools (forward sync).
 3. Operator follows up with `ReportDeployedStateAsync(pools)` — for every
    pool / workload it currently has a healthy helm release for, it sends an
@@ -1466,7 +1466,7 @@ see the recompute comment in `PoolService.RecomputeAllDeploymentStatesAsync`). T
 resource as `Kind 'Name' (State)` plus the undeploy verbs (`UndeployWorkload`, `UndeployPool`,
 Studio). Every other `ConfigurationException` stays a 400. The tenant delete/detach guard in the
 asset repository (AB#4255 step 1) only reads the enabled flag, so this is the check that keeps a
-deleted tenant from leaving `CommunicationPool` CRs and helm releases behind.
+deleted tenant from leaving `DeploymentSite` CRs and helm releases behind.
 
 **The AI Services flag blocks too (AB#4884).** `EnableAi` refuses while Communication is disabled
 (the AI service depends on System.Communication), so the reverse holds as well: the blocker hook
@@ -1858,11 +1858,11 @@ deletable `3.36.0 → 4.0.0` entry pointing at the same idempotent script.
 
 ### Out of scope of the rename, deliberately
 
-The operator's `CommunicationPool` **CRD** (its Kind is a hardcoded literal; the link to the CK
-entity is by RtId, not by name), the Helm value names `operator.{autoManagePools,poolNamespace,defaultPoolName}`,
+The operator's `DeploymentSite` **CRD** (its Kind is a hardcoded literal; the link to the CK
+entity is by RtId, not by name), the Helm value names `operator.{autoManageDeploymentSites,deploymentSiteNamespace,defaultDeploymentSiteName}`,
 the REST route `{tenantId}/v1/pool`, the `octo-cli` `GetPools`/`DeployPool`/`UndeployPool`
 commands and the MCP `get_pools`/`undeploy_pool` tools. The GraphQL type
-`SystemCommunicationPool`, however, is derived from the CkTypeId and **renames itself** on
+`SystemDeploymentSite`, however, is derived from the CkTypeId and **renames itself** on
 publish — ~66 frontend files across the Studio, `octo-frontend-libraries` and `meshmakers-app`
 break without anyone editing them, so codegen must be re-run in the same train.
 

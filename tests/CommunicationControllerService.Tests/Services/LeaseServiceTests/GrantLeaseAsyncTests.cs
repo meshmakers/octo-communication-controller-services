@@ -26,7 +26,7 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
     {
         ArrangeGrantableLease();
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1"));
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-1"));
 
         using var _ = Assert.Multiple();
         await Assert.That(result.Granted).IsTrue();
@@ -35,8 +35,8 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
 
         var lease = CapturePushedLease();
         await Assert.That(lease.TenantId).IsEqualTo(BorrowerTenantId);
-        await Assert.That(lease.PoolTenantId).IsEqualTo(LenderTenantId);
-        await Assert.That(lease.PoolRtId).IsEqualTo(PoolRtId.ToString());
+        await Assert.That(lease.AdapterPoolTenantId).IsEqualTo(LenderTenantId);
+        await Assert.That(lease.AdapterPoolRtId).IsEqualTo(AdapterPoolRtId.ToString());
         await Assert.That(lease.AdapterRtId).IsEqualTo(Borrower.RtId.ToString());
         await Assert.That(lease.ExecutionId).IsEqualTo("exec-1");
     }
@@ -51,7 +51,7 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
     {
         ArrangeGrantableLease();
 
-        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
 
         var lease = CapturePushedLease();
         using var _ = Assert.Multiple();
@@ -76,7 +76,7 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
         ArrangeConnectedMember();
         EncryptionService.Decrypt("enc:v1:cipher").Returns("plaintext-secret");
 
-        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
 
         await Assert.That(CapturePushedLease().ClientSecret).IsEqualTo("plaintext-secret");
     }
@@ -86,7 +86,7 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
     {
         ArrangeGrantableLease();
 
-        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest(ttl: TimeSpan.FromMinutes(2)));
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest(ttl: TimeSpan.FromMinutes(2)));
 
         var lease = CapturePushedLease();
         await Assert.That(lease.ExpiresAtUtc - lease.GrantedAtUtc).IsEqualTo(TimeSpan.FromMinutes(2));
@@ -97,7 +97,7 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
     {
         ArrangeGrantableLease();
 
-        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
 
         var lease = CapturePushedLease();
         await Assert.That(lease.ExpiresAtUtc - lease.GrantedAtUtc).IsEqualTo(ILeaseService.DefaultLeaseTtl);
@@ -115,7 +115,7 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
         ArrangeBorrowerCredential();
         ArrangeConnectedMember();
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
 
         using var _ = Assert.Multiple();
         await Assert.That(result.Granted).IsFalse();
@@ -131,7 +131,7 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
         ArrangeBorrowerCredential();
         ArrangeConnectedMember();
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
 
         using var _ = Assert.Multiple();
         await Assert.That(result.Granted).IsFalse();
@@ -152,7 +152,7 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
         ArrangeBorrowerCredential();
         ArrangeConnectedMember();
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
 
         using var _ = Assert.Multiple();
         await Assert.That(result.Granted).IsFalse();
@@ -174,7 +174,7 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
         ArrangeBorrowerCredential();
         ArrangeConnectedMember();
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
 
         using var _ = Assert.Multiple();
         await Assert.That(result.Granted).IsFalse();
@@ -196,7 +196,7 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
         ArrangeBorrowerCredential();
         ArrangeConnectedMember();
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
 
         using var _ = Assert.Multiple();
         await Assert.That(result.Granted).IsFalse();
@@ -216,7 +216,7 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
         ArrangeBorrowerCredential();
         ArrangeConnectedMember();
 
-        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
 
         await ServiceAccountResolver.DidNotReceive()
             .GetAdapterDefaultAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>());
@@ -231,7 +231,7 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
             .Returns((RtServiceAccountConfiguration?)null);
         ArrangeConnectedMember();
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
 
         using var _ = Assert.Multiple();
         await Assert.That(result.Granted).IsFalse();
@@ -247,7 +247,7 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
         ArrangeLendingPool(lends: true);
         ArrangeConnectedMember();
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
 
         using var _ = Assert.Multiple();
         await Assert.That(result.Granted).IsFalse();
@@ -267,7 +267,7 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
         ArrangeBorrowerCredential();
         // No member registered at all.
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
 
         using var _ = Assert.Multiple();
         await Assert.That(result.Granted).IsFalse();
@@ -278,9 +278,9 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
     public async Task WithEveryMemberBusy_TheRequestIsRefused()
     {
         ArrangeGrantableLease();
-        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
 
-        var second = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        var second = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
 
         using var _ = Assert.Multiple();
         await Assert.That(second.Granted).IsFalse();
@@ -300,7 +300,7 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
         var memberWasReservedWhenTheGateRan = false;
         var pushedBeforeTheGate = false;
 
-        var granted = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1"),
+        var granted = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-1"),
             CancellationToken.None,
             (_, member, _) =>
             {
@@ -328,7 +328,7 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
     {
         ArrangeGrantableLease();
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1"),
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-1"),
             CancellationToken.None, (_, _, _) => Task.FromResult(false));
 
         using var _ = Assert.Multiple();
@@ -347,7 +347,7 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
     {
         ArrangeGrantableLease();
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1"),
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-1"),
             CancellationToken.None,
             (_, _, _) => throw new InvalidOperationException("the tenant database went away"));
 
@@ -368,7 +368,7 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
         MemberProxy.SendCoreAsync(Arg.Any<string>(), Arg.Any<object?[]>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromException(new InvalidOperationException("connection went away")));
 
-        var failed = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        var failed = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
 
         using var _ = Assert.Multiple();
         await Assert.That(failed.Granted).IsFalse();

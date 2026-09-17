@@ -41,7 +41,7 @@ internal class LeasingEnabledGateTests : LeaseServiceTestsBase
         ArrangeProjectablePipeline();
         LifecycleConfiguration.IsLeasingEnabledAsync(LenderTenantId).Returns(false);
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, AWorkRequest());
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequest());
 
         using var _ = Assert.Multiple();
         await Assert.That(result.Granted).IsFalse();
@@ -56,7 +56,7 @@ internal class LeasingEnabledGateTests : LeaseServiceTestsBase
         ArrangeProjectablePipeline();
         LifecycleConfiguration.IsLeasingEnabledAsync(BorrowerTenantId).Returns(false);
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, AWorkRequest());
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequest());
 
         using var _ = Assert.Multiple();
         await Assert.That(result.Granted).IsFalse();
@@ -75,7 +75,7 @@ internal class LeasingEnabledGateTests : LeaseServiceTestsBase
         ArrangeGrantableLease();
         LifecycleConfiguration.IsLeasingEnabledAsync(LenderTenantId).Returns(false);
 
-        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, AWorkRequest());
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequest());
 
         using var _ = Assert.Multiple();
         await ServiceAccountResolver.DidNotReceiveWithAnyArgs().GetAdapterDefaultAsync(default!, default!);
@@ -92,7 +92,7 @@ internal class LeasingEnabledGateTests : LeaseServiceTestsBase
         ArrangeGrantableLease();
         ArrangeProjectablePipeline();
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, AWorkRequest());
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequest());
 
         await Assert.That(result.Granted).IsTrue();
     }
@@ -105,7 +105,7 @@ internal class LeasingEnabledGateTests : LeaseServiceTestsBase
     {
         await Assert.That(MemberProxy.ReceivedCalls()
             .Any(c => c.GetMethodInfo().Name == nameof(IClientProxy.SendCoreAsync))).IsFalse();
-        await Assert.That(ConnectionManager.GetMembers(LenderTenantId, PoolRtId.ToString())
+        await Assert.That(ConnectionManager.GetMembers(LenderTenantId, AdapterPoolRtId.ToString())
             .All(m => m.IsAvailable)).IsTrue();
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
             .TryClaimQueuedExecutionAsync(default!, default!, default);

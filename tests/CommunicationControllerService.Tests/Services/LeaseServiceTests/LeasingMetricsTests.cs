@@ -60,7 +60,7 @@ internal class LeasingMetricsTests : LeaseServiceTestsBase
 
         // Filtered on this test instance's own pool, because the instruments are process-wide and
         // the suite runs concurrently.
-        return recorded.Where(r => r.Tags.GetValueOrDefault("octo.pool.rt_id") == PoolRtId.ToString())
+        return recorded.Where(r => r.Tags.GetValueOrDefault("octo.pool.rt_id") == AdapterPoolRtId.ToString())
             .ToList();
     }
 
@@ -82,7 +82,7 @@ internal class LeasingMetricsTests : LeaseServiceTestsBase
         ArrangeGrantableLease();
 
         // Act
-        var recorded = Collect(() => LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1")));
+        var recorded = Collect(() => LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-1")));
 
         // Assert
         var granted = recorded.Single(r => r.Instrument == "octo.lease.granted.count");
@@ -107,7 +107,7 @@ internal class LeasingMetricsTests : LeaseServiceTestsBase
         LifecycleConfiguration.IsLeasingEnabledAsync(LenderTenantId).Returns(false);
 
         // Act
-        var recorded = Collect(() => LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1")));
+        var recorded = Collect(() => LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-1")));
 
         // Assert
         var refused = recorded.Single(r => r.Instrument == "octo.lease.refused.count");
@@ -125,7 +125,7 @@ internal class LeasingMetricsTests : LeaseServiceTestsBase
         LifecycleConfiguration.IsLeasingEnabledAsync(BorrowerTenantId).Returns(false);
 
         // Act
-        var recorded = Collect(() => LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1")));
+        var recorded = Collect(() => LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-1")));
 
         // Assert
         await Assert.That(recorded.Single(r => r.Instrument == "octo.lease.refused.count")
@@ -145,7 +145,7 @@ internal class LeasingMetricsTests : LeaseServiceTestsBase
         ArrangeUnprojectablePipeline();
 
         // Act
-        var recorded = Collect(() => LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, AWorkRequest()));
+        var recorded = Collect(() => LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequest()));
 
         // Assert
         await Assert.That(recorded.Single(r => r.Instrument == "octo.lease.refused.count")
@@ -166,7 +166,7 @@ internal class LeasingMetricsTests : LeaseServiceTestsBase
         ArrangeConnectedMember();
 
         // Act
-        var recorded = Collect(() => LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1")));
+        var recorded = Collect(() => LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-1")));
 
         // Assert
         await Assert.That(recorded.Single(r => r.Instrument == "octo.lease.refused.count")
@@ -182,7 +182,7 @@ internal class LeasingMetricsTests : LeaseServiceTestsBase
         ArrangeBorrowerCredential();
 
         // Act
-        var recorded = Collect(() => LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1")));
+        var recorded = Collect(() => LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-1")));
 
         // Assert
         await Assert.That(recorded.Single(r => r.Instrument == "octo.lease.refused.count")
@@ -201,7 +201,7 @@ internal class LeasingMetricsTests : LeaseServiceTestsBase
         // Arrange
         ArrangeGrantableLease();
         ArrangeProjectablePipeline();
-        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, AWorkRequest());
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequest());
         var lease = ConnectionManager.TryGetMember(ConnectionId)!.ActiveLease!;
 
         // Act
@@ -232,7 +232,7 @@ internal class LeasingMetricsTests : LeaseServiceTestsBase
     {
         // Arrange
         ArrangeGrantableLease();
-        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1"));
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-1"));
         var lease = ConnectionManager.TryGetMember(ConnectionId)!.ActiveLease!;
 
         // Act
@@ -260,7 +260,7 @@ internal class LeasingMetricsTests : LeaseServiceTestsBase
     {
         // Arrange
         ArrangeGrantableLease();
-        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1"));
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-1"));
         var member = ConnectionManager.TryGetMember(ConnectionId)!;
         CommunicationRepository
             .TryInterruptLeasedExecutionAsync(BorrowerTenantId, "exec-1", Arg.Any<DateTime>(),
@@ -294,7 +294,7 @@ internal class LeasingMetricsTests : LeaseServiceTestsBase
     {
         // Arrange
         ArrangeGrantableLease();
-        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1"));
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-1"));
         var member = ConnectionManager.TryGetMember(ConnectionId)!;
         CommunicationRepository
             .TryInterruptLeasedExecutionAsync(BorrowerTenantId, "exec-1", Arg.Any<DateTime>(),

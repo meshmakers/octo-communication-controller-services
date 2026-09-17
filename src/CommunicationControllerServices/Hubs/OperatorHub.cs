@@ -106,7 +106,7 @@ public class OperatorHub : Hub, IOperatorHub
     }
 
     /// <inheritdoc />
-    public Task<IEnumerable<DeployedPoolDto>> RegisterOperatorAsync(bool? autoManagePools = null)
+    public Task<IEnumerable<DeployedDeploymentSiteDto>> RegisterOperatorAsync(bool? autoManagePools = null)
     {
         Logger.Info(
             "Operator registered with connection id '{ConnectionId}' (mode: {Mode})",
@@ -120,7 +120,7 @@ public class OperatorHub : Hub, IOperatorHub
     }
 
     /// <inheritdoc />
-    public async Task ReportDeployedStateAsync(IReadOnlyList<OperatorDeployedPoolReportDto> deployedPools)
+    public async Task ReportDeployedStateAsync(IReadOnlyList<OperatorDeployedDeploymentSiteReportDto> deployedPools)
     {
         var operatorMode = _connectionManager.GetOperatorMode(Context.ConnectionId);
         if (operatorMode != true)
@@ -169,7 +169,7 @@ public class OperatorHub : Hub, IOperatorHub
     }
 
     /// <inheritdoc />
-    public async Task RegisterPoolAsync(string tenantId, string poolRtId)
+    public async Task RegisterDeploymentSiteAsync(string tenantId, string poolRtId)
     {
         Logger.Info(
             "Operator '{ConnectionId}' claims pool (rtId {PoolRtId}) for tenant '{TenantId}'",
@@ -286,13 +286,13 @@ public class OperatorHub : Hub, IOperatorHub
     }
 
     /// <inheritdoc />
-    public async Task UnregisterPoolAsync(string tenantId, string poolRtId)
+    public async Task UnregisterDeploymentSiteAsync(string tenantId, string poolRtId)
     {
         Logger.Info(
             "Operator '{ConnectionId}' releases pool (rtId {PoolRtId}) for tenant '{TenantId}'",
             Context.ConnectionId, poolRtId, tenantId);
 
-        // Validate up-front (same rationale as RegisterPoolAsync). Bad
+        // Validate up-front (same rationale as RegisterDeploymentSiteAsync). Bad
         // input here used to surface as FormatException from
         // `new OctoObjectId(poolRtId)`, swallowed by the catch below as
         // a generic warning that obscured the actual cause.

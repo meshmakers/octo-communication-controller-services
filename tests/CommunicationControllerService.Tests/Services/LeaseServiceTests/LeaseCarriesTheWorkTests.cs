@@ -34,7 +34,7 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
         ArrangeGrantableLease();
         var projection = ArrangeProjectablePipeline();
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, AWorkRequest());
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequest());
 
         using var _ = Assert.Multiple();
         await Assert.That(result.Granted).IsTrue();
@@ -59,7 +59,7 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
         ArrangeGrantableLease();
         ArrangeProjectablePipeline();
 
-        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, AWorkRequest());
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequest());
 
         await AdapterService.Received(1).GetLeasedPipelineConfigurationAsync(BorrowerTenantId,
             Arg.Is<RtEntityId>(id => id.RtId == Borrower.RtId), PipelineRtId);
@@ -76,7 +76,7 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
         ArrangeGrantableLease();
         ArrangeUnprojectablePipeline();
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, AWorkRequest());
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequest());
 
         using var _ = Assert.Multiple();
         await Assert.That(result.Granted).IsFalse();
@@ -84,7 +84,7 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
         // Nothing was pushed, and the member is still idle.
         await Assert.That(MemberProxy.ReceivedCalls()
             .Any(c => c.GetMethodInfo().Name == nameof(IClientProxy.SendCoreAsync))).IsFalse();
-        await Assert.That(ConnectionManager.GetMembers(LenderTenantId, PoolRtId.ToString())
+        await Assert.That(ConnectionManager.GetMembers(LenderTenantId, AdapterPoolRtId.ToString())
             .All(m => m.IsAvailable)).IsTrue();
         // The borrower can see why its queue entry did not move.
         await EventService.Received().StoreErrorEventAsync(BorrowerTenantId,
@@ -101,7 +101,7 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
     {
         ArrangeGrantableLease();
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
 
         using var _ = Assert.Multiple();
         await Assert.That(result.Granted).IsTrue();
@@ -126,7 +126,7 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
     {
         ArrangeGrantableLease();
         ArrangeProjectablePipeline();
-        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, AWorkRequest());
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequest());
         var lease = CapturePushedLease();
 
         CommunicationRepository.GetPipelineExecutionAsync(BorrowerTenantId, "exec-1")

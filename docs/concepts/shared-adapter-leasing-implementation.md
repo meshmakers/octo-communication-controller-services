@@ -568,11 +568,21 @@ readability and leaves `roleId: …/Manages` in the data as a hidden alias.
 
 ### 3.8 Not in scope, and deliberately so
 
-- **The `CommunicationPool` CRD is not renamed.** Its Kind is a hardcoded string literal in `V1CommunicationPoolEntity.cs` and its schema ships from `octo-helm-core/src/octo-mesh-crds`; the link to the CK entity is by **RtId**, not by name. Renaming it would require recreating every CR plus RBAC and webhook config, for no functional gain. Same for the Helm value names `operator.autoManagePools` / `poolNamespace` / `defaultPoolName`, which are a breaking chart change for every installation.
+- ~~**The `CommunicationPool` CRD is not renamed.**~~ 🔴 **Reversed — the CRD, the operator and the SignalR wire were renamed after all.** The original reasoning (Kind is a hardcoded literal, the link to the CK entity is by RtId not by name, renaming costs a recreate of every CR plus RBAC and webhook config "for no functional gain") priced the change correctly and then weighed the wrong thing. The gain was never functional: it is that `Pool` meant **two unrelated things at once** in the half of the estate the rename had not reached. Leaving the CRD alone did not preserve the old terminology, it *split* it — the CK model and Studio said `DeploymentSite` while the operator, the chart and the wire still said `Pool`, next to a genuine `AdapterPool`. That is the exact ambiguity §8 Q16/Q18 argued should be paid off in one migration rather than two.
+  - CRD: kind `CommunicationPool` → `DeploymentSite`, plural `communicationpools` → `deploymentsites`, spec field `poolRtId` → `deploymentSiteRtId`, and the API version left alpha: `v1alpha1` → **`v1`**.
+  - Operator: every `CommunicationPool*` and site-meaning `Pool*` type, member and option — `V1DeploymentSiteEntity`, `DeploymentSiteService`, `DeploymentSiteNamespace`, `AutoManageDeploymentSites`.
+  - Chart: `operator.autoManageDeploymentSites` / `deploymentSiteNamespace` / `defaultDeploymentSiteName`, the `OPERATOR__*` env vars they feed, the RBAC resource names and the webhook paths (`/validate/v1deploymentsiteentity`).
+  - Wire (`octo-sdk`): `RegisterDeploymentSiteAsync`, `UnregisterDeploymentSiteAsync`, `DeploymentSiteDeployedAsync`, `DeploymentSiteUndeployedAsync`, `DeployedDeploymentSiteDto`, `OperatorDeployedDeploymentSiteReportDto`.
+
+  No migration path: the CRD is deleted and reinstalled and the sites are redeployed through the controller, which owns each one as an `RtDeploymentSite` anyway. Operator and controller must therefore ship together.
+
+  🔴 **What the rename exposed.** `PoolRtId` meant *two different things on the same wire*: the deployment site in `DeployedPoolDto` / `WorkloadDeployedDto` / `WorkloadUndeployedDto` / `ScaleWorkloadDto` / `OperatorDeployedStateReportDto`, and the **adapter pool** in `LeaseDto` and `PoolMemberRegistrationDto`. A blanket rename would have silently corrupted the lease and member paths. The site ones became `DeploymentSiteRtId`; the adapter-pool ones became `AdapterPoolRtId` / `AdapterPoolTenantId`, so neither is a bare `Pool` any more.
+
+  What genuinely stays: `AdapterPool` and everything about pool members — that is the real pool — and the `octo-cli` verbs `GetPools` / `DeployPool` / `UndeployPool`, which are user-facing.
 - **`rtWellKnownName: CommunicationPool` on the seeded entity stays.** It is identity, not display text: the service-managed blueprint re-applies against it, and renaming it would create a *second* deployment site on every provisioned tenant and orphan the adapters attached to the first.
 - **Documentation follows separately.** 66 genuine markdown files in `octo-documentation` (45 EN + 28 DE, ~15 of them generated from the CK model or CLI metadata), including the doc folder `docs/technologyGuide/communication/pools/` whose URL would need a redirect.
 - **The public REST route `{tenantId}/v1/pool`** comes from `[controller]` on `PoolController`. If the C# class is ever renamed, pin `[Route("pool")]` explicitly or accept a breaking API change. The same applies to the `octo-cli` commands `GetPools` / `DeployPool` / `UndeployPool` and the MCP tools `get_pools` / `undeploy_pool`, all user-facing.
-- **The GraphQL type renames itself.** `SystemCommunicationPool` is derived from the CkTypeId, so publishing 4.0.0 breaks ~66 frontend files across `octo-frontend-refinery-studio` (59), `octo-frontend-libraries` (5) and `meshmakers-app` (2) **without anyone editing the frontend**. Codegen must be re-run in the same train. This is the largest downstream surface in the whole rename and it is invisible from this repo.
+- **The GraphQL type renames itself.** `SystemDeploymentSite` is derived from the CkTypeId, so publishing 4.0.0 breaks ~66 frontend files across `octo-frontend-refinery-studio` (59), `octo-frontend-libraries` (5) and `meshmakers-app` (2) **without anyone editing the frontend**. Codegen must be re-run in the same train. This is the largest downstream surface in the whole rename and it is invisible from this repo.
   🔴 **Correction after doing it (§11a.2a):** "codegen must be re-run" understates the coupling.
   `octo-frontend-libraries` is not a parallel item, it is a **prerequisite** — the Studio's codegen
   imports its base types from `@meshmakers/octo-services`, and the library's `dist/` (not its
@@ -1039,7 +1049,7 @@ is in another namespace is treated as having a **missing** owner and is *deleted
 collector. Writing one would not merely fail to clean up after a deleted tenant; it would delete a
 live tenant's pool seconds after the deploy.
 
-The only object that represents a tenant in the cluster is its `CommunicationPool` CR, and that CR
+The only object that represents a tenant in the cluster is its `DeploymentSite` CR, and that CR
 lives in `PoolNamespace`. Implemented accordingly:
 
 - `OperatorOptions.PlatformNamespace` is **empty by default and resolves to `PoolNamespace`** — which
@@ -1087,7 +1097,7 @@ to every replica, which is exactly Q15's "one sizing per pool".
 | Piece | Where |
 |---|---|
 | `PlatformNamespace` option + `ResolveNamespace`, applied to deploy / undeploy / scale / secret | `Options/OperatorOptions.cs`, `Reconcilers/WorkloadReconciler.cs` |
-| Owner reference to the tenant's `CommunicationPool` CR, on the per-release Secret and — after the install — on the release's Deployments | `WorkloadReconciler.TryResolvePoolOwnerReferenceAsync` / `ApplyPoolOwnerReferenceAsync`, `Services/CommunicationPoolKubernetesGateway.cs` |
+| Owner reference to the tenant's `DeploymentSite` CR, on the per-release Secret and — after the install — on the release's Deployments | `WorkloadReconciler.TryResolvePoolOwnerReferenceAsync` / `ApplyPoolOwnerReferenceAsync`, `Services/DeploymentSiteKubernetesGateway.cs` |
 | Cross-namespace refusal (§7.1a) | `WorkloadReconciler.TryResolvePoolOwnerReferenceAsync` |
 | Pool never receives the shared data-store credentials | `WorkloadReconciler.AppendClusterSecrets` |
 
@@ -1164,7 +1174,7 @@ a broken cluster rather than a typo.
 Six tests. **Scale** — a pool scaled **1 → 3 → 1** through
 `WorkloadReconciler.ScaleAsync`, asserting both `spec.replicas` and the ReplicaSet controller's
 `status.replicas`, so the cluster agrees rather than the spec merely having been accepted — and
-**garbage collection** when its tenant's `CommunicationPool` CR is deleted.
+**garbage collection** when its tenant's `DeploymentSite` CR is deleted.
 
 Then the pair that closes §7.1a, added after the first two:
 
@@ -1188,7 +1198,7 @@ And the two properties the first four left out:
   tenant's release now sits in the namespace through both paths, and the garbage-collection test
   asserts that neighbour is neither stamped nor collected.
 
-- **`DeletingTheLendingTenantsCommunicationPool_AlsoCollectsTheReleaseSecret`** — §7.3 writes the
+- **`DeletingTheLendingTenantsDeploymentSite_AlsoCollectsTheReleaseSecret`** — §7.3 writes the
   owner reference to *two* kinds of object, and the Secret is reached by a different path than the
   Deployments: its reference is set when the Secret is created, not patched on after the install, so
   covering only Deployments left that path unverified against a real garbage collector. It is also
@@ -1206,10 +1216,10 @@ and the write namespace are **one variable**. The reachable regression is repoin
 the CR lives — while the write stays on `ns`. That is the mutation the new test fails on.
 
 Without the environment variable all six report as *skipped*, never as passed. Requirements: the
-`communicationpools.octo-mesh.meshmakers.io` CRD and permission to create the `octo-pool-e2e` and
+`deploymentsites.octo-mesh.meshmakers.io` CRD and permission to create the `octo-pool-e2e` and
 `octo-pool-e2e-platform` namespaces.
 
-🔴 A deployed operator registers a finalizer on `CommunicationPool`, so a deleted CR lingers in
+🔴 A deployed operator registers a finalizer on `DeploymentSite`, so a deleted CR lingers in
 `Terminating` until that operator clears it. Arrange waits for the object to actually be gone rather
 than for the delete to be accepted — without that, the second test to create the CR fails with
 `409 AlreadyExists: object is being deleted`, in whichever test happens to run next. Helm is deliberately not in the loop — this increment changed
@@ -1820,7 +1830,7 @@ collapses that into "the call failed" and invites a retry, which is precisely th
    no `queuedAt`/`leaseWaitMs`/`executionClass`, and `SystemCommunicationPipelineExecutionStatus` has
    no `QUEUED` member. What *is* codegen-free — and was done — is the `QUEUED` filter item and the
    badge colour, both plain strings that never touch a generated type. The three attributes land with
-   the same pass that renames `SystemCommunicationPool`. `LeaseWaitMs` is additionally not on the
+   the same pass that renames `SystemDeploymentSite`. `LeaseWaitMs` is additionally not on the
    queue endpoint at all: it is stamped on the execution at lease grant, so it belongs to the history
    view, not to the queue view.
 3. **"Queue panel on the pool view" has no pool view to sit on yet.** `AdapterPool` becomes a GraphQL
@@ -1870,7 +1880,7 @@ Fixed at the source by defining the one property on the real `navigator`
 did) rather than replacing the global. Suite back to green: 116 files, 1863 tests.
 
 ⚠️ The rename in increment 1 also forces a **separate, unavoidable** frontend pass: the
-GraphQL type `SystemCommunicationPool` renames itself when 4.0.0 publishes (§3.8). Sequence
+GraphQL type `SystemDeploymentSite` renames itself when 4.0.0 publishes (§3.8). Sequence
 the codegen re-run with the model train, not with this increment, or the Studio will be broken
 in between.
 
@@ -2296,9 +2306,9 @@ second pool-ish concept appeared.
 `schema: - schema.graphql`, a checked-in *generated* file, so `npm run codegen` needs no server — but
 the schema file does. It was refreshed by introspecting `https://localhost:5001/tenants/meshtest/graphQL`
 on a `Start-Octo` stack from the `dev` checkout, verified first with
-`{ runtime { systemCommunicationDeploymentSite { totalCount } } }` (answered; `systemCommunicationPool`
+`{ runtime { systemCommunicationDeploymentSite { totalCount } } }` (answered; `systemDeploymentSite`
 answered HTTP 400, i.e. the field no longer exists). Counts in the Studio's `schema.graphql`:
-`SystemCommunicationPool` 44 → 3 (all three residual ones are `SystemCommunicationPoolScaleUpPolicy`,
+`SystemDeploymentSite` 44 → 3 (all three residual ones are `SystemDeploymentSiteScaleUpPolicy`,
 an **AdapterPool** enum), `DeploymentSite` 0 → 48.
 
 🔴 **`octo-frontend-libraries` is not optional and not a follow-up.** §3.8 counts it (5 files) but

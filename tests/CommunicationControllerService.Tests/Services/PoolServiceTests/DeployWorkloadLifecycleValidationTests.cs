@@ -18,7 +18,7 @@ internal class DeployWorkloadLifecycleValidationTests : PoolServiceTestsBase
     {
         var rtPool = new RtDeploymentSite
         {
-            RtId = PoolRtId,
+            RtId = DeploymentSiteRtId,
             CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
             Name = PoolName,
             // Edge routing keeps the arrange minimal — validation runs before any
@@ -99,7 +99,7 @@ internal class DeployWorkloadLifecycleValidationTests : PoolServiceTestsBase
     {
         var rtPool = new RtDeploymentSite
         {
-            RtId = PoolRtId,
+            RtId = DeploymentSiteRtId,
             CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
             Name = PoolName,
             Environment = RtEnvironmentEnum.Edge,

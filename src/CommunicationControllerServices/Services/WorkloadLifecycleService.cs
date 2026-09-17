@@ -241,7 +241,7 @@ internal class WorkloadLifecycleService(
         await operatorConnectionManager.NotifyWorkloadScaleAsync(new ScaleWorkloadDto
         {
             TenantId = tenantId,
-            PoolRtId = pool.RtId.ToString(),
+            DeploymentSiteRtId = pool.RtId.ToString(),
             WorkloadRtId = workload.RtId.ToString(),
             WorkloadName = workload.Name ?? string.Empty,
             WorkloadType = WorkloadWireMapping.ResolveWorkloadType(workload),

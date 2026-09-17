@@ -23,8 +23,8 @@ internal class LeaseRoutingAndReleaseTests : AdapterPoolHubTestsBase
     {
         LeaseId = leaseId,
         TenantId = tenantId,
-        PoolTenantId = LenderTenantId,
-        PoolRtId = PoolRtId,
+        AdapterPoolTenantId = LenderTenantId,
+        AdapterPoolRtId = AdapterPoolRtId,
         AdapterRtId = "6ad562f3ff7c40ff80275b85",
         AdapterCkTypeId = "System.Communication/Adapter",
         ClientId = "octo-pipeline-sa-borrower",
@@ -43,8 +43,8 @@ internal class LeaseRoutingAndReleaseTests : AdapterPoolHubTestsBase
 
         await Hub.RegisterPoolMemberAsync(new PoolMemberRegistrationDto
         {
-            PoolTenantId = LenderTenantId,
-            PoolRtId = PoolRtId,
+            AdapterPoolTenantId = LenderTenantId,
+            AdapterPoolRtId = AdapterPoolRtId,
             MemberId = memberId
         });
     }
@@ -59,8 +59,8 @@ internal class LeaseRoutingAndReleaseTests : AdapterPoolHubTestsBase
     {
         await RegisterAsync();
 
-        var first = ConnectionManager.TryClaimMember(LenderTenantId, PoolRtId, ALease());
-        var second = ConnectionManager.TryClaimMember(LenderTenantId, PoolRtId, ALease("lease-2", "other"));
+        var first = ConnectionManager.TryClaimMember(LenderTenantId, AdapterPoolRtId, ALease());
+        var second = ConnectionManager.TryClaimMember(LenderTenantId, AdapterPoolRtId, ALease("lease-2", "other"));
 
         using var _ = Assert.Multiple();
         await Assert.That(first).IsNotNull();
@@ -78,8 +78,8 @@ internal class LeaseRoutingAndReleaseTests : AdapterPoolHubTestsBase
         await RegisterAsync();
         await RegisterAsync(SecondConnectionId, "octo-pool-1");
 
-        var first = ConnectionManager.TryClaimMember(LenderTenantId, PoolRtId, ALease());
-        var second = ConnectionManager.TryClaimMember(LenderTenantId, PoolRtId, ALease("lease-2", "other"));
+        var first = ConnectionManager.TryClaimMember(LenderTenantId, AdapterPoolRtId, ALease());
+        var second = ConnectionManager.TryClaimMember(LenderTenantId, AdapterPoolRtId, ALease("lease-2", "other"));
 
         using var _ = Assert.Multiple();
         await Assert.That(first).IsNotNull();
@@ -97,7 +97,7 @@ internal class LeaseRoutingAndReleaseTests : AdapterPoolHubTestsBase
         await RegisterAsync();
 
         using var _ = Assert.Multiple();
-        await Assert.That(ConnectionManager.TryClaimMember("othertenant", PoolRtId, ALease())).IsNull();
+        await Assert.That(ConnectionManager.TryClaimMember("othertenant", AdapterPoolRtId, ALease())).IsNull();
         await Assert.That(ConnectionManager.TryClaimMember(LenderTenantId,
             "6ad562f3ff7c40ff80275b99", ALease())).IsNull();
     }
@@ -106,7 +106,7 @@ internal class LeaseRoutingAndReleaseTests : AdapterPoolHubTestsBase
     public async Task ReleaseFreesTheMemberForTheNextLease()
     {
         await RegisterAsync();
-        ConnectionManager.TryClaimMember(LenderTenantId, PoolRtId, ALease());
+        ConnectionManager.TryClaimMember(LenderTenantId, AdapterPoolRtId, ALease());
 
         await Hub.ReleaseLeaseAsync(new LeaseResultDto
         {
@@ -122,7 +122,7 @@ internal class LeaseRoutingAndReleaseTests : AdapterPoolHubTestsBase
             Arg.Is<LeaseResultDto>(r => r.LeaseId == "lease-1"));
 
         ConnectionManager.ReleaseLease(ConnectionId, "lease-1");
-        await Assert.That(ConnectionManager.TryClaimMember(LenderTenantId, PoolRtId, ALease("lease-2")))
+        await Assert.That(ConnectionManager.TryClaimMember(LenderTenantId, AdapterPoolRtId, ALease("lease-2")))
             .IsNotNull();
     }
 
@@ -136,13 +136,13 @@ internal class LeaseRoutingAndReleaseTests : AdapterPoolHubTestsBase
     public async Task AStaleReleaseDoesNotFreeTheCurrentLease()
     {
         await RegisterAsync();
-        ConnectionManager.TryClaimMember(LenderTenantId, PoolRtId, ALease("lease-current"));
+        ConnectionManager.TryClaimMember(LenderTenantId, AdapterPoolRtId, ALease("lease-current"));
 
         var released = ConnectionManager.ReleaseLease(ConnectionId, "lease-expired-long-ago");
 
         using var _ = Assert.Multiple();
         await Assert.That(released).IsNull();
-        await Assert.That(ConnectionManager.TryClaimMember(LenderTenantId, PoolRtId, ALease("lease-3")))
+        await Assert.That(ConnectionManager.TryClaimMember(LenderTenantId, AdapterPoolRtId, ALease("lease-3")))
             .IsNull();
     }
 
@@ -165,7 +165,7 @@ internal class LeaseRoutingAndReleaseTests : AdapterPoolHubTestsBase
     public async Task DisconnectMidLease_ReportsTheHeldLease()
     {
         await RegisterAsync();
-        ConnectionManager.TryClaimMember(LenderTenantId, PoolRtId, ALease());
+        ConnectionManager.TryClaimMember(LenderTenantId, AdapterPoolRtId, ALease());
         ShutdownState.IsShuttingDown.Returns(false);
 
         await Hub.OnDisconnectedAsync(exception: null);
@@ -199,7 +199,7 @@ internal class LeaseRoutingAndReleaseTests : AdapterPoolHubTestsBase
     public async Task ShuttingDown_DropsTheRegistrationButReportsNoInterruption()
     {
         await RegisterAsync();
-        ConnectionManager.TryClaimMember(LenderTenantId, PoolRtId, ALease());
+        ConnectionManager.TryClaimMember(LenderTenantId, AdapterPoolRtId, ALease());
         ShutdownState.IsShuttingDown.Returns(true);
 
         await Hub.OnDisconnectedAsync(exception: null);
@@ -219,7 +219,7 @@ internal class LeaseRoutingAndReleaseTests : AdapterPoolHubTestsBase
         await RegisterAsync();
         ConnectionManager.MarkDraining(ConnectionId);
 
-        await Assert.That(ConnectionManager.TryClaimMember(LenderTenantId, PoolRtId, ALease())).IsNull();
+        await Assert.That(ConnectionManager.TryClaimMember(LenderTenantId, AdapterPoolRtId, ALease())).IsNull();
     }
 
     [Test]

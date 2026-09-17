@@ -179,7 +179,7 @@ Check the result from the tenant's GraphQL endpoint rather than from a log:
 { runtime { systemCommunicationDeploymentSite { totalCount } } }
 ```
 
-An answer means 4.0.0 is live. If `systemCommunicationPool` answers instead, the model did not
+An answer means 4.0.0 is live. If `systemDeploymentSite` answers instead, the model did not
 install — and if the *new* name is absent the endpoint returns **HTTP 400**, not an empty result, so
 a naive "did it error?" check reads backwards.
 
@@ -1038,7 +1038,7 @@ every entry in `index.yaml` carries the *rebuild* time, not its own.
    scale-status blocker: SignalR discards a method the client does not implement, without an error on
    either side. Check the operator's image before concluding anything about a deploy that "did
    nothing".
-3. **The lender had no `CommunicationPool` CR.** Its `Default Cloud` site had never been deployed, so
+3. **The lender had no `DeploymentSite` CR.** Its `Default Cloud` site had never been deployed, so
    no operator owned it and the workload notification went into the AB#4371 pending queue instead of
    to a recipient. `DeployPool` on the lender first, then the workload.
 4. **The chart demanded cluster secrets a pool must not get.** First `secrets.databaseUser`, then —

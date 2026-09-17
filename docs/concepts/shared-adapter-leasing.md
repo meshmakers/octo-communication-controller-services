@@ -358,7 +358,7 @@ operational grounds point at leaving things where they already are:
 
 - Everything the operator deploys already lands in one namespace (`OperatorOptions.PoolNamespace`,
   default `octo`), separated by release name. A pool is not special enough to need its own.
-- It is the only namespace that contains an object representing a tenant — its `CommunicationPool`
+- It is the only namespace that contains an object representing a tenant — its `DeploymentSite`
   CR — which is what makes the owner reference and its garbage collection possible at all.
 
 A distinct platform namespace remains supported for whoever wants that topology, at the cost of the
@@ -374,7 +374,7 @@ to break is "one namespace for everything the operator deploys". And the RBAC li
 binding already covers any namespace.
 
 Independent of all of the above: **Kubernetes forbids cross-namespace owner references** — a dependent whose owner lives elsewhere is treated as having no owner and is deleted.
-Since the object that represents a tenant is its `CommunicationPool` CR in the operator's own
+Since the object that represents a tenant is its `DeploymentSite` CR in the operator's own
 namespace, "platform namespace" and "owned by the lending tenant" are only simultaneously satisfiable
 while the platform namespace *is* that namespace. That is what the implementation defaults to; a
 distinct platform namespace is supported and forfeits the owner reference, with a warning.

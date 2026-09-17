@@ -64,7 +64,7 @@ internal class RegisterPoolAsyncTests : IDisposable
         // so the audit trail still shows that a mode-less operator claimed the pool.
         _connectionManager.GetOperatorMode(ConnectionId).Returns((bool?)null);
 
-        await _hub.RegisterPoolAsync(TenantId, ValidPoolRtId);
+        await _hub.RegisterDeploymentSiteAsync(TenantId, ValidPoolRtId);
 
         _connectionManager.Received(1).RegisterPoolForConnection(ConnectionId, TenantId, ValidPoolRtId);
         await _poolService.Received(1).SetCommunicationStateOnlineAsync(
@@ -83,7 +83,7 @@ internal class RegisterPoolAsyncTests : IDisposable
         _connectionManager.GetOperatorMode(ConnectionId).Returns(true);
         GivenPoolWithEnvironment(RtEnvironmentEnum.Cloud);
 
-        await _hub.RegisterPoolAsync(TenantId, ValidPoolRtId);
+        await _hub.RegisterDeploymentSiteAsync(TenantId, ValidPoolRtId);
 
         _connectionManager.Received(1).RegisterPoolForConnection(ConnectionId, TenantId, ValidPoolRtId);
         await _poolService.Received(1).SetCommunicationStateOnlineAsync(
@@ -100,7 +100,7 @@ internal class RegisterPoolAsyncTests : IDisposable
         _connectionManager.GetOperatorMode(ConnectionId).Returns(false);
         GivenPoolWithEnvironment(RtEnvironmentEnum.Edge);
 
-        await _hub.RegisterPoolAsync(TenantId, ValidPoolRtId);
+        await _hub.RegisterDeploymentSiteAsync(TenantId, ValidPoolRtId);
 
         _connectionManager.Received(1).RegisterPoolForConnection(ConnectionId, TenantId, ValidPoolRtId);
         await _poolService.Received(1).SetCommunicationStateOnlineAsync(
@@ -121,7 +121,7 @@ internal class RegisterPoolAsyncTests : IDisposable
         _connectionManager.GetOperatorMode(ConnectionId).Returns(false);
         GivenPoolWithEnvironment(RtEnvironmentEnum.Cloud, name: "the-cloud-pool");
 
-        await Assert.That(async () => await _hub.RegisterPoolAsync(TenantId, ValidPoolRtId))
+        await Assert.That(async () => await _hub.RegisterDeploymentSiteAsync(TenantId, ValidPoolRtId))
             .Throws<HubException>();
 
         _connectionManager.DidNotReceiveWithAnyArgs().RegisterPoolForConnection(
@@ -139,7 +139,7 @@ internal class RegisterPoolAsyncTests : IDisposable
         _connectionManager.GetOperatorMode(ConnectionId).Returns(true);
         GivenPoolWithEnvironment(RtEnvironmentEnum.Edge, name: "the-edge-pool");
 
-        await Assert.That(async () => await _hub.RegisterPoolAsync(TenantId, ValidPoolRtId))
+        await Assert.That(async () => await _hub.RegisterDeploymentSiteAsync(TenantId, ValidPoolRtId))
             .Throws<HubException>();
 
         _connectionManager.DidNotReceiveWithAnyArgs().RegisterPoolForConnection(
@@ -157,7 +157,7 @@ internal class RegisterPoolAsyncTests : IDisposable
         _connectionManager.GetOperatorMode(ConnectionId).Returns(false);
         _repository.GetPoolsAsync(TenantId).Returns(Array.Empty<RtDeploymentSite>());
 
-        await Assert.That(async () => await _hub.RegisterPoolAsync(TenantId, ValidPoolRtId))
+        await Assert.That(async () => await _hub.RegisterDeploymentSiteAsync(TenantId, ValidPoolRtId))
             .Throws<HubException>();
 
         _connectionManager.DidNotReceiveWithAnyArgs().RegisterPoolForConnection(
@@ -175,7 +175,7 @@ internal class RegisterPoolAsyncTests : IDisposable
         // generic HubException. The operator-side log named no field, the
         // CR stayed Unregistered forever. The hub now rejects up-front
         // with a typed message that points at the offending field.
-        await Assert.That(async () => await _hub.RegisterPoolAsync(TenantId, string.Empty))
+        await Assert.That(async () => await _hub.RegisterDeploymentSiteAsync(TenantId, string.Empty))
             .Throws<HubException>();
 
         _connectionManager.DidNotReceiveWithAnyArgs().RegisterPoolForConnection(
@@ -187,7 +187,7 @@ internal class RegisterPoolAsyncTests : IDisposable
     [Test]
     public async Task MalformedRtId_ThrowsHubExceptionAndSkipsConnectionManager()
     {
-        await Assert.That(async () => await _hub.RegisterPoolAsync(TenantId, "not-an-objectid"))
+        await Assert.That(async () => await _hub.RegisterDeploymentSiteAsync(TenantId, "not-an-objectid"))
             .Throws<HubException>();
 
         _connectionManager.DidNotReceiveWithAnyArgs().RegisterPoolForConnection(
@@ -200,7 +200,7 @@ internal class RegisterPoolAsyncTests : IDisposable
     public async Task ShortHexRtId_ThrowsHubException()
     {
         // 23 hex chars — close to the right shape but still invalid.
-        await Assert.That(async () => await _hub.RegisterPoolAsync(TenantId, "6ad562f3ff7c40ff80275b8"))
+        await Assert.That(async () => await _hub.RegisterDeploymentSiteAsync(TenantId, "6ad562f3ff7c40ff80275b8"))
             .Throws<HubException>();
     }
 }

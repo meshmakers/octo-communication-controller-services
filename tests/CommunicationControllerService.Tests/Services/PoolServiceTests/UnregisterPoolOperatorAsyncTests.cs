@@ -11,7 +11,7 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
     {
         GivenTenantNotInCache();
 
-        await PoolService.UnregisterPoolOperatorAsync(TenantId, PoolRtId);
+        await PoolService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
             .SetPoolCommunicationStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
@@ -27,7 +27,7 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
         GivenTenantInCache();
         // Don't add the pool
 
-        await PoolService.UnregisterPoolOperatorAsync(TenantId, PoolRtId);
+        await PoolService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
             .SetPoolCommunicationStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
@@ -48,19 +48,19 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
         var receivedStateAtRepoCall = (Online: false, Offline: false, Unregistered: false);
 
         // Capture whether the pool was still in the cache at the moment the repo write happened.
-        await CommunicationRepository.SetPoolCommunicationStateAsync(TenantId, PoolRtId,
+        await CommunicationRepository.SetPoolCommunicationStateAsync(TenantId, DeploymentSiteRtId,
             Arg.Do<RtCommunicationStateEnum>(_ =>
             {
-                receivedStateAtRepoCall.Unregistered = PoolTenant.PoolsById.ContainsKey(PoolRtId);
+                receivedStateAtRepoCall.Unregistered = PoolTenant.PoolsById.ContainsKey(DeploymentSiteRtId);
             }));
 
-        await PoolService.UnregisterPoolOperatorAsync(TenantId, PoolRtId);
+        await PoolService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
 
         using var _ = Assert.Multiple();
         await CommunicationRepository.Received(1)
-            .SetPoolCommunicationStateAsync(TenantId, PoolRtId, RtCommunicationStateEnum.Unregistered);
+            .SetPoolCommunicationStateAsync(TenantId, DeploymentSiteRtId, RtCommunicationStateEnum.Unregistered);
         await Assert.That(receivedStateAtRepoCall.Unregistered).IsTrue();
-        await Assert.That(PoolTenant.PoolsById.ContainsKey(PoolRtId)).IsFalse();
+        await Assert.That(PoolTenant.PoolsById.ContainsKey(DeploymentSiteRtId)).IsFalse();
     }
 
     [Test]
@@ -69,10 +69,10 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
         GivenTenantInCache();
         AddPoolToTenant();
 
-        await PoolService.UnregisterPoolOperatorAsync(TenantId, PoolRtId);
+        await PoolService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
 
         await CommunicationRepository.Received(1)
-            .SetPoolDeploymentStateAsync(TenantId, PoolRtId, RtDeploymentStateEnum.Pending);
+            .SetPoolDeploymentStateAsync(TenantId, DeploymentSiteRtId, RtDeploymentStateEnum.Pending);
     }
 
     [Test]
@@ -82,10 +82,10 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
         AddPoolToTenant();
         GivenPersistedPool(RtDeploymentStateEnum.Deployed, RtEnvironmentEnum.Cloud);
 
-        await PoolService.UnregisterPoolOperatorAsync(TenantId, PoolRtId);
+        await PoolService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
 
         await CommunicationRepository.Received(1)
-            .SetPoolDeploymentStateAsync(TenantId, PoolRtId, RtDeploymentStateEnum.Pending);
+            .SetPoolDeploymentStateAsync(TenantId, DeploymentSiteRtId, RtDeploymentStateEnum.Pending);
     }
 
     [Test]
@@ -101,13 +101,13 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
         AddPoolToTenant();
         GivenPersistedPool(restingState, environment);
 
-        await PoolService.UnregisterPoolOperatorAsync(TenantId, PoolRtId);
+        await PoolService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
             .SetPoolDeploymentStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
                 Arg.Any<RtDeploymentStateEnum>());
         await CommunicationRepository.Received(1)
-            .SetPoolCommunicationStateAsync(TenantId, PoolRtId, RtCommunicationStateEnum.Unregistered);
+            .SetPoolCommunicationStateAsync(TenantId, DeploymentSiteRtId, RtCommunicationStateEnum.Unregistered);
     }
 
     private void GivenPersistedPool(RtDeploymentStateEnum deploymentState, RtEnvironmentEnum environment)
@@ -116,7 +116,7 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
         {
             new RtDeploymentSite
             {
-                RtId = PoolRtId,
+                RtId = DeploymentSiteRtId,
                 CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
                 Name = PoolName,
                 DeploymentState = deploymentState,
@@ -131,7 +131,7 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
         GivenTenantInCache();
         AddPoolToTenant();
 
-        await PoolService.UnregisterPoolOperatorAsync(TenantId, PoolRtId);
+        await PoolService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
 
         await CommunicationEventService.Received(1)
             .StoreInformationEventAsync(TenantId,

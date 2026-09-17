@@ -22,7 +22,7 @@ internal class LeaseOutcomeAndRequeueTests : LeaseServiceTestsBase
     private async Task<string> GrantWithWorkItemAsync()
     {
         ArrangeGrantableLease();
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest(ExecutionId));
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest(ExecutionId));
         return result.LeaseId!;
     }
 

@@ -14,7 +14,7 @@ public interface IPoolService
 {
     /// <summary>
     /// Unregisters a pool operator for a tenant. Called by
-    /// <c>OperatorHub.UnregisterPoolAsync</c> when the operator releases
+    /// <c>OperatorHub.UnregisterDeploymentSiteAsync</c> when the operator releases
     /// a pool while keeping the hub connection open.
     /// </summary>
     Task UnregisterPoolOperatorAsync(string tenantId, OctoObjectId poolRtId);
@@ -199,5 +199,5 @@ public interface IPoolService
     /// <param name="deployedPools">The operator's view of which pools and
     /// workloads currently have a healthy helm release.</param>
     Task RestoreDeployedStateAsync(string operatorConnectionId,
-        IReadOnlyList<OperatorDeployedPoolReportDto> deployedPools);
+        IReadOnlyList<OperatorDeployedDeploymentSiteReportDto> deployedPools);
 }

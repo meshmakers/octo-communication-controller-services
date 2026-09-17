@@ -248,10 +248,10 @@ internal class PoolService : IPoolService
         Logger.Info(
             "[{TenantId}] Pool '{PoolName}' (rtId {PoolRtId}) is Cloud — notifying central Communication Operator",
             tenantId, poolName, poolRtId);
-        await _operatorConnectionManager.NotifyPoolDeployedAsync(new DeployedPoolDto
+        await _operatorConnectionManager.NotifyPoolDeployedAsync(new DeployedDeploymentSiteDto
         {
             TenantId = tenantId,
-            PoolRtId = poolRtId.ToString(),
+            DeploymentSiteRtId = poolRtId.ToString(),
         });
 
         await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolRtId,
@@ -626,7 +626,7 @@ internal class PoolService : IPoolService
         await _operatorConnectionManager.NotifyWorkloadUndeployedAsync(new WorkloadUndeployedDto
         {
             TenantId = tenantId,
-            PoolRtId = pool.RtId.ToString(),
+            DeploymentSiteRtId = pool.RtId.ToString(),
             WorkloadRtId = workload.RtId.ToString(),
             WorkloadName = workload.Name ?? string.Empty,
             WorkloadType = WorkloadWireMapping.ResolveWorkloadType(workload),
@@ -801,7 +801,7 @@ internal class PoolService : IPoolService
         // where the repository is already torn down.
         var poolRtIdString = poolRtId.ToString();
         var tracked = _operatorConnectionManager.GetDeployedWorkloadsForTenant(tenantId)
-            .Where(w => w.PoolRtId == poolRtIdString)
+            .Where(w => w.DeploymentSiteRtId == poolRtIdString)
             .ToArray();
 
         if (tracked.Length == 0)
@@ -869,7 +869,7 @@ internal class PoolService : IPoolService
         return new WorkloadDeployedDto
         {
             TenantId = tenantId,
-            PoolRtId = poolRtId.ToString(),
+            DeploymentSiteRtId = poolRtId.ToString(),
             WorkloadName = workload.Name ?? string.Empty,
             WorkloadRtId = workload.RtId.ToString(),
             WorkloadType = WorkloadWireMapping.ResolveWorkloadType(workload),
@@ -1157,7 +1157,7 @@ internal class PoolService : IPoolService
             {
                 Logger.Warn(ex,
                     "[{TenantId}] Failed to notify operator of workload undeploy during tenant cleanup, workload '{WorkloadName}' (rtId {WorkloadRtId}, pool rtId {PoolRtId})",
-                    tenantId, workload.WorkloadName, workload.WorkloadRtId, workload.PoolRtId);
+                    tenantId, workload.WorkloadName, workload.WorkloadRtId, workload.DeploymentSiteRtId);
             }
         }
 
@@ -1300,7 +1300,7 @@ internal class PoolService : IPoolService
         // Lazy-load the pool into the cache on first sight. The legacy /poolHub
         // path relied on RegisterPoolOperatorAsync (which also touched the
         // pool's DeploymentState) to populate the cache; the new /operatorHub
-        // RegisterPoolAsync is purely about CommunicationState, so we just
+        // RegisterDeploymentSiteAsync is purely about CommunicationState, so we just
         // ensure the cache is populated here without touching DeploymentState.
         if (!poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
         {
@@ -1742,7 +1742,7 @@ internal class PoolService : IPoolService
 
     /// <inheritdoc />
     public async Task RestoreDeployedStateAsync(string operatorConnectionId,
-        IReadOnlyList<OperatorDeployedPoolReportDto> deployedPools)
+        IReadOnlyList<OperatorDeployedDeploymentSiteReportDto> deployedPools)
     {
         // Defensive: an empty list is a valid no-op (operator just restarted
         // and currently owns nothing). Don't log noise.
@@ -1759,20 +1759,20 @@ internal class PoolService : IPoolService
         {
             // Load by repository — the pool may or may not be in the local
             // cache yet (operator can call ReportDeployedStateAsync before
-            // any RegisterPoolAsync for the same pool has been processed).
+            // any RegisterDeploymentSiteAsync for the same pool has been processed).
             var pools = await _communicationRepository.GetPoolsAsync(report.TenantId);
-            var rtPool = pools.FirstOrDefault(p => p.RtId.ToString() == report.PoolRtId);
+            var rtPool = pools.FirstOrDefault(p => p.RtId.ToString() == report.DeploymentSiteRtId);
             if (rtPool == null)
             {
                 Logger.Warn(
                     "[{TenantId}] Reverse-sync: pool rtId '{PoolRtId}' reported by operator does not exist; skipping",
-                    report.TenantId, report.PoolRtId);
+                    report.TenantId, report.DeploymentSiteRtId);
                 continue;
             }
 
             // Per-pool environment guard: a Cloud operator (mode check ran in
             // OperatorHub) must not be able to revive Edge-pool state via this
-            // path. Mirrors the same enforcement on RegisterPoolAsync.
+            // path. Mirrors the same enforcement on RegisterDeploymentSiteAsync.
             if (rtPool.Environment != RtEnvironmentEnum.Cloud)
             {
                 Logger.Warn(
@@ -1800,13 +1800,13 @@ internal class PoolService : IPoolService
             // they're keyed on the new connection id, and the previous
             // connection's entries were dropped on disconnect. Idempotent if
             // the connection is already registered (ConcurrentDictionary set).
-            _operatorConnectionManager.TrackDeployedPool(new DeployedPoolDto
+            _operatorConnectionManager.TrackDeployedPool(new DeployedDeploymentSiteDto
             {
                 TenantId = report.TenantId,
-                PoolRtId = report.PoolRtId,
+                DeploymentSiteRtId = report.DeploymentSiteRtId,
             });
             _operatorConnectionManager.RegisterPoolForConnection(operatorConnectionId, report.TenantId,
-                report.PoolRtId);
+                report.DeploymentSiteRtId);
 
             // Workloads inside the pool — same restore-only-when-changed rule.
             foreach (var workloadRtIdString in report.WorkloadRtIds)
@@ -1845,7 +1845,7 @@ internal class PoolService : IPoolService
                 _operatorConnectionManager.TrackDeployedWorkload(new WorkloadUndeployedDto
                 {
                     TenantId = report.TenantId,
-                    PoolRtId = report.PoolRtId,
+                    DeploymentSiteRtId = report.DeploymentSiteRtId,
                     WorkloadRtId = workloadRtIdString,
                     WorkloadName = workload.Name ?? string.Empty,
                     WorkloadType = WorkloadWireMapping.ResolveWorkloadType(workload),

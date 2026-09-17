@@ -48,7 +48,7 @@ internal abstract class LeaseServiceTestsBase
     ///     process-wide statics tagged by pool rtId and TUnit runs these tests concurrently, so a
     ///     shared id would let one test read another's measurements.
     /// </summary>
-    protected readonly OctoObjectId PoolRtId = OctoObjectId.GenerateNewId();
+    protected readonly OctoObjectId AdapterPoolRtId = OctoObjectId.GenerateNewId();
 
     protected static readonly OctoObjectId PipelineRtId = new("6ad562f3ff7c40ff80275b85");
 
@@ -143,7 +143,7 @@ internal abstract class LeaseServiceTestsBase
         Borrower.Name = "borrowing-adapter";
         Borrower.LifecycleMode = lifecycleMode;
         Borrower.LentFromTenantId = lentFromTenantId;
-        Borrower.LentFromPoolRtId = lentFromPoolRtId ?? PoolRtId.ToString();
+        Borrower.LentFromPoolRtId = lentFromPoolRtId ?? AdapterPoolRtId.ToString();
 
         CommunicationRepository.GetWorkloadByRtIdAsync(BorrowerTenantId, Borrower.RtId).Returns(Borrower);
         return Borrower;
@@ -152,7 +152,7 @@ internal abstract class LeaseServiceTestsBase
     protected void ArrangeLendingPool(bool lends, int sharingMode = LendingScope.Descendants)
     {
         var scope = new LendingScope(sharingMode, null);
-        CommunicationRepository.TryGetAdapterPoolLendingScopeAsync(LenderTenantId, PoolRtId.ToString())
+        CommunicationRepository.TryGetAdapterPoolLendingScopeAsync(LenderTenantId, AdapterPoolRtId.ToString())
             .Returns(scope);
         LendingScopeResolver
             .MayLendAsync(LenderTenantId, BorrowerTenantId, scope, Arg.Any<CancellationToken>())
@@ -169,7 +169,7 @@ internal abstract class LeaseServiceTestsBase
 
     protected void ArrangeNoPool()
     {
-        CommunicationRepository.TryGetAdapterPoolLendingScopeAsync(LenderTenantId, PoolRtId.ToString())
+        CommunicationRepository.TryGetAdapterPoolLendingScopeAsync(LenderTenantId, AdapterPoolRtId.ToString())
             .Returns((LendingScope?)null);
     }
 
@@ -185,7 +185,7 @@ internal abstract class LeaseServiceTestsBase
 
     protected void ArrangeConnectedMember(string connectionId = ConnectionId, string memberId = MemberId)
     {
-        ConnectionManager.RegisterMember(connectionId, memberId, LenderTenantId, PoolRtId.ToString());
+        ConnectionManager.RegisterMember(connectionId, memberId, LenderTenantId, AdapterPoolRtId.ToString());
     }
 
     protected LeaseRequest ARequest(string? executionId = null, TimeSpan? ttl = null)

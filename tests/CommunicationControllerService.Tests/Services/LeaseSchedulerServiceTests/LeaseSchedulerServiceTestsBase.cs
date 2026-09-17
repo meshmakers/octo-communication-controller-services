@@ -41,7 +41,7 @@ internal abstract class LeaseSchedulerServiceTestsBase
     ///     are process-wide statics tagged by pool rtId, and TUnit runs these tests concurrently — a
     ///     shared pool id would let one test read another's measurements.
     /// </summary>
-    protected readonly OctoObjectId PoolRtId = OctoObjectId.GenerateNewId();
+    protected readonly OctoObjectId AdapterPoolRtId = OctoObjectId.GenerateNewId();
 
     protected readonly IAdapterCache AdapterCache = Substitute.For<IAdapterCache>();
     protected readonly ICommunicationRepository CommunicationRepository =
@@ -86,7 +86,7 @@ internal abstract class LeaseSchedulerServiceTestsBase
         {
             var index = _memberSequence++;
             ConnectionManager.RegisterMember($"conn-{index}", $"member-{index}", LenderTenantId,
-                PoolRtId.ToString());
+                AdapterPoolRtId.ToString());
         }
     }
 
@@ -98,13 +98,13 @@ internal abstract class LeaseSchedulerServiceTestsBase
     {
         var index = _memberSequence++;
         var connectionId = $"conn-{index}";
-        ConnectionManager.RegisterMember(connectionId, $"member-{index}", LenderTenantId, PoolRtId.ToString());
-        ConnectionManager.TryClaimMember(LenderTenantId, PoolRtId.ToString(), new LeaseDto
+        ConnectionManager.RegisterMember(connectionId, $"member-{index}", LenderTenantId, AdapterPoolRtId.ToString());
+        ConnectionManager.TryClaimMember(LenderTenantId, AdapterPoolRtId.ToString(), new LeaseDto
         {
             LeaseId = $"lease-{index}",
             TenantId = busyForTenantId,
-            PoolTenantId = LenderTenantId,
-            PoolRtId = PoolRtId.ToString(),
+            AdapterPoolTenantId = LenderTenantId,
+            AdapterPoolRtId = AdapterPoolRtId.ToString(),
             ExecutionId = $"busy-execution-{index}",
             GrantedAtUtc = DateTime.UtcNow.AddMinutes(-1),
             ExpiresAtUtc = expiresAtUtc ?? DateTime.UtcNow.AddMinutes(14)
@@ -124,7 +124,7 @@ internal abstract class LeaseSchedulerServiceTestsBase
             adapter.Name = $"{tenantId}-adapter";
             adapter.LifecycleMode = RtLifecycleModeEnum.Leased;
             adapter.LentFromTenantId = LenderTenantId;
-            adapter.LentFromPoolRtId = PoolRtId.ToString();
+            adapter.LentFromPoolRtId = AdapterPoolRtId.ToString();
             Borrowers[tenantId] = adapter;
 
             CommunicationRepository.GetWorkloadsAsync(tenantId)
@@ -170,7 +170,7 @@ internal abstract class LeaseSchedulerServiceTestsBase
     {
         var pool = new RtAdapterPool
         {
-            RtId = PoolRtId,
+            RtId = AdapterPoolRtId,
             CkTypeId = SystemCommunicationCkIds.RtCkAdapterPoolTypeId,
             Name = "shared-pool",
             MinReplicas = minReplicas,
@@ -185,7 +185,7 @@ internal abstract class LeaseSchedulerServiceTestsBase
             pool.LendingMaxConcurrentLeasesPerTenant = cap;
         }
 
-        CommunicationRepository.GetWorkloadByRtIdAsync(LenderTenantId, PoolRtId).Returns(pool);
+        CommunicationRepository.GetWorkloadByRtIdAsync(LenderTenantId, AdapterPoolRtId).Returns(pool);
         return pool;
     }
 
@@ -238,8 +238,8 @@ internal abstract class LeaseSchedulerServiceTestsBase
                 {
                     LeaseId = Guid.NewGuid().ToString("N"),
                     TenantId = request.BorrowerTenantId,
-                    PoolTenantId = lenderTenantId,
-                    PoolRtId = poolRtId.ToString(),
+                    AdapterPoolTenantId = lenderTenantId,
+                    AdapterPoolRtId = poolRtId.ToString(),
                     AdapterRtId = request.BorrowerAdapterRtId.ToString(),
                     ExecutionId = request.ExecutionId ?? string.Empty,
                     GrantedAtUtc = DateTime.UtcNow,

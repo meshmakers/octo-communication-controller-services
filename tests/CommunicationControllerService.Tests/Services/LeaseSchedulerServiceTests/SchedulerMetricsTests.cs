@@ -63,7 +63,7 @@ internal class SchedulerMetricsTests : LeaseSchedulerServiceTestsBase
 
         // This test instance's own pool only: the instruments are process-wide statics and the suite
         // runs concurrently.
-        return recorded.Where(r => r.Tags.GetValueOrDefault("octo.pool.rt_id") == PoolRtId.ToString())
+        return recorded.Where(r => r.Tags.GetValueOrDefault("octo.pool.rt_id") == AdapterPoolRtId.ToString())
             .ToList();
     }
 

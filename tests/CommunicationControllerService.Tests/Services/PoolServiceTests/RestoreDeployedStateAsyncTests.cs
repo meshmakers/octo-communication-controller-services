@@ -22,7 +22,7 @@ internal class RestoreDeployedStateAsyncTests : PoolServiceTestsBase
     {
         return new RtDeploymentSite
         {
-            RtId = PoolRtId,
+            RtId = DeploymentSiteRtId,
             CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
             Name = name,
             Environment = environment,
@@ -41,14 +41,14 @@ internal class RestoreDeployedStateAsyncTests : PoolServiceTestsBase
         };
     }
 
-    private static IReadOnlyList<OperatorDeployedPoolReportDto> SinglePoolReport(params string[] workloadRtIds)
+    private static IReadOnlyList<OperatorDeployedDeploymentSiteReportDto> SinglePoolReport(params string[] workloadRtIds)
         => new[]
         {
-            new OperatorDeployedPoolReportDto
+            new OperatorDeployedDeploymentSiteReportDto
             {
                 TenantId = TenantId,
-                PoolRtId = PoolRtId.ToString(),
-                PoolName = "pool-a",
+                DeploymentSiteRtId = DeploymentSiteRtId.ToString(),
+                DeploymentSiteName = "pool-a",
                 WorkloadRtIds = workloadRtIds,
             },
         };
@@ -59,7 +59,7 @@ internal class RestoreDeployedStateAsyncTests : PoolServiceTestsBase
         // Operator on first connect after install owns nothing. Don't hit
         // the repository, don't write audit events.
         await PoolService.RestoreDeployedStateAsync(OperatorConnectionId,
-            Array.Empty<OperatorDeployedPoolReportDto>());
+            Array.Empty<OperatorDeployedDeploymentSiteReportDto>());
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs().GetPoolsAsync(Arg.Any<string>());
         await CommunicationEventService.DidNotReceiveWithAnyArgs().StoreInformationEventAsync(
@@ -78,11 +78,11 @@ internal class RestoreDeployedStateAsyncTests : PoolServiceTestsBase
         await PoolService.RestoreDeployedStateAsync(OperatorConnectionId, SinglePoolReport());
 
         await CommunicationRepository.Received(1).SetPoolDeploymentStateAsync(
-            TenantId, PoolRtId, RtDeploymentStateEnum.Deployed);
+            TenantId, DeploymentSiteRtId, RtDeploymentStateEnum.Deployed);
         OperatorConnectionManager.Received(1).TrackDeployedPool(
-            Arg.Is<DeployedPoolDto>(p => p.TenantId == TenantId && p.PoolRtId == PoolRtId.ToString()));
+            Arg.Is<DeployedDeploymentSiteDto>(p => p.TenantId == TenantId && p.DeploymentSiteRtId == DeploymentSiteRtId.ToString()));
         OperatorConnectionManager.Received(1).RegisterPoolForConnection(
-            OperatorConnectionId, TenantId, PoolRtId.ToString());
+            OperatorConnectionId, TenantId, DeploymentSiteRtId.ToString());
         await CommunicationEventService.Received(1).StoreInformationEventAsync(
             TenantId, Arg.Is<string>(s => s.Contains("Deployed") && s.Contains("reverse-sync")),
             Arg.Any<RtEntityId?>());
@@ -101,9 +101,9 @@ internal class RestoreDeployedStateAsyncTests : PoolServiceTestsBase
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs().SetPoolDeploymentStateAsync(
             Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<RtDeploymentStateEnum>());
-        OperatorConnectionManager.Received(1).TrackDeployedPool(Arg.Any<DeployedPoolDto>());
+        OperatorConnectionManager.Received(1).TrackDeployedPool(Arg.Any<DeployedDeploymentSiteDto>());
         OperatorConnectionManager.Received(1).RegisterPoolForConnection(
-            OperatorConnectionId, TenantId, PoolRtId.ToString());
+            OperatorConnectionId, TenantId, DeploymentSiteRtId.ToString());
         await CommunicationEventService.DidNotReceiveWithAnyArgs().StoreInformationEventAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<RtEntityId?>());
     }
@@ -122,7 +122,7 @@ internal class RestoreDeployedStateAsyncTests : PoolServiceTestsBase
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs().SetPoolDeploymentStateAsync(
             Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<RtDeploymentStateEnum>());
-        OperatorConnectionManager.DidNotReceive().TrackDeployedPool(Arg.Any<DeployedPoolDto>());
+        OperatorConnectionManager.DidNotReceive().TrackDeployedPool(Arg.Any<DeployedDeploymentSiteDto>());
         OperatorConnectionManager.DidNotReceive().RegisterPoolForConnection(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>());
     }
@@ -139,7 +139,7 @@ internal class RestoreDeployedStateAsyncTests : PoolServiceTestsBase
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs().SetPoolDeploymentStateAsync(
             Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<RtDeploymentStateEnum>());
-        OperatorConnectionManager.DidNotReceive().TrackDeployedPool(Arg.Any<DeployedPoolDto>());
+        OperatorConnectionManager.DidNotReceive().TrackDeployedPool(Arg.Any<DeployedDeploymentSiteDto>());
     }
 
     [Test]

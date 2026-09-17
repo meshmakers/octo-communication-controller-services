@@ -181,8 +181,8 @@ internal class LeaseService : ILeaseService
         {
             LeaseId = Guid.NewGuid().ToString("N"),
             TenantId = request.BorrowerTenantId,
-            PoolTenantId = lenderTenantId,
-            PoolRtId = poolRtId.ToString(),
+            AdapterPoolTenantId = lenderTenantId,
+            AdapterPoolRtId = poolRtId.ToString(),
             AdapterRtId = borrower.RtId.ToString(),
             // The concrete CK type, not the base Adapter id: Adapter is polymorphic and the member
             // has to rebuild the exact RtEntityId to register under. A null here would mean an
@@ -271,7 +271,7 @@ internal class LeaseService : ILeaseService
         Logger.Info(
             "Granted lease '{LeaseId}' of pool {PoolRtId} (tenant '{PoolTenantId}') to tenant '{BorrowerTenantId}' " +
             "on member '{MemberId}', database '{DatabaseName}' as '{DatabaseUser}', expires {ExpiresAtUtc:O}",
-            lease.LeaseId, lease.PoolRtId, lease.PoolTenantId, lease.TenantId, member.MemberId,
+            lease.LeaseId, lease.AdapterPoolRtId, lease.AdapterPoolTenantId, lease.TenantId, member.MemberId,
             lease.DatabaseName, lease.DatabaseUser, lease.ExpiresAtUtc);
 
         AdapterLeasingMetrics.RecordGranted(lease.TenantId, lenderTenantId, poolRtId.ToString());
@@ -314,7 +314,7 @@ internal class LeaseService : ILeaseService
         // controller's clock, work from the member's; the difference is the per-lease warm-up
         // concept §2.3 exists to make measurable. Recorded BEFORE the outcome is applied, so a
         // repository failure below cannot cost the sample.
-        AdapterLeasingMetrics.RecordReleased(released.TenantId, released.PoolTenantId, released.PoolRtId,
+        AdapterLeasingMetrics.RecordReleased(released.TenantId, released.AdapterPoolTenantId, released.AdapterPoolRtId,
             ReleaseReasonTag(result.Reason), result.Success,
             DateTime.UtcNow - released.GrantedAtUtc,
             result.WorkDurationMs is { } ms ? TimeSpan.FromMilliseconds(ms) : null);
@@ -324,7 +324,7 @@ internal class LeaseService : ILeaseService
         if (result is { Success: false, Reason: not LeaseReleaseReasonDto.Drained })
         {
             await _eventService.StoreErrorEventAsync(released.TenantId,
-                $"A leased execution on adapter pool {released.PoolRtId} of tenant '{released.PoolTenantId}' " +
+                $"A leased execution on adapter pool {released.AdapterPoolRtId} of tenant '{released.AdapterPoolTenantId}' " +
                 $"failed: {result.StatusMessage ?? "no detail reported"}");
         }
 
@@ -363,7 +363,7 @@ internal class LeaseService : ILeaseService
 
         await _eventService.StoreErrorEventAsync(lease.TenantId,
             $"The adapter pool member '{member.MemberId}' holding this tenant's lease " +
-            $"(pool {lease.PoolRtId} of tenant '{lease.PoolTenantId}') disconnected before releasing it. " +
+            $"(pool {lease.AdapterPoolRtId} of tenant '{lease.AdapterPoolTenantId}') disconnected before releasing it. " +
             "Any pipeline execution it was running is interrupted" +
             (requeuedExecutionId is null
                 ? "."
@@ -432,7 +432,7 @@ internal class LeaseService : ILeaseService
         // Counted even when there is no execution behind the lease: a member that died holding a
         // hand-driven lease is the same fault, and a counter that silently skipped those would
         // under-report exactly the mid-lease failures it exists to surface.
-        AdapterLeasingMetrics.RecordInterrupted(lease.TenantId, lease.PoolTenantId, lease.PoolRtId,
+        AdapterLeasingMetrics.RecordInterrupted(lease.TenantId, lease.AdapterPoolTenantId, lease.AdapterPoolRtId,
             interruptReason, DateTime.UtcNow - lease.GrantedAtUtc);
 
         if (string.IsNullOrWhiteSpace(lease.ExecutionId))
@@ -461,7 +461,7 @@ internal class LeaseService : ILeaseService
             await _communicationRepository.EnqueueExecutionAsync(lease.TenantId, retry,
                 interrupted.PipelineRtEntityId, interrupted.AdapterRtEntityId, DateTime.UtcNow);
 
-            AdapterLeasingMetrics.RecordRequeued(lease.TenantId, lease.PoolTenantId, lease.PoolRtId,
+            AdapterLeasingMetrics.RecordRequeued(lease.TenantId, lease.AdapterPoolTenantId, lease.AdapterPoolRtId,
                 interruptReason);
 
             Logger.Info(

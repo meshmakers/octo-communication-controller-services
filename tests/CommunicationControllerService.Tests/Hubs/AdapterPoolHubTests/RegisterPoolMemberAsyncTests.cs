@@ -18,10 +18,10 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Hubs.Adap
 internal class RegisterPoolMemberAsyncTests : AdapterPoolHubTestsBase
 {
     private static PoolMemberRegistrationDto ARegistration(string poolTenantId = LenderTenantId,
-        string poolRtId = PoolRtId, string memberId = MemberId) => new()
+        string poolRtId = AdapterPoolRtId, string memberId = MemberId) => new()
     {
-        PoolTenantId = poolTenantId,
-        PoolRtId = poolRtId,
+        AdapterPoolTenantId = poolTenantId,
+        AdapterPoolRtId = poolRtId,
         MemberId = memberId,
         NodeDescriptors =
         [
@@ -42,7 +42,7 @@ internal class RegisterPoolMemberAsyncTests : AdapterPoolHubTestsBase
         // member ever filled and no controller ever read, and AdapterPoolConnectionManager stored no
         // descriptors at all. A BORROWER's DeployPipeline therefore had nothing to resolve an
         // execution class or a pipeline schema against.
-        var capabilities = ConnectionManager.TryGetPoolCapabilities(LenderTenantId, PoolRtId);
+        var capabilities = ConnectionManager.TryGetPoolCapabilities(LenderTenantId, AdapterPoolRtId);
 
         using var _ = Assert.Multiple();
         await Assert.That(capabilities).IsNotNull();
@@ -61,7 +61,7 @@ internal class RegisterPoolMemberAsyncTests : AdapterPoolHubTestsBase
         await Assert.That(result.Accepted).IsTrue();
         await Assert.That(result.MemberId).IsEqualTo(MemberId);
         await Assert.That(result.HeartbeatIntervalSeconds).IsGreaterThan(0);
-        await Assert.That(ConnectionManager.GetMembers(LenderTenantId, PoolRtId)).Count().IsEqualTo(1);
+        await Assert.That(ConnectionManager.GetMembers(LenderTenantId, AdapterPoolRtId)).Count().IsEqualTo(1);
     }
 
     /// <summary>
@@ -91,7 +91,7 @@ internal class RegisterPoolMemberAsyncTests : AdapterPoolHubTestsBase
 
         await Assert.That(async () => await Hub.RegisterPoolMemberAsync(ARegistration()))
             .Throws<HubException>();
-        await Assert.That(ConnectionManager.GetMembers(LenderTenantId, PoolRtId)).IsEmpty();
+        await Assert.That(ConnectionManager.GetMembers(LenderTenantId, AdapterPoolRtId)).IsEmpty();
     }
 
     /// <summary>
@@ -123,7 +123,7 @@ internal class RegisterPoolMemberAsyncTests : AdapterPoolHubTestsBase
 
         using var _ = Assert.Multiple();
         await Assert.That(result.Accepted).IsTrue();
-        await Assert.That(ConnectionManager.GetMembers(LenderTenantId, PoolRtId)).Count().IsEqualTo(1);
+        await Assert.That(ConnectionManager.GetMembers(LenderTenantId, AdapterPoolRtId)).Count().IsEqualTo(1);
     }
 
     [Test]
@@ -140,11 +140,11 @@ internal class RegisterPoolMemberAsyncTests : AdapterPoolHubTestsBase
     /// <summary>
     ///     A malformed pool reference is refused with a message naming the offending field, in every
     ///     mode — it is not an authorization question. Same rationale as
-    ///     <c>OperatorHub.RegisterPoolAsync</c>: a member cannot act on "'' is not a valid 24 digit
+    ///     <c>OperatorHub.RegisterDeploymentSiteAsync</c>: a member cannot act on "'' is not a valid 24 digit
     ///     hex string" and would retry the same broken configuration forever.
     /// </summary>
     [Test]
-    [Arguments("", PoolRtId)]
+    [Arguments("", AdapterPoolRtId)]
     [Arguments(LenderTenantId, "")]
     [Arguments(LenderTenantId, "not-a-hex-id")]
     public async Task MalformedPoolReference_IsRefused_InEveryMode(string poolTenantId, string poolRtId)
@@ -178,6 +178,6 @@ internal class RegisterPoolMemberAsyncTests : AdapterPoolHubTestsBase
         await Assert.That(result.Accepted).IsFalse();
         await Assert.That(result.StatusMessage).IsNotNull();
         // Not registered: a member this pod accepted would be offered leases it cannot serve.
-        await Assert.That(ConnectionManager.GetMembers(LenderTenantId, PoolRtId)).IsEmpty();
+        await Assert.That(ConnectionManager.GetMembers(LenderTenantId, AdapterPoolRtId)).IsEmpty();
     }
 }

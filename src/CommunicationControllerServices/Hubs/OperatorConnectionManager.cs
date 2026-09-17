@@ -12,7 +12,7 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
     private readonly ConcurrentDictionary<string, bool> _connectedOperators = new();
 
     // Per-connection AutoManagePools mode declared via RegisterOperatorAsync.
-    // Used by OperatorHub.RegisterPoolAsync to reject a pool whose Environment
+    // Used by OperatorHub.RegisterDeploymentSiteAsync to reject a pool whose Environment
     // does not match the calling operator's mode (a Cloud pool claimed by an
     // edge operator, or an Edge pool claimed by the central operator). A
     // missing entry means the operator did not declare a mode (legacy build
@@ -85,7 +85,7 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
         else
         {
             // Legacy operator: leave the entry absent so GetOperatorMode
-            // returns null and OperatorHub.RegisterPoolAsync skips enforcement.
+            // returns null and OperatorHub.RegisterDeploymentSiteAsync skips enforcement.
             _operatorModeByConnection.TryRemove(connectionId, out _);
         }
     }
@@ -116,13 +116,13 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
         }
     }
 
-    public IEnumerable<DeployedPoolDto> GetDeployedPools()
+    public IEnumerable<DeployedDeploymentSiteDto> GetDeployedPools()
     {
         return _deployedPoolsByTenant.SelectMany(tenant =>
-            tenant.Value.Select(pool => new DeployedPoolDto
+            tenant.Value.Select(pool => new DeployedDeploymentSiteDto
             {
                 TenantId = tenant.Key,
-                PoolRtId = pool.Key,
+                DeploymentSiteRtId = pool.Key,
             })).ToArray();
     }
 
@@ -158,14 +158,14 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
             .ToArray();
     }
 
-    public void TrackDeployedPool(DeployedPoolDto pool)
+    public void TrackDeployedPool(DeployedDeploymentSiteDto pool)
     {
         // Mirror NotifyPoolDeployedAsync's tracking write but skip the SignalR
         // fan-out — the operator is reporting state it already owns, no need
         // to echo a PoolDeployedAsync back at it.
         var tenantPools = _deployedPoolsByTenant.GetOrAdd(pool.TenantId,
             _ => new ConcurrentDictionary<string, bool>());
-        tenantPools[pool.PoolRtId] = true;
+        tenantPools[pool.DeploymentSiteRtId] = true;
     }
 
     public void TrackDeployedWorkload(WorkloadUndeployedDto workload)
@@ -177,26 +177,26 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
         tenantWorkloads[workload.WorkloadRtId] = workload;
     }
 
-    public async Task NotifyPoolDeployedAsync(DeployedPoolDto pool)
+    public async Task NotifyPoolDeployedAsync(DeployedDeploymentSiteDto pool)
     {
         // Track regardless of whether any operator is connected — when one
         // connects later, GetDeployedPools() / GetDeployedPoolsForTenant()
         // must still return the pool.
         var tenantPools = _deployedPoolsByTenant.GetOrAdd(pool.TenantId,
             _ => new ConcurrentDictionary<string, bool>());
-        tenantPools[pool.PoolRtId] = true;
+        tenantPools[pool.DeploymentSiteRtId] = true;
 
         if (_connectedOperators.IsEmpty)
         {
             Logger.Debug(
                 "No operators connected, skipping pool-deployed notification for tenant '{TenantId}', pool rtId {PoolRtId}",
-                pool.TenantId, pool.PoolRtId);
+                pool.TenantId, pool.DeploymentSiteRtId);
             return;
         }
 
         Logger.Info(
             "Notifying {Count} operator(s) of pool deployed: tenant '{TenantId}', pool rtId {PoolRtId}",
-            _connectedOperators.Count, pool.TenantId, pool.PoolRtId);
+            _connectedOperators.Count, pool.TenantId, pool.DeploymentSiteRtId);
 
         var connectionIds = _connectedOperators.Keys.ToList();
         foreach (var connectionId in connectionIds)
@@ -204,13 +204,13 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
             try
             {
                 await hubContext.Clients.Client(connectionId)
-                    .SendAsync(nameof(IOperatorHubCallbacks.PoolDeployedAsync), pool);
+                    .SendAsync(nameof(IOperatorHubCallbacks.DeploymentSiteDeployedAsync), pool);
             }
             catch (Exception ex)
             {
                 Logger.Warn(ex,
                     "Failed to notify operator {ConnectionId} of pool deployment for tenant '{TenantId}', pool rtId {PoolRtId}",
-                    connectionId, pool.TenantId, pool.PoolRtId);
+                    connectionId, pool.TenantId, pool.DeploymentSiteRtId);
             }
         }
     }
@@ -244,7 +244,7 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
             try
             {
                 await hubContext.Clients.Client(connectionId)
-                    .SendAsync(nameof(IOperatorHubCallbacks.PoolUndeployedAsync), tenantId, poolRtId);
+                    .SendAsync(nameof(IOperatorHubCallbacks.DeploymentSiteUndeployedAsync), tenantId, poolRtId);
             }
             catch (Exception ex)
             {
@@ -264,7 +264,7 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
         tenantWorkloads[workload.WorkloadRtId] = new WorkloadUndeployedDto
         {
             TenantId = workload.TenantId,
-            PoolRtId = workload.PoolRtId,
+            DeploymentSiteRtId = workload.DeploymentSiteRtId,
             WorkloadRtId = workload.WorkloadRtId,
             WorkloadName = workload.WorkloadName,
             WorkloadType = workload.WorkloadType,
@@ -279,23 +279,23 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
         // edge pool was deployed (the central operator happily ran the
         // helm-install against its own namespace and reported success, which
         // then overwrote the edge operator's failure on the runtime entity).
-        var targetConnections = GetConnectionsForPool(workload.TenantId, workload.PoolRtId);
+        var targetConnections = GetConnectionsForPool(workload.TenantId, workload.DeploymentSiteRtId);
         if (targetConnections.Count == 0)
         {
             // Don't drop the event — the pool may be orphaned only
             // transiently (AB#4371). Queue it for replay when an operator
             // registers the pool.
-            QueuePendingWorkloadNotification(workload.TenantId, workload.PoolRtId,
+            QueuePendingWorkloadNotification(workload.TenantId, workload.DeploymentSiteRtId,
                 workload.WorkloadRtId, workload);
             Logger.Warn(
                 "No operator currently owns pool rtId {PoolRtId} for tenant '{TenantId}'; queueing workload-deployed notification for '{WorkloadName}' until the pool is registered",
-                workload.PoolRtId, workload.TenantId, workload.WorkloadName);
+                workload.DeploymentSiteRtId, workload.TenantId, workload.WorkloadName);
             return;
         }
 
         Logger.Info(
             "Notifying {Count} operator(s) of workload deployed: tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}' (rtId {WorkloadRtId}), chart '{ChartName}:{ChartVersion}'",
-            targetConnections.Count, workload.TenantId, workload.PoolRtId,
+            targetConnections.Count, workload.TenantId, workload.DeploymentSiteRtId,
             workload.WorkloadName, workload.WorkloadRtId, workload.ChartName, workload.ChartVersion);
 
         foreach (var connectionId in targetConnections)
@@ -309,7 +309,7 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
             {
                 Logger.Warn(ex,
                     "Failed to notify operator {ConnectionId} of workload deployment for tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}'",
-                    connectionId, workload.TenantId, workload.PoolRtId, workload.WorkloadName);
+                    connectionId, workload.TenantId, workload.DeploymentSiteRtId, workload.WorkloadName);
             }
         }
     }
@@ -354,24 +354,24 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
         }
 
         // Same pool-scoped routing as NotifyWorkloadDeployedAsync.
-        var targetConnections = GetConnectionsForPool(workload.TenantId, workload.PoolRtId);
+        var targetConnections = GetConnectionsForPool(workload.TenantId, workload.DeploymentSiteRtId);
         if (targetConnections.Count == 0)
         {
             // Don't drop the event (AB#4371) — a dropped undeploy leaves the
             // helm release running forever while the entity says Undeployed.
             // Queue it; last-wins per workload rtId also cancels out a queued
             // deploy for the same workload.
-            QueuePendingWorkloadNotification(workload.TenantId, workload.PoolRtId,
+            QueuePendingWorkloadNotification(workload.TenantId, workload.DeploymentSiteRtId,
                 workload.WorkloadRtId, workload);
             Logger.Warn(
                 "No operator currently owns pool rtId {PoolRtId} for tenant '{TenantId}'; queueing workload-undeployed notification for '{WorkloadName}' until the pool is registered",
-                workload.PoolRtId, workload.TenantId, workload.WorkloadName);
+                workload.DeploymentSiteRtId, workload.TenantId, workload.WorkloadName);
             return;
         }
 
         Logger.Info(
             "Notifying {Count} operator(s) of workload undeployed: tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}' (rtId {WorkloadRtId})",
-            targetConnections.Count, workload.TenantId, workload.PoolRtId,
+            targetConnections.Count, workload.TenantId, workload.DeploymentSiteRtId,
             workload.WorkloadName, workload.WorkloadRtId);
 
         foreach (var connectionId in targetConnections)
@@ -385,7 +385,7 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
             {
                 Logger.Warn(ex,
                     "Failed to notify operator {ConnectionId} of workload undeployment for tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}'",
-                    connectionId, workload.TenantId, workload.PoolRtId, workload.WorkloadName);
+                    connectionId, workload.TenantId, workload.DeploymentSiteRtId, workload.WorkloadName);
             }
         }
     }
@@ -395,7 +395,7 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
         // No tracking-map updates: scaling does not change what is deployed —
         // a hibernated workload keeps its helm release and must still be
         // covered by the tenant-delete cascade.
-        var targetConnections = GetConnectionsForPool(workload.TenantId, workload.PoolRtId);
+        var targetConnections = GetConnectionsForPool(workload.TenantId, workload.DeploymentSiteRtId);
         if (targetConnections.Count == 0)
         {
             // Same AB#4371 rationale as deploy/undeploy: the pool may be
@@ -405,17 +405,17 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
             // deploy/undeploy of the same workload (which the last-wins map
             // would otherwise silently drop); among scales last-wins is
             // exactly right.
-            QueuePendingWorkloadNotification(workload.TenantId, workload.PoolRtId,
+            QueuePendingWorkloadNotification(workload.TenantId, workload.DeploymentSiteRtId,
                 ScalePendingKey(workload.WorkloadRtId), workload);
             Logger.Warn(
                 "No operator currently owns pool rtId {PoolRtId} for tenant '{TenantId}'; queueing workload-scale notification for '{WorkloadName}' (replicas {Replicas}) until the pool is registered",
-                workload.PoolRtId, workload.TenantId, workload.WorkloadName, workload.Replicas);
+                workload.DeploymentSiteRtId, workload.TenantId, workload.WorkloadName, workload.Replicas);
             return;
         }
 
         Logger.Info(
             "Notifying {Count} operator(s) of workload scale: tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}' (rtId {WorkloadRtId}), replicas {Replicas}",
-            targetConnections.Count, workload.TenantId, workload.PoolRtId,
+            targetConnections.Count, workload.TenantId, workload.DeploymentSiteRtId,
             workload.WorkloadName, workload.WorkloadRtId, workload.Replicas);
 
         foreach (var connectionId in targetConnections)
@@ -429,7 +429,7 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
             {
                 Logger.Warn(ex,
                     "Failed to notify operator {ConnectionId} of workload scale for tenant '{TenantId}', pool rtId {PoolRtId}, workload '{WorkloadName}'",
-                    connectionId, workload.TenantId, workload.PoolRtId, workload.WorkloadName);
+                    connectionId, workload.TenantId, workload.DeploymentSiteRtId, workload.WorkloadName);
             }
         }
     }

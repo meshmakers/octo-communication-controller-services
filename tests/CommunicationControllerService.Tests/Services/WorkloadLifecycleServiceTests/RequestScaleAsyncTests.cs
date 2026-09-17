@@ -13,7 +13,7 @@ internal class RequestScaleAsyncTests
 {
     private const string TenantId = "meshtest";
     private const string WorkloadRtId = "66004fda527ac79a03ecedd7";
-    private const string PoolRtId = "65d5c447b420da3fb12381bc";
+    private const string DeploymentSiteRtId = "65d5c447b420da3fb12381bc";
 
     private readonly ICommunicationRepository _repository =
         Substitute.For<ICommunicationRepository>();
@@ -36,7 +36,7 @@ internal class RequestScaleAsyncTests
     {
         var pool = new RtDeploymentSite
         {
-            RtId = new OctoObjectId(PoolRtId),
+            RtId = new OctoObjectId(DeploymentSiteRtId),
             CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
             Name = "cloud-pool",
             Environment = RtEnvironmentEnum.Cloud,
@@ -79,7 +79,7 @@ internal class RequestScaleAsyncTests
 
         await _connectionManager.Received(1).NotifyWorkloadScaleAsync(Arg.Is<ScaleWorkloadDto>(dto =>
             dto.TenantId == TenantId
-            && dto.PoolRtId == PoolRtId
+            && dto.DeploymentSiteRtId == DeploymentSiteRtId
             && dto.WorkloadRtId == WorkloadRtId
             && dto.WorkloadName == "meshtest-adapter"
             && dto.WorkloadType == WorkloadTypeDto.Adapter

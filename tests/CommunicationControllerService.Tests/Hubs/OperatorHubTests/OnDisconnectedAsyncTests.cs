@@ -11,7 +11,7 @@ internal class OnDisconnectedAsyncTests : IDisposable
 {
     private const string TenantId = "meshtest";
     private const string ConnectionId = "conn-1";
-    private const string PoolRtId = "6ad562f3ff7c40ff80275b84";
+    private const string DeploymentSiteRtId = "6ad562f3ff7c40ff80275b84";
 
     private readonly IOperatorConnectionManager _connectionManager =
         Substitute.For<IOperatorConnectionManager>();
@@ -48,13 +48,13 @@ internal class OnDisconnectedAsyncTests : IDisposable
     {
         _shutdownState.IsShuttingDown.Returns(false);
         _connectionManager.RemoveOperator(ConnectionId).Returns(
-            new[] { (TenantId, PoolRtId) });
+            new[] { (TenantId, DeploymentSiteRtId) });
 
         await _hub.OnDisconnectedAsync(exception: null);
 
         await _poolService.Received(1).SetCommunicationStateOfflineAsync(
             TenantId,
-            Arg.Is<OctoObjectId>(id => id.ToString() == PoolRtId),
+            Arg.Is<OctoObjectId>(id => id.ToString() == DeploymentSiteRtId),
             ConnectionId);
     }
 
@@ -69,7 +69,7 @@ internal class OnDisconnectedAsyncTests : IDisposable
         // this pod must not touch CommunicationState here.
         _shutdownState.IsShuttingDown.Returns(true);
         _connectionManager.RemoveOperator(ConnectionId).Returns(
-            new[] { (TenantId, PoolRtId) });
+            new[] { (TenantId, DeploymentSiteRtId) });
 
         await _hub.OnDisconnectedAsync(exception: null);
 

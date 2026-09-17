@@ -13,7 +13,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Hubs;
 internal class AdapterPoolConnectionManagerCapabilitiesTests
 {
     private const string LenderTenantId = "lender";
-    private const string PoolRtId = "6ad562f3ff7c40ff80275b84";
+    private const string AdapterPoolRtId = "6ad562f3ff7c40ff80275b84";
     private const string OtherPoolRtId = "6ad562f3ff7c40ff80275b85";
 
     private readonly AdapterPoolConnectionManager _manager = new();
@@ -24,10 +24,10 @@ internal class AdapterPoolConnectionManagerCapabilitiesTests
     [Test]
     public async Task ARegisteredMembersDescriptorsAnswerForItsPool()
     {
-        _manager.RegisterMember("conn-1", "octo-pool-0", LenderTenantId, PoolRtId,
+        _manager.RegisterMember("conn-1", "octo-pool-0", LenderTenantId, AdapterPoolRtId,
             [Descriptor("FromCustomThing")], """{"$id":"pool-schema"}""");
 
-        var capabilities = _manager.TryGetPoolCapabilities(LenderTenantId, PoolRtId);
+        var capabilities = _manager.TryGetPoolCapabilities(LenderTenantId, AdapterPoolRtId);
 
         using var _ = Assert.Multiple();
         await Assert.That(capabilities).IsNotNull();
@@ -45,31 +45,31 @@ internal class AdapterPoolConnectionManagerCapabilitiesTests
         // Not a formality: the borrower's LentFromPoolRtId is the only thing that decides which
         // process will run its pipelines, and a manager that answered pool-agnostically would
         // validate a leased pipeline against an unrelated tenant's SDK.
-        await Assert.That(_manager.TryGetPoolCapabilities(LenderTenantId, PoolRtId)).IsNull();
+        await Assert.That(_manager.TryGetPoolCapabilities(LenderTenantId, AdapterPoolRtId)).IsNull();
     }
 
     [Test]
     public async Task AMemberThatReportedNoDescriptorsDoesNotAnswer()
     {
-        _manager.RegisterMember("conn-1", "octo-pool-0", LenderTenantId, PoolRtId, [], null);
+        _manager.RegisterMember("conn-1", "octo-pool-0", LenderTenantId, AdapterPoolRtId, [], null);
 
         // "Registered but silent" must read as "nothing known", so the caller degrades to its
         // name-based fallback instead of classifying against an empty set — which would look like
         // "this pool can run nothing".
-        await Assert.That(_manager.TryGetPoolCapabilities(LenderTenantId, PoolRtId)).IsNull();
+        await Assert.That(_manager.TryGetPoolCapabilities(LenderTenantId, AdapterPoolRtId)).IsNull();
     }
 
     [Test]
     public async Task ADrainingMemberLosesToALiveOne()
     {
         // During a rolling upgrade the draining member is the OUTGOING version.
-        _manager.RegisterMember("conn-old", "aaa-old-member", LenderTenantId, PoolRtId,
+        _manager.RegisterMember("conn-old", "aaa-old-member", LenderTenantId, AdapterPoolRtId,
             [Descriptor("OldTrigger")], "{}");
-        _manager.RegisterMember("conn-new", "zzz-new-member", LenderTenantId, PoolRtId,
+        _manager.RegisterMember("conn-new", "zzz-new-member", LenderTenantId, AdapterPoolRtId,
             [Descriptor("NewTrigger")], "{}");
         _manager.MarkDraining("conn-old");
 
-        var capabilities = _manager.TryGetPoolCapabilities(LenderTenantId, PoolRtId);
+        var capabilities = _manager.TryGetPoolCapabilities(LenderTenantId, AdapterPoolRtId);
 
         // Ordinal order alone would have picked "aaa-old-member".
         await Assert.That(capabilities!.MemberId).IsEqualTo("zzz-new-member");
@@ -78,13 +78,13 @@ internal class AdapterPoolConnectionManagerCapabilitiesTests
     [Test]
     public async Task TheAnswerIsStableAcrossCalls()
     {
-        _manager.RegisterMember("conn-1", "octo-pool-2", LenderTenantId, PoolRtId, [Descriptor("A")], "{}");
-        _manager.RegisterMember("conn-2", "octo-pool-0", LenderTenantId, PoolRtId, [Descriptor("B")], "{}");
-        _manager.RegisterMember("conn-3", "octo-pool-1", LenderTenantId, PoolRtId, [Descriptor("C")], "{}");
+        _manager.RegisterMember("conn-1", "octo-pool-2", LenderTenantId, AdapterPoolRtId, [Descriptor("A")], "{}");
+        _manager.RegisterMember("conn-2", "octo-pool-0", LenderTenantId, AdapterPoolRtId, [Descriptor("B")], "{}");
+        _manager.RegisterMember("conn-3", "octo-pool-1", LenderTenantId, AdapterPoolRtId, [Descriptor("C")], "{}");
 
         // A pipeline's persisted execution class must not depend on dictionary enumeration order.
-        var first = _manager.TryGetPoolCapabilities(LenderTenantId, PoolRtId);
-        var second = _manager.TryGetPoolCapabilities(LenderTenantId, PoolRtId);
+        var first = _manager.TryGetPoolCapabilities(LenderTenantId, AdapterPoolRtId);
+        var second = _manager.TryGetPoolCapabilities(LenderTenantId, AdapterPoolRtId);
 
         using var _ = Assert.Multiple();
         await Assert.That(first!.MemberId).IsEqualTo("octo-pool-0");

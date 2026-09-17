@@ -29,7 +29,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 internal class DeployPipelineLeasedTests : AdapterServiceTestsBase
 {
     private const string LenderTenantId = "lender";
-    private const string PoolRtId = "6ad562f3ff7c40ff80275b84";
+    private const string AdapterPoolRtId = "6ad562f3ff7c40ff80275b84";
     private const string MemberConnectionId = "conn-pool-member-1";
     private const string MemberId = "octo-pool-0";
 
@@ -84,12 +84,12 @@ internal class DeployPipelineLeasedTests : AdapterServiceTestsBase
     private void GivenPoolMember(IReadOnlyList<NodeDescriptorDto>? descriptors,
         string? pipelineSchemaJson = PoolPipelineSchemaJson)
     {
-        PoolConnectionManager.RegisterMember(MemberConnectionId, MemberId, LenderTenantId, PoolRtId,
+        PoolConnectionManager.RegisterMember(MemberConnectionId, MemberId, LenderTenantId, AdapterPoolRtId,
             descriptors, pipelineSchemaJson);
     }
 
     private (RtAdapter Adapter, RtPipeline Pipeline) ArrangeLeasedPipeline(string? pipelineDefinition,
-        string? lentFromTenantId = LenderTenantId, string? lentFromPoolRtId = PoolRtId)
+        string? lentFromTenantId = LenderTenantId, string? lentFromPoolRtId = AdapterPoolRtId)
     {
         var rtAdapter = RtEntityCreator.CreateAdapter();
         rtAdapter.Name = "borrowed-adapter";

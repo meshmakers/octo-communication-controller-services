@@ -17,10 +17,10 @@ internal class SetCommunicationStateOfflineAsyncTests : PoolServiceTestsBase
         GivenTenantInCache();
         AddPoolToTenant();
 
-        await PoolService.SetCommunicationStateOfflineAsync(TenantId, PoolRtId, ConnectionId);
+        await PoolService.SetCommunicationStateOfflineAsync(TenantId, DeploymentSiteRtId, ConnectionId);
 
         await CommunicationRepository.Received(1)
-            .SetPoolCommunicationStateAsync(TenantId, PoolRtId, RtCommunicationStateEnum.Offline);
+            .SetPoolCommunicationStateAsync(TenantId, DeploymentSiteRtId, RtCommunicationStateEnum.Offline);
     }
 
     [Test]
@@ -37,7 +37,7 @@ internal class SetCommunicationStateOfflineAsyncTests : PoolServiceTestsBase
         GivenTenantInCache();
         AddPoolToTenant(connectionId: "new-connection-id");
 
-        await PoolService.SetCommunicationStateOfflineAsync(TenantId, PoolRtId,
+        await PoolService.SetCommunicationStateOfflineAsync(TenantId, DeploymentSiteRtId,
             "stale-old-connection-id");
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
@@ -50,7 +50,7 @@ internal class SetCommunicationStateOfflineAsyncTests : PoolServiceTestsBase
     {
         GivenTenantNotInCache();
 
-        await PoolService.SetCommunicationStateOfflineAsync(TenantId, PoolRtId, ConnectionId);
+        await PoolService.SetCommunicationStateOfflineAsync(TenantId, DeploymentSiteRtId, ConnectionId);
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
             .SetPoolCommunicationStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
@@ -63,7 +63,7 @@ internal class SetCommunicationStateOfflineAsyncTests : PoolServiceTestsBase
         GivenTenantInCache();
         // Don't add the pool — PoolsById lookup must miss and the call must no-op.
 
-        await PoolService.SetCommunicationStateOfflineAsync(TenantId, PoolRtId, ConnectionId);
+        await PoolService.SetCommunicationStateOfflineAsync(TenantId, DeploymentSiteRtId, ConnectionId);
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
             .SetPoolCommunicationStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
@@ -87,10 +87,10 @@ internal class SetCommunicationStateOfflineAsyncTests : PoolServiceTestsBase
         GivenTenantInCache();
         AddPoolToTenant();
         OperatorConnectionManager
-            .GetConnectionsForPool(TenantId, PoolRtId.ToString())
+            .GetConnectionsForPool(TenantId, DeploymentSiteRtId.ToString())
             .Returns(new[] { "surviving-connection-id" });
 
-        await PoolService.SetCommunicationStateOfflineAsync(TenantId, PoolRtId,
+        await PoolService.SetCommunicationStateOfflineAsync(TenantId, DeploymentSiteRtId,
             "disconnecting-connection-id");
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
@@ -110,10 +110,10 @@ internal class SetCommunicationStateOfflineAsyncTests : PoolServiceTestsBase
         GivenTenantInCache();
         var pool = AddPoolToTenant(connectionId: "disconnecting-connection-id");
         OperatorConnectionManager
-            .GetConnectionsForPool(TenantId, PoolRtId.ToString())
+            .GetConnectionsForPool(TenantId, DeploymentSiteRtId.ToString())
             .Returns(new[] { "surviving-connection-id" });
 
-        await PoolService.SetCommunicationStateOfflineAsync(TenantId, PoolRtId,
+        await PoolService.SetCommunicationStateOfflineAsync(TenantId, DeploymentSiteRtId,
             "disconnecting-connection-id");
 
         await Assert.That(pool.ConnectionId).IsEqualTo("surviving-connection-id");

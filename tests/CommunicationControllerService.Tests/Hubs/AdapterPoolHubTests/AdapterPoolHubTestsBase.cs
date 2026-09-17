@@ -20,7 +20,7 @@ internal abstract class AdapterPoolHubTestsBase : IDisposable
     protected const string ConnectionId = "conn-pool-member-1";
     protected const string LenderTenantId = "lender";
     protected const string BorrowerTenantId = "borrower";
-    protected const string PoolRtId = "6ad562f3ff7c40ff80275b84";
+    protected const string AdapterPoolRtId = "6ad562f3ff7c40ff80275b84";
     protected const string MemberId = "octo-pool-0";
 
     protected readonly IAdapterPoolConnectionManager ConnectionManager = new AdapterPoolConnectionManager();

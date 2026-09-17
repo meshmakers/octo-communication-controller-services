@@ -52,9 +52,9 @@ internal class ReportDeployedStateAsyncTests : IDisposable
     {
         // AutoManagePools=true → Cloud operator → allowed.
         _connectionManager.GetOperatorMode(ConnectionId).Returns(true);
-        var reports = new List<OperatorDeployedPoolReportDto>
+        var reports = new List<OperatorDeployedDeploymentSiteReportDto>
         {
-            new() { TenantId = "tenant-a", PoolRtId = "6ad562f3ff7c40ff80275b84", PoolName = "pool-a" },
+            new() { TenantId = "tenant-a", DeploymentSiteRtId = "6ad562f3ff7c40ff80275b84", DeploymentSiteName = "pool-a" },
         };
 
         await _hub.ReportDeployedStateAsync(reports);
@@ -72,9 +72,9 @@ internal class ReportDeployedStateAsyncTests : IDisposable
         // Cloud pools, so reverse-syncing from an edge node would falsely revive
         // entities that don't actually exist on the central cluster.
         _connectionManager.GetOperatorMode(ConnectionId).Returns(false);
-        var reports = new List<OperatorDeployedPoolReportDto>
+        var reports = new List<OperatorDeployedDeploymentSiteReportDto>
         {
-            new() { TenantId = "tenant-a", PoolRtId = "6ad562f3ff7c40ff80275b84", PoolName = "pool-a" },
+            new() { TenantId = "tenant-a", DeploymentSiteRtId = "6ad562f3ff7c40ff80275b84", DeploymentSiteName = "pool-a" },
         };
 
         var ex = await Assert.ThrowsAsync<HubException>(
@@ -83,7 +83,7 @@ internal class ReportDeployedStateAsyncTests : IDisposable
         await Assert.That(ex!.Message).Contains("edge");
         await Assert.That(ex!.Message).Contains("AutoManagePools");
         await _poolService.DidNotReceiveWithAnyArgs().RestoreDeployedStateAsync(
-            Arg.Any<string>(), Arg.Any<IReadOnlyList<OperatorDeployedPoolReportDto>>());
+            Arg.Any<string>(), Arg.Any<IReadOnlyList<OperatorDeployedDeploymentSiteReportDto>>());
         await _eventService.Received(1).StoreErrorEventAsync(
             string.Empty, Arg.Is<string>(s => s.Contains("edge")));
     }
@@ -95,9 +95,9 @@ internal class ReportDeployedStateAsyncTests : IDisposable
         // know if it's central or edge, so reject conservatively. This forces
         // operator builds to be upgraded before they can use the reverse-sync.
         _connectionManager.GetOperatorMode(ConnectionId).Returns((bool?)null);
-        var reports = new List<OperatorDeployedPoolReportDto>
+        var reports = new List<OperatorDeployedDeploymentSiteReportDto>
         {
-            new() { TenantId = "tenant-a", PoolRtId = "6ad562f3ff7c40ff80275b84", PoolName = "pool-a" },
+            new() { TenantId = "tenant-a", DeploymentSiteRtId = "6ad562f3ff7c40ff80275b84", DeploymentSiteName = "pool-a" },
         };
 
         var ex = await Assert.ThrowsAsync<HubException>(
@@ -105,7 +105,7 @@ internal class ReportDeployedStateAsyncTests : IDisposable
 
         await Assert.That(ex!.Message).Contains("legacy");
         await _poolService.DidNotReceiveWithAnyArgs().RestoreDeployedStateAsync(
-            Arg.Any<string>(), Arg.Any<IReadOnlyList<OperatorDeployedPoolReportDto>>());
+            Arg.Any<string>(), Arg.Any<IReadOnlyList<OperatorDeployedDeploymentSiteReportDto>>());
     }
 
     [Test]
@@ -115,7 +115,7 @@ internal class ReportDeployedStateAsyncTests : IDisposable
         // still be allowed to call this — the PoolService treats an empty
         // list as a logged no-op. Pin that we don't shortcut at the hub.
         _connectionManager.GetOperatorMode(ConnectionId).Returns(true);
-        var reports = new List<OperatorDeployedPoolReportDto>();
+        var reports = new List<OperatorDeployedDeploymentSiteReportDto>();
 
         await _hub.ReportDeployedStateAsync(reports);
 

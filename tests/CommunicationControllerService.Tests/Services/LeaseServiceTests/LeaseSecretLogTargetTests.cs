@@ -41,7 +41,7 @@ internal class LeaseSecretLogTargetTests : LeaseServiceTestsBase
         NLog.LogManager.Configuration = probeConfiguration;
         try
         {
-            var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1"));
+            var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-1"));
 
             using var _ = Assert.Multiple();
             // The value really did travel — otherwise the probe proves nothing.
@@ -72,7 +72,7 @@ internal class LeaseSecretLogTargetTests : LeaseServiceTestsBase
     public async Task RenderingTheLeaseObjectItselfDoesNotRevealTheSecret()
     {
         ArrangeGrantableLease();
-        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
         var lease = CapturePushedLease();
 
         var memoryTarget = new NLog.Targets.MemoryTarget("lease-tostring-probe")
@@ -129,7 +129,7 @@ internal class LeaseSecretLogTargetTests : LeaseServiceTestsBase
         NLog.LogManager.Configuration = probeConfiguration;
         try
         {
-            var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, AWorkRequest());
+            var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequest());
             var lease = CapturePushedLease();
 
             using var _ = Assert.Multiple();
@@ -173,7 +173,7 @@ internal class LeaseSecretLogTargetTests : LeaseServiceTestsBase
     {
         ArrangeGrantableLease();
         ArrangeProjectablePipeline();
-        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, AWorkRequest());
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequest());
         var lease = CapturePushedLease();
 
         var memoryTarget = new NLog.Targets.MemoryTarget("lease-work-tostring-probe") { Layout = "${message}" };
@@ -235,7 +235,7 @@ internal class LeaseSecretLogTargetTests : LeaseServiceTestsBase
         NLog.LogManager.Configuration = probeConfiguration;
         try
         {
-            var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest("exec-1"));
+            var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-1"));
             var lease = CapturePushedLease();
 
             using var _ = Assert.Multiple();
@@ -272,7 +272,7 @@ internal class LeaseSecretLogTargetTests : LeaseServiceTestsBase
     public async Task RenderingTheLeaseObjectItselfDoesNotRevealTheDatabasePassword()
     {
         ArrangeGrantableLease();
-        await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
         var lease = CapturePushedLease();
 
         var memoryTarget = new NLog.Targets.MemoryTarget("lease-db-tostring-probe") { Layout = "${message}" };

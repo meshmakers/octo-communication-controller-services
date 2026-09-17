@@ -11,7 +11,7 @@ internal class ReleaseAndDisconnectTests : LeaseServiceTestsBase
     private async Task<string> GrantAsync()
     {
         ArrangeGrantableLease();
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, PoolRtId, ARequest());
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
         return result.LeaseId!;
     }
 

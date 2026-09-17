@@ -11,16 +11,16 @@ internal class OperatorConnectionManagerTests
     private const string TenantA = "tenant-a";
     private const string TenantB = "tenant-b";
     // 24-char lowercase hex — shape of an actual OctoObjectId.
-    private const string PoolRtIdX = "65d5c447b420da3fb12381bc";
-    private const string PoolRtIdY = "67e10c0bfe3e19891bbfd261";
+    private const string DeploymentSiteRtIdX = "65d5c447b420da3fb12381bc";
+    private const string DeploymentSiteRtIdY = "67e10c0bfe3e19891bbfd261";
     private const string WorkloadRtId1 = "667ac108ef60ca86e830e47e";
     private const string WorkloadRtId2 = "686e0f17196fcd3c42ed8c77";
 
     private static OperatorConnectionManager CreateSut() =>
         new(Substitute.For<IHubContext<OperatorHub>>());
 
-    private static DeployedPoolDto PoolDto(string tenantId, string poolRtId) =>
-        new() { TenantId = tenantId, PoolRtId = poolRtId };
+    private static DeployedDeploymentSiteDto PoolDto(string tenantId, string poolRtId) =>
+        new() { TenantId = tenantId, DeploymentSiteRtId = poolRtId };
 
     [Test]
     public async Task GetDeployedPoolsForTenant_NeverNotified_ReturnsEmpty()
@@ -38,11 +38,11 @@ internal class OperatorConnectionManagerTests
     {
         var sut = CreateSut();
 
-        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, PoolRtIdX));
+        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
 
         var pools = sut.GetDeployedPoolsForTenant(TenantA);
         await Assert.That(pools.Count).IsEqualTo(1);
-        await Assert.That(pools.Contains(PoolRtIdX)).IsTrue();
+        await Assert.That(pools.Contains(DeploymentSiteRtIdX)).IsTrue();
     }
 
     [Test]
@@ -50,8 +50,8 @@ internal class OperatorConnectionManagerTests
     {
         var sut = CreateSut();
 
-        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, PoolRtIdX));
-        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, PoolRtIdX));
+        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
+        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
 
         await Assert.That(sut.GetDeployedPoolsForTenant(TenantA).Count).IsEqualTo(1);
     }
@@ -60,9 +60,9 @@ internal class OperatorConnectionManagerTests
     public async Task NotifyPoolUndeployedAsync_RemovesTrackedPool()
     {
         var sut = CreateSut();
-        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, PoolRtIdX));
+        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
 
-        await sut.NotifyPoolUndeployedAsync(TenantA, PoolRtIdX);
+        await sut.NotifyPoolUndeployedAsync(TenantA, DeploymentSiteRtIdX);
 
         await Assert.That(sut.GetDeployedPoolsForTenant(TenantA).Count).IsEqualTo(0);
     }
@@ -72,7 +72,7 @@ internal class OperatorConnectionManagerTests
     {
         var sut = CreateSut();
 
-        await sut.NotifyPoolUndeployedAsync(TenantA, PoolRtIdX);
+        await sut.NotifyPoolUndeployedAsync(TenantA, DeploymentSiteRtIdX);
 
         await Assert.That(sut.GetDeployedPoolsForTenant(TenantA).Count).IsEqualTo(0);
     }
@@ -81,39 +81,39 @@ internal class OperatorConnectionManagerTests
     public async Task GetDeployedPoolsForTenant_IsolatesTenants()
     {
         var sut = CreateSut();
-        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, PoolRtIdX));
-        await sut.NotifyPoolDeployedAsync(PoolDto(TenantB, PoolRtIdY));
+        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
+        await sut.NotifyPoolDeployedAsync(PoolDto(TenantB, DeploymentSiteRtIdY));
 
         var poolsA = sut.GetDeployedPoolsForTenant(TenantA);
         var poolsB = sut.GetDeployedPoolsForTenant(TenantB);
 
-        await Assert.That(poolsA.Contains(PoolRtIdX)).IsTrue();
-        await Assert.That(poolsA.Contains(PoolRtIdY)).IsFalse();
-        await Assert.That(poolsB.Contains(PoolRtIdY)).IsTrue();
-        await Assert.That(poolsB.Contains(PoolRtIdX)).IsFalse();
+        await Assert.That(poolsA.Contains(DeploymentSiteRtIdX)).IsTrue();
+        await Assert.That(poolsA.Contains(DeploymentSiteRtIdY)).IsFalse();
+        await Assert.That(poolsB.Contains(DeploymentSiteRtIdY)).IsTrue();
+        await Assert.That(poolsB.Contains(DeploymentSiteRtIdX)).IsFalse();
     }
 
     [Test]
     public async Task GetDeployedPools_AcrossTenants_ReturnsAll()
     {
         var sut = CreateSut();
-        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, PoolRtIdX));
-        await sut.NotifyPoolDeployedAsync(PoolDto(TenantB, PoolRtIdY));
+        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
+        await sut.NotifyPoolDeployedAsync(PoolDto(TenantB, DeploymentSiteRtIdY));
 
         var all = sut.GetDeployedPools().ToArray();
 
         await Assert.That(all.Length).IsEqualTo(2);
-        await Assert.That(all.Any(p => p.TenantId == TenantA && p.PoolRtId == PoolRtIdX)).IsTrue();
-        await Assert.That(all.Any(p => p.TenantId == TenantB && p.PoolRtId == PoolRtIdY)).IsTrue();
+        await Assert.That(all.Any(p => p.TenantId == TenantA && p.DeploymentSiteRtId == DeploymentSiteRtIdX)).IsTrue();
+        await Assert.That(all.Any(p => p.TenantId == TenantB && p.DeploymentSiteRtId == DeploymentSiteRtIdY)).IsTrue();
     }
 
     [Test]
     public async Task NotifyPoolUndeployedAsync_LastPoolForTenant_RemovesTenantBucket()
     {
         var sut = CreateSut();
-        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, PoolRtIdX));
+        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
 
-        await sut.NotifyPoolUndeployedAsync(TenantA, PoolRtIdX);
+        await sut.NotifyPoolUndeployedAsync(TenantA, DeploymentSiteRtIdX);
 
         await Assert.That(sut.GetDeployedPools()).IsEmpty();
         await Assert.That(sut.GetDeployedPoolsForTenant(TenantA)).IsEmpty();
@@ -126,7 +126,7 @@ internal class OperatorConnectionManagerTests
         new()
         {
             TenantId = tenantId,
-            PoolRtId = poolRtId,
+            DeploymentSiteRtId = poolRtId,
             WorkloadRtId = workloadRtId,
             WorkloadName = workloadName,
             WorkloadType = type,
@@ -139,11 +139,11 @@ internal class OperatorConnectionManagerTests
     {
         var sut = CreateSut();
 
-        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, PoolRtIdX, WorkloadRtId1, "wl-1"));
+        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, DeploymentSiteRtIdX, WorkloadRtId1, "wl-1"));
 
         var tracked = sut.GetDeployedWorkloadsForTenant(TenantA);
         await Assert.That(tracked.Count).IsEqualTo(1);
-        await Assert.That(tracked.Any(w => w.PoolRtId == PoolRtIdX && w.WorkloadRtId == WorkloadRtId1)).IsTrue();
+        await Assert.That(tracked.Any(w => w.DeploymentSiteRtId == DeploymentSiteRtIdX && w.WorkloadRtId == WorkloadRtId1)).IsTrue();
     }
 
     [Test]
@@ -151,7 +151,7 @@ internal class OperatorConnectionManagerTests
     {
         var sut = CreateSut();
 
-        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, PoolRtIdX,
+        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, DeploymentSiteRtIdX,
             WorkloadRtId1, "app-1", WorkloadTypeDto.Application));
 
         var tracked = sut.GetDeployedWorkloadsForTenant(TenantA);
@@ -164,8 +164,8 @@ internal class OperatorConnectionManagerTests
         // Same workload RtId should overwrite (idempotent re-deploy).
         var sut = CreateSut();
 
-        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, PoolRtIdX, WorkloadRtId1, "wl-1"));
-        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, PoolRtIdX, WorkloadRtId1, "wl-1"));
+        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, DeploymentSiteRtIdX, WorkloadRtId1, "wl-1"));
+        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, DeploymentSiteRtIdX, WorkloadRtId1, "wl-1"));
 
         await Assert.That(sut.GetDeployedWorkloadsForTenant(TenantA).Count).IsEqualTo(1);
     }
@@ -174,12 +174,12 @@ internal class OperatorConnectionManagerTests
     public async Task NotifyWorkloadUndeployedAsync_RemovesTrackedWorkload()
     {
         var sut = CreateSut();
-        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, PoolRtIdX, WorkloadRtId1, "wl-1"));
+        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, DeploymentSiteRtIdX, WorkloadRtId1, "wl-1"));
 
         await sut.NotifyWorkloadUndeployedAsync(new WorkloadUndeployedDto
         {
             TenantId = TenantA,
-            PoolRtId = PoolRtIdX,
+            DeploymentSiteRtId = DeploymentSiteRtIdX,
             WorkloadRtId = WorkloadRtId1,
             WorkloadName = "wl-1",
             WorkloadType = WorkloadTypeDto.Adapter,
@@ -192,8 +192,8 @@ internal class OperatorConnectionManagerTests
     public async Task GetDeployedWorkloadsForTenant_IsolatesTenants()
     {
         var sut = CreateSut();
-        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, PoolRtIdX, WorkloadRtId1, "wl-1"));
-        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantB, PoolRtIdY, WorkloadRtId2, "wl-2"));
+        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, DeploymentSiteRtIdX, WorkloadRtId1, "wl-1"));
+        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantB, DeploymentSiteRtIdY, WorkloadRtId2, "wl-2"));
 
         var trackedA = sut.GetDeployedWorkloadsForTenant(TenantA);
         var trackedB = sut.GetDeployedWorkloadsForTenant(TenantB);
@@ -208,12 +208,12 @@ internal class OperatorConnectionManagerTests
     public async Task NotifyWorkloadUndeployedAsync_LastWorkloadForTenant_RemovesTenantBucket()
     {
         var sut = CreateSut();
-        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, PoolRtIdX, WorkloadRtId1, "wl-1"));
+        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, DeploymentSiteRtIdX, WorkloadRtId1, "wl-1"));
 
         await sut.NotifyWorkloadUndeployedAsync(new WorkloadUndeployedDto
         {
             TenantId = TenantA,
-            PoolRtId = PoolRtIdX,
+            DeploymentSiteRtId = DeploymentSiteRtIdX,
             WorkloadRtId = WorkloadRtId1,
             WorkloadName = "wl-1",
             WorkloadType = WorkloadTypeDto.Adapter,
@@ -303,7 +303,7 @@ internal class OperatorConnectionManagerTests
         await sut.NotifyWorkloadUndeployedAsync(new WorkloadUndeployedDto
         {
             TenantId = TenantA,
-            PoolRtId = EdgePoolRtId,
+            DeploymentSiteRtId = EdgePoolRtId,
             WorkloadRtId = WorkloadRtId1,
             WorkloadName = "modbus-pv",
             WorkloadType = WorkloadTypeDto.Adapter,
@@ -325,7 +325,7 @@ internal class OperatorConnectionManagerTests
         // (e.g. the operator disconnected between deploy and cascade).
         var sut = CreateSut();
 
-        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, PoolRtIdX, WorkloadRtId1, "wl-1"));
+        await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, DeploymentSiteRtIdX, WorkloadRtId1, "wl-1"));
 
         var tracked = sut.GetDeployedWorkloadsForTenant(TenantA);
         await Assert.That(tracked.Count).IsEqualTo(1);
@@ -395,7 +395,7 @@ internal class OperatorConnectionManagerTests
         new()
         {
             TenantId = tenantId,
-            PoolRtId = poolRtId,
+            DeploymentSiteRtId = poolRtId,
             WorkloadRtId = workloadRtId,
             WorkloadName = workloadName,
             WorkloadType = WorkloadTypeDto.Adapter,
@@ -540,7 +540,7 @@ internal class OperatorConnectionManagerTests
         new()
         {
             TenantId = tenantId,
-            PoolRtId = poolRtId,
+            DeploymentSiteRtId = poolRtId,
             WorkloadRtId = workloadRtId,
             WorkloadName = workloadName,
             WorkloadType = WorkloadTypeDto.Adapter,

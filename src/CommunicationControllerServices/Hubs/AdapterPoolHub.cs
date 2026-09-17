@@ -125,23 +125,23 @@ internal class AdapterPoolHub : Hub, IAdapterPoolHub
             };
         }
 
-        if (string.IsNullOrWhiteSpace(registration.PoolTenantId) ||
-            !OctoObjectId.TryParse(registration.PoolRtId, out _))
+        if (string.IsNullOrWhiteSpace(registration.AdapterPoolTenantId) ||
+            !OctoObjectId.TryParse(registration.AdapterPoolRtId, out _))
         {
             // A typed refusal naming the offending field, for the same reason
-            // OperatorHub.RegisterPoolAsync validates its rtId up front: the member cannot act on
+            // OperatorHub.RegisterDeploymentSiteAsync validates its rtId up front: the member cannot act on
             // "'' is not a valid 24 digit hex string" and would simply retry the same broken
             // configuration forever.
             Logger.Warn(
                 "Rejecting a pool-member registration on connection '{ConnectionId}': pool tenant " +
                 "'{PoolTenantId}' / pool rtId '{PoolRtId}' is not a usable pair",
-                connectionId, registration.PoolTenantId, registration.PoolRtId);
+                connectionId, registration.AdapterPoolTenantId, registration.AdapterPoolRtId);
             throw new HubException(
-                $"Invalid pool member registration: PoolTenantId '{registration.PoolTenantId}' and PoolRtId " +
-                $"'{registration.PoolRtId}' must name a tenant and a 24-character hex ObjectId.");
+                $"Invalid pool member registration: AdapterPoolTenantId '{registration.AdapterPoolTenantId}' and PoolRtId " +
+                $"'{registration.AdapterPoolRtId}' must name a tenant and a 24-character hex ObjectId.");
         }
 
-        var refusal = CheckConnectionTenantBinding(registration.PoolTenantId);
+        var refusal = CheckConnectionTenantBinding(registration.AdapterPoolTenantId);
         if (refusal != null)
         {
             if (_authorizationOptions.Value.Mode == AdapterPoolHubAuthorizationMode.Enforce)
@@ -149,8 +149,8 @@ internal class AdapterPoolHub : Hub, IAdapterPoolHub
                 Logger.Warn(
                     "Refusing a pool-member registration on connection '{ConnectionId}': {Reason}",
                     connectionId, refusal);
-                await _eventService.StoreErrorEventAsync(registration.PoolTenantId,
-                    $"Refused a pool-member registration for pool {registration.PoolRtId}: {refusal}");
+                await _eventService.StoreErrorEventAsync(registration.AdapterPoolTenantId,
+                    $"Refused a pool-member registration for pool {registration.AdapterPoolRtId}: {refusal}");
                 throw new HubException($"Pool member registration refused: {refusal}.");
             }
 
@@ -172,8 +172,8 @@ internal class AdapterPoolHub : Hub, IAdapterPoolHub
         // AB#4924: the descriptors travel with the registration and are stored per pool, because a
         // BORROWER's DeployPipeline has to ask "which nodes can this pool run" — its own Leased
         // adapter has no process, and therefore no descriptors, of its own.
-        _connectionManager.RegisterMember(connectionId, memberId, registration.PoolTenantId,
-            registration.PoolRtId, registration.NodeDescriptors, registration.PipelineSchemaJson);
+        _connectionManager.RegisterMember(connectionId, memberId, registration.AdapterPoolTenantId,
+            registration.AdapterPoolRtId, registration.NodeDescriptors, registration.PipelineSchemaJson);
 
         return new PoolMemberRegistrationResultDto
         {
