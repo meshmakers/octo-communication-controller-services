@@ -35,10 +35,12 @@ description: |
       navigation would simply return nothing, and no error would be raised anywhere. The
       transform did not exist in the CK engine and was added for this migration.
 
-  🔴 The seeded entity keeps rtWellKnownName "CommunicationPool". That name is IDENTITY,
-  not display text: the service-managed blueprints re-apply against it, and renaming it
-  here while the blueprint looked for the new name would create a SECOND deployment site
-  on every tenant and silently orphan the adapters attached to the first one.
+  🔴 The seeded entity's rtWellKnownName is renamed too, in step 3. That name is IDENTITY,
+  not display text: the service-managed blueprints re-apply against it. Renaming it in the
+  seed ALONE would create a SECOND deployment site on every tenant and silently orphan the
+  adapters attached to the first — so the seed change and the data change ship together, in
+  this migration. The step needed a new CK engine transform, SetWellKnownName, because the
+  well-known name is a field on the entity rather than a CK attribute.
 
 steps:
   - stepId: migrate-pool-to-deployment-site
@@ -75,6 +77,67 @@ steps:
       targetAssociationRoleId: System.Communication/Hosts
     # Idempotent by construction — the rewrite matches only edges that still carry the OLD
     # role id, so a retry after a partial failure finishes the job rather than double-applying.
+    continueOnError: false
+
+  # Step 3: the seeded entity's well-known name.
+  #
+  # 🔴 This was originally left out, on the grounds that rtWellKnownName is identity rather than
+  # display text and that renaming it would create a SECOND deployment site on every provisioned
+  # tenant. The first half is true; the second only holds if the seed is renamed and the stored
+  # data is not. That is what a migration is for. Nothing in code resolves a deployment site by
+  # this name — the only consumer is the blueprint seed, which re-applies against it — so once
+  # the seed and the stored entities are renamed together, "CommunicationPool" is gone for good.
+  #
+  # SetWellKnownName had to be added to the CK engine for this: the well-known name is a field on
+  # the entity, not a CK attribute, so SetValue cannot reach it (it goes through SetAttributeValue).
+  # Same shape as RenameAssociationRole above, which this migration also needed first.
+  #
+  # The target pins BOTH the type and the old name. Without the rtWellKnownName selector this would
+  # stamp the name onto every deployment site in the tenant, including ones an operator created by
+  # hand. With it, the step is idempotent: a second run matches nothing.
+  - stepId: rename-well-known-name-to-deployment-site
+    description: "Rename the seeded deployment site's well-known name from CommunicationPool"
+    action: Transform
+    target:
+      ckTypeId: System.Communication/DeploymentSite
+      rtWellKnownName: CommunicationPool
+    transform:
+      type: SetWellKnownName
+      value: DeploymentSite
+    # Runs after step 1: the entity is only a DeploymentSite once ChangeCkType has moved it.
+    continueOnError: false
+
+  # Steps 4 and 5: the two CK attributes that still said "Pool" while meaning the ADAPTER pool.
+  #
+  # These are the mirror image of step 3. LentFromPoolRtId (on Adapter) and LeasedFromPoolRtId
+  # (on PipelineExecution) both point at the AdapterPool a workload borrows from — a real pool of
+  # processes — so they become LentFromAdapterPoolRtId / LeasedFromAdapterPoolRtId rather than
+  # DeploymentSite anything. After 4.0.0 no bare "Pool" is left in the model: what remains says
+  # either DeploymentSite or AdapterPool, and which one it is can be read off the name.
+  #
+  # RenameAttribute copies the stored value to the new attribute id. Entities that never carried
+  # the attribute (every non-leased adapter, every execution that did not run on a lease) simply
+  # do not match, so both steps are no-ops for the overwhelming majority of rows.
+  - stepId: rename-lent-from-pool-rt-id
+    description: "Adapter.LentFromPoolRtId -> LentFromAdapterPoolRtId"
+    action: Transform
+    target:
+      ckTypeId: System.Communication/Adapter
+    transform:
+      type: RenameAttribute
+      sourceAttribute: lentFromPoolRtId
+      targetAttribute: lentFromAdapterPoolRtId
+    continueOnError: false
+
+  - stepId: rename-leased-from-pool-rt-id
+    description: "PipelineExecution.LeasedFromPoolRtId -> LeasedFromAdapterPoolRtId"
+    action: Transform
+    target:
+      ckTypeId: System.Communication/PipelineExecution
+    transform:
+      type: RenameAttribute
+      sourceAttribute: leasedFromPoolRtId
+      targetAttribute: leasedFromAdapterPoolRtId
     continueOnError: false
 
 postValidations:

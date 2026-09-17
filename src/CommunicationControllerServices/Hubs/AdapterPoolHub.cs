@@ -134,10 +134,10 @@ internal class AdapterPoolHub : Hub, IAdapterPoolHub
             // configuration forever.
             Logger.Warn(
                 "Rejecting a pool-member registration on connection '{ConnectionId}': pool tenant " +
-                "'{PoolTenantId}' / pool rtId '{PoolRtId}' is not a usable pair",
+                "'{PoolTenantId}' / pool rtId '{AdapterPoolRtId}' is not a usable pair",
                 connectionId, registration.AdapterPoolTenantId, registration.AdapterPoolRtId);
             throw new HubException(
-                $"Invalid pool member registration: AdapterPoolTenantId '{registration.AdapterPoolTenantId}' and PoolRtId " +
+                $"Invalid pool member registration: AdapterPoolTenantId '{registration.AdapterPoolTenantId}' and AdapterPoolRtId " +
                 $"'{registration.AdapterPoolRtId}' must name a tenant and a 24-character hex ObjectId.");
         }
 

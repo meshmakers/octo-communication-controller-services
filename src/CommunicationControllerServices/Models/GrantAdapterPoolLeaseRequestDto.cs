@@ -15,7 +15,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 /// <param name="BorrowerTenantId">The tenant whose work should run.</param>
 /// <param name="AdapterRtId">
 ///     RtId of that tenant's <c>Adapter</c> whose <c>LifecycleMode</c> is <c>Leased</c>. The lease is
-///     refused unless that adapter's own <c>LentFromTenantId</c> / <c>LentFromPoolRtId</c> name this
+///     refused unless that adapter's own <c>LentFromTenantId</c> / <c>LentFromAdapterPoolRtId</c> name this
 ///     pool — lending is consensual in both directions.
 /// </param>
 /// <param name="ExecutionId">Optional pipeline execution the lease serves.</param>

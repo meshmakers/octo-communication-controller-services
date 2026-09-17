@@ -89,13 +89,13 @@ internal class DeployPipelineLeasedTests : AdapterServiceTestsBase
     }
 
     private (RtAdapter Adapter, RtPipeline Pipeline) ArrangeLeasedPipeline(string? pipelineDefinition,
-        string? lentFromTenantId = LenderTenantId, string? lentFromPoolRtId = AdapterPoolRtId)
+        string? lentFromTenantId = LenderTenantId, string? lentFromAdapterPoolRtId = AdapterPoolRtId)
     {
         var rtAdapter = RtEntityCreator.CreateAdapter();
         rtAdapter.Name = "borrowed-adapter";
         rtAdapter.LifecycleMode = RtLifecycleModeEnum.Leased;
         rtAdapter.LentFromTenantId = lentFromTenantId;
-        rtAdapter.LentFromPoolRtId = lentFromPoolRtId;
+        rtAdapter.LentFromAdapterPoolRtId = lentFromAdapterPoolRtId;
 
         var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline = RtEntityCreator.CreatePipeline(pipelineDefinition);
@@ -396,7 +396,7 @@ internal class DeployPipelineLeasedTests : AdapterServiceTestsBase
         // silently pick some other pool's descriptors.
         GivenPoolMember([Descriptor("FromCustomThing", 1, isTrigger: true, executionClass: Interactive)]);
         var (adapter, pipeline) = ArrangeLeasedPipeline(pipelineDefinition: null,
-            lentFromTenantId: null, lentFromPoolRtId: null);
+            lentFromTenantId: null, lentFromAdapterPoolRtId: null);
 
         await AdapterService.DeployPipelineAsync(TenantId, adapter.ToRtEntityId(), pipeline.ToRtEntityId(),
             PoolOnlyInteractiveDefinition);

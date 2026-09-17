@@ -137,13 +137,13 @@ internal abstract class LeaseServiceTestsBase
     }
 
     protected RtAdapter ArrangeBorrower(RtLifecycleModeEnum lifecycleMode = RtLifecycleModeEnum.Leased,
-        string? lentFromTenantId = LenderTenantId, string? lentFromPoolRtId = null)
+        string? lentFromTenantId = LenderTenantId, string? lentFromAdapterPoolRtId = null)
     {
         Borrower = RtEntityCreator.CreateAdapter();
         Borrower.Name = "borrowing-adapter";
         Borrower.LifecycleMode = lifecycleMode;
         Borrower.LentFromTenantId = lentFromTenantId;
-        Borrower.LentFromPoolRtId = lentFromPoolRtId ?? AdapterPoolRtId.ToString();
+        Borrower.LentFromAdapterPoolRtId = lentFromAdapterPoolRtId ?? AdapterPoolRtId.ToString();
 
         CommunicationRepository.GetWorkloadByRtIdAsync(BorrowerTenantId, Borrower.RtId).Returns(Borrower);
         return Borrower;

@@ -10,7 +10,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 /// <param name="BorrowerTenantId">The tenant whose work is to be executed.</param>
 /// <param name="BorrowerAdapterRtId">
 ///     RtId of the borrowing tenant's <c>Adapter</c> — the one whose <c>LifecycleMode</c> is
-///     <c>Leased</c>. Its <c>LentFromTenantId</c> / <c>LentFromPoolRtId</c> pair is what makes the
+///     <c>Leased</c>. Its <c>LentFromTenantId</c> / <c>LentFromAdapterPoolRtId</c> pair is what makes the
 ///     borrowing relationship the borrower's own declaration rather than something the lender can
 ///     impose.
 /// </param>

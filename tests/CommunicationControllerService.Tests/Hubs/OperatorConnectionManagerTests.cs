@@ -259,8 +259,8 @@ internal class OperatorConnectionManagerTests
         var (sut, _, centralProxy, edgeProxy) = CreateRoutingSut();
         sut.AddOperator(ConnCentral);
         sut.AddOperator(ConnEdge);
-        sut.RegisterPoolForConnection(ConnCentral, TenantA, CloudPoolRtId);
-        sut.RegisterPoolForConnection(ConnEdge, TenantA, EdgePoolRtId);
+        sut.RegisterDeploymentSiteForConnection(ConnCentral, TenantA, CloudPoolRtId);
+        sut.RegisterDeploymentSiteForConnection(ConnEdge, TenantA, EdgePoolRtId);
 
         await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, EdgePoolRtId,
             WorkloadRtId1, "modbus-pv"));
@@ -280,8 +280,8 @@ internal class OperatorConnectionManagerTests
         sut.AddOperator(ConnCentral);
         sut.AddOperator(ConnEdge);
         // Neither operator has claimed pool-orphan — must not fan out.
-        sut.RegisterPoolForConnection(ConnCentral, TenantA, CloudPoolRtId);
-        sut.RegisterPoolForConnection(ConnEdge, TenantA, EdgePoolRtId);
+        sut.RegisterDeploymentSiteForConnection(ConnCentral, TenantA, CloudPoolRtId);
+        sut.RegisterDeploymentSiteForConnection(ConnEdge, TenantA, EdgePoolRtId);
 
         const string orphanPoolRtId = "65d5c447b420da3fb12381ff";
         await sut.NotifyWorkloadDeployedAsync(WorkloadDeploy(TenantA, orphanPoolRtId,
@@ -297,8 +297,8 @@ internal class OperatorConnectionManagerTests
         var (sut, _, centralProxy, edgeProxy) = CreateRoutingSut();
         sut.AddOperator(ConnCentral);
         sut.AddOperator(ConnEdge);
-        sut.RegisterPoolForConnection(ConnCentral, TenantA, CloudPoolRtId);
-        sut.RegisterPoolForConnection(ConnEdge, TenantA, EdgePoolRtId);
+        sut.RegisterDeploymentSiteForConnection(ConnCentral, TenantA, CloudPoolRtId);
+        sut.RegisterDeploymentSiteForConnection(ConnEdge, TenantA, EdgePoolRtId);
 
         await sut.NotifyWorkloadUndeployedAsync(new WorkloadUndeployedDto
         {
@@ -414,7 +414,7 @@ internal class OperatorConnectionManagerTests
             WorkloadUndeploy(TenantA, CloudPoolRtId, WorkloadRtId1, "mesh-adapter"));
         await centralProxy.DidNotReceiveWithAnyArgs().SendCoreAsync(default!, default!, default);
 
-        sut.RegisterPoolForConnection(ConnCentral, TenantA, CloudPoolRtId);
+        sut.RegisterDeploymentSiteForConnection(ConnCentral, TenantA, CloudPoolRtId);
         await sut.FlushPendingWorkloadNotificationsAsync(ConnCentral, TenantA, CloudPoolRtId);
 
         await centralProxy.Received(1).SendCoreAsync(
@@ -556,8 +556,8 @@ internal class OperatorConnectionManagerTests
         var (sut, _, centralProxy, edgeProxy) = CreateRoutingSut();
         sut.AddOperator(ConnCentral);
         sut.AddOperator(ConnEdge);
-        sut.RegisterPoolForConnection(ConnCentral, TenantA, CloudPoolRtId);
-        sut.RegisterPoolForConnection(ConnEdge, TenantA, EdgePoolRtId);
+        sut.RegisterDeploymentSiteForConnection(ConnCentral, TenantA, CloudPoolRtId);
+        sut.RegisterDeploymentSiteForConnection(ConnEdge, TenantA, EdgePoolRtId);
 
         await sut.NotifyWorkloadScaleAsync(WorkloadScale(TenantA, CloudPoolRtId,
             WorkloadRtId1, "mesh-adapter", 0));
@@ -586,7 +586,7 @@ internal class OperatorConnectionManagerTests
             WorkloadRtId1, "mesh-adapter", 1));
         await centralProxy.DidNotReceiveWithAnyArgs().SendCoreAsync(default!, default!, default);
 
-        sut.RegisterPoolForConnection(ConnCentral, TenantA, CloudPoolRtId);
+        sut.RegisterDeploymentSiteForConnection(ConnCentral, TenantA, CloudPoolRtId);
         await sut.FlushPendingWorkloadNotificationsAsync(ConnCentral, TenantA, CloudPoolRtId);
 
         await centralProxy.Received(1).SendCoreAsync(
@@ -637,7 +637,7 @@ internal class OperatorConnectionManagerTests
         // cascade, so the tracking map must stay exactly as the deploy left it.
         var (sut, _, _, _) = CreateRoutingSut();
         sut.AddOperator(ConnCentral);
-        sut.RegisterPoolForConnection(ConnCentral, TenantA, CloudPoolRtId);
+        sut.RegisterDeploymentSiteForConnection(ConnCentral, TenantA, CloudPoolRtId);
         await sut.NotifyWorkloadDeployedAsync(
             WorkloadDeploy(TenantA, CloudPoolRtId, WorkloadRtId1, "mesh-adapter"));
 

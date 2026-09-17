@@ -83,16 +83,16 @@ internal class DeploymentSiteService : IDeploymentSiteService
     }
     
     /// <inheritdoc />
-    public async Task UnregisterPoolOperatorAsync(string tenantId, OctoObjectId poolRtId)
+    public async Task UnregisterPoolOperatorAsync(string tenantId, OctoObjectId deploymentSiteRtId)
     {
-        Logger.Info("[{TenantId}] Unregistering operator for pool '{PoolRtId}'",
-            tenantId, poolRtId);
+        Logger.Info("[{TenantId}] Unregistering operator for pool '{DeploymentSiteRtId}'",
+            tenantId, deploymentSiteRtId);
 
         if (!_poolCache.TryGetTenant(tenantId, out var tenantDescription))
         {
             return;
         }
-        if (!tenantDescription.PoolsById.TryGetValue(poolRtId, out var poolDescription))
+        if (!tenantDescription.PoolsById.TryGetValue(deploymentSiteRtId, out var deploymentSiteDescription))
         {
             return;
         }
@@ -101,16 +101,16 @@ internal class DeploymentSiteService : IDeploymentSiteService
         // After RemovePool, the OnDisconnectedAsync that follows the operator's
         // graceful disconnect can no longer locate the pool, so any state write
         // would silently no-op and the UI would keep showing Online forever.
-        await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, poolDescription.PoolRtId,
+        await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, deploymentSiteDescription.DeploymentSiteRtId,
             RtCommunicationStateEnum.Unregistered);
 
-        var poolName = poolDescription.PoolName;
-        tenantDescription.RemovePool(poolDescription.PoolRtId);
+        var poolName = deploymentSiteDescription.DeploymentSiteName;
+        tenantDescription.RemovePool(deploymentSiteDescription.DeploymentSiteRtId);
 
         // Edge pools stay Disabled regardless of operator presence; only Cloud
         // pools flip back to Pending until a new operator re-registers.
         var pools = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
-        var rtPool = pools.FirstOrDefault(p => p.RtId == poolRtId);
+        var rtPool = pools.FirstOrDefault(p => p.RtId == deploymentSiteRtId);
         if (rtPool != null && !ActiveDeployment.IsActive(rtPool.DeploymentState))
         {
             // AB#4255: an operator releasing a pool that already rests (UndeployPoolAsync wrote
@@ -118,23 +118,23 @@ internal class DeploymentSiteService : IDeploymentSiteService
             // Overwriting the resting state here parked every gracefully undeployed Cloud pool at
             // Pending forever, which the Communication disable guard would then refuse on.
             Logger.Info(
-                "[{TenantId}] Pool '{PoolRtId}' already rests at {DeploymentState}; operator release leaves it there",
-                tenantId, poolRtId, rtPool.DeploymentState);
+                "[{TenantId}] Pool '{DeploymentSiteRtId}' already rests at {DeploymentState}; operator release leaves it there",
+                tenantId, deploymentSiteRtId, rtPool.DeploymentState);
         }
         else
         {
             var targetState = rtPool?.Environment == RtEnvironmentEnum.Edge
                 ? RtDeploymentStateEnum.Disabled
                 : RtDeploymentStateEnum.Pending;
-            await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolDescription.PoolRtId,
+            await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, deploymentSiteDescription.DeploymentSiteRtId,
                 targetState);
         }
 
         await _eventService.StoreInformationEventAsync(tenantId,
             $"Pool operator for pool '{poolName}' unregistered.",
-            new RtEntityId(SystemCommunicationCkIds.RtCkDeploymentSiteTypeId, poolDescription.PoolRtId));
+            new RtEntityId(SystemCommunicationCkIds.RtCkDeploymentSiteTypeId, deploymentSiteDescription.DeploymentSiteRtId));
 
-        Logger.Info("[{TenantId}] Operator for pool '{PoolRtId}' unregistered", tenantId, poolRtId);
+        Logger.Info("[{TenantId}] Operator for pool '{DeploymentSiteRtId}' unregistered", tenantId, deploymentSiteRtId);
     }
 
     private readonly SemaphoreSlim _semaphore = new(1, 1);
@@ -226,11 +226,11 @@ internal class DeploymentSiteService : IDeploymentSiteService
     }
 
     /// <inheritdoc />
-    public async Task DeployPoolAsync(string tenantId, OctoObjectId poolRtId)
+    public async Task DeployPoolAsync(string tenantId, OctoObjectId deploymentSiteRtId)
     {
-        Logger.Info("[{TenantId}] Deploying pool '{PoolRtId}'", tenantId, poolRtId);
+        Logger.Info("[{TenantId}] Deploying pool '{DeploymentSiteRtId}'", tenantId, deploymentSiteRtId);
 
-        var rtPool = await GetPoolByRtIdAsync(tenantId, poolRtId);
+        var rtPool = await GetPoolByRtIdAsync(tenantId, deploymentSiteRtId);
 
         if (rtPool.Environment == RtEnvironmentEnum.Edge)
         {
@@ -241,20 +241,20 @@ internal class DeploymentSiteService : IDeploymentSiteService
             // user must call Undeploy to clean those resources up). The
             // backfill takes care of moving Undeployed Edge pools to
             // Disabled separately.
-            throw DeploymentSiteServiceException.EdgePoolNotDeployable(tenantId, poolRtId, rtPool.Name);
+            throw DeploymentSiteServiceException.EdgePoolNotDeployable(tenantId, deploymentSiteRtId, rtPool.Name);
         }
 
         var poolName = rtPool.Name ?? string.Empty;
         Logger.Info(
-            "[{TenantId}] Pool '{PoolName}' (rtId {PoolRtId}) is Cloud — notifying central Communication Operator",
-            tenantId, poolName, poolRtId);
+            "[{TenantId}] Pool '{DeploymentSiteName}' (rtId {DeploymentSiteRtId}) is Cloud — notifying central Communication Operator",
+            tenantId, poolName, deploymentSiteRtId);
         await _operatorConnectionManager.NotifyPoolDeployedAsync(new DeployedDeploymentSiteDto
         {
             TenantId = tenantId,
-            DeploymentSiteRtId = poolRtId.ToString(),
+            DeploymentSiteRtId = deploymentSiteRtId.ToString(),
         });
 
-        await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolRtId,
+        await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, deploymentSiteRtId,
             RtDeploymentStateEnum.Deployed);
 
         // Note: workloads are NOT auto-deployed here. Users (or callers)
@@ -286,7 +286,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
         }
 
         // Workloads in Edge pools are deployable: NotifyWorkloadDeployedAsync
-        // routes via RegisterPoolForConnection to whichever operator (central
+        // routes via RegisterDeploymentSiteForConnection to whichever operator (central
         // or edge) registered the pool, and OperatorHubService.WorkloadDeployedAsync
         // runs the same helm upgrade --install path in either mode. Only the
         // pool itself (CR + broker secret) is central-cluster-only and rejected
@@ -369,7 +369,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
             $"Workload '{workload.Name}' deploy requested.");
     }
 
-    public async Task ReconcilePendingWorkloadsAsync(string tenantId, OctoObjectId poolRtId)
+    public async Task ReconcilePendingWorkloadsAsync(string tenantId, OctoObjectId deploymentSiteRtId)
     {
         // AB#4894: a deploy notification that raced an operator pod replacement is lost
         // silently, stranding the workload in Pending with nothing to reconcile it. On every
@@ -378,7 +378,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
         IReadOnlyCollection<RtDeployableWorkload> workloads;
         try
         {
-            workloads = await _communicationRepository.GetWorkloadsForPoolAsync(tenantId, poolRtId);
+            workloads = await _communicationRepository.GetWorkloadsForPoolAsync(tenantId, deploymentSiteRtId);
         }
         catch (Exception e)
         {
@@ -386,8 +386,8 @@ internal class DeploymentSiteService : IDeploymentSiteService
             // PreDeleteTenant cascade avoids via in-memory tracking) — skip this round, the
             // next registration reconciles.
             Logger.Warn(e,
-                "[{TenantId}] Skipping pending-workload reconcile for pool {PoolRtId}: workload lookup failed",
-                tenantId, poolRtId);
+                "[{TenantId}] Skipping pending-workload reconcile for pool {DeploymentSiteRtId}: workload lookup failed",
+                tenantId, deploymentSiteRtId);
             return;
         }
 
@@ -703,11 +703,11 @@ internal class DeploymentSiteService : IDeploymentSiteService
     }
 
     /// <inheritdoc />
-    public async Task UndeployPoolAsync(string tenantId, OctoObjectId poolRtId)
+    public async Task UndeployPoolAsync(string tenantId, OctoObjectId deploymentSiteRtId)
     {
-        Logger.Info("[{TenantId}] Undeploying pool '{PoolRtId}'", tenantId, poolRtId);
+        Logger.Info("[{TenantId}] Undeploying pool '{DeploymentSiteRtId}'", tenantId, deploymentSiteRtId);
 
-        var rtPool = await GetPoolByRtIdAsync(tenantId, poolRtId);
+        var rtPool = await GetPoolByRtIdAsync(tenantId, deploymentSiteRtId);
 
         // Reject when there's nothing to undeploy. Both Undeployed and
         // Disabled are terminal resting states — the operator has no CR /
@@ -715,7 +715,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
         if (rtPool.DeploymentState == RtDeploymentStateEnum.Undeployed ||
             rtPool.DeploymentState == RtDeploymentStateEnum.Disabled)
         {
-            throw DeploymentSiteServiceException.PoolAlreadyNotDeployed(tenantId, poolRtId, rtPool.Name,
+            throw DeploymentSiteServiceException.PoolAlreadyNotDeployed(tenantId, deploymentSiteRtId, rtPool.Name,
                 rtPool.DeploymentState);
         }
 
@@ -728,53 +728,53 @@ internal class DeploymentSiteService : IDeploymentSiteService
         // Environment is now Edge: the user may have switched a Cloud pool
         // to Edge without first undeploying, and the CR/secret still exists
         // in the central cluster and must be removed.
-        await UndeployManagedWorkloadsAsync(tenantId, poolRtId, poolName);
+        await UndeployManagedWorkloadsAsync(tenantId, deploymentSiteRtId, poolName);
 
         Logger.Info(
-            "[{TenantId}] Pool '{PoolName}' (rtId {PoolRtId}): notifying central Communication Operator to clean up (Environment={Environment})",
-            tenantId, poolName, poolRtId, rtPool.Environment);
-        await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, poolRtId.ToString());
+            "[{TenantId}] Pool '{DeploymentSiteName}' (rtId {DeploymentSiteRtId}): notifying central Communication Operator to clean up (Environment={Environment})",
+            tenantId, poolName, deploymentSiteRtId, rtPool.Environment);
+        await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, deploymentSiteRtId.ToString());
 
         // Resting state after undeploy: Disabled when the pool can no longer
         // be deployed via this controller (Edge), else Undeployed.
         var restingState = rtPool.Environment == RtEnvironmentEnum.Edge
             ? RtDeploymentStateEnum.Disabled
             : RtDeploymentStateEnum.Undeployed;
-        await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, poolRtId, restingState);
+        await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, deploymentSiteRtId, restingState);
 
         await _eventService.StoreInformationEventAsync(tenantId,
             $"Pool '{poolName}' undeployed (resting state: {restingState}).");
     }
 
-    private async Task DeployManagedWorkloadsAsync(string tenantId, OctoObjectId poolRtId, string poolName)
+    private async Task DeployManagedWorkloadsAsync(string tenantId, OctoObjectId deploymentSiteRtId, string poolName)
     {
         IReadOnlyCollection<RtDeployableWorkload> workloads;
         try
         {
-            workloads = await _communicationRepository.GetWorkloadsForPoolAsync(tenantId, poolRtId);
+            workloads = await _communicationRepository.GetWorkloadsForPoolAsync(tenantId, deploymentSiteRtId);
         }
         catch (Exception ex)
         {
             Logger.Warn(ex,
-                "[{TenantId}] Failed to enumerate managed workloads of pool '{PoolName}'; pool is deployed but no workloads were fanned out",
+                "[{TenantId}] Failed to enumerate managed workloads of pool '{DeploymentSiteName}'; pool is deployed but no workloads were fanned out",
                 tenantId, poolName);
             return;
         }
 
         if (workloads.Count == 0)
         {
-            Logger.Info("[{TenantId}] Pool '{PoolName}' has no managed workloads", tenantId, poolName);
+            Logger.Info("[{TenantId}] Pool '{DeploymentSiteName}' has no managed workloads", tenantId, poolName);
             return;
         }
 
-        Logger.Info("[{TenantId}] Pool '{PoolName}' has {Count} managed workload(s) to deploy",
+        Logger.Info("[{TenantId}] Pool '{DeploymentSiteName}' has {Count} managed workload(s) to deploy",
             tenantId, poolName, workloads.Count);
 
         foreach (var workload in workloads)
         {
             try
             {
-                var dto = await BuildWorkloadDeployedDtoAsync(tenantId, poolRtId, poolName, workload);
+                var dto = await BuildWorkloadDeployedDtoAsync(tenantId, deploymentSiteRtId, poolName, workload);
                 if (dto == null)
                 {
                     Logger.Warn(
@@ -788,18 +788,18 @@ internal class DeploymentSiteService : IDeploymentSiteService
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "[{TenantId}] Failed to deploy workload '{WorkloadName}' of pool '{PoolName}'",
+                    "[{TenantId}] Failed to deploy workload '{WorkloadName}' of pool '{DeploymentSiteName}'",
                     tenantId, workload.Name ?? string.Empty, poolName);
             }
         }
     }
 
-    private async Task UndeployManagedWorkloadsAsync(string tenantId, OctoObjectId poolRtId, string poolName)
+    private async Task UndeployManagedWorkloadsAsync(string tenantId, OctoObjectId deploymentSiteRtId, string poolName)
     {
         // Read from in-memory tracking only — same rationale as
         // UndeployAllCloudPoolsAsync, this path may run during tenant delete
         // where the repository is already torn down.
-        var poolRtIdString = poolRtId.ToString();
+        var poolRtIdString = deploymentSiteRtId.ToString();
         var tracked = _operatorConnectionManager.GetDeployedWorkloadsForTenant(tenantId)
             .Where(w => w.DeploymentSiteRtId == poolRtIdString)
             .ToArray();
@@ -809,7 +809,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
             return;
         }
 
-        Logger.Info("[{TenantId}] Undeploying {Count} workload(s) of pool '{PoolName}'",
+        Logger.Info("[{TenantId}] Undeploying {Count} workload(s) of pool '{DeploymentSiteName}'",
             tenantId, tracked.Length, poolName);
 
         foreach (var workload in tracked)
@@ -821,14 +821,14 @@ internal class DeploymentSiteService : IDeploymentSiteService
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "[{TenantId}] Failed to undeploy workload '{WorkloadName}' of pool '{PoolName}'",
+                    "[{TenantId}] Failed to undeploy workload '{WorkloadName}' of pool '{DeploymentSiteName}'",
                     tenantId, workload.WorkloadName, poolName);
             }
         }
     }
 
     private async Task<WorkloadDeployedDto?> BuildWorkloadDeployedDtoAsync(string tenantId,
-        OctoObjectId poolRtId, string poolName, RtDeployableWorkload workload,
+        OctoObjectId deploymentSiteRtId, string poolName, RtDeployableWorkload workload,
         bool isReconciliation = false)
     {
         // ChartName is the minimal Helm identity we need to talk to a repository;
@@ -869,7 +869,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
         return new WorkloadDeployedDto
         {
             TenantId = tenantId,
-            DeploymentSiteRtId = poolRtId.ToString(),
+            DeploymentSiteRtId = deploymentSiteRtId.ToString(),
             WorkloadName = workload.Name ?? string.Empty,
             WorkloadRtId = workload.RtId.ToString(),
             WorkloadType = WorkloadWireMapping.ResolveWorkloadType(workload),
@@ -1156,22 +1156,22 @@ internal class DeploymentSiteService : IDeploymentSiteService
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "[{TenantId}] Failed to notify operator of workload undeploy during tenant cleanup, workload '{WorkloadName}' (rtId {WorkloadRtId}, pool rtId {PoolRtId})",
+                    "[{TenantId}] Failed to notify operator of workload undeploy during tenant cleanup, workload '{WorkloadName}' (rtId {WorkloadRtId}, deployment site rtId {DeploymentSiteRtId})",
                     tenantId, workload.WorkloadName, workload.WorkloadRtId, workload.DeploymentSiteRtId);
             }
         }
 
-        foreach (var poolRtId in deployedPools)
+        foreach (var deploymentSiteRtId in deployedPools)
         {
             try
             {
-                await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, poolRtId);
+                await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, deploymentSiteRtId);
             }
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "[{TenantId}] Failed to notify operator of pool undeploy during tenant cleanup, pool rtId {PoolRtId}",
-                    tenantId, poolRtId);
+                    "[{TenantId}] Failed to notify operator of pool undeploy during tenant cleanup, deployment site rtId {DeploymentSiteRtId}",
+                    tenantId, deploymentSiteRtId);
             }
         }
 
@@ -1179,36 +1179,36 @@ internal class DeploymentSiteService : IDeploymentSiteService
             $"Notified central Communication Operator to undeploy {trackedWorkloads.Count} workload(s) and {deployedPools.Count} Cloud pool(s) for tenant cleanup.");
     }
 
-    private async Task<RtDeploymentSite> GetPoolByRtIdAsync(string tenantId, OctoObjectId poolRtId)
+    private async Task<RtDeploymentSite> GetPoolByRtIdAsync(string tenantId, OctoObjectId deploymentSiteRtId)
     {
         var pools = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
-        var rtPool = pools.FirstOrDefault(p => p.RtId == poolRtId);
+        var rtPool = pools.FirstOrDefault(p => p.RtId == deploymentSiteRtId);
         if (rtPool == null)
         {
-            throw DeploymentSiteServiceException.PoolNotFound(tenantId, poolRtId);
+            throw DeploymentSiteServiceException.PoolNotFound(tenantId, deploymentSiteRtId);
         }
         return rtPool;
     }
 
     /// <inheritdoc />
-    public async Task SetCommunicationStateOfflineAsync(string tenantId, OctoObjectId poolRtId)
+    public async Task SetCommunicationStateOfflineAsync(string tenantId, OctoObjectId deploymentSiteRtId)
     {
-        Logger.Info("[{TenantId}] Setting pool '{PoolRtId}' offline", tenantId, poolRtId);
+        Logger.Info("[{TenantId}] Setting pool '{DeploymentSiteRtId}' offline", tenantId, deploymentSiteRtId);
 
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
             throw DeploymentSiteServiceException.TenantNotFoundOrNotEnabled(tenantId);
         }
 
-        if (poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
+        if (poolTenant.PoolsById.TryGetValue(deploymentSiteRtId, out var deploymentSiteDescription))
         {
-            await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, poolDescription.PoolRtId,
+            await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, deploymentSiteDescription.DeploymentSiteRtId,
                 RtCommunicationStateEnum.Offline);
         }
     }
 
     /// <inheritdoc />
-    public async Task SetCommunicationStateOfflineAsync(string tenantId, OctoObjectId poolRtId,
+    public async Task SetCommunicationStateOfflineAsync(string tenantId, OctoObjectId deploymentSiteRtId,
         string disconnectingConnectionId)
     {
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
@@ -1216,7 +1216,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
             return;
         }
 
-        if (!poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
+        if (!poolTenant.PoolsById.TryGetValue(deploymentSiteRtId, out var deploymentSiteDescription))
         {
             return;
         }
@@ -1225,7 +1225,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
         // same pool at the same time — central operator with replicas, or a
         // brief rolling-upgrade overlap where the new pod has registered but
         // the old pod's SignalR connection has not yet timed out. The
-        // PoolDescription cache only remembers the LAST claim's ConnectionId,
+        // DeploymentSiteDescription cache only remembers the LAST claim's ConnectionId,
         // so the disconnect of one claimer would silently flip the pool
         // Offline even though another connection is still hosting it
         // (caller passed RemoveOperator's orphan list, which only filters
@@ -1234,18 +1234,18 @@ internal class DeploymentSiteService : IDeploymentSiteService
         // OperatorConnectionManager.RemoveOperator has already cleared the
         // disconnecting connection's tracking entry by the time we get here,
         // so any results from GetConnectionsForPool are surviving operators.
-        var stillClaiming = _operatorConnectionManager.GetConnectionsForPool(tenantId, poolRtId.ToString());
+        var stillClaiming = _operatorConnectionManager.GetConnectionsForPool(tenantId, deploymentSiteRtId.ToString());
         if (stillClaiming.Count > 0)
         {
             // Keep the pool Online and rewire the cache to a surviving
             // connection so the stale-disconnect guard below works correctly
             // when THAT one eventually disconnects too.
-            poolDescription.UpdateConnectionId(tenantId, stillClaiming[0]);
+            deploymentSiteDescription.UpdateConnectionId(tenantId, stillClaiming[0]);
             Logger.Info(
-                "[{TenantId}] pool '{PoolRtId}' stays online after disconnect of " +
+                "[{TenantId}] pool '{DeploymentSiteRtId}' stays online after disconnect of " +
                 "'{OldConnectionId}': {Count} other operator connection(s) still claim it; " +
                 "cache rewired to '{NewConnectionId}'",
-                tenantId, poolRtId, disconnectingConnectionId, stillClaiming.Count,
+                tenantId, deploymentSiteRtId, disconnectingConnectionId, stillClaiming.Count,
                 stillClaiming[0]);
             return;
         }
@@ -1255,42 +1255,42 @@ internal class DeploymentSiteService : IDeploymentSiteService
         // connection's OnDisconnectedAsync is only now firing), we must not flip
         // Online → Offline. Mirrors the adapter pattern in
         // AdapterService.SetAdapterCommunicationStateOfflineAsync.
-        if (!string.IsNullOrWhiteSpace(poolDescription.ConnectionId) &&
-            poolDescription.ConnectionId != disconnectingConnectionId)
+        if (!string.IsNullOrWhiteSpace(deploymentSiteDescription.ConnectionId) &&
+            deploymentSiteDescription.ConnectionId != disconnectingConnectionId)
         {
             Logger.Warn(
-                "[{TenantId}] ignoring stale disconnect for pool '{PoolRtId}': cached connection " +
+                "[{TenantId}] ignoring stale disconnect for pool '{DeploymentSiteRtId}': cached connection " +
                 "'{CurrentConnectionId}' has replaced disconnecting connection '{OldConnectionId}'",
-                tenantId, poolRtId, poolDescription.ConnectionId, disconnectingConnectionId);
+                tenantId, deploymentSiteRtId, deploymentSiteDescription.ConnectionId, disconnectingConnectionId);
             return;
         }
 
-        poolDescription.RemoveConnectionId(tenantId);
-        await SetCommunicationStateOfflineAsync(tenantId, poolDescription.PoolRtId);
+        deploymentSiteDescription.RemoveConnectionId(tenantId);
+        await SetCommunicationStateOfflineAsync(tenantId, deploymentSiteDescription.DeploymentSiteRtId);
     }
 
     /// <inheritdoc />
-    public async Task SetCommunicationStateOnlineAsync(string tenantId, OctoObjectId poolRtId)
+    public async Task SetCommunicationStateOnlineAsync(string tenantId, OctoObjectId deploymentSiteRtId)
     {
-        Logger.Info("[{TenantId}] Setting pool '{PoolRtId}' online", tenantId, poolRtId);
+        Logger.Info("[{TenantId}] Setting pool '{DeploymentSiteRtId}' online", tenantId, deploymentSiteRtId);
 
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
             throw DeploymentSiteServiceException.TenantNotFoundOrNotEnabled(tenantId);
         }
 
-        if (poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
+        if (poolTenant.PoolsById.TryGetValue(deploymentSiteRtId, out var deploymentSiteDescription))
         {
-            await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, poolDescription.PoolRtId,
+            await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, deploymentSiteDescription.DeploymentSiteRtId,
                 RtCommunicationStateEnum.Online);
         }
     }
 
     /// <inheritdoc />
-    public async Task SetCommunicationStateOnlineAsync(string tenantId, OctoObjectId poolRtId, string connectionId)
+    public async Task SetCommunicationStateOnlineAsync(string tenantId, OctoObjectId deploymentSiteRtId, string connectionId)
     {
-        Logger.Info("[{TenantId}] Setting pool '{PoolRtId}' online (connection '{ConnectionId}')",
-            tenantId, poolRtId, connectionId);
+        Logger.Info("[{TenantId}] Setting pool '{DeploymentSiteRtId}' online (connection '{ConnectionId}')",
+            tenantId, deploymentSiteRtId, connectionId);
 
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
@@ -1302,24 +1302,24 @@ internal class DeploymentSiteService : IDeploymentSiteService
         // pool's DeploymentState) to populate the cache; the new /operatorHub
         // RegisterDeploymentSiteAsync is purely about CommunicationState, so we just
         // ensure the cache is populated here without touching DeploymentState.
-        if (!poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
+        if (!poolTenant.PoolsById.TryGetValue(deploymentSiteRtId, out var deploymentSiteDescription))
         {
             var pools = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
-            var rtPool = pools.FirstOrDefault(p => p.RtId == poolRtId);
+            var rtPool = pools.FirstOrDefault(p => p.RtId == deploymentSiteRtId);
             if (rtPool == null)
             {
-                Logger.Warn("[{TenantId}] Cannot set pool '{PoolRtId}' online — not found in repository",
-                    tenantId, poolRtId);
+                Logger.Warn("[{TenantId}] Cannot set pool '{DeploymentSiteRtId}' online — not found in repository",
+                    tenantId, deploymentSiteRtId);
                 return;
             }
-            poolDescription = poolTenant.AddPool(rtPool.Name ?? string.Empty, rtPool.RtId, connectionId);
+            deploymentSiteDescription = poolTenant.AddPool(rtPool.Name ?? string.Empty, rtPool.RtId, connectionId);
         }
         else
         {
-            poolDescription.UpdateConnectionId(tenantId, connectionId);
+            deploymentSiteDescription.UpdateConnectionId(tenantId, connectionId);
         }
 
-        await SetCommunicationStateOnlineAsync(tenantId, poolDescription.PoolRtId);
+        await SetCommunicationStateOnlineAsync(tenantId, deploymentSiteDescription.DeploymentSiteRtId);
     }
 
     public async Task<IReadOnlyList<DeploymentSiteSummaryDto>> GetDeploymentSiteSummariesAsync(string tenantId)
@@ -1436,7 +1436,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "[{TenantId}] Failed to recompute deployment state for pool '{PoolName}' or its workloads",
+                    "[{TenantId}] Failed to recompute deployment state for pool '{DeploymentSiteName}' or its workloads",
                     tenantId, pool.Name ?? pool.RtId.ToString());
             }
         }
@@ -1600,7 +1600,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
     ///     </para>
     ///     <para>
     ///         🔴 The borrower half has <b>no referential integrity behind it</b>: LentFromTenantId
-    ///         and LentFromPoolRtId point into a different tenant's database, where a CK association
+    ///         and LentFromAdapterPoolRtId point into a different tenant's database, where a CK association
     ///         cannot reach. This method is the only thing in the system that can catch a
     ///         half-configured or out-of-scope borrower before a lease is attempted.
     ///     </para>
@@ -1642,7 +1642,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
             // A value that silently does nothing is worse than an error: LentFrom* on a workload
             // that runs its own process reads like it borrows one.
             if (!string.IsNullOrWhiteSpace(adapter.LentFromTenantId) ||
-                !string.IsNullOrWhiteSpace(adapter.LentFromPoolRtId))
+                !string.IsNullOrWhiteSpace(adapter.LentFromAdapterPoolRtId))
             {
                 throw DeploymentSiteServiceException.LentFromSetWithoutLeasedMode(tenantId, adapter.RtId, adapter.Name);
             }
@@ -1663,7 +1663,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
         }
 
         var hasTenant = !string.IsNullOrWhiteSpace(adapter.LentFromTenantId);
-        var hasPool = !string.IsNullOrWhiteSpace(adapter.LentFromPoolRtId);
+        var hasPool = !string.IsNullOrWhiteSpace(adapter.LentFromAdapterPoolRtId);
 
         if (!hasTenant && !hasPool)
         {
@@ -1681,7 +1681,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
         // needed: a pool that does not exist, and a pool that exists but whose SharingMode or
         // allow-list excludes this tenant, are different misconfigurations with the same symptom.
         var lendingScope = await _communicationRepository
-            .TryGetAdapterPoolLendingScopeAsync(lenderTenantId, adapter.LentFromPoolRtId!);
+            .TryGetAdapterPoolLendingScopeAsync(lenderTenantId, adapter.LentFromAdapterPoolRtId!);
         if (lendingScope is null ||
             !await _lendingScopeResolver.MayLendAsync(lenderTenantId, tenantId, lendingScope.Value))
         {
@@ -1765,7 +1765,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
             if (rtPool == null)
             {
                 Logger.Warn(
-                    "[{TenantId}] Reverse-sync: pool rtId '{PoolRtId}' reported by operator does not exist; skipping",
+                    "[{TenantId}] Reverse-sync: deployment site rtId '{DeploymentSiteRtId}' reported by operator does not exist; skipping",
                     report.TenantId, report.DeploymentSiteRtId);
                 continue;
             }
@@ -1776,7 +1776,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
             if (rtPool.Environment != RtEnvironmentEnum.Cloud)
             {
                 Logger.Warn(
-                    "[{TenantId}] Reverse-sync: pool '{PoolName}' has Environment={Environment} (not Cloud); skipping",
+                    "[{TenantId}] Reverse-sync: pool '{DeploymentSiteName}' has Environment={Environment} (not Cloud); skipping",
                     report.TenantId, rtPool.Name, rtPool.Environment);
                 continue;
             }
@@ -1792,7 +1792,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
                     $"(was {rtPool.DeploymentState}).",
                     new RtEntityId(SystemCommunicationCkIds.RtCkDeploymentSiteTypeId, rtPool.RtId));
                 Logger.Info(
-                    "[{TenantId}] Reverse-sync: pool '{PoolName}' restored to Deployed (was {OldState})",
+                    "[{TenantId}] Reverse-sync: pool '{DeploymentSiteName}' restored to Deployed (was {OldState})",
                     report.TenantId, rtPool.Name, rtPool.DeploymentState);
             }
 
@@ -1805,7 +1805,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
                 TenantId = report.TenantId,
                 DeploymentSiteRtId = report.DeploymentSiteRtId,
             });
-            _operatorConnectionManager.RegisterPoolForConnection(operatorConnectionId, report.TenantId,
+            _operatorConnectionManager.RegisterDeploymentSiteForConnection(operatorConnectionId, report.TenantId,
                 report.DeploymentSiteRtId);
 
             // Workloads inside the pool — same restore-only-when-changed rule.
@@ -1814,7 +1814,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
                 if (!OctoObjectId.TryParse(workloadRtIdString, out var workloadRtId))
                 {
                     Logger.Warn(
-                        "[{TenantId}] Reverse-sync: workload rtId '{RtId}' under pool '{PoolName}' is not a valid OctoObjectId; skipping",
+                        "[{TenantId}] Reverse-sync: workload rtId '{RtId}' under pool '{DeploymentSiteName}' is not a valid OctoObjectId; skipping",
                         report.TenantId, workloadRtIdString, rtPool.Name);
                     continue;
                 }
@@ -1823,7 +1823,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
                 if (workload == null)
                 {
                     Logger.Warn(
-                        "[{TenantId}] Reverse-sync: workload rtId '{RtId}' reported by operator under pool '{PoolName}' does not exist; skipping",
+                        "[{TenantId}] Reverse-sync: workload rtId '{RtId}' reported by operator under pool '{DeploymentSiteName}' does not exist; skipping",
                         report.TenantId, workloadRtIdString, rtPool.Name);
                     continue;
                 }

@@ -186,7 +186,7 @@ internal static class AdapterLeasingMetrics
 
     private const string TagTenant = "octo.tenant.id";
     private const string TagPoolTenant = "octo.pool.tenant_id";
-    private const string TagPoolRtId = "octo.pool.rt_id";
+    private const string TagAdapterPoolRtId = "octo.pool.rt_id";
     private const string TagPoolName = "octo.pool.name";
     private const string TagStage = "octo.lease.stage";
     private const string TagRefusalReason = "octo.lease.refusal_reason";
@@ -404,15 +404,15 @@ internal static class AdapterLeasingMetrics
     #region Recording
 
     /// <summary>Records a work item entering a pool queue.</summary>
-    public static void RecordEnqueued(string borrowerTenantId, string lenderTenantId, string poolRtId)
+    public static void RecordEnqueued(string borrowerTenantId, string lenderTenantId, string adapterPoolRtId)
     {
-        Enqueued.Add(1, Tags(borrowerTenantId, lenderTenantId, poolRtId));
+        Enqueued.Add(1, Tags(borrowerTenantId, lenderTenantId, adapterPoolRtId));
     }
 
     /// <summary>Records a granted lease.</summary>
-    public static void RecordGranted(string borrowerTenantId, string lenderTenantId, string poolRtId)
+    public static void RecordGranted(string borrowerTenantId, string lenderTenantId, string adapterPoolRtId)
     {
-        Granted.Add(1, Tags(borrowerTenantId, lenderTenantId, poolRtId));
+        Granted.Add(1, Tags(borrowerTenantId, lenderTenantId, adapterPoolRtId));
     }
 
     /// <summary>
@@ -422,19 +422,19 @@ internal static class AdapterLeasingMetrics
     ///     Recorded by the scheduler rather than by the lease service: only queued work has a wait,
     ///     and a hand-driven lease has no <c>QueuedAt</c> to measure from.
     /// </remarks>
-    public static void RecordQueueWait(string borrowerTenantId, string lenderTenantId, string poolRtId,
+    public static void RecordQueueWait(string borrowerTenantId, string lenderTenantId, string adapterPoolRtId,
         TimeSpan wait)
     {
-        QueueWait.Record(Math.Max(0, wait.TotalSeconds), Tags(borrowerTenantId, lenderTenantId, poolRtId));
+        QueueWait.Record(Math.Max(0, wait.TotalSeconds), Tags(borrowerTenantId, lenderTenantId, adapterPoolRtId));
     }
 
     /// <summary>Records a refusal with its named reason.</summary>
-    public static void RecordRefused(string borrowerTenantId, string lenderTenantId, string poolRtId,
+    public static void RecordRefused(string borrowerTenantId, string lenderTenantId, string adapterPoolRtId,
         LeaseStage stage, LeaseRefusalReason reason)
     {
         Refused.Add(1,
         [
-            ..Tags(borrowerTenantId, lenderTenantId, poolRtId),
+            ..Tags(borrowerTenantId, lenderTenantId, adapterPoolRtId),
             new KeyValuePair<string, object?>(TagStage, StageTag(stage)),
             new KeyValuePair<string, object?>(TagRefusalReason, RefusalTag(reason))
         ]);
@@ -445,7 +445,7 @@ internal static class AdapterLeasingMetrics
     /// </summary>
     /// <param name="borrowerTenantId">Tenant the member was serving.</param>
     /// <param name="lenderTenantId">Tenant that owns the pool.</param>
-    /// <param name="poolRtId">RtId of the pool.</param>
+    /// <param name="adapterPoolRtId">RtId of the pool.</param>
     /// <param name="releaseReason">Why the lease ended, as the member reported it.</param>
     /// <param name="success">Whether the work item succeeded.</param>
     /// <param name="held">LeaseGrantedAt to now — how long the member was held for this borrower.</param>
@@ -455,10 +455,10 @@ internal static class AdapterLeasingMetrics
     ///     The work and overhead histograms stay silent in that case rather than recording a
     ///     fabricated zero, which would make the pool look infinitely wasteful.
     /// </param>
-    public static void RecordReleased(string borrowerTenantId, string lenderTenantId, string poolRtId,
+    public static void RecordReleased(string borrowerTenantId, string lenderTenantId, string adapterPoolRtId,
         string releaseReason, bool success, TimeSpan held, TimeSpan? work)
     {
-        var tags = Tags(borrowerTenantId, lenderTenantId, poolRtId);
+        var tags = Tags(borrowerTenantId, lenderTenantId, adapterPoolRtId);
 
         Released.Add(1,
         [
@@ -486,10 +486,10 @@ internal static class AdapterLeasingMetrics
     }
 
     /// <summary>Records a lease that ended without a release.</summary>
-    public static void RecordInterrupted(string borrowerTenantId, string lenderTenantId, string poolRtId,
+    public static void RecordInterrupted(string borrowerTenantId, string lenderTenantId, string adapterPoolRtId,
         LeaseInterruptReason reason, TimeSpan held)
     {
-        var tags = Tags(borrowerTenantId, lenderTenantId, poolRtId);
+        var tags = Tags(borrowerTenantId, lenderTenantId, adapterPoolRtId);
         Interrupted.Add(1,
             [..tags, new KeyValuePair<string, object?>(TagInterruptReason, InterruptTag(reason))]);
 
@@ -500,36 +500,36 @@ internal static class AdapterLeasingMetrics
     }
 
     /// <summary>Records an interrupted attempt that was successfully enqueued again.</summary>
-    public static void RecordRequeued(string borrowerTenantId, string lenderTenantId, string poolRtId,
+    public static void RecordRequeued(string borrowerTenantId, string lenderTenantId, string adapterPoolRtId,
         LeaseInterruptReason reason)
     {
         Requeued.Add(1,
         [
-            ..Tags(borrowerTenantId, lenderTenantId, poolRtId),
+            ..Tags(borrowerTenantId, lenderTenantId, adapterPoolRtId),
             new KeyValuePair<string, object?>(TagInterruptReason, InterruptTag(reason))
         ]);
     }
 
     /// <summary>Records a member told to drain and be replaced.</summary>
-    public static void RecordMemberDrained(string lenderTenantId, string poolRtId, LeaseDrainReason reason)
+    public static void RecordMemberDrained(string lenderTenantId, string adapterPoolRtId, LeaseDrainReason reason)
     {
         MembersDrained.Add(1,
         [
             new KeyValuePair<string, object?>(TagPoolTenant, lenderTenantId),
-            new KeyValuePair<string, object?>(TagPoolRtId, poolRtId),
-            new KeyValuePair<string, object?>(TagPoolName, PoolName(lenderTenantId, poolRtId)),
+            new KeyValuePair<string, object?>(TagAdapterPoolRtId, adapterPoolRtId),
+            new KeyValuePair<string, object?>(TagPoolName, PoolName(lenderTenantId, adapterPoolRtId)),
             new KeyValuePair<string, object?>(TagDrainReason, DrainTag(reason))
         ]);
     }
 
     /// <summary>Records a scale-up decision: the pool grew, hit its ceiling, or the request failed.</summary>
-    public static void RecordScaleUp(string lenderTenantId, string poolRtId, string outcome)
+    public static void RecordScaleUp(string lenderTenantId, string adapterPoolRtId, string outcome)
     {
         ScaleUps.Add(1,
         [
             new KeyValuePair<string, object?>(TagPoolTenant, lenderTenantId),
-            new KeyValuePair<string, object?>(TagPoolRtId, poolRtId),
-            new KeyValuePair<string, object?>(TagPoolName, PoolName(lenderTenantId, poolRtId)),
+            new KeyValuePair<string, object?>(TagAdapterPoolRtId, adapterPoolRtId),
+            new KeyValuePair<string, object?>(TagPoolName, PoolName(lenderTenantId, adapterPoolRtId)),
             new KeyValuePair<string, object?>(TagScaleUpOutcome, outcome)
         ]);
     }
@@ -555,14 +555,14 @@ internal static class AdapterLeasingMetrics
     ///     entity must not blank out a name an earlier round supplied — a dashboard nobody can read
     ///     is not observability.
     /// </remarks>
-    public static void NamePool(string lenderTenantId, string poolRtId, string? poolName)
+    public static void NamePool(string lenderTenantId, string adapterPoolRtId, string? poolName)
     {
         if (string.IsNullOrEmpty(poolName))
         {
             return;
         }
 
-        PoolNames[PoolKey.Create(lenderTenantId, poolRtId)] = poolName;
+        PoolNames[PoolKey.Create(lenderTenantId, adapterPoolRtId)] = poolName;
     }
 
     /// <summary>
@@ -570,7 +570,7 @@ internal static class AdapterLeasingMetrics
     ///     observation wholesale.
     /// </summary>
     /// <param name="lenderTenantId">Tenant that owns the pool.</param>
-    /// <param name="poolRtId">RtId of the pool.</param>
+    /// <param name="adapterPoolRtId">RtId of the pool.</param>
     /// <param name="depthByBorrower">Queued work item count per borrowing tenant.</param>
     /// <param name="oldestWait">Age of the oldest waiting item, or zero when nothing waits.</param>
     /// <param name="members">Members of this pool connected to this controller instance.</param>
@@ -578,15 +578,15 @@ internal static class AdapterLeasingMetrics
     /// <param name="depthSignal">Whether the depth signal is firing.</param>
     /// <param name="waitSignal">Whether the wait signal is firing.</param>
     /// <param name="undersized">Whether the pool wants to grow and is already at its ceiling.</param>
-    public static void ObserveRound(string lenderTenantId, string poolRtId,
+    public static void ObserveRound(string lenderTenantId, string adapterPoolRtId,
         IReadOnlyDictionary<string, int> depthByBorrower, TimeSpan oldestWait,
         (int Available, int Leased, int Draining) members, TimeSpan averagingWindow,
         bool depthSignal, bool waitSignal, bool undersized)
     {
-        Pools[PoolKey.Create(lenderTenantId, poolRtId)] = new PoolObservation(
+        Pools[PoolKey.Create(lenderTenantId, adapterPoolRtId)] = new PoolObservation(
             DateTime.UtcNow,
             lenderTenantId,
-            poolRtId,
+            adapterPoolRtId,
             depthByBorrower.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase),
             Math.Max(0, oldestWait.TotalSeconds),
             members.Available,
@@ -654,9 +654,9 @@ internal static class AdapterLeasingMetrics
                 yield return new Measurement<int>(depth,
                     new KeyValuePair<string, object?>(TagTenant, tenantId),
                     new KeyValuePair<string, object?>(TagPoolTenant, pool.LenderTenantId),
-                    new KeyValuePair<string, object?>(TagPoolRtId, pool.PoolRtId),
+                    new KeyValuePair<string, object?>(TagAdapterPoolRtId, pool.AdapterPoolRtId),
                     new KeyValuePair<string, object?>(TagPoolName,
-                        PoolName(pool.LenderTenantId, pool.PoolRtId)));
+                        PoolName(pool.LenderTenantId, pool.AdapterPoolRtId)));
             }
         }
     }
@@ -674,8 +674,8 @@ internal static class AdapterLeasingMetrics
     private static Measurement<int> MemberMeasurement(PoolObservation pool, string state, int count) =>
         new(count,
             new KeyValuePair<string, object?>(TagPoolTenant, pool.LenderTenantId),
-            new KeyValuePair<string, object?>(TagPoolRtId, pool.PoolRtId),
-            new KeyValuePair<string, object?>(TagPoolName, PoolName(pool.LenderTenantId, pool.PoolRtId)),
+            new KeyValuePair<string, object?>(TagAdapterPoolRtId, pool.AdapterPoolRtId),
+            new KeyValuePair<string, object?>(TagPoolName, PoolName(pool.LenderTenantId, pool.AdapterPoolRtId)),
             new KeyValuePair<string, object?>(TagMemberState, state));
 
     private static IEnumerable<Measurement<int>> ObserveSignals()
@@ -690,8 +690,8 @@ internal static class AdapterLeasingMetrics
     private static Measurement<int> SignalMeasurement(PoolObservation pool, string kind, bool firing) =>
         new(firing ? 1 : 0,
             new KeyValuePair<string, object?>(TagPoolTenant, pool.LenderTenantId),
-            new KeyValuePair<string, object?>(TagPoolRtId, pool.PoolRtId),
-            new KeyValuePair<string, object?>(TagPoolName, PoolName(pool.LenderTenantId, pool.PoolRtId)),
+            new KeyValuePair<string, object?>(TagAdapterPoolRtId, pool.AdapterPoolRtId),
+            new KeyValuePair<string, object?>(TagPoolName, PoolName(pool.LenderTenantId, pool.AdapterPoolRtId)),
             new KeyValuePair<string, object?>(TagSignalKind, kind));
 
     private static IEnumerable<Measurement<T>> ObservePool<T>(Func<PoolObservation, T> selector)
@@ -701,9 +701,9 @@ internal static class AdapterLeasingMetrics
         {
             yield return new Measurement<T>(selector(pool),
                 new KeyValuePair<string, object?>(TagPoolTenant, pool.LenderTenantId),
-                new KeyValuePair<string, object?>(TagPoolRtId, pool.PoolRtId),
+                new KeyValuePair<string, object?>(TagAdapterPoolRtId, pool.AdapterPoolRtId),
                 new KeyValuePair<string, object?>(TagPoolName,
-                    PoolName(pool.LenderTenantId, pool.PoolRtId)));
+                    PoolName(pool.LenderTenantId, pool.AdapterPoolRtId)));
         }
     }
 
@@ -712,16 +712,16 @@ internal static class AdapterLeasingMetrics
     #region Helpers
 
     private static KeyValuePair<string, object?>[] Tags(string borrowerTenantId, string lenderTenantId,
-        string poolRtId) =>
+        string adapterPoolRtId) =>
     [
         new(TagTenant, borrowerTenantId),
         new(TagPoolTenant, lenderTenantId),
-        new(TagPoolRtId, poolRtId),
-        new(TagPoolName, PoolName(lenderTenantId, poolRtId))
+        new(TagAdapterPoolRtId, adapterPoolRtId),
+        new(TagPoolName, PoolName(lenderTenantId, adapterPoolRtId))
     ];
 
-    private static string PoolName(string lenderTenantId, string poolRtId) =>
-        PoolNames.GetValueOrDefault(PoolKey.Create(lenderTenantId, poolRtId), string.Empty);
+    private static string PoolName(string lenderTenantId, string adapterPoolRtId) =>
+        PoolNames.GetValueOrDefault(PoolKey.Create(lenderTenantId, adapterPoolRtId), string.Empty);
 
     /// <summary>
     ///     The label values, written out rather than derived from <c>ToString</c>.
@@ -772,17 +772,17 @@ internal static class AdapterLeasingMetrics
     };
 
     /// <summary>One pool, identified across tenants and normalised the way the scheduler does.</summary>
-    private readonly record struct PoolKey(string LenderTenantId, string PoolRtId)
+    private readonly record struct PoolKey(string LenderTenantId, string AdapterPoolRtId)
     {
-        public static PoolKey Create(string lenderTenantId, string poolRtId) =>
-            new(lenderTenantId.ToLowerInvariant(), poolRtId.ToLowerInvariant());
+        public static PoolKey Create(string lenderTenantId, string adapterPoolRtId) =>
+            new(lenderTenantId.ToLowerInvariant(), adapterPoolRtId.ToLowerInvariant());
     }
 
     /// <summary>What one scheduling round saw of one pool.</summary>
     private sealed record PoolObservation(
         DateTime ObservedAtUtc,
         string LenderTenantId,
-        string PoolRtId,
+        string AdapterPoolRtId,
         Dictionary<string, int> DepthByBorrower,
         double OldestWaitSeconds,
         int AvailableMembers,

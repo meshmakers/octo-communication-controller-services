@@ -53,11 +53,12 @@ entities:
   # ---------------------------------------------------------------------------
   - rtId: '670000000000000000000001'
     ckTypeId: System.Communication/DeploymentSite
-    # 🔴 The well-known name stays CommunicationPool across the 4.0.0 rename. It is
-    # IDENTITY, not display text — this blueprint re-applies against it, and renaming
-    # it here would create a SECOND deployment site on every already-provisioned
-    # tenant and orphan the adapters attached to the first one.
-    rtWellKnownName: CommunicationPool
+    # 🔴 Renamed from CommunicationPool in 4.0.0, together with the migration step that
+    # renames it on stored entities (3.35.0-to-4.0.0, step 3). This name is IDENTITY,
+    # not display text — this blueprint re-applies against it, so changing it HERE alone
+    # would create a SECOND deployment site on every already-provisioned tenant and
+    # orphan the adapters attached to the first. Seed and data move together or not at all.
+    rtWellKnownName: DeploymentSite
     attributes:
       - id: System/Name
         value: Default Cloud

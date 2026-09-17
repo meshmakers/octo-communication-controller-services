@@ -43,7 +43,7 @@ internal class LeasedAdapterEnqueueTests : TriggerManagementServiceTestsBase
         adapter.Name = "an-adapter";
         adapter.LifecycleMode = lifecycleMode;
         adapter.LentFromTenantId = LenderTenantId;
-        adapter.LentFromPoolRtId = _poolRtId;
+        adapter.LentFromAdapterPoolRtId = _poolRtId;
 
         CommunicationRepository
             .GetAdapterByPipelineAsync(TenantId,

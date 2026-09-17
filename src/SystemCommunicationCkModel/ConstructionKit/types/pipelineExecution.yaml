@@ -80,8 +80,8 @@ types:
     - id: ${this}/LeasedFromTenantId
       name: LeasedFromTenantId
       isOptional: true
-    - id: ${this}/LeasedFromPoolRtId
-      name: LeasedFromPoolRtId
+    - id: ${this}/LeasedFromAdapterPoolRtId
+      name: LeasedFromAdapterPoolRtId
       isOptional: true
     - id: ${this}/LeasedOnMemberId
       name: LeasedOnMemberId

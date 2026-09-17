@@ -13,7 +13,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 /// </summary>
 /// <remarks>
 ///     🔴 <b>Lending is consensual in both directions.</b> The lender's <c>SharingMode</c> says who
-///     <i>may</i> borrow; the borrower's own <c>LentFromTenantId</c> / <c>LentFromPoolRtId</c> say
+///     <i>may</i> borrow; the borrower's own <c>LentFromTenantId</c> / <c>LentFromAdapterPoolRtId</c> say
 ///     from whom it <i>does</i>. Either half alone is not enough, and the refusals below are what
 ///     make that true rather than documented — without the borrower half a lender could push
 ///     executions into any descendant that never asked for them, under an identity that descendant
@@ -110,7 +110,7 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
     [Test]
     public async Task ABorrowerThatNamesADifferentPool_IsRefused()
     {
-        ArrangeBorrower(lentFromPoolRtId: "6ad562f3ff7c40ff80275b99");
+        ArrangeBorrower(lentFromAdapterPoolRtId: "6ad562f3ff7c40ff80275b99");
         ArrangeLendingPool(lends: true);
         ArrangeBorrowerCredential();
         ArrangeConnectedMember();

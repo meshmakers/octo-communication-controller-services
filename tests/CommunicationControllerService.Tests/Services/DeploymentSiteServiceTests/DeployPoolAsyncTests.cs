@@ -139,7 +139,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
     public async Task DeployWorkloadAsync_AdapterInEdgePool_NotifiesOperatorAndFlipsToPending()
     {
         // Edge pools are deployable at the workload level — the edge operator
-        // receives WorkloadDeployedAsync via RegisterPoolForConnection routing
+        // receives WorkloadDeployedAsync via RegisterDeploymentSiteForConnection routing
         // and runs the same helm upgrade --install path as the central operator.
         // Only the pool itself (CR + broker secret) is central-cluster-only.
         var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);

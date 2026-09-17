@@ -53,7 +53,7 @@ internal class LeaseService : ILeaseService
     }
 
     /// <inheritdoc />
-    public async Task<LeaseGrantResult> GrantLeaseAsync(string lenderTenantId, OctoObjectId poolRtId,
+    public async Task<LeaseGrantResult> GrantLeaseAsync(string lenderTenantId, OctoObjectId adapterPoolRtId,
         LeaseRequest request, CancellationToken cancellationToken = default,
         Func<LeaseDto, PoolMemberConnection, CancellationToken, Task<bool>>? admissionGate = null)
     {
@@ -71,7 +71,7 @@ internal class LeaseService : ILeaseService
         var leasingRefusal = await CheckLeasingEnabledAsync(lenderTenantId, request.BorrowerTenantId);
         if (leasingRefusal != null)
         {
-            return Refuse(lenderTenantId, poolRtId, request, leasingRefusal.Value.Reason,
+            return Refuse(lenderTenantId, adapterPoolRtId, request, leasingRefusal.Value.Reason,
                 leasingRefusal.Value.Message);
         }
 
@@ -81,14 +81,14 @@ internal class LeaseService : ILeaseService
         var borrower = await ReadBorrowerAdapterAsync(request.BorrowerTenantId, request.BorrowerAdapterRtId);
         if (borrower is null)
         {
-            return Refuse(lenderTenantId, poolRtId, request, LeaseRefusalReason.BorrowerAdapterUnknown,
+            return Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.BorrowerAdapterUnknown,
                 $"Tenant '{request.BorrowerTenantId}' has no adapter with rtId {request.BorrowerAdapterRtId}.");
         }
 
-        var declarationRefusal = CheckBorrowerDeclaration(borrower, lenderTenantId, poolRtId, request);
+        var declarationRefusal = CheckBorrowerDeclaration(borrower, lenderTenantId, adapterPoolRtId, request);
         if (declarationRefusal != null)
         {
-            return Refuse(lenderTenantId, poolRtId, request, declarationRefusal.Value.Reason,
+            return Refuse(lenderTenantId, adapterPoolRtId, request, declarationRefusal.Value.Reason,
                 declarationRefusal.Value.Message);
         }
 
@@ -97,11 +97,11 @@ internal class LeaseService : ILeaseService
         // that has been deleted or re-scoped since the borrower was deployed lands here (concept §6,
         // "parent tenant deleted while lending") rather than at deploy time.
         var lendingScope = await _communicationRepository
-            .TryGetAdapterPoolLendingScopeAsync(lenderTenantId, poolRtId.ToString());
+            .TryGetAdapterPoolLendingScopeAsync(lenderTenantId, adapterPoolRtId.ToString());
         if (lendingScope is null)
         {
-            return Refuse(lenderTenantId, poolRtId, request, LeaseRefusalReason.PoolUnknown,
-                $"Tenant '{lenderTenantId}' has no adapter pool with rtId {poolRtId}, or it cannot be read.");
+            return Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.PoolUnknown,
+                $"Tenant '{lenderTenantId}' has no adapter pool with rtId {adapterPoolRtId}, or it cannot be read.");
         }
 
         if (!await _lendingScopeResolver.MayLendAsync(lenderTenantId, request.BorrowerTenantId,
@@ -111,17 +111,17 @@ internal class LeaseService : ILeaseService
             // allow is the shape a cross-tenant incident would take, and it must be visible in the
             // borrower's own event log rather than only in a controller pod's stdout.
             await _eventService.StoreErrorEventAsync(request.BorrowerTenantId,
-                $"Refused a lease of adapter pool {poolRtId} in tenant '{lenderTenantId}': that pool does not " +
+                $"Refused a lease of adapter pool {adapterPoolRtId} in tenant '{lenderTenantId}': that pool does not " +
                 "lend to this tenant. Check the pool's SharingMode and LendingAllowedTenantIds.");
-            return Refuse(lenderTenantId, poolRtId, request, LeaseRefusalReason.LendingScopeDenied,
-                $"Adapter pool {poolRtId} in tenant '{lenderTenantId}' does not lend to tenant " +
+            return Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.LendingScopeDenied,
+                $"Adapter pool {adapterPoolRtId} in tenant '{lenderTenantId}' does not lend to tenant " +
                 $"'{request.BorrowerTenantId}'.");
         }
 
         var credential = await ResolveBorrowerCredentialAsync(request.BorrowerTenantId, borrower);
         if (credential is null)
         {
-            return Refuse(lenderTenantId, poolRtId, request, LeaseRefusalReason.BorrowerCredentialMissing,
+            return Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.BorrowerCredentialMissing,
                 $"Adapter '{borrower.Name}' in tenant '{request.BorrowerTenantId}' has no usable pipeline " +
                 "service account; a pool member cannot act as a borrower without one.");
         }
@@ -144,7 +144,7 @@ internal class LeaseService : ILeaseService
                 "Refused a lease: the database credential of this tenant could not be resolved, so a pool " +
                 "member could not be given access to its data. Check that the tenant has a database record " +
                 "and that the controller is configured with the datasource credentials.");
-            return Refuse(lenderTenantId, poolRtId, request,
+            return Refuse(lenderTenantId, adapterPoolRtId, request,
                 LeaseRefusalReason.BorrowerDatabaseCredentialUnresolvable,
                 $"The database credential of tenant '{request.BorrowerTenantId}' could not be resolved; a pool " +
                 "member cannot reach the borrower's data without it.");
@@ -170,7 +170,7 @@ internal class LeaseService : ILeaseService
                 await _eventService.StoreErrorEventAsync(request.BorrowerTenantId,
                     $"Refused a lease for pipeline '{pipelineRtId}': it is not deployed to adapter " +
                     $"'{borrower.Name}', is disabled, or carries no definition. The work item stays queued.");
-                return Refuse(lenderTenantId, poolRtId, request, LeaseRefusalReason.PipelineProjectionFailed,
+                return Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.PipelineProjectionFailed,
                     $"Pipeline '{pipelineRtId}' of tenant '{request.BorrowerTenantId}' could not be projected for " +
                     $"adapter '{borrower.Name}'; it is not deployed there, disabled, or has no definition.");
             }
@@ -182,7 +182,7 @@ internal class LeaseService : ILeaseService
             LeaseId = Guid.NewGuid().ToString("N"),
             TenantId = request.BorrowerTenantId,
             AdapterPoolTenantId = lenderTenantId,
-            AdapterPoolRtId = poolRtId.ToString(),
+            AdapterPoolRtId = adapterPoolRtId.ToString(),
             AdapterRtId = borrower.RtId.ToString(),
             // The concrete CK type, not the base Adapter id: Adapter is polymorphic and the member
             // has to rebuild the exact RtEntityId to register under. A null here would mean an
@@ -204,13 +204,13 @@ internal class LeaseService : ILeaseService
             ExpiresAtUtc = grantedAt + (request.Ttl ?? ILeaseService.DefaultLeaseTtl)
         };
 
-        var member = _connectionManager.TryClaimMember(lenderTenantId, poolRtId.ToString(), lease);
+        var member = _connectionManager.TryClaimMember(lenderTenantId, adapterPoolRtId.ToString(), lease);
         if (member is null)
         {
             // Nothing is parked here. A caller driving this by hand is told plainly; the scheduler
             // (increment 7) leaves the work item Queued, which is where the queue actually lives.
-            return Refuse(lenderTenantId, poolRtId, request, LeaseRefusalReason.NoIdleMember,
-                $"No idle member of adapter pool {poolRtId} in tenant '{lenderTenantId}' is connected to this " +
+            return Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.NoIdleMember,
+                $"No idle member of adapter pool {adapterPoolRtId} in tenant '{lenderTenantId}' is connected to this " +
                 "controller instance.");
         }
 
@@ -230,14 +230,14 @@ internal class LeaseService : ILeaseService
                     "The admission gate for lease '{LeaseId}' of tenant '{BorrowerTenantId}' threw; the member " +
                     "reservation was undone",
                     lease.LeaseId, lease.TenantId);
-                return Refuse(lenderTenantId, poolRtId, request, LeaseRefusalReason.AdmissionGateFailed,
+                return Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.AdmissionGateFailed,
                     $"The lease admission gate failed: {e.Message}");
             }
 
             if (!admitted)
             {
                 _connectionManager.ReleaseLease(member.ConnectionId, lease.LeaseId);
-                return Refuse(lenderTenantId, poolRtId, request, LeaseRefusalReason.AdmissionGateDeclined,
+                return Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.AdmissionGateDeclined,
                     $"The work item '{lease.ExecutionId}' of tenant '{lease.TenantId}' was no longer available " +
                     "when the member was reserved; it was taken by another controller instance or cancelled.");
             }
@@ -258,7 +258,7 @@ internal class LeaseService : ILeaseService
                 "Failed to push lease '{LeaseId}' to pool member '{MemberId}' (connection '{ConnectionId}'); " +
                 "the claim was undone and the member stays available",
                 lease.LeaseId, member.MemberId, member.ConnectionId);
-            return Refuse(lenderTenantId, poolRtId, request, LeaseRefusalReason.MemberDispatchFailed,
+            return Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.MemberDispatchFailed,
                 $"Pool member '{member.MemberId}' could not be handed the lease: {e.Message}");
         }
 
@@ -269,12 +269,12 @@ internal class LeaseService : ILeaseService
         // are identities and are named: without them a cross-tenant read could not be recognised from
         // a lease log line at all.
         Logger.Info(
-            "Granted lease '{LeaseId}' of pool {PoolRtId} (tenant '{PoolTenantId}') to tenant '{BorrowerTenantId}' " +
+            "Granted lease '{LeaseId}' of pool {AdapterPoolRtId} (tenant '{PoolTenantId}') to tenant '{BorrowerTenantId}' " +
             "on member '{MemberId}', database '{DatabaseName}' as '{DatabaseUser}', expires {ExpiresAtUtc:O}",
             lease.LeaseId, lease.AdapterPoolRtId, lease.AdapterPoolTenantId, lease.TenantId, member.MemberId,
             lease.DatabaseName, lease.DatabaseUser, lease.ExpiresAtUtc);
 
-        AdapterLeasingMetrics.RecordGranted(lease.TenantId, lenderTenantId, poolRtId.ToString());
+        AdapterLeasingMetrics.RecordGranted(lease.TenantId, lenderTenantId, adapterPoolRtId.ToString());
 
         return new LeaseGrantResult(true, lease.LeaseId, member.MemberId, null);
     }
@@ -287,10 +287,10 @@ internal class LeaseService : ILeaseService
     ///     the metric — the enum argument is what makes leaving it out a compile error rather than a
     ///     silently missing series.
     /// </remarks>
-    private static LeaseGrantResult Refuse(string lenderTenantId, OctoObjectId poolRtId, LeaseRequest request,
+    private static LeaseGrantResult Refuse(string lenderTenantId, OctoObjectId adapterPoolRtId, LeaseRequest request,
         LeaseRefusalReason reason, string message)
     {
-        AdapterLeasingMetrics.RecordRefused(request.BorrowerTenantId, lenderTenantId, poolRtId.ToString(),
+        AdapterLeasingMetrics.RecordRefused(request.BorrowerTenantId, lenderTenantId, adapterPoolRtId.ToString(),
             LeaseStage.Grant, reason);
         return LeaseGrantResult.Refused(reason, message);
     }
@@ -578,7 +578,7 @@ internal class LeaseService : ILeaseService
     ///     identity it did not intend to hand out.
     /// </remarks>
     private static (LeaseRefusalReason Reason, string Message)? CheckBorrowerDeclaration(RtAdapter borrower,
-        string lenderTenantId, OctoObjectId poolRtId, LeaseRequest request)
+        string lenderTenantId, OctoObjectId adapterPoolRtId, LeaseRequest request)
     {
         if (borrower.LifecycleMode != RtLifecycleModeEnum.Leased)
         {
@@ -594,11 +594,11 @@ internal class LeaseService : ILeaseService
                 $"'{borrower.LentFromTenantId ?? "<unset>"}', not from '{lenderTenantId}'.");
         }
 
-        if (!string.Equals(borrower.LentFromPoolRtId, poolRtId.ToString(), StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(borrower.LentFromAdapterPoolRtId, adapterPoolRtId.ToString(), StringComparison.OrdinalIgnoreCase))
         {
             return (LeaseRefusalReason.BorrowerNamesAnotherPool,
                 $"Adapter '{borrower.Name}' in tenant '{request.BorrowerTenantId}' borrows from pool " +
-                $"{borrower.LentFromPoolRtId ?? "<unset>"}, not from {poolRtId}.");
+                $"{borrower.LentFromAdapterPoolRtId ?? "<unset>"}, not from {adapterPoolRtId}.");
         }
 
         return null;

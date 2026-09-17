@@ -83,7 +83,7 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
             // through MongoDB can cost.
             loaded.LeaseWaitMs.Should().BeInRange(89_999, 90_001);
             loaded.LeasedFromTenantId.Should().Be(LenderTenantId);
-            loaded.LeasedFromPoolRtId.Should().Be(PoolRtId);
+            loaded.LeasedFromAdapterPoolRtId.Should().Be(PoolRtId);
             loaded.LeasedOnMemberId.Should().Be("member-7");
             // Not released yet — the span is only half open at this point.
             loaded.LeaseReleasedAt.Should().BeNull();
@@ -474,7 +474,7 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
             ConfigurationState = RtConfigurationStateEnum.Unconfigured,
             LifecycleMode = RtLifecycleModeEnum.Leased,
             LentFromTenantId = LenderTenantId,
-            LentFromPoolRtId = PoolRtId
+            LentFromAdapterPoolRtId = PoolRtId
         };
 
         var operationResult = new OperationResult();

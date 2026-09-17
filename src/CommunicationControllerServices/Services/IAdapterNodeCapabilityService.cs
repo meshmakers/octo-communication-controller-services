@@ -35,7 +35,7 @@ public sealed record AdapterNodeCapabilities(
 ///     <para>
 ///         A <b>Leased</b> adapter has no process of its own — it never holds an adapter-hub
 ///         connection and never will. Its pipelines are executed by a member of the pool named by
-///         <c>LentFromTenantId</c> / <c>LentFromPoolRtId</c>, so the pool's members are the only
+///         <c>LentFromTenantId</c> / <c>LentFromAdapterPoolRtId</c>, so the pool's members are the only
 ///         honest source. This seam exists because three separate deploy-time questions — schema
 ///         validation, process-bound-trigger classification, and the execution class — each used to
 ///         reach into <c>AdapterById</c> on their own and each would have had to grow the same

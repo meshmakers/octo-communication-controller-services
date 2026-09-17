@@ -7,24 +7,24 @@ internal class Pool
 {
     private readonly IPoolCachePublish _poolCachePublish;
 
-    public Pool(IPoolCachePublish poolCachePublish, OctoObjectId poolRtId, string poolName, string connectionId)
+    public Pool(IPoolCachePublish poolCachePublish, OctoObjectId deploymentSiteRtId, string poolName, string connectionId)
     {
         _poolCachePublish = poolCachePublish;
-        PoolRtId = poolRtId;
-        PoolName = poolName;
+        DeploymentSiteRtId = deploymentSiteRtId;
+        DeploymentSiteName = poolName;
         ConnectionId = connectionId;
     }
 
-    public Pool(IPoolCachePublish poolCachePublish, PoolDescription poolDescription)
+    public Pool(IPoolCachePublish poolCachePublish, DeploymentSiteDescription deploymentSiteDescription)
     {
         _poolCachePublish = poolCachePublish;
-        PoolRtId = poolDescription.PoolRtId;
-        PoolName = poolDescription.PoolName;
-        ConnectionId = poolDescription.ConnectionId;
+        DeploymentSiteRtId = deploymentSiteDescription.DeploymentSiteRtId;
+        DeploymentSiteName = deploymentSiteDescription.DeploymentSiteName;
+        ConnectionId = deploymentSiteDescription.ConnectionId;
     }
 
-    public string PoolName { get; }
-    public OctoObjectId PoolRtId { get; }
+    public string DeploymentSiteName { get; }
+    public OctoObjectId DeploymentSiteRtId { get; }
 
     public string? ConnectionId { get; private set; }
     
@@ -40,13 +40,13 @@ internal class Pool
         _poolCachePublish.PublishConfigurationAsync(tenantId);
     }
 
-    public PoolDescription GetPoolDescription()
+    public DeploymentSiteDescription GetDeploymentSiteDescription()
     {
-        return new PoolDescription
+        return new DeploymentSiteDescription
         {
             ConnectionId = ConnectionId,
-            PoolName = PoolName,
-            PoolRtId = PoolRtId
+            DeploymentSiteName = DeploymentSiteName,
+            DeploymentSiteRtId = DeploymentSiteRtId
         };
     }
 }

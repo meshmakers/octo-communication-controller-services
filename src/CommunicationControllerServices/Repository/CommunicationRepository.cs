@@ -33,7 +33,7 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyCollection<RtAdapter>> GetAdaptersAsync(string tenantId, OctoObjectId poolRtId)
+    public async Task<IReadOnlyCollection<RtAdapter>> GetAdaptersAsync(string tenantId, OctoObjectId adapterPoolRtId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -41,26 +41,26 @@ internal class CommunicationRepository : ICommunicationRepository
         try
         {
             var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtDeploymentSite, RtAdapter>(session,
-                [poolRtId] , SystemCommunicationCkIds.RtCkHostsRoleId,
+                [adapterPoolRtId] , SystemCommunicationCkIds.RtCkHostsRoleId,
                 GraphDirections.Inbound, null, RtEntityQueryOptions.Create());
 
             if (!resultSet.Any())
             {
-                throw CommunicationRepositoryException.PoolNotFound(tenantId, poolRtId);
+                throw CommunicationRepositoryException.PoolNotFound(tenantId, adapterPoolRtId);
             }
 
             return resultSet.First().Value.Items.ToList();
         }
         catch (Exception e)
         {
-            throw CommunicationRepositoryException.CommonFailedGettingAdapters(tenantId, poolRtId, e);
+            throw CommunicationRepositoryException.CommonFailedGettingAdapters(tenantId, adapterPoolRtId, e);
         }
     }
 
 
     /// <inheritdoc />
     public async Task<IReadOnlyCollection<RtDeployableWorkload>> GetWorkloadsForPoolAsync(string tenantId,
-        OctoObjectId poolRtId)
+        OctoObjectId adapterPoolRtId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -70,7 +70,7 @@ internal class CommunicationRepository : ICommunicationRepository
             // RtDeployableWorkload is abstract — the runtime engine returns the
             // concrete RtAdapter / RtApplication instances polymorphically.
             var resultSet = await tenantRepository.GetRtAssociationTargetsAsync<RtDeploymentSite, RtDeployableWorkload>(session,
-                [poolRtId], SystemCommunicationCkIds.RtCkHostsRoleId,
+                [adapterPoolRtId], SystemCommunicationCkIds.RtCkHostsRoleId,
                 GraphDirections.Inbound, null, RtEntityQueryOptions.Create());
 
             if (!resultSet.Any())
@@ -82,7 +82,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw CommunicationRepositoryException.CommonFailedGettingAdapters(tenantId, poolRtId, e);
+            throw CommunicationRepositoryException.CommonFailedGettingAdapters(tenantId, adapterPoolRtId, e);
         }
     }
 
@@ -236,20 +236,20 @@ internal class CommunicationRepository : ICommunicationRepository
 
     /// <inheritdoc />
     /// <inheritdoc />
-    public async Task<LendingScope?> TryGetAdapterPoolLendingScopeAsync(string lenderTenantId, string poolRtId)
+    public async Task<LendingScope?> TryGetAdapterPoolLendingScopeAsync(string lenderTenantId, string adapterPoolRtId)
     {
         // AB#4924 — reads an AdapterPool in a DIFFERENT tenant than the caller's. That is the
-        // whole point: the borrower's Adapter carries LentFromTenantId / LentFromPoolRtId as plain
+        // whole point: the borrower's Adapter carries LentFromTenantId / LentFromAdapterPoolRtId as plain
         // values because a CK association cannot cross a tenant database, so the controller is the
         // only component that can resolve the reference, and it does it here.
         //
         // Returns null for every "cannot resolve" case rather than throwing, because the caller
         // treats an unresolvable pool and a pool that does not lend here identically: both are a
         // refused deploy with a named reason (concept §6, "Parent tenant deleted while lending").
-        if (!OctoObjectId.TryParse(poolRtId, out var rtId))
+        if (!OctoObjectId.TryParse(adapterPoolRtId, out var rtId))
         {
-            _logger.LogWarning("[{LenderTenantId}] LentFromPoolRtId '{PoolRtId}' is not a valid RtId",
-                lenderTenantId, poolRtId);
+            _logger.LogWarning("[{LenderTenantId}] LentFromAdapterPoolRtId '{AdapterPoolRtId}' is not a valid RtId",
+                lenderTenantId, adapterPoolRtId);
             return null;
         }
 
@@ -276,8 +276,8 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            _logger.LogWarning(e, "[{LenderTenantId}] Failed to read adapter pool '{PoolRtId}'",
-                lenderTenantId, poolRtId);
+            _logger.LogWarning(e, "[{LenderTenantId}] Failed to read adapter pool '{AdapterPoolRtId}'",
+                lenderTenantId, adapterPoolRtId);
             return null;
         }
     }
@@ -968,7 +968,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task SetPoolDeploymentStateAsync(string tenantId, OctoObjectId poolRtId,
+    public async Task SetPoolDeploymentStateAsync(string tenantId, OctoObjectId adapterPoolRtId,
         RtDeploymentStateEnum deploymentState)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
@@ -980,7 +980,7 @@ internal class CommunicationRepository : ICommunicationRepository
 
             var rtPool = new RtDeploymentSite
             {
-                RtId = poolRtId,
+                RtId = adapterPoolRtId,
                 DeploymentState = deploymentState
             };
 
@@ -1004,12 +1004,12 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw CommunicationRepositoryException.CommonFailedSetPoolDeploymentState(tenantId, poolRtId,
+            throw CommunicationRepositoryException.CommonFailedSetPoolDeploymentState(tenantId, adapterPoolRtId,
                 deploymentState, e);
         }
     }
 
-    public async Task SetPoolCommunicationStateAsync(string tenantId, OctoObjectId poolRtId,
+    public async Task SetPoolCommunicationStateAsync(string tenantId, OctoObjectId adapterPoolRtId,
         RtCommunicationStateEnum communicationState)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
@@ -1026,7 +1026,7 @@ internal class CommunicationRepository : ICommunicationRepository
             var newTimestamp = DateTime.UtcNow;
             var rtPool = new RtDeploymentSite
             {
-                RtId = poolRtId,
+                RtId = adapterPoolRtId,
                 CommunicationState = communicationState,
                 CommunicationStateTimestamp = newTimestamp
             };
@@ -1052,7 +1052,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw CommunicationRepositoryException.CommonFailedSetPoolCommunicationState(tenantId, poolRtId,
+            throw CommunicationRepositoryException.CommonFailedSetPoolCommunicationState(tenantId, adapterPoolRtId,
                 communicationState, e);
         }
     }
@@ -2763,7 +2763,7 @@ internal class CommunicationRepository : ICommunicationRepository
                 LeaseGrantedAt = claim.GrantedAtUtc,
                 LeaseWaitMs = waitMs,
                 LeasedFromTenantId = claim.LenderTenantId,
-                LeasedFromPoolRtId = claim.PoolRtId,
+                LeasedFromAdapterPoolRtId = claim.AdapterPoolRtId,
                 LeasedOnMemberId = claim.MemberId
             };
 

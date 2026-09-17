@@ -81,7 +81,7 @@ internal class RestoreDeployedStateAsyncTests : PoolServiceTestsBase
             TenantId, DeploymentSiteRtId, RtDeploymentStateEnum.Deployed);
         OperatorConnectionManager.Received(1).TrackDeployedPool(
             Arg.Is<DeployedDeploymentSiteDto>(p => p.TenantId == TenantId && p.DeploymentSiteRtId == DeploymentSiteRtId.ToString()));
-        OperatorConnectionManager.Received(1).RegisterPoolForConnection(
+        OperatorConnectionManager.Received(1).RegisterDeploymentSiteForConnection(
             OperatorConnectionId, TenantId, DeploymentSiteRtId.ToString());
         await CommunicationEventService.Received(1).StoreInformationEventAsync(
             TenantId, Arg.Is<string>(s => s.Contains("Deployed") && s.Contains("reverse-sync")),
@@ -102,7 +102,7 @@ internal class RestoreDeployedStateAsyncTests : PoolServiceTestsBase
         await CommunicationRepository.DidNotReceiveWithAnyArgs().SetPoolDeploymentStateAsync(
             Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<RtDeploymentStateEnum>());
         OperatorConnectionManager.Received(1).TrackDeployedPool(Arg.Any<DeployedDeploymentSiteDto>());
-        OperatorConnectionManager.Received(1).RegisterPoolForConnection(
+        OperatorConnectionManager.Received(1).RegisterDeploymentSiteForConnection(
             OperatorConnectionId, TenantId, DeploymentSiteRtId.ToString());
         await CommunicationEventService.DidNotReceiveWithAnyArgs().StoreInformationEventAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<RtEntityId?>());
@@ -123,7 +123,7 @@ internal class RestoreDeployedStateAsyncTests : PoolServiceTestsBase
         await CommunicationRepository.DidNotReceiveWithAnyArgs().SetPoolDeploymentStateAsync(
             Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<RtDeploymentStateEnum>());
         OperatorConnectionManager.DidNotReceive().TrackDeployedPool(Arg.Any<DeployedDeploymentSiteDto>());
-        OperatorConnectionManager.DidNotReceive().RegisterPoolForConnection(
+        OperatorConnectionManager.DidNotReceive().RegisterDeploymentSiteForConnection(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>());
     }
 

@@ -809,9 +809,9 @@ internal class AdapterService(
         AdapterNodeCapabilities capabilities)
     {
         Logger.Info(
-            "[{TenantId}] Adapter '{AdapterRtId}' is Leased from pool {PoolRtId} of tenant '{LenderTenantId}'; " +
+            "[{TenantId}] Adapter '{AdapterRtId}' is Leased from pool {AdapterPoolRtId} of tenant '{LenderTenantId}'; " +
             "validating and persisting pipeline '{PipelineRtEntityId}' without a push. Node capabilities: {Source}",
-            tenantId, adapterRtEntityId, leasedAdapter.LentFromPoolRtId ?? "<unset>",
+            tenantId, adapterRtEntityId, leasedAdapter.LentFromAdapterPoolRtId ?? "<unset>",
             leasedAdapter.LentFromTenantId ?? "<unset>", pipelineRtEntityId, capabilities.Source);
 
         await ValidateAndPersistPipelineAsync(tenantId, adapterRtEntityId, pipelineRtEntityId, pipelineDefinition,

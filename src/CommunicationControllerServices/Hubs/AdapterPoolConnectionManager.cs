@@ -19,10 +19,10 @@ internal class AdapterPoolConnectionManager : IAdapterPoolConnectionManager
     private readonly Lock _claimLock = new();
 
     public PoolMemberConnection RegisterMember(string connectionId, string memberId, string poolTenantId,
-        string poolRtId, IReadOnlyList<NodeDescriptorDto>? nodeDescriptors = null,
+        string adapterPoolRtId, IReadOnlyList<NodeDescriptorDto>? nodeDescriptors = null,
         string? pipelineSchemaJson = null)
     {
-        var member = new PoolMemberConnection(connectionId, memberId, poolTenantId, poolRtId,
+        var member = new PoolMemberConnection(connectionId, memberId, poolTenantId, adapterPoolRtId,
             ActiveLease: null, IsDraining: false, LastSeenUtc: DateTime.UtcNow,
             // AB#4924: an empty list and "did not report any" are the same thing to every caller,
             // and null is the value the fallback path already understands.
@@ -35,22 +35,22 @@ internal class AdapterPoolConnectionManager : IAdapterPoolConnectionManager
         }
 
         Logger.Info(
-            "Pool member '{MemberId}' registered on connection '{ConnectionId}' for pool {PoolRtId} " +
+            "Pool member '{MemberId}' registered on connection '{ConnectionId}' for pool {AdapterPoolRtId} " +
             "of tenant '{PoolTenantId}' with {NodeCount} node descriptor(s) and {SchemaState} pipeline " +
             "schema; {Count} member(s) now registered on this controller",
-            memberId, connectionId, poolRtId, poolTenantId, member.NodeDescriptors?.Count ?? 0,
+            memberId, connectionId, adapterPoolRtId, poolTenantId, member.NodeDescriptors?.Count ?? 0,
             member.PipelineSchemaJson == null ? "no" : "a", _membersByConnection.Count);
 
         return member;
     }
 
-    public PoolMemberCapabilities? TryGetPoolCapabilities(string poolTenantId, string poolRtId)
+    public PoolMemberCapabilities? TryGetPoolCapabilities(string poolTenantId, string adapterPoolRtId)
     {
         // Deterministic and draining-last; see the interface remarks for why neither half is
         // cosmetic. No lock: a stale read here can only pick a member that just disconnected, and
         // its descriptors describe the same workload as its replacement's.
         var member = _membersByConnection.Values
-            .Where(m => Matches(m, poolTenantId, poolRtId) && m.NodeDescriptors is { Count: > 0 })
+            .Where(m => Matches(m, poolTenantId, adapterPoolRtId) && m.NodeDescriptors is { Count: > 0 })
             .OrderBy(m => m.IsDraining)
             .ThenBy(m => m.MemberId, StringComparer.Ordinal)
             .FirstOrDefault();
@@ -81,10 +81,10 @@ internal class AdapterPoolConnectionManager : IAdapterPoolConnectionManager
         return _membersByConnection.GetValueOrDefault(connectionId);
     }
 
-    public IReadOnlyCollection<PoolMemberConnection> GetMembers(string poolTenantId, string poolRtId)
+    public IReadOnlyCollection<PoolMemberConnection> GetMembers(string poolTenantId, string adapterPoolRtId)
     {
         return _membersByConnection.Values
-            .Where(m => Matches(m, poolTenantId, poolRtId))
+            .Where(m => Matches(m, poolTenantId, adapterPoolRtId))
             .ToList();
     }
 
@@ -93,7 +93,7 @@ internal class AdapterPoolConnectionManager : IAdapterPoolConnectionManager
         return _membersByConnection.Values.ToList();
     }
 
-    public PoolMemberConnection? TryClaimMember(string poolTenantId, string poolRtId, LeaseDto lease)
+    public PoolMemberConnection? TryClaimMember(string poolTenantId, string adapterPoolRtId, LeaseDto lease)
     {
         lock (_claimLock)
         {
@@ -102,7 +102,7 @@ internal class AdapterPoolConnectionManager : IAdapterPoolConnectionManager
             // increment 7 and it lives one level up, across tenants — just a tie-break that keeps a
             // single hot member from being the only one that ever warms up.
             var candidate = _membersByConnection.Values
-                .Where(m => Matches(m, poolTenantId, poolRtId) && m.IsAvailable)
+                .Where(m => Matches(m, poolTenantId, adapterPoolRtId) && m.IsAvailable)
                 .OrderBy(m => m.LastSeenUtc)
                 .FirstOrDefault();
 
@@ -175,9 +175,9 @@ internal class AdapterPoolConnectionManager : IAdapterPoolConnectionManager
         }
     }
 
-    private static bool Matches(PoolMemberConnection member, string poolTenantId, string poolRtId)
+    private static bool Matches(PoolMemberConnection member, string poolTenantId, string adapterPoolRtId)
     {
         return string.Equals(member.PoolTenantId, poolTenantId, StringComparison.OrdinalIgnoreCase)
-               && string.Equals(member.PoolRtId, poolRtId, StringComparison.OrdinalIgnoreCase);
+               && string.Equals(member.AdapterPoolRtId, adapterPoolRtId, StringComparison.OrdinalIgnoreCase);
     }
 }

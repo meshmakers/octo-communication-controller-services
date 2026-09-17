@@ -77,7 +77,7 @@ internal class SetCommunicationStateOfflineAsyncTests : PoolServiceTestsBase
         // claim the same pool (e.g. central operator with 2 replicas, or a
         // rolling restart with brief overlap), the disconnect of ONE claimer
         // must not flip the pool Offline as long as the other connection is
-        // still hosting it. The PoolDescription cache only carries the LAST
+        // still hosting it. The DeploymentSiteDescription cache only carries the LAST
         // claim's ConnectionId — without this guard the OperatorHub's
         // OnDisconnectedAsync orphan-flip would mark the pool Offline even
         // though the surviving operator is still connected. By the time we

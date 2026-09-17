@@ -34,14 +34,14 @@ internal sealed class AdapterNodeCapabilityService(
     private AdapterNodeCapabilities ResolveFromLendingPool(RtAdapter adapter)
     {
         var lenderTenantId = adapter.LentFromTenantId;
-        var poolRtId = adapter.LentFromPoolRtId;
+        var poolRtId = adapter.LentFromAdapterPoolRtId;
 
         // A half-configured borrower is refused at workload deploy (DeploymentSiteService), but DeployPipeline
         // can reach one that was never deployed — answer "nothing known" rather than guessing.
         if (string.IsNullOrWhiteSpace(lenderTenantId) || string.IsNullOrWhiteSpace(poolRtId))
         {
             return new AdapterNodeCapabilities(null, null,
-                "no lending pool (LentFromTenantId / LentFromPoolRtId are not both set)");
+                "no lending pool (LentFromTenantId / LentFromAdapterPoolRtId are not both set)");
         }
 
         var capabilities = poolConnectionManager.TryGetPoolCapabilities(lenderTenantId, poolRtId);

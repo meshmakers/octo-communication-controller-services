@@ -88,18 +88,18 @@ public class OperatorHub : Hub, IOperatorHub
         // newer connection has already taken over) does not overwrite the
         // Online state written by the newer connection.
         var orphaned = _connectionManager.RemoveOperator(disconnectingConnectionId);
-        foreach (var (tenantId, poolRtId) in orphaned)
+        foreach (var (tenantId, deploymentSiteRtId) in orphaned)
         {
             try
             {
                 await _poolService.SetCommunicationStateOfflineAsync(tenantId,
-                    new OctoObjectId(poolRtId), disconnectingConnectionId);
+                    new OctoObjectId(deploymentSiteRtId), disconnectingConnectionId);
             }
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "Failed to mark pool (rtId {PoolRtId}) offline after operator disconnect (tenant '{TenantId}')",
-                    poolRtId, tenantId);
+                    "Failed to mark pool (rtId {DeploymentSiteRtId}) offline after operator disconnect (tenant '{TenantId}')",
+                    deploymentSiteRtId, tenantId);
             }
         }
         await base.OnDisconnectedAsync(exception);
@@ -152,45 +152,45 @@ public class OperatorHub : Hub, IOperatorHub
         var disconnectingConnectionId = Context.ConnectionId;
         Logger.Info("Operator unregistered with connection id '{ConnectionId}'", disconnectingConnectionId);
         var orphaned = _connectionManager.RemoveOperator(disconnectingConnectionId);
-        foreach (var (tenantId, poolRtId) in orphaned)
+        foreach (var (tenantId, deploymentSiteRtId) in orphaned)
         {
             try
             {
                 await _poolService.SetCommunicationStateOfflineAsync(tenantId,
-                    new OctoObjectId(poolRtId), disconnectingConnectionId);
+                    new OctoObjectId(deploymentSiteRtId), disconnectingConnectionId);
             }
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "Failed to mark pool (rtId {PoolRtId}) offline on operator unregister (tenant '{TenantId}')",
-                    poolRtId, tenantId);
+                    "Failed to mark pool (rtId {DeploymentSiteRtId}) offline on operator unregister (tenant '{TenantId}')",
+                    deploymentSiteRtId, tenantId);
             }
         }
     }
 
     /// <inheritdoc />
-    public async Task RegisterDeploymentSiteAsync(string tenantId, string poolRtId)
+    public async Task RegisterDeploymentSiteAsync(string tenantId, string deploymentSiteRtId)
     {
         Logger.Info(
-            "Operator '{ConnectionId}' claims pool (rtId {PoolRtId}) for tenant '{TenantId}'",
-            Context.ConnectionId, poolRtId, tenantId);
+            "Operator '{ConnectionId}' claims pool (rtId {DeploymentSiteRtId}) for tenant '{TenantId}'",
+            Context.ConnectionId, deploymentSiteRtId, tenantId);
 
-        // Validate poolRtId up-front. An empty / malformed value used to
-        // surface as a FormatException from `new OctoObjectId(poolRtId)`
+        // Validate deploymentSiteRtId up-front. An empty / malformed value used to
+        // surface as a FormatException from `new OctoObjectId(deploymentSiteRtId)`
         // a few lines down, which SignalR then wrapped in a generic
         // HubException ("'' is not a valid 24 digit hex string"). The
         // operator could not act on that — it just kept retrying the
         // same broken CR. Failing here returns a typed HubException with
         // a message that names the offending field, so the operator log
         // immediately points at the misconfigured CR spec.
-        if (!OctoObjectId.TryParse(poolRtId, out var poolObjectId))
+        if (!OctoObjectId.TryParse(deploymentSiteRtId, out var poolObjectId))
         {
             Logger.Warn(
-                "Rejecting RegisterPool: poolRtId '{PoolRtId}' is not a valid 24-character hex ObjectId " +
+                "Rejecting RegisterPool: deploymentSiteRtId '{DeploymentSiteRtId}' is not a valid 24-character hex ObjectId " +
                 "(tenant '{TenantId}', connection '{ConnectionId}')",
-                poolRtId, tenantId, Context.ConnectionId);
+                deploymentSiteRtId, tenantId, Context.ConnectionId);
             throw new HubException(
-                $"Invalid poolRtId '{poolRtId}' (tenant '{tenantId}'): " +
+                $"Invalid deploymentSiteRtId '{deploymentSiteRtId}' (tenant '{tenantId}'): " +
                 "must be a 24-character hex ObjectId. Check the CommunicationPool CR spec.");
         }
 
@@ -210,14 +210,14 @@ public class OperatorHub : Hub, IOperatorHub
             if (rtPool == null)
             {
                 Logger.Warn(
-                    "Rejecting RegisterPool: no RtDeploymentSite with rtId {PoolRtId} for tenant '{TenantId}' " +
+                    "Rejecting RegisterPool: no RtDeploymentSite with rtId {DeploymentSiteRtId} for tenant '{TenantId}' " +
                     "(connection '{ConnectionId}')",
-                    poolRtId, tenantId, Context.ConnectionId);
+                    deploymentSiteRtId, tenantId, Context.ConnectionId);
                 await _eventService.StoreErrorEventAsync(tenantId,
                     $"Operator (connection '{Context.ConnectionId}', AutoManagePools={operatorMode.Value}) " +
-                    $"attempted to register pool rtId {poolRtId} but no such pool exists.");
+                    $"attempted to register deployment site rtId {deploymentSiteRtId} but no such pool exists.");
                 throw new HubException(
-                    $"Pool rtId {poolRtId} does not exist for tenant '{tenantId}'.");
+                    $"Deployment site rtId {deploymentSiteRtId} does not exist for tenant '{tenantId}'.");
             }
 
             var poolIsCloud = rtPool.Environment == RtEnvironmentEnum.Cloud;
@@ -227,15 +227,15 @@ public class OperatorHub : Hub, IOperatorHub
                 var operatorRole = operatorIsCentral ? "central (AutoManagePools=true)" : "edge (AutoManagePools=false)";
                 var poolEnv = poolIsCloud ? "Cloud" : "Edge";
                 Logger.Warn(
-                    "Rejecting RegisterPool: operator is {OperatorRole} but pool '{PoolName}' (rtId {PoolRtId}) " +
+                    "Rejecting RegisterPool: operator is {OperatorRole} but pool '{PoolName}' (rtId {DeploymentSiteRtId}) " +
                     "is {PoolEnv} (tenant '{TenantId}', connection '{ConnectionId}')",
-                    operatorRole, rtPool.Name, poolRtId, poolEnv, tenantId, Context.ConnectionId);
+                    operatorRole, rtPool.Name, deploymentSiteRtId, poolEnv, tenantId, Context.ConnectionId);
                 await _eventService.StoreErrorEventAsync(tenantId,
-                    $"Rejected pool registration: pool '{rtPool.Name}' (rtId {poolRtId}) " +
+                    $"Rejected pool registration: pool '{rtPool.Name}' (rtId {deploymentSiteRtId}) " +
                     $"is {poolEnv} but operator (connection '{Context.ConnectionId}') is {operatorRole}. " +
                     "Check the CommunicationPool CR and the operator's deployment mode.");
                 throw new HubException(
-                    $"Pool '{rtPool.Name}' (rtId {poolRtId}) is {poolEnv}; " +
+                    $"Pool '{rtPool.Name}' (rtId {deploymentSiteRtId}) is {poolEnv}; " +
                     $"a {operatorRole} operator cannot claim it. " +
                     "Check the operator's AutoManagePools setting and the pool's Environment.");
             }
@@ -244,17 +244,17 @@ public class OperatorHub : Hub, IOperatorHub
         {
             Logger.Info(
                 "Operator '{ConnectionId}' registered without mode declaration (legacy); skipping " +
-                "Environment/mode check for pool rtId {PoolRtId} (tenant '{TenantId}')",
-                Context.ConnectionId, poolRtId, tenantId);
+                "Environment/mode check for deployment site rtId {DeploymentSiteRtId} (tenant '{TenantId}')",
+                Context.ConnectionId, deploymentSiteRtId, tenantId);
             await _eventService.StoreInformationEventAsync(tenantId,
-                $"Legacy operator (connection '{Context.ConnectionId}') registered pool rtId {poolRtId} " +
+                $"Legacy operator (connection '{Context.ConnectionId}') registered deployment site rtId {deploymentSiteRtId} " +
                 "without declaring a mode; Environment/mode enforcement skipped.");
         }
 
         // Track the (connection, tenant, pool) tuple before flipping state —
         // if state-write fails we still want OnDisconnectedAsync to clean
         // up so the entity doesn't stay stuck on Online.
-        _connectionManager.RegisterPoolForConnection(Context.ConnectionId, tenantId, poolRtId);
+        _connectionManager.RegisterDeploymentSiteForConnection(Context.ConnectionId, tenantId, deploymentSiteRtId);
 
         try
         {
@@ -264,8 +264,8 @@ public class OperatorHub : Hub, IOperatorHub
         catch (Exception ex)
         {
             Logger.Error(ex,
-                "Failed to mark pool (rtId {PoolRtId}) online (tenant '{TenantId}')",
-                poolRtId, tenantId);
+                "Failed to mark pool (rtId {DeploymentSiteRtId}) online (tenant '{TenantId}')",
+                deploymentSiteRtId, tenantId);
             throw;
         }
 
@@ -275,7 +275,7 @@ public class OperatorHub : Hub, IOperatorHub
         // transiently. Runs after the state write so a failed registration
         // (rethrown above) does not consume the queue.
         await _connectionManager.FlushPendingWorkloadNotificationsAsync(
-            Context.ConnectionId, tenantId, poolRtId);
+            Context.ConnectionId, tenantId, deploymentSiteRtId);
 
         // Re-dispatch workloads stranded in Pending (AB#4894): a deploy
         // notification sent to the PREVIOUS operator pod while it was being
@@ -286,28 +286,28 @@ public class OperatorHub : Hub, IOperatorHub
     }
 
     /// <inheritdoc />
-    public async Task UnregisterDeploymentSiteAsync(string tenantId, string poolRtId)
+    public async Task UnregisterDeploymentSiteAsync(string tenantId, string deploymentSiteRtId)
     {
         Logger.Info(
-            "Operator '{ConnectionId}' releases pool (rtId {PoolRtId}) for tenant '{TenantId}'",
-            Context.ConnectionId, poolRtId, tenantId);
+            "Operator '{ConnectionId}' releases pool (rtId {DeploymentSiteRtId}) for tenant '{TenantId}'",
+            Context.ConnectionId, deploymentSiteRtId, tenantId);
 
         // Validate up-front (same rationale as RegisterDeploymentSiteAsync). Bad
         // input here used to surface as FormatException from
-        // `new OctoObjectId(poolRtId)`, swallowed by the catch below as
+        // `new OctoObjectId(deploymentSiteRtId)`, swallowed by the catch below as
         // a generic warning that obscured the actual cause.
-        if (!OctoObjectId.TryParse(poolRtId, out var poolObjectId))
+        if (!OctoObjectId.TryParse(deploymentSiteRtId, out var poolObjectId))
         {
             Logger.Warn(
-                "Rejecting UnregisterPool: poolRtId '{PoolRtId}' is not a valid 24-character hex ObjectId " +
+                "Rejecting UnregisterPool: deploymentSiteRtId '{DeploymentSiteRtId}' is not a valid 24-character hex ObjectId " +
                 "(tenant '{TenantId}', connection '{ConnectionId}')",
-                poolRtId, tenantId, Context.ConnectionId);
+                deploymentSiteRtId, tenantId, Context.ConnectionId);
             throw new HubException(
-                $"Invalid poolRtId '{poolRtId}' (tenant '{tenantId}'): " +
+                $"Invalid deploymentSiteRtId '{deploymentSiteRtId}' (tenant '{tenantId}'): " +
                 "must be a 24-character hex ObjectId.");
         }
 
-        _connectionManager.UnregisterPoolForConnection(Context.ConnectionId, tenantId, poolRtId);
+        _connectionManager.UnregisterPoolForConnection(Context.ConnectionId, tenantId, deploymentSiteRtId);
 
         try
         {
@@ -316,8 +316,8 @@ public class OperatorHub : Hub, IOperatorHub
         catch (Exception ex)
         {
             Logger.Warn(ex,
-                "Failed to unregister pool (rtId {PoolRtId}); state may stay Online until disconnect (tenant '{TenantId}')",
-                poolRtId, tenantId);
+                "Failed to unregister pool (rtId {DeploymentSiteRtId}); state may stay Online until disconnect (tenant '{TenantId}')",
+                deploymentSiteRtId, tenantId);
         }
     }
 

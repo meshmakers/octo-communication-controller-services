@@ -163,7 +163,7 @@ internal class TriggerManagementService(
             // two different tenants and an aggregate cannot tell them apart. This half is always
             // the borrower's own switch — the lender's is checked at grant, in LeaseService.
             AdapterLeasingMetrics.RecordRefused(tenantId, adapter.LentFromTenantId ?? string.Empty,
-                adapter.LentFromPoolRtId ?? string.Empty, LeaseStage.Enqueue,
+                adapter.LentFromAdapterPoolRtId ?? string.Empty, LeaseStage.Enqueue,
                 LeaseRefusalReason.LeasingDisabledBorrower);
 
             logger.LogWarning(
@@ -197,7 +197,7 @@ internal class TriggerManagementService(
         // but not which way it is moving. Re-queued attempts are counted separately on
         // octo.lease.requeued.count, so the full in-rate is the sum of the two.
         AdapterLeasingMetrics.RecordEnqueued(tenantId, adapter.LentFromTenantId ?? string.Empty,
-            adapter.LentFromPoolRtId ?? string.Empty);
+            adapter.LentFromAdapterPoolRtId ?? string.Empty);
 
         // 🔴 AB#4924 §9.6 — the half that decides whether Interactive means anything. Work has just
         // arrived, and a member of the pool may be idle ALREADY: without this the execution waits for

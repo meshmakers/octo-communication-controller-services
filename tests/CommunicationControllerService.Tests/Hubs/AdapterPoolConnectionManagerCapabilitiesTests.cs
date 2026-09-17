@@ -42,7 +42,7 @@ internal class AdapterPoolConnectionManagerCapabilitiesTests
         _manager.RegisterMember("conn-1", "octo-pool-0", LenderTenantId, OtherPoolRtId,
             [Descriptor("FromCustomThing")], "{}");
 
-        // Not a formality: the borrower's LentFromPoolRtId is the only thing that decides which
+        // Not a formality: the borrower's LentFromAdapterPoolRtId is the only thing that decides which
         // process will run its pipelines, and a manager that answered pool-agnostically would
         // validate a leased pipeline against an unrelated tenant's SDK.
         await Assert.That(_manager.TryGetPoolCapabilities(LenderTenantId, AdapterPoolRtId)).IsNull();

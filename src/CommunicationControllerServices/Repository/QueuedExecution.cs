@@ -80,7 +80,7 @@ public sealed record QueuedExecution(
 /// </summary>
 /// <param name="LeaseId">The lease the work item is served under.</param>
 /// <param name="LenderTenantId">Tenant that owns the pool — becomes <c>LeasedFromTenantId</c>.</param>
-/// <param name="PoolRtId">RtId of the <c>AdapterPool</c> — becomes <c>LeasedFromPoolRtId</c>.</param>
+/// <param name="AdapterPoolRtId">RtId of the <c>AdapterPool</c> — becomes <c>LeasedFromAdapterPoolRtId</c>.</param>
 /// <param name="MemberId">
 ///     The member that holds the lease — becomes <c>LeasedOnMemberId</c>. Not an RtId: members are
 ///     replicas of one pool workload rather than entities (implementation plan §13.1).
@@ -92,7 +92,7 @@ public sealed record QueuedExecution(
 public readonly record struct LeaseClaim(
     string LeaseId,
     string LenderTenantId,
-    string PoolRtId,
+    string AdapterPoolRtId,
     string MemberId,
     DateTime GrantedAtUtc);
 

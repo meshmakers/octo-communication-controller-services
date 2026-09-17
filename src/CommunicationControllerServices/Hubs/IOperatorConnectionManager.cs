@@ -32,29 +32,29 @@ public interface IOperatorConnectionManager
     bool? GetOperatorMode(string connectionId);
 
     /// <summary>
-    /// Removes an operator connection and returns the (tenant, poolRtId)
+    /// Removes an operator connection and returns the (tenant, deploymentSiteRtId)
     /// tuples that connection had registered via
-    /// <see cref="RegisterPoolForConnection"/>. The caller is expected to
+    /// <see cref="RegisterDeploymentSiteForConnection"/>. The caller is expected to
     /// flip every returned pool's <c>CommunicationState</c> to
     /// <c>Offline</c> — this happens on every operator disconnect, planned
     /// or otherwise.
     /// </summary>
-    IReadOnlyCollection<(string TenantId, string PoolRtId)> RemoveOperator(string connectionId);
+    IReadOnlyCollection<(string TenantId, string DeploymentSiteRtId)> RemoveOperator(string connectionId);
 
     /// <summary>
     /// Records that the given operator connection now hosts the pool
-    /// identified by <paramref name="poolRtId"/>. Used by
+    /// identified by <paramref name="deploymentSiteRtId"/>. Used by
     /// <c>OperatorHub.RegisterDeploymentSiteAsync</c> so the controller can reset
     /// the pool's state when the SignalR connection drops.
     /// </summary>
-    void RegisterPoolForConnection(string connectionId, string tenantId, string poolRtId);
+    void RegisterDeploymentSiteForConnection(string connectionId, string tenantId, string deploymentSiteRtId);
 
     /// <summary>
-    /// Removes a single (connection, tenant, poolRtId) tuple — called on a
+    /// Removes a single (connection, tenant, deploymentSiteRtId) tuple — called on a
     /// graceful <c>UnregisterDeploymentSiteAsync</c> while the operator keeps the
     /// connection open for other pools.
     /// </summary>
-    void UnregisterPoolForConnection(string connectionId, string tenantId, string poolRtId);
+    void UnregisterPoolForConnection(string connectionId, string tenantId, string deploymentSiteRtId);
 
     /// <summary>
     /// Returns all currently-deployed Cloud pools across every tenant. Used as
@@ -83,7 +83,7 @@ public interface IOperatorConnectionManager
     /// <summary>
     /// Notifies all connected operators that a Cloud pool was undeployed.
     /// </summary>
-    Task NotifyPoolUndeployedAsync(string tenantId, string poolRtId);
+    Task NotifyPoolUndeployedAsync(string tenantId, string deploymentSiteRtId);
 
     /// <summary>
     /// Returns the workloads this controller has notified operators of as
@@ -122,11 +122,11 @@ public interface IOperatorConnectionManager
     /// because no operator connection owned the target pool at notify time
     /// (AB#4371 — e.g. the operator's pool registration failed transiently
     /// and it re-registered later). Called by <c>OperatorHub.RegisterDeploymentSiteAsync</c>
-    /// right after the (connection, tenant, poolRtId) tuple is registered.
+    /// right after the (connection, tenant, deploymentSiteRtId) tuple is registered.
     /// No-op when nothing is pending. A replay that fails to send is
     /// re-queued so the next registration of the pool retries it.
     /// </summary>
-    Task FlushPendingWorkloadNotificationsAsync(string connectionId, string tenantId, string poolRtId);
+    Task FlushPendingWorkloadNotificationsAsync(string connectionId, string tenantId, string deploymentSiteRtId);
 
     /// <summary>
     /// Server→client fanout of the tenant pre-update signal. Operators use
@@ -138,14 +138,14 @@ public interface IOperatorConnectionManager
 
     /// <summary>
     /// Returns the SignalR connection ids of every operator that currently
-    /// claims the <c>(tenantId, poolRtId)</c> tuple via
-    /// <see cref="RegisterPoolForConnection"/>. Used by
+    /// claims the <c>(tenantId, deploymentSiteRtId)</c> tuple via
+    /// <see cref="RegisterDeploymentSiteForConnection"/>. Used by
     /// <c>DeploymentSiteService.SetCommunicationStateOfflineAsync</c> to detect that a
     /// disconnect should NOT flip the pool offline because another operator
     /// connection (e.g. a still-alive replica or the surviving end of a
     /// rolling restart with brief overlap) is still hosting it.
     /// </summary>
-    IReadOnlyList<string> GetConnectionsForPool(string tenantId, string poolRtId);
+    IReadOnlyList<string> GetConnectionsForPool(string tenantId, string deploymentSiteRtId);
 
     /// <summary>
     /// Adds <paramref name="pool"/> to the deployed-pool tracking map WITHOUT

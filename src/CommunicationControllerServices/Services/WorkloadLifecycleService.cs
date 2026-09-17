@@ -278,7 +278,7 @@ internal class WorkloadLifecycleService(
         // Warn, not Debug: somebody asked for something the pool declares it will not do, and the
         // gap between the request and the outcome is exactly what makes an incident unreadable.
         logger.LogWarning(
-            "[{TenantId}] Scale request of {Replicas} replica(s) for adapter pool '{PoolName}' ({PoolRtId}) is outside its declared range {MinReplicas}..{MaxReplicas}; scaling to {ClampedReplicas} instead",
+            "[{TenantId}] Scale request of {Replicas} replica(s) for adapter pool '{PoolName}' ({AdapterPoolRtId}) is outside its declared range {MinReplicas}..{MaxReplicas}; scaling to {ClampedReplicas} instead",
             tenantId, replicas, pool.Name, pool.RtId, pool.MinReplicas, pool.MaxReplicas, clamped);
         return clamped;
     }

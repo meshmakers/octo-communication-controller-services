@@ -66,7 +66,7 @@ internal class RegisterPoolAsyncTests : IDisposable
 
         await _hub.RegisterDeploymentSiteAsync(TenantId, ValidPoolRtId);
 
-        _connectionManager.Received(1).RegisterPoolForConnection(ConnectionId, TenantId, ValidPoolRtId);
+        _connectionManager.Received(1).RegisterDeploymentSiteForConnection(ConnectionId, TenantId, ValidPoolRtId);
         await _poolService.Received(1).SetCommunicationStateOnlineAsync(
             TenantId,
             Arg.Is<OctoObjectId>(id => id.ToString() == ValidPoolRtId),
@@ -85,7 +85,7 @@ internal class RegisterPoolAsyncTests : IDisposable
 
         await _hub.RegisterDeploymentSiteAsync(TenantId, ValidPoolRtId);
 
-        _connectionManager.Received(1).RegisterPoolForConnection(ConnectionId, TenantId, ValidPoolRtId);
+        _connectionManager.Received(1).RegisterDeploymentSiteForConnection(ConnectionId, TenantId, ValidPoolRtId);
         await _poolService.Received(1).SetCommunicationStateOnlineAsync(
             TenantId,
             Arg.Is<OctoObjectId>(id => id.ToString() == ValidPoolRtId),
@@ -102,7 +102,7 @@ internal class RegisterPoolAsyncTests : IDisposable
 
         await _hub.RegisterDeploymentSiteAsync(TenantId, ValidPoolRtId);
 
-        _connectionManager.Received(1).RegisterPoolForConnection(ConnectionId, TenantId, ValidPoolRtId);
+        _connectionManager.Received(1).RegisterDeploymentSiteForConnection(ConnectionId, TenantId, ValidPoolRtId);
         await _poolService.Received(1).SetCommunicationStateOnlineAsync(
             TenantId,
             Arg.Is<OctoObjectId>(id => id.ToString() == ValidPoolRtId),
@@ -124,7 +124,7 @@ internal class RegisterPoolAsyncTests : IDisposable
         await Assert.That(async () => await _hub.RegisterDeploymentSiteAsync(TenantId, ValidPoolRtId))
             .Throws<HubException>();
 
-        _connectionManager.DidNotReceiveWithAnyArgs().RegisterPoolForConnection(
+        _connectionManager.DidNotReceiveWithAnyArgs().RegisterDeploymentSiteForConnection(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>());
         await _poolService.DidNotReceiveWithAnyArgs().SetCommunicationStateOnlineAsync(
             Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<string>());
@@ -142,7 +142,7 @@ internal class RegisterPoolAsyncTests : IDisposable
         await Assert.That(async () => await _hub.RegisterDeploymentSiteAsync(TenantId, ValidPoolRtId))
             .Throws<HubException>();
 
-        _connectionManager.DidNotReceiveWithAnyArgs().RegisterPoolForConnection(
+        _connectionManager.DidNotReceiveWithAnyArgs().RegisterDeploymentSiteForConnection(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>());
         await _poolService.DidNotReceiveWithAnyArgs().SetCommunicationStateOnlineAsync(
             Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<string>());
@@ -160,7 +160,7 @@ internal class RegisterPoolAsyncTests : IDisposable
         await Assert.That(async () => await _hub.RegisterDeploymentSiteAsync(TenantId, ValidPoolRtId))
             .Throws<HubException>();
 
-        _connectionManager.DidNotReceiveWithAnyArgs().RegisterPoolForConnection(
+        _connectionManager.DidNotReceiveWithAnyArgs().RegisterDeploymentSiteForConnection(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>());
         await _eventService.Received(1).StoreErrorEventAsync(TenantId,
             Arg.Is<string>(s => s.Contains("no such pool")),
@@ -178,7 +178,7 @@ internal class RegisterPoolAsyncTests : IDisposable
         await Assert.That(async () => await _hub.RegisterDeploymentSiteAsync(TenantId, string.Empty))
             .Throws<HubException>();
 
-        _connectionManager.DidNotReceiveWithAnyArgs().RegisterPoolForConnection(
+        _connectionManager.DidNotReceiveWithAnyArgs().RegisterDeploymentSiteForConnection(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>());
         await _poolService.DidNotReceiveWithAnyArgs().SetCommunicationStateOnlineAsync(
             Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<string>());
@@ -190,7 +190,7 @@ internal class RegisterPoolAsyncTests : IDisposable
         await Assert.That(async () => await _hub.RegisterDeploymentSiteAsync(TenantId, "not-an-objectid"))
             .Throws<HubException>();
 
-        _connectionManager.DidNotReceiveWithAnyArgs().RegisterPoolForConnection(
+        _connectionManager.DidNotReceiveWithAnyArgs().RegisterDeploymentSiteForConnection(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>());
         await _poolService.DidNotReceiveWithAnyArgs().SetCommunicationStateOnlineAsync(
             Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<string>());

@@ -39,8 +39,8 @@ types:
     - id: ${this}/LentFromTenantId
       name: LentFromTenantId
       isOptional: true
-    - id: ${this}/LentFromPoolRtId
-      name: LentFromPoolRtId
+    - id: ${this}/LentFromAdapterPoolRtId
+      name: LentFromAdapterPoolRtId
       isOptional: true
   associations:
     # AB#5027: the service account every pipeline of this adapter executes as, unless
