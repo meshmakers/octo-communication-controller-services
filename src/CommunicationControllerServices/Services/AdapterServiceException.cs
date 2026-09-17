@@ -37,7 +37,7 @@ internal class AdapterServiceException : Exception
         return new AdapterServiceException(
             $"[{tenantId}] Adapter '{adapterRtEntityId}' has no live SignalR connection. " +
             "The adapter pod must be deployed and online before its pipeline configuration can be pushed. " +
-            "Deploy the adapter first via the 'Deploy Adapter' action (or 'Pool → Deploy Workload' on the API), " +
+            "Deploy the adapter first via the 'Deploy Adapter' action (or 'DeploymentSite → Deploy Workload' on the API), " +
             "then retry 'Update Configuration'.");
     }
 
@@ -127,7 +127,7 @@ internal class AdapterServiceException : Exception
         new($"[{tenantId}] Cannot deploy pipeline '{pipelineRtEntityId}' to workload '{workloadName}': " +
             "the workload has LifecycleMode=Leased, but the pipeline uses the process-bound trigger(s) " +
             $"{string.Join(", ", processBoundNodes.Select(n => $"'{n}'"))} (AB#4924). A leased adapter has no " +
-            "process of its own at all — it borrows one from an adapter pool between work items — so a trigger " +
+            "process of its own at all — it borrows one from an adapter deploymentSite between work items — so a trigger " +
             "that only fires while its own process runs can never fire. Either give the adapter a process of its " +
             "own (LifecycleMode AlwaysOn) or migrate the pipeline to a wake-capable trigger (cron PipelineTrigger, " +
             "FromHttpRequest, FromPipelineDataEvent).");

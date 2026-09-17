@@ -269,7 +269,7 @@ internal class LeaseService : ILeaseService
         // are identities and are named: without them a cross-tenant read could not be recognised from
         // a lease log line at all.
         Logger.Info(
-            "Granted lease '{LeaseId}' of pool {AdapterPoolRtId} (tenant '{PoolTenantId}') to tenant '{BorrowerTenantId}' " +
+            "Granted lease '{LeaseId}' of pool {AdapterPoolRtId} (tenant '{AdapterPoolTenantId}') to tenant '{BorrowerTenantId}' " +
             "on member '{MemberId}', database '{DatabaseName}' as '{DatabaseUser}', expires {ExpiresAtUtc:O}",
             lease.LeaseId, lease.AdapterPoolRtId, lease.AdapterPoolTenantId, lease.TenantId, member.MemberId,
             lease.DatabaseName, lease.DatabaseUser, lease.ExpiresAtUtc);

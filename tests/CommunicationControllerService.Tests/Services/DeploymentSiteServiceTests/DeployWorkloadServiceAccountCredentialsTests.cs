@@ -33,18 +33,18 @@ internal class DeployWorkloadServiceAccountCredentialsTests : PoolServiceTestsBa
         {
             RtId = OctoObjectId.GenerateNewId(),
             CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
-            Name = "cloud-pool",
+            Name = "cloud-deploymentSite",
             Environment = RtEnvironmentEnum.Cloud
         };
     }
 
-    private void ArrangeDeployableWorkload(RtDeploymentSite pool, RtDeployableWorkload workload)
+    private void ArrangeDeployableWorkload(RtDeploymentSite deploymentSite, RtDeployableWorkload workload)
     {
         workload.ChartName = "octo-mesh-adapter";
         workload.ChartVersion = "1.0.0";
 
         CommunicationRepository.GetWorkloadByRtIdAsync(TenantId, workload.RtId).Returns(workload);
-        CommunicationRepository.GetPoolForWorkloadAsync(TenantId, workload.RtId).Returns(pool);
+        CommunicationRepository.GetDeploymentSiteForWorkloadAsync(TenantId, workload.RtId).Returns(deploymentSite);
         CommunicationRepository.GetHelmRepositoryForWorkloadAsync(TenantId, workload.RtId)
             .Returns(new RtHelmRepositoryConfiguration
             {
@@ -78,9 +78,9 @@ internal class DeployWorkloadServiceAccountCredentialsTests : PoolServiceTestsBa
     [Test]
     public async Task DeployWorkloadAsync_Adapter_ProjectsClientIdAndSecretOntoTheChartPaths()
     {
-        var pool = ArrangeCloudPool();
+        var deploymentSite = ArrangeCloudPool();
         var adapter = RtEntityCreator.CreateAdapter();
-        ArrangeDeployableWorkload(pool, adapter);
+        ArrangeDeployableWorkload(deploymentSite, adapter);
         ArrangeServiceAccount(adapter);
 
         var dto = await DeployAndCaptureAsync(adapter);
@@ -106,14 +106,14 @@ internal class DeployWorkloadServiceAccountCredentialsTests : PoolServiceTestsBa
     [Test]
     public async Task DeployWorkloadAsync_Application_ProjectsNoCredentials()
     {
-        var pool = ArrangeCloudPool();
+        var deploymentSite = ArrangeCloudPool();
         var application = new RtApplication
         {
             RtId = OctoObjectId.GenerateNewId(),
             CkTypeId = SystemCommunicationCkIds.RtCkApplicationTypeId,
             Name = "some-app"
         };
-        ArrangeDeployableWorkload(pool, application);
+        ArrangeDeployableWorkload(deploymentSite, application);
 
         var dto = await DeployAndCaptureAsync(application);
 
@@ -128,9 +128,9 @@ internal class DeployWorkloadServiceAccountCredentialsTests : PoolServiceTestsBa
     [Test]
     public async Task DeployWorkloadAsync_NoServiceAccountLinked_ProjectsNothingAndStillDeploys()
     {
-        var pool = ArrangeCloudPool();
+        var deploymentSite = ArrangeCloudPool();
         var adapter = RtEntityCreator.CreateAdapter();
-        ArrangeDeployableWorkload(pool, adapter);
+        ArrangeDeployableWorkload(deploymentSite, adapter);
         // Base default: the resolver returns null.
 
         var dto = await DeployAndCaptureAsync(adapter);
@@ -143,9 +143,9 @@ internal class DeployWorkloadServiceAccountCredentialsTests : PoolServiceTestsBa
     [Test]
     public async Task DeployWorkloadAsync_HalfConfiguredServiceAccount_ProjectsNothing()
     {
-        var pool = ArrangeCloudPool();
+        var deploymentSite = ArrangeCloudPool();
         var adapter = RtEntityCreator.CreateAdapter();
-        ArrangeDeployableWorkload(pool, adapter);
+        ArrangeDeployableWorkload(deploymentSite, adapter);
         // A provisioning run that was interrupted between creating the entity and writing the
         // secret. Reading ClientSecret through the generated property would throw
         // InvalidAttributeValueException (the attribute is mandatory on the CK type); the projection
@@ -167,9 +167,9 @@ internal class DeployWorkloadServiceAccountCredentialsTests : PoolServiceTestsBa
     [Test]
     public async Task DeployWorkloadAsync_ResolverThrows_DeploysWithoutCredentials()
     {
-        var pool = ArrangeCloudPool();
+        var deploymentSite = ArrangeCloudPool();
         var adapter = RtEntityCreator.CreateAdapter();
-        ArrangeDeployableWorkload(pool, adapter);
+        ArrangeDeployableWorkload(deploymentSite, adapter);
         ServiceAccountResolver.GetAdapterDefaultAsync(TenantId, adapter.RtId)
             .ThrowsAsync(new InvalidOperationException("CK cache is being unloaded"));
 
@@ -182,14 +182,14 @@ internal class DeployWorkloadServiceAccountCredentialsTests : PoolServiceTestsBa
     [Test]
     public async Task DeployWorkloadAsync_ReceivesClusterSecretsFalse_StillProjectsTheCredentials()
     {
-        var pool = ArrangeCloudPool();
+        var deploymentSite = ArrangeCloudPool();
         var adapter = RtEntityCreator.CreateAdapter();
         // The edge case that decides the gating question: a pure edge adapter must NOT receive the
         // cluster's data-store credentials, but it needs its OWN identity more than an in-cluster
         // one — it is the only credential it presents when dialling into the controller across the
         // network. Same reasoning that makes the RabbitMQ password unconditional.
         adapter.ReceivesClusterSecrets = false;
-        ArrangeDeployableWorkload(pool, adapter);
+        ArrangeDeployableWorkload(deploymentSite, adapter);
         ArrangeServiceAccount(adapter);
 
         var dto = await DeployAndCaptureAsync(adapter);
@@ -203,7 +203,7 @@ internal class DeployWorkloadServiceAccountCredentialsTests : PoolServiceTestsBa
     [Test]
     public async Task DeployWorkloadAsync_WorkloadPinsTheSamePath_KeepsTheManualOverride()
     {
-        var pool = ArrangeCloudPool();
+        var deploymentSite = ArrangeCloudPool();
         var adapter = RtEntityCreator.CreateAdapter();
         adapter.Values = new AttributeRecordValueList<RtValueOverrideRecord>
         {
@@ -214,7 +214,7 @@ internal class DeployWorkloadServiceAccountCredentialsTests : PoolServiceTestsBa
                 IsSecret = false
             }
         };
-        ArrangeDeployableWorkload(pool, adapter);
+        ArrangeDeployableWorkload(deploymentSite, adapter);
         ArrangeServiceAccount(adapter);
 
         var dto = await DeployAndCaptureAsync(adapter);
@@ -232,9 +232,9 @@ internal class DeployWorkloadServiceAccountCredentialsTests : PoolServiceTestsBa
     [Test]
     public async Task DeployWorkloadAsync_EncryptedClientSecret_ReachesTheWireDecrypted()
     {
-        var pool = ArrangeCloudPool();
+        var deploymentSite = ArrangeCloudPool();
         var adapter = RtEntityCreator.CreateAdapter();
-        ArrangeDeployableWorkload(pool, adapter);
+        ArrangeDeployableWorkload(deploymentSite, adapter);
         ArrangeServiceAccount(adapter, clientSecret: "enc:v1:cipher");
         EncryptionService.Decrypt("enc:v1:cipher").Returns("plaintext-secret");
 
@@ -253,10 +253,10 @@ internal class DeployWorkloadServiceAccountCredentialsTests : PoolServiceTestsBa
     {
         const string secret = "sJ8k2p-QmZ4x7vNb1LcT0aRwEyUiOpAsDfGhJkLzXcVbNm";
 
-        var pool = ArrangeCloudPool();
+        var deploymentSite = ArrangeCloudPool();
         var adapter = RtEntityCreator.CreateAdapter();
         adapter.Name = "mesh-adapter";
-        ArrangeDeployableWorkload(pool, adapter);
+        ArrangeDeployableWorkload(deploymentSite, adapter);
         ArrangeServiceAccount(adapter, clientSecret: secret);
 
         var memoryTarget = new NLog.Targets.MemoryTarget("deploy-credentials-secret-probe")

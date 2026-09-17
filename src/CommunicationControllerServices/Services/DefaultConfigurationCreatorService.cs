@@ -79,7 +79,7 @@ internal class DefaultConfigurationCreatorService(
 
     protected override async Task ImportCkModelAsync(IOctoAdminSession session, ITenantContext tenantContext)
     {
-        // The Communication CK model + initial Pool/Adapter seed entities are now packaged
+        // The Communication CK model + initial DeploymentSite/Adapter seed entities are now packaged
         // together in the Communication-<x.y.z> blueprint. Applying the blueprint resolves the
         // ckModelDependencies (System.Communication-[3.0,4.0)) and upserts the seed entities, so
         // the explicit ImportCkModelAsync that used to live here is no longer needed. The runner
@@ -134,7 +134,7 @@ internal class DefaultConfigurationCreatorService(
     /// Fault tolerance is the whole point. The provisioning service already isolates each adapter and
     /// never throws; this wrapper adds the belt-and-braces catch so that even an unexpected failure
     /// cannot fail <c>StartTenantAsync</c> — a tenant that cannot reach the identity service must
-    /// still load, keep serving its already-deployed pipelines, and get its adapters, pools and
+    /// still load, keep serving its already-deployed pipelines, and get its adapters, deploymentSites and
     /// trigger schedules. What it must NOT do is fail silently: every failure lands in the tenant's
     /// event log (written per adapter by the provisioning service) so the refusal an operator later
     /// sees on a pipeline deploy has a visible cause.
@@ -250,8 +250,8 @@ internal class DefaultConfigurationCreatorService(
     {
         var resources = string.Join(", ", activeDeployments.Select(d => d.ToString()));
         return $"Communication cannot be disabled for tenant '{tenantId}' while the following resources are still deployed: " +
-               $"{resources}. Undeploy them first - workloads with UndeployWorkload, pools with UndeployPool " +
-               $"(octo-cli in a context of tenant '{tenantId}', or Refinery Studio > Communication > Adapters / Applications / Pools) - " +
+               $"{resources}. Undeploy them first - workloads with UndeployWorkload, deployment sites with UndeployDeploymentSite " +
+               $"(octo-cli in a context of tenant '{tenantId}', or Refinery Studio > Communication > Adapters / Applications / Deployment Sites) - " +
                "then retry DisableCommunication.";
     }
 

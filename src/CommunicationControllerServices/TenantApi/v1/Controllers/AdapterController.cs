@@ -33,7 +33,7 @@ public class AdapterController : ControllerBase
     /// <param name="logger">Logging object</param>
     /// <param name="communicationRepository"></param>
     /// <param name="adapterService">Adapter management service instance</param>
-    /// <param name="lendingScopeResolver">Resolves which tenants an adapter pool may lend to (AB#4924)</param>
+    /// <param name="lendingScopeResolver">Resolves which tenants an adapter deploymentSite may lend to (AB#4924)</param>
     public AdapterController(ILogger<AdapterController> logger, ICommunicationRepository communicationRepository,
         IAdapterService adapterService, ITenantLendingScopeResolver lendingScopeResolver)
     {
@@ -87,18 +87,18 @@ public class AdapterController : ControllerBase
     }
     
     /// <summary>
-    ///     Returns the adapter pools this tenant may borrow from, and — for an adapter pool owned by
+    ///     Returns the adapter deploymentSites this tenant may borrow from, and — for an adapter deploymentSite owned by
     ///     this tenant — the tenants it lends to (AB#4924).
     /// </summary>
     /// <remarks>
     ///     Answers the two questions the Studio, octo-cli and the MCP server all need before a
     ///     leasing configuration can be edited with any confidence: "who will accept me as a
     ///     borrower" and "who can borrow from me". Both are derived from the tenant tree and the
-    ///     pool's SharingMode, and neither can be read off a CK association, because the two halves
+    ///     deploymentSite's SharingMode, and neither can be read off a CK association, because the two halves
     ///     live in different tenant databases.
     /// </remarks>
     /// <param name="adapterPoolRtId">
-    ///     RtId of an adapter pool in THIS tenant whose lending scope should be resolved.
+    ///     RtId of an adapter deploymentSite in THIS tenant whose lending scope should be resolved.
     /// </param>
     [HttpGet("lending")]
     [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
@@ -122,7 +122,7 @@ public class AdapterController : ControllerBase
         {
             return NotFound(new ErrorResponse
             {
-                ErrorMessage = $"Adapter pool '{adapterPoolRtId}' was not found in tenant '{tenantId}'"
+                ErrorMessage = $"Adapter deploymentSite '{adapterPoolRtId}' was not found in tenant '{tenantId}'"
             });
         }
 

@@ -14,18 +14,18 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 /// </summary>
 internal class DeployWorkloadLifecycleValidationTests : PoolServiceTestsBase
 {
-    private (RtDeploymentSite Pool, RtAdapter Adapter) GivenEdgePoolWithAdapter(RtLifecycleModeEnum lifecycleMode)
+    private (RtDeploymentSite DeploymentSite, RtAdapter Adapter) GivenEdgePoolWithAdapter(RtLifecycleModeEnum lifecycleMode)
     {
-        var rtPool = new RtDeploymentSite
+        var rtDeploymentSite = new RtDeploymentSite
         {
             RtId = DeploymentSiteRtId,
             CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
-            Name = PoolName,
+            Name = DeploymentSiteName,
             // Edge routing keeps the arrange minimal — validation runs before any
             // operator-connection routing either way.
             Environment = RtEnvironmentEnum.Edge,
         };
-        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(new[] { rtPool });
+        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(new[] { rtDeploymentSite });
 
         var adapter = new RtAdapter
         {
@@ -38,7 +38,7 @@ internal class DeployWorkloadLifecycleValidationTests : PoolServiceTestsBase
             LifecycleMode = lifecycleMode,
         };
         CommunicationRepository.GetWorkloadByRtIdAsync(TenantId, adapter.RtId).Returns(adapter);
-        CommunicationRepository.GetPoolForWorkloadAsync(TenantId, adapter.RtId).Returns(rtPool);
+        CommunicationRepository.GetDeploymentSiteForWorkloadAsync(TenantId, adapter.RtId).Returns(rtDeploymentSite);
         CommunicationRepository.GetHelmRepositoryForWorkloadAsync(TenantId, adapter.RtId)
             .Returns(new RtHelmRepositoryConfiguration
             {
@@ -47,7 +47,7 @@ internal class DeployWorkloadLifecycleValidationTests : PoolServiceTestsBase
                 RepositoryUrl = "https://example.test/charts",
             });
 
-        return (rtPool, adapter);
+        return (rtDeploymentSite, adapter);
     }
 
     [Test]
@@ -97,14 +97,14 @@ internal class DeployWorkloadLifecycleValidationTests : PoolServiceTestsBase
     [Test]
     public async Task DeployWorkloadAsync_OnDemandApplication_IsRejected()
     {
-        var rtPool = new RtDeploymentSite
+        var rtDeploymentSite = new RtDeploymentSite
         {
             RtId = DeploymentSiteRtId,
             CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
-            Name = PoolName,
+            Name = DeploymentSiteName,
             Environment = RtEnvironmentEnum.Edge,
         };
-        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(new[] { rtPool });
+        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(new[] { rtDeploymentSite });
 
         var application = new RtApplication
         {
@@ -116,7 +116,7 @@ internal class DeployWorkloadLifecycleValidationTests : PoolServiceTestsBase
             LifecycleMode = RtLifecycleModeEnum.OnDemand,
         };
         CommunicationRepository.GetWorkloadByRtIdAsync(TenantId, application.RtId).Returns(application);
-        CommunicationRepository.GetPoolForWorkloadAsync(TenantId, application.RtId).Returns(rtPool);
+        CommunicationRepository.GetDeploymentSiteForWorkloadAsync(TenantId, application.RtId).Returns(rtDeploymentSite);
         CommunicationRepository.GetHelmRepositoryForWorkloadAsync(TenantId, application.RtId)
             .Returns(new RtHelmRepositoryConfiguration
             {

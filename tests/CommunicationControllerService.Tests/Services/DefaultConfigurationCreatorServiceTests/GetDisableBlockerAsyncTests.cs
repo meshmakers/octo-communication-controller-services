@@ -25,7 +25,7 @@ internal class GetDisableBlockerAsyncTests
 {
     private const string TenantId = "child-a";
 
-    private readonly IDeploymentSiteService _poolService = Substitute.For<IDeploymentSiteService>();
+    private readonly IDeploymentSiteService _deploymentSiteService = Substitute.For<IDeploymentSiteService>();
     private readonly ISystemContext _systemContext = Substitute.For<ISystemContext>();
     private readonly ITenantContext _tenantContext = Substitute.For<ITenantContext>();
 
@@ -47,7 +47,7 @@ internal class GetDisableBlockerAsyncTests
     [Test]
     public async Task AnswersNull_WhenNothingIsDeployed()
     {
-        _poolService.GetActiveDeploymentsAsync(TenantId).Returns(Array.Empty<ActiveDeployment>());
+        _deploymentSiteService.GetActiveDeploymentsAsync(TenantId).Returns(Array.Empty<ActiveDeployment>());
         SetAiServicesFlag(false);
 
         var blocker = await CreateSut().ProbeDisableBlockerAsync(TenantId);
@@ -59,7 +59,7 @@ internal class GetDisableBlockerAsyncTests
     public async Task AnswersNull_WhenTheAiFlagIsAbsent()
     {
         // A missing flag document reads as disabled - same normalisation as the delete/detach guard.
-        _poolService.GetActiveDeploymentsAsync(TenantId).Returns(Array.Empty<ActiveDeployment>());
+        _deploymentSiteService.GetActiveDeploymentsAsync(TenantId).Returns(Array.Empty<ActiveDeployment>());
         _tenantContext.GetConfigurationAsync(
                 Arg.Any<IOctoAdminSession>(),
                 TenantCapabilityConfigurationKeys.AiServices,
@@ -76,7 +76,7 @@ internal class GetDisableBlockerAsyncTests
     {
         // AB#4884: EnableAi refuses while Communication is disabled, so the reverse must hold too -
         // otherwise the tenant lands in a state EnableAi could never have produced.
-        _poolService.GetActiveDeploymentsAsync(TenantId).Returns(Array.Empty<ActiveDeployment>());
+        _deploymentSiteService.GetActiveDeploymentsAsync(TenantId).Returns(Array.Empty<ActiveDeployment>());
         SetAiServicesFlag(true);
 
         var blocker = await CreateSut().ProbeDisableBlockerAsync(TenantId);
@@ -91,23 +91,23 @@ internal class GetDisableBlockerAsyncTests
     [Test]
     public async Task NamesBothBlockers_WhenDeploymentsAndAiServicesBlock()
     {
-        _poolService.GetActiveDeploymentsAsync(TenantId).Returns(new List<ActiveDeployment>
+        _deploymentSiteService.GetActiveDeploymentsAsync(TenantId).Returns(new List<ActiveDeployment>
         {
-            new(ActiveDeployment.PoolKind, "edge-a", RtDeploymentStateEnum.Deployed),
+            new(ActiveDeployment.DeploymentSiteKind, "edge-a", RtDeploymentStateEnum.Deployed),
         });
         SetAiServicesFlag(true);
 
         var blocker = await CreateSut().ProbeDisableBlockerAsync(TenantId);
 
         await Assert.That(blocker).IsNotNull();
-        await Assert.That(blocker!).Contains("Pool 'edge-a' (Deployed)");
+        await Assert.That(blocker!).Contains("DeploymentSite 'edge-a' (Deployed)");
         await Assert.That(blocker!).Contains("AI Services is still enabled");
     }
 
     [Test]
     public async Task PropagatesAiFlagReadFailures_InsteadOfAllowingTheDisable()
     {
-        _poolService.GetActiveDeploymentsAsync(TenantId).Returns(Array.Empty<ActiveDeployment>());
+        _deploymentSiteService.GetActiveDeploymentsAsync(TenantId).Returns(Array.Empty<ActiveDeployment>());
         _systemContext.FindTenantContextAsync(TenantId).ThrowsAsync(new InvalidOperationException("mongo down"));
 
         await Assert.That(async () => await CreateSut().ProbeDisableBlockerAsync(TenantId))
@@ -130,9 +130,9 @@ internal class GetDisableBlockerAsyncTests
     [Test]
     public async Task NamesEveryActiveResource_WithKindAndState()
     {
-        _poolService.GetActiveDeploymentsAsync(TenantId).Returns(new List<ActiveDeployment>
+        _deploymentSiteService.GetActiveDeploymentsAsync(TenantId).Returns(new List<ActiveDeployment>
         {
-            new(ActiveDeployment.PoolKind, "edge-a", RtDeploymentStateEnum.Deployed),
+            new(ActiveDeployment.DeploymentSiteKind, "edge-a", RtDeploymentStateEnum.Deployed),
             new(ActiveDeployment.AdapterKind, "mesh-adapter", RtDeploymentStateEnum.Pending),
             new(ActiveDeployment.ApplicationKind, "grafana", RtDeploymentStateEnum.Error),
         });
@@ -140,17 +140,17 @@ internal class GetDisableBlockerAsyncTests
         var blocker = await CreateSut().ProbeDisableBlockerAsync(TenantId);
 
         await Assert.That(blocker).IsNotNull();
-        await Assert.That(blocker!).Contains("Pool 'edge-a' (Deployed)");
+        await Assert.That(blocker!).Contains("DeploymentSite 'edge-a' (Deployed)");
         await Assert.That(blocker!).Contains("Adapter 'mesh-adapter' (Pending)");
         await Assert.That(blocker!).Contains("Application 'grafana' (Error)");
         await Assert.That(blocker!).Contains("UndeployWorkload");
-        await Assert.That(blocker!).Contains("UndeployPool");
+        await Assert.That(blocker!).Contains("UndeployDeploymentSite");
     }
 
     [Test]
     public async Task PropagatesReadFailures_InsteadOfAllowingTheDisable()
     {
-        _poolService.GetActiveDeploymentsAsync(TenantId).ThrowsAsync(new InvalidOperationException("mongo down"));
+        _deploymentSiteService.GetActiveDeploymentsAsync(TenantId).ThrowsAsync(new InvalidOperationException("mongo down"));
 
         await Assert.That(async () => await CreateSut().ProbeDisableBlockerAsync(TenantId))
             .Throws<InvalidOperationException>();
@@ -161,21 +161,20 @@ internal class GetDisableBlockerAsyncTests
     {
         var message = DefaultConfigurationCreatorService.BuildDisableBlockedMessage("child-a",
         [
-            new ActiveDeployment(ActiveDeployment.PoolKind, "edge-a", RtDeploymentStateEnum.Deployed),
+            new ActiveDeployment(ActiveDeployment.DeploymentSiteKind, "edge-a", RtDeploymentStateEnum.Deployed),
             new ActiveDeployment(ActiveDeployment.AdapterKind, "mesh-adapter", RtDeploymentStateEnum.Pending),
         ]);
 
         await Assert.That(message).IsEqualTo(
             "Communication cannot be disabled for tenant 'child-a' while the following resources are still deployed: " +
-            "Pool 'edge-a' (Deployed), Adapter 'mesh-adapter' (Pending). Undeploy them first - workloads with UndeployWorkload, " +
-            "pools with UndeployPool (octo-cli in a context of tenant 'child-a', or Refinery Studio > Communication > " +
-            "Adapters / Applications / Pools) - then retry DisableCommunication.");
+            "DeploymentSite 'edge-a' (Deployed), Adapter 'mesh-adapter' (Pending). Undeploy them first - workloads with UndeployWorkload, deployment sites with UndeployDeploymentSite (octo-cli in a context of tenant 'child-a', or Refinery Studio > Communication > " +
+            "Adapters / Applications / Deployment Sites) - then retry DisableCommunication.");
         await Assert.That(message.All(c => c < 128)).IsTrue();
     }
 
     private TestableCreator CreateSut()
     {
-        return new TestableCreator(_poolService, _systemContext);
+        return new TestableCreator(_deploymentSiteService, _systemContext);
     }
 
     private sealed class TestableCreator(IDeploymentSiteService poolService, ISystemContext systemContext)

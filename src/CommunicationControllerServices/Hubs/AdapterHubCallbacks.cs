@@ -27,9 +27,9 @@ internal class AdapterHubCallbacks : IAdapterHubCallbacks
     /// <inheritdoc />
     public async Task AdapterConfigurationUpdatedAsync(string tenantId, AdapterConfigurationDto adapterConfiguration)
     {
-        if (_adapterCache.TryGetTenant(tenantId, out var poolTenant))
+        if (_adapterCache.TryGetTenant(tenantId, out var deploymentSiteTenant))
         {
-            if (poolTenant.AdapterById.TryGetValue(adapterConfiguration.AdapterRtEntityId, out var adapter)
+            if (deploymentSiteTenant.AdapterById.TryGetValue(adapterConfiguration.AdapterRtEntityId, out var adapter)
                 && !string.IsNullOrWhiteSpace(adapter.ConnectionId))
             {
                 
@@ -48,9 +48,9 @@ internal class AdapterHubCallbacks : IAdapterHubCallbacks
     /// <inheritdoc />
     public async Task PreUpdateTenantAsync(string tenantId)
     {
-        if (_adapterCache.TryGetTenant(tenantId, out var poolTenant))
+        if (_adapterCache.TryGetTenant(tenantId, out var deploymentSiteTenant))
         {
-            foreach (var adapter in poolTenant.AdapterById.Values)
+            foreach (var adapter in deploymentSiteTenant.AdapterById.Values)
             {
                 if (!string.IsNullOrWhiteSpace(adapter.ConnectionId))
                 {

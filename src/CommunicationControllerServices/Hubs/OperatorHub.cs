@@ -12,16 +12,16 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 /// <summary>
 /// Hub for operator management connections.
 /// Operators register here to receive tenant lifecycle notifications,
-/// register / unregister pools they own, and report workload deploy
+/// register / unregister deploymentSites they own, and report workload deploy
 /// outcomes. Not tenant-scoped — one operator process keeps one
-/// connection regardless of how many pools / tenants it manages.
+/// connection regardless of how many deploymentSites / tenants it manages.
 /// </summary>
 public class OperatorHub : Hub, IOperatorHub
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly IOperatorConnectionManager _connectionManager;
     private readonly ICommunicationRepository _communicationRepository;
-    private readonly IDeploymentSiteService _poolService;
+    private readonly IDeploymentSiteService _deploymentSiteService;
     private readonly IShutdownState _shutdownState;
     private readonly ICommunicationEventService _eventService;
     private readonly IWorkloadLifecycleService _workloadLifecycleService;
@@ -38,7 +38,7 @@ public class OperatorHub : Hub, IOperatorHub
     {
         _connectionManager = connectionManager;
         _communicationRepository = communicationRepository;
-        _poolService = poolService;
+        _deploymentSiteService = poolService;
         _shutdownState = shutdownState;
         _eventService = eventService;
         _workloadLifecycleService = workloadLifecycleService;
@@ -59,7 +59,7 @@ public class OperatorHub : Hub, IOperatorHub
 
         // Rolling-upgrade race guard: during this pod's own shutdown the
         // operator has already (or is about to) reconnect to a surviving
-        // controller pod, which writes Online for every pool it manages.
+        // controller pod, which writes Online for every deploymentSite it manages.
         // If we still ran the Offline-on-disconnect path here, our write
         // would land in MongoDB AFTER the new pod's Online write (later
         // timestamp wins the AttributeNewerThanGuard), and the UI would
@@ -70,17 +70,17 @@ public class OperatorHub : Hub, IOperatorHub
         {
             Logger.Info(
                 "App is stopping; skipping Offline writes for connection '{ConnectionId}'. " +
-                "Surviving pod will reconcile pool CommunicationState.",
+                "Surviving pod will reconcile deploymentSite CommunicationState.",
                 disconnectingConnectionId);
             // Drop the connection-level entry locally so any late hub
             // method calls don't see a stale connection, but skip the
-            // per-pool state writes.
+            // per-deploymentSite state writes.
             _connectionManager.RemoveOperator(disconnectingConnectionId);
             await base.OnDisconnectedAsync(exception);
             return;
         }
 
-        // Drop the connection-level entry and reset every pool it claimed.
+        // Drop the connection-level entry and reset every deploymentSite it claimed.
         // Same call site whether the disconnect was graceful (operator
         // shutdown) or a crash — the hub guarantees this fires exactly once.
         // The disconnecting connection id is passed to DeploymentSiteService so a stale
@@ -92,13 +92,13 @@ public class OperatorHub : Hub, IOperatorHub
         {
             try
             {
-                await _poolService.SetCommunicationStateOfflineAsync(tenantId,
+                await _deploymentSiteService.SetCommunicationStateOfflineAsync(tenantId,
                     new OctoObjectId(deploymentSiteRtId), disconnectingConnectionId);
             }
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "Failed to mark pool (rtId {DeploymentSiteRtId}) offline after operator disconnect (tenant '{TenantId}')",
+                    "Failed to mark deploymentSite (rtId {DeploymentSiteRtId}) offline after operator disconnect (tenant '{TenantId}')",
                     deploymentSiteRtId, tenantId);
             }
         }
@@ -106,44 +106,44 @@ public class OperatorHub : Hub, IOperatorHub
     }
 
     /// <inheritdoc />
-    public Task<IEnumerable<DeployedDeploymentSiteDto>> RegisterOperatorAsync(bool? autoManagePools = null)
+    public Task<IEnumerable<DeployedDeploymentSiteDto>> RegisterOperatorAsync(bool? autoManageDeploymentSites = null)
     {
         Logger.Info(
             "Operator registered with connection id '{ConnectionId}' (mode: {Mode})",
             Context.ConnectionId,
-            autoManagePools.HasValue
-                ? (autoManagePools.Value ? "central (AutoManagePools=true)" : "edge (AutoManagePools=false)")
+            autoManageDeploymentSites.HasValue
+                ? (autoManageDeploymentSites.Value ? "central (AutoManageDeploymentSites=true)" : "edge (AutoManageDeploymentSites=false)")
                 : "legacy (unknown)");
         _connectionManager.AddOperator(Context.ConnectionId);
-        _connectionManager.SetOperatorMode(Context.ConnectionId, autoManagePools);
-        return Task.FromResult(_connectionManager.GetDeployedPools());
+        _connectionManager.SetOperatorMode(Context.ConnectionId, autoManageDeploymentSites);
+        return Task.FromResult(_connectionManager.GetDeployedDeploymentSites());
     }
 
     /// <inheritdoc />
-    public async Task ReportDeployedStateAsync(IReadOnlyList<OperatorDeployedDeploymentSiteReportDto> deployedPools)
+    public async Task ReportDeployedStateAsync(IReadOnlyList<OperatorDeployedDeploymentSiteReportDto> deployedDeploymentSites)
     {
         var operatorMode = _connectionManager.GetOperatorMode(Context.ConnectionId);
         if (operatorMode != true)
         {
             // Edge operators and legacy (mode==null) operators must not
             // restore state via this path — their helm releases live on a
-            // different cluster than the controller-managed Cloud pools.
+            // different cluster than the controller-managed Cloud deploymentSites.
             // Throw a typed HubException so the SDK surfaces a useful
             // error message instead of a generic SignalR failure.
-            var modeLabel = operatorMode == false ? "edge (AutoManagePools=false)" : "legacy (unknown)";
+            var modeLabel = operatorMode == false ? "edge (AutoManageDeploymentSites=false)" : "legacy (unknown)";
             await _eventService.StoreErrorEventAsync(string.Empty,
                 $"ReportDeployedStateAsync rejected: operator connection '{Context.ConnectionId}' is in {modeLabel} mode. " +
-                "Only Cloud operators (AutoManagePools=true) may reverse-sync deployed state.");
+                "Only Cloud operators (AutoManageDeploymentSites=true) may reverse-sync deployed state.");
             throw new HubException(
-                $"ReportDeployedStateAsync is only allowed for Cloud operators (AutoManagePools=true); " +
+                $"ReportDeployedStateAsync is only allowed for Cloud operators (AutoManageDeploymentSites=true); " +
                 $"this connection declared mode: {modeLabel}.");
         }
 
         Logger.Info(
-            "Operator '{ConnectionId}' reverse-syncs deployed state: {Count} pool report(s)",
-            Context.ConnectionId, deployedPools.Count);
+            "Operator '{ConnectionId}' reverse-syncs deployed state: {Count} deploymentSite report(s)",
+            Context.ConnectionId, deployedDeploymentSites.Count);
 
-        await _poolService.RestoreDeployedStateAsync(Context.ConnectionId, deployedPools);
+        await _deploymentSiteService.RestoreDeployedStateAsync(Context.ConnectionId, deployedDeploymentSites);
     }
 
     /// <inheritdoc />
@@ -156,13 +156,13 @@ public class OperatorHub : Hub, IOperatorHub
         {
             try
             {
-                await _poolService.SetCommunicationStateOfflineAsync(tenantId,
+                await _deploymentSiteService.SetCommunicationStateOfflineAsync(tenantId,
                     new OctoObjectId(deploymentSiteRtId), disconnectingConnectionId);
             }
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "Failed to mark pool (rtId {DeploymentSiteRtId}) offline on operator unregister (tenant '{TenantId}')",
+                    "Failed to mark deploymentSite (rtId {DeploymentSiteRtId}) offline on operator unregister (tenant '{TenantId}')",
                     deploymentSiteRtId, tenantId);
             }
         }
@@ -172,7 +172,7 @@ public class OperatorHub : Hub, IOperatorHub
     public async Task RegisterDeploymentSiteAsync(string tenantId, string deploymentSiteRtId)
     {
         Logger.Info(
-            "Operator '{ConnectionId}' claims pool (rtId {DeploymentSiteRtId}) for tenant '{TenantId}'",
+            "Operator '{ConnectionId}' claims deploymentSite (rtId {DeploymentSiteRtId}) for tenant '{TenantId}'",
             Context.ConnectionId, deploymentSiteRtId, tenantId);
 
         // Validate deploymentSiteRtId up-front. An empty / malformed value used to
@@ -191,53 +191,53 @@ public class OperatorHub : Hub, IOperatorHub
                 deploymentSiteRtId, tenantId, Context.ConnectionId);
             throw new HubException(
                 $"Invalid deploymentSiteRtId '{deploymentSiteRtId}' (tenant '{tenantId}'): " +
-                "must be a 24-character hex ObjectId. Check the CommunicationPool CR spec.");
+                "must be a 24-character hex ObjectId. Check the DeploymentSite CR spec.");
         }
 
-        // Validate that the calling operator's mode matches the pool's
+        // Validate that the calling operator's mode matches the deploymentSite's
         // Environment before flipping state Online. This blocks an edge
-        // operator that picked up a CR for a Cloud pool (e.g. one materialized
+        // operator that picked up a CR for a Cloud deploymentSite (e.g. one materialized
         // by the now-fixed reconnect bug, or by a misfired
-        // deploy-edge-pool.yml run) from claiming ownership and receiving
+        // deploy-edge-deploymentSite.yml run) from claiming ownership and receiving
         // workload deploy events. A legacy operator that did not declare a
         // mode is logged + audited but allowed through, so rolling upgrades
         // do not break existing connections.
         var operatorMode = _connectionManager.GetOperatorMode(Context.ConnectionId);
         if (operatorMode.HasValue)
         {
-            var rtPool = (await _communicationRepository.GetDeploymentSitesAsync(tenantId))
+            var rtDeploymentSite = (await _communicationRepository.GetDeploymentSitesAsync(tenantId))
                 .FirstOrDefault(p => p.RtId == poolObjectId);
-            if (rtPool == null)
+            if (rtDeploymentSite == null)
             {
                 Logger.Warn(
                     "Rejecting RegisterPool: no RtDeploymentSite with rtId {DeploymentSiteRtId} for tenant '{TenantId}' " +
                     "(connection '{ConnectionId}')",
                     deploymentSiteRtId, tenantId, Context.ConnectionId);
                 await _eventService.StoreErrorEventAsync(tenantId,
-                    $"Operator (connection '{Context.ConnectionId}', AutoManagePools={operatorMode.Value}) " +
-                    $"attempted to register deployment site rtId {deploymentSiteRtId} but no such pool exists.");
+                    $"Operator (connection '{Context.ConnectionId}', AutoManageDeploymentSites={operatorMode.Value}) " +
+                    $"attempted to register deployment site rtId {deploymentSiteRtId} but no such deploymentSite exists.");
                 throw new HubException(
                     $"Deployment site rtId {deploymentSiteRtId} does not exist for tenant '{tenantId}'.");
             }
 
-            var poolIsCloud = rtPool.Environment == RtEnvironmentEnum.Cloud;
+            var poolIsCloud = rtDeploymentSite.Environment == RtEnvironmentEnum.Cloud;
             var operatorIsCentral = operatorMode.Value;
             if (poolIsCloud != operatorIsCentral)
             {
-                var operatorRole = operatorIsCentral ? "central (AutoManagePools=true)" : "edge (AutoManagePools=false)";
+                var operatorRole = operatorIsCentral ? "central (AutoManageDeploymentSites=true)" : "edge (AutoManageDeploymentSites=false)";
                 var poolEnv = poolIsCloud ? "Cloud" : "Edge";
                 Logger.Warn(
-                    "Rejecting RegisterPool: operator is {OperatorRole} but pool '{PoolName}' (rtId {DeploymentSiteRtId}) " +
+                    "Rejecting RegisterPool: operator is {OperatorRole} but deploymentSite '{DeploymentSiteName}' (rtId {DeploymentSiteRtId}) " +
                     "is {PoolEnv} (tenant '{TenantId}', connection '{ConnectionId}')",
-                    operatorRole, rtPool.Name, deploymentSiteRtId, poolEnv, tenantId, Context.ConnectionId);
+                    operatorRole, rtDeploymentSite.Name, deploymentSiteRtId, poolEnv, tenantId, Context.ConnectionId);
                 await _eventService.StoreErrorEventAsync(tenantId,
-                    $"Rejected pool registration: pool '{rtPool.Name}' (rtId {deploymentSiteRtId}) " +
+                    $"Rejected deploymentSite registration: deploymentSite '{rtDeploymentSite.Name}' (rtId {deploymentSiteRtId}) " +
                     $"is {poolEnv} but operator (connection '{Context.ConnectionId}') is {operatorRole}. " +
-                    "Check the CommunicationPool CR and the operator's deployment mode.");
+                    "Check the DeploymentSite CR and the operator's deployment mode.");
                 throw new HubException(
-                    $"Pool '{rtPool.Name}' (rtId {deploymentSiteRtId}) is {poolEnv}; " +
+                    $"DeploymentSite '{rtDeploymentSite.Name}' (rtId {deploymentSiteRtId}) is {poolEnv}; " +
                     $"a {operatorRole} operator cannot claim it. " +
-                    "Check the operator's AutoManagePools setting and the pool's Environment.");
+                    "Check the operator's AutoManageDeploymentSites setting and the deploymentSite's Environment.");
             }
         }
         else
@@ -251,26 +251,26 @@ public class OperatorHub : Hub, IOperatorHub
                 "without declaring a mode; Environment/mode enforcement skipped.");
         }
 
-        // Track the (connection, tenant, pool) tuple before flipping state —
+        // Track the (connection, tenant, deploymentSite) tuple before flipping state —
         // if state-write fails we still want OnDisconnectedAsync to clean
         // up so the entity doesn't stay stuck on Online.
         _connectionManager.RegisterDeploymentSiteForConnection(Context.ConnectionId, tenantId, deploymentSiteRtId);
 
         try
         {
-            await _poolService.SetCommunicationStateOnlineAsync(tenantId,
+            await _deploymentSiteService.SetCommunicationStateOnlineAsync(tenantId,
                 poolObjectId, Context.ConnectionId);
         }
         catch (Exception ex)
         {
             Logger.Error(ex,
-                "Failed to mark pool (rtId {DeploymentSiteRtId}) online (tenant '{TenantId}')",
+                "Failed to mark deploymentSite (rtId {DeploymentSiteRtId}) online (tenant '{TenantId}')",
                 deploymentSiteRtId, tenantId);
             throw;
         }
 
         // Replay any workload deploy/undeploy the controller had to queue
-        // while no operator owned this pool (AB#4371) — e.g. an undeploy
+        // while no operator owned this deploymentSite (AB#4371) — e.g. an undeploy
         // triggered while the operator's registration was failing
         // transiently. Runs after the state write so a failed registration
         // (rethrown above) does not consume the queue.
@@ -280,16 +280,16 @@ public class OperatorHub : Hub, IOperatorHub
         // Re-dispatch workloads stranded in Pending (AB#4894): a deploy
         // notification sent to the PREVIOUS operator pod while it was being
         // replaced is lost silently and never enters the AB#4371 queue (the
-        // pool had a registered — dying — owner at send time). Best effort,
+        // deploymentSite had a registered — dying — owner at send time). Best effort,
         // never fails the registration.
-        await _poolService.ReconcilePendingWorkloadsAsync(tenantId, poolObjectId);
+        await _deploymentSiteService.ReconcilePendingWorkloadsAsync(tenantId, poolObjectId);
     }
 
     /// <inheritdoc />
     public async Task UnregisterDeploymentSiteAsync(string tenantId, string deploymentSiteRtId)
     {
         Logger.Info(
-            "Operator '{ConnectionId}' releases pool (rtId {DeploymentSiteRtId}) for tenant '{TenantId}'",
+            "Operator '{ConnectionId}' releases deploymentSite (rtId {DeploymentSiteRtId}) for tenant '{TenantId}'",
             Context.ConnectionId, deploymentSiteRtId, tenantId);
 
         // Validate up-front (same rationale as RegisterDeploymentSiteAsync). Bad
@@ -307,16 +307,16 @@ public class OperatorHub : Hub, IOperatorHub
                 "must be a 24-character hex ObjectId.");
         }
 
-        _connectionManager.UnregisterPoolForConnection(Context.ConnectionId, tenantId, deploymentSiteRtId);
+        _connectionManager.UnregisterDeploymentSiteForConnection(Context.ConnectionId, tenantId, deploymentSiteRtId);
 
         try
         {
-            await _poolService.UnregisterPoolOperatorAsync(tenantId, poolObjectId);
+            await _deploymentSiteService.UnregisterDeploymentSiteOperatorAsync(tenantId, poolObjectId);
         }
         catch (Exception ex)
         {
             Logger.Warn(ex,
-                "Failed to unregister pool (rtId {DeploymentSiteRtId}); state may stay Online until disconnect (tenant '{TenantId}')",
+                "Failed to unregister deploymentSite (rtId {DeploymentSiteRtId}); state may stay Online until disconnect (tenant '{TenantId}')",
                 deploymentSiteRtId, tenantId);
         }
     }

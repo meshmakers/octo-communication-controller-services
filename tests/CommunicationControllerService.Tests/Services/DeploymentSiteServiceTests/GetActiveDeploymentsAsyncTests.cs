@@ -9,7 +9,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 /// <summary>
 /// Pins the repository-based "what still owns operator resources" answer behind the
 /// Communication disable guard (AB#4255): Deployed / Pending / Error count, Undeployed and
-/// Disabled do not, pools come before workloads, and a read failure is never reported as
+/// Disabled do not, deploymentSites come before workloads, and a read failure is never reported as
 /// "nothing deployed".
 /// </summary>
 internal class GetActiveDeploymentsAsyncTests : PoolServiceTestsBase
@@ -18,8 +18,8 @@ internal class GetActiveDeploymentsAsyncTests : PoolServiceTestsBase
     public async Task ReturnsEmpty_WhenEveryPoolAndWorkloadIsResting()
     {
         GivenPools(
-            Pool("edge", RtDeploymentStateEnum.Disabled, RtEnvironmentEnum.Edge),
-            Pool("cloud", RtDeploymentStateEnum.Undeployed, RtEnvironmentEnum.Cloud));
+            DeploymentSite("edge", RtDeploymentStateEnum.Disabled, RtEnvironmentEnum.Edge),
+            DeploymentSite("cloud", RtDeploymentStateEnum.Undeployed, RtEnvironmentEnum.Cloud));
         GivenWorkloads(
             Adapter("mesh", RtDeploymentStateEnum.Undeployed),
             Application("grafana", RtDeploymentStateEnum.Disabled));
@@ -33,9 +33,9 @@ internal class GetActiveDeploymentsAsyncTests : PoolServiceTestsBase
     public async Task ReturnsDeployedPendingAndError_PoolsFirst_ThenWorkloadsByName()
     {
         GivenPools(
-            Pool("zeta", RtDeploymentStateEnum.Pending, RtEnvironmentEnum.Cloud),
-            Pool("alpha", RtDeploymentStateEnum.Deployed, RtEnvironmentEnum.Cloud),
-            Pool("resting", RtDeploymentStateEnum.Undeployed, RtEnvironmentEnum.Cloud));
+            DeploymentSite("zeta", RtDeploymentStateEnum.Pending, RtEnvironmentEnum.Cloud),
+            DeploymentSite("alpha", RtDeploymentStateEnum.Deployed, RtEnvironmentEnum.Cloud),
+            DeploymentSite("resting", RtDeploymentStateEnum.Undeployed, RtEnvironmentEnum.Cloud));
         GivenWorkloads(
             Application("grafana", RtDeploymentStateEnum.Error),
             Adapter("mesh", RtDeploymentStateEnum.Deployed),
@@ -43,17 +43,17 @@ internal class GetActiveDeploymentsAsyncTests : PoolServiceTestsBase
 
         var result = await DeploymentSiteService.GetActiveDeploymentsAsync(TenantId);
 
-        // Joined so the ORDER is pinned too (pools first, then workloads, each by name).
+        // Joined so the ORDER is pinned too (deploymentSites first, then workloads, each by name).
         await Assert.That(string.Join(" | ", result.Select(d => d.ToString()))).IsEqualTo(
-            "Pool 'alpha' (Deployed) | Pool 'zeta' (Pending) | Application 'grafana' (Error) | Adapter 'mesh' (Deployed)");
+            "DeploymentSite 'alpha' (Deployed) | DeploymentSite 'zeta' (Pending) | Application 'grafana' (Error) | Adapter 'mesh' (Deployed)");
     }
 
     [Test]
     public async Task ReportsALeftoverWorkloadUnderAnEdgePool()
     {
-        // A Cloud pool switched to Edge while its adapter was deployed: the pool rests as
+        // A Cloud deploymentSite switched to Edge while its adapter was deployed: the deploymentSite rests as
         // Disabled, but the adapter still owns a helm release until it is undeployed.
-        GivenPools(Pool("edge", RtDeploymentStateEnum.Disabled, RtEnvironmentEnum.Edge));
+        GivenPools(DeploymentSite("edge", RtDeploymentStateEnum.Disabled, RtEnvironmentEnum.Edge));
         GivenWorkloads(Adapter("leftover", RtDeploymentStateEnum.Deployed));
 
         var result = await DeploymentSiteService.GetActiveDeploymentsAsync(TenantId);
@@ -66,19 +66,19 @@ internal class GetActiveDeploymentsAsyncTests : PoolServiceTestsBase
     [Test]
     public async Task FallsBackToTheRuntimeId_WhenAnEntityHasNoName()
     {
-        var pool = Pool(null, RtDeploymentStateEnum.Deployed, RtEnvironmentEnum.Cloud);
-        GivenPools(pool);
+        var deploymentSite = DeploymentSite(null, RtDeploymentStateEnum.Deployed, RtEnvironmentEnum.Cloud);
+        GivenPools(deploymentSite);
         GivenWorkloads();
 
         var result = await DeploymentSiteService.GetActiveDeploymentsAsync(TenantId);
 
-        await Assert.That(result[0].Name).IsEqualTo(pool.RtId.ToString());
+        await Assert.That(result[0].Name).IsEqualTo(deploymentSite.RtId.ToString());
     }
 
     [Test]
     public async Task PropagatesRepositoryFailures_InsteadOfAnsweringNothingDeployed()
     {
-        GivenPools(Pool("alpha", RtDeploymentStateEnum.Deployed, RtEnvironmentEnum.Cloud));
+        GivenPools(DeploymentSite("alpha", RtDeploymentStateEnum.Deployed, RtEnvironmentEnum.Cloud));
         CommunicationRepository.GetWorkloadsAsync(TenantId)
             .ThrowsAsync(new InvalidOperationException("mongo down"));
 
@@ -86,9 +86,9 @@ internal class GetActiveDeploymentsAsyncTests : PoolServiceTestsBase
             .Throws<InvalidOperationException>();
     }
 
-    private void GivenPools(params RtDeploymentSite[] pools)
+    private void GivenPools(params RtDeploymentSite[] deploymentSites)
     {
-        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(pools);
+        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(deploymentSites);
     }
 
     private void GivenWorkloads(params RtDeployableWorkload[] workloads)
@@ -96,7 +96,7 @@ internal class GetActiveDeploymentsAsyncTests : PoolServiceTestsBase
         CommunicationRepository.GetWorkloadsAsync(TenantId).Returns(workloads);
     }
 
-    private static RtDeploymentSite Pool(string? name, RtDeploymentStateEnum state, RtEnvironmentEnum environment)
+    private static RtDeploymentSite DeploymentSite(string? name, RtDeploymentStateEnum state, RtEnvironmentEnum environment)
     {
         return new RtDeploymentSite
         {

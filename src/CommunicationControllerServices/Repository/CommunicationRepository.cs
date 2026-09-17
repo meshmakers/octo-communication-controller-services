@@ -46,7 +46,7 @@ internal class CommunicationRepository : ICommunicationRepository
 
             if (!resultSet.Any())
             {
-                throw CommunicationRepositoryException.PoolNotFound(tenantId, adapterPoolRtId);
+                throw CommunicationRepositoryException.DeploymentSiteNotFound(tenantId, adapterPoolRtId);
             }
 
             return resultSet.First().Value.Items.ToList();
@@ -59,7 +59,7 @@ internal class CommunicationRepository : ICommunicationRepository
 
 
     /// <inheritdoc />
-    public async Task<IReadOnlyCollection<RtDeployableWorkload>> GetWorkloadsForPoolAsync(string tenantId,
+    public async Task<IReadOnlyCollection<RtDeployableWorkload>> GetWorkloadsForDeploymentSiteAsync(string tenantId,
         OctoObjectId adapterPoolRtId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
@@ -282,7 +282,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task<RtDeploymentSite?> GetPoolForWorkloadAsync(string tenantId, OctoObjectId workloadRtId)
+    public async Task<RtDeploymentSite?> GetDeploymentSiteForWorkloadAsync(string tenantId, OctoObjectId workloadRtId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -906,7 +906,7 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyCollection<RtDeploymentSite>> GetPoolByNameAsync(string tenantId, string poolName)
+    public async Task<IReadOnlyCollection<RtDeploymentSite>> GetPoolByNameAsync(string tenantId, string deploymentSiteName)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -914,7 +914,7 @@ internal class CommunicationRepository : ICommunicationRepository
         try
         {
             var dataQueryOperation = RtEntityQueryOptions.Create()
-                .FieldFilter(nameof(RtDeploymentSite.Name), FieldFilterOperator.Equals, poolName);
+                .FieldFilter(nameof(RtDeploymentSite.Name), FieldFilterOperator.Equals, deploymentSiteName);
 
             var poolResultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtDeploymentSite>(session, dataQueryOperation);
 
@@ -922,12 +922,12 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw CommunicationRepositoryException.CommonFailedGettingPoolByName(tenantId, poolName, e);
+            throw CommunicationRepositoryException.CommonFailedGettingPoolByName(tenantId, deploymentSiteName, e);
         }
     }
 
     /// <inheritdoc />
-    public async Task CreatePoolAsync(string tenantId, string poolName)
+    public async Task CreatePoolAsync(string tenantId, string deploymentSiteName)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -936,17 +936,17 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             session.StartTransaction();
 
-            var rtPool = new RtDeploymentSite
+            var rtDeploymentSite = new RtDeploymentSite
             {
                 CommunicationState = RtCommunicationStateEnum.Offline,
                 DeploymentState = RtDeploymentStateEnum.Undeployed,
                 ConfigurationState = RtConfigurationStateEnum.Unconfigured,
-                Name = poolName
+                Name = deploymentSiteName
             };
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtDeploymentSite>>
             {
-                EntityUpdateInfo<RtDeploymentSite>.CreateInsert(rtPool)
+                EntityUpdateInfo<RtDeploymentSite>.CreateInsert(rtDeploymentSite)
             };
 
             OperationResult operationResult = new();
@@ -964,11 +964,11 @@ internal class CommunicationRepository : ICommunicationRepository
         }
         catch (Exception e)
         {
-            throw CommunicationRepositoryException.CommonFailedCreatePool(tenantId, poolName, e);
+            throw CommunicationRepositoryException.CommonFailedCreatePool(tenantId, deploymentSiteName, e);
         }
     }
 
-    public async Task SetPoolDeploymentStateAsync(string tenantId, OctoObjectId adapterPoolRtId,
+    public async Task SetDeploymentSiteDeploymentStateAsync(string tenantId, OctoObjectId adapterPoolRtId,
         RtDeploymentStateEnum deploymentState)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
@@ -978,7 +978,7 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             session.StartTransaction();
 
-            var rtPool = new RtDeploymentSite
+            var rtDeploymentSite = new RtDeploymentSite
             {
                 RtId = adapterPoolRtId,
                 DeploymentState = deploymentState
@@ -986,7 +986,7 @@ internal class CommunicationRepository : ICommunicationRepository
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtDeploymentSite>>
             {
-                EntityUpdateInfo<RtDeploymentSite>.CreateUpdate(rtPool.ToRtEntityId(), rtPool)
+                EntityUpdateInfo<RtDeploymentSite>.CreateUpdate(rtDeploymentSite.ToRtEntityId(), rtDeploymentSite)
             };
 
             OperationResult operationResult = new();
@@ -1009,7 +1009,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task SetPoolCommunicationStateAsync(string tenantId, OctoObjectId adapterPoolRtId,
+    public async Task SetDeploymentSiteCommunicationStateAsync(string tenantId, OctoObjectId adapterPoolRtId,
         RtCommunicationStateEnum communicationState)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
@@ -1024,7 +1024,7 @@ internal class CommunicationRepository : ICommunicationRepository
             // a parallel writer — e.g. a controller pod mid-shutdown — is rejected at the
             // MongoDB filter level).
             var newTimestamp = DateTime.UtcNow;
-            var rtPool = new RtDeploymentSite
+            var rtDeploymentSite = new RtDeploymentSite
             {
                 RtId = adapterPoolRtId,
                 CommunicationState = communicationState,
@@ -1034,7 +1034,7 @@ internal class CommunicationRepository : ICommunicationRepository
             var guard = new AttributeNewerThanGuard("attributes.communicationStateTimestamp", newTimestamp);
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtDeploymentSite>>
             {
-                EntityUpdateInfo<RtDeploymentSite>.CreateConditionalUpdate(rtPool.ToRtEntityId(), rtPool, guard)
+                EntityUpdateInfo<RtDeploymentSite>.CreateConditionalUpdate(rtDeploymentSite.ToRtEntityId(), rtDeploymentSite, guard)
             };
 
             OperationResult operationResult = new();
@@ -1308,7 +1308,7 @@ internal class CommunicationRepository : ICommunicationRepository
                     return pool;
                 }
 
-                throw CommunicationRepositoryException.AdapterNotAssociatedToPool(tenantId, adapterRtEntityId);
+                throw CommunicationRepositoryException.AdapterNotAssociatedToDeploymentSite(tenantId, adapterRtEntityId);
             }
 
             throw CommunicationRepositoryException.AdapterNotFound(tenantId, adapterRtEntityId);

@@ -3,17 +3,17 @@ using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.Syst
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
 /// <summary>
-/// A pool or workload of a tenant whose <c>DeploymentState</c> says it still owns operator-managed
+/// A deploymentSite or workload of a tenant whose <c>DeploymentState</c> says it still owns operator-managed
 /// resources (anything but <c>Undeployed</c> / <c>Disabled</c>). Produced by
 /// <see cref="IDeploymentSiteService.GetActiveDeploymentsAsync"/> for the Communication disable guard (AB#4255).
 /// </summary>
-/// <param name="Kind">"Pool", "Adapter" or "Application"</param>
+/// <param name="Kind">"DeploymentSite", "Adapter" or "Application"</param>
 /// <param name="Name">Entity name, falling back to the runtime id</param>
 /// <param name="State">The persisted deployment state</param>
 public sealed record ActiveDeployment(string Kind, string Name, RtDeploymentStateEnum State)
 {
-    /// <summary>Kind label of a pool</summary>
-    public const string PoolKind = "Pool";
+    /// <summary>Kind label of a deploymentSite</summary>
+    public const string DeploymentSiteKind = "DeploymentSite";
 
     /// <summary>Kind label of an adapter workload</summary>
     public const string AdapterKind = "Adapter";

@@ -44,7 +44,7 @@ internal sealed class AdapterNodeCapabilityService(
                 "no lending pool (LentFromTenantId / LentFromAdapterPoolRtId are not both set)");
         }
 
-        var capabilities = poolConnectionManager.TryGetPoolCapabilities(lenderTenantId, poolRtId);
+        var capabilities = poolConnectionManager.TryGetAdapterPoolCapabilities(lenderTenantId, poolRtId);
         if (capabilities != null)
         {
             return new AdapterNodeCapabilities(capabilities.NodeDescriptors, capabilities.PipelineSchemaJson,

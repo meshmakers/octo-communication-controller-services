@@ -38,12 +38,12 @@ internal class PoolControllerDeployGateTests
     {
         var (sut, pools, _) = CreateSut(enabled: false);
 
-        var result = await sut.DeployPoolAsync(RtId);
+        var result = await sut.DeployDeploymentSiteAsync(RtId);
 
         var conflict = result as ConflictObjectResult;
         await Assert.That(conflict).IsNotNull();
         await Assert.That((conflict!.Value as OperationFailedErrorDto)!.Message).Contains("Communication is disabled for tenant 'child-a'");
-        await pools.DidNotReceive().DeployPoolAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>());
+        await pools.DidNotReceive().DeployDeploymentSiteAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>());
     }
 
     [Test]
@@ -62,12 +62,12 @@ internal class PoolControllerDeployGateTests
     {
         var (sut, pools, _) = CreateSut(enabled: true);
 
-        var poolResult = await sut.DeployPoolAsync(RtId);
+        var poolResult = await sut.DeployDeploymentSiteAsync(RtId);
         var workloadResult = await sut.DeployWorkloadAsync(RtId);
 
         await Assert.That(poolResult).IsTypeOf<NoContentResult>();
         await Assert.That(workloadResult).IsTypeOf<NoContentResult>();
-        await pools.Received(1).DeployPoolAsync(TenantId, RtId);
+        await pools.Received(1).DeployDeploymentSiteAsync(TenantId, RtId);
         await pools.Received(1).DeployWorkloadAsync(TenantId, RtId);
     }
 
@@ -76,12 +76,12 @@ internal class PoolControllerDeployGateTests
     {
         var (sut, pools, configuration) = CreateSut(enabled: false);
 
-        var poolResult = await sut.UndeployPoolAsync(RtId);
+        var poolResult = await sut.UndeployDeploymentSiteAsync(RtId);
         var workloadResult = await sut.UndeployWorkloadAsync(RtId);
 
         await Assert.That(poolResult).IsTypeOf<NoContentResult>();
         await Assert.That(workloadResult).IsTypeOf<NoContentResult>();
-        await pools.Received(1).UndeployPoolAsync(TenantId, RtId);
+        await pools.Received(1).UndeployDeploymentSiteAsync(TenantId, RtId);
         await pools.Received(1).UndeployWorkloadAsync(TenantId, RtId);
         await configuration.DidNotReceive().IsEnabledAsync(Arg.Any<string>());
     }

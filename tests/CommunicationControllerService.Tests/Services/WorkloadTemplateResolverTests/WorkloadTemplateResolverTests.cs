@@ -98,7 +98,7 @@ internal class WorkloadTemplateResolverTests
     {
         // {{context.tenantId}} is the only context.* placeholder for now;
         // the namespace is kept so future per-deploy values (workloadRtId,
-        // poolName) can land without touching templates already in the field.
+        // deploymentSiteName) can land without touching templates already in the field.
         var sut = CreateSut();
 
         var ok = sut.TryResolve("https://api/{{context.tenantId}}/callback", Ctx("acme"),

@@ -74,10 +74,10 @@ public class CommunicationRepositoryTests(CommunicationControllerFixture fixture
     public async Task CreatePool_ShouldCreatePoolSuccessfully()
     {
         var repository = fixture.GetService<ICommunicationRepository>();
-        var poolName = $"test-pool-{Guid.NewGuid():N}";
+        var deploymentSiteName = $"test-pool-{Guid.NewGuid():N}";
 
         // Act - verify that creating a pool doesn't throw
-        var act = async () => await repository.CreatePoolAsync(fixture.TestTenantId, poolName);
+        var act = async () => await repository.CreatePoolAsync(fixture.TestTenantId, deploymentSiteName);
         await act.Should().NotThrowAsync();
     }
 }

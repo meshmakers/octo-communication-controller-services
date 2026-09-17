@@ -22,13 +22,13 @@ internal class TenantManagementConsumerTests
     private static readonly DateTime FutureTimestamp = DateTime.UtcNow.AddYears(1);
 
     private readonly TenantManagementConsumer _consumer;
-    private readonly IDeploymentSiteService _poolService;
+    private readonly IDeploymentSiteService _deploymentSiteService;
     private readonly IAdapterService _adapterService;
     private readonly IConfigurationService _configurationService;
 
     public TenantManagementConsumerTests()
     {
-        _poolService = Substitute.For<IDeploymentSiteService>();
+        _deploymentSiteService = Substitute.For<IDeploymentSiteService>();
         _adapterService = Substitute.For<IAdapterService>();
         _configurationService = Substitute.For<IConfigurationService>();
         var logger = Substitute.For<ILogger<TenantManagementConsumer>>();
@@ -36,7 +36,7 @@ internal class TenantManagementConsumerTests
 
         _configurationService.IsEnabledAsync(TenantId).Returns(true);
 
-        _consumer = new TenantManagementConsumer(logger, _poolService, _adapterService,
+        _consumer = new TenantManagementConsumer(logger, _deploymentSiteService, _adapterService,
             _configurationService, eventService);
     }
 
@@ -57,9 +57,9 @@ internal class TenantManagementConsumerTests
         using var _ = Assert.Multiple();
 
         await _adapterService.Received(1).PreUpdateTenantAsync(TenantId);
-        await _poolService.Received(1).PreUpdateTenantAsync(TenantId);
+        await _deploymentSiteService.Received(1).PreUpdateTenantAsync(TenantId);
         await _adapterService.Received(1).PosUpdateTenantAsync(TenantId);
-        await _poolService.Received(1).PosUpdateTenantAsync(TenantId);
+        await _deploymentSiteService.Received(1).PosUpdateTenantAsync(TenantId);
     }
 
     [Test]
@@ -79,9 +79,9 @@ internal class TenantManagementConsumerTests
         using var _ = Assert.Multiple();
 
         await _adapterService.Received(1).PreUpdateTenantAsync(TenantId);
-        await _poolService.Received(1).PreUpdateTenantAsync(TenantId);
+        await _deploymentSiteService.Received(1).PreUpdateTenantAsync(TenantId);
         await _adapterService.Received(1).PosUpdateTenantAsync(TenantId);
-        await _poolService.Received(1).PosUpdateTenantAsync(TenantId);
+        await _deploymentSiteService.Received(1).PosUpdateTenantAsync(TenantId);
     }
 
     [Test]
@@ -98,9 +98,9 @@ internal class TenantManagementConsumerTests
         using var _ = Assert.Multiple();
 
         await _adapterService.DidNotReceive().PreUpdateTenantAsync(Arg.Any<string>());
-        await _poolService.DidNotReceive().PreUpdateTenantAsync(Arg.Any<string>());
+        await _deploymentSiteService.DidNotReceive().PreUpdateTenantAsync(Arg.Any<string>());
         await _adapterService.DidNotReceive().PosUpdateTenantAsync(Arg.Any<string>());
-        await _poolService.DidNotReceive().PosUpdateTenantAsync(Arg.Any<string>());
+        await _deploymentSiteService.DidNotReceive().PosUpdateTenantAsync(Arg.Any<string>());
     }
 
     [Test]
@@ -117,9 +117,9 @@ internal class TenantManagementConsumerTests
         using var _ = Assert.Multiple();
 
         await _adapterService.DidNotReceive().PreUpdateTenantAsync(Arg.Any<string>());
-        await _poolService.DidNotReceive().PreUpdateTenantAsync(Arg.Any<string>());
+        await _deploymentSiteService.DidNotReceive().PreUpdateTenantAsync(Arg.Any<string>());
         await _adapterService.DidNotReceive().PosUpdateTenantAsync(Arg.Any<string>());
-        await _poolService.DidNotReceive().PosUpdateTenantAsync(Arg.Any<string>());
+        await _deploymentSiteService.DidNotReceive().PosUpdateTenantAsync(Arg.Any<string>());
     }
 
     [Test]
@@ -140,9 +140,9 @@ internal class TenantManagementConsumerTests
         using var _ = Assert.Multiple();
 
         await _adapterService.DidNotReceive().PreUpdateTenantAsync(Arg.Any<string>());
-        await _poolService.DidNotReceive().PreUpdateTenantAsync(Arg.Any<string>());
+        await _deploymentSiteService.DidNotReceive().PreUpdateTenantAsync(Arg.Any<string>());
         await _adapterService.DidNotReceive().PosUpdateTenantAsync(Arg.Any<string>());
-        await _poolService.DidNotReceive().PosUpdateTenantAsync(Arg.Any<string>());
+        await _deploymentSiteService.DidNotReceive().PosUpdateTenantAsync(Arg.Any<string>());
     }
 
     [Test]
@@ -179,7 +179,7 @@ internal class TenantManagementConsumerTests
                 callOrder.Add("AdapterService.Pre");
                 return Task.CompletedTask;
             });
-        _poolService.PreUpdateTenantAsync(TenantId)
+        _deploymentSiteService.PreUpdateTenantAsync(TenantId)
             .Returns(_ =>
             {
                 callOrder.Add("DeploymentSiteService.Pre");
@@ -191,7 +191,7 @@ internal class TenantManagementConsumerTests
                 callOrder.Add("AdapterService.Pos");
                 return Task.CompletedTask;
             });
-        _poolService.PosUpdateTenantAsync(TenantId)
+        _deploymentSiteService.PosUpdateTenantAsync(TenantId)
             .Returns(_ =>
             {
                 callOrder.Add("DeploymentSiteService.Pos");
@@ -293,7 +293,7 @@ internal class TenantManagementConsumerTests
         // delivers Pre and Pos to two different instances. The pair state must survive across
         // instances (static), otherwise the paired branch silently never runs in production.
         var secondConsumer = new TenantManagementConsumer(
-            Substitute.For<ILogger<TenantManagementConsumer>>(), _poolService, _adapterService,
+            Substitute.For<ILogger<TenantManagementConsumer>>(), _deploymentSiteService, _adapterService,
             _configurationService, Substitute.For<ICommunicationEventService>());
 
         var correlationId = Guid.NewGuid();
@@ -351,9 +351,9 @@ internal class TenantManagementConsumerTests
 
         await _adapterService.Received(1).CkModelChangedAsync(TenantId);
         await _adapterService.DidNotReceive().PreUpdateTenantAsync(Arg.Any<string>());
-        await _poolService.DidNotReceive().PreUpdateTenantAsync(Arg.Any<string>());
+        await _deploymentSiteService.DidNotReceive().PreUpdateTenantAsync(Arg.Any<string>());
         await _adapterService.DidNotReceive().PosUpdateTenantAsync(Arg.Any<string>());
-        await _poolService.DidNotReceive().PosUpdateTenantAsync(Arg.Any<string>());
+        await _deploymentSiteService.DidNotReceive().PosUpdateTenantAsync(Arg.Any<string>());
     }
 
     [Test]

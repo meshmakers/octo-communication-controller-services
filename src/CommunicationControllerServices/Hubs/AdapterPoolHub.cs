@@ -134,7 +134,7 @@ internal class AdapterPoolHub : Hub, IAdapterPoolHub
             // configuration forever.
             Logger.Warn(
                 "Rejecting a pool-member registration on connection '{ConnectionId}': pool tenant " +
-                "'{PoolTenantId}' / pool rtId '{AdapterPoolRtId}' is not a usable pair",
+                "'{AdapterPoolTenantId}' / pool rtId '{AdapterPoolRtId}' is not a usable pair",
                 connectionId, registration.AdapterPoolTenantId, registration.AdapterPoolRtId);
             throw new HubException(
                 $"Invalid pool member registration: AdapterPoolTenantId '{registration.AdapterPoolTenantId}' and AdapterPoolRtId " +
@@ -213,23 +213,23 @@ internal class AdapterPoolHub : Hub, IAdapterPoolHub
     ///     <see cref="AdapterPoolHubAuthorizationFilter" />. It cannot live in the filter: the filter
     ///     runs at connect, before any hub method, and no pool has been declared yet at that point.
     /// </remarks>
-    private string? CheckConnectionTenantBinding(string declaredPoolTenantId)
+    private string? CheckConnectionTenantBinding(string declaredAdapterPoolTenantId)
     {
         var connectionTenantId = AdapterPoolHubAuthorizationFilter.GetConnectionTenantId(Context);
         if (string.IsNullOrEmpty(connectionTenantId))
         {
             return "presents no tenant-bound token, so its claim to belong to a pool of tenant " +
-                   $"'{declaredPoolTenantId}' cannot be checked";
+                   $"'{declaredAdapterPoolTenantId}' cannot be checked";
         }
 
-        if (!string.Equals(connectionTenantId, declaredPoolTenantId, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(connectionTenantId, declaredAdapterPoolTenantId, StringComparison.OrdinalIgnoreCase))
         {
             // 🔴 No parent/ancestor allowance, deliberately — the same stance AB#5063 takes on the
             // adapter hub. A pool belongs to the tenant that owns it, and a credential of some other
             // tenant registering members into it would let that tenant receive leases carrying a
             // third tenant's service-account secret.
             return $"presents a token of tenant '{connectionTenantId}' but claims to belong to a pool of " +
-                   $"tenant '{declaredPoolTenantId}'";
+                   $"tenant '{declaredAdapterPoolTenantId}'";
         }
 
         return null;

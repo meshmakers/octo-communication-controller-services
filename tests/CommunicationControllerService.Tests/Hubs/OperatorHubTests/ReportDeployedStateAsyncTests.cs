@@ -21,7 +21,7 @@ internal class ReportDeployedStateAsyncTests : IDisposable
         Substitute.For<IOperatorConnectionManager>();
     private readonly ICommunicationRepository _repository =
         Substitute.For<ICommunicationRepository>();
-    private readonly IDeploymentSiteService _poolService =
+    private readonly IDeploymentSiteService _deploymentSiteService =
         Substitute.For<IDeploymentSiteService>();
     private readonly IShutdownState _shutdownState =
         Substitute.For<IShutdownState>();
@@ -33,7 +33,7 @@ internal class ReportDeployedStateAsyncTests : IDisposable
 
     public ReportDeployedStateAsyncTests()
     {
-        _hub = new OperatorHub(_connectionManager, _repository, _poolService, _shutdownState,
+        _hub = new OperatorHub(_connectionManager, _repository, _deploymentSiteService, _shutdownState,
             _eventService, _workloadLifecycleService);
 
         var context = Substitute.For<HubCallerContext>();
@@ -50,16 +50,16 @@ internal class ReportDeployedStateAsyncTests : IDisposable
     [Test]
     public async Task CloudMode_DelegatesToPoolService()
     {
-        // AutoManagePools=true → Cloud operator → allowed.
+        // AutoManageDeploymentSites=true → Cloud operator → allowed.
         _connectionManager.GetOperatorMode(ConnectionId).Returns(true);
         var reports = new List<OperatorDeployedDeploymentSiteReportDto>
         {
-            new() { TenantId = "tenant-a", DeploymentSiteRtId = "6ad562f3ff7c40ff80275b84", DeploymentSiteName = "pool-a" },
+            new() { TenantId = "tenant-a", DeploymentSiteRtId = "6ad562f3ff7c40ff80275b84", DeploymentSiteName = "deploymentSite-a" },
         };
 
         await _hub.ReportDeployedStateAsync(reports);
 
-        await _poolService.Received(1).RestoreDeployedStateAsync(ConnectionId, reports);
+        await _deploymentSiteService.Received(1).RestoreDeployedStateAsync(ConnectionId, reports);
         await _eventService.DidNotReceiveWithAnyArgs().StoreErrorEventAsync(
             default!, default!);
     }
@@ -67,22 +67,22 @@ internal class ReportDeployedStateAsyncTests : IDisposable
     [Test]
     public async Task EdgeMode_ThrowsHubExceptionAndDoesNotDelegate()
     {
-        // AutoManagePools=false → edge operator → must NOT restore Cloud state.
+        // AutoManageDeploymentSites=false → edge operator → must NOT restore Cloud state.
         // Their helm releases live on a different cluster than the controller-managed
-        // Cloud pools, so reverse-syncing from an edge node would falsely revive
+        // Cloud deploymentSites, so reverse-syncing from an edge node would falsely revive
         // entities that don't actually exist on the central cluster.
         _connectionManager.GetOperatorMode(ConnectionId).Returns(false);
         var reports = new List<OperatorDeployedDeploymentSiteReportDto>
         {
-            new() { TenantId = "tenant-a", DeploymentSiteRtId = "6ad562f3ff7c40ff80275b84", DeploymentSiteName = "pool-a" },
+            new() { TenantId = "tenant-a", DeploymentSiteRtId = "6ad562f3ff7c40ff80275b84", DeploymentSiteName = "deploymentSite-a" },
         };
 
         var ex = await Assert.ThrowsAsync<HubException>(
             async () => await _hub.ReportDeployedStateAsync(reports));
 
         await Assert.That(ex!.Message).Contains("edge");
-        await Assert.That(ex!.Message).Contains("AutoManagePools");
-        await _poolService.DidNotReceiveWithAnyArgs().RestoreDeployedStateAsync(
+        await Assert.That(ex!.Message).Contains("AutoManageDeploymentSites");
+        await _deploymentSiteService.DidNotReceiveWithAnyArgs().RestoreDeployedStateAsync(
             Arg.Any<string>(), Arg.Any<IReadOnlyList<OperatorDeployedDeploymentSiteReportDto>>());
         await _eventService.Received(1).StoreErrorEventAsync(
             string.Empty, Arg.Is<string>(s => s.Contains("edge")));
@@ -97,14 +97,14 @@ internal class ReportDeployedStateAsyncTests : IDisposable
         _connectionManager.GetOperatorMode(ConnectionId).Returns((bool?)null);
         var reports = new List<OperatorDeployedDeploymentSiteReportDto>
         {
-            new() { TenantId = "tenant-a", DeploymentSiteRtId = "6ad562f3ff7c40ff80275b84", DeploymentSiteName = "pool-a" },
+            new() { TenantId = "tenant-a", DeploymentSiteRtId = "6ad562f3ff7c40ff80275b84", DeploymentSiteName = "deploymentSite-a" },
         };
 
         var ex = await Assert.ThrowsAsync<HubException>(
             async () => await _hub.ReportDeployedStateAsync(reports));
 
         await Assert.That(ex!.Message).Contains("legacy");
-        await _poolService.DidNotReceiveWithAnyArgs().RestoreDeployedStateAsync(
+        await _deploymentSiteService.DidNotReceiveWithAnyArgs().RestoreDeployedStateAsync(
             Arg.Any<string>(), Arg.Any<IReadOnlyList<OperatorDeployedDeploymentSiteReportDto>>());
     }
 
@@ -119,6 +119,6 @@ internal class ReportDeployedStateAsyncTests : IDisposable
 
         await _hub.ReportDeployedStateAsync(reports);
 
-        await _poolService.Received(1).RestoreDeployedStateAsync(ConnectionId, reports);
+        await _deploymentSiteService.Received(1).RestoreDeployedStateAsync(ConnectionId, reports);
     }
 }

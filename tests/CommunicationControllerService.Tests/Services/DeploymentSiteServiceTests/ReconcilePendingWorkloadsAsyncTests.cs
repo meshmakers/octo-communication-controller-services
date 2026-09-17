@@ -10,7 +10,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 /// <summary>
 ///     AB#4894: a workload deploy notification sent while the operator pod was being replaced is
 ///     lost silently (fire-and-forget SendAsync to a dying connection), stranding the entity in
-///     DeploymentState=Pending forever. On every pool (re-)registration the controller therefore
+///     DeploymentState=Pending forever. On every deploymentSite (re-)registration the controller therefore
 ///     re-dispatches whatever is still Pending — best effort, never failing the registration.
 /// </summary>
 internal class ReconcilePendingWorkloadsAsyncTests : PoolServiceTestsBase
@@ -23,11 +23,11 @@ internal class ReconcilePendingWorkloadsAsyncTests : PoolServiceTestsBase
         {
             RtId = DeploymentSiteRtId,
             CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
-            Name = PoolName,
+            Name = DeploymentSiteName,
             Environment = RtEnvironmentEnum.Cloud,
         };
-        var rtPool = _rtPool;
-        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(new[] { rtPool });
+        var rtDeploymentSite = _rtPool;
+        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(new[] { rtDeploymentSite });
 
         var adapter = new RtAdapter
         {
@@ -39,12 +39,12 @@ internal class ReconcilePendingWorkloadsAsyncTests : PoolServiceTestsBase
             ValuesYaml = string.Empty,
             DeploymentState = state,
         };
-        CommunicationRepository.GetWorkloadsForPoolAsync(TenantId, DeploymentSiteRtId)
+        CommunicationRepository.GetWorkloadsForDeploymentSiteAsync(TenantId, DeploymentSiteRtId)
             .Returns(new RtDeployableWorkload[] { adapter });
         CommunicationRepository.GetWorkloadByRtIdAsync(TenantId, adapter.RtId)
             .Returns(adapter);
-        CommunicationRepository.GetPoolForWorkloadAsync(TenantId, adapter.RtId)
-            .Returns(rtPool);
+        CommunicationRepository.GetDeploymentSiteForWorkloadAsync(TenantId, adapter.RtId)
+            .Returns(rtDeploymentSite);
         CommunicationRepository.GetHelmRepositoryForWorkloadAsync(TenantId, adapter.RtId)
             .Returns(new RtHelmRepositoryConfiguration
             {
@@ -88,7 +88,7 @@ internal class ReconcilePendingWorkloadsAsyncTests : PoolServiceTestsBase
     {
         // Arrange — the lookup can race a concurrent tenant-update cache unload; the
         // registration path must survive that.
-        CommunicationRepository.GetWorkloadsForPoolAsync(TenantId, DeploymentSiteRtId)
+        CommunicationRepository.GetWorkloadsForDeploymentSiteAsync(TenantId, DeploymentSiteRtId)
             .ThrowsAsync(new InvalidOperationException("cache unloaded"));
 
         // Act & Assert — no throw.
@@ -115,13 +115,13 @@ internal class ReconcilePendingWorkloadsAsyncTests : PoolServiceTestsBase
             ValuesYaml = string.Empty,
             DeploymentState = RtDeploymentStateEnum.Pending,
         };
-        CommunicationRepository.GetWorkloadsForPoolAsync(TenantId, DeploymentSiteRtId)
+        CommunicationRepository.GetWorkloadsForDeploymentSiteAsync(TenantId, DeploymentSiteRtId)
             .Returns(new RtDeployableWorkload[] { broken, second });
         CommunicationRepository.GetWorkloadByRtIdAsync(TenantId, broken.RtId)
             .Returns((RtDeployableWorkload?)null);
         CommunicationRepository.GetWorkloadByRtIdAsync(TenantId, second.RtId)
             .Returns(second);
-        CommunicationRepository.GetPoolForWorkloadAsync(TenantId, second.RtId)
+        CommunicationRepository.GetDeploymentSiteForWorkloadAsync(TenantId, second.RtId)
             .Returns(_rtPool);
         CommunicationRepository.GetHelmRepositoryForWorkloadAsync(TenantId, second.RtId)
             .Returns(new RtHelmRepositoryConfiguration
@@ -143,7 +143,7 @@ internal class ReconcilePendingWorkloadsAsyncTests : PoolServiceTestsBase
     public async Task UnpinnedWorkload_IsStillRedispatchedButWarnsAboutTheVersion()
     {
         // AB#4955: an empty ChartVersion resolves to "newest in the repository" at helm
-        // upgrade time. Because this dispatch is triggered by a pool re-registration —
+        // upgrade time. Because this dispatch is triggered by a deploymentSite re-registration —
         // an operator restart, a blueprint re-apply, a CK-model update — the workload can
         // come back on a version nobody chose. Recovery still has to happen (that is what
         // AB#4894 is for), so the dispatch stays; it must not stay silent though.
@@ -175,7 +175,7 @@ internal class ReconcilePendingWorkloadsAsyncTests : PoolServiceTestsBase
         // reconcile message rather than on the call count.
         await CommunicationEventService.Received(1).StoreInformationEventAsync(
             TenantId,
-            Arg.Is<string>(m => m.Contains("still Pending when its pool re-registered")),
+            Arg.Is<string>(m => m.Contains("still Pending when its deploymentSite re-registered")),
             Arg.Any<RtEntityId?>());
     }
 

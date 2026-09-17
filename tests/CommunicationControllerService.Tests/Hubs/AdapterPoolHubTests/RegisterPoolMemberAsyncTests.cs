@@ -17,10 +17,10 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Hubs.Adap
 /// </remarks>
 internal class RegisterPoolMemberAsyncTests : AdapterPoolHubTestsBase
 {
-    private static PoolMemberRegistrationDto ARegistration(string poolTenantId = LenderTenantId,
+    private static PoolMemberRegistrationDto ARegistration(string adapterPoolTenantId = LenderTenantId,
         string poolRtId = AdapterPoolRtId, string memberId = MemberId) => new()
     {
-        AdapterPoolTenantId = poolTenantId,
+        AdapterPoolTenantId = adapterPoolTenantId,
         AdapterPoolRtId = poolRtId,
         MemberId = memberId,
         NodeDescriptors =
@@ -42,7 +42,7 @@ internal class RegisterPoolMemberAsyncTests : AdapterPoolHubTestsBase
         // member ever filled and no controller ever read, and AdapterPoolConnectionManager stored no
         // descriptors at all. A BORROWER's DeployPipeline therefore had nothing to resolve an
         // execution class or a pipeline schema against.
-        var capabilities = ConnectionManager.TryGetPoolCapabilities(LenderTenantId, AdapterPoolRtId);
+        var capabilities = ConnectionManager.TryGetAdapterPoolCapabilities(LenderTenantId, AdapterPoolRtId);
 
         using var _ = Assert.Multiple();
         await Assert.That(capabilities).IsNotNull();
@@ -147,7 +147,7 @@ internal class RegisterPoolMemberAsyncTests : AdapterPoolHubTestsBase
     [Arguments("", AdapterPoolRtId)]
     [Arguments(LenderTenantId, "")]
     [Arguments(LenderTenantId, "not-a-hex-id")]
-    public async Task MalformedPoolReference_IsRefused_InEveryMode(string poolTenantId, string poolRtId)
+    public async Task MalformedPoolReference_IsRefused_InEveryMode(string adapterPoolTenantId, string poolRtId)
     {
         foreach (var mode in new[] { AdapterPoolHubAuthorizationMode.LogOnly, AdapterPoolHubAuthorizationMode.Enforce })
         {
@@ -155,7 +155,7 @@ internal class RegisterPoolMemberAsyncTests : AdapterPoolHubTestsBase
             ArrangeConnectionTenant(LenderTenantId);
 
             await Assert.That(async () =>
-                    await Hub.RegisterPoolMemberAsync(ARegistration(poolTenantId, poolRtId)))
+                    await Hub.RegisterPoolMemberAsync(ARegistration(adapterPoolTenantId, poolRtId)))
                 .Throws<HubException>();
         }
     }

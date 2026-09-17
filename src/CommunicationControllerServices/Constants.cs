@@ -9,7 +9,7 @@ internal static class Constants
     internal static readonly DateTime StartTime = DateTime.UtcNow;
 
     private const string TenantId = "tenantId";
-    private const string PoolName = "pool-name";
+    private const string DeploymentSiteName = "deploymentSite-name";
     private const string AdapterRtId = "adapter-rtId";
     private const string AdapterCkTypeId = "adapter-ckTypeId";
 
@@ -79,7 +79,7 @@ internal static class Constants
     
     public static string? GetPoolName(this HttpContext httpContext)
     {
-        return httpContext.Request.Headers[PoolName];
+        return httpContext.Request.Headers[DeploymentSiteName];
     }
     
     public static RtEntityId? GetAdapterRtEntityId(this HttpContext httpContext)

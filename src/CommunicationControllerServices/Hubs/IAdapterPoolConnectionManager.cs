@@ -11,8 +11,8 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 ///     <c>LeasedOnMemberId</c> — it is deliberately <b>not</b> an RtId: members are replicas of one
 ///     pool workload, not separate entities (implementation plan §13.1/§13.2).
 /// </param>
-/// <param name="PoolTenantId">The lending tenant that owns the pool.</param>
-/// <param name="AdapterPoolRtId">RtId of the <c>AdapterPool</c> in <paramref name="PoolTenantId" />.</param>
+/// <param name="AdapterPoolTenantId">The lending tenant that owns the pool.</param>
+/// <param name="AdapterPoolRtId">RtId of the <c>AdapterPool</c> in <paramref name="AdapterPoolTenantId" />.</param>
 /// <param name="ActiveLease">The lease the member currently holds, or null when it is idle.</param>
 /// <param name="IsDraining">
 ///     Whether the member was told to drain. A draining member is never handed another lease; it
@@ -31,7 +31,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 public record PoolMemberConnection(
     string ConnectionId,
     string MemberId,
-    string PoolTenantId,
+    string AdapterPoolTenantId,
     string AdapterPoolRtId,
     LeaseDto? ActiveLease,
     bool IsDraining,
@@ -80,7 +80,7 @@ public interface IAdapterPoolConnectionManager
     ///     Records a member as connected and eligible for leases. Replaces any previous registration
     ///     of the same connection.
     /// </summary>
-    PoolMemberConnection RegisterMember(string connectionId, string memberId, string poolTenantId,
+    PoolMemberConnection RegisterMember(string connectionId, string memberId, string adapterPoolTenantId,
         string adapterPoolRtId, IReadOnlyList<NodeDescriptorDto>? nodeDescriptors = null,
         string? pipelineSchemaJson = null);
 
@@ -110,7 +110,7 @@ public interface IAdapterPoolConnectionManager
     ///         this process's lifetime already produces.
     ///     </para>
     /// </remarks>
-    PoolMemberCapabilities? TryGetPoolCapabilities(string poolTenantId, string adapterPoolRtId);
+    PoolMemberCapabilities? TryGetAdapterPoolCapabilities(string adapterPoolTenantId, string adapterPoolRtId);
 
     /// <summary>
     ///     Drops a connection and returns what it was holding, so the caller can re-queue an
@@ -122,7 +122,7 @@ public interface IAdapterPoolConnectionManager
     PoolMemberConnection? TryGetMember(string connectionId);
 
     /// <summary>Every member currently registered for one pool.</summary>
-    IReadOnlyCollection<PoolMemberConnection> GetMembers(string poolTenantId, string adapterPoolRtId);
+    IReadOnlyCollection<PoolMemberConnection> GetMembers(string adapterPoolTenantId, string adapterPoolRtId);
 
     /// <summary>
     ///     Every member registered on this controller instance, across all pools. The lease reaper
@@ -140,7 +140,7 @@ public interface IAdapterPoolConnectionManager
     ///     handed the same member. There is no queue here — a caller that gets null decides what to
     ///     do, and until increment 7 that decision is "tell the caller the pool is exhausted".
     /// </remarks>
-    PoolMemberConnection? TryClaimMember(string poolTenantId, string adapterPoolRtId, LeaseDto lease);
+    PoolMemberConnection? TryClaimMember(string adapterPoolTenantId, string adapterPoolRtId, LeaseDto lease);
 
     /// <summary>
     ///     Releases a lease previously claimed on this connection. Returns the released lease, or null

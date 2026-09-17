@@ -18,23 +18,23 @@ internal class DeployWorkloadServiceAccountProvisioningTests : PoolServiceTestsB
 {
     private RtDeploymentSite ArrangeCloudPool()
     {
-        var pool = new RtDeploymentSite
+        var deploymentSite = new RtDeploymentSite
         {
             RtId = OctoObjectId.GenerateNewId(),
             CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
-            Name = "cloud-pool",
+            Name = "cloud-deploymentSite",
             Environment = RtEnvironmentEnum.Cloud
         };
-        return pool;
+        return deploymentSite;
     }
 
-    private void ArrangeDeployableWorkload(RtDeploymentSite pool, RtDeployableWorkload workload)
+    private void ArrangeDeployableWorkload(RtDeploymentSite deploymentSite, RtDeployableWorkload workload)
     {
         workload.ChartName = "octo-mesh-adapter";
         workload.ChartVersion = "1.0.0";
 
         CommunicationRepository.GetWorkloadByRtIdAsync(TenantId, workload.RtId).Returns(workload);
-        CommunicationRepository.GetPoolForWorkloadAsync(TenantId, workload.RtId).Returns(pool);
+        CommunicationRepository.GetDeploymentSiteForWorkloadAsync(TenantId, workload.RtId).Returns(deploymentSite);
         CommunicationRepository.GetHelmRepositoryForWorkloadAsync(TenantId, workload.RtId)
             .Returns(new RtHelmRepositoryConfiguration
             {
@@ -47,10 +47,10 @@ internal class DeployWorkloadServiceAccountProvisioningTests : PoolServiceTestsB
     [Test]
     public async Task DeployWorkloadAsync_Adapter_ProvisionsItsPipelineServiceAccount()
     {
-        var pool = ArrangeCloudPool();
+        var deploymentSite = ArrangeCloudPool();
         var adapter = RtEntityCreator.CreateAdapter();
         adapter.Name = "mesh-adapter";
-        ArrangeDeployableWorkload(pool, adapter);
+        ArrangeDeployableWorkload(deploymentSite, adapter);
 
         await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
@@ -60,14 +60,14 @@ internal class DeployWorkloadServiceAccountProvisioningTests : PoolServiceTestsB
     [Test]
     public async Task DeployWorkloadAsync_Application_DoesNotProvision()
     {
-        var pool = ArrangeCloudPool();
+        var deploymentSite = ArrangeCloudPool();
         var application = new RtApplication
         {
             RtId = OctoObjectId.GenerateNewId(),
             CkTypeId = SystemCommunicationCkIds.RtCkApplicationTypeId,
             Name = "some-app"
         };
-        ArrangeDeployableWorkload(pool, application);
+        ArrangeDeployableWorkload(deploymentSite, application);
 
         await DeploymentSiteService.DeployWorkloadAsync(TenantId, application.RtId);
 
@@ -79,9 +79,9 @@ internal class DeployWorkloadServiceAccountProvisioningTests : PoolServiceTestsB
     [Test]
     public async Task DeployWorkloadAsync_ProvisioningThrows_DoesNotFailTheDeploy()
     {
-        var pool = ArrangeCloudPool();
+        var deploymentSite = ArrangeCloudPool();
         var adapter = RtEntityCreator.CreateAdapter();
-        ArrangeDeployableWorkload(pool, adapter);
+        ArrangeDeployableWorkload(deploymentSite, adapter);
         // Defence in depth: EnsureAdapterProvisionedAsync is contractually non-throwing, but a
         // helm rollout must not depend on that contract holding.
         ServiceAccountProvisioningService
@@ -110,9 +110,9 @@ internal class DeployWorkloadServiceAccountProvisioningTests : PoolServiceTestsB
     [Test]
     public async Task DeployWorkloadAsync_ProvisionsBeforeItBuildsTheDeployNotification()
     {
-        var pool = ArrangeCloudPool();
+        var deploymentSite = ArrangeCloudPool();
         var adapter = RtEntityCreator.CreateAdapter();
-        ArrangeDeployableWorkload(pool, adapter);
+        ArrangeDeployableWorkload(deploymentSite, adapter);
 
         await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
 

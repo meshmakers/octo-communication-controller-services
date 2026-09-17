@@ -28,11 +28,11 @@ public interface ICommunicationRepository
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="poolRtId">Object id of pool</param>
-    Task<IReadOnlyCollection<RtDeployableWorkload>> GetWorkloadsForPoolAsync(string tenantId, OctoObjectId poolRtId);
+    Task<IReadOnlyCollection<RtDeployableWorkload>> GetWorkloadsForDeploymentSiteAsync(string tenantId, OctoObjectId poolRtId);
 
     /// <summary>
     /// Loads every deployable workload (Adapter and Application) of the tenant, regardless of
-    /// whether a pool manages it. Polymorphic like <see cref="GetWorkloadsForPoolAsync"/>.
+    /// whether a pool manages it. Polymorphic like <see cref="GetWorkloadsForDeploymentSiteAsync"/>.
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     Task<IReadOnlyCollection<RtDeployableWorkload>> GetWorkloadsAsync(string tenantId);
@@ -83,7 +83,7 @@ public interface ICommunicationRepository
     /// <summary>
     ///     Returns the deployment site a workload is hosted at, or null when it is not assigned.
     /// </summary>
-    Task<RtDeploymentSite?> GetPoolForWorkloadAsync(string tenantId, OctoObjectId workloadRtId);
+    Task<RtDeploymentSite?> GetDeploymentSiteForWorkloadAsync(string tenantId, OctoObjectId workloadRtId);
 
     /// <summary>
     /// Resolves the <c>HelmRepositoryConfiguration</c> referenced by a
@@ -269,17 +269,17 @@ public interface ICommunicationRepository
     /// Get pools for a tenant by name
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="poolName">Name of the pool</param>
+    /// <param name="deploymentSiteName">Name of the pool</param>
     /// <returns>List of pools with the given name</returns>
-    Task<IReadOnlyCollection<RtDeploymentSite>> GetPoolByNameAsync(string tenantId, string poolName);
+    Task<IReadOnlyCollection<RtDeploymentSite>> GetPoolByNameAsync(string tenantId, string deploymentSiteName);
 
     /// <summary>
     /// Creates a pool
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
-    /// <param name="poolName">Name of pool</param>
+    /// <param name="deploymentSiteName">Name of pool</param>
     /// <exception cref="CommunicationRepositoryException"></exception>
-    Task CreatePoolAsync(string tenantId, string poolName);
+    Task CreatePoolAsync(string tenantId, string deploymentSiteName);
 
     /// <summary>
     /// Set the deployment state of a pool
@@ -288,7 +288,7 @@ public interface ICommunicationRepository
     /// <param name="poolRtId">Object id of pool</param>
     /// <param name="deploymentState">State of pool</param>
     /// <returns></returns>
-    Task SetPoolDeploymentStateAsync(string tenantId, OctoObjectId poolRtId, RtDeploymentStateEnum deploymentState);
+    Task SetDeploymentSiteDeploymentStateAsync(string tenantId, OctoObjectId poolRtId, RtDeploymentStateEnum deploymentState);
 
     /// <summary>
     /// Set the communication state of a pool
@@ -297,7 +297,7 @@ public interface ICommunicationRepository
     /// <param name="poolRtId">Object id of pool</param>
     /// <param name="communicationState">State of pool</param>
     /// <returns></returns>
-    Task SetPoolCommunicationStateAsync(string tenantId, OctoObjectId poolRtId,
+    Task SetDeploymentSiteCommunicationStateAsync(string tenantId, OctoObjectId poolRtId,
         RtCommunicationStateEnum communicationState);
 
     /// <summary>

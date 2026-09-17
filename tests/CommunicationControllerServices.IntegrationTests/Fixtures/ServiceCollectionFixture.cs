@@ -1,6 +1,6 @@
 using MartinCostello.Logging.XUnit;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.DeploymentSites;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
@@ -109,7 +109,7 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
 
         Services.AddScopedMultipleInterfaces<DefaultConfigurationCreatorService, IDefaultConfigurationCreatorService,
             IConfigurationService>();
-        Services.AddSingletonMultipleInterfaces<PoolHubCache, IPoolCache, IPoolCachePublish>();
+        Services.AddSingletonMultipleInterfaces<DeploymentSiteHubCache, IDeploymentSiteCache, IDeploymentSiteCachePublish>();
         Services.AddSingletonMultipleInterfaces<AdapterCache, IAdapterCache, IAdapterCachePublish>();
 
         // Legacy IPoolHubCallbacks/PoolHubCallbacks were removed when /poolHub

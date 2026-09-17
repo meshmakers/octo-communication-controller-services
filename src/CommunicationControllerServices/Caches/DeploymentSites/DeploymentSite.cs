@@ -1,21 +1,21 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages.Payloads;
 
-namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
+namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.DeploymentSites;
 
-internal class Pool
+internal class DeploymentSite
 {
-    private readonly IPoolCachePublish _poolCachePublish;
+    private readonly IDeploymentSiteCachePublish _poolCachePublish;
 
-    public Pool(IPoolCachePublish poolCachePublish, OctoObjectId deploymentSiteRtId, string poolName, string connectionId)
+    public DeploymentSite(IDeploymentSiteCachePublish poolCachePublish, OctoObjectId deploymentSiteRtId, string deploymentSiteName, string connectionId)
     {
         _poolCachePublish = poolCachePublish;
         DeploymentSiteRtId = deploymentSiteRtId;
-        DeploymentSiteName = poolName;
+        DeploymentSiteName = deploymentSiteName;
         ConnectionId = connectionId;
     }
 
-    public Pool(IPoolCachePublish poolCachePublish, DeploymentSiteDescription deploymentSiteDescription)
+    public DeploymentSite(IDeploymentSiteCachePublish poolCachePublish, DeploymentSiteDescription deploymentSiteDescription)
     {
         _poolCachePublish = poolCachePublish;
         DeploymentSiteRtId = deploymentSiteDescription.DeploymentSiteRtId;

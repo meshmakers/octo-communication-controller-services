@@ -52,15 +52,15 @@ internal class EnsureWorkloadRunningTests
 
     private void GivenWorkloadIsInPool()
     {
-        var pool = new RtDeploymentSite
+        var deploymentSite = new RtDeploymentSite
         {
             RtId = new OctoObjectId(DeploymentSiteRtId),
             CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
-            Name = "cloud-pool",
+            Name = "cloud-deploymentSite",
             Environment = RtEnvironmentEnum.Cloud,
         };
-        _repository.GetPoolForWorkloadAsync(TenantId, Arg.Is<OctoObjectId>(id => id.ToString() == WorkloadRtId))
-            .Returns(pool);
+        _repository.GetDeploymentSiteForWorkloadAsync(TenantId, Arg.Is<OctoObjectId>(id => id.ToString() == WorkloadRtId))
+            .Returns(deploymentSite);
     }
 
     private static RtAdapter CreateAdapter(RtLifecycleModeEnum lifecycleMode, RtLifecycleStateEnum lifecycleState)

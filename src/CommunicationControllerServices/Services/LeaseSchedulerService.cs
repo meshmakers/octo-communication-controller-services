@@ -21,7 +21,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     private readonly ICommunicationEventService _eventService;
     private readonly ILeaseService _leaseService;
     private readonly CommunicationControllerOptions _options;
-    private readonly IDeploymentSiteService _poolService;
+    private readonly IDeploymentSiteService _deploymentSiteService;
 
     /// <summary>
     ///     Which borrower tenants each pool serves. Rebuilt on a slower cadence than the scheduling
@@ -30,8 +30,8 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     /// </summary>
     private readonly SemaphoreSlim _topologyLock = new(1, 1);
 
-    private IReadOnlyDictionary<PoolKey, IReadOnlyList<PoolBorrower>> _topology =
-        new Dictionary<PoolKey, IReadOnlyList<PoolBorrower>>();
+    private IReadOnlyDictionary<AdapterPoolKey, IReadOnlyList<AdapterPoolBorrower>> _topology =
+        new Dictionary<AdapterPoolKey, IReadOnlyList<AdapterPoolBorrower>>();
 
     private DateTime _topologyBuiltAtUtc = DateTime.MinValue;
 
@@ -40,20 +40,20 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     ///     tenant <b>after</b> it, which is what makes turns actually rotate instead of always
     ///     beginning at the alphabetically first borrower.
     /// </summary>
-    private readonly ConcurrentDictionary<PoolKey, string> _rotationCursor = new();
+    private readonly ConcurrentDictionary<AdapterPoolKey, string> _rotationCursor = new();
 
     /// <summary>Queue-depth samples per pool, for the scale-up averaging window (§9.4).</summary>
-    private readonly ConcurrentDictionary<PoolKey, List<DepthSample>> _depthSamples = new();
+    private readonly ConcurrentDictionary<AdapterPoolKey, List<DepthSample>> _depthSamples = new();
 
     /// <summary>When each pool last had a scale-up requested, so one signal does not fire a burst.</summary>
-    private readonly ConcurrentDictionary<PoolKey, DateTime> _lastScaleUpUtc = new();
+    private readonly ConcurrentDictionary<AdapterPoolKey, DateTime> _lastScaleUpUtc = new();
 
     /// <summary>
     ///     Pools currently observed with queued work and no idle member, so the condition is logged
     ///     once when it starts rather than on every five-second round while it lasts (AB#4924
     ///     increment 9).
     /// </summary>
-    private readonly ConcurrentDictionary<PoolKey, DateTime> _exhaustedPools = new();
+    private readonly ConcurrentDictionary<AdapterPoolKey, DateTime> _exhaustedAdapterPools = new();
 
     /// <summary>
     ///     The reason each queued execution was last refused a lease, so the refusal is announced when
@@ -64,7 +64,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     ///     my queue not moving" invisible at the default level — an operator saw the enqueue and then
     ///     silence, while the answer ("leasing is disabled on the lending tenant, enable it with
     ///     octo-cli") was being produced twelve times a minute one level below. Raising it outright
-    ///     would have swapped one problem for the other, so it follows <see cref="_exhaustedPools" />:
+    ///     would have swapped one problem for the other, so it follows <see cref="_exhaustedAdapterPools" />:
     ///     the transition is INFO, the repeat stays DEBUG.
     /// </remarks>
     private readonly ConcurrentDictionary<string, RefusalMemo> _refusedExecutions =
@@ -92,7 +92,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
         _connectionManager = connectionManager;
         _eventService = eventService;
         _leaseService = leaseService;
-        _poolService = poolService;
+        _deploymentSiteService = poolService;
         _options = options.Value;
     }
 
@@ -129,7 +129,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
         // is an alert that can never clear, and the first thing anyone does with an alert that never
         // clears is stop reading it. By age, not by "not in this round's topology" — several
         // controller pods sweep independently and each sees a different subset.
-        AdapterLeasingMetrics.SweepStalePools();
+        AdapterLeasingMetrics.SweepStaleDeploymentSites();
         SweepStaleRefusals();
 
         return granted;
@@ -171,7 +171,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
             // Counted here rather than inside DrainMemberAsync, which only knows a connection id:
             // the drain counter is scoped to the POOL, because a drain loop is a property of the
             // pool and the member id changes on every restart the loop causes.
-            AdapterLeasingMetrics.RecordMemberDrained(member.PoolTenantId, member.AdapterPoolRtId,
+            AdapterLeasingMetrics.RecordMemberDrained(member.AdapterPoolTenantId, member.AdapterPoolRtId,
                 LeaseDrainReason.TtlExpiry);
 
             await _eventService.StoreErrorEventAsync(lease.TenantId,
@@ -192,7 +192,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     public async Task<IReadOnlyList<AdapterPoolQueueEntry>> GetQueueAsync(string lenderTenantId,
         OctoObjectId adapterPoolRtId, CancellationToken cancellationToken = default)
     {
-        var key = PoolKey.Create(lenderTenantId, adapterPoolRtId.ToString());
+        var key = AdapterPoolKey.Create(lenderTenantId, adapterPoolRtId.ToString());
         var topology = await GetTopologyAsync(cancellationToken);
         topology.TryGetValue(key, out var borrowers);
 
@@ -276,7 +276,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
             }
         }
 
-        var key = PoolKey.Create(lenderTenantId, adapterPoolRtId.ToString());
+        var key = AdapterPoolKey.Create(lenderTenantId, adapterPoolRtId.ToString());
         var topology = await GetTopologyAsync(cancellationToken);
         if (!topology.TryGetValue(key, out var borrowers))
         {
@@ -328,7 +328,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     /// <summary>
     ///     Serves one pool: read its queue, evaluate scale-up, then hand out what the members can take.
     /// </summary>
-    private async Task<int> ScheduleForPoolAsync(PoolKey key, IReadOnlyList<PoolBorrower> borrowers,
+    private async Task<int> ScheduleForPoolAsync(AdapterPoolKey key, IReadOnlyList<AdapterPoolBorrower> borrowers,
         CancellationToken cancellationToken)
     {
         var byTenant = await ReadQueueByTenantAsync(borrowers, cancellationToken);
@@ -368,7 +368,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
 
         if (depth == 0)
         {
-            _exhaustedPools.TryRemove(key, out _);
+            _exhaustedAdapterPools.TryRemove(key, out _);
             return 0;
         }
 
@@ -390,7 +390,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
             // condition lasted — which is precisely when nobody can read the log. The continuous
             // signal is octo.lease.pool.members / octo.lease.queue.depth; this line only says when
             // it started.
-            if (_exhaustedPools.TryAdd(key, DateTime.UtcNow))
+            if (_exhaustedAdapterPools.TryAdd(key, DateTime.UtcNow))
             {
                 Logger.Info(
                     "Adapter pool {AdapterPoolRtId} of tenant '{LenderTenantId}' has {Depth} work item(s) queued and no " +
@@ -401,7 +401,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
             return 0;
         }
 
-        _exhaustedPools.TryRemove(key, out _);
+        _exhaustedAdapterPools.TryRemove(key, out _);
 
         var activePerTenant = members
             .Where(m => m.ActiveLease is not null)
@@ -496,7 +496,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     /// </summary>
     /// <remarks>
     ///     By age rather than by "not among this round's candidates", for the same reason
-    ///     <c>AdapterLeasingMetrics.SweepStalePools</c> is: several controller pods schedule
+    ///     <c>AdapterLeasingMetrics.SweepStaleDeploymentSites</c> is: several controller pods schedule
     ///     independently and each sees a different subset, and an execution can also drop out of a
     ///     queue read that is capped at <c>LeaseQueueReadLimitPerAdapter</c> without having gone
     ///     anywhere. Forgetting one early costs a single repeated INFO line; the window is generous
@@ -520,7 +520,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     ///     Grants one lease and takes the work item out of the queue in the same step. Returns the
     ///     member that took it, or null when nothing was granted.
     /// </summary>
-    private async Task<string?> TryGrantAsync(PoolKey key, OctoObjectId adapterPoolRtId, QueueCandidate candidate,
+    private async Task<string?> TryGrantAsync(AdapterPoolKey key, OctoObjectId adapterPoolRtId, QueueCandidate candidate,
         TimeSpan ttl, CancellationToken cancellationToken)
     {
         // 🔴 AB#4924 §9.9 / D4 — the lease carries the work. The scheduler decided WHICH queued item
@@ -583,7 +583,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     ///     inside each tenant by class and then arrival.
     /// </summary>
     private async Task<Dictionary<string, List<QueueCandidate>>> ReadQueueByTenantAsync(
-        IReadOnlyList<PoolBorrower> borrowers, CancellationToken cancellationToken)
+        IReadOnlyList<AdapterPoolBorrower> borrowers, CancellationToken cancellationToken)
     {
         var byTenant = new Dictionary<string, List<QueueCandidate>>(StringComparer.OrdinalIgnoreCase);
         var take = Math.Max(1, _options.LeaseQueueReadLimitPerAdapter);
@@ -641,7 +641,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     /// <summary>
     ///     Where in the ring this round begins: just after the tenant served last.
     /// </summary>
-    private int ResolveRotationStart(PoolKey key, List<string> rotation)
+    private int ResolveRotationStart(AdapterPoolKey key, List<string> rotation)
     {
         if (rotation.Count == 0)
         {
@@ -681,7 +681,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     ///         globally once increment 9 has produced real queue-depth data.
     ///     </para>
     /// </remarks>
-    private async Task<ScaleUpEvaluation> EvaluateScaleUpAsync(PoolKey key, RtAdapterPool? pool, int depth,
+    private async Task<ScaleUpEvaluation> EvaluateScaleUpAsync(AdapterPoolKey key, RtAdapterPool? pool, int depth,
         TimeSpan oldestWait, int membersHere)
     {
         if (pool is null)
@@ -761,7 +761,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
             // pool, or move the tenant to a dedicated adapter), not something to log at Debug.
             _lastScaleUpUtc[key] = now;
             Logger.Warn(
-                "Adapter pool '{PoolName}' ({AdapterPoolRtId}) of tenant '{LenderTenantId}' is at its ceiling of " +
+                "Adapter pool '{DeploymentSiteName}' ({AdapterPoolRtId}) of tenant '{LenderTenantId}' is at its ceiling of " +
                 "{MaxReplicas} member(s) with {Depth} work item(s) queued and the oldest waiting {WaitSeconds:F0}s",
                 pool.Name, key.AdapterPoolRtId, key.LenderTenantId, pool.MaxReplicas, depth, oldestWait.TotalSeconds);
             await _eventService.StoreErrorEventAsync(key.LenderTenantId,
@@ -780,11 +780,11 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
             // 🔴 Through DeploymentSiteService, which routes into WorkloadLifecycleService.RequestScaleAsync
             // and its MinReplicas..MaxReplicas clamp (increment 5). A second clamp written here
             // would be a second opinion about the pool's declared range, and the two would drift.
-            var effective = await _poolService.ScaleAdapterPoolAsync(key.LenderTenantId, pool.RtId, desired);
+            var effective = await _deploymentSiteService.ScaleAdapterPoolAsync(key.LenderTenantId, pool.RtId, desired);
             AdapterLeasingMetrics.RecordScaleUp(key.LenderTenantId, key.AdapterPoolRtId,
                 AdapterLeasingMetrics.ScaleUpOutcomes.Scaled);
             Logger.Info(
-                "Adapter pool '{PoolName}' ({AdapterPoolRtId}) of tenant '{LenderTenantId}' scaling to {Effective} " +
+                "Adapter pool '{DeploymentSiteName}' ({AdapterPoolRtId}) of tenant '{LenderTenantId}' scaling to {Effective} " +
                 "member(s): depth={Depth} (threshold {Threshold}, window {WindowSeconds}s, signal={DepthSignal}), " +
                 "oldest wait={WaitSeconds:F0}s (threshold {WaitThreshold}s, signal={WaitSignal})",
                 pool.Name, key.AdapterPoolRtId, key.LenderTenantId, effective, depth, pool.ScaleUpQueueDepthThreshold,
@@ -795,7 +795,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
             AdapterLeasingMetrics.RecordScaleUp(key.LenderTenantId, key.AdapterPoolRtId,
                 AdapterLeasingMetrics.ScaleUpOutcomes.Failed);
             Logger.Warn(e,
-                "Could not scale adapter pool '{PoolName}' ({AdapterPoolRtId}) of tenant '{LenderTenantId}' to " +
+                "Could not scale adapter pool '{DeploymentSiteName}' ({AdapterPoolRtId}) of tenant '{LenderTenantId}' to " +
                 "{Desired} member(s)",
                 pool.Name, key.AdapterPoolRtId, key.LenderTenantId, desired);
         }
@@ -859,7 +859,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
         };
     }
 
-    private async Task<RtAdapterPool?> TryReadPoolAsync(PoolKey key, OctoObjectId adapterPoolRtId)
+    private async Task<RtAdapterPool?> TryReadPoolAsync(AdapterPoolKey key, OctoObjectId adapterPoolRtId)
     {
         try
         {
@@ -886,7 +886,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     ///     the lending scope to a tenant list on every round, and would put the lender in a position
     ///     to push work into a tenant that never asked for it.
     /// </remarks>
-    private async Task<IReadOnlyDictionary<PoolKey, IReadOnlyList<PoolBorrower>>> GetTopologyAsync(
+    private async Task<IReadOnlyDictionary<AdapterPoolKey, IReadOnlyList<AdapterPoolBorrower>>> GetTopologyAsync(
         CancellationToken cancellationToken)
     {
         var refresh = TimeSpan.FromSeconds(Math.Max(5, _options.LeaseTopologyRefreshSeconds));
@@ -903,7 +903,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
                 return _topology;
             }
 
-            var built = new Dictionary<PoolKey, List<PoolBorrower>>();
+            var built = new Dictionary<AdapterPoolKey, List<AdapterPoolBorrower>>();
 
             foreach (var tenantId in _adapterCache.GetEnabledTenantIds())
             {
@@ -942,20 +942,20 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
                         continue;
                     }
 
-                    var key = PoolKey.Create(adapter.LentFromTenantId!, adapterPoolRtId.ToString());
+                    var key = AdapterPoolKey.Create(adapter.LentFromTenantId!, adapterPoolRtId.ToString());
                     if (!built.TryGetValue(key, out var borrowers))
                     {
                         borrowers = [];
                         built[key] = borrowers;
                     }
 
-                    borrowers.Add(new PoolBorrower(tenantId,
+                    borrowers.Add(new AdapterPoolBorrower(tenantId,
                         new RtEntityId(adapter.CkTypeId ?? SystemCommunicationCkIds.RtCkAdapterTypeId, adapter.RtId),
                         adapter.Name));
                 }
             }
 
-            _topology = built.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<PoolBorrower>)kv.Value);
+            _topology = built.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<AdapterPoolBorrower>)kv.Value);
             _topologyBuiltAtUtc = DateTime.UtcNow;
             return _topology;
         }
@@ -966,21 +966,21 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     }
 
     /// <summary>One pool, identified across tenants.</summary>
-    private readonly record struct PoolKey(string LenderTenantId, string AdapterPoolRtId)
+    private readonly record struct AdapterPoolKey(string LenderTenantId, string AdapterPoolRtId)
     {
-        public static PoolKey Create(string lenderTenantId, string adapterPoolRtId)
+        public static AdapterPoolKey Create(string lenderTenantId, string adapterPoolRtId)
         {
             // Normalised at construction so the dictionary key, the rotation cursor and the sample
             // ring all agree on what "the same pool" means, whatever casing a caller used.
-            return new PoolKey(lenderTenantId.ToLowerInvariant(), adapterPoolRtId.ToLowerInvariant());
+            return new AdapterPoolKey(lenderTenantId.ToLowerInvariant(), adapterPoolRtId.ToLowerInvariant());
         }
     }
 
     /// <summary>One adapter that borrows from a pool.</summary>
-    private sealed record PoolBorrower(string TenantId, RtEntityId AdapterRtEntityId, string? AdapterName);
+    private sealed record AdapterPoolBorrower(string TenantId, RtEntityId AdapterRtEntityId, string? AdapterName);
 
     /// <summary>One queued work item together with the borrower it belongs to.</summary>
-    private sealed record QueueCandidate(PoolBorrower Borrower, QueuedExecution Queued);
+    private sealed record QueueCandidate(AdapterPoolBorrower Borrower, QueuedExecution Queued);
 
     /// <summary>One queue-depth reading of one pool.</summary>
     private readonly record struct DepthSample(DateTime SampledAtUtc, int Depth);

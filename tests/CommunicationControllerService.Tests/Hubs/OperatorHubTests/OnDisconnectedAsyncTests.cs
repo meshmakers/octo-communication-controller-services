@@ -17,7 +17,7 @@ internal class OnDisconnectedAsyncTests : IDisposable
         Substitute.For<IOperatorConnectionManager>();
     private readonly ICommunicationRepository _repository =
         Substitute.For<ICommunicationRepository>();
-    private readonly IDeploymentSiteService _poolService =
+    private readonly IDeploymentSiteService _deploymentSiteService =
         Substitute.For<IDeploymentSiteService>();
     private readonly IShutdownState _shutdownState =
         Substitute.For<IShutdownState>();
@@ -29,7 +29,7 @@ internal class OnDisconnectedAsyncTests : IDisposable
 
     public OnDisconnectedAsyncTests()
     {
-        _hub = new OperatorHub(_connectionManager, _repository, _poolService, _shutdownState,
+        _hub = new OperatorHub(_connectionManager, _repository, _deploymentSiteService, _shutdownState,
             _eventService, _workloadLifecycleService);
 
         var context = Substitute.For<HubCallerContext>();
@@ -52,7 +52,7 @@ internal class OnDisconnectedAsyncTests : IDisposable
 
         await _hub.OnDisconnectedAsync(exception: null);
 
-        await _poolService.Received(1).SetCommunicationStateOfflineAsync(
+        await _deploymentSiteService.Received(1).SetCommunicationStateOfflineAsync(
             TenantId,
             Arg.Is<OctoObjectId>(id => id.ToString() == DeploymentSiteRtId),
             ConnectionId);
@@ -64,7 +64,7 @@ internal class OnDisconnectedAsyncTests : IDisposable
         // Rolling-upgrade race regression: the OLD controller pod's
         // OnDisconnectedAsync used to write Offline AFTER the NEW pod had
         // already written Online (newer timestamp wins the
-        // AttributeNewerThanGuard), leaving every pool stuck Offline.
+        // AttributeNewerThanGuard), leaving every deploymentSite stuck Offline.
         // While the host is stopping the surviving pod is authoritative;
         // this pod must not touch CommunicationState here.
         _shutdownState.IsShuttingDown.Returns(true);
@@ -78,7 +78,7 @@ internal class OnDisconnectedAsyncTests : IDisposable
         _connectionManager.Received(1).RemoveOperator(ConnectionId);
 
         // Critically: no Offline write — that's the whole point.
-        await _poolService.DidNotReceiveWithAnyArgs().SetCommunicationStateOfflineAsync(
+        await _deploymentSiteService.DidNotReceiveWithAnyArgs().SetCommunicationStateOfflineAsync(
             Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<string>());
     }
 }

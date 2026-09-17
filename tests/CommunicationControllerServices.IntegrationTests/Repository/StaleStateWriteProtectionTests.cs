@@ -13,7 +13,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTes
 ///     a controller pod mid-shutdown commits Offline LATE — after the replacement pod has
 ///     already written Online — leaving the DB stuck on Offline even though the adapter is
 ///     healthy and re-registered. CommunicationRepository.SetAdapterCommunicationStateAsync
-///     and SetPoolCommunicationStateAsync now write via
+///     and SetDeploymentSiteCommunicationStateAsync now write via
 ///     EntityUpdateInfo.CreateConditionalUpdate with an AttributeNewerThanGuard on
 ///     communicationStateTimestamp, so a write whose timestamp is older than the persisted
 ///     one is silently dropped at the MongoDB filter level.
@@ -109,16 +109,16 @@ public class StaleStateWriteProtectionTests(CommunicationControllerFixture fixtu
         using (var session = await tenantRepository.GetSessionAsync())
         {
             session.StartTransaction();
-            var rtPool = await tenantRepository.CreateTransientRtEntityAsync<RtDeploymentSite>();
-            rtPool.RtId = poolRtId;
-            rtPool.Name = $"stale-write-pool-{Guid.NewGuid():N}";
-            rtPool.CommunicationState = RtCommunicationStateEnum.Online;
-            rtPool.CommunicationStateTimestamp = futureTimestamp;
-            await tenantRepository.InsertOneRtEntityAsync(session, rtPool);
+            var rtDeploymentSite = await tenantRepository.CreateTransientRtEntityAsync<RtDeploymentSite>();
+            rtDeploymentSite.RtId = poolRtId;
+            rtDeploymentSite.Name = $"stale-write-pool-{Guid.NewGuid():N}";
+            rtDeploymentSite.CommunicationState = RtCommunicationStateEnum.Online;
+            rtDeploymentSite.CommunicationStateTimestamp = futureTimestamp;
+            await tenantRepository.InsertOneRtEntityAsync(session, rtDeploymentSite);
             await session.CommitTransactionAsync();
         }
 
-        await repository.SetPoolCommunicationStateAsync(fixture.TestTenantId, poolRtId,
+        await repository.SetDeploymentSiteCommunicationStateAsync(fixture.TestTenantId, poolRtId,
             RtCommunicationStateEnum.Offline);
 
         var pools = await repository.GetDeploymentSitesAsync(fixture.TestTenantId);

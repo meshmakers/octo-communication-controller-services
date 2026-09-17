@@ -2,18 +2,18 @@ using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using NLog;
 
-namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
+namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.DeploymentSites;
 
-internal class PoolHubCache : IPoolCachePublish, IPoolCache
+internal class DeploymentSiteHubCache : IDeploymentSiteCachePublish, IDeploymentSiteCache
 {
-    private readonly ConcurrentDictionary<string, PoolTenant> _tenantDescriptions = new();
+    private readonly ConcurrentDictionary<string, DeploymentSiteTenant> _tenantDescriptions = new();
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-    public PoolTenant AddOrUpdateTenant(string tenantId)
+    public DeploymentSiteTenant AddOrUpdateTenant(string tenantId)
     {
         if (!_tenantDescriptions.TryGetValue(tenantId, out var tenantDescription))
         {
-            var adapterHubTenant = new PoolTenant(this, tenantId);
+            var adapterHubTenant = new DeploymentSiteTenant(this, tenantId);
             tenantDescription = _tenantDescriptions.AddOrUpdate(tenantId, _ => adapterHubTenant,
                 (_, _) => adapterHubTenant);
 
@@ -29,9 +29,9 @@ internal class PoolHubCache : IPoolCachePublish, IPoolCache
         PublishConfigurationAsync(tenantId);
     }
 
-    public bool TryGetTenant(string tenantId, [NotNullWhen(true)] out PoolTenant? poolTenant)
+    public bool TryGetTenant(string tenantId, [NotNullWhen(true)] out DeploymentSiteTenant? deploymentSiteTenant)
     {
-        return _tenantDescriptions.TryGetValue(tenantId, out poolTenant);
+        return _tenantDescriptions.TryGetValue(tenantId, out deploymentSiteTenant);
     }
 
     public bool HasTenant(string tenantId)
@@ -41,7 +41,7 @@ internal class PoolHubCache : IPoolCachePublish, IPoolCache
 
     public Task PublishConfigurationAsync(string tenantId)
     {
-        Logger.Info("Publishing PoolHubCache configuration '{TenantId}'", tenantId);
+        Logger.Info("Publishing DeploymentSiteHubCache configuration '{TenantId}'", tenantId);
         return Task.CompletedTask;
     }
 }

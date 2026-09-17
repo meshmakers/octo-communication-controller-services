@@ -17,8 +17,8 @@ internal class Adapter(
 
     private readonly AdapterMetricsRingBuffer _metricsBuffer = new(MetricsCapacity);
 
-    public Adapter(IAdapterCachePublish adapterCachePublish, AdapterDescription adapterHubPoolDescription)
-        : this(adapterCachePublish, adapterHubPoolDescription.AdapterRtEntityId, adapterHubPoolDescription.ConnectionId, adapterHubPoolDescription.Configuration)
+    public Adapter(IAdapterCachePublish adapterCachePublish, AdapterDescription adapterDescription)
+        : this(adapterCachePublish, adapterDescription.AdapterRtEntityId, adapterDescription.ConnectionId, adapterDescription.Configuration)
     {
     }
 

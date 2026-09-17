@@ -366,12 +366,12 @@ internal class AdapterLeasingMetricsTests
 
         // Act — a sweep one minute inside the horizon keeps it, one minute past it drops it.
         var justInside = Collect(poolRtId,
-            () => AdapterLeasingMetrics.SweepStalePools(
+            () => AdapterLeasingMetrics.SweepStaleDeploymentSites(
                 DateTime.UtcNow + AdapterLeasingMetrics.PoolObservationStaleAfter - TimeSpan.FromMinutes(1)),
             observeGauges: true);
 
         var pastTheHorizon = Collect(poolRtId,
-            () => AdapterLeasingMetrics.SweepStalePools(
+            () => AdapterLeasingMetrics.SweepStaleDeploymentSites(
                 DateTime.UtcNow + AdapterLeasingMetrics.PoolObservationStaleAfter + TimeSpan.FromMinutes(1)),
             observeGauges: true);
 

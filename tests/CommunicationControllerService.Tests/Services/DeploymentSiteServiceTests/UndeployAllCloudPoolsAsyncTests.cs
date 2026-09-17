@@ -16,37 +16,37 @@ internal class UndeployAllCloudPoolsAsyncTests : PoolServiceTestsBase
     [Test]
     public async Task UndeployAllCloudPoolsAsync_NoTrackedPools_NoNotifications()
     {
-        OperatorConnectionManager.GetDeployedPoolsForTenant(TenantId).Returns([]);
+        OperatorConnectionManager.GetDeployedDeploymentSitesForTenant(TenantId).Returns([]);
 
-        await DeploymentSiteService.UndeployAllCloudPoolsAsync(TenantId);
+        await DeploymentSiteService.UndeployAllCloudDeploymentSitesAsync(TenantId);
 
         await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
-            .NotifyPoolUndeployedAsync(Arg.Any<string>(), Arg.Any<string>());
+            .NotifyDeploymentSiteUndeployedAsync(Arg.Any<string>(), Arg.Any<string>());
     }
 
     [Test]
     public async Task UndeployAllCloudPoolsAsync_OneTrackedPool_NotifiesOperator()
     {
-        OperatorConnectionManager.GetDeployedPoolsForTenant(TenantId)
+        OperatorConnectionManager.GetDeployedDeploymentSitesForTenant(TenantId)
             .Returns([PoolOneRtId]);
 
-        await DeploymentSiteService.UndeployAllCloudPoolsAsync(TenantId);
+        await DeploymentSiteService.UndeployAllCloudDeploymentSitesAsync(TenantId);
 
         await OperatorConnectionManager.Received(1)
-            .NotifyPoolUndeployedAsync(TenantId, PoolOneRtId);
+            .NotifyDeploymentSiteUndeployedAsync(TenantId, PoolOneRtId);
     }
 
     [Test]
     public async Task UndeployAllCloudPoolsAsync_MultipleTrackedPools_NotifiesEach()
     {
-        OperatorConnectionManager.GetDeployedPoolsForTenant(TenantId)
+        OperatorConnectionManager.GetDeployedDeploymentSitesForTenant(TenantId)
             .Returns([PoolOneRtId, PoolTwoRtId, PoolThreeRtId]);
 
-        await DeploymentSiteService.UndeployAllCloudPoolsAsync(TenantId);
+        await DeploymentSiteService.UndeployAllCloudDeploymentSitesAsync(TenantId);
 
-        await OperatorConnectionManager.Received(1).NotifyPoolUndeployedAsync(TenantId, PoolOneRtId);
-        await OperatorConnectionManager.Received(1).NotifyPoolUndeployedAsync(TenantId, PoolTwoRtId);
-        await OperatorConnectionManager.Received(1).NotifyPoolUndeployedAsync(TenantId, PoolThreeRtId);
+        await OperatorConnectionManager.Received(1).NotifyDeploymentSiteUndeployedAsync(TenantId, PoolOneRtId);
+        await OperatorConnectionManager.Received(1).NotifyDeploymentSiteUndeployedAsync(TenantId, PoolTwoRtId);
+        await OperatorConnectionManager.Received(1).NotifyDeploymentSiteUndeployedAsync(TenantId, PoolThreeRtId);
     }
 
     [Test]
@@ -54,11 +54,11 @@ internal class UndeployAllCloudPoolsAsyncTests : PoolServiceTestsBase
     {
         // Regression: the previous implementation called GetDeploymentSitesAsync() here,
         // which races with PreUpdatePreDeleteTenantConsumer's cache unload and
-        // throws "Failed to get pools" — leaving CRs orphaned in the cluster.
-        OperatorConnectionManager.GetDeployedPoolsForTenant(TenantId)
+        // throws "Failed to get deploymentSites" — leaving CRs orphaned in the cluster.
+        OperatorConnectionManager.GetDeployedDeploymentSitesForTenant(TenantId)
             .Returns([PoolOneRtId]);
 
-        await DeploymentSiteService.UndeployAllCloudPoolsAsync(TenantId);
+        await DeploymentSiteService.UndeployAllCloudDeploymentSitesAsync(TenantId);
 
         await CommunicationRepository.DidNotReceive().GetDeploymentSitesAsync(Arg.Any<string>());
     }
@@ -66,21 +66,21 @@ internal class UndeployAllCloudPoolsAsyncTests : PoolServiceTestsBase
     [Test]
     public async Task UndeployAllCloudPoolsAsync_NotifyFails_StillContinuesOtherPools()
     {
-        OperatorConnectionManager.GetDeployedPoolsForTenant(TenantId)
+        OperatorConnectionManager.GetDeployedDeploymentSitesForTenant(TenantId)
             .Returns([PoolBrokenRtId, PoolOneRtId]);
         OperatorConnectionManager
-            .NotifyPoolUndeployedAsync(TenantId, PoolBrokenRtId)
+            .NotifyDeploymentSiteUndeployedAsync(TenantId, PoolBrokenRtId)
             .Returns(Task.FromException(new InvalidOperationException("boom")));
 
-        await DeploymentSiteService.UndeployAllCloudPoolsAsync(TenantId);
+        await DeploymentSiteService.UndeployAllCloudDeploymentSitesAsync(TenantId);
 
-        await OperatorConnectionManager.Received(1).NotifyPoolUndeployedAsync(TenantId, PoolOneRtId);
+        await OperatorConnectionManager.Received(1).NotifyDeploymentSiteUndeployedAsync(TenantId, PoolOneRtId);
     }
 
     [Test]
     public async Task UndeployAllCloudPoolsAsync_TrackedWorkloads_AlsoNotifiedBeforePools()
     {
-        OperatorConnectionManager.GetDeployedPoolsForTenant(TenantId)
+        OperatorConnectionManager.GetDeployedDeploymentSitesForTenant(TenantId)
             .Returns([PoolOneRtId]);
         OperatorConnectionManager.GetDeployedWorkloadsForTenant(TenantId).Returns(new[]
         {
@@ -94,24 +94,24 @@ internal class UndeployAllCloudPoolsAsyncTests : PoolServiceTestsBase
             },
         });
 
-        await DeploymentSiteService.UndeployAllCloudPoolsAsync(TenantId);
+        await DeploymentSiteService.UndeployAllCloudDeploymentSitesAsync(TenantId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadUndeployedAsync(
             Arg.Is<WorkloadUndeployedDto>(w => w.WorkloadName == "wl-1"));
-        await OperatorConnectionManager.Received(1).NotifyPoolUndeployedAsync(TenantId, PoolOneRtId);
+        await OperatorConnectionManager.Received(1).NotifyDeploymentSiteUndeployedAsync(TenantId, PoolOneRtId);
     }
 
     [Test]
     public async Task UndeployAllCloudPoolsAsync_NeitherPoolsNorWorkloads_NoOp()
     {
-        OperatorConnectionManager.GetDeployedPoolsForTenant(TenantId).Returns([]);
+        OperatorConnectionManager.GetDeployedDeploymentSitesForTenant(TenantId).Returns([]);
         OperatorConnectionManager.GetDeployedWorkloadsForTenant(TenantId)
             .Returns(Array.Empty<WorkloadUndeployedDto>());
 
-        await DeploymentSiteService.UndeployAllCloudPoolsAsync(TenantId);
+        await DeploymentSiteService.UndeployAllCloudDeploymentSitesAsync(TenantId);
 
         await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
-            .NotifyPoolUndeployedAsync(Arg.Any<string>(), Arg.Any<string>());
+            .NotifyDeploymentSiteUndeployedAsync(Arg.Any<string>(), Arg.Any<string>());
         await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
             .NotifyWorkloadUndeployedAsync(Arg.Any<WorkloadUndeployedDto>());
     }

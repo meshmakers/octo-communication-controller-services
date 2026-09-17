@@ -22,7 +22,7 @@ public class CommunicationLifecycleConfiguration
     public bool ScaleToZeroEnabled { get; set; }
 
     /// <summary>
-    ///     Master switch for adapter-pool leasing on this tenant (AB#4924 §14). Default false.
+    ///     Master switch for adapter-deploymentSite leasing on this tenant (AB#4924 §14). Default false.
     /// </summary>
     /// <remarks>
     ///     <para>
@@ -34,7 +34,7 @@ public class CommunicationLifecycleConfiguration
     ///     </para>
     ///     <para>
     ///         <b>One flag, two meanings, both required.</b> On a <b>lending</b> tenant it reads "this
-    ///         tenant's pools hand their members out"; on a <b>borrowing</b> tenant it reads "this
+    ///         tenant's deploymentSites hand their members out"; on a <b>borrowing</b> tenant it reads "this
     ///         tenant's <c>Leased</c> adapters get scheduled". A lease needs both ends on, because
     ///         lending is the lender's capability and borrowing is the borrower's and neither tenant
     ///         can assert the other's. That is what the plan's §14 asks for in one line.

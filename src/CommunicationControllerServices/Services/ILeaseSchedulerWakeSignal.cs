@@ -26,7 +26,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 ///         <c>Leased</c> adapter), and — the one that would otherwise bite in production — the
 ///         multi-pod case, where the release or the enqueue happened on a <i>different</i> controller
 ///         instance and this one heard nothing. Same reasoning as
-///         <c>AdapterLeasingMetrics.SweepStalePools</c>: several controllers act independently and
+///         <c>AdapterLeasingMetrics.SweepStaleDeploymentSites</c>: several controllers act independently and
 ///         each sees a different subset, so nothing may depend on having observed an event.
 ///     </para>
 /// </remarks>

@@ -2,7 +2,7 @@ using Duende.IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.BackgroundServices;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.DeploymentSites;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Configuration;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Extensions;
@@ -138,7 +138,7 @@ try
     builder.Services
         .AddScopedMultipleInterfaces<DefaultConfigurationCreatorService, IDefaultConfigurationCreatorService,
             IConfigurationService>();
-    builder.Services.AddSingletonMultipleInterfaces<PoolHubCache, IPoolCache, IPoolCachePublish>();
+    builder.Services.AddSingletonMultipleInterfaces<DeploymentSiteHubCache, IDeploymentSiteCache, IDeploymentSiteCachePublish>();
     builder.Services.AddSingletonMultipleInterfaces<AdapterCache, IAdapterCache, IAdapterCachePublish>();
 
     builder.Services.AddSingleton<IOperatorConnectionManager, OperatorConnectionManager>();

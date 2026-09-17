@@ -10,17 +10,17 @@ internal class SetCommunicationStateOfflineAsyncTests : PoolServiceTestsBase
     public async Task SetCommunicationStateOfflineAsync_PoolFoundByRtIdAndConnectionMatches_WritesOffline()
     {
         // Happy path for the OperatorHub.OnDisconnectedAsync fix: when the
-        // disconnecting connection still owns the cached pool, the service
+        // disconnecting connection still owns the cached deploymentSite, the service
         // must write Offline. This is the only path that flips state when
         // the operator's SignalR connection drops without a graceful
-        // UnregisterPoolOperatorAsync.
+        // UnregisterDeploymentSiteOperatorAsync.
         GivenTenantInCache();
-        AddPoolToTenant();
+        AddDeploymentSiteToTenant();
 
         await DeploymentSiteService.SetCommunicationStateOfflineAsync(TenantId, DeploymentSiteRtId, ConnectionId);
 
         await CommunicationRepository.Received(1)
-            .SetPoolCommunicationStateAsync(TenantId, DeploymentSiteRtId, RtCommunicationStateEnum.Offline);
+            .SetDeploymentSiteCommunicationStateAsync(TenantId, DeploymentSiteRtId, RtCommunicationStateEnum.Offline);
     }
 
     [Test]
@@ -28,20 +28,20 @@ internal class SetCommunicationStateOfflineAsyncTests : PoolServiceTestsBase
     {
         // Regression: a controller restart drops the operator's previous
         // SignalR connection. The operator auto-reconnects with a NEW
-        // connection id and re-registers its pools (cache.ConnectionId =
+        // connection id and re-registers its deploymentSites (cache.ConnectionId =
         // new id). Some time later the previous connection's
         // OnDisconnectedAsync finally fires on the controller. Without the
         // stale-disconnect guard this overwrites the freshly-written
-        // Online state and the UI shows the pool offline even though the
+        // Online state and the UI shows the deploymentSite offline even though the
         // operator is connected.
         GivenTenantInCache();
-        AddPoolToTenant(connectionId: "new-connection-id");
+        AddDeploymentSiteToTenant(connectionId: "new-connection-id");
 
         await DeploymentSiteService.SetCommunicationStateOfflineAsync(TenantId, DeploymentSiteRtId,
             "stale-old-connection-id");
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
-            .SetPoolCommunicationStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
+            .SetDeploymentSiteCommunicationStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
                 Arg.Any<RtCommunicationStateEnum>());
     }
 
@@ -53,7 +53,7 @@ internal class SetCommunicationStateOfflineAsyncTests : PoolServiceTestsBase
         await DeploymentSiteService.SetCommunicationStateOfflineAsync(TenantId, DeploymentSiteRtId, ConnectionId);
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
-            .SetPoolCommunicationStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
+            .SetDeploymentSiteCommunicationStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
                 Arg.Any<RtCommunicationStateEnum>());
     }
 
@@ -61,12 +61,12 @@ internal class SetCommunicationStateOfflineAsyncTests : PoolServiceTestsBase
     public async Task SetCommunicationStateOfflineAsync_PoolRtIdNotInCache_NoOp()
     {
         GivenTenantInCache();
-        // Don't add the pool — PoolsById lookup must miss and the call must no-op.
+        // Don't add the deploymentSite — DeploymentSitesById lookup must miss and the call must no-op.
 
         await DeploymentSiteService.SetCommunicationStateOfflineAsync(TenantId, DeploymentSiteRtId, ConnectionId);
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
-            .SetPoolCommunicationStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
+            .SetDeploymentSiteCommunicationStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
                 Arg.Any<RtCommunicationStateEnum>());
     }
 
@@ -74,27 +74,27 @@ internal class SetCommunicationStateOfflineAsyncTests : PoolServiceTestsBase
     public async Task SetCommunicationStateOfflineAsync_OtherConnectionStillClaimsPool_NoOp()
     {
         // Regression for the multi-claimer bug: when two operator connections
-        // claim the same pool (e.g. central operator with 2 replicas, or a
+        // claim the same deploymentSite (e.g. central operator with 2 replicas, or a
         // rolling restart with brief overlap), the disconnect of ONE claimer
-        // must not flip the pool Offline as long as the other connection is
+        // must not flip the deploymentSite Offline as long as the other connection is
         // still hosting it. The DeploymentSiteDescription cache only carries the LAST
         // claim's ConnectionId — without this guard the OperatorHub's
-        // OnDisconnectedAsync orphan-flip would mark the pool Offline even
+        // OnDisconnectedAsync orphan-flip would mark the deploymentSite Offline even
         // though the surviving operator is still connected. By the time we
         // get here OperatorConnectionManager.RemoveOperator has already
         // removed the disconnecting connection's tracking entry, so any
-        // results from GetConnectionsForPool are surviving operators.
+        // results from GetConnectionsForDeploymentSite are surviving operators.
         GivenTenantInCache();
-        AddPoolToTenant();
+        AddDeploymentSiteToTenant();
         OperatorConnectionManager
-            .GetConnectionsForPool(TenantId, DeploymentSiteRtId.ToString())
+            .GetConnectionsForDeploymentSite(TenantId, DeploymentSiteRtId.ToString())
             .Returns(new[] { "surviving-connection-id" });
 
         await DeploymentSiteService.SetCommunicationStateOfflineAsync(TenantId, DeploymentSiteRtId,
             "disconnecting-connection-id");
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
-            .SetPoolCommunicationStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
+            .SetDeploymentSiteCommunicationStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
                 Arg.Any<RtCommunicationStateEnum>());
     }
 
@@ -108,14 +108,14 @@ internal class SetCommunicationStateOfflineAsyncTests : PoolServiceTestsBase
         // disconnects (rather than the cached id being a dead connection
         // and the guard then refusing to write Offline forever).
         GivenTenantInCache();
-        var pool = AddPoolToTenant(connectionId: "disconnecting-connection-id");
+        var deploymentSite = AddDeploymentSiteToTenant(connectionId: "disconnecting-connection-id");
         OperatorConnectionManager
-            .GetConnectionsForPool(TenantId, DeploymentSiteRtId.ToString())
+            .GetConnectionsForDeploymentSite(TenantId, DeploymentSiteRtId.ToString())
             .Returns(new[] { "surviving-connection-id" });
 
         await DeploymentSiteService.SetCommunicationStateOfflineAsync(TenantId, DeploymentSiteRtId,
             "disconnecting-connection-id");
 
-        await Assert.That(pool.ConnectionId).IsEqualTo("surviving-connection-id");
+        await Assert.That(deploymentSite.ConnectionId).IsEqualTo("surviving-connection-id");
     }
 }

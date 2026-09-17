@@ -15,7 +15,7 @@ public interface ICommunicationEventService
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="level">The level of the event</param>
     /// <param name="message">The message of the event</param>
-    /// <param name="associatedRtEntityId">Optional entity identifier the event is associated to (e.g., Adapter, Pipeline, Pool)</param>
+    /// <param name="associatedRtEntityId">Optional entity identifier the event is associated to (e.g., Adapter, Pipeline, DeploymentSite)</param>
     Task StoreEventAsync(string tenantId, RtEventLevelsEnum level, string message, RtEntityId? associatedRtEntityId = null);
 
     /// <summary>
@@ -23,7 +23,7 @@ public interface ICommunicationEventService
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="message">The message of the event</param>
-    /// <param name="associatedRtEntityId">Optional entity identifier the event is associated to (e.g., Adapter, Pipeline, Pool)</param>
+    /// <param name="associatedRtEntityId">Optional entity identifier the event is associated to (e.g., Adapter, Pipeline, DeploymentSite)</param>
     Task StoreInformationEventAsync(string tenantId, string message, RtEntityId? associatedRtEntityId = null);
 
     /// <summary>
@@ -31,7 +31,7 @@ public interface ICommunicationEventService
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="message">The message of the event</param>
-    /// <param name="associatedRtEntityId">Optional entity identifier the event is associated to (e.g., Adapter, Pipeline, Pool)</param>
+    /// <param name="associatedRtEntityId">Optional entity identifier the event is associated to (e.g., Adapter, Pipeline, DeploymentSite)</param>
     Task StoreWarningEventAsync(string tenantId, string message, RtEntityId? associatedRtEntityId = null);
 
     /// <summary>
@@ -39,7 +39,7 @@ public interface ICommunicationEventService
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="message">The message of the event</param>
-    /// <param name="associatedRtEntityId">Optional entity identifier the event is associated to (e.g., Adapter, Pipeline, Pool)</param>
+    /// <param name="associatedRtEntityId">Optional entity identifier the event is associated to (e.g., Adapter, Pipeline, DeploymentSite)</param>
     Task StoreErrorEventAsync(string tenantId, string message, RtEntityId? associatedRtEntityId = null);
 
     /// <summary>

@@ -40,7 +40,7 @@ internal enum AdapterPoolHubAuthorizationMode
 ///     <para>
 ///         <b>What the binding is, concretely.</b> The filter resolves the connection's principal and
 ///         remembers its <c>tenant_id</c> claim on the connection. <c>AdapterPoolHub</c> then refuses
-///         a <c>RegisterPoolMemberAsync</c> whose declared <c>PoolTenantId</c> is a different tenant.
+///         a <c>RegisterPoolMemberAsync</c> whose declared <c>AdapterPoolTenantId</c> is a different tenant.
 ///         Two halves in two places on purpose: the filter cannot see the declared pool (it runs at
 ///         connect, before any hub method), and the hub cannot re-derive the principal as cheaply or
 ///         as reliably as the filter, which authenticates the bearer scheme explicitly when the

@@ -185,9 +185,9 @@ internal static class AdapterLeasingMetrics
     #region Tag names
 
     private const string TagTenant = "octo.tenant.id";
-    private const string TagPoolTenant = "octo.pool.tenant_id";
+    private const string TagAdapterPoolTenant = "octo.pool.tenant_id";
     private const string TagAdapterPoolRtId = "octo.pool.rt_id";
-    private const string TagPoolName = "octo.pool.name";
+    private const string TagAdapterPoolName = "octo.pool.name";
     private const string TagStage = "octo.lease.stage";
     private const string TagRefusalReason = "octo.lease.refusal_reason";
     private const string TagReleaseReason = "octo.lease.release_reason";
@@ -325,13 +325,13 @@ internal static class AdapterLeasingMetrics
     ///     What each pool's last scheduling round saw. Replaced wholesale per round, so a pool that
     ///     stops being scheduled stops publishing rather than freezing at its last value.
     /// </summary>
-    private static readonly ConcurrentDictionary<PoolKey, PoolObservation> Pools = new();
+    private static readonly ConcurrentDictionary<AdapterPoolKey, AdapterPoolObservation> Pools = new();
 
     /// <summary>
     ///     Pool display names, learned when a scheduling round reads the pool entity. Kept apart
     ///     from <see cref="Pools" /> so a name survives a round that could not read the entity.
     /// </summary>
-    private static readonly ConcurrentDictionary<PoolKey, string> PoolNames = new();
+    private static readonly ConcurrentDictionary<AdapterPoolKey, string> DeploymentSiteNames = new();
 
     // Assigning the gauges to fields is what keeps them alive; the callbacks do the reporting.
     // ReSharper disable NotAccessedField.Local
@@ -346,7 +346,7 @@ internal static class AdapterLeasingMetrics
 
     private static readonly ObservableGauge<double> QueueOldestWaitGauge = Meter.CreateObservableGauge(
         "octo.lease.queue.oldest_wait",
-        () => ObservePool(p => p.OldestWaitSeconds),
+        () => ObserveAdapterPool(p => p.OldestWaitSeconds),
         unit: "s",
         description:
         "Age of the oldest work item waiting on a pool. This is the exact quantity the scale-up " +
@@ -363,7 +363,7 @@ internal static class AdapterLeasingMetrics
 
     private static readonly ObservableGauge<double> ScaleUpWindowGauge = Meter.CreateObservableGauge(
         "octo.lease.scaleup.window",
-        () => ObservePool(p => p.AveragingWindowSeconds),
+        () => ObserveAdapterPool(p => p.AveragingWindowSeconds),
         unit: "s",
         description:
         "The depth-averaging window actually in force for this pool — the pool's own " +
@@ -392,7 +392,7 @@ internal static class AdapterLeasingMetrics
     /// </remarks>
     private static readonly ObservableGauge<int> UndersizedGauge = Meter.CreateObservableGauge(
         "octo.lease.pool.undersized",
-        () => ObservePool(p => p.Undersized ? 1 : 0),
+        () => ObserveAdapterPool(p => p.Undersized ? 1 : 0),
         unit: "{pool}",
         description:
         "1 while a pool's queue signals say it should grow and it is already at MaxReplicas — it " +
@@ -515,9 +515,9 @@ internal static class AdapterLeasingMetrics
     {
         MembersDrained.Add(1,
         [
-            new KeyValuePair<string, object?>(TagPoolTenant, lenderTenantId),
+            new KeyValuePair<string, object?>(TagAdapterPoolTenant, lenderTenantId),
             new KeyValuePair<string, object?>(TagAdapterPoolRtId, adapterPoolRtId),
-            new KeyValuePair<string, object?>(TagPoolName, PoolName(lenderTenantId, adapterPoolRtId)),
+            new KeyValuePair<string, object?>(TagAdapterPoolName, DeploymentSiteName(lenderTenantId, adapterPoolRtId)),
             new KeyValuePair<string, object?>(TagDrainReason, DrainTag(reason))
         ]);
     }
@@ -527,9 +527,9 @@ internal static class AdapterLeasingMetrics
     {
         ScaleUps.Add(1,
         [
-            new KeyValuePair<string, object?>(TagPoolTenant, lenderTenantId),
+            new KeyValuePair<string, object?>(TagAdapterPoolTenant, lenderTenantId),
             new KeyValuePair<string, object?>(TagAdapterPoolRtId, adapterPoolRtId),
-            new KeyValuePair<string, object?>(TagPoolName, PoolName(lenderTenantId, adapterPoolRtId)),
+            new KeyValuePair<string, object?>(TagAdapterPoolName, DeploymentSiteName(lenderTenantId, adapterPoolRtId)),
             new KeyValuePair<string, object?>(TagScaleUpOutcome, outcome)
         ]);
     }
@@ -555,14 +555,14 @@ internal static class AdapterLeasingMetrics
     ///     entity must not blank out a name an earlier round supplied — a dashboard nobody can read
     ///     is not observability.
     /// </remarks>
-    public static void NamePool(string lenderTenantId, string adapterPoolRtId, string? poolName)
+    public static void NamePool(string lenderTenantId, string adapterPoolRtId, string? deploymentSiteName)
     {
-        if (string.IsNullOrEmpty(poolName))
+        if (string.IsNullOrEmpty(deploymentSiteName))
         {
             return;
         }
 
-        PoolNames[PoolKey.Create(lenderTenantId, adapterPoolRtId)] = poolName;
+        DeploymentSiteNames[AdapterPoolKey.Create(lenderTenantId, adapterPoolRtId)] = deploymentSiteName;
     }
 
     /// <summary>
@@ -583,7 +583,7 @@ internal static class AdapterLeasingMetrics
         (int Available, int Leased, int Draining) members, TimeSpan averagingWindow,
         bool depthSignal, bool waitSignal, bool undersized)
     {
-        Pools[PoolKey.Create(lenderTenantId, adapterPoolRtId)] = new PoolObservation(
+        Pools[AdapterPoolKey.Create(lenderTenantId, adapterPoolRtId)] = new AdapterPoolObservation(
             DateTime.UtcNow,
             lenderTenantId,
             adapterPoolRtId,
@@ -627,7 +627,7 @@ internal static class AdapterLeasingMetrics
     ///     </para>
     /// </remarks>
     /// <param name="nowUtc">Test seam; production passes nothing and gets the wall clock.</param>
-    public static void SweepStalePools(DateTime? nowUtc = null)
+    public static void SweepStaleDeploymentSites(DateTime? nowUtc = null)
     {
         var now = nowUtc ?? DateTime.UtcNow;
 
@@ -636,7 +636,7 @@ internal static class AdapterLeasingMetrics
             if (now - observation.ObservedAtUtc > PoolObservationStaleAfter)
             {
                 Pools.TryRemove(key, out _);
-                PoolNames.TryRemove(key, out _);
+                DeploymentSiteNames.TryRemove(key, out _);
             }
         }
     }
@@ -653,10 +653,10 @@ internal static class AdapterLeasingMetrics
             {
                 yield return new Measurement<int>(depth,
                     new KeyValuePair<string, object?>(TagTenant, tenantId),
-                    new KeyValuePair<string, object?>(TagPoolTenant, pool.LenderTenantId),
+                    new KeyValuePair<string, object?>(TagAdapterPoolTenant, pool.LenderTenantId),
                     new KeyValuePair<string, object?>(TagAdapterPoolRtId, pool.AdapterPoolRtId),
-                    new KeyValuePair<string, object?>(TagPoolName,
-                        PoolName(pool.LenderTenantId, pool.AdapterPoolRtId)));
+                    new KeyValuePair<string, object?>(TagAdapterPoolName,
+                        DeploymentSiteName(pool.LenderTenantId, pool.AdapterPoolRtId)));
             }
         }
     }
@@ -671,11 +671,11 @@ internal static class AdapterLeasingMetrics
         }
     }
 
-    private static Measurement<int> MemberMeasurement(PoolObservation pool, string state, int count) =>
+    private static Measurement<int> MemberMeasurement(AdapterPoolObservation pool, string state, int count) =>
         new(count,
-            new KeyValuePair<string, object?>(TagPoolTenant, pool.LenderTenantId),
+            new KeyValuePair<string, object?>(TagAdapterPoolTenant, pool.LenderTenantId),
             new KeyValuePair<string, object?>(TagAdapterPoolRtId, pool.AdapterPoolRtId),
-            new KeyValuePair<string, object?>(TagPoolName, PoolName(pool.LenderTenantId, pool.AdapterPoolRtId)),
+            new KeyValuePair<string, object?>(TagAdapterPoolName, DeploymentSiteName(pool.LenderTenantId, pool.AdapterPoolRtId)),
             new KeyValuePair<string, object?>(TagMemberState, state));
 
     private static IEnumerable<Measurement<int>> ObserveSignals()
@@ -687,23 +687,23 @@ internal static class AdapterLeasingMetrics
         }
     }
 
-    private static Measurement<int> SignalMeasurement(PoolObservation pool, string kind, bool firing) =>
+    private static Measurement<int> SignalMeasurement(AdapterPoolObservation pool, string kind, bool firing) =>
         new(firing ? 1 : 0,
-            new KeyValuePair<string, object?>(TagPoolTenant, pool.LenderTenantId),
+            new KeyValuePair<string, object?>(TagAdapterPoolTenant, pool.LenderTenantId),
             new KeyValuePair<string, object?>(TagAdapterPoolRtId, pool.AdapterPoolRtId),
-            new KeyValuePair<string, object?>(TagPoolName, PoolName(pool.LenderTenantId, pool.AdapterPoolRtId)),
+            new KeyValuePair<string, object?>(TagAdapterPoolName, DeploymentSiteName(pool.LenderTenantId, pool.AdapterPoolRtId)),
             new KeyValuePair<string, object?>(TagSignalKind, kind));
 
-    private static IEnumerable<Measurement<T>> ObservePool<T>(Func<PoolObservation, T> selector)
+    private static IEnumerable<Measurement<T>> ObserveAdapterPool<T>(Func<AdapterPoolObservation, T> selector)
         where T : struct
     {
         foreach (var pool in Pools.Values)
         {
             yield return new Measurement<T>(selector(pool),
-                new KeyValuePair<string, object?>(TagPoolTenant, pool.LenderTenantId),
+                new KeyValuePair<string, object?>(TagAdapterPoolTenant, pool.LenderTenantId),
                 new KeyValuePair<string, object?>(TagAdapterPoolRtId, pool.AdapterPoolRtId),
-                new KeyValuePair<string, object?>(TagPoolName,
-                    PoolName(pool.LenderTenantId, pool.AdapterPoolRtId)));
+                new KeyValuePair<string, object?>(TagAdapterPoolName,
+                    DeploymentSiteName(pool.LenderTenantId, pool.AdapterPoolRtId)));
         }
     }
 
@@ -715,13 +715,13 @@ internal static class AdapterLeasingMetrics
         string adapterPoolRtId) =>
     [
         new(TagTenant, borrowerTenantId),
-        new(TagPoolTenant, lenderTenantId),
+        new(TagAdapterPoolTenant, lenderTenantId),
         new(TagAdapterPoolRtId, adapterPoolRtId),
-        new(TagPoolName, PoolName(lenderTenantId, adapterPoolRtId))
+        new(TagAdapterPoolName, DeploymentSiteName(lenderTenantId, adapterPoolRtId))
     ];
 
-    private static string PoolName(string lenderTenantId, string adapterPoolRtId) =>
-        PoolNames.GetValueOrDefault(PoolKey.Create(lenderTenantId, adapterPoolRtId), string.Empty);
+    private static string DeploymentSiteName(string lenderTenantId, string adapterPoolRtId) =>
+        DeploymentSiteNames.GetValueOrDefault(AdapterPoolKey.Create(lenderTenantId, adapterPoolRtId), string.Empty);
 
     /// <summary>
     ///     The label values, written out rather than derived from <c>ToString</c>.
@@ -772,14 +772,14 @@ internal static class AdapterLeasingMetrics
     };
 
     /// <summary>One pool, identified across tenants and normalised the way the scheduler does.</summary>
-    private readonly record struct PoolKey(string LenderTenantId, string AdapterPoolRtId)
+    private readonly record struct AdapterPoolKey(string LenderTenantId, string AdapterPoolRtId)
     {
-        public static PoolKey Create(string lenderTenantId, string adapterPoolRtId) =>
+        public static AdapterPoolKey Create(string lenderTenantId, string adapterPoolRtId) =>
             new(lenderTenantId.ToLowerInvariant(), adapterPoolRtId.ToLowerInvariant());
     }
 
     /// <summary>What one scheduling round saw of one pool.</summary>
-    private sealed record PoolObservation(
+    private sealed record AdapterPoolObservation(
         DateTime ObservedAtUtc,
         string LenderTenantId,
         string AdapterPoolRtId,

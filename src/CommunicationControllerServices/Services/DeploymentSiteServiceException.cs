@@ -22,9 +22,9 @@ internal class DeploymentSiteServiceException : Exception
         return new DeploymentSiteServiceException($"Tenant {tenantId} not found or communication service not enabled");
     }
 
-    internal static Exception PoolNotFound(string tenantId, OctoObjectId poolRtId)
+    internal static Exception DeploymentSiteNotFound(string tenantId, OctoObjectId poolRtId)
     {
-        return new DeploymentSiteServiceException($"[{tenantId}] Pool '{poolRtId}' not found");
+        return new DeploymentSiteServiceException($"[{tenantId}] DeploymentSite '{poolRtId}' not found");
     }
 
     internal static Exception AdapterNotFound(string tenantId, RtEntityId adapterRtEntityId)
@@ -32,9 +32,9 @@ internal class DeploymentSiteServiceException : Exception
         return new DeploymentSiteServiceException($"[{tenantId}] Adapter '{adapterRtEntityId}' not found");
     }
 
-    internal static Exception CannotCreatePool(string tenantId, string poolName)
+    internal static Exception CannotCreatePool(string tenantId, string deploymentSiteName)
     {
-        return new DeploymentSiteServiceException($"[{tenantId}] Cannot create pool '{poolName}'");
+        return new DeploymentSiteServiceException($"[{tenantId}] Cannot create deploymentSite '{deploymentSiteName}'");
     }
 
     internal static Exception PreUpdateTenantFailed(string tenantId, Exception exception)
@@ -52,10 +52,10 @@ internal class DeploymentSiteServiceException : Exception
         return new DeploymentSiteServiceException($"[{tenantId}] Workload '{workloadRtId}' not found");
     }
 
-    internal static Exception WorkloadNotInPool(string tenantId, OctoObjectId workloadRtId)
+    internal static Exception WorkloadNotInDeploymentSite(string tenantId, OctoObjectId workloadRtId)
     {
         return new DeploymentSiteServiceException(
-            $"[{tenantId}] Workload '{workloadRtId}' is not currently in any pool — assign it to a pool before deploying");
+            $"[{tenantId}] Workload '{workloadRtId}' is not currently in any deploymentSite — assign it to a deploymentSite before deploying");
     }
 
     internal static Exception WorkloadMissingChartName(string tenantId, OctoObjectId workloadRtId, string? workloadName)
@@ -104,20 +104,20 @@ internal class DeploymentSiteServiceException : Exception
             $"the '{fieldName}' template '{template}' references unknown placeholder '{{{{{unknownPlaceholder}}}}}'. {hint}");
     }
 
-    internal static Exception EdgePoolNotDeployable(string tenantId, OctoObjectId poolRtId, string? poolName)
+    internal static Exception EdgePoolNotDeployable(string tenantId, OctoObjectId poolRtId, string? deploymentSiteName)
     {
         return new DeploymentSiteServiceException(
-            $"[{tenantId}] Pool '{poolName ?? poolRtId.ToString()}' has Environment=Edge — Deploy is not available. " +
-            "Edge pools are installed and run by an external operator outside the central cluster; only Cloud pools " +
+            $"[{tenantId}] DeploymentSite '{deploymentSiteName ?? poolRtId.ToString()}' has Environment=Edge — Deploy is not available. " +
+            "Edge deploymentSites are installed and run by an external operator outside the central cluster; only Cloud deploymentSites " +
             "can be deployed from this controller.");
     }
 
-    internal static Exception PoolAlreadyNotDeployed(string tenantId, OctoObjectId poolRtId, string? poolName,
+    internal static Exception PoolAlreadyNotDeployed(string tenantId, OctoObjectId poolRtId, string? deploymentSiteName,
         RtDeploymentStateEnum currentState)
     {
         return new DeploymentSiteServiceException(
-            $"[{tenantId}] Pool '{poolName ?? poolRtId.ToString()}' is '{currentState}' — there is nothing to undeploy. " +
-            "Undeploy is only valid when the pool is Deployed, Pending, or in Error.");
+            $"[{tenantId}] DeploymentSite '{deploymentSiteName ?? poolRtId.ToString()}' is '{currentState}' — there is nothing to undeploy. " +
+            "Undeploy is only valid when the deploymentSite is Deployed, Pending, or in Error.");
     }
 
     internal static Exception WorkloadAlreadyNotDeployed(string tenantId, OctoObjectId workloadRtId,
@@ -176,9 +176,9 @@ internal class DeploymentSiteServiceException : Exception
         string? workloadName)
     {
         return new DeploymentSiteServiceException(
-            $"[{tenantId}] Cannot deploy adapter pool '{workloadName ?? workloadRtId.ToString()}' with LifecycleMode " +
+            $"[{tenantId}] Cannot deploy adapter deploymentSite '{workloadName ?? workloadRtId.ToString()}' with LifecycleMode " +
             "'Leased' (AB#4924). 'Leased' is the BORROWER's mode — it means the workload has no process of its own. " +
-            "A pool is the opposite: it owns the processes that are lent out. Set the pool to AlwaysOn and control its " +
+            "A deploymentSite is the opposite: it owns the processes that are lent out. Set the deploymentSite to AlwaysOn and control its " +
             "size with MinReplicas / MaxReplicas instead.");
     }
 
@@ -198,7 +198,7 @@ internal class DeploymentSiteServiceException : Exception
         return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}' with LifecycleMode 'Leased': " +
             "LentFromTenantId and LentFromAdapterPoolRtId must be set together (AB#4924). One without the other names no " +
-            "resolvable pool, and there is no referential integrity behind these values — they point into a different " +
+            "resolvable deploymentSite, and there is no referential integrity behind these values — they point into a different " +
             "tenant's database, so nothing but this check can catch a half-configured borrower.");
     }
 
@@ -207,7 +207,7 @@ internal class DeploymentSiteServiceException : Exception
     {
         return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}' with LifecycleMode 'Leased': " +
-            "it names no adapter pool to borrow from. Set LentFromTenantId and LentFromAdapterPoolRtId to the lending tenant " +
+            "it names no adapter deploymentSite to borrow from. Set LentFromTenantId and LentFromAdapterPoolRtId to the lending tenant " +
             "and the AdapterPool inside it (AB#4924).");
     }
 
@@ -227,8 +227,8 @@ internal class DeploymentSiteServiceException : Exception
         return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}' with LifecycleMode 'Leased': " +
             $"tenant '{lenderTenantId}' does not lend to tenant '{tenantId}' (AB#4924). Lending follows the tenant tree " +
-            "and never flows upwards: a pool lends to its owner's descendants, and to siblings under a shared parent " +
-            $"when its SharingMode is 'DescendantsAndSiblings'. Check the pool's SharingMode and its " +
+            "and never flows upwards: a deploymentSite lends to its owner's descendants, and to siblings under a shared parent " +
+            $"when its SharingMode is 'DescendantsAndSiblings'. Check the deploymentSite's SharingMode and its " +
             "LendingAllowedTenantIds allow-list in tenant '" + lenderTenantId + "'.");
     }
 
@@ -236,36 +236,36 @@ internal class DeploymentSiteServiceException : Exception
         string? workloadName)
     {
         return new DeploymentSiteServiceException(
-            $"[{tenantId}] Cannot deploy adapter pool '{workloadName ?? workloadRtId.ToString()}' with a SharingMode " +
-            "other than 'NotShared': the pool is not on-demand capable (AB#4924). A lease is handed to a process " +
-            "between work items, so a pool whose own workload carries a process-bound trigger cannot serve one.");
+            $"[{tenantId}] Cannot deploy adapter deploymentSite '{workloadName ?? workloadRtId.ToString()}' with a SharingMode " +
+            "other than 'NotShared': the deploymentSite is not on-demand capable (AB#4924). A lease is handed to a process " +
+            "between work items, so a deploymentSite whose own workload carries a process-bound trigger cannot serve one.");
     }
 
     internal static Exception AdapterPoolReplicaRangeInvalid(string tenantId, OctoObjectId workloadRtId,
         string? workloadName, int minReplicas, int maxReplicas)
     {
         return new DeploymentSiteServiceException(
-            $"[{tenantId}] Cannot deploy adapter pool '{workloadName ?? workloadRtId.ToString()}': the replica range " +
+            $"[{tenantId}] Cannot deploy adapter deploymentSite '{workloadName ?? workloadRtId.ToString()}': the replica range " +
             $"MinReplicas={minReplicas} / MaxReplicas={maxReplicas} is invalid (AB#4924). MaxReplicas must be at least 1 " +
-            "and at least MinReplicas; MinReplicas must not be negative. MinReplicas=0 is permitted and turns the pool " +
-            "into a scale-to-zero pool where every burst pays one cold start.");
+            "and at least MinReplicas; MinReplicas must not be negative. MinReplicas=0 is permitted and turns the deploymentSite " +
+            "into a scale-to-zero deploymentSite where every burst pays one cold start.");
     }
 
     internal static Exception WorkloadIsNotAnAdapterPool(string tenantId, OctoObjectId workloadRtId,
         string? workloadName)
     {
         return new DeploymentSiteServiceException(
-            $"[{tenantId}] Workload '{workloadName ?? workloadRtId.ToString()}' is not an adapter pool and cannot be " +
-            "scaled through the pool path (AB#4924). An Adapter or Application is scaled by the on-demand lifecycle " +
-            "(hibernate / wake), which owns its replica count; only a pool has a replica RANGE to move within.");
+            $"[{tenantId}] Workload '{workloadName ?? workloadRtId.ToString()}' is not an adapter deploymentSite and cannot be " +
+            "scaled through the deploymentSite path (AB#4924). An Adapter or Application is scaled by the on-demand lifecycle " +
+            "(hibernate / wake), which owns its replica count; only a deploymentSite has a replica RANGE to move within.");
     }
 
     internal static Exception AdapterPoolNotDeployed(string tenantId, OctoObjectId workloadRtId,
         string? workloadName, RtDeploymentStateEnum deploymentState)
     {
         return new DeploymentSiteServiceException(
-            $"[{tenantId}] Cannot scale adapter pool '{workloadName ?? workloadRtId.ToString()}': it is " +
-            $"'{deploymentState}', so there is no Helm release whose members could be scaled (AB#4924). Deploy the pool " +
+            $"[{tenantId}] Cannot scale adapter deploymentSite '{workloadName ?? workloadRtId.ToString()}': it is " +
+            $"'{deploymentState}', so there is no Helm release whose members could be scaled (AB#4924). Deploy the deploymentSite " +
             "first.");
     }
 
@@ -273,7 +273,7 @@ internal class DeploymentSiteServiceException : Exception
         string? workloadName, int cap)
     {
         return new DeploymentSiteServiceException(
-            $"[{tenantId}] Cannot deploy adapter pool '{workloadName ?? workloadRtId.ToString()}': " +
+            $"[{tenantId}] Cannot deploy adapter deploymentSite '{workloadName ?? workloadRtId.ToString()}': " +
             $"LendingMaxConcurrentLeasesPerTenant is {cap} (AB#4924). Leave it unset for no per-tenant cap — " +
             "MaxReplicas and the round-robin rotation are the real bounds — or set a value of at least 1. A cap of 0 " +
             "would let a borrower queue work that can never be leased.");

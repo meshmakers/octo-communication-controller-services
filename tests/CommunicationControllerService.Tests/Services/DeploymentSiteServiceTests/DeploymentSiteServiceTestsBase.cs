@@ -1,5 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.DeploymentSites;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -13,12 +13,12 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 internal abstract class PoolServiceTestsBase
 {
     protected const string TenantId = "tenantId";
-    protected const string PoolName = "default";
+    protected const string DeploymentSiteName = "default";
     protected const string ConnectionId = "connectionId";
     protected static readonly OctoObjectId DeploymentSiteRtId = OctoObjectId.GenerateNewId();
 
     protected readonly ICommunicationRepository CommunicationRepository;
-    protected readonly IPoolCache PoolCache;
+    protected readonly IDeploymentSiteCache DeploymentSiteCache;
     protected readonly ICommunicationEventService CommunicationEventService;
     protected readonly IOperatorConnectionManager OperatorConnectionManager;
     protected readonly IWorkloadEncryptionService EncryptionService;
@@ -32,8 +32,8 @@ internal abstract class PoolServiceTestsBase
     /// <summary>AB#4924 — substituted; the scale verb itself is covered by WorkloadLifecycleServiceTests.</summary>
     protected readonly IWorkloadLifecycleService WorkloadLifecycleService =
         Substitute.For<IWorkloadLifecycleService>();
-    protected readonly IPoolCachePublish PoolCachePublish;
-    protected readonly PoolTenant PoolTenant;
+    protected readonly IDeploymentSiteCachePublish PoolCachePublish;
+    protected readonly DeploymentSiteTenant DeploymentSiteTenant;
     protected readonly DeploymentSiteService DeploymentSiteService;
 
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
@@ -42,15 +42,15 @@ internal abstract class PoolServiceTestsBase
     protected PoolServiceTestsBase()
     {
         CommunicationRepository = Substitute.For<ICommunicationRepository>();
-        PoolCache = Substitute.For<IPoolCache>();
+        DeploymentSiteCache = Substitute.For<IDeploymentSiteCache>();
         CommunicationEventService = Substitute.For<ICommunicationEventService>();
         OperatorConnectionManager = Substitute.For<IOperatorConnectionManager>();
-        // Default: no other operator connection is still claiming any pool.
+        // Default: no other operator connection is still claiming any deploymentSite.
         // The multi-claim guard in SetCommunicationStateOfflineAsync needs a
         // non-null IReadOnlyList<string> back from this call; tests that
         // exercise the multi-claim path override the return value.
         OperatorConnectionManager
-            .GetConnectionsForPool(Arg.Any<string>(), Arg.Any<string>())
+            .GetConnectionsForDeploymentSite(Arg.Any<string>(), Arg.Any<string>())
             .Returns(Array.Empty<string>());
         EncryptionService = Substitute.For<IWorkloadEncryptionService>();
         // Default: Decrypt passes the value through unchanged (so non-secret
@@ -82,12 +82,12 @@ internal abstract class PoolServiceTestsBase
         OnDemandCapabilityService
             .EvaluateAsync(Arg.Any<string>(), Arg.Any<RtEntityId>())
             .Returns(new OnDemandCapabilityResult(true, []));
-        PoolCachePublish = Substitute.For<IPoolCachePublish>();
-        PoolTenant = new PoolTenant(PoolCachePublish, TenantId);
+        PoolCachePublish = Substitute.For<IDeploymentSiteCachePublish>();
+        DeploymentSiteTenant = new DeploymentSiteTenant(PoolCachePublish, TenantId);
 
         // AB#5027: the deploy path provisions the adapter's pipeline service account. Substituted
         // here — the real behaviour is covered by PipelineServiceAccountProvisioningServiceTests;
-        // what the pool suite asserts is that the call is made for Adapters and only for Adapters.
+        // what the deploymentSite suite asserts is that the call is made for Adapters and only for Adapters.
         ServiceAccountProvisioningService = Substitute.For<IPipelineServiceAccountProvisioningService>();
 
         // AB#5072: the deploy path projects the adapter's provisioned credentials into the
@@ -100,7 +100,7 @@ internal abstract class PoolServiceTestsBase
 
         DeploymentSiteService = new DeploymentSiteService(
             CommunicationRepository,
-            PoolCache,
+            DeploymentSiteCache,
             CommunicationEventService,
             OperatorConnectionManager,
             EncryptionService,
@@ -115,10 +115,10 @@ internal abstract class PoolServiceTestsBase
     [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]
     protected void GivenTenantInCache()
     {
-        PoolCache.TryGetTenant(TenantId, out Arg.Any<PoolTenant?>())
+        DeploymentSiteCache.TryGetTenant(TenantId, out Arg.Any<DeploymentSiteTenant?>())
             .Returns(x =>
             {
-                x[1] = PoolTenant;
+                x[1] = DeploymentSiteTenant;
                 return true;
             });
     }
@@ -126,12 +126,12 @@ internal abstract class PoolServiceTestsBase
     [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]
     protected void GivenTenantNotInCache()
     {
-        PoolCache.TryGetTenant(TenantId, out Arg.Any<PoolTenant?>())
+        DeploymentSiteCache.TryGetTenant(TenantId, out Arg.Any<DeploymentSiteTenant?>())
             .Returns(false);
     }
 
-    protected Pool AddPoolToTenant(string poolName = PoolName, string connectionId = ConnectionId)
+    protected DeploymentSite AddDeploymentSiteToTenant(string deploymentSiteName = DeploymentSiteName, string connectionId = ConnectionId)
     {
-        return PoolTenant.AddPool(poolName, DeploymentSiteRtId, connectionId);
+        return DeploymentSiteTenant.AddDeploymentSite(deploymentSiteName, DeploymentSiteRtId, connectionId);
     }
 }

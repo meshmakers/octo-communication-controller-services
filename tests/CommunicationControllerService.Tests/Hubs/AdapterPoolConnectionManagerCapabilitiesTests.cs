@@ -27,7 +27,7 @@ internal class AdapterPoolConnectionManagerCapabilitiesTests
         _manager.RegisterMember("conn-1", "octo-pool-0", LenderTenantId, AdapterPoolRtId,
             [Descriptor("FromCustomThing")], """{"$id":"pool-schema"}""");
 
-        var capabilities = _manager.TryGetPoolCapabilities(LenderTenantId, AdapterPoolRtId);
+        var capabilities = _manager.TryGetAdapterPoolCapabilities(LenderTenantId, AdapterPoolRtId);
 
         using var _ = Assert.Multiple();
         await Assert.That(capabilities).IsNotNull();
@@ -45,7 +45,7 @@ internal class AdapterPoolConnectionManagerCapabilitiesTests
         // Not a formality: the borrower's LentFromAdapterPoolRtId is the only thing that decides which
         // process will run its pipelines, and a manager that answered pool-agnostically would
         // validate a leased pipeline against an unrelated tenant's SDK.
-        await Assert.That(_manager.TryGetPoolCapabilities(LenderTenantId, AdapterPoolRtId)).IsNull();
+        await Assert.That(_manager.TryGetAdapterPoolCapabilities(LenderTenantId, AdapterPoolRtId)).IsNull();
     }
 
     [Test]
@@ -56,7 +56,7 @@ internal class AdapterPoolConnectionManagerCapabilitiesTests
         // "Registered but silent" must read as "nothing known", so the caller degrades to its
         // name-based fallback instead of classifying against an empty set — which would look like
         // "this pool can run nothing".
-        await Assert.That(_manager.TryGetPoolCapabilities(LenderTenantId, AdapterPoolRtId)).IsNull();
+        await Assert.That(_manager.TryGetAdapterPoolCapabilities(LenderTenantId, AdapterPoolRtId)).IsNull();
     }
 
     [Test]
@@ -69,7 +69,7 @@ internal class AdapterPoolConnectionManagerCapabilitiesTests
             [Descriptor("NewTrigger")], "{}");
         _manager.MarkDraining("conn-old");
 
-        var capabilities = _manager.TryGetPoolCapabilities(LenderTenantId, AdapterPoolRtId);
+        var capabilities = _manager.TryGetAdapterPoolCapabilities(LenderTenantId, AdapterPoolRtId);
 
         // Ordinal order alone would have picked "aaa-old-member".
         await Assert.That(capabilities!.MemberId).IsEqualTo("zzz-new-member");
@@ -83,8 +83,8 @@ internal class AdapterPoolConnectionManagerCapabilitiesTests
         _manager.RegisterMember("conn-3", "octo-pool-1", LenderTenantId, AdapterPoolRtId, [Descriptor("C")], "{}");
 
         // A pipeline's persisted execution class must not depend on dictionary enumeration order.
-        var first = _manager.TryGetPoolCapabilities(LenderTenantId, AdapterPoolRtId);
-        var second = _manager.TryGetPoolCapabilities(LenderTenantId, AdapterPoolRtId);
+        var first = _manager.TryGetAdapterPoolCapabilities(LenderTenantId, AdapterPoolRtId);
+        var second = _manager.TryGetAdapterPoolCapabilities(LenderTenantId, AdapterPoolRtId);
 
         using var _ = Assert.Multiple();
         await Assert.That(first!.MemberId).IsEqualTo("octo-pool-0");

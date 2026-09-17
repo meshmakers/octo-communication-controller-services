@@ -27,10 +27,10 @@ internal class OperatorConnectionManagerTests
     {
         var sut = CreateSut();
 
-        var pools = sut.GetDeployedPoolsForTenant(TenantA);
+        var deploymentSites = sut.GetDeployedDeploymentSitesForTenant(TenantA);
 
-        await Assert.That(pools).IsNotNull();
-        await Assert.That(pools.Count).IsEqualTo(0);
+        await Assert.That(deploymentSites).IsNotNull();
+        await Assert.That(deploymentSites.Count).IsEqualTo(0);
     }
 
     [Test]
@@ -38,11 +38,11 @@ internal class OperatorConnectionManagerTests
     {
         var sut = CreateSut();
 
-        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
+        await sut.NotifyDeploymentSiteDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
 
-        var pools = sut.GetDeployedPoolsForTenant(TenantA);
-        await Assert.That(pools.Count).IsEqualTo(1);
-        await Assert.That(pools.Contains(DeploymentSiteRtIdX)).IsTrue();
+        var deploymentSites = sut.GetDeployedDeploymentSitesForTenant(TenantA);
+        await Assert.That(deploymentSites.Count).IsEqualTo(1);
+        await Assert.That(deploymentSites.Contains(DeploymentSiteRtIdX)).IsTrue();
     }
 
     [Test]
@@ -50,21 +50,21 @@ internal class OperatorConnectionManagerTests
     {
         var sut = CreateSut();
 
-        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
-        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
+        await sut.NotifyDeploymentSiteDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
+        await sut.NotifyDeploymentSiteDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
 
-        await Assert.That(sut.GetDeployedPoolsForTenant(TenantA).Count).IsEqualTo(1);
+        await Assert.That(sut.GetDeployedDeploymentSitesForTenant(TenantA).Count).IsEqualTo(1);
     }
 
     [Test]
     public async Task NotifyPoolUndeployedAsync_RemovesTrackedPool()
     {
         var sut = CreateSut();
-        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
+        await sut.NotifyDeploymentSiteDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
 
-        await sut.NotifyPoolUndeployedAsync(TenantA, DeploymentSiteRtIdX);
+        await sut.NotifyDeploymentSiteUndeployedAsync(TenantA, DeploymentSiteRtIdX);
 
-        await Assert.That(sut.GetDeployedPoolsForTenant(TenantA).Count).IsEqualTo(0);
+        await Assert.That(sut.GetDeployedDeploymentSitesForTenant(TenantA).Count).IsEqualTo(0);
     }
 
     [Test]
@@ -72,20 +72,20 @@ internal class OperatorConnectionManagerTests
     {
         var sut = CreateSut();
 
-        await sut.NotifyPoolUndeployedAsync(TenantA, DeploymentSiteRtIdX);
+        await sut.NotifyDeploymentSiteUndeployedAsync(TenantA, DeploymentSiteRtIdX);
 
-        await Assert.That(sut.GetDeployedPoolsForTenant(TenantA).Count).IsEqualTo(0);
+        await Assert.That(sut.GetDeployedDeploymentSitesForTenant(TenantA).Count).IsEqualTo(0);
     }
 
     [Test]
     public async Task GetDeployedPoolsForTenant_IsolatesTenants()
     {
         var sut = CreateSut();
-        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
-        await sut.NotifyPoolDeployedAsync(PoolDto(TenantB, DeploymentSiteRtIdY));
+        await sut.NotifyDeploymentSiteDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
+        await sut.NotifyDeploymentSiteDeployedAsync(PoolDto(TenantB, DeploymentSiteRtIdY));
 
-        var poolsA = sut.GetDeployedPoolsForTenant(TenantA);
-        var poolsB = sut.GetDeployedPoolsForTenant(TenantB);
+        var poolsA = sut.GetDeployedDeploymentSitesForTenant(TenantA);
+        var poolsB = sut.GetDeployedDeploymentSitesForTenant(TenantB);
 
         await Assert.That(poolsA.Contains(DeploymentSiteRtIdX)).IsTrue();
         await Assert.That(poolsA.Contains(DeploymentSiteRtIdY)).IsFalse();
@@ -97,10 +97,10 @@ internal class OperatorConnectionManagerTests
     public async Task GetDeployedPools_AcrossTenants_ReturnsAll()
     {
         var sut = CreateSut();
-        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
-        await sut.NotifyPoolDeployedAsync(PoolDto(TenantB, DeploymentSiteRtIdY));
+        await sut.NotifyDeploymentSiteDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
+        await sut.NotifyDeploymentSiteDeployedAsync(PoolDto(TenantB, DeploymentSiteRtIdY));
 
-        var all = sut.GetDeployedPools().ToArray();
+        var all = sut.GetDeployedDeploymentSites().ToArray();
 
         await Assert.That(all.Length).IsEqualTo(2);
         await Assert.That(all.Any(p => p.TenantId == TenantA && p.DeploymentSiteRtId == DeploymentSiteRtIdX)).IsTrue();
@@ -111,12 +111,12 @@ internal class OperatorConnectionManagerTests
     public async Task NotifyPoolUndeployedAsync_LastPoolForTenant_RemovesTenantBucket()
     {
         var sut = CreateSut();
-        await sut.NotifyPoolDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
+        await sut.NotifyDeploymentSiteDeployedAsync(PoolDto(TenantA, DeploymentSiteRtIdX));
 
-        await sut.NotifyPoolUndeployedAsync(TenantA, DeploymentSiteRtIdX);
+        await sut.NotifyDeploymentSiteUndeployedAsync(TenantA, DeploymentSiteRtIdX);
 
-        await Assert.That(sut.GetDeployedPools()).IsEmpty();
-        await Assert.That(sut.GetDeployedPoolsForTenant(TenantA)).IsEmpty();
+        await Assert.That(sut.GetDeployedDeploymentSites()).IsEmpty();
+        await Assert.That(sut.GetDeployedDeploymentSitesForTenant(TenantA)).IsEmpty();
     }
 
     // ---- Workload tracking ----
@@ -250,12 +250,12 @@ internal class OperatorConnectionManagerTests
     [Test]
     public async Task NotifyWorkloadDeployedAsync_RoutesOnlyToOperatorOwningTheTargetPool()
     {
-        // Regression: deploying a workload assigned to an edge pool while a
+        // Regression: deploying a workload assigned to an edge deploymentSite while a
         // central operator is also connected used to fan the event out to
         // both operators. The central operator would happily helm-install
         // the chart in its own namespace and report success, overwriting
         // the edge operator's failure on the runtime entity. Now workload
-        // events must hit only the operator that registered the pool.
+        // events must hit only the operator that registered the deploymentSite.
         var (sut, _, centralProxy, edgeProxy) = CreateRoutingSut();
         sut.AddOperator(ConnCentral);
         sut.AddOperator(ConnEdge);
@@ -279,7 +279,7 @@ internal class OperatorConnectionManagerTests
         var (sut, _, centralProxy, edgeProxy) = CreateRoutingSut();
         sut.AddOperator(ConnCentral);
         sut.AddOperator(ConnEdge);
-        // Neither operator has claimed pool-orphan — must not fan out.
+        // Neither operator has claimed deploymentSite-orphan — must not fan out.
         sut.RegisterDeploymentSiteForConnection(ConnCentral, TenantA, CloudPoolRtId);
         sut.RegisterDeploymentSiteForConnection(ConnEdge, TenantA, EdgePoolRtId);
 
@@ -321,7 +321,7 @@ internal class OperatorConnectionManagerTests
     public async Task NotifyWorkloadDeployedAsync_TracksWorkloadEvenWhenNoOperatorRegistered()
     {
         // Tracking is the source of truth for the tenant-delete cascade;
-        // it must happen even when no operator currently owns the pool
+        // it must happen even when no operator currently owns the deploymentSite
         // (e.g. the operator disconnected between deploy and cascade).
         var sut = CreateSut();
 
@@ -404,9 +404,9 @@ internal class OperatorConnectionManagerTests
     [Test]
     public async Task NotifyWorkloadUndeployedAsync_NoOwner_IsReplayedWhenThePoolRegisters()
     {
-        // The prod-1 incident (AB#4371): undeploy fired while the pool was
+        // The prod-1 incident (AB#4371): undeploy fired while the deploymentSite was
         // orphaned used to be dropped, leaving the helm release running
-        // forever. It must be queued and replayed on pool registration.
+        // forever. It must be queued and replayed on deploymentSite registration.
         var (sut, _, centralProxy, _) = CreateRoutingSut();
         sut.AddOperator(ConnCentral);
 
@@ -550,8 +550,8 @@ internal class OperatorConnectionManagerTests
     [Test]
     public async Task NotifyWorkloadScaleAsync_RoutesOnlyToOperatorOwningTheTargetPool()
     {
-        // Same pool-scoped routing contract as deploy/undeploy: a central and
-        // an edge operator can both be connected — only the pool owner may
+        // Same deploymentSite-scoped routing contract as deploy/undeploy: a central and
+        // an edge operator can both be connected — only the deploymentSite owner may
         // receive the scale request.
         var (sut, _, centralProxy, edgeProxy) = CreateRoutingSut();
         sut.AddOperator(ConnCentral);
@@ -576,7 +576,7 @@ internal class OperatorConnectionManagerTests
     [Test]
     public async Task NotifyWorkloadScaleAsync_NoOwner_IsReplayedAsScaleWorkloadWhenThePoolRegisters()
     {
-        // AB#4371 contract extended to scale: a scale fired while the pool is
+        // AB#4371 contract extended to scale: a scale fired while the deploymentSite is
         // transiently orphaned must be queued and replayed — a dropped scale-1
         // leaves a wake gate waiting for its full budget.
         var (sut, _, centralProxy, _) = CreateRoutingSut();

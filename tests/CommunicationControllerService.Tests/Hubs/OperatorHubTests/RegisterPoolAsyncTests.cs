@@ -18,7 +18,7 @@ internal class RegisterPoolAsyncTests : IDisposable
         Substitute.For<IOperatorConnectionManager>();
     private readonly ICommunicationRepository _repository =
         Substitute.For<ICommunicationRepository>();
-    private readonly IDeploymentSiteService _poolService =
+    private readonly IDeploymentSiteService _deploymentSiteService =
         Substitute.For<IDeploymentSiteService>();
     private readonly IShutdownState _shutdownState =
         Substitute.For<IShutdownState>();
@@ -30,7 +30,7 @@ internal class RegisterPoolAsyncTests : IDisposable
 
     public RegisterPoolAsyncTests()
     {
-        _hub = new OperatorHub(_connectionManager, _repository, _poolService, _shutdownState,
+        _hub = new OperatorHub(_connectionManager, _repository, _deploymentSiteService, _shutdownState,
             _eventService, _workloadLifecycleService);
 
         var context = Substitute.For<HubCallerContext>();
@@ -44,16 +44,16 @@ internal class RegisterPoolAsyncTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    private void GivenPoolWithEnvironment(RtEnvironmentEnum environment, string name = "test-pool")
+    private void GivenPoolWithEnvironment(RtEnvironmentEnum environment, string name = "test-deploymentSite")
     {
-        var pool = new RtDeploymentSite
+        var deploymentSite = new RtDeploymentSite
         {
             RtId = new OctoObjectId(ValidPoolRtId),
             CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
             Name = name,
             Environment = environment,
         };
-        _repository.GetDeploymentSitesAsync(TenantId).Returns(new[] { pool });
+        _repository.GetDeploymentSitesAsync(TenantId).Returns(new[] { deploymentSite });
     }
 
     [Test]
@@ -61,13 +61,13 @@ internal class RegisterPoolAsyncTests : IDisposable
     {
         // Operator did not call RegisterOperatorAsync(...) with a mode (legacy build).
         // Enforcement is skipped; the registration is recorded as an information event
-        // so the audit trail still shows that a mode-less operator claimed the pool.
+        // so the audit trail still shows that a mode-less operator claimed the deploymentSite.
         _connectionManager.GetOperatorMode(ConnectionId).Returns((bool?)null);
 
         await _hub.RegisterDeploymentSiteAsync(TenantId, ValidPoolRtId);
 
         _connectionManager.Received(1).RegisterDeploymentSiteForConnection(ConnectionId, TenantId, ValidPoolRtId);
-        await _poolService.Received(1).SetCommunicationStateOnlineAsync(
+        await _deploymentSiteService.Received(1).SetCommunicationStateOnlineAsync(
             TenantId,
             Arg.Is<OctoObjectId>(id => id.ToString() == ValidPoolRtId),
             ConnectionId);
@@ -86,7 +86,7 @@ internal class RegisterPoolAsyncTests : IDisposable
         await _hub.RegisterDeploymentSiteAsync(TenantId, ValidPoolRtId);
 
         _connectionManager.Received(1).RegisterDeploymentSiteForConnection(ConnectionId, TenantId, ValidPoolRtId);
-        await _poolService.Received(1).SetCommunicationStateOnlineAsync(
+        await _deploymentSiteService.Received(1).SetCommunicationStateOnlineAsync(
             TenantId,
             Arg.Is<OctoObjectId>(id => id.ToString() == ValidPoolRtId),
             ConnectionId);
@@ -103,7 +103,7 @@ internal class RegisterPoolAsyncTests : IDisposable
         await _hub.RegisterDeploymentSiteAsync(TenantId, ValidPoolRtId);
 
         _connectionManager.Received(1).RegisterDeploymentSiteForConnection(ConnectionId, TenantId, ValidPoolRtId);
-        await _poolService.Received(1).SetCommunicationStateOnlineAsync(
+        await _deploymentSiteService.Received(1).SetCommunicationStateOnlineAsync(
             TenantId,
             Arg.Is<OctoObjectId>(id => id.ToString() == ValidPoolRtId),
             ConnectionId);
@@ -115,21 +115,21 @@ internal class RegisterPoolAsyncTests : IDisposable
     public async Task EdgeMode_CloudPool_RejectsAndAudits()
     {
         // This is the regression that the operator-side reconnect bug exposed:
-        // an edge operator must not be able to claim a Cloud pool, otherwise
+        // an edge operator must not be able to claim a Cloud deploymentSite, otherwise
         // workload-deploy events get routed to the edge K3s alongside the
         // central cluster.
         _connectionManager.GetOperatorMode(ConnectionId).Returns(false);
-        GivenPoolWithEnvironment(RtEnvironmentEnum.Cloud, name: "the-cloud-pool");
+        GivenPoolWithEnvironment(RtEnvironmentEnum.Cloud, name: "the-cloud-deploymentSite");
 
         await Assert.That(async () => await _hub.RegisterDeploymentSiteAsync(TenantId, ValidPoolRtId))
             .Throws<HubException>();
 
         _connectionManager.DidNotReceiveWithAnyArgs().RegisterDeploymentSiteForConnection(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>());
-        await _poolService.DidNotReceiveWithAnyArgs().SetCommunicationStateOnlineAsync(
+        await _deploymentSiteService.DidNotReceiveWithAnyArgs().SetCommunicationStateOnlineAsync(
             Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<string>());
         await _eventService.Received(1).StoreErrorEventAsync(TenantId,
-            Arg.Is<string>(s => s.Contains("the-cloud-pool") && s.Contains("Cloud") && s.Contains("edge")),
+            Arg.Is<string>(s => s.Contains("the-cloud-deploymentSite") && s.Contains("Cloud") && s.Contains("edge")),
             Arg.Any<Meshmakers.Octo.ConstructionKit.Contracts.RtEntityId?>());
     }
 
@@ -137,17 +137,17 @@ internal class RegisterPoolAsyncTests : IDisposable
     public async Task CentralMode_EdgePool_RejectsAndAudits()
     {
         _connectionManager.GetOperatorMode(ConnectionId).Returns(true);
-        GivenPoolWithEnvironment(RtEnvironmentEnum.Edge, name: "the-edge-pool");
+        GivenPoolWithEnvironment(RtEnvironmentEnum.Edge, name: "the-edge-deploymentSite");
 
         await Assert.That(async () => await _hub.RegisterDeploymentSiteAsync(TenantId, ValidPoolRtId))
             .Throws<HubException>();
 
         _connectionManager.DidNotReceiveWithAnyArgs().RegisterDeploymentSiteForConnection(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>());
-        await _poolService.DidNotReceiveWithAnyArgs().SetCommunicationStateOnlineAsync(
+        await _deploymentSiteService.DidNotReceiveWithAnyArgs().SetCommunicationStateOnlineAsync(
             Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<string>());
         await _eventService.Received(1).StoreErrorEventAsync(TenantId,
-            Arg.Is<string>(s => s.Contains("the-edge-pool") && s.Contains("Edge") && s.Contains("central")),
+            Arg.Is<string>(s => s.Contains("the-edge-deploymentSite") && s.Contains("Edge") && s.Contains("central")),
             Arg.Any<Meshmakers.Octo.ConstructionKit.Contracts.RtEntityId?>());
     }
 
@@ -163,7 +163,7 @@ internal class RegisterPoolAsyncTests : IDisposable
         _connectionManager.DidNotReceiveWithAnyArgs().RegisterDeploymentSiteForConnection(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>());
         await _eventService.Received(1).StoreErrorEventAsync(TenantId,
-            Arg.Is<string>(s => s.Contains("no such pool")),
+            Arg.Is<string>(s => s.Contains("no such deploymentSite")),
             Arg.Any<Meshmakers.Octo.ConstructionKit.Contracts.RtEntityId?>());
     }
 
@@ -180,7 +180,7 @@ internal class RegisterPoolAsyncTests : IDisposable
 
         _connectionManager.DidNotReceiveWithAnyArgs().RegisterDeploymentSiteForConnection(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>());
-        await _poolService.DidNotReceiveWithAnyArgs().SetCommunicationStateOnlineAsync(
+        await _deploymentSiteService.DidNotReceiveWithAnyArgs().SetCommunicationStateOnlineAsync(
             Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<string>());
     }
 
@@ -192,7 +192,7 @@ internal class RegisterPoolAsyncTests : IDisposable
 
         _connectionManager.DidNotReceiveWithAnyArgs().RegisterDeploymentSiteForConnection(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>());
-        await _poolService.DidNotReceiveWithAnyArgs().SetCommunicationStateOnlineAsync(
+        await _deploymentSiteService.DidNotReceiveWithAnyArgs().SetCommunicationStateOnlineAsync(
             Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<string>());
     }
 

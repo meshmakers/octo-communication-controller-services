@@ -9,15 +9,15 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 /// <summary>
 ///    Handles tenant lifecycle events for communication management.
 ///    Tenant lifecycle no longer triggers operator-side actions — those are
-///    driven by pool deploy / undeploy events instead. This consumer keeps
-///    pre/post-update bookkeeping for adapters and pools so that disabling a
-///    tenant for communication tears down its pool/adapter caches cleanly.
+///    driven by deploymentSite deploy / undeploy events instead. This consumer keeps
+///    pre/post-update bookkeeping for adapters and deploymentSites so that disabling a
+///    tenant for communication tears down its deploymentSite/adapter caches cleanly.
 /// </summary>
 internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>, IDistributedConsumer<PosUpdateTenant>,
     IDistributedConsumer<PreDeleteTenant>, IDistributedConsumer<PosCreateTenant>
 {
     private readonly ILogger<TenantManagementConsumer> _logger;
-    private readonly IDeploymentSiteService _poolService;
+    private readonly IDeploymentSiteService _deploymentSiteService;
     private readonly IAdapterService _adapterService;
     private readonly IConfigurationService _configurationService;
     private readonly ICommunicationEventService _eventService;
@@ -47,7 +47,7 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
         ICommunicationEventService eventService)
     {
         _logger = logger;
-        _poolService = poolService;
+        _deploymentSiteService = poolService;
         _adapterService = adapterService;
         _configurationService = configurationService;
         _eventService = eventService;
@@ -138,7 +138,7 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
             }
 
             // Tenant creation no longer triggers any operator-side action.
-            // Pool deploy events do.
+            // DeploymentSite deploy events do.
         }
         catch (Exception e)
         {
@@ -164,9 +164,9 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
             }
 
             // Tell the central Communication Operator to clean up every Cloud
-            // pool of this tenant before the rest of the tenant data goes
-            // away. Edge pools are managed externally and stay untouched.
-            await _poolService.UndeployAllCloudPoolsAsync(context.Message.TenantId);
+            // deploymentSite of this tenant before the rest of the tenant data goes
+            // away. Edge deploymentSites are managed externally and stay untouched.
+            await _deploymentSiteService.UndeployAllCloudDeploymentSitesAsync(context.Message.TenantId);
 
             await ExecutePreTenantUpdate(context.Message.TenantId);
         }
@@ -230,7 +230,7 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
         if (await _configurationService.IsEnabledAsync(tenantId))
         {
             await _adapterService.PreUpdateTenantAsync(tenantId);
-            await _poolService.PreUpdateTenantAsync(tenantId);
+            await _deploymentSiteService.PreUpdateTenantAsync(tenantId);
         }
     }
 
@@ -239,7 +239,7 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
         if (await _configurationService.IsEnabledAsync(tenantId))
         {
             await _adapterService.PosUpdateTenantAsync(tenantId);
-            await _poolService.PosUpdateTenantAsync(tenantId);
+            await _deploymentSiteService.PosUpdateTenantAsync(tenantId);
         }
     }
 }

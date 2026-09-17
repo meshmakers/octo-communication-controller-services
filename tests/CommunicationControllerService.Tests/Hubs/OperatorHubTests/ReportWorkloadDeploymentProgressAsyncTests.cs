@@ -20,7 +20,7 @@ internal class ReportWorkloadDeploymentProgressAsyncTests : IDisposable
         Substitute.For<IOperatorConnectionManager>();
     private readonly ICommunicationRepository _repository =
         Substitute.For<ICommunicationRepository>();
-    private readonly IDeploymentSiteService _poolService =
+    private readonly IDeploymentSiteService _deploymentSiteService =
         Substitute.For<IDeploymentSiteService>();
     private readonly IShutdownState _shutdownState =
         Substitute.For<IShutdownState>();
@@ -32,7 +32,7 @@ internal class ReportWorkloadDeploymentProgressAsyncTests : IDisposable
 
     public ReportWorkloadDeploymentProgressAsyncTests()
     {
-        _hub = new OperatorHub(_connectionManager, _repository, _poolService, _shutdownState,
+        _hub = new OperatorHub(_connectionManager, _repository, _deploymentSiteService, _shutdownState,
             _eventService, _workloadLifecycleService);
     }
 

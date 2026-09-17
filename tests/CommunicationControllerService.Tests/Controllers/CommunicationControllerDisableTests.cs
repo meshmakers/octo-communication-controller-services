@@ -48,7 +48,7 @@ internal class CommunicationControllerDisableTests
     public async Task Disable_ReturnsConflictWithTheReason_WhenResourcesAreStillDeployed()
     {
         var (sut, configuration) = CreateSut();
-        const string reason = "Communication cannot be disabled for tenant 'child-a' while the following resources are still deployed: Pool 'edge-a' (Deployed).";
+        const string reason = "Communication cannot be disabled for tenant 'child-a' while the following resources are still deployed: DeploymentSite 'edge-a' (Deployed).";
         configuration.DisableAsync(TenantId).ThrowsAsync(ConfigurationException.TenantDisableBlocked(reason));
 
         var result = await sut.Disable();

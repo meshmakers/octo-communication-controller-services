@@ -13,7 +13,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
 
 /// <summary>
-/// Manages pool deployments and lifecycle.
+/// Manages deploymentSite deployments and lifecycle.
 /// </summary>
 [Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
 [ApiController]
@@ -22,27 +22,27 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.C
 public class DeploymentSiteController : ControllerBase
 {
     private readonly ILogger<DeploymentSiteController> _logger;
-    private readonly IDeploymentSiteService _poolService;
+    private readonly IDeploymentSiteService _deploymentSiteService;
     private readonly IConfigurationService _configurationService;
 
     /// <summary>
     /// Constructor
     /// </summary>
     /// <param name="logger">Logging object</param>
-    /// <param name="poolService">Pool management service instance</param>
+    /// <param name="poolService">DeploymentSite management service instance</param>
     /// <param name="configurationService">Enabled state of Communication per tenant</param>
     public DeploymentSiteController(ILogger<DeploymentSiteController> logger, IDeploymentSiteService poolService,
         IConfigurationService configurationService)
     {
         _logger = logger;
-        _poolService = poolService;
+        _deploymentSiteService = poolService;
         _configurationService = configurationService;
     }
 
     /// <summary>
     /// AB#4255: deploying creates operator-managed cluster resources, which must not happen on a
     /// tenant whose Communication is disabled — the tenant delete guard only sees the flag, and a
-    /// pool deployed afterwards would be orphaned. This service does not run the platform's tenant
+    /// deploymentSite deployed afterwards would be orphaned. This service does not run the platform's tenant
     /// enabled-gate middleware (it would also gate the adapter hub), so the two resource-creating
     /// endpoints check the flag themselves. Undeploy stays open so remediation always works.
     /// </summary>
@@ -56,11 +56,11 @@ public class DeploymentSiteController : ControllerBase
         _logger.LogWarning("Rejected {Operation} for tenant '{TenantId}': Communication is disabled", operation,
             tenantId);
         return Conflict(new OperationFailedErrorDto(
-            $"Communication is disabled for tenant '{tenantId}'. Enable it first (EnableCommunication) before deploying pools or workloads."));
+            $"Communication is disabled for tenant '{tenantId}'. Enable it first (EnableCommunication) before deploying deploymentSites or workloads."));
     }
     
     /// <summary>
-    /// Returns a list of all pools for the tenant
+    /// Returns a list of all deploymentSites for the tenant
     /// </summary>
     /// <returns></returns>
     [HttpGet]
@@ -75,25 +75,25 @@ public class DeploymentSiteController : ControllerBase
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
 
-        var pools = await _poolService.GetDeploymentSiteSummariesAsync(tenantId);
+        var deploymentSites = await _deploymentSiteService.GetDeploymentSiteSummariesAsync(tenantId);
 
-        return Ok(pools);
+        return Ok(deploymentSites);
     }
 
     /// <summary>
-    /// Deploys a pool. For Cloud-environment pools, this triggers the central
-    /// Communication Operator to provision the corresponding CommunicationPool
-    /// CR and broker secret. Edge-environment pools transition state without
+    /// Deploys a deploymentSite. For Cloud-environment deploymentSites, this triggers the central
+    /// Communication Operator to provision the corresponding DeploymentSite
+    /// CR and broker secret. Edge-environment deploymentSites transition state without
     /// any operator notification.
     /// </summary>
-    /// <param name="poolRtId">The id of the pool.</param>
+    /// <param name="poolRtId">The id of the deploymentSite.</param>
     [HttpPost("deploy")]
     [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(OperationFailedErrorDto), StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> DeployPoolAsync([Required][FromQuery] OctoObjectId poolRtId)
+    public async Task<IActionResult> DeployDeploymentSiteAsync([Required][FromQuery] OctoObjectId poolRtId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
@@ -101,35 +101,35 @@ public class DeploymentSiteController : ControllerBase
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
         }
 
-        if (await RefuseWhileDisabledAsync(tenantId, "pool deploy") is { } refusal)
+        if (await RefuseWhileDisabledAsync(tenantId, "deploymentSite deploy") is { } refusal)
         {
             return refusal;
         }
 
         try
         {
-            await _poolService.DeployPoolAsync(tenantId, poolRtId);
+            await _deploymentSiteService.DeployDeploymentSiteAsync(tenantId, poolRtId);
             return NoContent();
         }
         catch (DeploymentSiteServiceException e)
         {
-            _logger.LogError(e, "Error deploying pool");
+            _logger.LogError(e, "Error deploying deploymentSite");
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
         }
     }
 
     /// <summary>
-    /// Undeploys a pool. For Cloud-environment pools, this notifies the
-    /// central Communication Operator to remove the CommunicationPool CR and
+    /// Undeploys a deploymentSite. For Cloud-environment deploymentSites, this notifies the
+    /// central Communication Operator to remove the DeploymentSite CR and
     /// broker secret.
     /// </summary>
-    /// <param name="poolRtId">The id of the pool.</param>
+    /// <param name="poolRtId">The id of the deploymentSite.</param>
     [HttpPost("undeploy")]
     [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> UndeployPoolAsync([Required][FromQuery] OctoObjectId poolRtId)
+    public async Task<IActionResult> UndeployDeploymentSiteAsync([Required][FromQuery] OctoObjectId poolRtId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
@@ -139,19 +139,19 @@ public class DeploymentSiteController : ControllerBase
 
         try
         {
-            await _poolService.UndeployPoolAsync(tenantId, poolRtId);
+            await _deploymentSiteService.UndeployDeploymentSiteAsync(tenantId, poolRtId);
             return NoContent();
         }
         catch (DeploymentSiteServiceException e)
         {
-            _logger.LogError(e, "Error undeploying pool");
+            _logger.LogError(e, "Error undeploying deploymentSite");
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
         }
     }
 
     /// <summary>
     /// Deploys a single workload (Adapter or Application). Independent of
-    /// pool deploy — the workload's parent pool must already be deployed,
+    /// deploymentSite deploy — the workload's parent deploymentSite must already be deployed,
     /// but this call only triggers the operator's helm-install for the
     /// one workload.
     /// </summary>
@@ -177,7 +177,7 @@ public class DeploymentSiteController : ControllerBase
 
         try
         {
-            await _poolService.DeployWorkloadAsync(tenantId, workloadRtId);
+            await _deploymentSiteService.DeployWorkloadAsync(tenantId, workloadRtId);
             return NoContent();
         }
         catch (DeploymentSiteServiceException e)
@@ -206,7 +206,7 @@ public class DeploymentSiteController : ControllerBase
 
         try
         {
-            await _poolService.UndeployWorkloadAsync(tenantId, workloadRtId);
+            await _deploymentSiteService.UndeployWorkloadAsync(tenantId, workloadRtId);
             return NoContent();
         }
         catch (DeploymentSiteServiceException e)
@@ -218,13 +218,13 @@ public class DeploymentSiteController : ControllerBase
 
     /// <summary>
     /// Scales a deployed <c>AdapterPool</c> to the requested number of members (AB#4924).
-    /// The request is held inside the pool's declared <c>MinReplicas..MaxReplicas</c> range; the
+    /// The request is held inside the deploymentSite's declared <c>MinReplicas..MaxReplicas</c> range; the
     /// response body carries the member count actually requested from the operator, which differs
     /// from the input exactly when the input was outside that range.
     /// </summary>
     /// <param name="workloadRtId">The runtime id of the AdapterPool workload.</param>
     /// <param name="replicas">Desired member count.</param>
-    [HttpPost("workloads/adapter-pool/scale")]
+    [HttpPost("workloads/adapter-deploymentSite/scale")]
     [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
     [ProducesResponseType(typeof(AdapterPoolScaleResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
@@ -243,27 +243,27 @@ public class DeploymentSiteController : ControllerBase
             return BadRequest(new ErrorResponse { ErrorMessage = "Replicas must not be negative." });
         }
 
-        if (await RefuseWhileDisabledAsync(tenantId, "adapter pool scale") is { } refusal)
+        if (await RefuseWhileDisabledAsync(tenantId, "adapter deploymentSite scale") is { } refusal)
         {
             return refusal;
         }
 
         try
         {
-            var effective = await _poolService.ScaleAdapterPoolAsync(tenantId, workloadRtId, replicas);
+            var effective = await _deploymentSiteService.ScaleAdapterPoolAsync(tenantId, workloadRtId, replicas);
             return Ok(new AdapterPoolScaleResultDto(effective));
         }
         catch (DeploymentSiteServiceException e)
         {
-            _logger.LogError(e, "Error scaling adapter pool");
+            _logger.LogError(e, "Error scaling adapter deploymentSite");
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
         }
     }
 }
 
 /// <summary>
-/// Result of an adapter-pool scale request (AB#4924): the member count actually requested from the
-/// operator after the pool's declared <c>MinReplicas..MaxReplicas</c> range was applied.
+/// Result of an adapter-deploymentSite scale request (AB#4924): the member count actually requested from the
+/// operator after the deploymentSite's declared <c>MinReplicas..MaxReplicas</c> range was applied.
 /// </summary>
 /// <param name="Replicas">Effective member count.</param>
 public record AdapterPoolScaleResultDto(int Replicas);

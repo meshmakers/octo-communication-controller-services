@@ -1,5 +1,5 @@
 using System.Globalization;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Pools;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.DeploymentSites;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
@@ -15,7 +15,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly ICommunicationRepository _communicationRepository;
-    private readonly IPoolCache _poolCache;
+    private readonly IDeploymentSiteCache _deploymentSiteCache;
     private readonly ICommunicationEventService _eventService;
     private readonly IOperatorConnectionManager _operatorConnectionManager;
     private readonly IWorkloadEncryptionService _encryptionService;
@@ -50,15 +50,15 @@ internal class DeploymentSiteService : IDeploymentSiteService
     /// <param name="communicationRepository">Communication repository</param>
     /// <param name="poolCache">Distributed and synchronized data between nodes</param>
     /// <param name="eventService">Service for storing system events</param>
-    /// <param name="operatorConnectionManager">Manages SignalR connections to central Communication Operators (for Cloud-pool deploy/undeploy notifications and PreUpdateTenant fan-out)</param>
+    /// <param name="operatorConnectionManager">Manages SignalR connections to central Communication Operators (for Cloud-deploymentSite deploy/undeploy notifications and PreUpdateTenant fan-out)</param>
     /// <param name="encryptionService">Decrypts secret-flagged ValueOverride values before they go on the SignalR wire</param>
     /// <param name="templateResolver">Resolves <c>{{domain.NAME}}</c>, <c>{{service.NAME}}</c> and <c>{{context.tenantId}}</c> placeholders in workload <c>Hostname</c>, non-secret <c>ValueOverride.Value</c> and <c>ValuesYaml</c> at deploy time</param>
     /// <param name="onDemandCapabilityService">Validates LifecycleMode=OnDemand against the workload's trigger classification at deploy time (AB#4984)</param>
     /// <param name="serviceAccountProvisioningService">Provisions the adapter's pipeline service account on deploy (AB#5027)</param>
     /// <param name="serviceAccountResolver">Reads the adapter's provisioned service account so its credentials can be projected into the workload's Helm values (AB#5072)</param>
-    /// <param name="lendingScopeResolver">Resolves which tenants an adapter pool may lend to, so a Leased workload naming an out-of-scope lender is refused at deploy time (AB#4924)</param>
-    /// <param name="workloadLifecycleService">Carries the AB#4917 scale verb to the operator owning the workload's pool; reused for adapter-pool scaling so the MinReplicas floor is enforced in one place (AB#4924)</param>
-    public DeploymentSiteService(ICommunicationRepository communicationRepository, IPoolCache poolCache,
+    /// <param name="lendingScopeResolver">Resolves which tenants an adapter deploymentSite may lend to, so a Leased workload naming an out-of-scope lender is refused at deploy time (AB#4924)</param>
+    /// <param name="workloadLifecycleService">Carries the AB#4917 scale verb to the operator owning the workload's deploymentSite; reused for adapter-deploymentSite scaling so the MinReplicas floor is enforced in one place (AB#4924)</param>
+    public DeploymentSiteService(ICommunicationRepository communicationRepository, IDeploymentSiteCache poolCache,
         ICommunicationEventService eventService,
         IOperatorConnectionManager operatorConnectionManager,
         IWorkloadEncryptionService encryptionService,
@@ -70,7 +70,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
         IWorkloadLifecycleService workloadLifecycleService)
     {
         _communicationRepository = communicationRepository;
-        _poolCache = poolCache;
+        _deploymentSiteCache = poolCache;
         _eventService = eventService;
         _operatorConnectionManager = operatorConnectionManager;
         _encryptionService = encryptionService;
@@ -83,58 +83,58 @@ internal class DeploymentSiteService : IDeploymentSiteService
     }
     
     /// <inheritdoc />
-    public async Task UnregisterPoolOperatorAsync(string tenantId, OctoObjectId deploymentSiteRtId)
+    public async Task UnregisterDeploymentSiteOperatorAsync(string tenantId, OctoObjectId deploymentSiteRtId)
     {
-        Logger.Info("[{TenantId}] Unregistering operator for pool '{DeploymentSiteRtId}'",
+        Logger.Info("[{TenantId}] Unregistering operator for deploymentSite '{DeploymentSiteRtId}'",
             tenantId, deploymentSiteRtId);
 
-        if (!_poolCache.TryGetTenant(tenantId, out var tenantDescription))
+        if (!_deploymentSiteCache.TryGetTenant(tenantId, out var tenantDescription))
         {
             return;
         }
-        if (!tenantDescription.PoolsById.TryGetValue(deploymentSiteRtId, out var deploymentSiteDescription))
+        if (!tenantDescription.DeploymentSitesById.TryGetValue(deploymentSiteRtId, out var deploymentSiteDescription))
         {
             return;
         }
 
         // Set communication state to Unregistered *before* removing from cache.
-        // After RemovePool, the OnDisconnectedAsync that follows the operator's
-        // graceful disconnect can no longer locate the pool, so any state write
+        // After RemoveDeploymentSite, the OnDisconnectedAsync that follows the operator's
+        // graceful disconnect can no longer locate the deploymentSite, so any state write
         // would silently no-op and the UI would keep showing Online forever.
-        await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, deploymentSiteDescription.DeploymentSiteRtId,
+        await _communicationRepository.SetDeploymentSiteCommunicationStateAsync(tenantId, deploymentSiteDescription.DeploymentSiteRtId,
             RtCommunicationStateEnum.Unregistered);
 
-        var poolName = deploymentSiteDescription.DeploymentSiteName;
-        tenantDescription.RemovePool(deploymentSiteDescription.DeploymentSiteRtId);
+        var deploymentSiteName = deploymentSiteDescription.DeploymentSiteName;
+        tenantDescription.RemoveDeploymentSite(deploymentSiteDescription.DeploymentSiteRtId);
 
-        // Edge pools stay Disabled regardless of operator presence; only Cloud
-        // pools flip back to Pending until a new operator re-registers.
-        var pools = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
-        var rtPool = pools.FirstOrDefault(p => p.RtId == deploymentSiteRtId);
-        if (rtPool != null && !ActiveDeployment.IsActive(rtPool.DeploymentState))
+        // Edge deploymentSites stay Disabled regardless of operator presence; only Cloud
+        // deploymentSites flip back to Pending until a new operator re-registers.
+        var deploymentSites = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
+        var rtDeploymentSite = deploymentSites.FirstOrDefault(p => p.RtId == deploymentSiteRtId);
+        if (rtDeploymentSite != null && !ActiveDeployment.IsActive(rtDeploymentSite.DeploymentState))
         {
-            // AB#4255: an operator releasing a pool that already rests (UndeployPoolAsync wrote
+            // AB#4255: an operator releasing a deploymentSite that already rests (UndeployDeploymentSiteAsync wrote
             // Undeployed / Disabled before notifying it) is the acknowledgement of that undeploy.
-            // Overwriting the resting state here parked every gracefully undeployed Cloud pool at
+            // Overwriting the resting state here parked every gracefully undeployed Cloud deploymentSite at
             // Pending forever, which the Communication disable guard would then refuse on.
             Logger.Info(
-                "[{TenantId}] Pool '{DeploymentSiteRtId}' already rests at {DeploymentState}; operator release leaves it there",
-                tenantId, deploymentSiteRtId, rtPool.DeploymentState);
+                "[{TenantId}] DeploymentSite '{DeploymentSiteRtId}' already rests at {DeploymentState}; operator release leaves it there",
+                tenantId, deploymentSiteRtId, rtDeploymentSite.DeploymentState);
         }
         else
         {
-            var targetState = rtPool?.Environment == RtEnvironmentEnum.Edge
+            var targetState = rtDeploymentSite?.Environment == RtEnvironmentEnum.Edge
                 ? RtDeploymentStateEnum.Disabled
                 : RtDeploymentStateEnum.Pending;
-            await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, deploymentSiteDescription.DeploymentSiteRtId,
+            await _communicationRepository.SetDeploymentSiteDeploymentStateAsync(tenantId, deploymentSiteDescription.DeploymentSiteRtId,
                 targetState);
         }
 
         await _eventService.StoreInformationEventAsync(tenantId,
-            $"Pool operator for pool '{poolName}' unregistered.",
+            $"DeploymentSite operator for deploymentSite '{deploymentSiteName}' unregistered.",
             new RtEntityId(SystemCommunicationCkIds.RtCkDeploymentSiteTypeId, deploymentSiteDescription.DeploymentSiteRtId));
 
-        Logger.Info("[{TenantId}] Operator for pool '{DeploymentSiteRtId}' unregistered", tenantId, deploymentSiteRtId);
+        Logger.Info("[{TenantId}] Operator for deploymentSite '{DeploymentSiteRtId}' unregistered", tenantId, deploymentSiteRtId);
     }
 
     private readonly SemaphoreSlim _semaphore = new(1, 1);
@@ -147,27 +147,27 @@ internal class DeploymentSiteService : IDeploymentSiteService
         {
             await _semaphore.WaitAsync();
 
-            if (_poolCache.TryGetTenant(tenantId, out var poolTenant))
+            if (_deploymentSiteCache.TryGetTenant(tenantId, out var deploymentSiteTenant))
             {
                 // Inform all connected operators that the tenant is about to
-                // be updated. Replaces the per-pool /poolHub fan-out — every
+                // be updated. Replaces the per-deploymentSite /poolHub fan-out — every
                 // operator multiplexes through its single /operatorHub channel.
                 await _operatorConnectionManager.NotifyPreUpdateTenantAsync(tenantId);
-                // Remove all pools from cache so we skip the possibility to
+                // Remove all deploymentSites from cache so we skip the possibility to
                 // communicate with them while the CK-cache is unloaded.
-                _poolCache.RemoveTenant(tenantId);
+                _deploymentSiteCache.RemoveTenant(tenantId);
 
                 // Note: we do NOT touch CommunicationState in the database here.
-                // The legacy /poolHub design had to mark every pool Unregistered
-                // because the per-pool SignalR connection died on cache flush
+                // The legacy /poolHub design had to mark every deploymentSite Unregistered
+                // because the per-deploymentSite SignalR connection died on cache flush
                 // and only re-registered after the operator reconnected. With
                 // the new /operatorHub model the operator's connection survives
-                // tenant cache reloads entirely — pools stay Online unless the
+                // tenant cache reloads entirely — deploymentSites stay Online unless the
                 // operator actually disconnects, in which case OnDisconnectedAsync
                 // sets them Offline.
 
                 await _eventService.StoreInformationEventAsync(tenantId,
-                    $"Tenant pre-update completed. {poolTenant.PoolsById.Count} pool(s) flushed from cache.");
+                    $"Tenant pre-update completed. {deploymentSiteTenant.DeploymentSitesById.Count} deploymentSite(s) flushed from cache.");
             }
         }
         catch (Exception e)
@@ -188,16 +188,16 @@ internal class DeploymentSiteService : IDeploymentSiteService
         {
             await _semaphore.WaitAsync();
 
-            _poolCache.AddOrUpdateTenant(tenantId);
+            _deploymentSiteCache.AddOrUpdateTenant(tenantId);
 
-            // Note: pool CommunicationState is intentionally NOT reset here.
+            // Note: deploymentSite CommunicationState is intentionally NOT reset here.
             // See PreUpdateTenantAsync above for the full rationale — the
             // operator-hub model decouples connection lifecycle from tenant
             // cache lifecycle, so the on-disk state is authoritative and
             // should be preserved across cache reloads.
 
             await _eventService.StoreInformationEventAsync(tenantId,
-                "Tenant post-update completed. Pool cache re-initialized.");
+                "Tenant post-update completed. DeploymentSite cache re-initialized.");
         }
         catch (Exception e)
         {
@@ -208,11 +208,11 @@ internal class DeploymentSiteService : IDeploymentSiteService
             _semaphore.Release();
         }
 
-        // Outside the semaphore: recompute DeploymentState across all pools /
+        // Outside the semaphore: recompute DeploymentState across all deploymentSites /
         // workloads / pipelines / triggers. This is the catch-all backfill that
         // keeps the DB in sync with the Disabled rules whenever a tenant is
         // (re-)enabled or its CK model updated. Runs after PosUpdate so the
-        // pool cache is already re-initialised.
+        // deploymentSite cache is already re-initialised.
         try
         {
             await RecomputeAllDeploymentStatesAsync(tenantId);
@@ -226,45 +226,45 @@ internal class DeploymentSiteService : IDeploymentSiteService
     }
 
     /// <inheritdoc />
-    public async Task DeployPoolAsync(string tenantId, OctoObjectId deploymentSiteRtId)
+    public async Task DeployDeploymentSiteAsync(string tenantId, OctoObjectId deploymentSiteRtId)
     {
-        Logger.Info("[{TenantId}] Deploying pool '{DeploymentSiteRtId}'", tenantId, deploymentSiteRtId);
+        Logger.Info("[{TenantId}] Deploying deploymentSite '{DeploymentSiteRtId}'", tenantId, deploymentSiteRtId);
 
-        var rtPool = await GetPoolByRtIdAsync(tenantId, deploymentSiteRtId);
+        var rtDeploymentSite = await GetPoolByRtIdAsync(tenantId, deploymentSiteRtId);
 
-        if (rtPool.Environment == RtEnvironmentEnum.Edge)
+        if (rtDeploymentSite.Environment == RtEnvironmentEnum.Edge)
         {
-            // We never ask the central operator to deploy an Edge pool. The
+            // We never ask the central operator to deploy an Edge deploymentSite. The
             // entity's DeploymentState is left untouched here — it reflects
-            // whatever the operator last reported (e.g. Deployed if the pool
+            // whatever the operator last reported (e.g. Deployed if the deploymentSite
             // was Cloud-deployed before the user switched it to Edge; the
             // user must call Undeploy to clean those resources up). The
-            // backfill takes care of moving Undeployed Edge pools to
+            // backfill takes care of moving Undeployed Edge deploymentSites to
             // Disabled separately.
-            throw DeploymentSiteServiceException.EdgePoolNotDeployable(tenantId, deploymentSiteRtId, rtPool.Name);
+            throw DeploymentSiteServiceException.EdgePoolNotDeployable(tenantId, deploymentSiteRtId, rtDeploymentSite.Name);
         }
 
-        var poolName = rtPool.Name ?? string.Empty;
+        var deploymentSiteName = rtDeploymentSite.Name ?? string.Empty;
         Logger.Info(
-            "[{TenantId}] Pool '{DeploymentSiteName}' (rtId {DeploymentSiteRtId}) is Cloud — notifying central Communication Operator",
-            tenantId, poolName, deploymentSiteRtId);
-        await _operatorConnectionManager.NotifyPoolDeployedAsync(new DeployedDeploymentSiteDto
+            "[{TenantId}] DeploymentSite '{DeploymentSiteName}' (rtId {DeploymentSiteRtId}) is Cloud — notifying central Communication Operator",
+            tenantId, deploymentSiteName, deploymentSiteRtId);
+        await _operatorConnectionManager.NotifyDeploymentSiteDeployedAsync(new DeployedDeploymentSiteDto
         {
             TenantId = tenantId,
             DeploymentSiteRtId = deploymentSiteRtId.ToString(),
         });
 
-        await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, deploymentSiteRtId,
+        await _communicationRepository.SetDeploymentSiteDeploymentStateAsync(tenantId, deploymentSiteRtId,
             RtDeploymentStateEnum.Deployed);
 
         // Note: workloads are NOT auto-deployed here. Users (or callers)
         // trigger DeployWorkloadAsync per workload explicitly — this lets
-        // the pool's CommunicationState turn Online first, so any issue
-        // with the pool itself is visible before any helm install runs.
-        // Use case: smoke-test a fresh pool, then phase adapter deploys.
+        // the deploymentSite's CommunicationState turn Online first, so any issue
+        // with the deploymentSite itself is visible before any helm install runs.
+        // Use case: smoke-test a fresh deploymentSite, then phase adapter deploys.
 
         await _eventService.StoreInformationEventAsync(tenantId,
-            $"Pool '{poolName}' deployed.");
+            $"DeploymentSite '{deploymentSiteName}' deployed.");
     }
 
     /// <inheritdoc />
@@ -279,23 +279,23 @@ internal class DeploymentSiteService : IDeploymentSiteService
             throw DeploymentSiteServiceException.WorkloadNotFound(tenantId, workloadRtId);
         }
 
-        var pool = await _communicationRepository.GetPoolForWorkloadAsync(tenantId, workload.RtId);
-        if (pool == null)
+        var deploymentSite = await _communicationRepository.GetDeploymentSiteForWorkloadAsync(tenantId, workload.RtId);
+        if (deploymentSite == null)
         {
-            throw DeploymentSiteServiceException.WorkloadNotInPool(tenantId, workloadRtId);
+            throw DeploymentSiteServiceException.WorkloadNotInDeploymentSite(tenantId, workloadRtId);
         }
 
-        // Workloads in Edge pools are deployable: NotifyWorkloadDeployedAsync
+        // Workloads in Edge deploymentSites are deployable: NotifyWorkloadDeployedAsync
         // routes via RegisterDeploymentSiteForConnection to whichever operator (central
-        // or edge) registered the pool, and OperatorHubService.WorkloadDeployedAsync
+        // or edge) registered the deploymentSite, and OperatorHubService.WorkloadDeployedAsync
         // runs the same helm upgrade --install path in either mode. Only the
-        // pool itself (CR + broker secret) is central-cluster-only and rejected
-        // in DeployPoolAsync.
+        // deploymentSite itself (CR + broker secret) is central-cluster-only and rejected
+        // in DeployDeploymentSiteAsync.
 
         // Validate the workload's Helm fields up-front so we can throw a precise
         // exception telling the user exactly what to fix. BuildWorkloadDeployedDtoAsync
         // intentionally returns null for any missing field (silently skipped by the
-        // pool fan-out), but for an explicit user-triggered single-workload deploy
+        // deploymentSite fan-out), but for an explicit user-triggered single-workload deploy
         // the user deserves to know which field is missing.
         await EnsureWorkloadIsHelmDeployableAsync(tenantId, workload);
 
@@ -345,8 +345,8 @@ internal class DeploymentSiteService : IDeploymentSiteService
             }
         }
 
-        var poolName = pool.Name ?? string.Empty;
-        var dto = await BuildWorkloadDeployedDtoAsync(tenantId, pool.RtId, poolName, workload, isReconciliation);
+        var deploymentSiteName = deploymentSite.Name ?? string.Empty;
+        var dto = await BuildWorkloadDeployedDtoAsync(tenantId, deploymentSite.RtId, deploymentSiteName, workload, isReconciliation);
         if (dto == null)
         {
             // Should be unreachable after EnsureWorkloadIsHelmDeployableAsync, but
@@ -373,12 +373,12 @@ internal class DeploymentSiteService : IDeploymentSiteService
     {
         // AB#4894: a deploy notification that raced an operator pod replacement is lost
         // silently, stranding the workload in Pending with nothing to reconcile it. On every
-        // pool (re-)registration, re-dispatch whatever is still Pending. Best effort — this
+        // deploymentSite (re-)registration, re-dispatch whatever is still Pending. Best effort — this
         // runs on the registration path and must never fail it.
         IReadOnlyCollection<RtDeployableWorkload> workloads;
         try
         {
-            workloads = await _communicationRepository.GetWorkloadsForPoolAsync(tenantId, deploymentSiteRtId);
+            workloads = await _communicationRepository.GetWorkloadsForDeploymentSiteAsync(tenantId, deploymentSiteRtId);
         }
         catch (Exception e)
         {
@@ -386,7 +386,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
             // PreDeleteTenant cascade avoids via in-memory tracking) — skip this round, the
             // next registration reconciles.
             Logger.Warn(e,
-                "[{TenantId}] Skipping pending-workload reconcile for pool {DeploymentSiteRtId}: workload lookup failed",
+                "[{TenantId}] Skipping pending-workload reconcile for deploymentSite {DeploymentSiteRtId}: workload lookup failed",
                 tenantId, deploymentSiteRtId);
             return;
         }
@@ -396,12 +396,12 @@ internal class DeploymentSiteService : IDeploymentSiteService
             try
             {
                 Logger.Info(
-                    "[{TenantId}] Workload '{WorkloadName}' ({WorkloadRtId}) is stuck in Pending on pool registration — re-dispatching its deploy (AB#4894)",
+                    "[{TenantId}] Workload '{WorkloadName}' ({WorkloadRtId}) is stuck in Pending on deploymentSite registration — re-dispatching its deploy (AB#4894)",
                     tenantId, workload.Name, workload.RtId);
 
                 // AB#4955: an empty ChartVersion means "newest in the repository", resolved by the
                 // operator at `helm upgrade` time. This dispatch is not a release decision — it is
-                // triggered by a pool re-registration, i.e. an operator restart, a blueprint
+                // triggered by a deploymentSite re-registration, i.e. an operator restart, a blueprint
                 // re-apply or a CK-model update — so an unpinned workload could come back on a
                 // different version than it was running, with nobody having asked for it. That is
                 // how the prod accounting fleet moved from 1.0.71 to 1.0.72 unattended. The DTO's
@@ -419,7 +419,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
                 else
                 {
                     await _eventService.StoreInformationEventAsync(tenantId,
-                        $"Workload '{workload.Name}' was still Pending when its pool re-registered — deploy re-dispatched.");
+                        $"Workload '{workload.Name}' was still Pending when its deploymentSite re-registered — deploy re-dispatched.");
                 }
 
                 await DeployWorkloadAsync(tenantId, workload.RtId, isReconciliation: true);
@@ -450,8 +450,8 @@ internal class DeploymentSiteService : IDeploymentSiteService
                     await _communicationRepository.SetApplicationDeploymentStateAsync(tenantId, rtEntityId, deploymentState);
                     break;
                 }
-            // AB#4924: without this arm a pool's deploy left DeploymentState at its default, so the
-            // UI never showed a pool as deployed and Undeploy refused it as "already not deployed"
+            // AB#4924: without this arm a deploymentSite's deploy left DeploymentState at its default, so the
+            // UI never showed a deploymentSite as deployed and Undeploy refused it as "already not deployed"
             // — a workload that deploys and then cannot be taken down again.
             case RtAdapterPool:
                 {
@@ -604,10 +604,10 @@ internal class DeploymentSiteService : IDeploymentSiteService
             throw DeploymentSiteServiceException.WorkloadNotFound(tenantId, workloadRtId);
         }
 
-        var pool = await _communicationRepository.GetPoolForWorkloadAsync(tenantId, workload.RtId);
-        if (pool == null)
+        var deploymentSite = await _communicationRepository.GetDeploymentSiteForWorkloadAsync(tenantId, workload.RtId);
+        if (deploymentSite == null)
         {
-            throw DeploymentSiteServiceException.WorkloadNotInPool(tenantId, workloadRtId);
+            throw DeploymentSiteServiceException.WorkloadNotInDeploymentSite(tenantId, workloadRtId);
         }
 
         // Reject when there's nothing to undeploy. Both Undeployed and
@@ -626,7 +626,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
         await _operatorConnectionManager.NotifyWorkloadUndeployedAsync(new WorkloadUndeployedDto
         {
             TenantId = tenantId,
-            DeploymentSiteRtId = pool.RtId.ToString(),
+            DeploymentSiteRtId = deploymentSite.RtId.ToString(),
             WorkloadRtId = workload.RtId.ToString(),
             WorkloadName = workload.Name ?? string.Empty,
             WorkloadType = WorkloadWireMapping.ResolveWorkloadType(workload),
@@ -634,7 +634,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
 
         // Compute resting state. If the workload can no longer be deployed
         // (missing Helm fields), park it at Disabled; otherwise Undeployed so a
-        // fresh deploy can be triggered. Edge pools are NOT a disabling rule —
+        // fresh deploy can be triggered. Edge deploymentSites are NOT a disabling rule —
         // an edge operator deploys workloads via the same helm path as central.
         var restingState = await IsWorkloadHelmDeployableAsync(tenantId, workload)
             ? RtDeploymentStateEnum.Undeployed
@@ -653,7 +653,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
     /// <inheritdoc />
     public async Task<int> ScaleAdapterPoolAsync(string tenantId, OctoObjectId poolWorkloadRtId, int replicas)
     {
-        Logger.Info("[{TenantId}] Scaling adapter pool '{PoolWorkloadRtId}' to {Replicas} member(s)",
+        Logger.Info("[{TenantId}] Scaling adapter deploymentSite '{PoolWorkloadRtId}' to {Replicas} member(s)",
             tenantId, poolWorkloadRtId, replicas);
 
         var workload = await _communicationRepository.GetWorkloadByRtIdAsync(tenantId, poolWorkloadRtId);
@@ -662,31 +662,31 @@ internal class DeploymentSiteService : IDeploymentSiteService
             throw DeploymentSiteServiceException.WorkloadNotFound(tenantId, poolWorkloadRtId);
         }
 
-        if (workload is not RtAdapterPool pool)
+        if (workload is not RtAdapterPool deploymentSite)
         {
             throw DeploymentSiteServiceException.WorkloadIsNotAnAdapterPool(tenantId, poolWorkloadRtId, workload.Name);
         }
 
         // Pending counts as scalable: a deploy that is still rolling out already has its
         // Deployments, and refusing here would make the first scale after a deploy a race.
-        if (pool.DeploymentState != RtDeploymentStateEnum.Deployed &&
-            pool.DeploymentState != RtDeploymentStateEnum.Pending)
+        if (deploymentSite.DeploymentState != RtDeploymentStateEnum.Deployed &&
+            deploymentSite.DeploymentState != RtDeploymentStateEnum.Pending)
         {
-            throw DeploymentSiteServiceException.AdapterPoolNotDeployed(tenantId, poolWorkloadRtId, pool.Name,
-                pool.DeploymentState);
+            throw DeploymentSiteServiceException.AdapterPoolNotDeployed(tenantId, poolWorkloadRtId, deploymentSite.Name,
+                deploymentSite.DeploymentState);
         }
 
         // The clamp lives in RequestScaleAsync, not here: every caller of the scale verb has to be
-        // held to the pool's range, and a guard that only covers the caller you thought of is the
+        // held to the deploymentSite's range, and a guard that only covers the caller you thought of is the
         // guard that is missing during the incident.
-        var effective = Math.Clamp(replicas, pool.MinReplicas, Math.Max(pool.MinReplicas, pool.MaxReplicas));
-        await _workloadLifecycleService.RequestScaleAsync(tenantId, pool, replicas);
+        var effective = Math.Clamp(replicas, deploymentSite.MinReplicas, Math.Max(deploymentSite.MinReplicas, deploymentSite.MaxReplicas));
+        await _workloadLifecycleService.RequestScaleAsync(tenantId, deploymentSite, replicas);
 
         await _eventService.StoreInformationEventAsync(tenantId,
-            $"Adapter pool '{pool.Name}' scale to {effective} member(s) requested" +
+            $"Adapter deploymentSite '{deploymentSite.Name}' scale to {effective} member(s) requested" +
             (effective == replicas
                 ? "."
-                : $" ({replicas} was outside the declared range {pool.MinReplicas}..{pool.MaxReplicas})."));
+                : $" ({replicas} was outside the declared range {deploymentSite.MinReplicas}..{deploymentSite.MaxReplicas})."));
 
         return effective;
     }
@@ -694,87 +694,87 @@ internal class DeploymentSiteService : IDeploymentSiteService
     /// <summary>
     /// Resolves the deployment site name for a workload by walking the <c>Hosts</c>
     /// association back to its parent <c>RtDeploymentSite</c>. Returns null when the
-    /// workload isn't currently in any pool.
+    /// workload isn't currently in any deploymentSite.
     /// </summary>
     private async Task<string?> ResolvePoolNameForWorkloadAsync(string tenantId, RtDeployableWorkload workload)
     {
-        var pool = await _communicationRepository.GetPoolForWorkloadAsync(tenantId, workload.RtId);
-        return pool?.Name;
+        var deploymentSite = await _communicationRepository.GetDeploymentSiteForWorkloadAsync(tenantId, workload.RtId);
+        return deploymentSite?.Name;
     }
 
     /// <inheritdoc />
-    public async Task UndeployPoolAsync(string tenantId, OctoObjectId deploymentSiteRtId)
+    public async Task UndeployDeploymentSiteAsync(string tenantId, OctoObjectId deploymentSiteRtId)
     {
-        Logger.Info("[{TenantId}] Undeploying pool '{DeploymentSiteRtId}'", tenantId, deploymentSiteRtId);
+        Logger.Info("[{TenantId}] Undeploying deploymentSite '{DeploymentSiteRtId}'", tenantId, deploymentSiteRtId);
 
-        var rtPool = await GetPoolByRtIdAsync(tenantId, deploymentSiteRtId);
+        var rtDeploymentSite = await GetPoolByRtIdAsync(tenantId, deploymentSiteRtId);
 
         // Reject when there's nothing to undeploy. Both Undeployed and
         // Disabled are terminal resting states — the operator has no CR /
         // broker secret to remove.
-        if (rtPool.DeploymentState == RtDeploymentStateEnum.Undeployed ||
-            rtPool.DeploymentState == RtDeploymentStateEnum.Disabled)
+        if (rtDeploymentSite.DeploymentState == RtDeploymentStateEnum.Undeployed ||
+            rtDeploymentSite.DeploymentState == RtDeploymentStateEnum.Disabled)
         {
-            throw DeploymentSiteServiceException.PoolAlreadyNotDeployed(tenantId, deploymentSiteRtId, rtPool.Name,
-                rtPool.DeploymentState);
+            throw DeploymentSiteServiceException.PoolAlreadyNotDeployed(tenantId, deploymentSiteRtId, rtDeploymentSite.Name,
+                rtDeploymentSite.DeploymentState);
         }
 
-        var poolName = rtPool.Name ?? string.Empty;
+        var deploymentSiteName = rtDeploymentSite.Name ?? string.Empty;
 
-        // Helm uninstall managed workloads before tearing down the pool
-        // itself — the operator removes the CommunicationPool CR last so
-        // it can still resolve the pool's namespace while uninstalling.
+        // Helm uninstall managed workloads before tearing down the deploymentSite
+        // itself — the operator removes the DeploymentSite CR last so
+        // it can still resolve the deploymentSite's namespace while uninstalling.
         // We always go through the central-operator cleanup path even when
-        // Environment is now Edge: the user may have switched a Cloud pool
+        // Environment is now Edge: the user may have switched a Cloud deploymentSite
         // to Edge without first undeploying, and the CR/secret still exists
         // in the central cluster and must be removed.
-        await UndeployManagedWorkloadsAsync(tenantId, deploymentSiteRtId, poolName);
+        await UndeployManagedWorkloadsAsync(tenantId, deploymentSiteRtId, deploymentSiteName);
 
         Logger.Info(
-            "[{TenantId}] Pool '{DeploymentSiteName}' (rtId {DeploymentSiteRtId}): notifying central Communication Operator to clean up (Environment={Environment})",
-            tenantId, poolName, deploymentSiteRtId, rtPool.Environment);
-        await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, deploymentSiteRtId.ToString());
+            "[{TenantId}] DeploymentSite '{DeploymentSiteName}' (rtId {DeploymentSiteRtId}): notifying central Communication Operator to clean up (Environment={Environment})",
+            tenantId, deploymentSiteName, deploymentSiteRtId, rtDeploymentSite.Environment);
+        await _operatorConnectionManager.NotifyDeploymentSiteUndeployedAsync(tenantId, deploymentSiteRtId.ToString());
 
-        // Resting state after undeploy: Disabled when the pool can no longer
+        // Resting state after undeploy: Disabled when the deploymentSite can no longer
         // be deployed via this controller (Edge), else Undeployed.
-        var restingState = rtPool.Environment == RtEnvironmentEnum.Edge
+        var restingState = rtDeploymentSite.Environment == RtEnvironmentEnum.Edge
             ? RtDeploymentStateEnum.Disabled
             : RtDeploymentStateEnum.Undeployed;
-        await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, deploymentSiteRtId, restingState);
+        await _communicationRepository.SetDeploymentSiteDeploymentStateAsync(tenantId, deploymentSiteRtId, restingState);
 
         await _eventService.StoreInformationEventAsync(tenantId,
-            $"Pool '{poolName}' undeployed (resting state: {restingState}).");
+            $"DeploymentSite '{deploymentSiteName}' undeployed (resting state: {restingState}).");
     }
 
-    private async Task DeployManagedWorkloadsAsync(string tenantId, OctoObjectId deploymentSiteRtId, string poolName)
+    private async Task DeployManagedWorkloadsAsync(string tenantId, OctoObjectId deploymentSiteRtId, string deploymentSiteName)
     {
         IReadOnlyCollection<RtDeployableWorkload> workloads;
         try
         {
-            workloads = await _communicationRepository.GetWorkloadsForPoolAsync(tenantId, deploymentSiteRtId);
+            workloads = await _communicationRepository.GetWorkloadsForDeploymentSiteAsync(tenantId, deploymentSiteRtId);
         }
         catch (Exception ex)
         {
             Logger.Warn(ex,
-                "[{TenantId}] Failed to enumerate managed workloads of pool '{DeploymentSiteName}'; pool is deployed but no workloads were fanned out",
-                tenantId, poolName);
+                "[{TenantId}] Failed to enumerate managed workloads of deploymentSite '{DeploymentSiteName}'; deploymentSite is deployed but no workloads were fanned out",
+                tenantId, deploymentSiteName);
             return;
         }
 
         if (workloads.Count == 0)
         {
-            Logger.Info("[{TenantId}] Pool '{DeploymentSiteName}' has no managed workloads", tenantId, poolName);
+            Logger.Info("[{TenantId}] DeploymentSite '{DeploymentSiteName}' has no managed workloads", tenantId, deploymentSiteName);
             return;
         }
 
-        Logger.Info("[{TenantId}] Pool '{DeploymentSiteName}' has {Count} managed workload(s) to deploy",
-            tenantId, poolName, workloads.Count);
+        Logger.Info("[{TenantId}] DeploymentSite '{DeploymentSiteName}' has {Count} managed workload(s) to deploy",
+            tenantId, deploymentSiteName, workloads.Count);
 
         foreach (var workload in workloads)
         {
             try
             {
-                var dto = await BuildWorkloadDeployedDtoAsync(tenantId, deploymentSiteRtId, poolName, workload);
+                var dto = await BuildWorkloadDeployedDtoAsync(tenantId, deploymentSiteRtId, deploymentSiteName, workload);
                 if (dto == null)
                 {
                     Logger.Warn(
@@ -788,16 +788,16 @@ internal class DeploymentSiteService : IDeploymentSiteService
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "[{TenantId}] Failed to deploy workload '{WorkloadName}' of pool '{DeploymentSiteName}'",
-                    tenantId, workload.Name ?? string.Empty, poolName);
+                    "[{TenantId}] Failed to deploy workload '{WorkloadName}' of deploymentSite '{DeploymentSiteName}'",
+                    tenantId, workload.Name ?? string.Empty, deploymentSiteName);
             }
         }
     }
 
-    private async Task UndeployManagedWorkloadsAsync(string tenantId, OctoObjectId deploymentSiteRtId, string poolName)
+    private async Task UndeployManagedWorkloadsAsync(string tenantId, OctoObjectId deploymentSiteRtId, string deploymentSiteName)
     {
         // Read from in-memory tracking only — same rationale as
-        // UndeployAllCloudPoolsAsync, this path may run during tenant delete
+        // UndeployAllCloudDeploymentSitesAsync, this path may run during tenant delete
         // where the repository is already torn down.
         var poolRtIdString = deploymentSiteRtId.ToString();
         var tracked = _operatorConnectionManager.GetDeployedWorkloadsForTenant(tenantId)
@@ -809,8 +809,8 @@ internal class DeploymentSiteService : IDeploymentSiteService
             return;
         }
 
-        Logger.Info("[{TenantId}] Undeploying {Count} workload(s) of pool '{DeploymentSiteName}'",
-            tenantId, tracked.Length, poolName);
+        Logger.Info("[{TenantId}] Undeploying {Count} workload(s) of deploymentSite '{DeploymentSiteName}'",
+            tenantId, tracked.Length, deploymentSiteName);
 
         foreach (var workload in tracked)
         {
@@ -821,14 +821,14 @@ internal class DeploymentSiteService : IDeploymentSiteService
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "[{TenantId}] Failed to undeploy workload '{WorkloadName}' of pool '{DeploymentSiteName}'",
-                    tenantId, workload.WorkloadName, poolName);
+                    "[{TenantId}] Failed to undeploy workload '{WorkloadName}' of deploymentSite '{DeploymentSiteName}'",
+                    tenantId, workload.WorkloadName, deploymentSiteName);
             }
         }
     }
 
     private async Task<WorkloadDeployedDto?> BuildWorkloadDeployedDtoAsync(string tenantId,
-        OctoObjectId deploymentSiteRtId, string poolName, RtDeployableWorkload workload,
+        OctoObjectId deploymentSiteRtId, string deploymentSiteName, RtDeployableWorkload workload,
         bool isReconciliation = false)
     {
         // ChartName is the minimal Helm identity we need to talk to a repository;
@@ -895,8 +895,8 @@ internal class DeploymentSiteService : IDeploymentSiteService
             // Lives on DeployableWorkload so both Adapter and Application can
             // opt in. Applications with a backend (e.g. energy-community,
             // voest-app) need cluster credentials just like in-cluster adapters.
-            // 🔴 AB#4924: never for an adapter pool, whatever the entity says. The flag hands the
-            // workload the cluster's SHARED Mongo / CrateDB credentials, and a pool member runs
+            // 🔴 AB#4924: never for an adapter deploymentSite, whatever the entity says. The flag hands the
+            // workload the cluster's SHARED Mongo / CrateDB credentials, and a deploymentSite member runs
             // work for tenants other than the one that owns it — a standing credential to every
             // tenant's data would make the lease that grants it one tenant at a time meaningless.
             // The operator refuses the same thing independently; either gate alone is one edit
@@ -1032,15 +1032,15 @@ internal class DeploymentSiteService : IDeploymentSiteService
     /// </summary>
     /// <remarks>
     ///     <para>
-    ///         A pool is <b>one workload with a replica range</b>, not N entities — so there is no new
+    ///         A deploymentSite is <b>one workload with a replica range</b>, not N entities — so there is no new
     ///         deployment concept here, only <c>replicaCount</c> plus the four <c>resources.*</c>
     ///         paths on the same Helm release the operator already installs 1:1. Q15's "one sizing per
-    ///         pool" is literally what a chart value is: it renders identically into every replica.
+    ///         deploymentSite" is literally what a chart value is: it renders identically into every replica.
     ///     </para>
     ///     <para>
     ///         The release starts at <c>MinReplicas</c>. Everything above that is a scaling decision
     ///         driven by queue pressure and carried by the AB#4917 <c>ScaleWorkloadDto</c> verb, which
-    ///         patches replicas without touching the release — so a scaled-up pool is not reverted by
+    ///         patches replicas without touching the release — so a scaled-up deploymentSite is not reverted by
     ///         the next unrelated reconcile the way a value-file replica count would be.
     ///     </para>
     ///     <para>
@@ -1052,20 +1052,20 @@ internal class DeploymentSiteService : IDeploymentSiteService
     private static ValueOverrideDto[] AppendAdapterPoolMemberOverrides(string tenantId,
         RtDeployableWorkload workload, ValueOverrideDto[] overrides)
     {
-        if (workload is not RtAdapterPool pool)
+        if (workload is not RtAdapterPool deploymentSite)
         {
             return overrides;
         }
 
         var result = new List<ValueOverrideDto>(overrides);
 
-        // 🔴 AB#4924 §9.4 — without these two the pod is not a pool member at all. It starts, binds
+        // 🔴 AB#4924 §9.4 — without these two the pod is not a deploymentSite member at all. It starts, binds
         // AdapterPoolMemberOptions to its defaults, finds IsEnabled false, logs "started without a
-        // configured pool … Doing nothing" and sits there looking healthy: the SDK composes a member
+        // configured deploymentSite … Doing nothing" and sits there looking healthy: the SDK composes a member
         // only when BOTH ids are present. Sizing and replica count alone, which is all this method
         // used to write, produce exactly that pod.
         //
-        // The tenant is the LENDER — the tenant that owns the pool entity, i.e. the one this
+        // The tenant is the LENDER — the tenant that owns the deploymentSite entity, i.e. the one this
         // workload is being deployed for. It is the member's CONNECTION tenant, never the tenant of
         // any work it executes; that arrives per lease. See AdapterPoolMemberOptions.
         //
@@ -1074,14 +1074,14 @@ internal class DeploymentSiteService : IDeploymentSiteService
         // search for anyway, and the only one that stays correct when a replica is rescheduled.
         // Writing a value here would pin every replica of the deployment to the same member id, and
         // the controller's registry keys members by it.
-        AddUnlessPinned(result, "adapterPool.poolTenantId", tenantId);
-        AddUnlessPinned(result, "adapterPool.poolRtId", pool.RtId.ToString());
+        AddUnlessPinned(result, "adapterPool.adapterPoolTenantId", tenantId);
+        AddUnlessPinned(result, "adapterPool.poolRtId", deploymentSite.RtId.ToString());
 
-        AddUnlessPinned(result, "replicaCount", pool.MinReplicas.ToString(CultureInfo.InvariantCulture));
-        AddUnlessPinned(result, "resources.requests.cpu", pool.PoolMemberCpuRequest);
-        AddUnlessPinned(result, "resources.limits.cpu", pool.PoolMemberCpuLimit);
-        AddUnlessPinned(result, "resources.requests.memory", pool.PoolMemberMemoryRequest);
-        AddUnlessPinned(result, "resources.limits.memory", pool.PoolMemberMemoryLimit);
+        AddUnlessPinned(result, "replicaCount", deploymentSite.MinReplicas.ToString(CultureInfo.InvariantCulture));
+        AddUnlessPinned(result, "resources.requests.cpu", deploymentSite.PoolMemberCpuRequest);
+        AddUnlessPinned(result, "resources.limits.cpu", deploymentSite.PoolMemberCpuLimit);
+        AddUnlessPinned(result, "resources.requests.memory", deploymentSite.PoolMemberMemoryRequest);
+        AddUnlessPinned(result, "resources.limits.memory", deploymentSite.PoolMemberMemoryLimit);
 
         return result.ToArray();
 
@@ -1125,28 +1125,28 @@ internal class DeploymentSiteService : IDeploymentSiteService
     }
 
     /// <inheritdoc />
-    public async Task UndeployAllCloudPoolsAsync(string tenantId)
+    public async Task UndeployAllCloudDeploymentSitesAsync(string tenantId)
     {
-        Logger.Info("[{TenantId}] Undeploying all Cloud pools (tenant cleanup)", tenantId);
+        Logger.Info("[{TenantId}] Undeploying all Cloud deploymentSites (tenant cleanup)", tenantId);
 
         // Read from the operator connection manager's in-memory tracking
         // rather than the tenant repository. PreDeleteTenant fires in parallel
         // with PreUpdatePreDeleteTenantConsumer (octo-common-services), which
         // unloads the CK-cache for the tenant. If we hit the repository here
-        // we race and get "Failed to get pools" — and the operator is never
-        // told to clean up, leaving the CommunicationPool CR and broker
+        // we race and get "Failed to get deploymentSites" — and the operator is never
+        // told to clean up, leaving the DeploymentSite CR and broker
         // secret orphaned in the cluster.
-        var deployedPools = _operatorConnectionManager.GetDeployedPoolsForTenant(tenantId);
+        var deployedDeploymentSites = _operatorConnectionManager.GetDeployedDeploymentSitesForTenant(tenantId);
         var trackedWorkloads = _operatorConnectionManager.GetDeployedWorkloadsForTenant(tenantId);
 
-        if (deployedPools.Count == 0 && trackedWorkloads.Count == 0)
+        if (deployedDeploymentSites.Count == 0 && trackedWorkloads.Count == 0)
         {
-            Logger.Info("[{TenantId}] No Cloud pools or workloads to clean up", tenantId);
+            Logger.Info("[{TenantId}] No Cloud deploymentSites or workloads to clean up", tenantId);
             return;
         }
 
         // Tear down workloads first so the operator can helm uninstall while
-        // the pool namespace is still around.
+        // the deploymentSite namespace is still around.
         foreach (var workload in trackedWorkloads)
         {
             try
@@ -1161,48 +1161,48 @@ internal class DeploymentSiteService : IDeploymentSiteService
             }
         }
 
-        foreach (var deploymentSiteRtId in deployedPools)
+        foreach (var deploymentSiteRtId in deployedDeploymentSites)
         {
             try
             {
-                await _operatorConnectionManager.NotifyPoolUndeployedAsync(tenantId, deploymentSiteRtId);
+                await _operatorConnectionManager.NotifyDeploymentSiteUndeployedAsync(tenantId, deploymentSiteRtId);
             }
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "[{TenantId}] Failed to notify operator of pool undeploy during tenant cleanup, deployment site rtId {DeploymentSiteRtId}",
+                    "[{TenantId}] Failed to notify operator of deploymentSite undeploy during tenant cleanup, deployment site rtId {DeploymentSiteRtId}",
                     tenantId, deploymentSiteRtId);
             }
         }
 
         await _eventService.StoreInformationEventAsync(tenantId,
-            $"Notified central Communication Operator to undeploy {trackedWorkloads.Count} workload(s) and {deployedPools.Count} Cloud pool(s) for tenant cleanup.");
+            $"Notified central Communication Operator to undeploy {trackedWorkloads.Count} workload(s) and {deployedDeploymentSites.Count} Cloud deploymentSite(s) for tenant cleanup.");
     }
 
     private async Task<RtDeploymentSite> GetPoolByRtIdAsync(string tenantId, OctoObjectId deploymentSiteRtId)
     {
-        var pools = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
-        var rtPool = pools.FirstOrDefault(p => p.RtId == deploymentSiteRtId);
-        if (rtPool == null)
+        var deploymentSites = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
+        var rtDeploymentSite = deploymentSites.FirstOrDefault(p => p.RtId == deploymentSiteRtId);
+        if (rtDeploymentSite == null)
         {
-            throw DeploymentSiteServiceException.PoolNotFound(tenantId, deploymentSiteRtId);
+            throw DeploymentSiteServiceException.DeploymentSiteNotFound(tenantId, deploymentSiteRtId);
         }
-        return rtPool;
+        return rtDeploymentSite;
     }
 
     /// <inheritdoc />
     public async Task SetCommunicationStateOfflineAsync(string tenantId, OctoObjectId deploymentSiteRtId)
     {
-        Logger.Info("[{TenantId}] Setting pool '{DeploymentSiteRtId}' offline", tenantId, deploymentSiteRtId);
+        Logger.Info("[{TenantId}] Setting deploymentSite '{DeploymentSiteRtId}' offline", tenantId, deploymentSiteRtId);
 
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
+        if (!_deploymentSiteCache.TryGetTenant(tenantId, out var deploymentSiteTenant))
         {
             throw DeploymentSiteServiceException.TenantNotFoundOrNotEnabled(tenantId);
         }
 
-        if (poolTenant.PoolsById.TryGetValue(deploymentSiteRtId, out var deploymentSiteDescription))
+        if (deploymentSiteTenant.DeploymentSitesById.TryGetValue(deploymentSiteRtId, out var deploymentSiteDescription))
         {
-            await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, deploymentSiteDescription.DeploymentSiteRtId,
+            await _communicationRepository.SetDeploymentSiteCommunicationStateAsync(tenantId, deploymentSiteDescription.DeploymentSiteRtId,
                 RtCommunicationStateEnum.Offline);
         }
     }
@@ -1211,38 +1211,38 @@ internal class DeploymentSiteService : IDeploymentSiteService
     public async Task SetCommunicationStateOfflineAsync(string tenantId, OctoObjectId deploymentSiteRtId,
         string disconnectingConnectionId)
     {
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
+        if (!_deploymentSiteCache.TryGetTenant(tenantId, out var deploymentSiteTenant))
         {
             return;
         }
 
-        if (!poolTenant.PoolsById.TryGetValue(deploymentSiteRtId, out var deploymentSiteDescription))
+        if (!deploymentSiteTenant.DeploymentSitesById.TryGetValue(deploymentSiteRtId, out var deploymentSiteDescription))
         {
             return;
         }
 
         // Multi-claim guard: more than one operator connection can claim the
-        // same pool at the same time — central operator with replicas, or a
+        // same deploymentSite at the same time — central operator with replicas, or a
         // brief rolling-upgrade overlap where the new pod has registered but
         // the old pod's SignalR connection has not yet timed out. The
         // DeploymentSiteDescription cache only remembers the LAST claim's ConnectionId,
-        // so the disconnect of one claimer would silently flip the pool
+        // so the disconnect of one claimer would silently flip the deploymentSite
         // Offline even though another connection is still hosting it
         // (caller passed RemoveOperator's orphan list, which only filters
         // claims made by the disconnecting connection, not all live claims).
         //
         // OperatorConnectionManager.RemoveOperator has already cleared the
         // disconnecting connection's tracking entry by the time we get here,
-        // so any results from GetConnectionsForPool are surviving operators.
-        var stillClaiming = _operatorConnectionManager.GetConnectionsForPool(tenantId, deploymentSiteRtId.ToString());
+        // so any results from GetConnectionsForDeploymentSite are surviving operators.
+        var stillClaiming = _operatorConnectionManager.GetConnectionsForDeploymentSite(tenantId, deploymentSiteRtId.ToString());
         if (stillClaiming.Count > 0)
         {
-            // Keep the pool Online and rewire the cache to a surviving
+            // Keep the deploymentSite Online and rewire the cache to a surviving
             // connection so the stale-disconnect guard below works correctly
             // when THAT one eventually disconnects too.
             deploymentSiteDescription.UpdateConnectionId(tenantId, stillClaiming[0]);
             Logger.Info(
-                "[{TenantId}] pool '{DeploymentSiteRtId}' stays online after disconnect of " +
+                "[{TenantId}] deploymentSite '{DeploymentSiteRtId}' stays online after disconnect of " +
                 "'{OldConnectionId}': {Count} other operator connection(s) still claim it; " +
                 "cache rewired to '{NewConnectionId}'",
                 tenantId, deploymentSiteRtId, disconnectingConnectionId, stillClaiming.Count,
@@ -1251,7 +1251,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
         }
 
         // Stale-disconnect guard: if a newer connection has already taken over this
-        // pool (e.g. the operator reconnected after a controller restart and the old
+        // deploymentSite (e.g. the operator reconnected after a controller restart and the old
         // connection's OnDisconnectedAsync is only now firing), we must not flip
         // Online → Offline. Mirrors the adapter pattern in
         // AdapterService.SetAdapterCommunicationStateOfflineAsync.
@@ -1259,7 +1259,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
             deploymentSiteDescription.ConnectionId != disconnectingConnectionId)
         {
             Logger.Warn(
-                "[{TenantId}] ignoring stale disconnect for pool '{DeploymentSiteRtId}': cached connection " +
+                "[{TenantId}] ignoring stale disconnect for deploymentSite '{DeploymentSiteRtId}': cached connection " +
                 "'{CurrentConnectionId}' has replaced disconnecting connection '{OldConnectionId}'",
                 tenantId, deploymentSiteRtId, deploymentSiteDescription.ConnectionId, disconnectingConnectionId);
             return;
@@ -1272,16 +1272,16 @@ internal class DeploymentSiteService : IDeploymentSiteService
     /// <inheritdoc />
     public async Task SetCommunicationStateOnlineAsync(string tenantId, OctoObjectId deploymentSiteRtId)
     {
-        Logger.Info("[{TenantId}] Setting pool '{DeploymentSiteRtId}' online", tenantId, deploymentSiteRtId);
+        Logger.Info("[{TenantId}] Setting deploymentSite '{DeploymentSiteRtId}' online", tenantId, deploymentSiteRtId);
 
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
+        if (!_deploymentSiteCache.TryGetTenant(tenantId, out var deploymentSiteTenant))
         {
             throw DeploymentSiteServiceException.TenantNotFoundOrNotEnabled(tenantId);
         }
 
-        if (poolTenant.PoolsById.TryGetValue(deploymentSiteRtId, out var deploymentSiteDescription))
+        if (deploymentSiteTenant.DeploymentSitesById.TryGetValue(deploymentSiteRtId, out var deploymentSiteDescription))
         {
-            await _communicationRepository.SetPoolCommunicationStateAsync(tenantId, deploymentSiteDescription.DeploymentSiteRtId,
+            await _communicationRepository.SetDeploymentSiteCommunicationStateAsync(tenantId, deploymentSiteDescription.DeploymentSiteRtId,
                 RtCommunicationStateEnum.Online);
         }
     }
@@ -1289,30 +1289,30 @@ internal class DeploymentSiteService : IDeploymentSiteService
     /// <inheritdoc />
     public async Task SetCommunicationStateOnlineAsync(string tenantId, OctoObjectId deploymentSiteRtId, string connectionId)
     {
-        Logger.Info("[{TenantId}] Setting pool '{DeploymentSiteRtId}' online (connection '{ConnectionId}')",
+        Logger.Info("[{TenantId}] Setting deploymentSite '{DeploymentSiteRtId}' online (connection '{ConnectionId}')",
             tenantId, deploymentSiteRtId, connectionId);
 
-        if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
+        if (!_deploymentSiteCache.TryGetTenant(tenantId, out var deploymentSiteTenant))
         {
             throw DeploymentSiteServiceException.TenantNotFoundOrNotEnabled(tenantId);
         }
 
-        // Lazy-load the pool into the cache on first sight. The legacy /poolHub
+        // Lazy-load the deploymentSite into the cache on first sight. The legacy /poolHub
         // path relied on RegisterPoolOperatorAsync (which also touched the
-        // pool's DeploymentState) to populate the cache; the new /operatorHub
+        // deploymentSite's DeploymentState) to populate the cache; the new /operatorHub
         // RegisterDeploymentSiteAsync is purely about CommunicationState, so we just
         // ensure the cache is populated here without touching DeploymentState.
-        if (!poolTenant.PoolsById.TryGetValue(deploymentSiteRtId, out var deploymentSiteDescription))
+        if (!deploymentSiteTenant.DeploymentSitesById.TryGetValue(deploymentSiteRtId, out var deploymentSiteDescription))
         {
-            var pools = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
-            var rtPool = pools.FirstOrDefault(p => p.RtId == deploymentSiteRtId);
-            if (rtPool == null)
+            var deploymentSites = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
+            var rtDeploymentSite = deploymentSites.FirstOrDefault(p => p.RtId == deploymentSiteRtId);
+            if (rtDeploymentSite == null)
             {
-                Logger.Warn("[{TenantId}] Cannot set pool '{DeploymentSiteRtId}' online — not found in repository",
+                Logger.Warn("[{TenantId}] Cannot set deploymentSite '{DeploymentSiteRtId}' online — not found in repository",
                     tenantId, deploymentSiteRtId);
                 return;
             }
-            deploymentSiteDescription = poolTenant.AddPool(rtPool.Name ?? string.Empty, rtPool.RtId, connectionId);
+            deploymentSiteDescription = deploymentSiteTenant.AddDeploymentSite(rtDeploymentSite.Name ?? string.Empty, rtDeploymentSite.RtId, connectionId);
         }
         else
         {
@@ -1324,8 +1324,8 @@ internal class DeploymentSiteService : IDeploymentSiteService
 
     public async Task<IReadOnlyList<DeploymentSiteSummaryDto>> GetDeploymentSiteSummariesAsync(string tenantId)
     {
-        var pools = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
-        return pools.Select(p => new DeploymentSiteSummaryDto
+        var deploymentSites = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
+        return deploymentSites.Select(p => new DeploymentSiteSummaryDto
         {
             RtId = p.RtId.ToString(),
             Name = p.Name ?? string.Empty,
@@ -1341,13 +1341,13 @@ internal class DeploymentSiteService : IDeploymentSiteService
     /// <inheritdoc />
     public async Task<IReadOnlyList<ActiveDeployment>> GetActiveDeploymentsAsync(string tenantId)
     {
-        var pools = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
+        var deploymentSites = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
         var workloads = await _communicationRepository.GetWorkloadsAsync(tenantId);
 
         var active = new List<ActiveDeployment>();
-        active.AddRange(pools
+        active.AddRange(deploymentSites
             .Where(p => ActiveDeployment.IsActive(p.DeploymentState))
-            .Select(p => new ActiveDeployment(ActiveDeployment.PoolKind, DisplayName(p.Name, p.RtId), p.DeploymentState))
+            .Select(p => new ActiveDeployment(ActiveDeployment.DeploymentSiteKind, DisplayName(p.Name, p.RtId), p.DeploymentState))
             .OrderBy(d => d.Name, StringComparer.Ordinal));
         active.AddRange(workloads
             .Where(w => ActiveDeployment.IsActive(w.DeploymentState))
@@ -1374,48 +1374,48 @@ internal class DeploymentSiteService : IDeploymentSiteService
         var pipelinesUpdated = 0;
         var triggersUpdated = 0;
 
-        // 1) Pools: Edge → Disabled, Cloud → leave (controller-managed lifecycle)
-        IReadOnlyCollection<RtDeploymentSite> pools;
+        // 1) DeploymentSites: Edge → Disabled, Cloud → leave (controller-managed lifecycle)
+        IReadOnlyCollection<RtDeploymentSite> deploymentSites;
         try
         {
-            pools = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
+            deploymentSites = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
         }
         catch (Exception ex)
         {
-            Logger.Warn(ex, "[{TenantId}] Failed to enumerate pools during deployment-state recompute", tenantId);
+            Logger.Warn(ex, "[{TenantId}] Failed to enumerate deploymentSites during deployment-state recompute", tenantId);
             return;
         }
 
         // Track adapter Disabled state so pipelines can inherit it without an extra DB hit per pipeline.
         var disabledAdapterRtIds = new HashSet<OctoObjectId>();
 
-        foreach (var pool in pools)
+        foreach (var deploymentSite in deploymentSites)
         {
             try
             {
-                // Only flip resting states. A pool currently Deployed/Pending/Error
-                // owns real operator resources (CommunicationPool CR, broker secret)
+                // Only flip resting states. A deploymentSite currently Deployed/Pending/Error
+                // owns real operator resources (DeploymentSite CR, broker secret)
                 // and must stay until an explicit Undeploy. The user who switches a
-                // Cloud pool to Edge while it is Deployed sees Deployed correctly
+                // Cloud deploymentSite to Edge while it is Deployed sees Deployed correctly
                 // and can clean up via the Undeploy command.
-                if (pool.DeploymentState == RtDeploymentStateEnum.Undeployed ||
-                    pool.DeploymentState == RtDeploymentStateEnum.Disabled)
+                if (deploymentSite.DeploymentState == RtDeploymentStateEnum.Undeployed ||
+                    deploymentSite.DeploymentState == RtDeploymentStateEnum.Disabled)
                 {
-                    var poolTarget = pool.Environment == RtEnvironmentEnum.Edge
+                    var poolTarget = deploymentSite.Environment == RtEnvironmentEnum.Edge
                         ? RtDeploymentStateEnum.Disabled
                         : RtDeploymentStateEnum.Undeployed;
-                    if (poolTarget != pool.DeploymentState)
+                    if (poolTarget != deploymentSite.DeploymentState)
                     {
-                        await _communicationRepository.SetPoolDeploymentStateAsync(tenantId, pool.RtId, poolTarget);
+                        await _communicationRepository.SetDeploymentSiteDeploymentStateAsync(tenantId, deploymentSite.RtId, poolTarget);
                         poolsUpdated++;
                     }
                 }
 
-                // 2) Workloads in this pool
-                var workloads = await _communicationRepository.GetWorkloadsForPoolAsync(tenantId, pool.RtId);
+                // 2) Workloads in this deploymentSite
+                var workloads = await _communicationRepository.GetWorkloadsForDeploymentSiteAsync(tenantId, deploymentSite.RtId);
                 foreach (var workload in workloads)
                 {
-                    var target = await ComputeWorkloadTargetStateAsync(tenantId, workload, pool);
+                    var target = await ComputeWorkloadTargetStateAsync(tenantId, workload, deploymentSite);
                     if (target.HasValue && target.Value != workload.DeploymentState)
                     {
                         await SetWorkloadDeploymentStateAsync(tenantId, workload, target.Value);
@@ -1423,7 +1423,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
                     }
 
                     // Track adapters that ended up (or stayed) Disabled so pipelines
-                    // can inherit. A Deployed adapter — even one in an Edge pool
+                    // can inherit. A Deployed adapter — even one in an Edge deploymentSite
                     // post-env-switch — is still physically running, so its pipelines
                     // are not inherited-Disabled.
                     var endStateIsDisabled = (target ?? workload.DeploymentState) == RtDeploymentStateEnum.Disabled;
@@ -1436,8 +1436,8 @@ internal class DeploymentSiteService : IDeploymentSiteService
             catch (Exception ex)
             {
                 Logger.Warn(ex,
-                    "[{TenantId}] Failed to recompute deployment state for pool '{DeploymentSiteName}' or its workloads",
-                    tenantId, pool.Name ?? pool.RtId.ToString());
+                    "[{TenantId}] Failed to recompute deployment state for deploymentSite '{DeploymentSiteName}' or its workloads",
+                    tenantId, deploymentSite.Name ?? deploymentSite.RtId.ToString());
             }
         }
 
@@ -1549,12 +1549,12 @@ internal class DeploymentSiteService : IDeploymentSiteService
         if (poolsUpdated + workloadsUpdated + pipelinesUpdated + triggersUpdated > 0)
         {
             await _eventService.StoreInformationEventAsync(tenantId,
-                $"DeploymentState recompute: pools {poolsUpdated}, workloads {workloadsUpdated}, " +
+                $"DeploymentState recompute: deploymentSites {poolsUpdated}, workloads {workloadsUpdated}, " +
                 $"pipelines {pipelinesUpdated}, triggers {triggersUpdated} updated.");
         }
 
         Logger.Info(
-            "[{TenantId}] Deployment-state recompute done: pools {Pools}, workloads {Workloads}, " +
+            "[{TenantId}] Deployment-state recompute done: deploymentSites {DeploymentSites}, workloads {Workloads}, " +
             "pipelines {Pipelines}, triggers {Triggers}",
             tenantId, poolsUpdated, workloadsUpdated, pipelinesUpdated, triggersUpdated);
     }
@@ -1568,7 +1568,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
     /// transitions to Disabled only via the Undeploy command path.
     /// </summary>
     private async Task<RtDeploymentStateEnum?> ComputeWorkloadTargetStateAsync(string tenantId,
-        RtDeployableWorkload workload, RtDeploymentSite pool)
+        RtDeployableWorkload workload, RtDeploymentSite deploymentSite)
     {
         // Only touch resting states. Deployed/Pending/Error must stay — those reflect
         // real operator-managed resources in the cluster, regardless of whether the
@@ -1579,10 +1579,10 @@ internal class DeploymentSiteService : IDeploymentSiteService
             return null;
         }
 
-        // Edge pools are NOT a disabling rule for workloads (only for the pool
+        // Edge deploymentSites are NOT a disabling rule for workloads (only for the deploymentSite
         // itself) — an edge operator deploys workloads via the same helm path
         // as the central operator. Only missing Helm fields disable a workload.
-        _ = pool;
+        _ = deploymentSite;
 
         return await IsWorkloadHelmDeployableAsync(tenantId, workload)
             ? RtDeploymentStateEnum.Undeployed
@@ -1595,8 +1595,8 @@ internal class DeploymentSiteService : IDeploymentSiteService
     /// <remarks>
     ///     <para>
     ///         Three shapes are checked, in the order a reader would ask about them: is this
-    ///         workload allowed to be <c>Leased</c> at all, does it name a pool that actually lends
-    ///         to it, and — for an <see cref="RtAdapterPool" /> — is the pool itself coherent.
+    ///         workload allowed to be <c>Leased</c> at all, does it name a deploymentSite that actually lends
+    ///         to it, and — for an <see cref="RtAdapterPool" /> — is the deploymentSite itself coherent.
     ///     </para>
     ///     <para>
     ///         🔴 The borrower half has <b>no referential integrity behind it</b>: LentFromTenantId
@@ -1609,18 +1609,18 @@ internal class DeploymentSiteService : IDeploymentSiteService
     {
         var isLeased = workload.LifecycleMode == RtLifecycleModeEnum.Leased;
 
-        if (workload is RtAdapterPool pool)
+        if (workload is RtAdapterPool deploymentSite)
         {
-            // A pool is never itself Leased. Leased means "has no process of its own"; a pool is
+            // A deploymentSite is never itself Leased. Leased means "has no process of its own"; a deploymentSite is
             // the thing that owns the processes. Catching this explicitly matters because the
-            // concept text once described pool members as Leased, so it is a mistake an author is
+            // concept text once described deploymentSite members as Leased, so it is a mistake an author is
             // actively invited to make.
             if (isLeased)
             {
-                throw DeploymentSiteServiceException.AdapterPoolCannotBeLeased(tenantId, pool.RtId, pool.Name);
+                throw DeploymentSiteServiceException.AdapterPoolCannotBeLeased(tenantId, deploymentSite.RtId, deploymentSite.Name);
             }
 
-            await EnsureAdapterPoolIsValidAsync(tenantId, pool);
+            await EnsureAdapterPoolIsValidAsync(tenantId, deploymentSite);
             return;
         }
 
@@ -1677,8 +1677,8 @@ internal class DeploymentSiteService : IDeploymentSiteService
 
         var lenderTenantId = adapter.LentFromTenantId!;
 
-        // Resolve the pool in the LENDING tenant and ask whether it lends here. Both halves are
-        // needed: a pool that does not exist, and a pool that exists but whose SharingMode or
+        // Resolve the deploymentSite in the LENDING tenant and ask whether it lends here. Both halves are
+        // needed: a deploymentSite that does not exist, and a deploymentSite that exists but whose SharingMode or
         // allow-list excludes this tenant, are different misconfigurations with the same symptom.
         var lendingScope = await _communicationRepository
             .TryGetAdapterPoolLendingScopeAsync(lenderTenantId, adapter.LentFromAdapterPoolRtId!);
@@ -1693,34 +1693,34 @@ internal class DeploymentSiteService : IDeploymentSiteService
     /// <summary>
     ///     Validates an <see cref="RtAdapterPool" />'s own configuration (AB#4924 §4a).
     /// </summary>
-    private async Task EnsureAdapterPoolIsValidAsync(string tenantId, RtAdapterPool pool)
+    private async Task EnsureAdapterPoolIsValidAsync(string tenantId, RtAdapterPool deploymentSite)
     {
-        if (pool.MinReplicas < 0 || pool.MaxReplicas < 1 || pool.MaxReplicas < pool.MinReplicas)
+        if (deploymentSite.MinReplicas < 0 || deploymentSite.MaxReplicas < 1 || deploymentSite.MaxReplicas < deploymentSite.MinReplicas)
         {
-            throw DeploymentSiteServiceException.AdapterPoolReplicaRangeInvalid(tenantId, pool.RtId, pool.Name,
-                pool.MinReplicas, pool.MaxReplicas);
+            throw DeploymentSiteServiceException.AdapterPoolReplicaRangeInvalid(tenantId, deploymentSite.RtId, deploymentSite.Name,
+                deploymentSite.MinReplicas, deploymentSite.MaxReplicas);
         }
 
-        if (pool.LendingMaxConcurrentLeasesPerTenant is { } cap && cap < 1)
+        if (deploymentSite.LendingMaxConcurrentLeasesPerTenant is { } cap && cap < 1)
         {
             // Unset means "no per-tenant cap" and is the documented default (concept §8, Q11).
             // Zero is not that — it is a cap that can never be satisfied, so work would queue
             // forever with no error anywhere.
-            throw DeploymentSiteServiceException.AdapterPoolLeaseCapInvalid(tenantId, pool.RtId, pool.Name, cap);
+            throw DeploymentSiteServiceException.AdapterPoolLeaseCapInvalid(tenantId, deploymentSite.RtId, deploymentSite.Name, cap);
         }
 
-        if (pool.SharingMode == RtAdapterSharingModeEnum.NotShared)
+        if (deploymentSite.SharingMode == RtAdapterSharingModeEnum.NotShared)
         {
             return;
         }
 
-        // A pool that lends must be able to hand its process to a borrower between work items,
+        // A deploymentSite that lends must be able to hand its process to a borrower between work items,
         // which is the same requirement OnDemand makes of a workload.
         var capability = await _onDemandCapabilityService.EvaluateAsync(tenantId,
-            new RtEntityId(SystemCommunicationCkIds.RtCkAdapterPoolTypeId, pool.RtId));
+            new RtEntityId(SystemCommunicationCkIds.RtCkAdapterPoolTypeId, deploymentSite.RtId));
         if (!capability.IsCapable)
         {
-            throw DeploymentSiteServiceException.AdapterPoolNotOnDemandCapable(tenantId, pool.RtId, pool.Name);
+            throw DeploymentSiteServiceException.AdapterPoolNotOnDemandCapable(tenantId, deploymentSite.RtId, deploymentSite.Name);
         }
     }
 
@@ -1742,27 +1742,27 @@ internal class DeploymentSiteService : IDeploymentSiteService
 
     /// <inheritdoc />
     public async Task RestoreDeployedStateAsync(string operatorConnectionId,
-        IReadOnlyList<OperatorDeployedDeploymentSiteReportDto> deployedPools)
+        IReadOnlyList<OperatorDeployedDeploymentSiteReportDto> deployedDeploymentSites)
     {
         // Defensive: an empty list is a valid no-op (operator just restarted
         // and currently owns nothing). Don't log noise.
-        if (deployedPools.Count == 0)
+        if (deployedDeploymentSites.Count == 0)
         {
             return;
         }
 
         Logger.Info(
-            "Reverse-sync from operator connection '{ConnectionId}': {Count} pool report(s)",
-            operatorConnectionId, deployedPools.Count);
+            "Reverse-sync from operator connection '{ConnectionId}': {Count} deploymentSite report(s)",
+            operatorConnectionId, deployedDeploymentSites.Count);
 
-        foreach (var report in deployedPools)
+        foreach (var report in deployedDeploymentSites)
         {
-            // Load by repository — the pool may or may not be in the local
+            // Load by repository — the deploymentSite may or may not be in the local
             // cache yet (operator can call ReportDeployedStateAsync before
-            // any RegisterDeploymentSiteAsync for the same pool has been processed).
-            var pools = await _communicationRepository.GetDeploymentSitesAsync(report.TenantId);
-            var rtPool = pools.FirstOrDefault(p => p.RtId.ToString() == report.DeploymentSiteRtId);
-            if (rtPool == null)
+            // any RegisterDeploymentSiteAsync for the same deploymentSite has been processed).
+            var deploymentSites = await _communicationRepository.GetDeploymentSitesAsync(report.TenantId);
+            var rtDeploymentSite = deploymentSites.FirstOrDefault(p => p.RtId.ToString() == report.DeploymentSiteRtId);
+            if (rtDeploymentSite == null)
             {
                 Logger.Warn(
                     "[{TenantId}] Reverse-sync: deployment site rtId '{DeploymentSiteRtId}' reported by operator does not exist; skipping",
@@ -1770,37 +1770,37 @@ internal class DeploymentSiteService : IDeploymentSiteService
                 continue;
             }
 
-            // Per-pool environment guard: a Cloud operator (mode check ran in
-            // OperatorHub) must not be able to revive Edge-pool state via this
+            // Per-deploymentSite environment guard: a Cloud operator (mode check ran in
+            // OperatorHub) must not be able to revive Edge-deploymentSite state via this
             // path. Mirrors the same enforcement on RegisterDeploymentSiteAsync.
-            if (rtPool.Environment != RtEnvironmentEnum.Cloud)
+            if (rtDeploymentSite.Environment != RtEnvironmentEnum.Cloud)
             {
                 Logger.Warn(
-                    "[{TenantId}] Reverse-sync: pool '{DeploymentSiteName}' has Environment={Environment} (not Cloud); skipping",
-                    report.TenantId, rtPool.Name, rtPool.Environment);
+                    "[{TenantId}] Reverse-sync: deploymentSite '{DeploymentSiteName}' has Environment={Environment} (not Cloud); skipping",
+                    report.TenantId, rtDeploymentSite.Name, rtDeploymentSite.Environment);
                 continue;
             }
 
             // Only write when state would actually change — avoids no-op
             // SetState calls firing audit events for every report.
-            if (rtPool.DeploymentState != RtDeploymentStateEnum.Deployed)
+            if (rtDeploymentSite.DeploymentState != RtDeploymentStateEnum.Deployed)
             {
-                await _communicationRepository.SetPoolDeploymentStateAsync(report.TenantId, rtPool.RtId,
+                await _communicationRepository.SetDeploymentSiteDeploymentStateAsync(report.TenantId, rtDeploymentSite.RtId,
                     RtDeploymentStateEnum.Deployed);
                 await _eventService.StoreInformationEventAsync(report.TenantId,
-                    $"Pool '{rtPool.Name}' DeploymentState restored to Deployed by operator reverse-sync " +
-                    $"(was {rtPool.DeploymentState}).",
-                    new RtEntityId(SystemCommunicationCkIds.RtCkDeploymentSiteTypeId, rtPool.RtId));
+                    $"DeploymentSite '{rtDeploymentSite.Name}' DeploymentState restored to Deployed by operator reverse-sync " +
+                    $"(was {rtDeploymentSite.DeploymentState}).",
+                    new RtEntityId(SystemCommunicationCkIds.RtCkDeploymentSiteTypeId, rtDeploymentSite.RtId));
                 Logger.Info(
-                    "[{TenantId}] Reverse-sync: pool '{DeploymentSiteName}' restored to Deployed (was {OldState})",
-                    report.TenantId, rtPool.Name, rtPool.DeploymentState);
+                    "[{TenantId}] Reverse-sync: deploymentSite '{DeploymentSiteName}' restored to Deployed (was {OldState})",
+                    report.TenantId, rtDeploymentSite.Name, rtDeploymentSite.DeploymentState);
             }
 
-            // Always rebuild the tracking + per-connection pool registration —
+            // Always rebuild the tracking + per-connection deploymentSite registration —
             // they're keyed on the new connection id, and the previous
             // connection's entries were dropped on disconnect. Idempotent if
             // the connection is already registered (ConcurrentDictionary set).
-            _operatorConnectionManager.TrackDeployedPool(new DeployedDeploymentSiteDto
+            _operatorConnectionManager.TrackDeployedDeploymentSite(new DeployedDeploymentSiteDto
             {
                 TenantId = report.TenantId,
                 DeploymentSiteRtId = report.DeploymentSiteRtId,
@@ -1808,14 +1808,14 @@ internal class DeploymentSiteService : IDeploymentSiteService
             _operatorConnectionManager.RegisterDeploymentSiteForConnection(operatorConnectionId, report.TenantId,
                 report.DeploymentSiteRtId);
 
-            // Workloads inside the pool — same restore-only-when-changed rule.
+            // Workloads inside the deploymentSite — same restore-only-when-changed rule.
             foreach (var workloadRtIdString in report.WorkloadRtIds)
             {
                 if (!OctoObjectId.TryParse(workloadRtIdString, out var workloadRtId))
                 {
                     Logger.Warn(
-                        "[{TenantId}] Reverse-sync: workload rtId '{RtId}' under pool '{DeploymentSiteName}' is not a valid OctoObjectId; skipping",
-                        report.TenantId, workloadRtIdString, rtPool.Name);
+                        "[{TenantId}] Reverse-sync: workload rtId '{RtId}' under deploymentSite '{DeploymentSiteName}' is not a valid OctoObjectId; skipping",
+                        report.TenantId, workloadRtIdString, rtDeploymentSite.Name);
                     continue;
                 }
 
@@ -1823,8 +1823,8 @@ internal class DeploymentSiteService : IDeploymentSiteService
                 if (workload == null)
                 {
                     Logger.Warn(
-                        "[{TenantId}] Reverse-sync: workload rtId '{RtId}' reported by operator under pool '{DeploymentSiteName}' does not exist; skipping",
-                        report.TenantId, workloadRtIdString, rtPool.Name);
+                        "[{TenantId}] Reverse-sync: workload rtId '{RtId}' reported by operator under deploymentSite '{DeploymentSiteName}' does not exist; skipping",
+                        report.TenantId, workloadRtIdString, rtDeploymentSite.Name);
                     continue;
                 }
 
