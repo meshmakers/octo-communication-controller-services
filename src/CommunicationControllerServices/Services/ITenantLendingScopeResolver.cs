@@ -37,6 +37,27 @@ public interface ITenantLendingScopeResolver
         LendingScope scope, CancellationToken cancellationToken = default);
 
     /// <summary>
+    ///     Every tenant that could possibly lend to <paramref name="borrowerTenantId" /> — its
+    ///     ancestors and the tenants sharing its parent.
+    /// </summary>
+    /// <remarks>
+    ///     🔴 This is a candidate set, not a permission. It answers "whose pools are even worth
+    ///     looking at", derived purely from the tenant tree; whether any individual pool actually
+    ///     lends here is still decided by <see cref="MayLendAsync" /> against that pool's own
+    ///     sharing mode and allow-list. Keeping the two apart matters: the tree walk is shared and
+    ///     cacheable per tenant, while the scope check differs per pool.
+    ///
+    ///     <para>
+    ///     Siblings are included because a pool may be <c>DescendantsAndSiblings</c>. A sibling
+    ///     whose pools are merely <c>Descendants</c> simply contributes nothing once
+    ///     <see cref="MayLendAsync" /> runs — it is cheaper to over-collect candidates here than to
+    ///     duplicate the mode logic.
+    ///     </para>
+    /// </remarks>
+    Task<IReadOnlyCollection<string>> ResolveCandidateLenderTenantsAsync(string borrowerTenantId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     ///     Drops any cached tenant-tree walk for this lender, so the next resolve sees a tenant that
     ///     was just created, attached or deleted.
     /// </summary>

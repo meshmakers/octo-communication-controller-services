@@ -61,6 +61,31 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyCollection<string>> ResolveCandidateLenderTenantsAsync(
+        string borrowerTenantId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(borrowerTenantId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Ancestors first: the ordinary case is a pool in the parent, and ResolveAncestorsAsync
+        // already walks ParentTenantId upwards with its own cycle guard.
+        var candidates = new HashSet<string>(
+            await ResolveAncestorsAsync(borrowerTenantId).ConfigureAwait(false),
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var sibling in await ResolveSiblingsAsync(borrowerTenantId).ConfigureAwait(false))
+        {
+            candidates.Add(sibling);
+        }
+
+        // The borrower can never be its own lender. ResolveAncestorsAsync cannot return it unless
+        // the registry has a cycle, and ResolveSiblingsAsync already filters it out, but a
+        // candidate set that decides what a tenant is shown should not depend on that.
+        candidates.Remove(borrowerTenantId);
+        return candidates;
+    }
+
+    /// <inheritdoc />
     public void Invalidate(string lenderTenantId)
     {
         foreach (var key in _cache.Keys.Where(k =>
