@@ -75,7 +75,7 @@ public class PoolController : ControllerBase
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
 
-        var pools = await _poolService.GetPoolSummariesAsync(tenantId);
+        var pools = await _poolService.GetDeploymentSiteSummariesAsync(tenantId);
 
         return Ok(pools);
     }

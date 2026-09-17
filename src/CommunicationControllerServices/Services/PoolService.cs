@@ -1322,10 +1322,10 @@ internal class PoolService : IPoolService
         await SetCommunicationStateOnlineAsync(tenantId, poolDescription.PoolRtId);
     }
 
-    public async Task<IReadOnlyList<PoolSummaryDto>> GetPoolSummariesAsync(string tenantId)
+    public async Task<IReadOnlyList<DeploymentSiteSummaryDto>> GetDeploymentSiteSummariesAsync(string tenantId)
     {
         var pools = await _communicationRepository.GetPoolsAsync(tenantId);
-        return pools.Select(p => new PoolSummaryDto
+        return pools.Select(p => new DeploymentSiteSummaryDto
         {
             RtId = p.RtId.ToString(),
             Name = p.Name ?? string.Empty,

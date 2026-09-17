@@ -145,7 +145,7 @@ public interface IPoolService
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <returns>List of pool summaries with typed communication, configuration, and deployment states</returns>
-    Task<IReadOnlyList<PoolSummaryDto>> GetPoolSummariesAsync(string tenantId);
+    Task<IReadOnlyList<DeploymentSiteSummaryDto>> GetDeploymentSiteSummariesAsync(string tenantId);
 
     /// <summary>
     /// Lists the pools and workloads (Adapters/Applications) of the tenant that still own
