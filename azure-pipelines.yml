@@ -75,7 +75,19 @@ resources:
       # installs octo-ckc 3.4.115 — 3.4.115 > 0.2.x — whose migration schema predates
       # the RenameAssociationRole transform, so validate-ck-versions rejects the
       # System.Communication 4.0.0 migration before restore even runs (build 46257).
-      ref: refs/tags/tpl-v0.5.3
+      #
+      # 🔴 tpl-v0.5.5 additionally lets the gate resolve a PRERELEASE tool on dev/*
+      # and test/*. Deriving the line was only half the fix: dev-lane builds stamp
+      # -dev onto PackageVersion, so a stable-only filter could still only ever see
+      # a tool from an earlier stable line — never the engine this lane just built.
+      # SetWellKnownName (AB#4924) was published as 0.2.2609.17001-dev and the gate
+      # resolved 0.2.2609.15001, rejecting valid YAML (build 46791). Release lanes
+      # keep the stable-only rule.
+      #
+      # Deliberately the 0.5 line, not tpl-v0.6.x: 0.6 also rewrites
+      # build-and-push-docker and handle-artifacts, which this pipeline uses and
+      # which have nothing to do with the CK gate.
+      ref: refs/tags/tpl-v0.5.5
 
 trigger:
   batch: true
