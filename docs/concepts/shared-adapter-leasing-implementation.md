@@ -1113,7 +1113,7 @@ queue pressure own the lifecycle instead (concept §4a). This closes plan 1.0's 
 
 **Tests:** `PlatformNamespaceTests` (13, including 8 that pin the one-namespace assumption as
 unchanged for Adapter and Application), `PoolOwnerReferenceTests` (10), `AdapterPoolKindE2ETests`
-(2, against a live cluster — see §7.6), `WorkloadLifecycleWatchdogTests` pool cases (5),
+(4, against a live cluster — see §7.6), `WorkloadLifecycleWatchdogTests` pool cases (5),
 `AdapterPoolDeploymentTests` (12), `RequestScaleAsyncTests` pool cases (5),
 `WorkloadHostnameIndexTests` pool cases (2), `AppendClusterSecretsTests` pool cases (2).
 
@@ -1153,15 +1153,49 @@ Both were reachable, neither had a symptom that pointed at its cause.
 ```bash
 OCTO_OPERATOR_E2E_KUBECONTEXT=kind-kind \
   dotnet test --project tests/CommunicationOperator.Tests/CommunicationOperator.Tests.csproj \
-  -c DebugL --filter "/*/*/AdapterPoolKindE2ETests/*"
+  -c DebugL --treenode-filter "/*/*/AdapterPoolKindE2ETests/*"
 ```
 
-Two tests: a pool scaled **1 → 3 → 1** through `WorkloadReconciler.ScaleAsync` (asserting both
-`spec.replicas` and the ReplicaSet controller's `status.replicas`, so the cluster agrees rather than
-the spec merely having been accepted), and a pool **garbage-collected** when its tenant's
-`CommunicationPool` CR is deleted. Without the environment variable both report as *skipped*, never
-as passed. Requirements: the `communicationpools.octo-mesh.meshmakers.io` CRD and permission to
-create the `octo-pool-e2e` namespace. Helm is deliberately not in the loop — this increment changed
+🔴 `--treenode-filter`, **not** `--filter`. Under the Microsoft.Testing.Platform runner the
+operator repo opts into, `--filter` is accepted, matches nothing and exits **5** with "no tests were
+run". This section said `--filter` until the suite was next picked up, and the wrong flag reads like
+a broken cluster rather than a typo.
+
+Four tests, in two pairs. **Scale** — a pool scaled **1 → 3 → 1** through
+`WorkloadReconciler.ScaleAsync`, asserting both `spec.replicas` and the ReplicaSet controller's
+`status.replicas`, so the cluster agrees rather than the spec merely having been accepted — and
+**garbage collection** when its tenant's `CommunicationPool` CR is deleted.
+
+Then the pair that closes §7.1a, added after the first two:
+
+- **`CrossNamespaceOwner_DestroysThePoolWhileItsOwnerIsStillAlive`** — the fact the refusal exists
+  for. A Deployment in the platform namespace, owned by a CR in the pool namespace, is destroyed by
+  the garbage collector **while that CR is still alive**. Until this existed, "Kubernetes deletes a
+  dependent whose owner lives elsewhere" was an unverified claim in a comment, and
+  `PoolOwnerReferenceTests` — which substitutes the gateway, and therefore has no garbage collector
+  — could never verify it. The test asserts the GC's own `OwnerRefInvalidNamespace` event rather
+  than merely that the object vanished, and Arrange deletes stale events first, since events outlive
+  their objects by an hour and would otherwise let the test assert evidence it did not produce.
+- **`DeployingAPoolIntoAPlatformNamespace_WritesNoOwnerAndThePoolSurvives`** — the operator
+  declining to do that, against the same live apiserver.
+
+🔴 **A correction to what this section implied, found by mutating the code.** Deleting the
+namespace guard in `TryResolvePoolOwnerReferenceAsync` does **not** on its own produce a
+cross-namespace owner reference, and no test fails. The CR lookup and the owner-reference write both
+take the same `ns`, so with the guard gone the lookup simply moves to the platform namespace and
+finds no CR. The guard is defence in depth; the load-bearing protection is that the lookup namespace
+and the write namespace are **one variable**. The reachable regression is repointing the lookup at
+`_options.PoolNamespace` — which the guard's own warning text invites, since it says that is where
+the CR lives — while the write stays on `ns`. That is the mutation the new test fails on.
+
+Without the environment variable all four report as *skipped*, never as passed. Requirements: the
+`communicationpools.octo-mesh.meshmakers.io` CRD and permission to create the `octo-pool-e2e` and
+`octo-pool-e2e-platform` namespaces.
+
+🔴 A deployed operator registers a finalizer on `CommunicationPool`, so a deleted CR lingers in
+`Terminating` until that operator clears it. Arrange waits for the object to actually be gone rather
+than for the delete to be accepted — without that, the second test to create the CR fails with
+`409 AlreadyExists: object is being deleted`, in whichever test happens to run next. Helm is deliberately not in the loop — this increment changed
 nothing in the helm layer, and a directly created Deployment carrying the release's
 `app.kubernetes.io/instance` label is exactly the shape the scale path selects on.
 
