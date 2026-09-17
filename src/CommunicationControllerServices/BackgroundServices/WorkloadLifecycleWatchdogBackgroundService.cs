@@ -199,7 +199,7 @@ internal class WorkloadLifecycleWatchdogBackgroundService(
         }
 
         // AB#4984 defense-in-depth: LifecycleMode is plain CK author configuration and can be
-        // set to OnDemand via GraphQL/blueprint without ever passing the PoolService deploy
+        // set to OnDemand via GraphQL/blueprint without ever passing the DeploymentSiteService deploy
         // gate. Never hibernate a workload whose pipelines use process-bound triggers — that
         // would silently stop them. Surface the misconfiguration as a warning event instead.
         var capability = await onDemandCapabilityService.EvaluateAsync(tenantId, adapterRtEntityId);

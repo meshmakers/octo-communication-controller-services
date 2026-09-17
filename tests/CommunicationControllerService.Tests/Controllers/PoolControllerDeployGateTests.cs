@@ -21,12 +21,12 @@ internal class PoolControllerDeployGateTests
     private const string TenantId = "child-a";
     private static readonly OctoObjectId RtId = OctoObjectId.GenerateNewId();
 
-    private static (PoolController sut, IPoolService pools, IConfigurationService configuration) CreateSut(bool enabled)
+    private static (DeploymentSiteController sut, IDeploymentSiteService pools, IConfigurationService configuration) CreateSut(bool enabled)
     {
-        var pools = Substitute.For<IPoolService>();
+        var pools = Substitute.For<IDeploymentSiteService>();
         var configuration = Substitute.For<IConfigurationService>();
         configuration.IsEnabledAsync(TenantId).Returns(enabled);
-        var sut = new PoolController(NullLogger<PoolController>.Instance, pools, configuration);
+        var sut = new DeploymentSiteController(NullLogger<DeploymentSiteController>.Instance, pools, configuration);
         var httpContext = new DefaultHttpContext();
         httpContext.Request.RouteValues["tenantId"] = TenantId;
         sut.ControllerContext = new ControllerContext { HttpContext = httpContext };

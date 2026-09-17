@@ -100,7 +100,7 @@ internal class WorkloadOnDemandCapabilityService(
         catch (Exception e)
         {
             // Best-effort by contract: the persisted value is a Studio display aid; validation
-            // paths (PoolService, DeployPipelineAsync) always evaluate live and are unaffected.
+            // paths (DeploymentSiteService, DeployPipelineAsync) always evaluate live and are unaffected.
             Logger.Warn(e, "[{TenantId}] Failed to refresh on-demand capability for workload '{AdapterRtId}'",
                 tenantId, adapterRtEntityId);
         }

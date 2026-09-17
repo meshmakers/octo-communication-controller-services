@@ -3,7 +3,7 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using NSubstitute;
 
-namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.PoolServiceTests;
+namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.DeploymentSiteServiceTests;
 
 /// <summary>
 /// Pins the reverse-sync state-restore contract: a Cloud operator reporting a
@@ -58,10 +58,10 @@ internal class RestoreDeployedStateAsyncTests : PoolServiceTestsBase
     {
         // Operator on first connect after install owns nothing. Don't hit
         // the repository, don't write audit events.
-        await PoolService.RestoreDeployedStateAsync(OperatorConnectionId,
+        await DeploymentSiteService.RestoreDeployedStateAsync(OperatorConnectionId,
             Array.Empty<OperatorDeployedDeploymentSiteReportDto>());
 
-        await CommunicationRepository.DidNotReceiveWithAnyArgs().GetPoolsAsync(Arg.Any<string>());
+        await CommunicationRepository.DidNotReceiveWithAnyArgs().GetDeploymentSitesAsync(Arg.Any<string>());
         await CommunicationEventService.DidNotReceiveWithAnyArgs().StoreInformationEventAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<RtEntityId?>());
     }
@@ -73,9 +73,9 @@ internal class RestoreDeployedStateAsyncTests : PoolServiceTestsBase
         // operator restart caused state drift), helm release exists, operator
         // reports it as deployed. Controller must lift Pending → Deployed.
         var pool = MakePool(RtEnvironmentEnum.Cloud, RtDeploymentStateEnum.Pending);
-        CommunicationRepository.GetPoolsAsync(TenantId).Returns(new[] { pool });
+        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(new[] { pool });
 
-        await PoolService.RestoreDeployedStateAsync(OperatorConnectionId, SinglePoolReport());
+        await DeploymentSiteService.RestoreDeployedStateAsync(OperatorConnectionId, SinglePoolReport());
 
         await CommunicationRepository.Received(1).SetPoolDeploymentStateAsync(
             TenantId, DeploymentSiteRtId, RtDeploymentStateEnum.Deployed);
@@ -95,9 +95,9 @@ internal class RestoreDeployedStateAsyncTests : PoolServiceTestsBase
         // is on a NEW connection, so per-connection tracking + pool-for-conn
         // registration MUST be rebuilt, otherwise undeploy fan-out fails.
         var pool = MakePool(RtEnvironmentEnum.Cloud, RtDeploymentStateEnum.Deployed);
-        CommunicationRepository.GetPoolsAsync(TenantId).Returns(new[] { pool });
+        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(new[] { pool });
 
-        await PoolService.RestoreDeployedStateAsync(OperatorConnectionId, SinglePoolReport());
+        await DeploymentSiteService.RestoreDeployedStateAsync(OperatorConnectionId, SinglePoolReport());
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs().SetPoolDeploymentStateAsync(
             Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<RtDeploymentStateEnum>());
@@ -112,13 +112,13 @@ internal class RestoreDeployedStateAsyncTests : PoolServiceTestsBase
     public async Task EdgePool_IsSilentlySkipped()
     {
         // Defense in depth: even if the OperatorHub's mode check is bypassed
-        // somehow, a per-pool Environment guard in PoolService must refuse to
+        // somehow, a per-pool Environment guard in DeploymentSiteService must refuse to
         // revive Edge-pool state — those entities live on a different cluster
         // and the controller has no authority to flip them.
         var pool = MakePool(RtEnvironmentEnum.Edge, RtDeploymentStateEnum.Disabled);
-        CommunicationRepository.GetPoolsAsync(TenantId).Returns(new[] { pool });
+        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(new[] { pool });
 
-        await PoolService.RestoreDeployedStateAsync(OperatorConnectionId, SinglePoolReport());
+        await DeploymentSiteService.RestoreDeployedStateAsync(OperatorConnectionId, SinglePoolReport());
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs().SetPoolDeploymentStateAsync(
             Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<RtDeploymentStateEnum>());
@@ -133,9 +133,9 @@ internal class RestoreDeployedStateAsyncTests : PoolServiceTestsBase
         // Operator reports a pool the controller has no record of (entity
         // deleted while operator was offline). Skip the entry, don't blow up
         // the whole reverse-sync — other reported pools still need restoring.
-        CommunicationRepository.GetPoolsAsync(TenantId).Returns(Array.Empty<RtDeploymentSite>());
+        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(Array.Empty<RtDeploymentSite>());
 
-        await PoolService.RestoreDeployedStateAsync(OperatorConnectionId, SinglePoolReport());
+        await DeploymentSiteService.RestoreDeployedStateAsync(OperatorConnectionId, SinglePoolReport());
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs().SetPoolDeploymentStateAsync(
             Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<RtDeploymentStateEnum>());
@@ -148,11 +148,11 @@ internal class RestoreDeployedStateAsyncTests : PoolServiceTestsBase
         // Companion to the pool case — workloads inside a Cloud pool that the
         // operator reports must also be lifted Pending → Deployed.
         var pool = MakePool(RtEnvironmentEnum.Cloud, RtDeploymentStateEnum.Deployed);
-        CommunicationRepository.GetPoolsAsync(TenantId).Returns(new[] { pool });
+        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(new[] { pool });
         var adapter = MakeAdapter(RtDeploymentStateEnum.Pending);
         CommunicationRepository.GetWorkloadByRtIdAsync(TenantId, WorkloadRtId).Returns(adapter);
 
-        await PoolService.RestoreDeployedStateAsync(OperatorConnectionId,
+        await DeploymentSiteService.RestoreDeployedStateAsync(OperatorConnectionId,
             SinglePoolReport(WorkloadRtId.ToString()));
 
         await CommunicationRepository.Received(1).SetAdapterDeploymentStateAsync(
@@ -170,11 +170,11 @@ internal class RestoreDeployedStateAsyncTests : PoolServiceTestsBase
     public async Task WorkloadAlreadyDeployed_SkipsStateWriteButStillTracks()
     {
         var pool = MakePool(RtEnvironmentEnum.Cloud, RtDeploymentStateEnum.Deployed);
-        CommunicationRepository.GetPoolsAsync(TenantId).Returns(new[] { pool });
+        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(new[] { pool });
         var adapter = MakeAdapter(RtDeploymentStateEnum.Deployed);
         CommunicationRepository.GetWorkloadByRtIdAsync(TenantId, WorkloadRtId).Returns(adapter);
 
-        await PoolService.RestoreDeployedStateAsync(OperatorConnectionId,
+        await DeploymentSiteService.RestoreDeployedStateAsync(OperatorConnectionId,
             SinglePoolReport(WorkloadRtId.ToString()));
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs().SetAdapterDeploymentStateAsync(
@@ -188,9 +188,9 @@ internal class RestoreDeployedStateAsyncTests : PoolServiceTestsBase
         // Malformed rtId on the wire — log + skip, continue processing rest
         // of the pool. Don't blow up the whole reverse-sync.
         var pool = MakePool(RtEnvironmentEnum.Cloud, RtDeploymentStateEnum.Deployed);
-        CommunicationRepository.GetPoolsAsync(TenantId).Returns(new[] { pool });
+        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(new[] { pool });
 
-        await PoolService.RestoreDeployedStateAsync(OperatorConnectionId,
+        await DeploymentSiteService.RestoreDeployedStateAsync(OperatorConnectionId,
             SinglePoolReport("not-a-valid-octo-object-id"));
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs().GetWorkloadByRtIdAsync(

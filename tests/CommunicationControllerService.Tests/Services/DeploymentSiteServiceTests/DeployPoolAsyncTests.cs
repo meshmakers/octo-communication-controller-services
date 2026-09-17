@@ -5,7 +5,7 @@ using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.Syst
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using NSubstitute;
 
-namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.PoolServiceTests;
+namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.DeploymentSiteServiceTests;
 
 internal class DeployPoolAsyncTests : PoolServiceTestsBase
 {
@@ -18,7 +18,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
             Name = PoolName,
             Environment = RtEnvironmentEnum.Cloud,
         };
-        CommunicationRepository.GetPoolsAsync(TenantId).Returns(new[] { rtPool });
+        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(new[] { rtPool });
         // GetWorkloadsForPoolAsync — default empty
         CommunicationRepository.GetWorkloadsForPoolAsync(TenantId, DeploymentSiteRtId)
             .Returns(Array.Empty<RtDeployableWorkload>());
@@ -34,7 +34,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
             Name = PoolName,
             Environment = RtEnvironmentEnum.Edge,
         };
-        CommunicationRepository.GetPoolsAsync(TenantId).Returns(new[] { rtPool });
+        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(new[] { rtPool });
         await Task.CompletedTask;
     }
 
@@ -43,7 +43,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
     {
         await GivenCloudPool();
 
-        await PoolService.DeployPoolAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.DeployPoolAsync(TenantId, DeploymentSiteRtId);
 
         await OperatorConnectionManager.Received(1).NotifyPoolDeployedAsync(
             Arg.Is<DeployedDeploymentSiteDto>(d => d.TenantId == TenantId && d.DeploymentSiteRtId == DeploymentSiteRtId.ToString()));
@@ -54,7 +54,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
     {
         await GivenCloudPool();
 
-        await PoolService.DeployPoolAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.DeployPoolAsync(TenantId, DeploymentSiteRtId);
 
         await OperatorConnectionManager.DidNotReceive()
             .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
@@ -72,7 +72,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         await GivenEdgePool();
 
         var ex = await Assert.ThrowsAsync<Exception>(
-            async () => await PoolService.DeployPoolAsync(TenantId, DeploymentSiteRtId));
+            async () => await DeploymentSiteService.DeployPoolAsync(TenantId, DeploymentSiteRtId));
         await Assert.That(ex!.Message).Contains("Edge");
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
@@ -92,10 +92,10 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         // still work — notify the operator to clean up, then set the
         // resting state to Disabled (since Environment is now Edge).
         await GivenEdgePool();
-        var pool = (await CommunicationRepository.GetPoolsAsync(TenantId)).Single();
+        var pool = (await CommunicationRepository.GetDeploymentSitesAsync(TenantId)).Single();
         pool.DeploymentState = RtDeploymentStateEnum.Deployed;
 
-        await PoolService.UndeployPoolAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.UndeployPoolAsync(TenantId, DeploymentSiteRtId);
 
         await OperatorConnectionManager.Received(1)
             .NotifyPoolUndeployedAsync(TenantId, DeploymentSiteRtId.ToString());
@@ -109,11 +109,11 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         // Nothing to clean up — both Undeployed and Disabled are terminal
         // resting states.
         await GivenCloudPool();
-        var pool = (await CommunicationRepository.GetPoolsAsync(TenantId)).Single();
+        var pool = (await CommunicationRepository.GetDeploymentSitesAsync(TenantId)).Single();
         pool.DeploymentState = RtDeploymentStateEnum.Undeployed;
 
         var ex = await Assert.ThrowsAsync<Exception>(
-            async () => await PoolService.UndeployPoolAsync(TenantId, DeploymentSiteRtId));
+            async () => await DeploymentSiteService.UndeployPoolAsync(TenantId, DeploymentSiteRtId));
         await Assert.That(ex!.Message).Contains("nothing to undeploy");
 
         await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
@@ -124,11 +124,11 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
     public async Task UndeployPoolAsync_AlreadyDisabled_ThrowsAlreadyNotDeployed()
     {
         await GivenEdgePool();
-        var pool = (await CommunicationRepository.GetPoolsAsync(TenantId)).Single();
+        var pool = (await CommunicationRepository.GetDeploymentSitesAsync(TenantId)).Single();
         pool.DeploymentState = RtDeploymentStateEnum.Disabled;
 
         var ex = await Assert.ThrowsAsync<Exception>(
-            async () => await PoolService.UndeployPoolAsync(TenantId, DeploymentSiteRtId));
+            async () => await DeploymentSiteService.UndeployPoolAsync(TenantId, DeploymentSiteRtId));
         await Assert.That(ex!.Message).Contains("nothing to undeploy");
 
         await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
@@ -143,10 +143,10 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         // and runs the same helm upgrade --install path as the central operator.
         // Only the pool itself (CR + broker secret) is central-cluster-only.
         var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
-        var pool = (await CommunicationRepository.GetPoolsAsync(TenantId)).Single();
+        var pool = (await CommunicationRepository.GetDeploymentSitesAsync(TenantId)).Single();
         pool.Environment = RtEnvironmentEnum.Edge;
 
-        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(d =>
@@ -166,11 +166,11 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         // a re-deploy is possible. Resting state is Undeployed (the workload
         // still has its Helm fields), not Disabled.
         var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
-        var pool = (await CommunicationRepository.GetPoolsAsync(TenantId)).Single();
+        var pool = (await CommunicationRepository.GetDeploymentSitesAsync(TenantId)).Single();
         pool.Environment = RtEnvironmentEnum.Edge;
         adapter.DeploymentState = RtDeploymentStateEnum.Deployed;
 
-        await PoolService.UndeployWorkloadAsync(TenantId, adapter.RtId);
+        await DeploymentSiteService.UndeployWorkloadAsync(TenantId, adapter.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadUndeployedAsync(
             Arg.Is<WorkloadUndeployedDto>(w =>
@@ -189,7 +189,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         adapter.DeploymentState = RtDeploymentStateEnum.Undeployed;
 
         var ex = await Assert.ThrowsAsync<Exception>(
-            async () => await PoolService.UndeployWorkloadAsync(TenantId, adapter.RtId));
+            async () => await DeploymentSiteService.UndeployWorkloadAsync(TenantId, adapter.RtId));
         await Assert.That(ex!.Message).Contains("nothing to undeploy");
 
         await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
@@ -203,7 +203,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
         adapter.DeploymentState = RtDeploymentStateEnum.Deployed;
 
-        await PoolService.UndeployWorkloadAsync(TenantId, adapter.RtId);
+        await DeploymentSiteService.UndeployWorkloadAsync(TenantId, adapter.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadUndeployedAsync(
             Arg.Any<WorkloadUndeployedDto>());
@@ -217,7 +217,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
     {
         await GivenCloudPool();
 
-        await PoolService.DeployPoolAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.DeployPoolAsync(TenantId, DeploymentSiteRtId);
 
         await CommunicationRepository.Received(1).SetPoolDeploymentStateAsync(TenantId, DeploymentSiteRtId,
             RtDeploymentStateEnum.Deployed);
@@ -229,7 +229,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         await GivenCloudPool();
         // UndeployPool requires the pool to be in a deployable state (the
         // controller would otherwise throw PoolAlreadyNotDeployed).
-        (await CommunicationRepository.GetPoolsAsync(TenantId)).Single().DeploymentState =
+        (await CommunicationRepository.GetDeploymentSitesAsync(TenantId)).Single().DeploymentState =
             RtDeploymentStateEnum.Deployed;
         // Pretend two workloads were tracked from an earlier deploy.
         OperatorConnectionManager.GetDeployedWorkloadsForTenant(TenantId).Returns(new[]
@@ -246,7 +246,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
             },
         });
 
-        await PoolService.UndeployPoolAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.UndeployPoolAsync(TenantId, DeploymentSiteRtId);
 
         // Both workload notifies fired, and the pool notify after them.
         await OperatorConnectionManager.Received(1).NotifyWorkloadUndeployedAsync(
@@ -264,7 +264,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         // calls. This test pins the fan-out is gone.
         await GivenCloudPoolWithAdapter(receivesClusterSecrets: true);
 
-        await PoolService.DeployPoolAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.DeployPoolAsync(TenantId, DeploymentSiteRtId);
 
         await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
             .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
@@ -275,7 +275,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
     {
         var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: true);
 
-        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(d => d.ReceivesClusterSecrets));
@@ -286,7 +286,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
     {
         var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
 
-        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(d => !d.ReceivesClusterSecrets));
@@ -297,7 +297,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
     {
         var (_, application) = await GivenCloudPoolWithApplication(receivesClusterSecrets: false);
 
-        await PoolService.DeployWorkloadAsync(TenantId, application.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, application.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(d => !d.ReceivesClusterSecrets));
@@ -311,7 +311,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         // the attribute lives on DeployableWorkload so both types carry it.
         var (_, application) = await GivenCloudPoolWithApplication(receivesClusterSecrets: true);
 
-        await PoolService.DeployWorkloadAsync(TenantId, application.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, application.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(d => d.ReceivesClusterSecrets));
@@ -324,7 +324,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         adapter.ChartName = string.Empty;
 
         var ex = await Assert.ThrowsAsync<Exception>(
-            async () => await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId));
+            async () => await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId));
 
         await Assert.That(ex!.Message).Contains("Chart Name");
         await Assert.That(ex!.Message).Contains("test-adapter");
@@ -342,7 +342,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
         adapter.ChartVersion = string.Empty;
 
-        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(w => w.ChartVersion == string.Empty));
@@ -356,7 +356,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
             .Returns((RtHelmRepositoryConfiguration?)null);
 
         var ex = await Assert.ThrowsAsync<Exception>(
-            async () => await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId));
+            async () => await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId));
 
         await Assert.That(ex!.Message).Contains("Helm repository");
         await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
@@ -376,7 +376,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
             });
 
         var ex = await Assert.ThrowsAsync<Exception>(
-            async () => await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId));
+            async () => await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId));
 
         await Assert.That(ex!.Message).Contains("Repository URL");
         await Assert.That(ex!.Message).Contains("test-adapter");
@@ -390,7 +390,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         var (_, adapter) = await GivenCloudPoolWithAdapter(receivesClusterSecrets: false);
         adapter.DeploymentState = RtDeploymentStateEnum.Deployed;
 
-        await PoolService.UndeployWorkloadAsync(TenantId, adapter.RtId);
+        await DeploymentSiteService.UndeployWorkloadAsync(TenantId, adapter.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadUndeployedAsync(
             Arg.Is<WorkloadUndeployedDto>(w =>
@@ -409,7 +409,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
             Name = PoolName,
             Environment = RtEnvironmentEnum.Cloud,
         };
-        CommunicationRepository.GetPoolsAsync(TenantId).Returns(new[] { rtPool });
+        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(new[] { rtPool });
 
         var adapter = new RtAdapter
         {
@@ -449,7 +449,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
             Name = PoolName,
             Environment = RtEnvironmentEnum.Cloud,
         };
-        CommunicationRepository.GetPoolsAsync(TenantId).Returns(new[] { rtPool });
+        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(new[] { rtPool });
 
         var application = new RtApplication
         {
@@ -483,7 +483,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
     public async Task UndeployPoolAsync_CloudPool_OnlyUndeploysWorkloadsOfThisPool()
     {
         await GivenCloudPool();
-        (await CommunicationRepository.GetPoolsAsync(TenantId)).Single().DeploymentState =
+        (await CommunicationRepository.GetDeploymentSitesAsync(TenantId)).Single().DeploymentState =
             RtDeploymentStateEnum.Deployed;
         // Two workloads, one in a different pool — must not be undeployed here.
         OperatorConnectionManager.GetDeployedWorkloadsForTenant(TenantId).Returns(new[]
@@ -500,7 +500,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
             },
         });
 
-        await PoolService.UndeployPoolAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.UndeployPoolAsync(TenantId, DeploymentSiteRtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadUndeployedAsync(
             Arg.Is<WorkloadUndeployedDto>(w => w.WorkloadName == "wl-here"));
@@ -519,7 +519,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         adapter.IngressEnabled = true;
         adapter.Hostname = "adapter.staging.octo-mesh.com";
 
-        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(d =>
@@ -537,7 +537,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         adapter.IngressEnabled = false;
         adapter.Hostname = "adapter.staging.octo-mesh.com";
 
-        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(d =>
@@ -557,7 +557,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         adapter.Hostname = string.Empty;
 
         var ex = await Assert.ThrowsAsync<Exception>(
-            async () => await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId));
+            async () => await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId));
 
         await Assert.That(ex!.Message).Contains("Hostname");
         await Assert.That(ex!.Message).Contains("Ingress Enabled");
@@ -575,7 +575,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         application.IngressEnabled = true;
         application.Hostname = "energy.prod-1.octo-mesh.com";
 
-        await PoolService.DeployWorkloadAsync(TenantId, application.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, application.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(d =>
@@ -594,7 +594,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         adapter.IngressEnabled = false;
         adapter.Hostname = string.Empty;
 
-        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(d => !d.IngressEnabled && d.Hostname == null));
@@ -621,7 +621,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
                 return true;
             });
 
-        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(d =>
@@ -651,7 +651,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
             });
 
         var ex = await Assert.ThrowsAsync<Exception>(
-            async () => await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId));
+            async () => await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId));
 
         await Assert.That(ex!.Message).Contains("does-not-exist");
         await Assert.That(ex!.Message).Contains("Hostname");
@@ -686,7 +686,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
                 return true;
             });
 
-        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(d =>
@@ -716,7 +716,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
         };
         EncryptionService.Decrypt("enc:v1:cipher").Returns("plain-{{context.tenantId}}");
 
-        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
         // The Decrypt output reaches the DTO with the placeholder text intact —
         // proves the resolver did NOT run over secret material. Running templating
@@ -751,7 +751,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
                 return true;
             });
 
-        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(d =>
@@ -785,7 +785,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
             });
 
         var ex = await Assert.ThrowsAsync<Exception>(
-            async () => await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId));
+            async () => await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId));
 
         await Assert.That(ex!.Message).Contains("service.nope");
         await Assert.That(ex!.Message).Contains("ValueOverride[oauth.callbackUrl]");
@@ -809,7 +809,7 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
             });
 
         var ex = await Assert.ThrowsAsync<Exception>(
-            async () => await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId));
+            async () => await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId));
 
         await Assert.That(ex!.Message).Contains("domain.missing");
         await Assert.That(ex!.Message).Contains("ValuesYaml");

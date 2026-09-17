@@ -21,8 +21,8 @@ internal class ReportDeployedStateAsyncTests : IDisposable
         Substitute.For<IOperatorConnectionManager>();
     private readonly ICommunicationRepository _repository =
         Substitute.For<ICommunicationRepository>();
-    private readonly IPoolService _poolService =
-        Substitute.For<IPoolService>();
+    private readonly IDeploymentSiteService _poolService =
+        Substitute.For<IDeploymentSiteService>();
     private readonly IShutdownState _shutdownState =
         Substitute.For<IShutdownState>();
     private readonly ICommunicationEventService _eventService =
@@ -112,7 +112,7 @@ internal class ReportDeployedStateAsyncTests : IDisposable
     public async Task CloudMode_EmptyReport_StillDelegatesAsNoOp()
     {
         // An operator that genuinely owns nothing (e.g. fresh install) should
-        // still be allowed to call this — the PoolService treats an empty
+        // still be allowed to call this — the DeploymentSiteService treats an empty
         // list as a logged no-op. Pin that we don't shortcut at the hub.
         _connectionManager.GetOperatorMode(ConnectionId).Returns(true);
         var reports = new List<OperatorDeployedDeploymentSiteReportDto>();

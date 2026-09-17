@@ -15,8 +15,8 @@ internal class ReportWorkloadScaleStatusAsyncTests : IDisposable
         Substitute.For<IOperatorConnectionManager>();
     private readonly ICommunicationRepository _repository =
         Substitute.For<ICommunicationRepository>();
-    private readonly IPoolService _poolService =
-        Substitute.For<IPoolService>();
+    private readonly IDeploymentSiteService _poolService =
+        Substitute.For<IDeploymentSiteService>();
     private readonly IShutdownState _shutdownState =
         Substitute.For<IShutdownState>();
     private readonly ICommunicationEventService _eventService =

@@ -6,7 +6,7 @@ using Meshmakers.Octo.Runtime.Contracts;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 
-namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.PoolServiceTests;
+namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.DeploymentSiteServiceTests;
 
 /// <summary>
 /// AB#5027 phase 2: deploying an Adapter workload is the closest this service has to "an adapter was
@@ -52,7 +52,7 @@ internal class DeployWorkloadServiceAccountProvisioningTests : PoolServiceTestsB
         adapter.Name = "mesh-adapter";
         ArrangeDeployableWorkload(pool, adapter);
 
-        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
         await ServiceAccountProvisioningService.Received(1).EnsureAdapterProvisionedAsync(TenantId, adapter);
     }
@@ -69,7 +69,7 @@ internal class DeployWorkloadServiceAccountProvisioningTests : PoolServiceTestsB
         };
         ArrangeDeployableWorkload(pool, application);
 
-        await PoolService.DeployWorkloadAsync(TenantId, application.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, application.RtId);
 
         // An Application executes no pipelines and therefore has no pipeline identity.
         await ServiceAccountProvisioningService.DidNotReceiveWithAnyArgs()
@@ -88,7 +88,7 @@ internal class DeployWorkloadServiceAccountProvisioningTests : PoolServiceTestsB
             .EnsureAdapterProvisionedAsync(TenantId, adapter)
             .ThrowsAsync(new InvalidOperationException("identity unreachable"));
 
-        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
         // Provisioning runs BEFORE the deploy notification since AB#5072 (the notification carries
         // the credentials), so a broken identity service must not swallow the notification or the
@@ -114,7 +114,7 @@ internal class DeployWorkloadServiceAccountProvisioningTests : PoolServiceTestsB
         var adapter = RtEntityCreator.CreateAdapter();
         ArrangeDeployableWorkload(pool, adapter);
 
-        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
         Received.InOrder(() =>
         {

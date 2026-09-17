@@ -42,7 +42,7 @@ public class CommunicationRepositoryTests(CommunicationControllerFixture fixture
     {
         var repository = fixture.GetService<ICommunicationRepository>();
 
-        var pools = await repository.GetPoolsAsync(fixture.TestTenantId);
+        var pools = await repository.GetDeploymentSitesAsync(fixture.TestTenantId);
 
         // In a shared test environment, we can't guarantee an empty database.
         // We verify the method returns a valid collection.

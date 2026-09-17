@@ -19,10 +19,10 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.C
 [ApiController]
 [Route("{tenantId:tenantId}/v{version:apiVersion}/[controller]")]
 [ApiVersion("1.0")]
-public class PoolController : ControllerBase
+public class DeploymentSiteController : ControllerBase
 {
-    private readonly ILogger<PoolController> _logger;
-    private readonly IPoolService _poolService;
+    private readonly ILogger<DeploymentSiteController> _logger;
+    private readonly IDeploymentSiteService _poolService;
     private readonly IConfigurationService _configurationService;
 
     /// <summary>
@@ -31,7 +31,7 @@ public class PoolController : ControllerBase
     /// <param name="logger">Logging object</param>
     /// <param name="poolService">Pool management service instance</param>
     /// <param name="configurationService">Enabled state of Communication per tenant</param>
-    public PoolController(ILogger<PoolController> logger, IPoolService poolService,
+    public DeploymentSiteController(ILogger<DeploymentSiteController> logger, IDeploymentSiteService poolService,
         IConfigurationService configurationService)
     {
         _logger = logger;
@@ -111,7 +111,7 @@ public class PoolController : ControllerBase
             await _poolService.DeployPoolAsync(tenantId, poolRtId);
             return NoContent();
         }
-        catch (PoolServiceException e)
+        catch (DeploymentSiteServiceException e)
         {
             _logger.LogError(e, "Error deploying pool");
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
@@ -142,7 +142,7 @@ public class PoolController : ControllerBase
             await _poolService.UndeployPoolAsync(tenantId, poolRtId);
             return NoContent();
         }
-        catch (PoolServiceException e)
+        catch (DeploymentSiteServiceException e)
         {
             _logger.LogError(e, "Error undeploying pool");
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
@@ -180,7 +180,7 @@ public class PoolController : ControllerBase
             await _poolService.DeployWorkloadAsync(tenantId, workloadRtId);
             return NoContent();
         }
-        catch (PoolServiceException e)
+        catch (DeploymentSiteServiceException e)
         {
             _logger.LogError(e, "Error deploying workload");
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
@@ -209,7 +209,7 @@ public class PoolController : ControllerBase
             await _poolService.UndeployWorkloadAsync(tenantId, workloadRtId);
             return NoContent();
         }
-        catch (PoolServiceException e)
+        catch (DeploymentSiteServiceException e)
         {
             _logger.LogError(e, "Error undeploying workload");
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
@@ -253,7 +253,7 @@ public class PoolController : ControllerBase
             var effective = await _poolService.ScaleAdapterPoolAsync(tenantId, workloadRtId, replicas);
             return Ok(new AdapterPoolScaleResultDto(effective));
         }
-        catch (PoolServiceException e)
+        catch (DeploymentSiteServiceException e)
         {
             _logger.LogError(e, "Error scaling adapter pool");
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message });

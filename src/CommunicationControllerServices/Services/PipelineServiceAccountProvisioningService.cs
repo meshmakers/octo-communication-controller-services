@@ -22,7 +22,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 /// <see cref="CommunicationEventService" /> resolves <c>IEventRepository</c>. Constructor-injecting
 /// it fails DI validation: <c>ICommandClient&lt;T&gt;</c> wraps MassTransit's
 /// <c>IRequestClient&lt;T&gt;</c>, which is <b>scoped</b>, and this service is a singleton consumed
-/// by the singleton <c>PoolService</c>.
+/// by the singleton <c>DeploymentSiteService</c>.
 /// </remarks>
 internal class PipelineServiceAccountProvisioningService(
     ICommunicationRepository communicationRepository,

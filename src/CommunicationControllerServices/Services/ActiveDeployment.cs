@@ -5,7 +5,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 /// <summary>
 /// A pool or workload of a tenant whose <c>DeploymentState</c> says it still owns operator-managed
 /// resources (anything but <c>Undeployed</c> / <c>Disabled</c>). Produced by
-/// <see cref="IPoolService.GetActiveDeploymentsAsync"/> for the Communication disable guard (AB#4255).
+/// <see cref="IDeploymentSiteService.GetActiveDeploymentsAsync"/> for the Communication disable guard (AB#4255).
 /// </summary>
 /// <param name="Kind">"Pool", "Adapter" or "Application"</param>
 /// <param name="Name">Entity name, falling back to the runtime id</param>

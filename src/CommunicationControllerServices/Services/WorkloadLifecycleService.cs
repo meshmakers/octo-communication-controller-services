@@ -233,7 +233,7 @@ internal class WorkloadLifecycleService(
         var pool = await communicationRepository.GetPoolForWorkloadAsync(tenantId, workload.RtId);
         if (pool == null)
         {
-            throw PoolServiceException.WorkloadNotInPool(tenantId, workload.RtId);
+            throw DeploymentSiteServiceException.WorkloadNotInPool(tenantId, workload.RtId);
         }
 
         replicas = ClampToAdapterPoolRange(tenantId, workload, replicas);

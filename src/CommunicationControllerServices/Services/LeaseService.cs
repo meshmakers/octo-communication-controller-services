@@ -619,7 +619,7 @@ internal class LeaseService : ILeaseService
     ///     </para>
     ///     <para>
     ///         🔴 Read through <c>GetAttributeValueOrDefault</c> rather than the generated properties,
-    ///         for the same reason <c>PoolService.AppendPipelineServiceAccountOverridesAsync</c> does:
+    ///         for the same reason <c>DeploymentSiteService.AppendPipelineServiceAccountOverridesAsync</c> does:
     ///         both attributes are mandatory on the CK type, so a generated getter throws on a
     ///         half-written entity. Here that must degrade to a refused lease with a named reason, not
     ///         to an exception out of a hub method.

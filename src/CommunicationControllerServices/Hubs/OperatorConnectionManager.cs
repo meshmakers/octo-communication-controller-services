@@ -22,7 +22,7 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
 
     // For each connected operator (by connectionId), the (tenant, poolRtId)
     // tuples it has claimed via RegisterPoolForConnection. On disconnect we
-    // hand these back to PoolService so the corresponding pool entities'
+    // hand these back to DeploymentSiteService so the corresponding pool entities'
     // state can be flipped to Offline. The dictionary value is unused —
     // ConcurrentHashSet does not exist, so a bool sentinel emulates a set.
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<(string TenantId, string PoolRtId), bool>>

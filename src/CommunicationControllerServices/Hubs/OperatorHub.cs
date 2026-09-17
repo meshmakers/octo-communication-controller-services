@@ -21,7 +21,7 @@ public class OperatorHub : Hub, IOperatorHub
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly IOperatorConnectionManager _connectionManager;
     private readonly ICommunicationRepository _communicationRepository;
-    private readonly IPoolService _poolService;
+    private readonly IDeploymentSiteService _poolService;
     private readonly IShutdownState _shutdownState;
     private readonly ICommunicationEventService _eventService;
     private readonly IWorkloadLifecycleService _workloadLifecycleService;
@@ -31,7 +31,7 @@ public class OperatorHub : Hub, IOperatorHub
     /// </summary>
     public OperatorHub(IOperatorConnectionManager connectionManager,
         ICommunicationRepository communicationRepository,
-        IPoolService poolService,
+        IDeploymentSiteService poolService,
         IShutdownState shutdownState,
         ICommunicationEventService eventService,
         IWorkloadLifecycleService workloadLifecycleService)
@@ -83,7 +83,7 @@ public class OperatorHub : Hub, IOperatorHub
         // Drop the connection-level entry and reset every pool it claimed.
         // Same call site whether the disconnect was graceful (operator
         // shutdown) or a crash — the hub guarantees this fires exactly once.
-        // The disconnecting connection id is passed to PoolService so a stale
+        // The disconnecting connection id is passed to DeploymentSiteService so a stale
         // disconnect (a previous connection's handler firing late, after a
         // newer connection has already taken over) does not overwrite the
         // Online state written by the newer connection.
@@ -205,7 +205,7 @@ public class OperatorHub : Hub, IOperatorHub
         var operatorMode = _connectionManager.GetOperatorMode(Context.ConnectionId);
         if (operatorMode.HasValue)
         {
-            var rtPool = (await _communicationRepository.GetPoolsAsync(tenantId))
+            var rtPool = (await _communicationRepository.GetDeploymentSitesAsync(tenantId))
                 .FirstOrDefault(p => p.RtId == poolObjectId);
             if (rtPool == null)
             {

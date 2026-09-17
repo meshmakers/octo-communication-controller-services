@@ -130,7 +130,7 @@ try
     builder.Services.AddSingleton<IExpressionValidationService, ExpressionValidationService>();
     builder.Services.AddSingleton<IPipelineDefinitionService, PipelineDefinitionService>();
     builder.Services.AddSingleton<IAdapterService, AdapterService>();
-    builder.Services.AddSingleton<IPoolService, PoolService>();
+    builder.Services.AddSingleton<IDeploymentSiteService, DeploymentSiteService>();
     builder.Services.AddSingleton<IPipelineDebugService, PipelineDebugService>();
     builder.Services.AddSingleton<IPipelineExecutionService, PipelineExecutionService>();
     builder.Services.AddTransient<ITriggerManagementService, TriggerManagementService>();

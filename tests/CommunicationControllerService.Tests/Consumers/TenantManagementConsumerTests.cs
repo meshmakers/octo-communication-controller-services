@@ -22,13 +22,13 @@ internal class TenantManagementConsumerTests
     private static readonly DateTime FutureTimestamp = DateTime.UtcNow.AddYears(1);
 
     private readonly TenantManagementConsumer _consumer;
-    private readonly IPoolService _poolService;
+    private readonly IDeploymentSiteService _poolService;
     private readonly IAdapterService _adapterService;
     private readonly IConfigurationService _configurationService;
 
     public TenantManagementConsumerTests()
     {
-        _poolService = Substitute.For<IPoolService>();
+        _poolService = Substitute.For<IDeploymentSiteService>();
         _adapterService = Substitute.For<IAdapterService>();
         _configurationService = Substitute.For<IConfigurationService>();
         var logger = Substitute.For<ILogger<TenantManagementConsumer>>();
@@ -182,7 +182,7 @@ internal class TenantManagementConsumerTests
         _poolService.PreUpdateTenantAsync(TenantId)
             .Returns(_ =>
             {
-                callOrder.Add("PoolService.Pre");
+                callOrder.Add("DeploymentSiteService.Pre");
                 return Task.CompletedTask;
             });
         _adapterService.PosUpdateTenantAsync(TenantId)
@@ -194,7 +194,7 @@ internal class TenantManagementConsumerTests
         _poolService.PosUpdateTenantAsync(TenantId)
             .Returns(_ =>
             {
-                callOrder.Add("PoolService.Pos");
+                callOrder.Add("DeploymentSiteService.Pos");
                 return Task.CompletedTask;
             });
 
@@ -205,7 +205,7 @@ internal class TenantManagementConsumerTests
         // Assert
         await Assert.That(callOrder).IsEquivalentTo(new[]
         {
-            "AdapterService.Pre", "PoolService.Pre", "AdapterService.Pos", "PoolService.Pos"
+            "AdapterService.Pre", "DeploymentSiteService.Pre", "AdapterService.Pos", "DeploymentSiteService.Pos"
         });
     }
 

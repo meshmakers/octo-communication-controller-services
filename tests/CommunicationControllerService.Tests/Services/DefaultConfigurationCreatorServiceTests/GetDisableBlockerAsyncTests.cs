@@ -25,7 +25,7 @@ internal class GetDisableBlockerAsyncTests
 {
     private const string TenantId = "child-a";
 
-    private readonly IPoolService _poolService = Substitute.For<IPoolService>();
+    private readonly IDeploymentSiteService _poolService = Substitute.For<IDeploymentSiteService>();
     private readonly ISystemContext _systemContext = Substitute.For<ISystemContext>();
     private readonly ITenantContext _tenantContext = Substitute.For<ITenantContext>();
 
@@ -178,7 +178,7 @@ internal class GetDisableBlockerAsyncTests
         return new TestableCreator(_poolService, _systemContext);
     }
 
-    private sealed class TestableCreator(IPoolService poolService, ISystemContext systemContext)
+    private sealed class TestableCreator(IDeploymentSiteService poolService, ISystemContext systemContext)
         : DefaultConfigurationCreatorService(
         NullLogger<DefaultConfigurationCreatorService>.Instance,
         Substitute.For<IDiagnosticsService>(),

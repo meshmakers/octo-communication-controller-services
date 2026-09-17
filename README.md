@@ -52,7 +52,7 @@ The Communication Controller Service is the central hub for coordinating communi
 │  ┌──────────────────────────────────────────────────────────────┐   │
 │  │                      Service Layer                           │   │
 │  │  ┌───────────────┐ ┌───────────────┐ ┌────────────────────┐  │   │
-│  │  │AdapterService │ │  PoolService  │ │PipelineDebugService│  │   │
+│  │  │AdapterService │ │  DeploymentSiteService  │ │PipelineDebugService│  │   │
 │  │  └───────┬───────┘ └───────┬───────┘ └─────────┬──────────┘  │   │
 │  └──────────┼─────────────────┼───────────────────┼─────────────┘   │
 │             │                 │                   │                 │
@@ -208,12 +208,12 @@ public interface IAdapterService
 }
 ```
 
-#### PoolService
+#### DeploymentSiteService
 
 Business logic for pool management. Workloads managed by the pool (Adapters + Applications) are fanned out as Helm deploys by `DeployPoolAsync` via the `/operatorHub` SignalR channel — no adapter list is returned to the operator on pool registration.
 
 ```csharp
-public interface IPoolService
+public interface IDeploymentSiteService
 {
     Task<OctoObjectId> RegisterPoolOperatorAsync(string tenantId, string poolName, string connectionId);
     Task UnregisterPoolOperatorAsync(string tenantId, string poolName);
@@ -296,7 +296,7 @@ public interface ICommunicationRepository
     Task<RtAdapter> GetAdapterAsync(string tenantId, RtEntityId adapterRtEntityId);
 
     // Pool operations
-    Task<IReadOnlyCollection<RtPool>> GetPoolsAsync(string tenantId);
+    Task<IReadOnlyCollection<RtPool>> GetDeploymentSitesAsync(string tenantId);
     Task CreatePoolAsync(string tenantId, string poolName);
     Task SetPoolDeploymentStateAsync(string tenantId, OctoObjectId poolRtId, RtDeploymentStateEnum state);
 
@@ -614,7 +614,7 @@ app.Lifetime.ApplicationStarted.Register(() =>
 | | Data pipeline undeployed | Information | Pipeline removed from adapters |
 | | Tenant pre-update | Information | Before tenant config reload |
 | | Tenant post-update | Information | After tenant config reload |
-| **PoolService** | Pool operator registered | Information | Pool operator connects |
+| **DeploymentSiteService** | Pool operator registered | Information | Pool operator connects |
 | | Pool operator unregistered | Information | Pool operator disconnects |
 | | Adapter deployed to pool | Information | Adapter assigned to pool |
 | | Adapter undeployed from pool | Information | Adapter removed from pool |

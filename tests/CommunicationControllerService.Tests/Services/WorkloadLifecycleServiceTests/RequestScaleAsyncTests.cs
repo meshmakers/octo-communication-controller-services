@@ -57,7 +57,7 @@ internal class RequestScaleAsyncTests
             Name = "meshtest-adapter",
         };
 
-        await Assert.ThrowsAsync<PoolServiceException>(
+        await Assert.ThrowsAsync<DeploymentSiteServiceException>(
             () => _service.RequestScaleAsync(TenantId, adapter, 0));
 
         await _connectionManager.DidNotReceiveWithAnyArgs().NotifyWorkloadScaleAsync(

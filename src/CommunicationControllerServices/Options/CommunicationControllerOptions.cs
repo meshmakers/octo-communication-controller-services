@@ -239,7 +239,7 @@ public class CommunicationControllerOptions
     ///
     /// Empty / missing is tolerated; only workloads that reference a non-existent
     /// domain key fail at deploy time with
-    /// <c>PoolServiceException.WorkloadTemplateUnknownPlaceholder</c>.
+    /// <c>DeploymentSiteServiceException.WorkloadTemplateUnknownPlaceholder</c>.
     /// </summary>
     public Dictionary<string, string> Domains { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -259,7 +259,7 @@ public class CommunicationControllerOptions
     ///
     /// Empty / missing is tolerated; only workloads that reference a
     /// non-existent service key fail at deploy time with
-    /// <c>PoolServiceException.WorkloadTemplateUnknownPlaceholder</c>.
+    /// <c>DeploymentSiteServiceException.WorkloadTemplateUnknownPlaceholder</c>.
     /// </summary>
     public Dictionary<string, string> ServiceUrls { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 

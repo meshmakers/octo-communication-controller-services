@@ -251,7 +251,7 @@ internal class SchedulerMetricsTests : LeaseSchedulerServiceTestsBase
         await Assert.That(recorded.Single(r => r.Instrument == "octo.lease.scaleup.count")
             .Tags["octo.lease.scaleup.outcome"]).IsEqualTo("at_ceiling");
         // And the pool never grew.
-        await PoolService.DidNotReceive().ScaleAdapterPoolAsync(Arg.Any<string>(), Arg.Any<ConstructionKit
+        await DeploymentSiteService.DidNotReceive().ScaleAdapterPoolAsync(Arg.Any<string>(), Arg.Any<ConstructionKit
             .Contracts.OctoObjectId>(), Arg.Any<int>());
     }
 

@@ -4,11 +4,11 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using NSubstitute;
 
-namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.PoolServiceTests;
+namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.DeploymentSiteServiceTests;
 
 /// <summary>
 /// Pins the AB#4984 deploy-time lifecycle validation in
-/// <c>PoolService.EnsureWorkloadIsHelmDeployableAsync</c>: OnDemand deploys are rejected for
+/// <c>DeploymentSiteService.EnsureWorkloadIsHelmDeployableAsync</c>: OnDemand deploys are rejected for
 /// non-capable workloads (process-bound triggers) and for Application workloads, and the
 /// reserved LifecycleMode 'Auto' is rejected until implemented.
 /// </summary>
@@ -25,7 +25,7 @@ internal class DeployWorkloadLifecycleValidationTests : PoolServiceTestsBase
             // operator-connection routing either way.
             Environment = RtEnvironmentEnum.Edge,
         };
-        CommunicationRepository.GetPoolsAsync(TenantId).Returns(new[] { rtPool });
+        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(new[] { rtPool });
 
         var adapter = new RtAdapter
         {
@@ -60,7 +60,7 @@ internal class DeployWorkloadLifecycleValidationTests : PoolServiceTestsBase
                 ["Pipeline 'sync' uses process-bound trigger 'FromPolling@1'"]));
 
         var ex = await Assert.ThrowsAsync<Exception>(
-            async () => await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId));
+            async () => await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId));
 
         using var _ = Assert.Multiple();
         await Assert.That(ex!.Message).Contains("FromPolling@1");
@@ -74,7 +74,7 @@ internal class DeployWorkloadLifecycleValidationTests : PoolServiceTestsBase
     {
         var (_, adapter) = GivenEdgePoolWithAdapter(RtLifecycleModeEnum.OnDemand);
 
-        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(d => d.TenantId == TenantId && d.WorkloadName == "test-adapter"));
@@ -86,7 +86,7 @@ internal class DeployWorkloadLifecycleValidationTests : PoolServiceTestsBase
         var (_, adapter) = GivenEdgePoolWithAdapter(RtLifecycleModeEnum.Auto);
 
         var ex = await Assert.ThrowsAsync<Exception>(
-            async () => await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId));
+            async () => await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId));
 
         using var _ = Assert.Multiple();
         await Assert.That(ex!.Message).Contains("Auto");
@@ -104,7 +104,7 @@ internal class DeployWorkloadLifecycleValidationTests : PoolServiceTestsBase
             Name = PoolName,
             Environment = RtEnvironmentEnum.Edge,
         };
-        CommunicationRepository.GetPoolsAsync(TenantId).Returns(new[] { rtPool });
+        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(new[] { rtPool });
 
         var application = new RtApplication
         {
@@ -126,7 +126,7 @@ internal class DeployWorkloadLifecycleValidationTests : PoolServiceTestsBase
             });
 
         var ex = await Assert.ThrowsAsync<Exception>(
-            async () => await PoolService.DeployWorkloadAsync(TenantId, application.RtId));
+            async () => await DeploymentSiteService.DeployWorkloadAsync(TenantId, application.RtId));
 
         using var _ = Assert.Multiple();
         await Assert.That(ex!.Message).Contains("adapter workloads only");

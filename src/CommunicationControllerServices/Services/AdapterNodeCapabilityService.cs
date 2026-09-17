@@ -36,7 +36,7 @@ internal sealed class AdapterNodeCapabilityService(
         var lenderTenantId = adapter.LentFromTenantId;
         var poolRtId = adapter.LentFromPoolRtId;
 
-        // A half-configured borrower is refused at workload deploy (PoolService), but DeployPipeline
+        // A half-configured borrower is refused at workload deploy (DeploymentSiteService), but DeployPipeline
         // can reach one that was never deployed — answer "nothing known" rather than guessing.
         if (string.IsNullOrWhiteSpace(lenderTenantId) || string.IsNullOrWhiteSpace(poolRtId))
         {

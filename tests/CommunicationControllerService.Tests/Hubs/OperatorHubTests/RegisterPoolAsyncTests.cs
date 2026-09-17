@@ -18,8 +18,8 @@ internal class RegisterPoolAsyncTests : IDisposable
         Substitute.For<IOperatorConnectionManager>();
     private readonly ICommunicationRepository _repository =
         Substitute.For<ICommunicationRepository>();
-    private readonly IPoolService _poolService =
-        Substitute.For<IPoolService>();
+    private readonly IDeploymentSiteService _poolService =
+        Substitute.For<IDeploymentSiteService>();
     private readonly IShutdownState _shutdownState =
         Substitute.For<IShutdownState>();
     private readonly ICommunicationEventService _eventService =
@@ -53,7 +53,7 @@ internal class RegisterPoolAsyncTests : IDisposable
             Name = name,
             Environment = environment,
         };
-        _repository.GetPoolsAsync(TenantId).Returns(new[] { pool });
+        _repository.GetDeploymentSitesAsync(TenantId).Returns(new[] { pool });
     }
 
     [Test]
@@ -74,7 +74,7 @@ internal class RegisterPoolAsyncTests : IDisposable
         await _eventService.Received(1).StoreInformationEventAsync(TenantId,
             Arg.Is<string>(s => s.Contains("Legacy operator") && s.Contains(ValidPoolRtId)),
             Arg.Any<Meshmakers.Octo.ConstructionKit.Contracts.RtEntityId?>());
-        await _repository.DidNotReceiveWithAnyArgs().GetPoolsAsync(Arg.Any<string>());
+        await _repository.DidNotReceiveWithAnyArgs().GetDeploymentSitesAsync(Arg.Any<string>());
     }
 
     [Test]
@@ -155,7 +155,7 @@ internal class RegisterPoolAsyncTests : IDisposable
     public async Task ModeSet_PoolNotFound_RejectsAndAudits()
     {
         _connectionManager.GetOperatorMode(ConnectionId).Returns(false);
-        _repository.GetPoolsAsync(TenantId).Returns(Array.Empty<RtDeploymentSite>());
+        _repository.GetDeploymentSitesAsync(TenantId).Returns(Array.Empty<RtDeploymentSite>());
 
         await Assert.That(async () => await _hub.RegisterDeploymentSiteAsync(TenantId, ValidPoolRtId))
             .Throws<HubException>();

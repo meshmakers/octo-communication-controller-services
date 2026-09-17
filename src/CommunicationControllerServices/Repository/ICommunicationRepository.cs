@@ -262,7 +262,7 @@ public interface ICommunicationRepository
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <returns>List of pools of the tenant</returns>
-    Task<IReadOnlyCollection<RtDeploymentSite>> GetPoolsAsync(string tenantId);
+    Task<IReadOnlyCollection<RtDeploymentSite>> GetDeploymentSitesAsync(string tenantId);
 
 
     /// <summary>

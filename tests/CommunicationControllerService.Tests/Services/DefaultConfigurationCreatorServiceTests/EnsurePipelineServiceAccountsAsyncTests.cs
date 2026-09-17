@@ -79,7 +79,7 @@ internal class EnsurePipelineServiceAccountsAsyncTests
         Substitute.For<ITriggerManagementService>(),
         Substitute.For<ICommandClient<CreateIdentityDataCommandRequest>>(),
         Substitute.For<ISystemContext>(),
-        Substitute.For<IPoolService>(),
+        Substitute.For<IDeploymentSiteService>(),
         Substitute.For<IAdapterCachePublish>(),
         Substitute.For<IAdapterService>(),
         provisioningService,

@@ -17,7 +17,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.C
 /// (Adapter + Application). Used by the CI/CD rollout flow (Epic 3054, Phase 2)
 /// to: (a) discover which workloads use a given Helm chart in a tenant, and
 /// (b) bump the chart version after a successful CI build. The actual deploy
-/// trigger lives on <see cref="PoolController"/> — chart-version update and
+/// trigger lives on <see cref="DeploymentSiteController"/> — chart-version update and
 /// deploy are intentionally split so an operator (or a smarter CI pipeline) can
 /// stage version writes across many tenants before rolling them.
 /// </summary>

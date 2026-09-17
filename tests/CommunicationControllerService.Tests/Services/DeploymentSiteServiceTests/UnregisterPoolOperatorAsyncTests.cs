@@ -2,7 +2,7 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using NSubstitute;
 
-namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.PoolServiceTests;
+namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.DeploymentSiteServiceTests;
 
 internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
 {
@@ -11,7 +11,7 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
     {
         GivenTenantNotInCache();
 
-        await PoolService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
             .SetPoolCommunicationStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
@@ -27,7 +27,7 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
         GivenTenantInCache();
         // Don't add the pool
 
-        await PoolService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
             .SetPoolCommunicationStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
@@ -54,7 +54,7 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
                 receivedStateAtRepoCall.Unregistered = PoolTenant.PoolsById.ContainsKey(DeploymentSiteRtId);
             }));
 
-        await PoolService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
 
         using var _ = Assert.Multiple();
         await CommunicationRepository.Received(1)
@@ -69,7 +69,7 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
         GivenTenantInCache();
         AddPoolToTenant();
 
-        await PoolService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
 
         await CommunicationRepository.Received(1)
             .SetPoolDeploymentStateAsync(TenantId, DeploymentSiteRtId, RtDeploymentStateEnum.Pending);
@@ -82,7 +82,7 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
         AddPoolToTenant();
         GivenPersistedPool(RtDeploymentStateEnum.Deployed, RtEnvironmentEnum.Cloud);
 
-        await PoolService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
 
         await CommunicationRepository.Received(1)
             .SetPoolDeploymentStateAsync(TenantId, DeploymentSiteRtId, RtDeploymentStateEnum.Pending);
@@ -101,7 +101,7 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
         AddPoolToTenant();
         GivenPersistedPool(restingState, environment);
 
-        await PoolService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
 
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
             .SetPoolDeploymentStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
@@ -112,7 +112,7 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
 
     private void GivenPersistedPool(RtDeploymentStateEnum deploymentState, RtEnvironmentEnum environment)
     {
-        CommunicationRepository.GetPoolsAsync(TenantId).Returns(new[]
+        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(new[]
         {
             new RtDeploymentSite
             {
@@ -131,7 +131,7 @@ internal class UnregisterPoolOperatorAsyncTests : PoolServiceTestsBase
         GivenTenantInCache();
         AddPoolToTenant();
 
-        await PoolService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.UnregisterPoolOperatorAsync(TenantId, DeploymentSiteRtId);
 
         await CommunicationEventService.Received(1)
             .StoreInformationEventAsync(TenantId,

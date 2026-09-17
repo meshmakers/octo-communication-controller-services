@@ -49,7 +49,7 @@ internal abstract class LeaseSchedulerServiceTestsBase
     protected readonly IAdapterPoolConnectionManager ConnectionManager = new AdapterPoolConnectionManager();
     protected readonly ICommunicationEventService EventService = Substitute.For<ICommunicationEventService>();
     protected readonly ILeaseService LeaseService = Substitute.For<ILeaseService>();
-    protected readonly IPoolService PoolService = Substitute.For<IPoolService>();
+    protected readonly IDeploymentSiteService DeploymentSiteService = Substitute.For<IDeploymentSiteService>();
 
     protected readonly CommunicationControllerOptions Options = new();
     protected readonly ILeaseSchedulerService Scheduler;
@@ -74,7 +74,7 @@ internal abstract class LeaseSchedulerServiceTestsBase
         ArrangeLeaseServiceStub();
 
         Scheduler = new LeaseSchedulerService(AdapterCache, CommunicationRepository, ConnectionManager,
-            EventService, LeaseService, PoolService, new OptionsWrapper<CommunicationControllerOptions>(Options));
+            EventService, LeaseService, DeploymentSiteService, new OptionsWrapper<CommunicationControllerOptions>(Options));
     }
 
     /// <summary>

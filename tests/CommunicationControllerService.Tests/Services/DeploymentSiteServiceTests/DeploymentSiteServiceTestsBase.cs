@@ -8,7 +8,7 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using NSubstitute;
 
-namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.PoolServiceTests;
+namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.DeploymentSiteServiceTests;
 
 internal abstract class PoolServiceTestsBase
 {
@@ -34,7 +34,7 @@ internal abstract class PoolServiceTestsBase
         Substitute.For<IWorkloadLifecycleService>();
     protected readonly IPoolCachePublish PoolCachePublish;
     protected readonly PoolTenant PoolTenant;
-    protected readonly PoolService PoolService;
+    protected readonly DeploymentSiteService DeploymentSiteService;
 
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
     [SuppressMessage("Argument matchers", "NS3003:Multiple matchers of same type",
@@ -98,7 +98,7 @@ internal abstract class PoolServiceTestsBase
             .GetAdapterDefaultAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>())
             .Returns((RtServiceAccountConfiguration?)null);
 
-        PoolService = new PoolService(
+        DeploymentSiteService = new DeploymentSiteService(
             CommunicationRepository,
             PoolCache,
             CommunicationEventService,

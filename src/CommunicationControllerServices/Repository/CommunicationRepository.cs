@@ -887,7 +887,7 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task<IReadOnlyCollection<RtDeploymentSite>> GetPoolsAsync(string tenantId)
+    public async Task<IReadOnlyCollection<RtDeploymentSite>> GetDeploymentSitesAsync(string tenantId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 

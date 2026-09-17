@@ -5,7 +5,7 @@ using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 
-namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.PoolServiceTests;
+namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.DeploymentSiteServiceTests;
 
 /// <summary>
 ///     AB#4894: a workload deploy notification sent while the operator pod was being replaced is
@@ -27,7 +27,7 @@ internal class ReconcilePendingWorkloadsAsyncTests : PoolServiceTestsBase
             Environment = RtEnvironmentEnum.Cloud,
         };
         var rtPool = _rtPool;
-        CommunicationRepository.GetPoolsAsync(TenantId).Returns(new[] { rtPool });
+        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(new[] { rtPool });
 
         var adapter = new RtAdapter
         {
@@ -62,7 +62,7 @@ internal class ReconcilePendingWorkloadsAsyncTests : PoolServiceTestsBase
         var adapter = GivenPoolWithAdapterInState(RtDeploymentStateEnum.Pending);
 
         // Act
-        await PoolService.ReconcilePendingWorkloadsAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.ReconcilePendingWorkloadsAsync(TenantId, DeploymentSiteRtId);
 
         // Assert — the full deploy path ran: notify + Pending state write.
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
@@ -76,7 +76,7 @@ internal class ReconcilePendingWorkloadsAsyncTests : PoolServiceTestsBase
         GivenPoolWithAdapterInState(RtDeploymentStateEnum.Deployed);
 
         // Act
-        await PoolService.ReconcilePendingWorkloadsAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.ReconcilePendingWorkloadsAsync(TenantId, DeploymentSiteRtId);
 
         // Assert
         await OperatorConnectionManager.DidNotReceive()
@@ -92,7 +92,7 @@ internal class ReconcilePendingWorkloadsAsyncTests : PoolServiceTestsBase
             .ThrowsAsync(new InvalidOperationException("cache unloaded"));
 
         // Act & Assert — no throw.
-        await PoolService.ReconcilePendingWorkloadsAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.ReconcilePendingWorkloadsAsync(TenantId, DeploymentSiteRtId);
 
         await OperatorConnectionManager.DidNotReceive()
             .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
@@ -132,7 +132,7 @@ internal class ReconcilePendingWorkloadsAsyncTests : PoolServiceTestsBase
             });
 
         // Act
-        await PoolService.ReconcilePendingWorkloadsAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.ReconcilePendingWorkloadsAsync(TenantId, DeploymentSiteRtId);
 
         // Assert
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
@@ -150,7 +150,7 @@ internal class ReconcilePendingWorkloadsAsyncTests : PoolServiceTestsBase
         var adapter = GivenPoolWithAdapterInState(RtDeploymentStateEnum.Pending);
         adapter.ChartVersion = string.Empty;
 
-        await PoolService.ReconcilePendingWorkloadsAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.ReconcilePendingWorkloadsAsync(TenantId, DeploymentSiteRtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(w => w.WorkloadRtId == adapter.RtId.ToString()));
@@ -167,7 +167,7 @@ internal class ReconcilePendingWorkloadsAsyncTests : PoolServiceTestsBase
         // re-dispatch is unremarkable and stays an information event.
         GivenPoolWithAdapterInState(RtDeploymentStateEnum.Pending);
 
-        await PoolService.ReconcilePendingWorkloadsAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.ReconcilePendingWorkloadsAsync(TenantId, DeploymentSiteRtId);
 
         await CommunicationEventService.DidNotReceive().StoreWarningEventAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<RtEntityId?>());
@@ -186,7 +186,7 @@ internal class ReconcilePendingWorkloadsAsyncTests : PoolServiceTestsBase
         // "give me the newest chart", which is the whole reason an unpinned workload could drift.
         GivenPoolWithAdapterInState(RtDeploymentStateEnum.Pending);
 
-        await PoolService.ReconcilePendingWorkloadsAsync(TenantId, DeploymentSiteRtId);
+        await DeploymentSiteService.ReconcilePendingWorkloadsAsync(TenantId, DeploymentSiteRtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(w => w.IsReconciliation));
@@ -199,7 +199,7 @@ internal class ReconcilePendingWorkloadsAsyncTests : PoolServiceTestsBase
         // must keep meaning "newest in the repository".
         var adapter = GivenPoolWithAdapterInState(RtDeploymentStateEnum.Deployed);
 
-        await PoolService.DeployWorkloadAsync(TenantId, adapter.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(
             Arg.Is<WorkloadDeployedDto>(w => !w.IsReconciliation));

@@ -10,7 +10,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 /// the central Communication Operator — there is no legacy adapter-deploy callback path
 /// any more.
 /// </summary>
-public interface IPoolService
+public interface IDeploymentSiteService
 {
     /// <summary>
     /// Unregisters a pool operator for a tenant. Called by

@@ -43,7 +43,7 @@ This is the **Octo Communication Controller Services** - an ASP.NET Core web ser
 
 The service follows a layered architecture:
 - **Hubs Layer** (`src/CommunicationControllerServices/Hubs/`) - SignalR hubs for real-time communication
-- **Service Layer** (`src/CommunicationControllerServices/Services/`) - Core business logic (`AdapterService`, `PoolService`, `PipelineDebugService`, `TriggerManagementService`, `PipelineExecutionService`, `CommunicationEventService`)
+- **Service Layer** (`src/CommunicationControllerServices/Services/`) - Core business logic (`AdapterService`, `DeploymentSiteService`, `PipelineDebugService`, `TriggerManagementService`, `PipelineExecutionService`, `CommunicationEventService`)
 - **Repository Layer** (`src/CommunicationControllerServices/Repository/`) - Data access via MongoDB Runtime Engine
 - **Cache Layer** (`src/CommunicationControllerServices/Caches/`) - In-memory state synchronized across nodes via hub callbacks
 - **Consumers** (`src/CommunicationControllerServices/Consumers/`) - Message bus event consumers for tenant lifecycle management
@@ -283,9 +283,9 @@ The service uses the Octo Notification system to log important business events f
 | AdapterService | Data pipeline deployed/undeployed | Information | Pipeline deployment to adapters |
 | AdapterService | Deprecated node used | Warning | Deployed pipeline uses a node type flagged `IsDeprecated` in the adapter's node descriptors (one event per deprecated node type, associated with the pipeline entity) |
 | AdapterService | Tenant pre/post-update | Information | Tenant lifecycle events |
-| PoolService | Pool operator registered/unregistered | Information | Pool operator connection state |
-| PoolService | Adapter deployed/undeployed to pool | Information | Adapter assignment to pools |
-| PoolService | Tenant pre/post-update | Information | Tenant lifecycle events |
+| DeploymentSiteService | Pool operator registered/unregistered | Information | Pool operator connection state |
+| DeploymentSiteService | Adapter deployed/undeployed to pool | Information | Adapter assignment to pools |
+| DeploymentSiteService | Tenant pre/post-update | Information | Tenant lifecycle events |
 | TriggerManagementService | Pipeline execution started | Information | Manual pipeline trigger |
 | TriggerManagementService | Pipeline execution failed | Error | Pipeline execution errors |
 | TriggerManagementService | Trigger schedule updated | Information | Scheduled triggers updated |
@@ -445,7 +445,7 @@ fresh-tenant default.
 
 | Attribute | Why it's runtime state |
 |---|---|
-| `DeploymentState` | Driven by `PoolService.Deploy/UndeployPoolAsync` + the reverse-sync from `ReportDeployedStateAsync`. Reset to 0 by a seed import flips a Deployed entity back to Undeployed in Studio. |
+| `DeploymentState` | Driven by `DeploymentSiteService.Deploy/UndeployPoolAsync` + the reverse-sync from `ReportDeployedStateAsync`. Reset to 0 by a seed import flips a Deployed entity back to Undeployed in Studio. |
 | `CommunicationState` + `CommunicationStateTimestamp` | Written by the `OperatorHub` / `AdapterHub` connect & disconnect handlers and the rolling-upgrade shutdown guard. Seed-managed reset would mark an online operator as Unregistered. |
 | `ConfigurationState` | Toggled by `AdapterService` on configuration deploy / failure. |
 | `StatusMessage` | Live status text overwritten on every state transition — pure runtime breadcrumb. |
@@ -525,7 +525,7 @@ opt-in for "deploy the newest chart in the configured Helm repository"; non-empt
 values must still parse as SemVer. The audit-event message renders `(latest)` for
 the empty sentinel so CI/CD inspection stays readable.
 
-`PoolService.EnsureWorkloadIsHelmDeployableAsync` /
+`DeploymentSiteService.EnsureWorkloadIsHelmDeployableAsync` /
 `BuildWorkloadDeployedDtoAsync` / `IsWorkloadHelmDeployableAsync` only require
 `ChartName` and a linked `HelmRepositoryConfiguration` with a non-empty
 `RepositoryUrl` — `ChartVersion` is optional. The `WorkloadDeployedDto` sent to
@@ -787,7 +787,7 @@ Services expose multiple interfaces (e.g., cache as `IAdapterCache` and `IAdapte
 
 ### Error Handling
 
-Services throw custom exceptions (e.g., `AdapterServiceException`, `PoolServiceException`) with static factory methods for specific error scenarios. Always log errors with NLog before throwing.
+Services throw custom exceptions (e.g., `AdapterServiceException`, `DeploymentSiteServiceException`) with static factory methods for specific error scenarios. Always log errors with NLog before throwing.
 
 ### Configuration
 
@@ -900,10 +900,10 @@ is written from two paths and the **write order vs. cache mutation matters**:
 
 | Trigger | Code path | State written | Notes |
 |---|---|---|---|
-| Operator's SignalR `OnConnectedAsync` | `PoolHub.OnConnectedAsync` → `PoolService.SetCommunicationStateOnlineAsync(tenantId, poolName, connectionId)` | `Online` | Adds the pool to `_poolCache` if missing. |
-| Operator's `RegisterPoolOperatorAsync` invocation | `PoolHub.RegisterPoolOperatorAsync` → `PoolService.RegisterPoolOperatorAsync` → `SetCommunicationStateOnlineAsync(tenantId, poolRtId)` | `Online` | Workloads are deployed via the `WorkloadDeployedAsync` flow on the `/operatorHub`, not via the pool-hub adapter list (which no longer exists). |
-| Operator's `UnregisterPoolOperatorAsync` invocation (graceful undeploy) | `PoolHub.UnregisterPoolOperatorAsync` → `PoolService.UnregisterPoolOperatorAsync` | `Unregistered` | **Must write the state before `PoolTenant.RemovePool`** — otherwise the `OnDisconnectedAsync` that follows finds nothing in the cache and silently no-ops. |
-| Operator's SignalR connection drops without an `UnregisterPoolOperatorAsync` (crash, network) | `OperatorHub.OnDisconnectedAsync` → `PoolService.SetCommunicationStateOfflineAsync(tenantId, poolName, disconnectingConnectionId)` | `Offline` | The hub must pass `poolName`, never `Context.ConnectionId`, as the lookup key. The third arg is the **disconnecting** connection id — the service compares it with the cache's current `Pool.ConnectionId` and only writes Offline if they still match. A newer connection that has replaced the disconnecting one (e.g. the operator auto-reconnected after a controller restart and the previous connection's handler is firing late) is treated as a stale disconnect and the call no-ops. Mirrors `AdapterService.SetAdapterCommunicationStateOfflineAsync`'s stale-disconnect guard. |
+| Operator's SignalR `OnConnectedAsync` | `PoolHub.OnConnectedAsync` → `DeploymentSiteService.SetCommunicationStateOnlineAsync(tenantId, poolName, connectionId)` | `Online` | Adds the pool to `_poolCache` if missing. |
+| Operator's `RegisterPoolOperatorAsync` invocation | `PoolHub.RegisterPoolOperatorAsync` → `DeploymentSiteService.RegisterPoolOperatorAsync` → `SetCommunicationStateOnlineAsync(tenantId, poolRtId)` | `Online` | Workloads are deployed via the `WorkloadDeployedAsync` flow on the `/operatorHub`, not via the pool-hub adapter list (which no longer exists). |
+| Operator's `UnregisterPoolOperatorAsync` invocation (graceful undeploy) | `PoolHub.UnregisterPoolOperatorAsync` → `DeploymentSiteService.UnregisterPoolOperatorAsync` | `Unregistered` | **Must write the state before `PoolTenant.RemovePool`** — otherwise the `OnDisconnectedAsync` that follows finds nothing in the cache and silently no-ops. |
+| Operator's SignalR connection drops without an `UnregisterPoolOperatorAsync` (crash, network) | `OperatorHub.OnDisconnectedAsync` → `DeploymentSiteService.SetCommunicationStateOfflineAsync(tenantId, poolName, disconnectingConnectionId)` | `Offline` | The hub must pass `poolName`, never `Context.ConnectionId`, as the lookup key. The third arg is the **disconnecting** connection id — the service compares it with the cache's current `Pool.ConnectionId` and only writes Offline if they still match. A newer connection that has replaced the disconnecting one (e.g. the operator auto-reconnected after a controller restart and the previous connection's handler is firing late) is treated as a stale disconnect and the call no-ops. Mirrors `AdapterService.SetAdapterCommunicationStateOfflineAsync`'s stale-disconnect guard. |
 
 Tests for this state machine live in
 `tests/CommunicationControllerService.Tests/Services/PoolServiceTests/`:
@@ -1097,7 +1097,7 @@ The `OperatorConnectionManager` keeps an in-memory map
 as deployed but not yet undeployed. `NotifyPoolDeployedAsync` adds an entry,
 `NotifyPoolUndeployedAsync` removes one.
 
-`PoolService.UndeployAllCloudPoolsAsync` reads from this map (via
+`DeploymentSiteService.UndeployAllCloudPoolsAsync` reads from this map (via
 `GetDeployedPoolsForTenant`) rather than the tenant repository. Reason:
 `TenantManagementConsumer.ConsumeAsync(PreDeleteTenant)` fires in parallel
 with `PreUpdatePreDeleteTenantConsumer` (in `octo-common-services`), which
@@ -1119,7 +1119,7 @@ Tests:
 - `Hubs/OperatorConnectionManagerTests` — tracking add/remove, tenant
   isolation, bucket cleanup when empty.
 - `Services/PoolServiceTests/UndeployAllCloudPoolsAsyncTests` — including a
-  regression test that pins `ICommunicationRepository.GetPoolsAsync` is
+  regression test that pins `ICommunicationRepository.GetDeploymentSitesAsync` is
   never called from this path.
 
 ### Helm Workload Deploy (Phase 2)
@@ -1139,7 +1139,7 @@ attribute can carry either a plaintext or an encrypted value. This same
 service is also used for `HelmRepositoryConfiguration.Password` and any
 future at-rest-encrypted attribute.
 
-**`PoolService.DeployPoolAsync`** (Cloud pools) now:
+**`DeploymentSiteService.DeployPoolAsync`** (Cloud pools) now:
 1. Sets `DeploymentState = Deployed` on the pool.
 2. Notifies the operator via `IOperatorConnectionManager.NotifyPoolDeployedAsync`.
 3. Enumerates the pool's managed workloads through
@@ -1159,7 +1159,7 @@ future at-rest-encrypted attribute.
    unconditionally because every workload needs the controller-to-workload
    command bus.
 
-**`PoolService.UndeployPoolAsync`** mirrors deploy but in reverse order:
+**`DeploymentSiteService.UndeployPoolAsync`** mirrors deploy but in reverse order:
 workloads first (so the operator can `helm uninstall` while the pool
 namespace still exists), then the pool itself.
 
@@ -1185,7 +1185,7 @@ typed attributes on the base type so Adapter and Application share them:
 `BuildWorkloadDeployedDtoAsync` copies them onto `WorkloadDeployedDto`
 (normalising blank Hostname to null). `EnsureWorkloadIsHelmDeployableAsync`
 rejects `IngressEnabled=true` + empty Hostname at Deploy time
-(`PoolServiceException.WorkloadIngressEnabledButHostnameEmpty`) — the chart
+(`DeploymentSiteServiceException.WorkloadIngressEnabledButHostnameEmpty`) — the chart
 templates build host rules from `publicUri`, and an empty host would fail
 k8s admission mid-helm-rollout. The operator's
 `WorkloadContextValuesBuilder` then projects `ingress.enabled=true` plus
@@ -1284,7 +1284,7 @@ being replaced (e.g. an operator CD mid-rollout) lands on the dying connection a
 the entity stays `Pending` forever, and neither the AB#4371 pending queue (the pool HAD a
 registered owner at send time) nor the reverse-sync (restores state, never re-dispatches)
 covers it. `OperatorHub.RegisterDeploymentSiteAsync` therefore calls
-`PoolService.ReconcilePendingWorkloadsAsync` after the AB#4371 flush: every workload of the
+`DeploymentSiteService.ReconcilePendingWorkloadsAsync` after the AB#4371 flush: every workload of the
 pool still in `DeploymentState=Pending` gets its deploy re-dispatched through the normal
 `DeployWorkloadAsync` path. Best effort — lookup or per-workload failures are logged and never
 fail the registration. Re-dispatching a genuinely in-flight deploy is safe: the operator queue
@@ -1326,7 +1326,7 @@ maps and on `DeploymentState` drift. The flow:
    other than Cloud (edge or legacy/unknown) and writes an error audit event
    before throwing — defense in depth, prevents an edge cluster from
    reviving central-cluster state.
-5. `PoolService.RestoreDeployedStateAsync` runs the per-pool work:
+5. `DeploymentSiteService.RestoreDeployedStateAsync` runs the per-pool work:
    - Loads `RtPool` by rtId; skips when missing.
    - Per-pool `Environment != Cloud` guard skips Edge pools silently —
      a second line of defense against a Cloud operator reporting cross-mode
@@ -1399,11 +1399,11 @@ touching templates already in the field.
   NOT trigger an error — they pass through verbatim so a ValuesYaml block
   can carry literal Go-template-looking strings without the resolver
   tripping.
-- **Hook points in `PoolService`:**
+- **Hook points in `DeploymentSiteService`:**
   - `EnsureWorkloadIsHelmDeployableAsync` validates the template up-front
     on **all three input surfaces** (Hostname, every non-secret
     `ValueOverride.Value`, and the whole `ValuesYaml` string) and throws
-    `PoolServiceException.WorkloadTemplateUnknownPlaceholder` so
+    `DeploymentSiteServiceException.WorkloadTemplateUnknownPlaceholder` so
     misconfigured workloads fail at Deploy with an actionable message
     instead of producing an Ingress with a literal `{{...}}` host (which
     k8s admission would reject mid-rollout) or a helm values file with
@@ -1462,7 +1462,7 @@ Tests:
 `POST {tenantId}/v1/communication/disable` answers **409** with an `OperationFailedErrorDto` while any
 Pool, Adapter or Application of the tenant has a `DeploymentState` other than `Undeployed` /
 `Disabled` (`ActiveDeployment.IsActive`: Deployed, Pending and Error all own operator resources —
-see the recompute comment in `PoolService.RecomputeAllDeploymentStatesAsync`). The body names every
+see the recompute comment in `DeploymentSiteService.RecomputeAllDeploymentStatesAsync`). The body names every
 resource as `Kind 'Name' (State)` plus the undeploy verbs (`UndeployWorkload`, `UndeployPool`,
 Studio). Every other `ConfigurationException` stays a 400. The tenant delete/detach guard in the
 asset repository (AB#4255 step 1) only reads the enabled flag, so this is the check that keeps a
@@ -1484,7 +1484,7 @@ Mechanics:
   (consulted after the already-disabled check, before the flag is removed; a refusal keeps the flag and
   skips `StopTenantAsync`) and builds the message with `BuildDisableBlockedMessage` (pinned by
   `GetDisableBlockerAsyncTests.BuildDisableBlockedMessage_IsTheOperatorContract`).
-- `IPoolService.GetActiveDeploymentsAsync` reads the **repository** (`GetPoolsAsync` +
+- `IDeploymentSiteService.GetActiveDeploymentsAsync` reads the **repository** (`GetDeploymentSitesAsync` +
   `GetWorkloadsAsync`, the latter a polymorphic `GetRtEntitiesByTypeAsync<RtDeployableWorkload>`),
   NOT the `OperatorConnectionManager` tracking maps: this is a user request on a live tenant (no race
   with the PreDeleteTenant cache unload), and the persisted state is what the operator mirrors back
@@ -1503,7 +1503,7 @@ Mechanics:
 **Deploy gate.** This service does not register the platform's `UseOctoTenants()` enabled-gate
 middleware (it would 403 the `adapterHub` negotiate and every Studio Communication page of a disabled
 tenant — the Studio derives navigation from CK-model presence, which Disable does not remove). After
-a Disable the tenant API therefore stays callable. `PoolController.DeployPoolAsync` and
+a Disable the tenant API therefore stays callable. `DeploymentSiteController.DeployPoolAsync` and
 `DeployWorkloadAsync` — the two endpoints that create operator-managed cluster resources — check
 `IConfigurationService.IsEnabledAsync` themselves and answer 409 on a disabled tenant; undeploy stays
 open so remediation always works. `DeployDataFlow` / `DeployTrigger` already fail on a disabled tenant
@@ -1512,7 +1512,7 @@ middleware gate is a follow-up decision, not part of AB#4255.
 
 **Operator release must not resurrect a resting pool.** `UndeployPoolAsync` writes the resting state
 (`Undeployed` / Edge `Disabled`) *before* it notifies the operator; the operator then removes the CR and
-calls `UnregisterPoolAsync`, and `PoolService.UnregisterPoolOperatorAsync` used to overwrite the resting
+calls `UnregisterPoolAsync`, and `DeploymentSiteService.UnregisterPoolOperatorAsync` used to overwrite the resting
 state with `Pending` ("no operator until one re-registers"). Every gracefully undeployed Cloud pool
 therefore sat at `Pending` forever — invisible before, fatal for the guard (found in the local E2E with
 the kind operator connected). The release now leaves a pool that already rests alone; only a
@@ -1860,7 +1860,7 @@ deletable `3.36.0 → 4.0.0` entry pointing at the same idempotent script.
 
 The operator's `DeploymentSite` **CRD** (its Kind is a hardcoded literal; the link to the CK
 entity is by RtId, not by name), the Helm value names `operator.{autoManageDeploymentSites,deploymentSiteNamespace,defaultDeploymentSiteName}`,
-the REST route `{tenantId}/v1/pool`, the `octo-cli` `GetPools`/`DeployPool`/`UndeployPool`
+the REST route `{tenantId}/v1/deploymentsite`, the `octo-cli` `GetPools`/`DeployPool`/`UndeployPool`
 commands and the MCP `get_pools`/`undeploy_pool` tools. The GraphQL type
 `SystemDeploymentSite`, however, is derived from the CkTypeId and **renames itself** on
 publish — ~66 frontend files across the Studio, `octo-frontend-libraries` and `meshmakers-app`
@@ -1892,7 +1892,7 @@ fails, **and nothing else does**, if that subtraction is removed.
 Also: an unresolvable lender lends to **nobody** (never a wider scope), a root tenant has **no**
 siblings, and `LendingAllowedTenantIds` intersects — it can never widen past the subtree.
 
-### Deploy guards (`PoolService.EnsureLeasingConfigurationIsValidAsync`)
+### Deploy guards (`DeploymentSiteService.EnsureLeasingConfigurationIsValidAsync`)
 
 Same enforcement rationale as the AB#4984 `LifecycleMode` block: all of this is plain CK author
 configuration with no service-layer hook, so the deploy is the net. `Leased` requires
@@ -1963,7 +1963,7 @@ none of them.
   by pressing Deploy.
 - **`EnsurePipelineIsOnDemandCompatible` fires on `Leased` too**, with its own message factory
   `AdapterServiceException.PipelineNotLeasable` (different remedy: an OnDemand workload can go back
-  to AlwaysOn, a leased one has no process to switch on). `PoolService` enforces the same rule at
+  to AlwaysOn, a leased one has no process to switch on). `DeploymentSiteService` enforces the same rule at
   *workload* deploy over the whole pipeline set; without this per-pipeline arm a new process-bound
   pipeline on an already deployed leased adapter would only be caught at the next workload deploy.
 - **`SetPipelineDeploymentStateAsync` writes `Deployed` directly, never `Pending`.** `Pending` means
@@ -1998,7 +1998,7 @@ the member listing and the scale-up evaluation.
 
 ⚠️ **Still blind:** `WorkloadOnDemandCapabilityService.EvaluateAsync` reads only `AdapterById`, so
 for a leased adapter it classifies with `descriptors = null` (name-based fallback) both in
-`PoolService.EnsureLeasingConfigurationIsValidAsync` and in the persisted display value.
+`DeploymentSiteService.EnsureLeasingConfigurationIsValidAsync` and in the persisted display value.
 `DeployDataFlowAsync` has no leased branch at all — it still falls through the `AdapterById` lookup.
 
 ### Pool members report node descriptors
@@ -2023,10 +2023,10 @@ for the same reasons as on the on-demand path.
 | Piece | Where |
 |---|---|
 | `WorkloadTypeDto` mapping (one place, four call sites) | `Services/WorkloadWireMapping.cs` |
-| Pool `DeploymentState` writer | `CommunicationRepository.SetAdapterPoolDeploymentStateAsync`, `PoolService.SetWorkloadDeploymentStateAsync` |
-| `replicaCount` + per-member sizing as chart values | `PoolService.AppendAdapterPoolMemberOverrides` |
-| Scale verb with the `MinReplicas` floor | `PoolService.ScaleAdapterPoolAsync` → `WorkloadLifecycleService.ClampToAdapterPoolRange` |
-| `POST {tenantId}/v1/pool/workloads/adapter-pool/scale` | `TenantApi/v1/Controllers/PoolController.cs` |
+| Pool `DeploymentState` writer | `CommunicationRepository.SetAdapterPoolDeploymentStateAsync`, `DeploymentSiteService.SetWorkloadDeploymentStateAsync` |
+| `replicaCount` + per-member sizing as chart values | `DeploymentSiteService.AppendAdapterPoolMemberOverrides` |
+| Scale verb with the `MinReplicas` floor | `DeploymentSiteService.ScaleAdapterPoolAsync` → `WorkloadLifecycleService.ClampToAdapterPoolRange` |
+| `POST {tenantId}/v1/deploymentsite/workloads/adapter-pool/scale` | `TenantApi/v1/Controllers/DeploymentSiteController.cs` |
 | Idle-watchdog exclusion | `BackgroundServices/WorkloadLifecycleWatchdogBackgroundService.SweepTenantAsync` |
 | Activator index scoping | `Services/WorkloadHostnameIndex.RefreshAsync` |
 
@@ -2374,7 +2374,7 @@ gates must surface identically in the Studio, which renders `ErrorResponse.Error
 regardless of status. The message names cause, work item, pipeline, adapter and **both**
 ways out (link the account on the adapter, or set a per-pipeline override).
 
-**Not guarded in `PoolService.DeployWorkloadAsync`** (documented in place next to the
+**Not guarded in `DeploymentSiteService.DeployWorkloadAsync`** (documented in place next to the
 AB#4984 lifecycle validation): that method also validates `Application`s, which execute no
 pipelines; the helm deploy of the adapter pod is the step that must succeed *before* a
 service account can be provisioned onto it, so gating it would be circular and would make
@@ -2435,7 +2435,7 @@ unchanged. **Deployment order: identity first, then the controller**; an identit
 change ignores the new fields and would create a secretless client.
 
 🔴 **The command client is scoped.** `ICommandClient<T>` wraps MassTransit's `IRequestClient<T>`,
-which is **scoped**; this service is a singleton consumed by the singleton `PoolService`, so it
+which is **scoped**; this service is a singleton consumed by the singleton `DeploymentSiteService`, so it
 resolves the client per call from a fresh scope (the `CommunicationEventService` pattern).
 Constructor-injecting it fails DI validation at startup.
 
@@ -2450,7 +2450,7 @@ later would mean touching every already-provisioned tenant.
 | Trigger | Where | Covers |
 |---|---|---|
 | Tenant-wide sweep | `DefaultConfigurationCreatorService.StartTenantAsync` → `EnsurePipelineServiceAccountsAsync`, right after `ApplyServiceManagedBlueprintsAsync` | The **backfill** for existing tenants (service start, Enable, and `PosUpdateTenant` — i.e. the documented `clearCache` recovery lever), and the blueprint-seeded default Adapter on a fresh tenant. |
-| Per adapter | `PoolService.DeployWorkloadAsync`, after the deploy notification, for `RtAdapter` only | An adapter an operator adds between two tenant loads. There is no adapter-*create* path in this service (adapters are RtEntities written through the asset repository), and nothing runs pipelines before its workload is deployed, so this is the earliest point that matters. |
+| Per adapter | `DeploymentSiteService.DeployWorkloadAsync`, after the deploy notification, for `RtAdapter` only | An adapter an operator adds between two tenant loads. There is no adapter-*create* path in this service (adapters are RtEntities written through the asset repository), and nothing runs pipelines before its workload is deployed, so this is the earliest point that matters. |
 
 **Fault tolerance is the point of the backfill.** `EnsureAdapterProvisionedAsync` never throws: it
 logs an Error **and writes a persistent Error event into the tenant's event log**, so the refusal an
@@ -2579,7 +2579,7 @@ time.
 **The coupling to the chart, side by side.** These four rows are the whole contract, and a typo in
 any of them is invisible until a pod is running — the adapter simply connects anonymously:
 
-| Controller (`PoolService`) | Operator | Chart (`octo-mesh-adapter/templates/_env.tpl`) | Adapter |
+| Controller (`DeploymentSiteService`) | Operator | Chart (`octo-mesh-adapter/templates/_env.tpl`) | Adapter |
 |---|---|---|---|
 | `ServiceAccountClientIdValuePath` = `serviceAccountClientId`, `IsSecret=false` | literal value in `values-overrides.yaml` | `.Values.serviceAccountClientId` | `OCTO_ADAPTER__CLIENTID` |
 | `ServiceAccountClientSecretValuePath` = `secrets.serviceAccountClientSecret`, **`IsSecret=true`** | materialised into `{release}-octo-secrets`, path rewritten to `valueFrom.secretKeyRef` | `.Values.secrets.serviceAccountClientSecret` through `octo-mesh.secretEnv` (same helper as `secrets.rabbitmq`) | `OCTO_ADAPTER__CLIENTSECRET` |
@@ -2592,7 +2592,7 @@ and must also serve adapters that have no `MeshAdapterConfiguration` (Loxone, Mo
 always name the same identity service, so the chart feeds both from the one `authUri` value; a second
 chart value could only ever drift. Nothing is projected for it here.
 
-**Where the projection happens.** `PoolService.AppendPipelineServiceAccountOverridesAsync`, called
+**Where the projection happens.** `DeploymentSiteService.AppendPipelineServiceAccountOverridesAsync`, called
 from `BuildWorkloadDeployedDtoAsync` after the entity's own overrides are built. It reads the account
 through `IPipelineServiceAccountResolver.GetAdapterDefaultAsync` — the adapter-wide default, not a
 per-pipeline override: this is the *process* identity of the pod, and a per-pipeline account is about
@@ -2934,7 +2934,7 @@ throw new AdapterServiceException("Tenant not enabled");
 throw AdapterServiceException.TenantNotEnabled(tenantId);
 ```
 
-Each service has a dedicated exception class: `AdapterServiceException`, `PoolServiceException`, `PipelineDebugServiceException`, `TriggerManagementServiceException`, `PipelineExecutionServiceException`, `CommunicationRepositoryException`.
+Each service has a dedicated exception class: `AdapterServiceException`, `DeploymentSiteServiceException`, `PipelineDebugServiceException`, `TriggerManagementServiceException`, `PipelineExecutionServiceException`, `CommunicationRepositoryException`.
 
 ## CI/CD Workload Rollout E2E
 
@@ -2958,7 +2958,7 @@ by the CI/CD rollout flow described in
 | `PATCH` | `{tenantId}/v1/workload/{workloadRtId}/chart-version` body `{ "chartVersion": "1.2.3" }` | Validates the version is a non-empty SemVer (`MAJOR.MINOR.PATCH[-prerelease][+build]`), updates the entity through `ICommunicationRepository.UpdateWorkloadChartVersionAsync`, and writes an `Information` event via `ICommunicationEventService` with the source tag `(source: CI/CD)`. |
 
 Auth: read-only / read-write tenant communication policies (same as
-`PoolController`).
+`DeploymentSiteController`).
 
 **Deploy is intentionally a separate call.** `WorkloadController` writes the
 chart version into MongoDB but never triggers a Helm rollout. The CI pipeline

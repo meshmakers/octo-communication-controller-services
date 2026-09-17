@@ -17,7 +17,7 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
     IDistributedConsumer<PreDeleteTenant>, IDistributedConsumer<PosCreateTenant>
 {
     private readonly ILogger<TenantManagementConsumer> _logger;
-    private readonly IPoolService _poolService;
+    private readonly IDeploymentSiteService _poolService;
     private readonly IAdapterService _adapterService;
     private readonly IConfigurationService _configurationService;
     private readonly ICommunicationEventService _eventService;
@@ -42,7 +42,7 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
             : TenantUpdateScope.CacheOnly;
     }
 
-    public TenantManagementConsumer(ILogger<TenantManagementConsumer> logger, IPoolService poolService,
+    public TenantManagementConsumer(ILogger<TenantManagementConsumer> logger, IDeploymentSiteService poolService,
         IAdapterService adapterService, IConfigurationService configurationService,
         ICommunicationEventService eventService)
     {

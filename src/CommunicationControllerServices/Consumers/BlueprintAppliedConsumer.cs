@@ -19,7 +19,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 /// <para>
 /// The remaining gap, documented rather than plugged: an Adapter or ServiceAccountConfiguration
 /// created <b>directly</b> through the asset repository's GraphQL/REST API (outside a blueprint) is
-/// still only picked up by its workload deploy (<c>PoolService.DeployWorkloadAsync</c>), by the
+/// still only picked up by its workload deploy (<c>DeploymentSiteService.DeployWorkloadAsync</c>), by the
 /// next tenant load (<c>DefaultConfigurationCreatorService.StartTenantAsync</c>), or by the manual
 /// reconcile endpoints (AB#5111). Closing it for real needs entity-change events from the asset
 /// repository — a platform feature, not something to counterfeit here with polling.

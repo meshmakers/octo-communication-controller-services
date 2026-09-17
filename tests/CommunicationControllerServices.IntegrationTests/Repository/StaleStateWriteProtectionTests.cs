@@ -121,7 +121,7 @@ public class StaleStateWriteProtectionTests(CommunicationControllerFixture fixtu
         await repository.SetPoolCommunicationStateAsync(fixture.TestTenantId, poolRtId,
             RtCommunicationStateEnum.Offline);
 
-        var pools = await repository.GetPoolsAsync(fixture.TestTenantId);
+        var pools = await repository.GetDeploymentSitesAsync(fixture.TestTenantId);
         var loaded = pools.Single(p => p.RtId == poolRtId);
         loaded.CommunicationState.Should().Be(RtCommunicationStateEnum.Online);
         loaded.CommunicationStateTimestamp.Should().BeCloseTo(futureTimestamp, TimeSpan.FromMilliseconds(1));

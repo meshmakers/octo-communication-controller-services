@@ -26,7 +26,7 @@ internal class DefaultConfigurationCreatorService(
     ITriggerManagementService triggerManagementService,
     ICommandClient<CreateIdentityDataCommandRequest> createIdentityDataCommandClient,
     ISystemContext systemContext,
-    IPoolService poolService,
+    IDeploymentSiteService poolService,
     IAdapterCachePublish adapterCachePublish,
     IAdapterService adapterService,
     IPipelineServiceAccountProvisioningService serviceAccountProvisioningService,
@@ -114,7 +114,7 @@ internal class DefaultConfigurationCreatorService(
         // that failed once is retried by the existing FailedTenantRegistry machinery anyway. The
         // controller has no adapter-CREATE code path of its own (adapters are RtEntities written
         // through the asset repository), so an adapter added by hand between two tenant loads is
-        // picked up by its workload deploy (PoolService.DeployWorkloadAsync) or by the next load.
+        // picked up by its workload deploy (DeploymentSiteService.DeployWorkloadAsync) or by the next load.
         await EnsurePipelineServiceAccountsAsync(tenantId);
 
         // try to load the configuration from the cache

@@ -73,7 +73,7 @@ internal class ReapAndScaleUpTests : LeaseSchedulerServiceTestsBase
 
         await Scheduler.RunSchedulingRoundAsync();
 
-        await PoolService.Received(1).ScaleAdapterPoolAsync(LenderTenantId, pool.RtId, 2);
+        await DeploymentSiteService.Received(1).ScaleAdapterPoolAsync(LenderTenantId, pool.RtId, 2);
     }
 
     /// <summary>
@@ -92,7 +92,7 @@ internal class ReapAndScaleUpTests : LeaseSchedulerServiceTestsBase
 
         await Scheduler.RunSchedulingRoundAsync();
 
-        await PoolService.DidNotReceive()
+        await DeploymentSiteService.DidNotReceive()
             .ScaleAdapterPoolAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<int>());
     }
 
@@ -116,7 +116,7 @@ internal class ReapAndScaleUpTests : LeaseSchedulerServiceTestsBase
         await Task.Delay(TimeSpan.FromSeconds(1.2));
         await Scheduler.RunSchedulingRoundAsync();
 
-        await PoolService.Received(1).ScaleAdapterPoolAsync(LenderTenantId, pool.RtId, 2);
+        await DeploymentSiteService.Received(1).ScaleAdapterPoolAsync(LenderTenantId, pool.RtId, 2);
     }
 
     /// <summary>
@@ -134,7 +134,7 @@ internal class ReapAndScaleUpTests : LeaseSchedulerServiceTestsBase
         await Scheduler.RunSchedulingRoundAsync();
 
         using var _ = Assert.Multiple();
-        await PoolService.DidNotReceive()
+        await DeploymentSiteService.DidNotReceive()
             .ScaleAdapterPoolAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<int>());
         await EventService.Received(1).StoreErrorEventAsync(LenderTenantId,
             Arg.Is<string>(m => m.Contains("ceiling")));
@@ -152,7 +152,7 @@ internal class ReapAndScaleUpTests : LeaseSchedulerServiceTestsBase
 
         await Scheduler.RunSchedulingRoundAsync();
 
-        await PoolService.DidNotReceive()
+        await DeploymentSiteService.DidNotReceive()
             .ScaleAdapterPoolAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<int>());
     }
 }

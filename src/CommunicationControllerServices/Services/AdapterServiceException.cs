@@ -134,7 +134,7 @@ internal class AdapterServiceException : Exception
 
     /// <summary>
     /// AB#5027 mandatory-identity guard. Deliberately an <see cref="AdapterServiceException" />
-    /// (→ HTTP 404 in <c>PipelineController</c>) rather than a <c>PoolServiceException</c> (→ 400):
+    /// (→ HTTP 404 in <c>PipelineController</c>) rather than a <c>DeploymentSiteServiceException</c> (→ 400):
     /// it is thrown on the same deploy paths as the AB#4984 gate and must surface identically in
     /// the Studio, which renders <c>ErrorResponse.ErrorMessage</c> regardless of the status code.
     /// The message carries the whole remedy, so the status code is not the diagnostic here.

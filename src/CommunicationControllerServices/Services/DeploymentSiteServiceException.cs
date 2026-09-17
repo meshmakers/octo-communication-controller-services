@@ -3,64 +3,64 @@ using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.Syst
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
-internal class PoolServiceException : Exception
+internal class DeploymentSiteServiceException : Exception
 {
-    private PoolServiceException()
+    private DeploymentSiteServiceException()
     {
     }
 
-    private PoolServiceException(string message) : base(message)
+    private DeploymentSiteServiceException(string message) : base(message)
     {
     }
 
-    private PoolServiceException(string message, Exception inner) : base(message, inner)
+    private DeploymentSiteServiceException(string message, Exception inner) : base(message, inner)
     {
     }
 
     internal static Exception TenantNotFoundOrNotEnabled(string tenantId)
     {
-        return new PoolServiceException($"Tenant {tenantId} not found or communication service not enabled");
+        return new DeploymentSiteServiceException($"Tenant {tenantId} not found or communication service not enabled");
     }
 
     internal static Exception PoolNotFound(string tenantId, OctoObjectId poolRtId)
     {
-        return new PoolServiceException($"[{tenantId}] Pool '{poolRtId}' not found");
+        return new DeploymentSiteServiceException($"[{tenantId}] Pool '{poolRtId}' not found");
     }
 
     internal static Exception AdapterNotFound(string tenantId, RtEntityId adapterRtEntityId)
     {
-        return new PoolServiceException($"[{tenantId}] Adapter '{adapterRtEntityId}' not found");
+        return new DeploymentSiteServiceException($"[{tenantId}] Adapter '{adapterRtEntityId}' not found");
     }
 
     internal static Exception CannotCreatePool(string tenantId, string poolName)
     {
-        return new PoolServiceException($"[{tenantId}] Cannot create pool '{poolName}'");
+        return new DeploymentSiteServiceException($"[{tenantId}] Cannot create pool '{poolName}'");
     }
 
     internal static Exception PreUpdateTenantFailed(string tenantId, Exception exception)
     {
-        return new PoolServiceException($"[{tenantId}] Failed to pre update tenant", exception);
+        return new DeploymentSiteServiceException($"[{tenantId}] Failed to pre update tenant", exception);
     }
     
     internal static Exception PosUpdateTenantFailed(string tenantId, Exception exception)
     {
-        return new PoolServiceException($"[{tenantId}] Failed to pos update tenant", exception);
+        return new DeploymentSiteServiceException($"[{tenantId}] Failed to pos update tenant", exception);
     }
 
     internal static Exception WorkloadNotFound(string tenantId, OctoObjectId workloadRtId)
     {
-        return new PoolServiceException($"[{tenantId}] Workload '{workloadRtId}' not found");
+        return new DeploymentSiteServiceException($"[{tenantId}] Workload '{workloadRtId}' not found");
     }
 
     internal static Exception WorkloadNotInPool(string tenantId, OctoObjectId workloadRtId)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Workload '{workloadRtId}' is not currently in any pool — assign it to a pool before deploying");
     }
 
     internal static Exception WorkloadMissingChartName(string tenantId, OctoObjectId workloadRtId, string? workloadName)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': " +
             "the 'Chart Name' field is empty. Open the workload in the Refinery Studio and set a Helm chart name " +
             "(e.g. 'octo-modbus-adapter') before deploying.");
@@ -68,7 +68,7 @@ internal class PoolServiceException : Exception
 
     internal static Exception WorkloadMissingHelmRepository(string tenantId, OctoObjectId workloadRtId, string? workloadName)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': " +
             "no Helm repository is linked. Associate the workload with a HelmRepositoryConfiguration in the Studio " +
             "(workload form → 'Helm Repository' field) so the operator knows where to pull the chart from.");
@@ -76,7 +76,7 @@ internal class PoolServiceException : Exception
 
     internal static Exception WorkloadHelmRepositoryUrlEmpty(string tenantId, OctoObjectId workloadRtId, string? workloadName)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': " +
             "the linked Helm repository has an empty 'Repository URL'. Open the HelmRepositoryConfiguration " +
             "entity in the Studio and set a chart-repository URL (e.g. 'https://charts.meshmakers.cloud').");
@@ -85,7 +85,7 @@ internal class PoolServiceException : Exception
     internal static Exception WorkloadIngressEnabledButHostnameEmpty(string tenantId, OctoObjectId workloadRtId,
         string? workloadName)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': " +
             "'Ingress Enabled' is on but the 'Hostname' field is empty. Open the workload in the Refinery Studio and " +
             "set a public hostname (e.g. 'adapter.staging.octo-mesh.com') or disable 'Ingress Enabled' before deploying.");
@@ -99,14 +99,14 @@ internal class PoolServiceException : Exception
             : unknownPlaceholder.StartsWith("service.", StringComparison.OrdinalIgnoreCase)
                 ? $"Either pick one of the values exposed by GET /v1/communication/workload-variables, or extend the controller's ServiceUrls option (OCTO_COMMUNICATIONCONTROLLER__SERVICEURLS__{unknownPlaceholder["service.".Length..].ToUpperInvariant()})."
                 : "Available placeholders: {{context.tenantId}}, {{domain.NAME}}, {{service.NAME}}; see GET /v1/communication/workload-variables for configured NAMEs.";
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': " +
             $"the '{fieldName}' template '{template}' references unknown placeholder '{{{{{unknownPlaceholder}}}}}'. {hint}");
     }
 
     internal static Exception EdgePoolNotDeployable(string tenantId, OctoObjectId poolRtId, string? poolName)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Pool '{poolName ?? poolRtId.ToString()}' has Environment=Edge — Deploy is not available. " +
             "Edge pools are installed and run by an external operator outside the central cluster; only Cloud pools " +
             "can be deployed from this controller.");
@@ -115,7 +115,7 @@ internal class PoolServiceException : Exception
     internal static Exception PoolAlreadyNotDeployed(string tenantId, OctoObjectId poolRtId, string? poolName,
         RtDeploymentStateEnum currentState)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Pool '{poolName ?? poolRtId.ToString()}' is '{currentState}' — there is nothing to undeploy. " +
             "Undeploy is only valid when the pool is Deployed, Pending, or in Error.");
     }
@@ -123,7 +123,7 @@ internal class PoolServiceException : Exception
     internal static Exception WorkloadAlreadyNotDeployed(string tenantId, OctoObjectId workloadRtId,
         string? workloadName, RtDeploymentStateEnum currentState)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Workload '{workloadName ?? workloadRtId.ToString()}' is '{currentState}' — there is nothing to undeploy. " +
             "Undeploy is only valid when the workload is Deployed, Pending, or in Error.");
     }
@@ -131,7 +131,7 @@ internal class PoolServiceException : Exception
     internal static Exception WorkloadLifecycleModeAutoNotImplemented(string tenantId, OctoObjectId workloadRtId,
         string? workloadName)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': LifecycleMode 'Auto' " +
             "is reserved and not implemented yet (AB#4984). Set the workload to AlwaysOn or OnDemand in the Refinery Studio.");
     }
@@ -139,7 +139,7 @@ internal class PoolServiceException : Exception
     internal static Exception WorkloadOnDemandNotSupportedForType(string tenantId, OctoObjectId workloadRtId,
         string? workloadName)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': LifecycleMode 'OnDemand' " +
             "is currently supported for adapter workloads only — the idle watchdog and wake gates do not manage " +
             "Application workloads (AB#4984). Set the workload to AlwaysOn in the Refinery Studio.");
@@ -148,7 +148,7 @@ internal class PoolServiceException : Exception
     internal static Exception WorkloadNotOnDemandCapable(string tenantId, OctoObjectId workloadRtId,
         string? workloadName, IReadOnlyList<string> blockingReasons)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}' with LifecycleMode 'OnDemand': " +
             $"{string.Join("; ", blockingReasons)}. Process-bound triggers stop silently while the workload is hibernated " +
             "(AB#4984). Either set the workload back to AlwaysOn or migrate the pipelines to wake-capable triggers " +
@@ -166,7 +166,7 @@ internal class PoolServiceException : Exception
     internal static Exception WorkloadLeasedNotSupportedForType(string tenantId, OctoObjectId workloadRtId,
         string? workloadName)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': LifecycleMode 'Leased' " +
             "is supported for adapter workloads only — only an Adapter runs pipelines, and only pipelines can be " +
             "executed on a borrowed process (AB#4924). Set the workload to AlwaysOn in the Refinery Studio.");
@@ -175,7 +175,7 @@ internal class PoolServiceException : Exception
     internal static Exception AdapterPoolCannotBeLeased(string tenantId, OctoObjectId workloadRtId,
         string? workloadName)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy adapter pool '{workloadName ?? workloadRtId.ToString()}' with LifecycleMode " +
             "'Leased' (AB#4924). 'Leased' is the BORROWER's mode — it means the workload has no process of its own. " +
             "A pool is the opposite: it owns the processes that are lent out. Set the pool to AlwaysOn and control its " +
@@ -185,7 +185,7 @@ internal class PoolServiceException : Exception
     internal static Exception WorkloadLeasedNotOnDemandCapable(string tenantId, OctoObjectId workloadRtId,
         string? workloadName, IReadOnlyList<string> blockingReasons)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}' with LifecycleMode 'Leased': " +
             $"{string.Join("; ", blockingReasons)}. A lease can only be handed to a process whose triggers are " +
             "wake-capable — a process-bound trigger would need a process of its own, which is exactly what a leased " +
@@ -195,7 +195,7 @@ internal class PoolServiceException : Exception
     internal static Exception LeasedWorkloadLenderIncomplete(string tenantId, OctoObjectId workloadRtId,
         string? workloadName)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}' with LifecycleMode 'Leased': " +
             "LentFromTenantId and LentFromPoolRtId must be set together (AB#4924). One without the other names no " +
             "resolvable pool, and there is no referential integrity behind these values — they point into a different " +
@@ -205,7 +205,7 @@ internal class PoolServiceException : Exception
     internal static Exception LeasedWorkloadWithoutLender(string tenantId, OctoObjectId workloadRtId,
         string? workloadName)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}' with LifecycleMode 'Leased': " +
             "it names no adapter pool to borrow from. Set LentFromTenantId and LentFromPoolRtId to the lending tenant " +
             "and the AdapterPool inside it (AB#4924).");
@@ -214,7 +214,7 @@ internal class PoolServiceException : Exception
     internal static Exception LentFromSetWithoutLeasedMode(string tenantId, OctoObjectId workloadRtId,
         string? workloadName)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': LentFromTenantId / " +
             "LentFromPoolRtId are set but LifecycleMode is not 'Leased' (AB#4924). The values would do nothing, and a " +
             "value that silently does nothing is worse than an error — it reads like the workload borrows a process " +
@@ -224,7 +224,7 @@ internal class PoolServiceException : Exception
     internal static Exception LenderDoesNotLendToThisTenant(string tenantId, OctoObjectId workloadRtId,
         string? workloadName, string lenderTenantId)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}' with LifecycleMode 'Leased': " +
             $"tenant '{lenderTenantId}' does not lend to tenant '{tenantId}' (AB#4924). Lending follows the tenant tree " +
             "and never flows upwards: a pool lends to its owner's descendants, and to siblings under a shared parent " +
@@ -235,7 +235,7 @@ internal class PoolServiceException : Exception
     internal static Exception AdapterPoolNotOnDemandCapable(string tenantId, OctoObjectId workloadRtId,
         string? workloadName)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy adapter pool '{workloadName ?? workloadRtId.ToString()}' with a SharingMode " +
             "other than 'NotShared': the pool is not on-demand capable (AB#4924). A lease is handed to a process " +
             "between work items, so a pool whose own workload carries a process-bound trigger cannot serve one.");
@@ -244,7 +244,7 @@ internal class PoolServiceException : Exception
     internal static Exception AdapterPoolReplicaRangeInvalid(string tenantId, OctoObjectId workloadRtId,
         string? workloadName, int minReplicas, int maxReplicas)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy adapter pool '{workloadName ?? workloadRtId.ToString()}': the replica range " +
             $"MinReplicas={minReplicas} / MaxReplicas={maxReplicas} is invalid (AB#4924). MaxReplicas must be at least 1 " +
             "and at least MinReplicas; MinReplicas must not be negative. MinReplicas=0 is permitted and turns the pool " +
@@ -254,7 +254,7 @@ internal class PoolServiceException : Exception
     internal static Exception WorkloadIsNotAnAdapterPool(string tenantId, OctoObjectId workloadRtId,
         string? workloadName)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Workload '{workloadName ?? workloadRtId.ToString()}' is not an adapter pool and cannot be " +
             "scaled through the pool path (AB#4924). An Adapter or Application is scaled by the on-demand lifecycle " +
             "(hibernate / wake), which owns its replica count; only a pool has a replica RANGE to move within.");
@@ -263,7 +263,7 @@ internal class PoolServiceException : Exception
     internal static Exception AdapterPoolNotDeployed(string tenantId, OctoObjectId workloadRtId,
         string? workloadName, RtDeploymentStateEnum deploymentState)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot scale adapter pool '{workloadName ?? workloadRtId.ToString()}': it is " +
             $"'{deploymentState}', so there is no Helm release whose members could be scaled (AB#4924). Deploy the pool " +
             "first.");
@@ -272,7 +272,7 @@ internal class PoolServiceException : Exception
     internal static Exception AdapterPoolLeaseCapInvalid(string tenantId, OctoObjectId workloadRtId,
         string? workloadName, int cap)
     {
-        return new PoolServiceException(
+        return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy adapter pool '{workloadName ?? workloadRtId.ToString()}': " +
             $"LendingMaxConcurrentLeasesPerTenant is {cap} (AB#4924). Leave it unset for no per-tenant cap — " +
             "MaxReplicas and the round-robin rotation are the real bounds — or set a value of at least 1. A cap of 0 " +

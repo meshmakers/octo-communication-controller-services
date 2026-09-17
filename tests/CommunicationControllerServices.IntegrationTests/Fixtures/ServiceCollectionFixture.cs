@@ -55,7 +55,7 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         Services.AddSingleton<ICommunicationEventService, CommunicationEventService>();
         Services.AddSingleton<IPipelineSchemaValidator, PipelineSchemaValidator>();
         Services.AddSingleton<IPipelineDefinitionService, PipelineDefinitionService>();
-        // AB#4984: AdapterService/PoolService take the on-demand capability service. The real
+        // AB#4984: AdapterService/DeploymentSiteService take the on-demand capability service. The real
         // implementation is pure over the repository/cache/parser registered above, so the
         // integration tests exercise the real trigger classification.
         Services.AddSingleton<IWorkloadOnDemandCapabilityService, WorkloadOnDemandCapabilityService>();
@@ -77,7 +77,7 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         // back to AuthorityUrl, which is exactly the local-dev shape.
         Services.AddOptions<CommunicationControllerOptions>();
         Services.AddSingleton<IWorkloadTemplateResolver, WorkloadTemplateResolver>();
-        // AB#5027 phase 2: PoolService takes the provisioning service. Substituted here — the real
+        // AB#5027 phase 2: DeploymentSiteService takes the provisioning service. Substituted here — the real
         // one talks to the identity service over the distribution event hub, which the integration
         // fixture does not run; the repository-side entity + edge write it performs is covered
         // directly by Repository/PipelineServiceAccountRepositoryTests.
@@ -103,7 +103,7 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         Services.AddSingleton<IServiceAccountRightsAnalysisService, ServiceAccountRightsAnalysisService>();
         Services.AddSingleton<IAdapterConnectionTracker, AdapterConnectionTracker>();
         Services.AddSingleton<IAdapterService, AdapterService>();
-        Services.AddSingleton<IPoolService, PoolService>();
+        Services.AddSingleton<IDeploymentSiteService, DeploymentSiteService>();
         Services.AddSingleton<IPipelineDebugService, PipelineDebugService>();
         Services.AddTransient<ITriggerManagementService, TriggerManagementService>();
 

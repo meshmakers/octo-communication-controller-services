@@ -11,7 +11,7 @@ using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
-internal class PoolService : IPoolService
+internal class DeploymentSiteService : IDeploymentSiteService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly ICommunicationRepository _communicationRepository;
@@ -58,7 +58,7 @@ internal class PoolService : IPoolService
     /// <param name="serviceAccountResolver">Reads the adapter's provisioned service account so its credentials can be projected into the workload's Helm values (AB#5072)</param>
     /// <param name="lendingScopeResolver">Resolves which tenants an adapter pool may lend to, so a Leased workload naming an out-of-scope lender is refused at deploy time (AB#4924)</param>
     /// <param name="workloadLifecycleService">Carries the AB#4917 scale verb to the operator owning the workload's pool; reused for adapter-pool scaling so the MinReplicas floor is enforced in one place (AB#4924)</param>
-    public PoolService(ICommunicationRepository communicationRepository, IPoolCache poolCache,
+    public DeploymentSiteService(ICommunicationRepository communicationRepository, IPoolCache poolCache,
         ICommunicationEventService eventService,
         IOperatorConnectionManager operatorConnectionManager,
         IWorkloadEncryptionService encryptionService,
@@ -109,7 +109,7 @@ internal class PoolService : IPoolService
 
         // Edge pools stay Disabled regardless of operator presence; only Cloud
         // pools flip back to Pending until a new operator re-registers.
-        var pools = await _communicationRepository.GetPoolsAsync(tenantId);
+        var pools = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
         var rtPool = pools.FirstOrDefault(p => p.RtId == poolRtId);
         if (rtPool != null && !ActiveDeployment.IsActive(rtPool.DeploymentState))
         {
@@ -172,7 +172,7 @@ internal class PoolService : IPoolService
         }
         catch (Exception e)
         {
-            throw PoolServiceException.PreUpdateTenantFailed(tenantId, e);
+            throw DeploymentSiteServiceException.PreUpdateTenantFailed(tenantId, e);
         }
         finally
         {
@@ -201,7 +201,7 @@ internal class PoolService : IPoolService
         }
         catch (Exception e)
         {
-            throw PoolServiceException.PosUpdateTenantFailed(tenantId, e);
+            throw DeploymentSiteServiceException.PosUpdateTenantFailed(tenantId, e);
         }
         finally
         {
@@ -241,7 +241,7 @@ internal class PoolService : IPoolService
             // user must call Undeploy to clean those resources up). The
             // backfill takes care of moving Undeployed Edge pools to
             // Disabled separately.
-            throw PoolServiceException.EdgePoolNotDeployable(tenantId, poolRtId, rtPool.Name);
+            throw DeploymentSiteServiceException.EdgePoolNotDeployable(tenantId, poolRtId, rtPool.Name);
         }
 
         var poolName = rtPool.Name ?? string.Empty;
@@ -276,13 +276,13 @@ internal class PoolService : IPoolService
         var workload = await _communicationRepository.GetWorkloadByRtIdAsync(tenantId, workloadRtId);
         if (workload == null)
         {
-            throw PoolServiceException.WorkloadNotFound(tenantId, workloadRtId);
+            throw DeploymentSiteServiceException.WorkloadNotFound(tenantId, workloadRtId);
         }
 
         var pool = await _communicationRepository.GetPoolForWorkloadAsync(tenantId, workload.RtId);
         if (pool == null)
         {
-            throw PoolServiceException.WorkloadNotInPool(tenantId, workloadRtId);
+            throw DeploymentSiteServiceException.WorkloadNotInPool(tenantId, workloadRtId);
         }
 
         // Workloads in Edge pools are deployable: NotifyWorkloadDeployedAsync
@@ -351,7 +351,7 @@ internal class PoolService : IPoolService
         {
             // Should be unreachable after EnsureWorkloadIsHelmDeployableAsync, but
             // keep the fallback so the call can never silently no-op.
-            throw PoolServiceException.WorkloadMissingChartName(tenantId, workloadRtId, workload.Name);
+            throw DeploymentSiteServiceException.WorkloadMissingChartName(tenantId, workloadRtId, workload.Name);
         }
 
         await _operatorConnectionManager.NotifyWorkloadDeployedAsync(dto);
@@ -472,7 +472,7 @@ internal class PoolService : IPoolService
     }
 
     /// <summary>
-    /// Throws a precise <see cref="PoolServiceException"/> when the workload is
+    /// Throws a precise <see cref="DeploymentSiteServiceException"/> when the workload is
     /// missing any of the fields required for a Helm-based deploy: chart name,
     /// linked HelmRepositoryConfiguration, or repository URL. <c>ChartVersion</c>
     /// is intentionally NOT required — an empty value is the explicit "use the
@@ -484,17 +484,17 @@ internal class PoolService : IPoolService
     {
         if (string.IsNullOrWhiteSpace(workload.ChartName))
         {
-            throw PoolServiceException.WorkloadMissingChartName(tenantId, workload.RtId, workload.Name);
+            throw DeploymentSiteServiceException.WorkloadMissingChartName(tenantId, workload.RtId, workload.Name);
         }
 
         var repo = await _communicationRepository.GetHelmRepositoryForWorkloadAsync(tenantId, workload.RtId);
         if (repo == null)
         {
-            throw PoolServiceException.WorkloadMissingHelmRepository(tenantId, workload.RtId, workload.Name);
+            throw DeploymentSiteServiceException.WorkloadMissingHelmRepository(tenantId, workload.RtId, workload.Name);
         }
         if (string.IsNullOrWhiteSpace(repo.RepositoryUrl))
         {
-            throw PoolServiceException.WorkloadHelmRepositoryUrlEmpty(tenantId, workload.RtId, workload.Name);
+            throw DeploymentSiteServiceException.WorkloadHelmRepositoryUrlEmpty(tenantId, workload.RtId, workload.Name);
         }
 
         // Ingress contract: when IngressEnabled is true we project ingress.enabled=true
@@ -505,7 +505,7 @@ internal class PoolService : IPoolService
         // instead. ChartName / repo checks above mirror the same fail-fast pattern.
         if (workload.IngressEnabled && string.IsNullOrWhiteSpace(workload.Hostname))
         {
-            throw PoolServiceException.WorkloadIngressEnabledButHostnameEmpty(tenantId, workload.RtId, workload.Name);
+            throw DeploymentSiteServiceException.WorkloadIngressEnabledButHostnameEmpty(tenantId, workload.RtId, workload.Name);
         }
 
         // Validate template placeholders up-front so misconfigured workloads
@@ -518,7 +518,7 @@ internal class PoolService : IPoolService
         if (!string.IsNullOrWhiteSpace(workload.Hostname) &&
             !_templateResolver.TryResolve(workload.Hostname, ctx, out _, out var unknownInHostname))
         {
-            throw PoolServiceException.WorkloadTemplateUnknownPlaceholder(
+            throw DeploymentSiteServiceException.WorkloadTemplateUnknownPlaceholder(
                 tenantId, workload.RtId, workload.Name, "Hostname", workload.Hostname, unknownInHostname!);
         }
 
@@ -534,7 +534,7 @@ internal class PoolService : IPoolService
             }
             if (!_templateResolver.TryResolve(v.Value, ctx, out _, out var unknownInOverride))
             {
-                throw PoolServiceException.WorkloadTemplateUnknownPlaceholder(
+                throw DeploymentSiteServiceException.WorkloadTemplateUnknownPlaceholder(
                     tenantId, workload.RtId, workload.Name,
                     $"ValueOverride[{v.Path ?? string.Empty}]", v.Value, unknownInOverride!);
             }
@@ -543,7 +543,7 @@ internal class PoolService : IPoolService
         if (!string.IsNullOrEmpty(workload.ValuesYaml) &&
             !_templateResolver.TryResolve(workload.ValuesYaml, ctx, out _, out var unknownInYaml))
         {
-            throw PoolServiceException.WorkloadTemplateUnknownPlaceholder(
+            throw DeploymentSiteServiceException.WorkloadTemplateUnknownPlaceholder(
                 tenantId, workload.RtId, workload.Name, "ValuesYaml", workload.ValuesYaml, unknownInYaml!);
         }
 
@@ -553,21 +553,21 @@ internal class PoolService : IPoolService
         // workload whose triggers would silently stop when the watchdog hibernates it.
         if (workload.LifecycleMode == RtLifecycleModeEnum.Auto)
         {
-            throw PoolServiceException.WorkloadLifecycleModeAutoNotImplemented(tenantId, workload.RtId, workload.Name);
+            throw DeploymentSiteServiceException.WorkloadLifecycleModeAutoNotImplemented(tenantId, workload.RtId, workload.Name);
         }
 
         if (workload.LifecycleMode == RtLifecycleModeEnum.OnDemand)
         {
             if (workload is not RtAdapter)
             {
-                throw PoolServiceException.WorkloadOnDemandNotSupportedForType(tenantId, workload.RtId, workload.Name);
+                throw DeploymentSiteServiceException.WorkloadOnDemandNotSupportedForType(tenantId, workload.RtId, workload.Name);
             }
 
             var capability = await _onDemandCapabilityService.EvaluateAsync(tenantId,
                 new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, workload.RtId));
             if (!capability.IsCapable)
             {
-                throw PoolServiceException.WorkloadNotOnDemandCapable(tenantId, workload.RtId, workload.Name,
+                throw DeploymentSiteServiceException.WorkloadNotOnDemandCapable(tenantId, workload.RtId, workload.Name,
                     capability.BlockingReasons);
             }
         }
@@ -601,13 +601,13 @@ internal class PoolService : IPoolService
         var workload = await _communicationRepository.GetWorkloadByRtIdAsync(tenantId, workloadRtId);
         if (workload == null)
         {
-            throw PoolServiceException.WorkloadNotFound(tenantId, workloadRtId);
+            throw DeploymentSiteServiceException.WorkloadNotFound(tenantId, workloadRtId);
         }
 
         var pool = await _communicationRepository.GetPoolForWorkloadAsync(tenantId, workload.RtId);
         if (pool == null)
         {
-            throw PoolServiceException.WorkloadNotInPool(tenantId, workloadRtId);
+            throw DeploymentSiteServiceException.WorkloadNotInPool(tenantId, workloadRtId);
         }
 
         // Reject when there's nothing to undeploy. Both Undeployed and
@@ -615,7 +615,7 @@ internal class PoolService : IPoolService
         if (workload.DeploymentState == RtDeploymentStateEnum.Undeployed ||
             workload.DeploymentState == RtDeploymentStateEnum.Disabled)
         {
-            throw PoolServiceException.WorkloadAlreadyNotDeployed(tenantId, workloadRtId, workload.Name,
+            throw DeploymentSiteServiceException.WorkloadAlreadyNotDeployed(tenantId, workloadRtId, workload.Name,
                 workload.DeploymentState);
         }
 
@@ -659,12 +659,12 @@ internal class PoolService : IPoolService
         var workload = await _communicationRepository.GetWorkloadByRtIdAsync(tenantId, poolWorkloadRtId);
         if (workload == null)
         {
-            throw PoolServiceException.WorkloadNotFound(tenantId, poolWorkloadRtId);
+            throw DeploymentSiteServiceException.WorkloadNotFound(tenantId, poolWorkloadRtId);
         }
 
         if (workload is not RtAdapterPool pool)
         {
-            throw PoolServiceException.WorkloadIsNotAnAdapterPool(tenantId, poolWorkloadRtId, workload.Name);
+            throw DeploymentSiteServiceException.WorkloadIsNotAnAdapterPool(tenantId, poolWorkloadRtId, workload.Name);
         }
 
         // Pending counts as scalable: a deploy that is still rolling out already has its
@@ -672,7 +672,7 @@ internal class PoolService : IPoolService
         if (pool.DeploymentState != RtDeploymentStateEnum.Deployed &&
             pool.DeploymentState != RtDeploymentStateEnum.Pending)
         {
-            throw PoolServiceException.AdapterPoolNotDeployed(tenantId, poolWorkloadRtId, pool.Name,
+            throw DeploymentSiteServiceException.AdapterPoolNotDeployed(tenantId, poolWorkloadRtId, pool.Name,
                 pool.DeploymentState);
         }
 
@@ -715,7 +715,7 @@ internal class PoolService : IPoolService
         if (rtPool.DeploymentState == RtDeploymentStateEnum.Undeployed ||
             rtPool.DeploymentState == RtDeploymentStateEnum.Disabled)
         {
-            throw PoolServiceException.PoolAlreadyNotDeployed(tenantId, poolRtId, rtPool.Name,
+            throw DeploymentSiteServiceException.PoolAlreadyNotDeployed(tenantId, poolRtId, rtPool.Name,
                 rtPool.DeploymentState);
         }
 
@@ -1181,11 +1181,11 @@ internal class PoolService : IPoolService
 
     private async Task<RtDeploymentSite> GetPoolByRtIdAsync(string tenantId, OctoObjectId poolRtId)
     {
-        var pools = await _communicationRepository.GetPoolsAsync(tenantId);
+        var pools = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
         var rtPool = pools.FirstOrDefault(p => p.RtId == poolRtId);
         if (rtPool == null)
         {
-            throw PoolServiceException.PoolNotFound(tenantId, poolRtId);
+            throw DeploymentSiteServiceException.PoolNotFound(tenantId, poolRtId);
         }
         return rtPool;
     }
@@ -1197,7 +1197,7 @@ internal class PoolService : IPoolService
 
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
-            throw PoolServiceException.TenantNotFoundOrNotEnabled(tenantId);
+            throw DeploymentSiteServiceException.TenantNotFoundOrNotEnabled(tenantId);
         }
 
         if (poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
@@ -1276,7 +1276,7 @@ internal class PoolService : IPoolService
 
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
-            throw PoolServiceException.TenantNotFoundOrNotEnabled(tenantId);
+            throw DeploymentSiteServiceException.TenantNotFoundOrNotEnabled(tenantId);
         }
 
         if (poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
@@ -1294,7 +1294,7 @@ internal class PoolService : IPoolService
 
         if (!_poolCache.TryGetTenant(tenantId, out var poolTenant))
         {
-            throw PoolServiceException.TenantNotFoundOrNotEnabled(tenantId);
+            throw DeploymentSiteServiceException.TenantNotFoundOrNotEnabled(tenantId);
         }
 
         // Lazy-load the pool into the cache on first sight. The legacy /poolHub
@@ -1304,7 +1304,7 @@ internal class PoolService : IPoolService
         // ensure the cache is populated here without touching DeploymentState.
         if (!poolTenant.PoolsById.TryGetValue(poolRtId, out var poolDescription))
         {
-            var pools = await _communicationRepository.GetPoolsAsync(tenantId);
+            var pools = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
             var rtPool = pools.FirstOrDefault(p => p.RtId == poolRtId);
             if (rtPool == null)
             {
@@ -1324,7 +1324,7 @@ internal class PoolService : IPoolService
 
     public async Task<IReadOnlyList<DeploymentSiteSummaryDto>> GetDeploymentSiteSummariesAsync(string tenantId)
     {
-        var pools = await _communicationRepository.GetPoolsAsync(tenantId);
+        var pools = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
         return pools.Select(p => new DeploymentSiteSummaryDto
         {
             RtId = p.RtId.ToString(),
@@ -1341,7 +1341,7 @@ internal class PoolService : IPoolService
     /// <inheritdoc />
     public async Task<IReadOnlyList<ActiveDeployment>> GetActiveDeploymentsAsync(string tenantId)
     {
-        var pools = await _communicationRepository.GetPoolsAsync(tenantId);
+        var pools = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
         var workloads = await _communicationRepository.GetWorkloadsAsync(tenantId);
 
         var active = new List<ActiveDeployment>();
@@ -1378,7 +1378,7 @@ internal class PoolService : IPoolService
         IReadOnlyCollection<RtDeploymentSite> pools;
         try
         {
-            pools = await _communicationRepository.GetPoolsAsync(tenantId);
+            pools = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
         }
         catch (Exception ex)
         {
@@ -1617,7 +1617,7 @@ internal class PoolService : IPoolService
             // actively invited to make.
             if (isLeased)
             {
-                throw PoolServiceException.AdapterPoolCannotBeLeased(tenantId, pool.RtId, pool.Name);
+                throw DeploymentSiteServiceException.AdapterPoolCannotBeLeased(tenantId, pool.RtId, pool.Name);
             }
 
             await EnsureAdapterPoolIsValidAsync(tenantId, pool);
@@ -1631,7 +1631,7 @@ internal class PoolService : IPoolService
         {
             if (isLeased)
             {
-                throw PoolServiceException.WorkloadLeasedNotSupportedForType(tenantId, workload.RtId, workload.Name);
+                throw DeploymentSiteServiceException.WorkloadLeasedNotSupportedForType(tenantId, workload.RtId, workload.Name);
             }
 
             return;
@@ -1644,7 +1644,7 @@ internal class PoolService : IPoolService
             if (!string.IsNullOrWhiteSpace(adapter.LentFromTenantId) ||
                 !string.IsNullOrWhiteSpace(adapter.LentFromPoolRtId))
             {
-                throw PoolServiceException.LentFromSetWithoutLeasedMode(tenantId, adapter.RtId, adapter.Name);
+                throw DeploymentSiteServiceException.LentFromSetWithoutLeasedMode(tenantId, adapter.RtId, adapter.Name);
             }
 
             return;
@@ -1658,7 +1658,7 @@ internal class PoolService : IPoolService
             new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, adapter.RtId));
         if (!capability.IsCapable)
         {
-            throw PoolServiceException.WorkloadLeasedNotOnDemandCapable(tenantId, adapter.RtId, adapter.Name,
+            throw DeploymentSiteServiceException.WorkloadLeasedNotOnDemandCapable(tenantId, adapter.RtId, adapter.Name,
                 capability.BlockingReasons);
         }
 
@@ -1667,12 +1667,12 @@ internal class PoolService : IPoolService
 
         if (!hasTenant && !hasPool)
         {
-            throw PoolServiceException.LeasedWorkloadWithoutLender(tenantId, adapter.RtId, adapter.Name);
+            throw DeploymentSiteServiceException.LeasedWorkloadWithoutLender(tenantId, adapter.RtId, adapter.Name);
         }
 
         if (hasTenant != hasPool)
         {
-            throw PoolServiceException.LeasedWorkloadLenderIncomplete(tenantId, adapter.RtId, adapter.Name);
+            throw DeploymentSiteServiceException.LeasedWorkloadLenderIncomplete(tenantId, adapter.RtId, adapter.Name);
         }
 
         var lenderTenantId = adapter.LentFromTenantId!;
@@ -1685,7 +1685,7 @@ internal class PoolService : IPoolService
         if (lendingScope is null ||
             !await _lendingScopeResolver.MayLendAsync(lenderTenantId, tenantId, lendingScope.Value))
         {
-            throw PoolServiceException.LenderDoesNotLendToThisTenant(tenantId, adapter.RtId, adapter.Name,
+            throw DeploymentSiteServiceException.LenderDoesNotLendToThisTenant(tenantId, adapter.RtId, adapter.Name,
                 lenderTenantId);
         }
     }
@@ -1697,7 +1697,7 @@ internal class PoolService : IPoolService
     {
         if (pool.MinReplicas < 0 || pool.MaxReplicas < 1 || pool.MaxReplicas < pool.MinReplicas)
         {
-            throw PoolServiceException.AdapterPoolReplicaRangeInvalid(tenantId, pool.RtId, pool.Name,
+            throw DeploymentSiteServiceException.AdapterPoolReplicaRangeInvalid(tenantId, pool.RtId, pool.Name,
                 pool.MinReplicas, pool.MaxReplicas);
         }
 
@@ -1706,7 +1706,7 @@ internal class PoolService : IPoolService
             // Unset means "no per-tenant cap" and is the documented default (concept §8, Q11).
             // Zero is not that — it is a cap that can never be satisfied, so work would queue
             // forever with no error anywhere.
-            throw PoolServiceException.AdapterPoolLeaseCapInvalid(tenantId, pool.RtId, pool.Name, cap);
+            throw DeploymentSiteServiceException.AdapterPoolLeaseCapInvalid(tenantId, pool.RtId, pool.Name, cap);
         }
 
         if (pool.SharingMode == RtAdapterSharingModeEnum.NotShared)
@@ -1720,7 +1720,7 @@ internal class PoolService : IPoolService
             new RtEntityId(SystemCommunicationCkIds.RtCkAdapterPoolTypeId, pool.RtId));
         if (!capability.IsCapable)
         {
-            throw PoolServiceException.AdapterPoolNotOnDemandCapable(tenantId, pool.RtId, pool.Name);
+            throw DeploymentSiteServiceException.AdapterPoolNotOnDemandCapable(tenantId, pool.RtId, pool.Name);
         }
     }
 
@@ -1760,7 +1760,7 @@ internal class PoolService : IPoolService
             // Load by repository — the pool may or may not be in the local
             // cache yet (operator can call ReportDeployedStateAsync before
             // any RegisterDeploymentSiteAsync for the same pool has been processed).
-            var pools = await _communicationRepository.GetPoolsAsync(report.TenantId);
+            var pools = await _communicationRepository.GetDeploymentSitesAsync(report.TenantId);
             var rtPool = pools.FirstOrDefault(p => p.RtId.ToString() == report.DeploymentSiteRtId);
             if (rtPool == null)
             {

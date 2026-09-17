@@ -391,7 +391,7 @@ internal class DeployPipelineLeasedTests : AdapterServiceTestsBase
     [Test]
     public async Task DeployPipelineAsync_LeasedAdapterWithoutALender_DeploysWithTheFallbackClass()
     {
-        // LentFrom* unset — a borrower that was authored but never deployed (PoolService refuses this
+        // LentFrom* unset — a borrower that was authored but never deployed (DeploymentSiteService refuses this
         // at workload deploy; DeployPipeline can still reach it). It must not throw, and it must not
         // silently pick some other pool's descriptors.
         GivenPoolMember([Descriptor("FromCustomThing", 1, isTrigger: true, executionClass: Interactive)]);

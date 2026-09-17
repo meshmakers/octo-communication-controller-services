@@ -6,7 +6,7 @@ using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using NSubstitute;
 
-namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.PoolServiceTests;
+namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.DeploymentSiteServiceTests;
 
 /// <summary>
 ///     AB#4924 §7 — the controller half of adapter-pool deployment: deploy, undeploy and scale.
@@ -86,7 +86,7 @@ internal class AdapterPoolDeploymentTests : PoolServiceTestsBase
 
     private async Task<WorkloadDeployedDto> DeployAndCaptureAsync(RtDeployableWorkload workload)
     {
-        await PoolService.DeployWorkloadAsync(TenantId, workload.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, workload.RtId);
 
         return (WorkloadDeployedDto)OperatorConnectionManager.ReceivedCalls()
             .Single(c => c.GetMethodInfo().Name == nameof(IOperatorConnectionManager.NotifyWorkloadDeployedAsync))
@@ -256,7 +256,7 @@ internal class AdapterPoolDeploymentTests : PoolServiceTestsBase
         // "already not deployed".
         var pool = ArrangeAdapterPool(ArrangeCloudPool());
 
-        await PoolService.DeployWorkloadAsync(TenantId, pool.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, pool.RtId);
 
         await CommunicationRepository.Received(1).SetAdapterPoolDeploymentStateAsync(
             TenantId,
@@ -271,7 +271,7 @@ internal class AdapterPoolDeploymentTests : PoolServiceTestsBase
     {
         var pool = ArrangeAdapterPool(ArrangeCloudPool(), deploymentState: RtDeploymentStateEnum.Deployed);
 
-        await PoolService.UndeployWorkloadAsync(TenantId, pool.RtId);
+        await DeploymentSiteService.UndeployWorkloadAsync(TenantId, pool.RtId);
 
         await OperatorConnectionManager.Received(1).NotifyWorkloadUndeployedAsync(
             Arg.Is<WorkloadUndeployedDto>(d => d.WorkloadType == WorkloadTypeDto.AdapterPool));
@@ -283,7 +283,7 @@ internal class AdapterPoolDeploymentTests : PoolServiceTestsBase
         var pool = ArrangeAdapterPool(ArrangeCloudPool(), minReplicas: 1, maxReplicas: 3,
             deploymentState: RtDeploymentStateEnum.Deployed);
 
-        var effective = await PoolService.ScaleAdapterPoolAsync(TenantId, pool.RtId, 3);
+        var effective = await DeploymentSiteService.ScaleAdapterPoolAsync(TenantId, pool.RtId, 3);
 
         await Assert.That(effective).IsEqualTo(3);
         await WorkloadLifecycleService.Received(1).RequestScaleAsync(TenantId, pool, 3);
@@ -295,7 +295,7 @@ internal class AdapterPoolDeploymentTests : PoolServiceTestsBase
         var pool = ArrangeAdapterPool(ArrangeCloudPool(), minReplicas: 1, maxReplicas: 3,
             deploymentState: RtDeploymentStateEnum.Deployed);
 
-        var effective = await PoolService.ScaleAdapterPoolAsync(TenantId, pool.RtId, 0);
+        var effective = await DeploymentSiteService.ScaleAdapterPoolAsync(TenantId, pool.RtId, 0);
 
         await Assert.That(effective).IsEqualTo(1);
     }
@@ -305,8 +305,8 @@ internal class AdapterPoolDeploymentTests : PoolServiceTestsBase
     {
         var pool = ArrangeAdapterPool(ArrangeCloudPool(), deploymentState: RtDeploymentStateEnum.Undeployed);
 
-        await Assert.ThrowsAsync<PoolServiceException>(
-            () => PoolService.ScaleAdapterPoolAsync(TenantId, pool.RtId, 2));
+        await Assert.ThrowsAsync<DeploymentSiteServiceException>(
+            () => DeploymentSiteService.ScaleAdapterPoolAsync(TenantId, pool.RtId, 2));
 
         await WorkloadLifecycleService.DidNotReceiveWithAnyArgs().RequestScaleAsync(
             Arg.Any<string>(), Arg.Any<RtDeployableWorkload>(), Arg.Any<int>());
@@ -324,7 +324,7 @@ internal class AdapterPoolDeploymentTests : PoolServiceTestsBase
         CommunicationRepository.GetWorkloadByRtIdAsync(TenantId, adapter.RtId).Returns(adapter);
         CommunicationRepository.GetPoolForWorkloadAsync(TenantId, adapter.RtId).Returns(site);
 
-        await Assert.ThrowsAsync<PoolServiceException>(
-            () => PoolService.ScaleAdapterPoolAsync(TenantId, adapter.RtId, 2));
+        await Assert.ThrowsAsync<DeploymentSiteServiceException>(
+            () => DeploymentSiteService.ScaleAdapterPoolAsync(TenantId, adapter.RtId, 2));
     }
 }

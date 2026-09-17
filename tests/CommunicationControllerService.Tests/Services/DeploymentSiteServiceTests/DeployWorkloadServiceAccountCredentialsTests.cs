@@ -8,7 +8,7 @@ using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 
-namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.PoolServiceTests;
+namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.DeploymentSiteServiceTests;
 
 /// <summary>
 /// AB#5072: the adapter can authenticate its own <c>/{tenantId}/adapterHub</c> connection, but only
@@ -67,7 +67,7 @@ internal class DeployWorkloadServiceAccountCredentialsTests : PoolServiceTestsBa
 
     private async Task<WorkloadDeployedDto> DeployAndCaptureAsync(RtDeployableWorkload workload)
     {
-        await PoolService.DeployWorkloadAsync(TenantId, workload.RtId);
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, workload.RtId);
 
         return (WorkloadDeployedDto)OperatorConnectionManager.ReceivedCalls()
             .Single(c => c.GetMethodInfo().Name ==
@@ -296,7 +296,7 @@ internal class DeployWorkloadServiceAccountCredentialsTests : PoolServiceTestsBa
         // .Values.secrets.serviceAccountClientSecret through octo-mesh.secretEnv into
         // OCTO_ADAPTER__CLIENTSECRET. Nothing at build or deploy time notices a drift here.
         using var _ = Assert.Multiple();
-        await Assert.That(PoolService.ServiceAccountClientIdValuePath).IsEqualTo(ChartClientIdPath);
-        await Assert.That(PoolService.ServiceAccountClientSecretValuePath).IsEqualTo(ChartClientSecretPath);
+        await Assert.That(DeploymentSiteService.ServiceAccountClientIdValuePath).IsEqualTo(ChartClientIdPath);
+        await Assert.That(DeploymentSiteService.ServiceAccountClientSecretValuePath).IsEqualTo(ChartClientSecretPath);
     }
 }

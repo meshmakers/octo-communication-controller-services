@@ -142,7 +142,7 @@ internal class WorkloadLifecycleWatchdogTests
     public async Task IdleAdapterNotOnDemandCapable_IsNotDrained_StoresWarning()
     {
         // AB#4984 defense-in-depth: LifecycleMode can be set to OnDemand via GraphQL or a
-        // blueprint without passing the PoolService deploy gate. The watchdog must never
+        // blueprint without passing the DeploymentSiteService deploy gate. The watchdog must never
         // hibernate a workload whose pipelines use process-bound triggers.
         var adapter = CreateOnDemandAdapter(lastActivityAt: DateTime.UtcNow.AddHours(-2));
         GivenWorkloads(adapter);

@@ -4,7 +4,7 @@ using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.Syst
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 
-namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.PoolServiceTests;
+namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.DeploymentSiteServiceTests;
 
 /// <summary>
 /// Pins the repository-based "what still owns operator resources" answer behind the
@@ -24,7 +24,7 @@ internal class GetActiveDeploymentsAsyncTests : PoolServiceTestsBase
             Adapter("mesh", RtDeploymentStateEnum.Undeployed),
             Application("grafana", RtDeploymentStateEnum.Disabled));
 
-        var result = await PoolService.GetActiveDeploymentsAsync(TenantId);
+        var result = await DeploymentSiteService.GetActiveDeploymentsAsync(TenantId);
 
         await Assert.That(result).IsEmpty();
     }
@@ -41,7 +41,7 @@ internal class GetActiveDeploymentsAsyncTests : PoolServiceTestsBase
             Adapter("mesh", RtDeploymentStateEnum.Deployed),
             Adapter("idle", RtDeploymentStateEnum.Undeployed));
 
-        var result = await PoolService.GetActiveDeploymentsAsync(TenantId);
+        var result = await DeploymentSiteService.GetActiveDeploymentsAsync(TenantId);
 
         // Joined so the ORDER is pinned too (pools first, then workloads, each by name).
         await Assert.That(string.Join(" | ", result.Select(d => d.ToString()))).IsEqualTo(
@@ -56,7 +56,7 @@ internal class GetActiveDeploymentsAsyncTests : PoolServiceTestsBase
         GivenPools(Pool("edge", RtDeploymentStateEnum.Disabled, RtEnvironmentEnum.Edge));
         GivenWorkloads(Adapter("leftover", RtDeploymentStateEnum.Deployed));
 
-        var result = await PoolService.GetActiveDeploymentsAsync(TenantId);
+        var result = await DeploymentSiteService.GetActiveDeploymentsAsync(TenantId);
 
         await Assert.That(result.Count).IsEqualTo(1);
         await Assert.That(result[0].Kind).IsEqualTo(ActiveDeployment.AdapterKind);
@@ -70,7 +70,7 @@ internal class GetActiveDeploymentsAsyncTests : PoolServiceTestsBase
         GivenPools(pool);
         GivenWorkloads();
 
-        var result = await PoolService.GetActiveDeploymentsAsync(TenantId);
+        var result = await DeploymentSiteService.GetActiveDeploymentsAsync(TenantId);
 
         await Assert.That(result[0].Name).IsEqualTo(pool.RtId.ToString());
     }
@@ -82,13 +82,13 @@ internal class GetActiveDeploymentsAsyncTests : PoolServiceTestsBase
         CommunicationRepository.GetWorkloadsAsync(TenantId)
             .ThrowsAsync(new InvalidOperationException("mongo down"));
 
-        await Assert.That(async () => await PoolService.GetActiveDeploymentsAsync(TenantId))
+        await Assert.That(async () => await DeploymentSiteService.GetActiveDeploymentsAsync(TenantId))
             .Throws<InvalidOperationException>();
     }
 
     private void GivenPools(params RtDeploymentSite[] pools)
     {
-        CommunicationRepository.GetPoolsAsync(TenantId).Returns(pools);
+        CommunicationRepository.GetDeploymentSitesAsync(TenantId).Returns(pools);
     }
 
     private void GivenWorkloads(params RtDeployableWorkload[] workloads)

@@ -21,7 +21,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     private readonly ICommunicationEventService _eventService;
     private readonly ILeaseService _leaseService;
     private readonly CommunicationControllerOptions _options;
-    private readonly IPoolService _poolService;
+    private readonly IDeploymentSiteService _poolService;
 
     /// <summary>
     ///     Which borrower tenants each pool serves. Rebuilt on a slower cadence than the scheduling
@@ -84,7 +84,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
         IAdapterPoolConnectionManager connectionManager,
         ICommunicationEventService eventService,
         ILeaseService leaseService,
-        IPoolService poolService,
+        IDeploymentSiteService poolService,
         IOptions<CommunicationControllerOptions> options)
     {
         _adapterCache = adapterCache;
@@ -777,7 +777,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
 
         try
         {
-            // 🔴 Through PoolService, which routes into WorkloadLifecycleService.RequestScaleAsync
+            // 🔴 Through DeploymentSiteService, which routes into WorkloadLifecycleService.RequestScaleAsync
             // and its MinReplicas..MaxReplicas clamp (increment 5). A second clamp written here
             // would be a second opinion about the pool's declared range, and the two would drift.
             var effective = await _poolService.ScaleAdapterPoolAsync(key.LenderTenantId, pool.RtId, desired);

@@ -823,7 +823,7 @@ internal class AdapterService(
             "There is no adapter process to push it to.");
 
         // AB#4984 / AB#4924: the deployed pipeline set changed. Still meaningful here — "Leased"
-        // requires on-demand capability (PoolService refuses a leased workload that is not capable),
+        // requires on-demand capability (DeploymentSiteService refuses a leased workload that is not capable),
         // so this is the value that explains a later refusal to deploy the workload.
         await onDemandCapabilityService.RefreshWorkloadCapabilityAsync(tenantId, adapterRtEntityId);
 
@@ -1040,7 +1040,7 @@ internal class AdapterService(
     /// Leased adapter has no process of its own <b>at all</b> — it is handed one BETWEEN work items
     /// and gives it back. A trigger that only fires while a process of its own is running can
     /// therefore never fire on a leased adapter. The same guard is applied at workload-deploy time
-    /// by <c>PoolService.EnsureLeasingConfigurationIsValidAsync</c>, over the adapter's whole
+    /// by <c>DeploymentSiteService.EnsureLeasingConfigurationIsValidAsync</c>, over the adapter's whole
     /// pipeline set; without this per-pipeline arm a NEW process-bound pipeline could be deployed
     /// to an already deployed leased adapter and would only be caught at the next workload deploy —
     /// i.e. it would sit in the queue and never run. Deliberately reuses
