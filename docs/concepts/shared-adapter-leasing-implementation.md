@@ -1113,7 +1113,7 @@ queue pressure own the lifecycle instead (concept §4a). This closes plan 1.0's 
 
 **Tests:** `PlatformNamespaceTests` (13, including 8 that pin the one-namespace assumption as
 unchanged for Adapter and Application), `PoolOwnerReferenceTests` (10), `AdapterPoolKindE2ETests`
-(5, against a live cluster — see §7.6), `WorkloadLifecycleWatchdogTests` pool cases (5),
+(6, against a live cluster — see §7.6), `WorkloadLifecycleWatchdogTests` pool cases (5),
 `AdapterPoolDeploymentTests` (12), `RequestScaleAsyncTests` pool cases (5),
 `WorkloadHostnameIndexTests` pool cases (2), `AppendClusterSecretsTests` pool cases (2).
 
@@ -1161,7 +1161,7 @@ operator repo opts into, `--filter` is accepted, matches nothing and exits **5**
 run". This section said `--filter` until the suite was next picked up, and the wrong flag reads like
 a broken cluster rather than a typo.
 
-Five tests. **Scale** — a pool scaled **1 → 3 → 1** through
+Six tests. **Scale** — a pool scaled **1 → 3 → 1** through
 `WorkloadReconciler.ScaleAsync`, asserting both `spec.replicas` and the ReplicaSet controller's
 `status.replicas`, so the cluster agrees rather than the spec merely having been accepted — and
 **garbage collection** when its tenant's `CommunicationPool` CR is deleted.
@@ -1179,7 +1179,14 @@ Then the pair that closes §7.1a, added after the first two:
 - **`DeployingAPoolIntoAPlatformNamespace_WritesNoOwnerAndThePoolSurvives`** — the operator
   declining to do that, against the same live apiserver.
 
-And the dependent the first four left out:
+And the two properties the first four left out:
+
+- **`Scale_MovesItsOwnReleaseAndLeavesAnotherTenantsPoolWhereItWas`** — the scale verb and the
+  owner stamp both select on `app.kubernetes.io/instance={release}` and act on everything returned.
+  The pool namespace holds many tenants' pools by design, so a selector matching too broadly
+  resizes — or takes ownership of, and later collects — an unrelated tenant's pool. A second
+  tenant's release now sits in the namespace through both paths, and the garbage-collection test
+  asserts that neighbour is neither stamped nor collected.
 
 - **`DeletingTheLendingTenantsCommunicationPool_AlsoCollectsTheReleaseSecret`** — §7.3 writes the
   owner reference to *two* kinds of object, and the Secret is reached by a different path than the
@@ -1198,7 +1205,7 @@ and the write namespace are **one variable**. The reachable regression is repoin
 `_options.PoolNamespace` — which the guard's own warning text invites, since it says that is where
 the CR lives — while the write stays on `ns`. That is the mutation the new test fails on.
 
-Without the environment variable all five report as *skipped*, never as passed. Requirements: the
+Without the environment variable all six report as *skipped*, never as passed. Requirements: the
 `communicationpools.octo-mesh.meshmakers.io` CRD and permission to create the `octo-pool-e2e` and
 `octo-pool-e2e-platform` namespaces.
 
