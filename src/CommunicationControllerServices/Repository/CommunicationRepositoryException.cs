@@ -281,6 +281,14 @@ internal class CommunicationRepositoryException : Exception
             $"[{tenantId}] Failed to get pipeline service account of adapter '{adapterRtId}'", exception);
     }
 
+    public static Exception CommonFailedGettingLentAdapterPoolsForAdapters(string borrowerTenantId,
+        Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{borrowerTenantId}] Failed to resolve the lent adapter pool mirrors of the tenant's borrowing adapters " +
+            "(AB#5271)", exception);
+    }
+
     public static Exception CommonFailedGettingServiceAccountByWellKnownName(string tenantId, string wellKnownName,
         Exception exception)
     {

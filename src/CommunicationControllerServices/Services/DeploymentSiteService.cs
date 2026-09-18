@@ -25,6 +25,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
     private readonly IPipelineServiceAccountResolver _serviceAccountResolver;
     private readonly ITenantLendingScopeResolver _lendingScopeResolver;
     private readonly IWorkloadLifecycleService _workloadLifecycleService;
+    private readonly IAdapterPoolMirrorProvisioningService _adapterPoolMirrorProvisioningService;
 
     /// <summary>
     /// Helm values path carrying the adapter's own OAuth client id (AB#5072). Must stay in lockstep
@@ -58,6 +59,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
     /// <param name="serviceAccountResolver">Reads the adapter's provisioned service account so its credentials can be projected into the workload's Helm values (AB#5072)</param>
     /// <param name="lendingScopeResolver">Resolves which tenants an adapter deploymentSite may lend to, so a Leased workload naming an out-of-scope lender is refused at deploy time (AB#4924)</param>
     /// <param name="workloadLifecycleService">Carries the AB#4917 scale verb to the operator owning the workload's deploymentSite; reused for adapter-deploymentSite scaling so the MinReplicas floor is enforced in one place (AB#4924)</param>
+    /// <param name="adapterPoolMirrorProvisioningService">Pushes an adapter pool's deploy/undeploy out to the LentAdapterPool mirrors its borrowers hold (AB#5271)</param>
     public DeploymentSiteService(ICommunicationRepository communicationRepository, IDeploymentSiteCache poolCache,
         ICommunicationEventService eventService,
         IOperatorConnectionManager operatorConnectionManager,
@@ -67,7 +69,8 @@ internal class DeploymentSiteService : IDeploymentSiteService
         IPipelineServiceAccountProvisioningService serviceAccountProvisioningService,
         IPipelineServiceAccountResolver serviceAccountResolver,
         ITenantLendingScopeResolver lendingScopeResolver,
-        IWorkloadLifecycleService workloadLifecycleService)
+        IWorkloadLifecycleService workloadLifecycleService,
+        IAdapterPoolMirrorProvisioningService adapterPoolMirrorProvisioningService)
     {
         _communicationRepository = communicationRepository;
         _deploymentSiteCache = poolCache;
@@ -80,6 +83,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
         _serviceAccountResolver = serviceAccountResolver;
         _lendingScopeResolver = lendingScopeResolver;
         _workloadLifecycleService = workloadLifecycleService;
+        _adapterPoolMirrorProvisioningService = adapterPoolMirrorProvisioningService;
     }
     
     /// <inheritdoc />
@@ -367,6 +371,8 @@ internal class DeploymentSiteService : IDeploymentSiteService
 
         await _eventService.StoreInformationEventAsync(tenantId,
             $"Workload '{workload.Name}' deploy requested.");
+
+        await FanOutAdapterPoolMirrorsAsync(tenantId, workload);
     }
 
     public async Task ReconcilePendingWorkloadsAsync(string tenantId, OctoObjectId deploymentSiteRtId)
@@ -648,6 +654,47 @@ internal class DeploymentSiteService : IDeploymentSiteService
 
         await _eventService.StoreInformationEventAsync(tenantId,
             $"Workload '{workload.Name}' undeploy requested (resting state: {restingState}).");
+
+        await FanOutAdapterPoolMirrorsAsync(tenantId, workload);
+    }
+
+    /// <summary>
+    ///     Pushes an adapter pool's change out to the mirrors its borrowers hold (AB#5271).
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         <c>DeploymentState</c> is one of the mirrored fields, and it is the one that explains a
+    ///         queue which never drains — a borrower has no way to read it from the lender's database,
+    ///         so a pool that goes down has to push. Deploy and undeploy are also the only pool events
+    ///         this service owns: pools are RtEntities written through the asset repository, so a
+    ///         rename or a scope change reaches the mirrors through the per-tenant reconcile on the
+    ///         next tenant load (or a manual backfill) instead.
+    ///     </para>
+    ///     <para>
+    ///         Best effort, exactly like the AB#5027 service-account provisioning on this path: a
+    ///         mirror that could not be refreshed must not fail a deploy that has already been sent to
+    ///         the operator. It is also cheap for the overwhelmingly common case — a pool that lends
+    ///         to nobody resolves an empty borrower set and stops.
+    ///     </para>
+    /// </remarks>
+    private async Task FanOutAdapterPoolMirrorsAsync(string tenantId, RtDeployableWorkload workload)
+    {
+        if (workload is not RtAdapterPool)
+        {
+            return;
+        }
+
+        try
+        {
+            await _adapterPoolMirrorProvisioningService.ProvisionForLenderAsync(tenantId);
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e,
+                "[{TenantId}] Could not refresh the lent adapter pool mirrors of adapter pool '{WorkloadName}' " +
+                "({WorkloadRtId}); borrowers keep the mirror they have until the next reconcile",
+                tenantId, workload.Name, workload.RtId);
+        }
     }
 
     /// <inheritdoc />
@@ -1599,10 +1646,12 @@ internal class DeploymentSiteService : IDeploymentSiteService
     ///         to it, and — for an <see cref="RtAdapterPool" /> — is the deploymentSite itself coherent.
     ///     </para>
     ///     <para>
-    ///         🔴 The borrower half has <b>no referential integrity behind it</b>: LentFromTenantId
-    ///         and LentFromAdapterPoolRtId point into a different tenant's database, where a CK association
-    ///         cannot reach. This method is the only thing in the system that can catch a
-    ///         half-configured or out-of-scope borrower before a lease is attempted.
+    ///         🔴 The borrower half still has <b>no referential integrity behind it</b>. Since
+    ///         AB#5271 the adapter's <c>LentFrom</c> edge is local and enforced, but what it points
+    ///         at — the mirror's <c>Lender</c> record — names an <c>AdapterPool</c> in a different
+    ///         tenant's database, where a CK association cannot reach. This method is still the only
+    ///         thing in the system that can catch a half-configured or out-of-scope borrower before a
+    ///         lease is attempted.
     ///     </para>
     /// </remarks>
     private async Task EnsureLeasingConfigurationIsValidAsync(string tenantId, RtDeployableWorkload workload)
@@ -1637,12 +1686,16 @@ internal class DeploymentSiteService : IDeploymentSiteService
             return;
         }
 
+        // AB#5271: the lender comes from the adapter's LentFrom edge to a borrower-local mirror.
+        // Read once here and reused by every branch below — the edge is the same fact whether we are
+        // about to reject it for being present, absent or out of scope.
+        var mirror = await _communicationRepository.GetLentAdapterPoolForAdapterAsync(tenantId, adapter.RtId);
+
         if (!isLeased)
         {
-            // A value that silently does nothing is worse than an error: LentFrom* on a workload
+            // A link that silently does nothing is worse than an error: a LentFrom edge on a workload
             // that runs its own process reads like it borrows one.
-            if (!string.IsNullOrWhiteSpace(adapter.LentFromTenantId) ||
-                !string.IsNullOrWhiteSpace(adapter.LentFromAdapterPoolRtId))
+            if (mirror is not null)
             {
                 throw DeploymentSiteServiceException.LentFromSetWithoutLeasedMode(tenantId, adapter.RtId, adapter.Name);
             }
@@ -1662,26 +1715,31 @@ internal class DeploymentSiteService : IDeploymentSiteService
                 capability.BlockingReasons);
         }
 
-        var hasTenant = !string.IsNullOrWhiteSpace(adapter.LentFromTenantId);
-        var hasPool = !string.IsNullOrWhiteSpace(adapter.LentFromAdapterPoolRtId);
-
-        if (!hasTenant && !hasPool)
+        if (mirror is null)
         {
             throw DeploymentSiteServiceException.LeasedWorkloadWithoutLender(tenantId, adapter.RtId, adapter.Name);
         }
 
-        if (hasTenant != hasPool)
+        // The edge exists, so the borrower does name a pool — but the mirror it names can still carry
+        // a Lender record that says nothing usable. The provisioning sweep writes that record as one
+        // unit, so this only happens when somebody edited the mirror in the borrower's own database.
+        var lentFrom = LentFromReference.FromMirror(mirror);
+        if (lentFrom is null)
         {
             throw DeploymentSiteServiceException.LeasedWorkloadLenderIncomplete(tenantId, adapter.RtId, adapter.Name);
         }
 
-        var lenderTenantId = adapter.LentFromTenantId!;
+        var lenderTenantId = lentFrom.LenderTenantId;
 
         // Resolve the deploymentSite in the LENDING tenant and ask whether it lends here. Both halves are
         // needed: a deploymentSite that does not exist, and a deploymentSite that exists but whose SharingMode or
         // allow-list excludes this tenant, are different misconfigurations with the same symptom.
+        //
+        // 🔴 Read from the LENDER, never from the mirror. The mirror carries a SharingMode of its own
+        // and a borrower can edit its own database — deciding from it would let any tenant grant
+        // itself a pool it was never lent.
         var lendingScope = await _communicationRepository
-            .TryGetAdapterPoolLendingScopeAsync(lenderTenantId, adapter.LentFromAdapterPoolRtId!);
+            .TryGetAdapterPoolLendingScopeAsync(lenderTenantId, lentFrom.AdapterPoolRtId);
         if (lendingScope is null ||
             !await _lendingScopeResolver.MayLendAsync(lenderTenantId, tenantId, lendingScope.Value))
         {

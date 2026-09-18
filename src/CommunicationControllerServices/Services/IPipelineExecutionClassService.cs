@@ -48,6 +48,6 @@ public interface IPipelineExecutionClassService
     ///     answer: a leased adapter has no descriptors of its own, and the pool that executes its
     ///     pipelines is named on the entity. Omitting it resolves the dedicated way.
     /// </param>
-    int ResolveForAdapter(string tenantId, RtEntityId adapterRtEntityId, string? pipelineDefinition,
+    Task<int> ResolveForAdapterAsync(string tenantId, RtEntityId adapterRtEntityId, string? pipelineDefinition,
         RtAdapter? adapter = null);
 }

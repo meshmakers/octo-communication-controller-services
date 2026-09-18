@@ -142,8 +142,15 @@ internal abstract class LeaseServiceTestsBase
         Borrower = RtEntityCreator.CreateAdapter();
         Borrower.Name = "borrowing-adapter";
         Borrower.LifecycleMode = lifecycleMode;
-        Borrower.LentFromTenantId = lentFromTenantId;
-        Borrower.LentFromAdapterPoolRtId = lentFromAdapterPoolRtId ?? AdapterPoolRtId.ToString();
+        // AB#5271: the borrower half is the adapter's LentFrom mirror, so it is arranged on the
+        // repository rather than assigned on the entity. A null lender tenant means "this adapter
+        // declares no pool at all" — the edge is simply absent, which is what the old null attribute
+        // pair stood for.
+        if (lentFromTenantId is not null)
+        {
+            CommunicationRepository.ArrangeLentFrom(BorrowerTenantId, Borrower, lentFromTenantId,
+                lentFromAdapterPoolRtId ?? AdapterPoolRtId.ToString());
+        }
 
         CommunicationRepository.GetWorkloadByRtIdAsync(BorrowerTenantId, Borrower.RtId).Returns(Borrower);
         return Borrower;

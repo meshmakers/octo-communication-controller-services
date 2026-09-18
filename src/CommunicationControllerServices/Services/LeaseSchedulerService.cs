@@ -880,8 +880,8 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     /// </summary>
     /// <remarks>
     ///     🔴 Built from the BORROWERS' declarations, not from the pools. The borrowing relationship
-    ///     is the borrower's own statement (<c>LifecycleMode = Leased</c> plus
-    ///     <c>LentFromTenantId</c>/<c>LentFromAdapterPoolRtId</c>), and the lender's sharing scope is checked
+    ///     is the borrower's own statement (<c>LifecycleMode = Leased</c> plus its <c>LentFrom</c>
+    ///     mirror, AB#5271), and the lender's sharing scope is checked
     ///     per lease by <c>LeaseService</c>. Walking from the pools instead would require resolving
     ///     the lending scope to a tenant list on every round, and would put the lender in a position
     ///     to push work into a tenant that never asked for it.
@@ -921,28 +921,50 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
                     continue;
                 }
 
-                foreach (var workload in workloads)
-                {
-                    if (workload is not RtAdapter adapter ||
-                        adapter.LifecycleMode != RtLifecycleModeEnum.Leased)
-                    {
-                        continue;
-                    }
+                var leasedAdapters = workloads
+                    .OfType<RtAdapter>()
+                    .Where(a => a.LifecycleMode == RtLifecycleModeEnum.Leased)
+                    .ToList();
 
-                    if (string.IsNullOrWhiteSpace(adapter.LentFromTenantId) ||
-                        string.IsNullOrWhiteSpace(adapter.LentFromAdapterPoolRtId) ||
-                        !OctoObjectId.TryParse(adapter.LentFromAdapterPoolRtId!, out var adapterPoolRtId))
+                if (leasedAdapters.Count == 0)
+                {
+                    continue;
+                }
+
+                // AB#5271: one batched read per tenant for the whole set. This runs on the topology
+                // refresh cadence for every enabled tenant, so resolving each borrower's LentFrom
+                // mirror separately would turn one query per tenant into one per borrowing adapter.
+                IReadOnlyDictionary<OctoObjectId, RtLentAdapterPool> mirrors;
+                try
+                {
+                    mirrors = await _communicationRepository.GetLentAdapterPoolsForAdaptersAsync(tenantId,
+                        leasedAdapters.Select(a => a.RtId).ToList());
+                }
+                catch (Exception e)
+                {
+                    Logger.Warn(e,
+                        "[{TenantId}] Could not resolve the lent adapter pool mirrors while building the lease topology",
+                        tenantId);
+                    continue;
+                }
+
+                foreach (var adapter in leasedAdapters)
+                {
+                    var lentFrom = LentFromReference.FromMirror(mirrors.GetValueOrDefault(adapter.RtId));
+
+                    if (lentFrom is null ||
+                        !OctoObjectId.TryParse(lentFrom.AdapterPoolRtId, out var adapterPoolRtId))
                     {
-                        // The deploy guard refuses this pair (increment 2); an entity that reached
-                        // this state anyway is skipped rather than guessed at.
+                        // The deploy guard refuses this (increment 2); an entity that reached this
+                        // state anyway is skipped rather than guessed at.
                         Logger.Warn(
                             "[{TenantId}] Leased adapter '{AdapterName}' names no usable pool " +
-                            "(LentFromTenantId='{LentFromTenantId}', LentFromAdapterPoolRtId='{LentFromAdapterPoolRtId}')",
-                            tenantId, adapter.Name, adapter.LentFromTenantId, adapter.LentFromAdapterPoolRtId);
+                            "(LentFrom mirror: lender='{LenderTenantId}', pool='{AdapterPoolRtId}')",
+                            tenantId, adapter.Name, lentFrom?.LenderTenantId, lentFrom?.AdapterPoolRtId);
                         continue;
                     }
 
-                    var key = AdapterPoolKey.Create(adapter.LentFromTenantId!, adapterPoolRtId.ToString());
+                    var key = AdapterPoolKey.Create(lentFrom.LenderTenantId, adapterPoolRtId.ToString());
                     if (!built.TryGetValue(key, out var borrowers))
                     {
                         borrowers = [];

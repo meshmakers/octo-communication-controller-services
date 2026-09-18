@@ -8,7 +8,7 @@ $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 #            borrow them: AdapterSharingMode + LendingAllowedTenantIds +
 #            LendingMaxConcurrentLeasesPerTenant, plus the sizing in attributes/adapterPool.yaml.
 #   BORROWER (Adapter, in the borrowing tenant) — has NO process of its own:
-#            LifecycleMode = Leased + LentFromTenantId + LentFromPoolRtId.
+#            LifecycleMode = Leased + a LentFrom edge to a LentAdapterPool mirror (AB#5271).
 #   EXECUTION(PipelineExecution, in the BORROWING tenant) — records which pool and which
 #            member actually served it: LeasedFromTenantId + LeasedFromPoolRtId +
 #            LeasedOnMemberId, alongside QueuedAt / LeaseGrantedAt / LeaseReleasedAt.

@@ -150,6 +150,13 @@ internal class TriggerManagementService(
             return null;
         }
 
+        // AB#5271: the lending pool is the adapter's LentFrom mirror, not two attributes on the
+        // adapter. Resolved once here and used for both metric tags below. A borrower that names no
+        // pool is not rejected on this path — the lease itself will refuse it with a named reason —
+        // so an unresolvable mirror only costs the tags their values.
+        var lentFrom = LentFromReference.FromMirror(
+            await communicationRepository.GetLentAdapterPoolForAdapterAsync(tenantId, adapter.RtId));
+
         // 🔴 AB#4924 §14 — the per-tenant kill switch, enqueue half. Nothing is written: no execution
         // entity, no QueuedAt, no event that looks like progress. The other half sits in
         // LeaseService.GrantLeaseAsync, and both are needed — a switch that stopped only new enqueues
@@ -162,8 +169,8 @@ internal class TriggerManagementService(
             // borrowing half named, because "leasing is off" is two different operator decisions on
             // two different tenants and an aggregate cannot tell them apart. This half is always
             // the borrower's own switch — the lender's is checked at grant, in LeaseService.
-            AdapterLeasingMetrics.RecordRefused(tenantId, adapter.LentFromTenantId ?? string.Empty,
-                adapter.LentFromAdapterPoolRtId ?? string.Empty, LeaseStage.Enqueue,
+            AdapterLeasingMetrics.RecordRefused(tenantId, lentFrom?.LenderTenantId ?? string.Empty,
+                lentFrom?.AdapterPoolRtId ?? string.Empty, LeaseStage.Enqueue,
                 LeaseRefusalReason.LeasingDisabledBorrower);
 
             logger.LogWarning(
@@ -196,8 +203,8 @@ internal class TriggerManagementService(
         // honest answer to "is the queue growing or draining"; a depth gauge alone shows the level
         // but not which way it is moving. Re-queued attempts are counted separately on
         // octo.lease.requeued.count, so the full in-rate is the sum of the two.
-        AdapterLeasingMetrics.RecordEnqueued(tenantId, adapter.LentFromTenantId ?? string.Empty,
-            adapter.LentFromAdapterPoolRtId ?? string.Empty);
+        AdapterLeasingMetrics.RecordEnqueued(tenantId, lentFrom?.LenderTenantId ?? string.Empty,
+            lentFrom?.AdapterPoolRtId ?? string.Empty);
 
         // 🔴 AB#4924 §9.6 — the half that decides whether Interactive means anything. Work has just
         // arrived, and a member of the pool may be idle ALREADY: without this the execution waits for

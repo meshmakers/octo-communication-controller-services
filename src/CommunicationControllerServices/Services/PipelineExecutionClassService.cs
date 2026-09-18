@@ -86,15 +86,15 @@ internal class PipelineExecutionClassService(
         return Batch;
     }
 
-    public int ResolveForAdapter(string tenantId, RtEntityId adapterRtEntityId, string? pipelineDefinition,
-        RtAdapter? adapter = null)
+    public async Task<int> ResolveForAdapterAsync(string tenantId, RtEntityId adapterRtEntityId,
+        string? pipelineDefinition, RtAdapter? adapter = null)
     {
         // 🔴 AB#4924: for a Leased adapter this resolves against the LENDING POOL's member
         // descriptors, not against AdapterById. A leased adapter never holds an adapter-hub
         // connection, so the old cache lookup always missed and every leased pipeline was persisted
         // with the CK default Batch — which made the Interactive-before-Batch ordering of the
         // scheduler unobservable on the only path where it matters.
-        var capabilities = adapterNodeCapabilityService.Resolve(tenantId, adapterRtEntityId, adapter);
+        var capabilities = await adapterNodeCapabilityService.ResolveAsync(tenantId, adapterRtEntityId, adapter);
         return Resolve(pipelineDefinition, capabilities.NodeDescriptors);
     }
 

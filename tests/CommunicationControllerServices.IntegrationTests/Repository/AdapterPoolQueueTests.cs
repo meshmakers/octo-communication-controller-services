@@ -472,9 +472,11 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
             CommunicationState = RtCommunicationStateEnum.Offline,
             DeploymentState = RtDeploymentStateEnum.Deployed,
             ConfigurationState = RtConfigurationStateEnum.Unconfigured,
-            LifecycleMode = RtLifecycleModeEnum.Leased,
-            LentFromTenantId = LenderTenantId,
-            LentFromAdapterPoolRtId = PoolRtId
+            // AB#5271: the borrower's lender is the adapter's LentFrom edge to a mirror, not two
+            // attributes. This suite never resolves it — it exercises the queue writes, which only
+            // need the adapter to BE leased — so nothing is linked here. The lender ids it does use
+            // travel on the LeaseClaim, which is where the queue reads them from.
+            LifecycleMode = RtLifecycleModeEnum.Leased
         };
 
         var operationResult = new OperationResult();

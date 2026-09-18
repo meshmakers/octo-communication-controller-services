@@ -94,8 +94,13 @@ internal class DeployPipelineLeasedTests : AdapterServiceTestsBase
         var rtAdapter = RtEntityCreator.CreateAdapter();
         rtAdapter.Name = "borrowed-adapter";
         rtAdapter.LifecycleMode = RtLifecycleModeEnum.Leased;
-        rtAdapter.LentFromTenantId = lentFromTenantId;
-        rtAdapter.LentFromAdapterPoolRtId = lentFromAdapterPoolRtId;
+        // AB#5271: the lender is the adapter's LentFrom mirror; a null lender tenant means the
+        // adapter has no such edge, which is the "names no pool" case these tests exercise.
+        if (lentFromTenantId is not null && lentFromAdapterPoolRtId is not null)
+        {
+            CommunicationRepository.ArrangeLentFrom(TenantId, rtAdapter, lentFromTenantId,
+                lentFromAdapterPoolRtId);
+        }
 
         var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline = RtEntityCreator.CreatePipeline(pipelineDefinition);

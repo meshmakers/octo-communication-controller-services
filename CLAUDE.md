@@ -2225,6 +2225,116 @@ one had nothing to run. Resolved: `LeaseDto` carries the pipeline rtId, the inpu
 `PipelineConfigurationDto`, and `octo-mesh-adapter` implements the work item. `LeaseService` refuses
 the lease — **before a member is reserved** — when the pipeline cannot be projected.
 
+## Lent adapter pool mirrors — the borrower's view of what it may lease (AB#5271)
+
+Concept: `docs/concepts/lent-adapter-pool-mirror.md`.
+
+A borrower could not see which adapter pools it may use: the `AdapterPool` entity lives in the
+**lender's** tenant database, GraphQL is tenant-scoped, and a CK association cannot cross that
+boundary. AB#4924 worked around it with two plain strings on the borrowing `RtAdapter`
+(`LentFromTenantId` / `LentFromAdapterPoolRtId`) — no navigation, no filtering, no display name,
+nothing for backup to carry.
+
+**CK 4.0.0 (still unpublished, so this rides along rather than needing a migration).** A new type
+`LentAdapterPool` is a borrower-local mirror of one lent pool; the association
+`Adapter --LentFrom--> LentAdapterPool` (`ZeroOrOne` outbound, `N` inbound) **replaces** the two
+attributes, which are gone. The cross-tenant part is held once per pool in the mirror's `Lender`
+record (`LenderTenantId` + `LenderAdapterPoolRtId`, single-valued `valueType: Record`) instead of
+twice on every leased adapter. Every attribute on the mirror is `isRuntimeState: true` — the
+controller provisions it, nobody authors it.
+
+🔴 **The mirror is NEVER authoritative.** A tenant can edit entities in its own database, so if the
+lease decision ever read the mirror a borrower could point it wherever it liked. It does not: every
+decision re-reads the **lender's own** `AdapterPool` and calls `MayLendAsync` against that pool's
+sharing mode and allow-list. Editing a mirror changes what a borrower SEES, never what it may use.
+Nothing in `LeaseService`, `LeaseSchedulerService` or `AdapterService` may read this type to make a
+decision — `TheLendingDecision_UsesTheLendersScopeAndNotTheMirrors` is the test that holds it.
+
+🔴 **The association is the truth, which puts the sync service on the critical path.** No mirror, no
+lease. That was accepted deliberately (concept §7.1) because 4.0.0 is unpublished and there is no
+installed base to protect — but it changes what a sync bug costs: an outage, not a display error.
+
+### Resolving the borrower half
+
+`LentFromReference.FromMirror(...)` is the one projection from a mirror to the
+`(LenderTenantId, AdapterPoolRtId)` pair every consumer wants. Two repository reads feed it:
+`GetLentAdapterPoolForAdapterAsync` and the batched `GetLentAdapterPoolsForAdaptersAsync`.
+
+🔴 **Never cached.** Re-pointing an adapter at a different pool must take effect at once, and a
+stale answer would send a lease request to the wrong lender. (`TenantLendingScopeResolver`'s 30 s
+cache holds the lending *scope* — a different question with a different blast radius.) The batched
+form exists for `LeaseSchedulerService.GetTopologyAsync`, which walks every leased adapter of every
+enabled tenant on the topology refresh cadence: one query per tenant, not one per borrower.
+
+The six resolution points: `AdapterNodeCapabilityService` (now `ResolveAsync` — a leased adapter's
+lender is a repository read, so the seam had to become asynchronous, and with it
+`IPipelineExecutionClassService.ResolveForAdapterAsync`), `DeploymentSiteService`'s leasing deploy
+guard, `LeaseService.CheckBorrowerDeclaration`, `LeaseSchedulerService.GetTopologyAsync`,
+`TriggerManagementService`'s enqueue metrics, and `AdapterService`'s leased deploy log line (which
+now takes the lender from `capabilities.Source` rather than reading it a second time).
+
+### The sync service
+
+`IAdapterPoolMirrorProvisioningService` / `AdapterPoolMirrorProvisioningService`, following
+`ClientMirrorProvisioningService` in octo-identity-services — with one deliberate difference:
+
+🔴 **There is no tracking row.** Client mirroring records a `ClientMirror` in the parent to remember
+what it provisioned. Here the mirror's own `Lender` record is the key and the desired set is
+recomputed from the tenant tree on every run, so a hand-deleted mirror comes back, a mirror the
+controller failed to remove goes on the next pass, and no second piece of state can drift from the
+first. The cost is reading every candidate lender's pools per run — bounded by the tenant's
+ancestry.
+
+🔴 **A run walks the stored mirrors as well as the tree candidates** (`ResolveLendersToWalkAsync`).
+That is what makes **revocation** work: a lender that has dropped out of the candidate set — the
+borrower was re-parented, the tree changed — is no longer returned by the walk, so a run driven by
+candidates alone would never look at its mirrors again and they would sit there forever naming a
+pool the borrower may no longer use.
+`AMirrorOfALenderThatIsNoLongerACandidate_IsStillRemoved` fails, and nothing else does, if that
+half goes away.
+
+🔴 **An unreadable lender is unknown, never empty** (`CarryForwardMirrorsOf`). Its mirrors are
+carried forward untouched. Treating a tenant that is mid-update as "lends nothing" would delete the
+borrower's mirrors, and with the association leading that breaks every adapter borrowing from it.
+Same stance for an unreadable **borrower**: without the stored set the run cannot decide removals,
+and a run that only ever adds turns a narrowed lending scope into a mirror that never goes away —
+so it does nothing at all.
+
+🔴 **Removal never cascades into the borrower's adapters** (concept §6). An adapter left pointing at
+a mirror that has gone is a defined, reported state; deleting a tenant's adapters because a lender
+narrowed its scope would be a far worse failure than a blocked deploy.
+
+Triggers — all idempotent, so the startup re-check and a backfill are one code path:
+
+| trigger | where | covers |
+|---|---|---|
+| tenant load / `Enable` / `PosUpdateTenant` | `DefaultConfigurationCreatorService.EnsureLentAdapterPoolMirrorsAsync` | the backfill, a new or re-parented tenant, a hand-deleted mirror, and `clearCache` as the manual convergence lever |
+| `AdapterPool` deploy / undeploy | `DeploymentSiteService.FanOutAdapterPoolMirrorsAsync` | `DeploymentState` — the one mirrored field that changes without a tenant load, and the one that explains a queue which never drains |
+| `POST {tenantId}/v1/adapterPool/mirrors/refresh` | borrower-side, read-write | a lender-side rename / sharing-mode / allow-list change, written through the asset repository and therefore reaching no hook here |
+| `POST {tenantId}/v1/adapterPool/mirrors/publish` | lender-side, read-write | the same, pushed instead of pulled |
+
+Both hooks are best effort and never fail what they hang off: a mirror refresh must not fail a
+deploy the operator has already been told about, and a tenant that cannot reconcile must still load
+— but the tenant-start failure is written to the tenant's **event log** as an Error, because with
+the association leading it is not merely a later refusal.
+
+**What the mirror carries**: identity, the `Lender` record, the lending pool's `SharingMode`,
+`MinReplicas`/`MaxReplicas` and `DeploymentState`. Deliberately **not** chart name, version or
+values — lender-side deployment detail that changes on every rollout and would invite a borrower to
+reason about a release it has no say over. Pool members and the lease queue are not mirrored at all
+(concept §8).
+
+**The demo blueprint seeds a mirror, and normally nothing should.** `AdapterPoolBorrowerDemo` needs
+a fixed rtId for its `LentFrom` edge and a controller-generated one has none. It is safe because the
+upsert keys on the `Lender` record: the first reconcile **adopts** the seeded entity rather than
+adding a second mirror, and if the named lender does not lend there it **removes** it — leaving a
+refused deploy with a named reason, which is the loud failure the sample wants.
+
+Tests: `Services/AdapterPoolMirrorProvisioningServiceTests/` (borrower reconcile incl. the
+revocation and unreadable-lender rules, lender fan-out incl. the one-reconcile-per-borrower and
+failing-borrower rules) and the four fan-out cases in
+`Services/DeploymentSiteServiceTests/AdapterPoolDeploymentTests`.
+
 ## Leasing: metrics, alerts and rollout operability (AB#4924 increment 9)
 
 Plan: `docs/concepts/shared-adapter-leasing-implementation.md` §11. Alert rules live in

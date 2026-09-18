@@ -9,9 +9,23 @@ description: |
   is consensual in both directions — the pool's `SharingMode` says who MAY borrow,
   and this half says from whom this tenant DOES. Either alone grants nothing.
 
+  🔴 THE MIRROR IS SEEDED HERE, AND NORMALLY IT IS NOT
+
+  Since AB#5271 the borrower names its lender through an association to a local
+  `LentAdapterPool` mirror rather than through two strings on the adapter. That
+  mirror is runtime state the Communication Controller provisions and keeps in sync
+  (`AdapterPoolMirrorProvisioningService`), so seeding one is exactly the shape
+  blueprints are meant to stay out of. This sample seeds it anyway, because an
+  association needs a FIXED rtId to point at and a controller-generated one has
+  none. It is safe: the sync service keys its upsert on the `Lender` record, not on
+  the rtId, so the first reconcile ADOPTS this entity instead of adding a second
+  mirror of the same pool — and if `accounting` does not in fact lend here, that
+  same reconcile REMOVES it and the adapter is left pointing at nothing, which is a
+  refused deploy with a named reason. Loud, which is what this sample wants.
+
   🔴 THE LENDER'S TENANT ID IS HARD-CODED, AND THAT IS THIS SAMPLE'S LIMIT
 
-  `LentFromTenantId` below says `accounting`. It has to say something concrete,
+  The mirror's `Lender` record says `accounting`. It has to say something concrete,
   and a blueprint has no way to derive it: `DefaultBlueprintVariableProvider`
   surfaces `octo.tenantId`, `octo.systemTenantId`, `octo.environment*`,
   `octo.version`, `octo.scheme` and `octo.domain` — and no parent. It reads
@@ -21,9 +35,9 @@ description: |
   was designed to avoid, or registering a richer provider in the service.
 
   So this file is a SAMPLE for the estate it was written against, not a portable
-  artifact. Installing it on a tenant whose parent is not `accounting` produces an
-  adapter that declares a lender it may not borrow from, and the first execution
-  is refused with `LendingScopeDenied` — loudly, at least, rather than silently
+  artifact. Installing it on a tenant whose parent is not `accounting` produces a
+  mirror the next reconcile deletes and an adapter that then names no pool at all,
+  and the first execution is refused — loudly, at least, rather than silently
   running somewhere unintended. Making it portable means adding a parent-tenant
   blueprint variable first; that is a change to the engine's blueprint layer and
   belongs in its own work item.

@@ -39,6 +39,7 @@ public class AdapterPoolController : ControllerBase
     private readonly IAdapterPoolConnectionManager _connectionManager;
     private readonly ILeaseSchedulerService _leaseScheduler;
     private readonly ILeaseService _leaseService;
+    private readonly IAdapterPoolMirrorProvisioningService _mirrorProvisioningService;
     private readonly ILogger<AdapterPoolController> _logger;
 
     /// <summary>
@@ -47,15 +48,87 @@ public class AdapterPoolController : ControllerBase
     /// <param name="connectionManager">Registry of pool members connected to this instance.</param>
     /// <param name="leaseScheduler">Owns the pool queue and its rotation.</param>
     /// <param name="leaseService">Grants leases.</param>
+    /// <param name="mirrorProvisioningService">Reconciles the borrower-local LentAdapterPool mirrors (AB#5271).</param>
     /// <param name="logger">Logging object.</param>
     public AdapterPoolController(IAdapterPoolConnectionManager connectionManager,
         ILeaseSchedulerService leaseScheduler,
-        ILeaseService leaseService, ILogger<AdapterPoolController> logger)
+        ILeaseService leaseService,
+        IAdapterPoolMirrorProvisioningService mirrorProvisioningService,
+        ILogger<AdapterPoolController> logger)
     {
         _connectionManager = connectionManager;
         _leaseScheduler = leaseScheduler;
         _leaseService = leaseService;
+        _mirrorProvisioningService = mirrorProvisioningService;
         _logger = logger;
+    }
+
+    /// <summary>
+    ///     Reconciles the route tenant's own <c>LentAdapterPool</c> mirrors against what its
+    ///     ancestors and siblings currently lend it (AB#5271).
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         The route tenant is the <b>borrower</b>. This is the manual counterpart of the
+    ///         reconcile that runs on every tenant load — it exists because the events that make a
+    ///         mirror necessary happen in another tenant's database, where this service has no hook:
+    ///         a pool renamed or re-scoped through the asset repository reaches the borrowers on the
+    ///         next tenant load, or here, whichever comes first.
+    ///     </para>
+    ///     <para>
+    ///         Read-write, not read-only: it writes entities in the route tenant. Idempotent, so it
+    ///         is safe to call repeatedly.
+    ///     </para>
+    /// </remarks>
+    [HttpPost("mirrors/refresh")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(typeof(AdapterPoolMirrorSyncResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RefreshMirrorsAsync()
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        var result = await _mirrorProvisioningService.ProvisionForBorrowerAsync(tenantId,
+            HttpContext.RequestAborted);
+        _logger.LogInformation(
+            "[{TenantId}] Lent adapter pool mirrors refreshed on request: {Created} present, {Removed} removed",
+            tenantId, result.MirrorsCreatedOrUpdated, result.MirrorsRemoved);
+        return Ok(result);
+    }
+
+    /// <summary>
+    ///     Pushes the route tenant's adapter pools out to every tenant that may borrow from them
+    ///     (AB#5271).
+    /// </summary>
+    /// <remarks>
+    ///     The route tenant is the <b>lender</b>. Use it after changing a pool's name, sharing mode
+    ///     or allow-list, which are written through the asset repository and therefore reach no hook
+    ///     in this service. Each borrower is reconciled in full, so a borrower that also lost a pool
+    ///     loses its mirror in the same pass.
+    /// </remarks>
+    [HttpPost("mirrors/publish")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(typeof(AdapterPoolMirrorSyncResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> PublishMirrorsAsync()
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        var result = await _mirrorProvisioningService.ProvisionForLenderAsync(tenantId,
+            HttpContext.RequestAborted);
+        _logger.LogInformation(
+            "[{TenantId}] Adapter pool mirrors published on request: {Tenants} borrower(s), {Created} present, " +
+            "{Removed} removed",
+            tenantId, result.TenantsReconciled, result.MirrorsCreatedOrUpdated, result.MirrorsRemoved);
+        return Ok(result);
     }
 
     /// <summary>

@@ -123,8 +123,8 @@ internal abstract class LeaseSchedulerServiceTestsBase
             adapter = RtEntityCreator.CreateAdapter();
             adapter.Name = $"{tenantId}-adapter";
             adapter.LifecycleMode = RtLifecycleModeEnum.Leased;
-            adapter.LentFromTenantId = LenderTenantId;
-            adapter.LentFromAdapterPoolRtId = AdapterPoolRtId.ToString();
+            CommunicationRepository.ArrangeLentFrom(tenantId, adapter, LenderTenantId,
+                AdapterPoolRtId.ToString());
             Borrowers[tenantId] = adapter;
 
             CommunicationRepository.GetWorkloadsAsync(tenantId)

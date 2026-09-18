@@ -197,9 +197,11 @@ internal class DeploymentSiteServiceException : Exception
     {
         return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}' with LifecycleMode 'Leased': " +
-            "LentFromTenantId and LentFromAdapterPoolRtId must be set together (AB#4924). One without the other names no " +
-            "resolvable deploymentSite, and there is no referential integrity behind these values — they point into a different " +
-            "tenant's database, so nothing but this check can catch a half-configured borrower.");
+            "the LentAdapterPool it is linked to names no lender (AB#5271). Its Lender record must carry both the " +
+            "lending tenant and the AdapterPool's RtId inside that tenant; one without the other names no resolvable " +
+            "pool. The controller writes that record as one unit, so a mirror in this state was edited by hand. There " +
+            "is no referential integrity behind it either — it points into a different tenant's database, so nothing " +
+            "but this check can catch a half-configured borrower. Re-run the adapter pool mirror sync to repair it.");
     }
 
     internal static Exception LeasedWorkloadWithoutLender(string tenantId, OctoObjectId workloadRtId,
@@ -207,18 +209,19 @@ internal class DeploymentSiteServiceException : Exception
     {
         return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}' with LifecycleMode 'Leased': " +
-            "it names no adapter deploymentSite to borrow from. Set LentFromTenantId and LentFromAdapterPoolRtId to the lending tenant " +
-            "and the AdapterPool inside it (AB#4924).");
+            "it names no adapter pool to borrow from. Link the adapter to the LentAdapterPool of the pool it should " +
+            "borrow from (association 'LentFrom', AB#5271). Those mirrors are provisioned by the controller for every " +
+            "pool this tenant may borrow; if the list is empty, no ancestor or sibling lends to this tenant.");
     }
 
     internal static Exception LentFromSetWithoutLeasedMode(string tenantId, OctoObjectId workloadRtId,
         string? workloadName)
     {
         return new DeploymentSiteServiceException(
-            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': LentFromTenantId / " +
-            "LentFromAdapterPoolRtId are set but LifecycleMode is not 'Leased' (AB#4924). The values would do nothing, and a " +
-            "value that silently does nothing is worse than an error — it reads like the workload borrows a process " +
-            "when it actually runs its own. Either set LifecycleMode to 'Leased' or clear both values.");
+            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': it is linked to a " +
+            "LentAdapterPool ('LentFrom', AB#5271) but LifecycleMode is not 'Leased'. The link would do nothing, and a " +
+            "link that silently does nothing is worse than an error — it reads like the workload borrows a process " +
+            "when it actually runs its own. Either set LifecycleMode to 'Leased' or remove the LentFrom link.");
     }
 
     internal static Exception LenderDoesNotLendToThisTenant(string tenantId, OctoObjectId workloadRtId,

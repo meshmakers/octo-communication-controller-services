@@ -195,4 +195,29 @@ internal static class RtEntityCreator
         return new RtEntityId(entity.CkTypeId!, entity.RtId);
     }
 
+
+    /// <summary>
+    ///     Creates the borrower-local mirror of a lent adapter pool (AB#5271).
+    /// </summary>
+    /// <remarks>
+    ///     Since AB#5271 a borrower names its lender through the <c>LentFrom</c> edge to one of these
+    ///     rather than through two attributes on the adapter, so arranging a leased adapter in a test
+    ///     means arranging the repository to hand this back — see
+    ///     <see cref="CommunicationRepositoryLeasingArrangements.ArrangeLentFrom" />.
+    /// </remarks>
+    public static RtLentAdapterPool CreateLentAdapterPool(string lenderTenantId, string lenderAdapterPoolRtId,
+        string? id = null)
+    {
+        return new RtLentAdapterPool
+        {
+            RtId = new OctoObjectId(id ?? OctoObjectId.GenerateNewId().ToString()),
+            CkTypeId = SystemCommunicationCkIds.RtCkLentAdapterPoolTypeId,
+            Name = $"lent-{lenderAdapterPoolRtId}",
+            Lender = new RtLenderReferenceRecord
+            {
+                LenderTenantId = lenderTenantId,
+                LenderAdapterPoolRtId = lenderAdapterPoolRtId
+            }
+        };
+    }
 }

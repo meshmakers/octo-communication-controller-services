@@ -51,8 +51,14 @@ public interface IAdapterNodeCapabilityService
     /// <param name="adapterRtEntityId">The adapter.</param>
     /// <param name="adapter">
     ///     The adapter entity, when the caller has already read it. Required to recognise a
-    ///     <c>Leased</c> adapter: the lending pool is named on the entity, not in any cache.
-    ///     Passing null resolves the dedicated way, which is what every pre-AB#4924 caller means.
+    ///     <c>Leased</c> adapter: the lending pool hangs off the entity's <c>LentFrom</c> edge, not
+    ///     off any cache. Passing null resolves the dedicated way, which is what every pre-AB#4924
+    ///     caller means.
     /// </param>
-    AdapterNodeCapabilities Resolve(string tenantId, RtEntityId adapterRtEntityId, RtAdapter? adapter);
+    /// <remarks>
+    ///     Asynchronous since AB#5271: a leased adapter's lender is a repository read of its
+    ///     <c>LentFrom</c> mirror rather than two attributes on the adapter. The dedicated path still
+    ///     answers from the cache without touching the database.
+    /// </remarks>
+    Task<AdapterNodeCapabilities> ResolveAsync(string tenantId, RtEntityId adapterRtEntityId, RtAdapter? adapter);
 }

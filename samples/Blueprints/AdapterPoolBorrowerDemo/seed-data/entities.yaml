@@ -24,6 +24,13 @@ entities:
       - roleId: System.Communication/Hosts
         targetRtId: '670000000000000000000001'
         targetCkTypeId: System.Communication/DeploymentSite
+      # 🔴 AB#5271 — the borrower half is now an ASSOCIATION to a local mirror, not two
+      # strings on this adapter. The mirror below is what carries the cross-tenant
+      # reference, and it carries it once for every adapter in this tenant that borrows
+      # from that pool.
+      - roleId: System.Communication/LentFrom
+        targetRtId: '49240000000000000000bb04'
+        targetCkTypeId: System.Communication/LentAdapterPool
     attributes:
       - id: System/Name
         value: Leased Adapter
@@ -32,24 +39,73 @@ entities:
           Adapter whose pipelines run on a borrowed pool member instead of a process of
           its own (AB#4924). It is never deployed; the lease is what gives it a runtime,
           one work item at a time.
-      # 🔴 3 = Leased. Together with the two LentFrom* values below this is the
-      # borrower's consent — and the deploy guard validates them as a PAIR, so
-      # setting one without the other is refused rather than half-applied.
+      # 🔴 3 = Leased. Together with the LentFrom association above this is the
+      # borrower's consent — the deploy guard refuses Leased without a mirror, and a
+      # mirror without Leased, rather than half-applying either.
       - id: System.Communication/LifecycleMode
         value: 3
-      # 🔴 Hard-coded; see the blueprint description. A blueprint cannot derive its
-      # parent — there is no ${octo.parentTenantId}.
-      - id: System.Communication/LentFromTenantId
-        value: accounting
-      # The POOL, not a member: membership is elastic and a member id would be
-      # stale the moment the pool scales.
-      - id: System.Communication/LentFromPoolRtId
-        value: '49240000000000000000aa01'
       - id: System.Communication/DeploymentState
         value: 0
       - id: System.Communication/CommunicationState
         value: 0
       - id: System.Communication/ConfigurationState
+        value: 0
+
+  # ---------------------------------------------------------------------------
+  # The mirror of the lender's pool (AB#5271).
+  #
+  # 🔴 THIS ENTITY IS NORMALLY NOT SEEDED. The controller provisions it — see
+  # AdapterPoolMirrorProvisioningService — and every attribute on it is runtime
+  # state, so seeding one is exactly the shape blueprints are supposed to keep out
+  # of. It is seeded here anyway, and the reason is worth stating: a blueprint needs
+  # a FIXED rtId to point its LentFrom association at, and a controller-generated one
+  # has none.
+  #
+  # It is safe because the sync service ADOPTS it rather than colliding with it: its
+  # upsert is keyed on the Lender record below, not on the rtId, so the first
+  # reconcile after this blueprint updates this very entity instead of adding a
+  # second mirror of the same pool. What is seeded here is therefore a placeholder
+  # the controller takes ownership of, not a competing source of truth.
+  #
+  # 🔴 And it grants nothing. The lease decision always re-reads the LENDER's own
+  # AdapterPool and its SharingMode; this mirror only decides what the borrower SEES.
+  # If `accounting` does not in fact lend here, the next reconcile REMOVES this
+  # entity and the adapter above is left pointing at nothing — a refused deploy with
+  # a named reason, which is the loud failure this sample wants.
+  # ---------------------------------------------------------------------------
+  - rtId: '49240000000000000000bb04'
+    ckTypeId: System.Communication/LentAdapterPool
+    rtWellKnownName: LentAccountingAdapterPool
+    attributes:
+      - id: System/Name
+        value: Accounting Adapter Pool (lent)
+      - id: System/Description
+        value: >-
+          Borrower-local mirror of the adapter pool owned by the lending tenant
+          (AB#5271). Provisioned and kept in sync by the Communication Controller;
+          seeded here only so this sample has a stable association target.
+      - id: System.Communication/Lender
+        value:
+          ckRecordId: System.Communication/LenderReference
+          attributes:
+            # 🔴 Hard-coded; see the blueprint description. A blueprint cannot derive its
+            # parent — there is no ${octo.parentTenantId}.
+            - id: System.Communication/LenderTenantId
+              value: accounting
+            # The POOL, not a member: membership is elastic and a member id would be
+            # stale the moment the pool scales.
+            - id: System.Communication/LenderAdapterPoolRtId
+              value: '49240000000000000000aa01'
+      # 1 = Descendants, mirroring AdapterPoolDemo's pool. Display only — the lease
+      # decision reads the lender's own value, never this one.
+      - id: System.Communication/LentAdapterPoolSharingMode
+        value: 1
+      - id: System.Communication/LentAdapterPoolMinReplicas
+        value: 1
+      - id: System.Communication/LentAdapterPoolMaxReplicas
+        value: 3
+      # 0 = Undeployed until the lender deploys its pool and the fan-out updates this.
+      - id: System.Communication/LentAdapterPoolDeploymentState
         value: 0
 
   - rtId: '49240000000000000000bb02'

@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
@@ -34,6 +35,10 @@ internal class PipelineExecutionClassServiceTests
     // AB#4924: the real pool registry, so a leased resolution runs the real "which member answers
     // for this pool" pick rather than a stubbed answer.
     private readonly AdapterPoolConnectionManager _poolConnectionManager = new();
+    // AB#5271: the capability service resolves a leased adapter's lending pool through its
+    // LentFrom mirror, which is a repository read. Substituted here — the tests that exercise the
+    // leased path arrange the mirror themselves.
+    private readonly ICommunicationRepository _communicationRepository = Substitute.For<ICommunicationRepository>();
     private readonly PipelineExecutionClassService _service;
     private readonly RtAdapter _rtAdapter;
 
@@ -44,7 +49,7 @@ internal class PipelineExecutionClassServiceTests
         // capability service for the same reason — it is the seam that decides WHOSE descriptors
         // answer, and a substitute would hide exactly that.
         _service = new PipelineExecutionClassService(
-            new AdapterNodeCapabilityService(_adapterCache, _poolConnectionManager),
+            new AdapterNodeCapabilityService(_adapterCache, _poolConnectionManager, _communicationRepository),
             new PipelineDefinitionService());
         _rtAdapter = RtEntityCreator.CreateAdapter();
     }
@@ -193,7 +198,7 @@ internal class PipelineExecutionClassServiceTests
         GivenRegisteredAdapterWithDescriptors(
             Descriptor("FromCustomThing", 1, isTrigger: true, executionClass: Interactive));
 
-        var result = _service.ResolveForAdapter(TenantId, _rtAdapter.ToRtEntityId(),
+        var result = await _service.ResolveForAdapterAsync(TenantId, _rtAdapter.ToRtEntityId(),
             "triggers:\n  - type: FromCustomThing@1");
 
         await Assert.That(result).IsEqualTo(Interactive);
@@ -204,7 +209,7 @@ internal class PipelineExecutionClassServiceTests
     {
         // No GivenRegisteredAdapterWithDescriptors — the cache misses, as it does for every
         // hibernated adapter and after every controller restart.
-        var result = _service.ResolveForAdapter(TenantId, _rtAdapter.ToRtEntityId(), HttpTriggerPipeline);
+        var result = await _service.ResolveForAdapterAsync(TenantId, _rtAdapter.ToRtEntityId(), HttpTriggerPipeline);
 
         await Assert.That(result).IsEqualTo(Interactive);
     }

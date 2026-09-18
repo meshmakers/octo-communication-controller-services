@@ -83,6 +83,7 @@ internal class EnsurePipelineServiceAccountsAsyncTests
         Substitute.For<IAdapterCachePublish>(),
         Substitute.For<IAdapterService>(),
         provisioningService,
+        Substitute.For<IAdapterPoolMirrorProvisioningService>(),
         new FailedTenantRegistry(),
         eventService,
         Substitute.For<IBlueprintService>(),

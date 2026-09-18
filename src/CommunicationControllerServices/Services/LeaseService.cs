@@ -85,7 +85,15 @@ internal class LeaseService : ILeaseService
                 $"Tenant '{request.BorrowerTenantId}' has no adapter with rtId {request.BorrowerAdapterRtId}.");
         }
 
-        var declarationRefusal = CheckBorrowerDeclaration(borrower, lenderTenantId, adapterPoolRtId, request);
+        // AB#5271: what the borrower declares now hangs off its LentFrom edge to a borrower-local
+        // mirror, so reading it is a repository round trip rather than two attribute reads. Still on
+        // the pre-credential side of the order above: it is resolved here, before anything decrypts.
+        var borrowerLentFrom = LentFromReference.FromMirror(
+            await _communicationRepository.GetLentAdapterPoolForAdapterAsync(request.BorrowerTenantId,
+                request.BorrowerAdapterRtId));
+
+        var declarationRefusal =
+            CheckBorrowerDeclaration(borrower, borrowerLentFrom, lenderTenantId, adapterPoolRtId, request);
         if (declarationRefusal != null)
         {
             return Refuse(lenderTenantId, adapterPoolRtId, request, declarationRefusal.Value.Reason,
@@ -578,7 +586,8 @@ internal class LeaseService : ILeaseService
     ///     identity it did not intend to hand out.
     /// </remarks>
     private static (LeaseRefusalReason Reason, string Message)? CheckBorrowerDeclaration(RtAdapter borrower,
-        string lenderTenantId, OctoObjectId adapterPoolRtId, LeaseRequest request)
+        LentFromReference? borrowerLentFrom, string lenderTenantId, OctoObjectId adapterPoolRtId,
+        LeaseRequest request)
     {
         if (borrower.LifecycleMode != RtLifecycleModeEnum.Leased)
         {
@@ -587,18 +596,23 @@ internal class LeaseService : ILeaseService
                 $"(LifecycleMode={borrower.LifecycleMode}); only a Leased adapter borrows a process.");
         }
 
-        if (!string.Equals(borrower.LentFromTenantId, lenderTenantId, StringComparison.OrdinalIgnoreCase))
+        // 🔴 Read from the borrower's OWN mirror, never from the pool being asked for. This is the
+        // half that makes lending consensual, so it has to come from the borrower's side of the
+        // relationship — and an adapter that names no pool at all has declared nothing, which is a
+        // refusal rather than a match against whatever pool happened to ask.
+        if (!string.Equals(borrowerLentFrom?.LenderTenantId, lenderTenantId, StringComparison.OrdinalIgnoreCase))
         {
             return (LeaseRefusalReason.BorrowerNamesAnotherLender,
                 $"Adapter '{borrower.Name}' in tenant '{request.BorrowerTenantId}' borrows from tenant " +
-                $"'{borrower.LentFromTenantId ?? "<unset>"}', not from '{lenderTenantId}'.");
+                $"'{borrowerLentFrom?.LenderTenantId ?? "<unset>"}', not from '{lenderTenantId}'.");
         }
 
-        if (!string.Equals(borrower.LentFromAdapterPoolRtId, adapterPoolRtId.ToString(), StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(borrowerLentFrom?.AdapterPoolRtId, adapterPoolRtId.ToString(),
+                StringComparison.OrdinalIgnoreCase))
         {
             return (LeaseRefusalReason.BorrowerNamesAnotherPool,
                 $"Adapter '{borrower.Name}' in tenant '{request.BorrowerTenantId}' borrows from pool " +
-                $"{borrower.LentFromAdapterPoolRtId ?? "<unset>"}, not from {adapterPoolRtId}.");
+                $"{borrowerLentFrom?.AdapterPoolRtId ?? "<unset>"}, not from {adapterPoolRtId}.");
         }
 
         return null;

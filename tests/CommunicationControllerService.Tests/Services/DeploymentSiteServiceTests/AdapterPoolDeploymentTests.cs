@@ -5,6 +5,7 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.DeploymentSiteServiceTests;
 
@@ -326,5 +327,67 @@ internal class AdapterPoolDeploymentTests : PoolServiceTestsBase
 
         await Assert.ThrowsAsync<DeploymentSiteServiceException>(
             () => DeploymentSiteService.ScaleAdapterPoolAsync(TenantId, adapter.RtId, 2));
+    }
+
+    /// <summary>
+    ///     AB#5271 — a pool deploy pushes its new <c>DeploymentState</c> out to the mirrors its
+    ///     borrowers hold. Without it a borrower has no way to learn that the pool it is queuing
+    ///     against went down: the state lives in the lender's database, which the borrower cannot
+    ///     read, and it is the one mirrored field that explains a queue which never drains.
+    /// </summary>
+    [Test]
+    public async Task DeployWorkloadAsync_AdapterPool_RefreshesTheBorrowersMirrors()
+    {
+        var deploymentSite = ArrangeAdapterPool(ArrangeCloudPool());
+
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, deploymentSite.RtId);
+
+        await AdapterPoolMirrorProvisioningService.Received(1)
+            .ProvisionForLenderAsync(TenantId, Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task UndeployWorkloadAsync_AdapterPool_RefreshesTheBorrowersMirrors()
+    {
+        var deploymentSite = ArrangeAdapterPool(ArrangeCloudPool(),
+            deploymentState: RtDeploymentStateEnum.Deployed);
+
+        await DeploymentSiteService.UndeployWorkloadAsync(TenantId, deploymentSite.RtId);
+
+        await AdapterPoolMirrorProvisioningService.Received(1)
+            .ProvisionForLenderAsync(TenantId, Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    ///     An ordinary adapter is nobody's lender, so it must not trigger a fan-out — this hook hangs
+    ///     off the deploy path of every workload and a full reconcile per adapter deploy would be a
+    ///     real cost for no answer.
+    /// </summary>
+    [Test]
+    public async Task DeployWorkloadAsync_PlainAdapter_RefreshesNoMirrors()
+    {
+        var adapter = ArrangePlainAdapter(ArrangeCloudPool());
+
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
+
+        await AdapterPoolMirrorProvisioningService.DidNotReceive()
+            .ProvisionForLenderAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    ///     Best effort: a mirror refresh that fails must not fail a deploy the operator has already
+    ///     been told about. Same contract as the AB#5027 service-account provisioning on this path.
+    /// </summary>
+    [Test]
+    public async Task DeployWorkloadAsync_AdapterPool_SurvivesAFailingMirrorRefresh()
+    {
+        var deploymentSite = ArrangeAdapterPool(ArrangeCloudPool());
+        AdapterPoolMirrorProvisioningService.ProvisionForLenderAsync(TenantId, Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("a borrower is being updated"));
+
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, deploymentSite.RtId);
+
+        await OperatorConnectionManager.Received(1)
+            .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
     }
 }

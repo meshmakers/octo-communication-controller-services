@@ -147,21 +147,60 @@ deliberately — see 7.1 — but it changes what a sync bug costs: an outage, no
 service therefore has to be idempotent and to reconcile on startup, both of which the
 `ClientMirrorProvisioningService` pattern already provides.
 
-🔴 **Open follow-on:** the `AdapterPoolBorrowerDemo` blueprint currently seeds the borrower adapter
-with the two `LentFrom*` values. It cannot seed them any more. Either it seeds a `LentAdapterPool`
-directly — odd for an entity that is runtime state and controller-owned — or the demo depends on
-the sync service having run. Decide when the service exists, not before.
+✅ **Resolved — the demo blueprint seeds the mirror, and the sync service adopts it.**
+`AdapterPoolBorrowerDemo` now seeds a `LentAdapterPool` with a fixed rtId and points the adapter's
+`LentFrom` edge at it. Seeding runtime state is still the wrong shape in general, and the blueprint
+says so in its own description — but an association needs a fixed rtId to target and a
+controller-generated one has none. It is safe because `UpsertLentAdapterPoolMirrorAsync` keys on the
+`Lender` record rather than the rtId, so the first reconcile **adopts** the seeded entity instead of
+adding a second mirror of the same pool. And if the named lender does not in fact lend there, the
+same reconcile **removes** it and the adapter is left naming no pool — a refused deploy with a named
+reason, which is the loud failure the sample wants. The alternative ("the demo requires the service
+to have run") was rejected: it would have left the blueprint unable to express the edge at all.
 
-### 7.4 What still has to be decided
+### 7.4 Decided
 
+1. **What the mirror carries** — identity (`Name`, `Description`), the `Lender` record, the lending
+   pool's `SharingMode`, its `MinReplicas`/`MaxReplicas` and its `DeploymentState`. Nothing else, and
+   in particular **no chart name, version or values**: those are the lender's deployment detail, they
+   change on every rollout, and copying them into another tenant's database would invite a borrower
+   to reason about a release it has no say over. `DeploymentState` is the one field that earns its
+   place by explaining something the borrower cannot otherwise see — a pool that is not deployed
+   cannot serve a lease, which is why a queue never drains.
 
+   Pool members and the lease queue stay out for the reasons in §8.
 
-1. **What the mirror carries.** Name, sharing mode, replica range and deployment state are
-   uncontroversial. Chart name/version and values are lender-side deployment detail and probably
-   should not be copied into another tenant's database.
-2. **Who may see it.** Which role in the borrower reads the mirror — and does the parent-tenant
-   administration boundary (AB#5060/5068/5070) have anything to say about a child displaying an
-   ancestor's resource name?
+2. **Who may see it** — the mirror is an ordinary entity in the borrower's own database, so it is
+   read by whoever may read that tenant's `System.Communication` entities. No new permission surface,
+   which was half the point of §2. The parent-tenant administration boundary (AB#5060/5068/5070) has
+   nothing to say here: it governs a **parent acting inside a child**, and this is the opposite
+   direction — a child displaying a name and a replica range that its own administrator already had
+   to be told in order to configure the borrower at all. What the mirror must never do is let the
+   borrower *decide* anything, and §4 is what holds that line.
+
+### 7.5 How the sync is triggered
+
+| trigger | where | covers |
+|---|---|---|
+| every tenant load / `Enable` / `PosUpdateTenant` | `DefaultConfigurationCreatorService.StartTenantAsync` → `EnsureLentAdapterPoolMirrorsAsync` | the backfill, a newly created tenant, a re-parented tenant, a mirror deleted by hand, and `clearCache` as the manual convergence lever |
+| an `AdapterPool` deploy or undeploy | `DeploymentSiteService.FanOutAdapterPoolMirrorsAsync` | `DeploymentState`, the one mirrored field that changes without a tenant load |
+| `POST {tenantId}/v1/adapterPool/mirrors/refresh` | borrower-side, on demand | a lender-side change made through the asset repository (rename, sharing mode, allow-list), which reaches no hook in this service |
+| `POST {tenantId}/v1/adapterPool/mirrors/publish` | lender-side, on demand | the same, pushed from the lender instead of pulled per borrower |
+
+🔴 **There is no tracking row**, unlike the `ClientMirrorProvisioningService` precedent: the desired
+set is recomputed from the tenant tree on every run and the mirror's own `Lender` record is the key.
+So a hand-deleted mirror comes back, a mirror the controller failed to remove goes on the next pass,
+and no second piece of state can drift from the first.
+
+🔴 **A run walks the stored mirrors as well as the tenant-tree candidates.** That second half is what
+makes *revocation* work: a lender that has dropped out of the candidate set is no longer returned by
+the walk, so a run driven by candidates alone would never look at its mirrors again and they would
+sit there forever naming a pool the borrower may no longer use.
+
+🔴 **An unreadable lender is unknown, never empty.** Its existing mirrors are carried forward
+untouched. Treating a tenant that is mid-update as "lends nothing" would delete the borrower's
+mirrors — and with the association leading, that breaks every adapter borrowing from it. A transient
+read failure must not become an outage.
 
 ## 8. Not mirrored
 

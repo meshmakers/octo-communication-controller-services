@@ -128,10 +128,10 @@ internal abstract class AdapterServiceTestsBase
             // Real service (AB#4924): the execution class is resolved from real YAML on the deploy
             // path, so a substitute would hide exactly the wiring this is meant to exercise.
             new PipelineExecutionClassService(
-                new AdapterNodeCapabilityService(AdapterCache, PoolConnectionManager), PipelineDefinitionService),
+                new AdapterNodeCapabilityService(AdapterCache, PoolConnectionManager, CommunicationRepository), PipelineDefinitionService),
             // Real service (AB#4924), same reasoning: it decides whether the deploy path validates
             // and classifies against the adapter's own descriptors or the lending pool's.
-            new AdapterNodeCapabilityService(AdapterCache, PoolConnectionManager),
+            new AdapterNodeCapabilityService(AdapterCache, PoolConnectionManager, CommunicationRepository),
             ServiceAccountResolver,
             // Real resolver (AB#5111), same reasoning as the service-account resolver above: the
             // IssuerUri token resolution in the configuration projection runs the real machinery.

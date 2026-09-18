@@ -1,24 +1,30 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
+using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
 /// <inheritdoc cref="IAdapterNodeCapabilityService" />
 internal sealed class AdapterNodeCapabilityService(
     IAdapterCache adapterCache,
-    IAdapterPoolConnectionManager poolConnectionManager)
+    IAdapterPoolConnectionManager poolConnectionManager,
+    ICommunicationRepository communicationRepository)
     : IAdapterNodeCapabilityService
 {
+    private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+
     private static readonly AdapterNodeCapabilities None =
         new(null, null, "no connected adapter");
 
-    public AdapterNodeCapabilities Resolve(string tenantId, RtEntityId adapterRtEntityId, RtAdapter? adapter)
+    public async Task<AdapterNodeCapabilities> ResolveAsync(string tenantId, RtEntityId adapterRtEntityId,
+        RtAdapter? adapter)
     {
         if (adapter is { LifecycleMode: RtLifecycleModeEnum.Leased })
         {
-            return ResolveFromLendingPool(adapter);
+            return await ResolveFromLendingPoolAsync(tenantId, adapter);
         }
 
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant) &&
@@ -31,18 +37,37 @@ internal sealed class AdapterNodeCapabilityService(
         return None;
     }
 
-    private AdapterNodeCapabilities ResolveFromLendingPool(RtAdapter adapter)
+    private async Task<AdapterNodeCapabilities> ResolveFromLendingPoolAsync(string tenantId, RtAdapter adapter)
     {
-        var lenderTenantId = adapter.LentFromTenantId;
-        var poolRtId = adapter.LentFromAdapterPoolRtId;
+        // AB#5271: the lender is named by the adapter's LentFrom edge to a borrower-local mirror,
+        // not by two attributes on the adapter itself. A repository read, deliberately not cached —
+        // see LentFromReference.
+        LentFromReference? lentFrom;
+        try
+        {
+            lentFrom = LentFromReference.FromMirror(
+                await communicationRepository.GetLentAdapterPoolForAdapterAsync(tenantId, adapter.RtId));
+        }
+        catch (Exception e)
+        {
+            // Same stance as an unset edge: this method answers "whose descriptors decide", and
+            // "nothing known" degrades every caller to its name-based fallback. Failing the deploy
+            // on an unreadable mirror would be a harder failure than the question warrants.
+            Logger.Warn(e, "[{TenantId}] Could not resolve the lending pool of leased adapter '{AdapterName}'",
+                tenantId, adapter.Name);
+            lentFrom = null;
+        }
 
         // A half-configured borrower is refused at workload deploy (DeploymentSiteService), but DeployPipeline
         // can reach one that was never deployed — answer "nothing known" rather than guessing.
-        if (string.IsNullOrWhiteSpace(lenderTenantId) || string.IsNullOrWhiteSpace(poolRtId))
+        if (lentFrom is null)
         {
             return new AdapterNodeCapabilities(null, null,
-                "no lending pool (LentFromTenantId / LentFromAdapterPoolRtId are not both set)");
+                "no lending pool (the adapter has no LentFrom mirror, or the mirror names no lender)");
         }
+
+        var lenderTenantId = lentFrom.LenderTenantId;
+        var poolRtId = lentFrom.AdapterPoolRtId;
 
         var capabilities = poolConnectionManager.TryGetAdapterPoolCapabilities(lenderTenantId, poolRtId);
         if (capabilities != null)

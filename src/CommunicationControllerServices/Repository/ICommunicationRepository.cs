@@ -81,6 +81,67 @@ public interface ICommunicationRepository
     Task<LendingScope?> TryGetAdapterPoolLendingScopeAsync(string lenderTenantId, string poolRtId);
 
     /// <summary>
+    ///     Every <c>AdapterPool</c> in <paramref name="lenderTenantId" />, with the fields a
+    ///     borrower's mirror carries (AB#5271).
+    /// </summary>
+    /// <remarks>
+    ///     Reads a tenant the caller is usually not in — the same cross-tenant read as
+    ///     <see cref="TryGetAdapterPoolLendingScopeAsync" />, widened from one known pool to all of
+    ///     them, because mirroring has to discover pools rather than resolve a named one.
+    ///
+    ///     <para>
+    ///     🔴 Returns pools regardless of their sharing mode. Filtering by who may borrow is the
+    ///     caller's job via <c>MayLendAsync</c>, and deliberately not folded in here: the scope
+    ///     check needs the BORROWER's id, which this method has no business knowing, and keeping
+    ///     the two apart is what lets one read serve every borrower in a fan-out.
+    ///     </para>
+    /// </remarks>
+    Task<IReadOnlyCollection<LendableAdapterPool>> GetAdapterPoolsForMirroringAsync(string lenderTenantId);
+
+    /// <summary>
+    ///     The <c>LentAdapterPool</c> mirrors currently stored in <paramref name="borrowerTenantId" />.
+    /// </summary>
+    Task<IReadOnlyCollection<RtLentAdapterPool>> GetLentAdapterPoolMirrorsAsync(string borrowerTenantId);
+
+    /// <summary>
+    ///     The mirror one borrowing adapter points at through its <c>LentFrom</c> edge, or null when
+    ///     it points at none (AB#5271).
+    /// </summary>
+    Task<RtLentAdapterPool?> GetLentAdapterPoolForAdapterAsync(string borrowerTenantId, OctoObjectId adapterRtId);
+
+    /// <summary>
+    ///     The same resolution for many adapters at once, keyed by adapter RtId; adapters with no
+    ///     <c>LentFrom</c> edge are absent from the result (AB#5271).
+    /// </summary>
+    /// <remarks>
+    ///     The batch form exists for the lease-topology sweep, which walks every leased adapter of
+    ///     every enabled tenant every few seconds. Resolving one adapter at a time there would turn
+    ///     one query per tenant into one per borrower.
+    /// </remarks>
+    Task<IReadOnlyDictionary<OctoObjectId, RtLentAdapterPool>> GetLentAdapterPoolsForAdaptersAsync(
+        string borrowerTenantId, IReadOnlyCollection<OctoObjectId> adapterRtIds);
+
+    /// <summary>
+    ///     Creates or updates the mirror of one lent pool in the borrower, and returns its RtId.
+    /// </summary>
+    /// <remarks>
+    ///     Idempotent: matched on the <c>Lender</c> record, so a second call with the same lender
+    ///     and pool updates the existing mirror instead of adding a second one.
+    /// </remarks>
+    Task<OctoObjectId> UpsertLentAdapterPoolMirrorAsync(string borrowerTenantId, LendableAdapterPool pool);
+
+    /// <summary>
+    ///     Removes a mirror that no longer corresponds to a pool this tenant may borrow.
+    /// </summary>
+    /// <remarks>
+    ///     🔴 Removing the mirror must not cascade into the borrower's adapters. An adapter left
+    ///     pointing at nothing is a defined, reported state — a refused deploy with a named reason
+    ///     (concept §6, "parent tenant deleted while lending"). Deleting a tenant's adapters
+    ///     because a lender narrowed its scope would be a far worse failure than a blocked deploy.
+    /// </remarks>
+    Task RemoveLentAdapterPoolMirrorAsync(string borrowerTenantId, OctoObjectId mirrorRtId);
+
+    /// <summary>
     ///     Returns the deployment site a workload is hosted at, or null when it is not assigned.
     /// </summary>
     Task<RtDeploymentSite?> GetDeploymentSiteForWorkloadAsync(string tenantId, OctoObjectId workloadRtId);

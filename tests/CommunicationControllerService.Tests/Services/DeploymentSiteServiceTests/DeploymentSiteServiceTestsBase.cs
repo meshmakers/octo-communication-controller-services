@@ -32,6 +32,12 @@ internal abstract class PoolServiceTestsBase
     /// <summary>AB#4924 — substituted; the scale verb itself is covered by WorkloadLifecycleServiceTests.</summary>
     protected readonly IWorkloadLifecycleService WorkloadLifecycleService =
         Substitute.For<IWorkloadLifecycleService>();
+
+    /// <summary>AB#5271 — substituted; the fan-out itself is covered by
+    ///     AdapterPoolMirrorProvisioningServiceTests. What this suite asserts is that a pool deploy
+    ///     triggers it and an adapter deploy does not.</summary>
+    protected readonly IAdapterPoolMirrorProvisioningService AdapterPoolMirrorProvisioningService =
+        Substitute.For<IAdapterPoolMirrorProvisioningService>();
     protected readonly IDeploymentSiteCachePublish PoolCachePublish;
     protected readonly DeploymentSiteTenant DeploymentSiteTenant;
     protected readonly DeploymentSiteService DeploymentSiteService;
@@ -109,7 +115,8 @@ internal abstract class PoolServiceTestsBase
             ServiceAccountProvisioningService,
             ServiceAccountResolver,
             LendingScopeResolver,
-            WorkloadLifecycleService);
+            WorkloadLifecycleService,
+            AdapterPoolMirrorProvisioningService);
     }
 
     [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]

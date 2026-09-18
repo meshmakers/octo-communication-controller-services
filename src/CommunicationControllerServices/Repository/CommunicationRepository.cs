@@ -282,6 +282,206 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyCollection<LendableAdapterPool>> GetAdapterPoolsForMirroringAsync(
+        string lenderTenantId)
+    {
+        var tenantRepository = await _systemContext.TryFindTenantRepositoryAsync(lenderTenantId);
+        if (tenantRepository is null)
+        {
+            // A lender that cannot be resolved contributes no pools. Same treatment as
+            // TryGetAdapterPoolLendingScopeAsync: never guess, and never throw — a mid-delete or
+            // mid-create tenant in a candidate list must not fail the whole mirror sweep.
+            _logger.LogWarning("Lending tenant '{LenderTenantId}' cannot be resolved; no pools to mirror",
+                lenderTenantId);
+            return [];
+        }
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtAdapterPool>(
+                session, RtEntityQueryOptions.Create());
+
+            // 🔴 Materialise before the session closes. The attribute lists are live views over
+            // the entity, and these values are about to be written into other tenants.
+            return resultSet.Items
+                .Select(p => new LendableAdapterPool(
+                    lenderTenantId,
+                    p.RtId.ToString(),
+                    // Name is optional on AdapterPool but mandatory on the mirror; the RtId is a
+                    // poor display name but an honest one, and a mirror nobody can identify is worse
+                    // than one named after the pool it stands for.
+                    p.Name ?? p.RtId.ToString(),
+                    p.Description,
+                    new LendingScope((int)p.SharingMode, p.LendingAllowedTenantIds?.ToList()),
+                    p.MinReplicas,
+                    p.MaxReplicas,
+                    (int)p.DeploymentState))
+                .ToList();
+        }
+        catch (Exception e)
+        {
+            _logger.LogWarning(e, "[{LenderTenantId}] Failed to read adapter pools for mirroring",
+                lenderTenantId);
+            return [];
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyCollection<RtLentAdapterPool>> GetLentAdapterPoolMirrorsAsync(
+        string borrowerTenantId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(borrowerTenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtLentAdapterPool>(
+            session, RtEntityQueryOptions.Create());
+        return resultSet.Items.ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<RtLentAdapterPool?> GetLentAdapterPoolForAdapterAsync(string borrowerTenantId,
+        OctoObjectId adapterRtId)
+    {
+        var mirrors = await GetLentAdapterPoolsForAdaptersAsync(borrowerTenantId, [adapterRtId]);
+        return mirrors.GetValueOrDefault(adapterRtId);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<OctoObjectId, RtLentAdapterPool>> GetLentAdapterPoolsForAdaptersAsync(
+        string borrowerTenantId, IReadOnlyCollection<OctoObjectId> adapterRtIds)
+    {
+        if (adapterRtIds.Count == 0)
+        {
+            return new Dictionary<OctoObjectId, RtLentAdapterPool>();
+        }
+
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(borrowerTenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            // One read for every adapter the caller is about to ask about. The lease-topology sweep
+            // walks every leased adapter of every enabled tenant on a five-second cadence, so a
+            // per-adapter round trip here is the difference between one query per tenant and one per
+            // borrower — and the association API already takes the origins as a list.
+            var resultSet = await tenantRepository
+                .GetRtAssociationTargetsAsync<RtAdapter, RtLentAdapterPool>(session,
+                    adapterRtIds, SystemCommunicationCkIds.RtCkLentFromRoleId,
+                    GraphDirections.Outbound, null, RtEntityQueryOptions.Create());
+
+            var mirrors = new Dictionary<OctoObjectId, RtLentAdapterPool>();
+            foreach (var entry in resultSet)
+            {
+                // ZeroOrOne outbound, so at most one target; FirstOrDefault rather than Single
+                // because a stored edge set that violates the multiplicity must not throw on a read
+                // path that several sweeps depend on.
+                var mirror = entry.Value.Items.FirstOrDefault();
+                if (mirror is not null)
+                {
+                    mirrors[entry.Key.RtId] = mirror;
+                }
+            }
+
+            return mirrors;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingLentAdapterPoolsForAdapters(
+                borrowerTenantId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<OctoObjectId> UpsertLentAdapterPoolMirrorAsync(
+        string borrowerTenantId, LendableAdapterPool pool)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(borrowerTenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+        try
+        {
+            // Idempotency key is the Lender record, not a name: two pools in different lenders may
+            // share a display name, and a rename on the lending side must update the existing
+            // mirror rather than orphan it and add a second.
+            var existing = (await tenantRepository.GetRtEntitiesByTypeAsync<RtLentAdapterPool>(
+                    session, RtEntityQueryOptions.Create()))
+                .Items
+                .FirstOrDefault(m =>
+                    string.Equals(m.Lender?.LenderTenantId, pool.LenderTenantId,
+                        StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(m.Lender?.LenderAdapterPoolRtId, pool.AdapterPoolRtId,
+                        StringComparison.OrdinalIgnoreCase));
+
+            RtLentAdapterPool mirror;
+            if (existing is null)
+            {
+                // CreateTransientRtEntityAsync, not `new`: it is what stamps the CkTypeId the
+                // insert needs. A hand-constructed entity inserts as an untyped RtEntity.
+                mirror = await tenantRepository.CreateTransientRtEntityAsync<RtLentAdapterPool>();
+                mirror.RtId = OctoObjectId.GenerateNewId();
+            }
+            else
+            {
+                mirror = existing;
+            }
+
+            mirror.Name = pool.Name;
+            mirror.Description = pool.Description;
+            mirror.Lender = new RtLenderReferenceRecord
+            {
+                LenderTenantId = pool.LenderTenantId,
+                LenderAdapterPoolRtId = pool.AdapterPoolRtId
+            };
+            mirror.SharingMode = (RtAdapterSharingModeEnum)pool.Scope.Mode;
+            mirror.MinReplicas = pool.MinReplicas;
+            mirror.MaxReplicas = pool.MaxReplicas;
+            mirror.DeploymentState = (RtDeploymentStateEnum)pool.DeploymentState;
+
+            if (existing is null)
+            {
+                await tenantRepository.InsertOneRtEntityAsync(session, mirror);
+            }
+            else
+            {
+                await tenantRepository.UpdateOneRtEntityByIdAsync(session, mirror.RtId, mirror);
+            }
+
+            await session.CommitTransactionAsync();
+            return mirror.RtId;
+        }
+        catch
+        {
+            await session.AbortTransactionAsync();
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task RemoveLentAdapterPoolMirrorAsync(string borrowerTenantId, OctoObjectId mirrorRtId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(borrowerTenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+        try
+        {
+            // Erase, not the engine default Archive: a mirror is derived state the sweep
+            // rebuilds, so a tombstone would only accumulate and would still be found by the
+            // duplicate check on the next upsert.
+            await tenantRepository.DeleteOneRtEntityByRtIdAsync<RtLentAdapterPool>(
+                session, mirrorRtId, DeleteOptions.Erase);
+            await session.CommitTransactionAsync();
+        }
+        catch
+        {
+            await session.AbortTransactionAsync();
+            throw;
+        }
+    }
+
     public async Task<RtDeploymentSite?> GetDeploymentSiteForWorkloadAsync(string tenantId, OctoObjectId workloadRtId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);

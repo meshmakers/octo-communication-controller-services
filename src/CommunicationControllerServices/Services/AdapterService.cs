@@ -704,7 +704,7 @@ internal class AdapterService(
 
         // AB#4924: the descriptors and pipeline schema of whatever will actually execute this
         // pipeline — the adapter itself when dedicated, the lending pool's members when leased.
-        var capabilities = adapterNodeCapabilityService.Resolve(tenantId, adapterRtEntityId, leasedAdapter);
+        var capabilities = await adapterNodeCapabilityService.ResolveAsync(tenantId, adapterRtEntityId, leasedAdapter);
 
         if (leasedAdapter != null)
         {
@@ -808,11 +808,13 @@ internal class AdapterService(
         RtEntityId pipelineRtEntityId, string? pipelineDefinition, RtAdapter leasedAdapter,
         AdapterNodeCapabilities capabilities)
     {
+        // AB#5271: the lender is no longer readable off the adapter — it hangs off the LentFrom
+        // mirror, which ResolveAsync has already walked. capabilities.Source names that same pool and
+        // tenant, so the line stays as informative without a second read purely to log it.
         Logger.Info(
-            "[{TenantId}] Adapter '{AdapterRtId}' is Leased from pool {AdapterPoolRtId} of tenant '{LenderTenantId}'; " +
-            "validating and persisting pipeline '{PipelineRtEntityId}' without a push. Node capabilities: {Source}",
-            tenantId, adapterRtEntityId, leasedAdapter.LentFromAdapterPoolRtId ?? "<unset>",
-            leasedAdapter.LentFromTenantId ?? "<unset>", pipelineRtEntityId, capabilities.Source);
+            "[{TenantId}] Adapter '{AdapterRtId}' is Leased; validating and persisting pipeline " +
+            "'{PipelineRtEntityId}' without a push. Node capabilities: {Source}",
+            tenantId, adapterRtEntityId, pipelineRtEntityId, capabilities.Source);
 
         await ValidateAndPersistPipelineAsync(tenantId, adapterRtEntityId, pipelineRtEntityId, pipelineDefinition,
             leasedAdapter, capabilities, leasedAdapter);
@@ -889,7 +891,7 @@ internal class AdapterService(
             // write it in the same update. Resolved here rather than in the repository
             // because it needs the live node descriptors of whatever will execute the pipeline,
             // which the repository has no business knowing about.
-            var executionClass = pipelineExecutionClassService.ResolveForAdapter(tenantId,
+            var executionClass = await pipelineExecutionClassService.ResolveForAdapterAsync(tenantId,
                 adapterRtEntityId, pipelineDefinition, leasedAdapter);
 
             // SetPipelineDefinitionAsync also syncs SendsDataTo associations
@@ -910,7 +912,7 @@ internal class AdapterService(
             // definition it claims to describe. A single-field write, NOT a definition rewrite —
             // deploy must not persist a definition it was not given.
             await communicationRepository.SetPipelineExecutionClassAsync(tenantId, pipelineRtEntityId,
-                pipelineExecutionClassService.ResolveForAdapter(tenantId, adapterRtEntityId,
+                await pipelineExecutionClassService.ResolveForAdapterAsync(tenantId, adapterRtEntityId,
                     pipeline.PipelineDefinition, leasedAdapter));
         }
 

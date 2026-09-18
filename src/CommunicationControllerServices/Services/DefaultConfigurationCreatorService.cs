@@ -30,6 +30,7 @@ internal class DefaultConfigurationCreatorService(
     IAdapterCachePublish adapterCachePublish,
     IAdapterService adapterService,
     IPipelineServiceAccountProvisioningService serviceAccountProvisioningService,
+    IAdapterPoolMirrorProvisioningService adapterPoolMirrorProvisioningService,
     FailedTenantRegistry failedTenantRegistry,
     ICommunicationEventService communicationEventService,
     IBlueprintService blueprintService,
@@ -117,6 +118,17 @@ internal class DefaultConfigurationCreatorService(
         // picked up by its workload deploy (DeploymentSiteService.DeployWorkloadAsync) or by the next load.
         await EnsurePipelineServiceAccountsAsync(tenantId);
 
+        // AB#5271 — the borrower's view of the pools it may lease from. Same hook and the same
+        // reasoning as the line above: driven by service start, Enable and PosUpdateTenant, so it is
+        // the creation path and the backfill path at once and an operator can force convergence with
+        // `clearCache` instead of a pod restart.
+        //
+        // 🔴 Reconciled from the BORROWER's side even though the change that makes a mirror
+        // necessary happens on the lender. A lender-side hook alone would miss the cases this has to
+        // cover — a tenant created after the pool, a tenant re-parented, a mirror deleted by hand —
+        // because none of them touch the lender at all.
+        await EnsureLentAdapterPoolMirrorsAsync(tenantId);
+
         // try to load the configuration from the cache
         await adapterCachePublish.LoadConfigurationAsync(tenantId);
 
@@ -168,6 +180,55 @@ internal class DefaultConfigurationCreatorService(
                 "Pipeline service account provisioning failed for tenant '{TenantId}'. Tenant startup continues; " +
                 "deploying pipelines of the affected adapters will be refused until it succeeds",
                 tenantId);
+        }
+    }
+
+    /// <summary>
+    /// Reconciles the tenant's <c>LentAdapterPool</c> mirrors (AB#5271) without ever failing tenant
+    /// startup.
+    ///
+    /// <para>
+    /// 🔴 Unlike the service-account backfill above, a failure here is not merely a later refusal:
+    /// since AB#5271 the <c>LentFrom</c> association is the truth, so a borrower with no mirror
+    /// cannot even name its lender. That is why the failure is written to the tenant's event log as
+    /// an Error and not just to the pod log — but it still must not stop the tenant from loading,
+    /// because everything already deployed keeps working and a tenant that will not start fixes
+    /// nothing.
+    /// </para>
+    /// </summary>
+    internal async Task EnsureLentAdapterPoolMirrorsAsync(string tenantId)
+    {
+        try
+        {
+            var result = await adapterPoolMirrorProvisioningService.ProvisionForBorrowerAsync(tenantId);
+
+            if (!result.IsNoOp)
+            {
+                logger.LogInformation(
+                    "Lent adapter pool mirrors for tenant '{TenantId}': {Created} present, {Removed} removed",
+                    tenantId, result.MirrorsCreatedOrUpdated, result.MirrorsRemoved);
+                await communicationEventService.StoreInformationEventAsync(tenantId,
+                    $"Lent adapter pool mirrors reconciled (AB#5271): {result.MirrorsCreatedOrUpdated} available, " +
+                    $"{result.MirrorsRemoved} removed.");
+            }
+
+            if (result.LendersUnreadable > 0)
+            {
+                logger.LogWarning(
+                    "Lent adapter pool mirrors for tenant '{TenantId}' are incomplete: {LendersUnreadable} candidate " +
+                    "lender(s) could not be read",
+                    tenantId, result.LendersUnreadable);
+            }
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e,
+                "Lent adapter pool mirror reconciliation failed for tenant '{TenantId}'. Tenant startup continues; " +
+                "leased adapters of this tenant cannot be linked to a pool until it succeeds",
+                tenantId);
+            await communicationEventService.StoreErrorEventAsync(tenantId,
+                "Lent adapter pool mirrors could not be reconciled (AB#5271); leased adapters cannot be linked to " +
+                $"an adapter pool until this succeeds: {e.Message}");
         }
     }
 
