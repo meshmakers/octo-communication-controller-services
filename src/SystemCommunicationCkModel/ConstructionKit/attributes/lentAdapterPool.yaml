@@ -1,0 +1,43 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+# AB#5271 — attributes of the borrower-local mirror of a lent AdapterPool.
+#
+# 🔴 Every one of these is isRuntimeState: true, without exception. The mirror is not authored by
+# anyone: the controller provisions it from the lender's pool and keeps it in sync. A blueprint
+# re-apply resets non-runtime attributes to their seeded values, which for a mirror means wiping
+# or recreating it — the mechanism behind the prod-1 redirect-URI outage (AB#5210).
+#
+# 🔴 These deliberately do NOT reuse the AdapterPool attributes of the same name. isRuntimeState
+# lives on the attribute, not on the type, and the pool's MinReplicas/MaxReplicas/SharingMode are
+# authored values. Sharing the ids would make the lender's own settings runtime state.
+attributes:
+- id: LenderTenantId
+  valueType: String
+  isRuntimeState: true
+  description: 'Member of the LenderReference record (AB#5271): the tenant that owns the lent AdapterPool. Mirrored from the lending side; never author-set. The controller re-resolves it on every lease, so a stale value produces a refused deploy with a named reason rather than a wrong grant.'
+- id: LenderAdapterPoolRtId
+  valueType: String
+  isRuntimeState: true
+  description: 'Member of the LenderReference record (AB#5271): the bare 24-character hexadecimal RtId of the AdapterPool inside LenderTenantId. Names the POOL, never an individual member — membership is elastic, so a reference to a member would dangle the moment that member is drained.'
+- id: LentAdapterPoolSharingMode
+  valueType: Enum
+  valueCkEnumId: ${this}/AdapterSharingMode
+  isRuntimeState: true
+  description: 'The lending pool''s sharing mode as last mirrored (AB#5271). Shown so a borrower can see WHY a pool is available to it. 🔴 Display only: the lease-time decision always re-reads the lender''s own pool and calls MayLendAsync, so a borrower editing this value in its own database changes what it sees, never what it may use.'
+- id: LentAdapterPoolMinReplicas
+  valueType: Int
+  isRuntimeState: true
+  description: 'Lower bound of the lending pool''s replica range as last mirrored (AB#5271). Informational: it tells a borrower how much capacity is kept warm, which is what decides whether a lease is likely to be immediate or queued.'
+- id: LentAdapterPoolMaxReplicas
+  valueType: Int
+  isRuntimeState: true
+  description: 'Upper bound of the lending pool''s replica range as last mirrored (AB#5271). Informational, as above.'
+- id: LentAdapterPoolDeploymentState
+  valueType: Enum
+  valueCkEnumId: ${this}/DeploymentState
+  isRuntimeState: true
+  description: 'Deployment state of the lending pool as last mirrored (AB#5271). A pool that is not Deployed cannot serve a lease, so this is the one mirrored field that explains a queue that never drains. Mirrored rather than resolved on read because the borrower cannot query the lender''s database.'
+- id: Lender
+  valueType: Record
+  valueCkRecordId: ${this}/LenderReference
+  isRuntimeState: true
+  description: 'The lending tenant and pool this mirror stands for (AB#5271). Single-valued: a mirror has exactly one lender. Set and cleared as one unit, so a tenant id can never be present without its pool RtId.'

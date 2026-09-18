@@ -107,38 +107,16 @@ steps:
     # Runs after step 1: the entity is only a DeploymentSite once ChangeCkType has moved it.
     continueOnError: false
 
-  # Steps 4 and 5: the two CK attributes that still said "Pool" while meaning the ADAPTER pool.
+  # 🔴 There are no steps for the borrower-side lending attributes, and there deliberately never
+  # were any that survived. An earlier revision of this migration renamed Adapter.LentFromPoolRtId
+  # to LentFromAdapterPoolRtId — a no-op by construction, because that attribute was introduced BY
+  # 4.0.0 and so no 3.35.0 tenant can hold a value in it. AB#5271 then removed the attribute
+  # outright in favour of an association to a local LentAdapterPool mirror, which is only possible
+  # because 4.0.0 is still unpublished: nothing stored anywhere is in the old shape.
   #
-  # These are the mirror image of step 3. LentFromPoolRtId (on Adapter) and LeasedFromPoolRtId
-  # (on PipelineExecution) both point at the AdapterPool a workload borrows from — a real pool of
-  # processes — so they become LentFromAdapterPoolRtId / LeasedFromAdapterPoolRtId rather than
-  # DeploymentSite anything. After 4.0.0 no bare "Pool" is left in the model: what remains says
-  # either DeploymentSite or AdapterPool, and which one it is can be read off the name.
-  #
-  # RenameAttribute copies the stored value to the new attribute id. Entities that never carried
-  # the attribute (every non-leased adapter, every execution that did not run on a lease) simply
-  # do not match, so both steps are no-ops for the overwhelming majority of rows.
-  - stepId: rename-lent-from-pool-rt-id
-    description: "Adapter.LentFromPoolRtId -> LentFromAdapterPoolRtId"
-    action: Transform
-    target:
-      ckTypeId: System.Communication/Adapter
-    transform:
-      type: RenameAttribute
-      sourceAttribute: lentFromPoolRtId
-      targetAttribute: lentFromAdapterPoolRtId
-    continueOnError: false
-
-  - stepId: rename-leased-from-pool-rt-id
-    description: "PipelineExecution.LeasedFromPoolRtId -> LeasedFromAdapterPoolRtId"
-    action: Transform
-    target:
-      ckTypeId: System.Communication/PipelineExecution
-    transform:
-      type: RenameAttribute
-      sourceAttribute: leasedFromPoolRtId
-      targetAttribute: leasedFromAdapterPoolRtId
-    continueOnError: false
+  # PipelineExecution.LeasedFromAdapterPoolRtId stays an attribute and is likewise untouched here.
+  # It is a historical record of where one execution actually ran, not a live reference, so it
+  # must NOT follow the adapter if the adapter is later re-pointed at another pool.
 
 postValidations:
   - validationId: no-legacy-pools

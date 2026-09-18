@@ -1,0 +1,47 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+# AB#5271 — a borrower-local stand-in for an AdapterPool that lives in another tenant.
+#
+# Why this type exists at all: the pool entity is in the LENDER's tenant database, GraphQL is
+# tenant-scoped, and a CK association cannot cross that boundary. Without a local entity a
+# borrower cannot see which pools it may use, cannot filter or sort them with everything else,
+# gets nothing carried by tenant backup/restore, and has to name its lender with two opaque
+# strings on every leased adapter. The mirror converts one impossible cross-tenant association
+# into a local association plus a cross-tenant reference held ONCE, here.
+#
+# 🔴 THIS ENTITY IS NEVER AUTHORITATIVE. A tenant can edit entities in its own database, so if
+# the lease decision ever read this mirror a borrower could point it wherever it liked. It does
+# not: the controller always resolves the lender's own AdapterPool and calls MayLendAsync against
+# that pool's sharing mode and allow-list. Editing a mirror changes what a borrower SEES, never
+# what it may use — and a mirror aimed at a tenant outside the lending scope is denied by the
+# same walk that denies everything else. Nothing in LeaseService, LeaseSchedulerService or
+# AdapterService may read this type to make a decision.
+#
+# 🔴 Provisioned and kept in sync by the controller, following ClientMirrorProvisioningService in
+# octo-identity-services: the lender pushes changes down, the borrower never polls up. Every
+# attribute is therefore runtime state — see attributes/lentAdapterPool.yaml.
+- typeId: LentAdapterPool
+  description: 'A borrower-local mirror of an AdapterPool owned by an ancestor or sibling tenant (AB#5271). Exists so a borrowing tenant can see, list and reference the pools lent to it, none of which is possible against an entity in another tenant database. Display and association only: the lease-time decision always re-reads the lending tenant''s own pool, so this mirror can never widen what a borrower is allowed to use. Provisioned and kept in sync by the Communication Controller; never author-set.'
+  derivedFromCkTypeId: ${System}/Entity
+  isFinal: true
+  attributes:
+    - id: ${System}/Name
+      name: Name
+    - id: ${System}/Description
+      name: Description
+      isOptional: true
+    # The cross-tenant reference, held once here instead of on every leased adapter.
+    - id: ${this}/Lender
+      name: Lender
+    # Mirrored from the lending pool so the borrower can judge availability without a
+    # cross-tenant read. All informational — see the authority note above.
+    - id: ${this}/LentAdapterPoolSharingMode
+      name: SharingMode
+    - id: ${this}/LentAdapterPoolMinReplicas
+      name: MinReplicas
+      isOptional: true
+    - id: ${this}/LentAdapterPoolMaxReplicas
+      name: MaxReplicas
+      isOptional: true
+    - id: ${this}/LentAdapterPoolDeploymentState
+      name: DeploymentState

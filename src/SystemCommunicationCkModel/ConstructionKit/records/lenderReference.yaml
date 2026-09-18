@@ -1,0 +1,24 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+records:
+  # AB#5271 — the one reference in this model that genuinely cannot be an association: it names
+  # an AdapterPool entity inside a DIFFERENT tenant database, and a CK association cannot cross
+  # that boundary.
+  #
+  # 🔴 A record rather than two loose attributes, because the two values are meaningless apart. A
+  # tenant id without a pool RtId is not a partial reference, it is a broken one, and a record
+  # makes that structural instead of a rule someone has to remember and the controller has to
+  # re-check. It is also set and cleared as one unit, so the half-state cannot be written at all.
+  #
+  # 🔴 Used single-valued (valueType: Record), never RecordArray: a mirror has exactly one lender.
+  # An array would model a multiplicity that cannot occur, and would buy into the array traps this
+  # model has already paid for once — the polymorphic {"_v":[…]} wrapper (AB#5160) and the
+  # flat-shape surprise of RecordArray values.
+  - recordId: LenderReference
+    description: 'Names an AdapterPool in another tenant: the lending tenant and the pool''s RtId inside it (AB#5271). Cross-tenant by nature, which is why it is a record of plain values rather than an association — a CK association cannot span tenant databases. Nothing enforces that the target exists; the controller resolves it per lease and refuses an unresolvable pool with a named reason.'
+    isFinal: true
+    isAbstract: false
+    attributes:
+      - id: ${this}/LenderTenantId
+        name: LenderTenantId
+      - id: ${this}/LenderAdapterPoolRtId
+        name: LenderAdapterPoolRtId

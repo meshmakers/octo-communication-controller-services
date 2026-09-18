@@ -1,0 +1,18 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+associationRoles:
+  # AB#5271 — replaces the LentFromTenantId / LentFromAdapterPoolRtId attribute pair that AB#4924
+  # put on Adapter.
+  #
+  # 🔴 Both ends are LOCAL. The adapter and its mirror live in the same (borrowing) tenant
+  # database, so this is an ordinary edge — the cross-tenant part is the mirror's own Lender
+  # record, which is held once per pool instead of twice per adapter.
+  #
+  # Only clean because 4.0.0 is unpublished: the two attributes were introduced by the single
+  # commit that created it, so there is no stored data in the old shape and no migration to write.
+  # Had the model shipped, this would have been coexistence first.
+  - id: LentFrom
+    description: Links a borrowing adapter to the local mirror of the adapter pool it leases members from. An adapter borrows from at most one pool; one mirror serves every adapter in the tenant that borrows from that pool. Replaces the LentFromTenantId/LentFromAdapterPoolRtId attributes of 4.0.0.
+    inboundName: LentTo
+    inboundMultiplicity: N
+    outboundName: LentFrom
+    outboundMultiplicity: ZeroOrOne

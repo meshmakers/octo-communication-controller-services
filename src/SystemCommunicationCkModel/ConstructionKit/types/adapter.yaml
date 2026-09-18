@@ -32,17 +32,20 @@ types:
     # pipelines, so only an Adapter can borrow a process to run them on — an Application has
     # nothing to lease. Same reasoning as PipelineServiceAccount below.
     #
-    # Both values are set as a PAIR on an adapter whose LifecycleMode is Leased, meaningless
-    # in every other mode, and validated as a pair at deploy time. Full rationale, including
-    # why they are attributes instead of an association: attributes/adapterLeasing.yaml and
-    # docs/concepts/shared-adapter-leasing.md.
-    - id: ${this}/LentFromTenantId
-      name: LentFromTenantId
-      isOptional: true
-    - id: ${this}/LentFromAdapterPoolRtId
-      name: LentFromAdapterPoolRtId
-      isOptional: true
   associations:
+    # AB#5271 — the pool this adapter borrows members from, when LifecycleMode is Leased.
+    #
+    # 🔴 Replaces the LentFromTenantId / LentFromAdapterPoolRtId attribute pair. The target is a
+    # LentAdapterPool in THIS tenant — the borrower-local mirror of a pool owned by an ancestor or
+    # sibling — so the edge is ordinary and local. The cross-tenant part sits once on the mirror's
+    # Lender record instead of twice on every leased adapter.
+    #
+    # Optional in the model: only an adapter in Leased mode has one, and the "Leased implies a
+    # pool" rule is a deploy guard, not a multiplicity — exactly as with pipelineServiceAccount
+    # below, and for the same reason (a mandatory end would break import of every existing
+    # Adapter).
+    - id: ${this}/LentFrom
+      targetCkTypeId: ${this}/LentAdapterPool
     # AB#5027: the service account every pipeline of this adapter executes as, unless
     # the pipeline carries its own ServiceAccountConfiguration on the generic Uses role.
     # Declared on Adapter (not on DeployableWorkload): only Adapters execute pipelines,

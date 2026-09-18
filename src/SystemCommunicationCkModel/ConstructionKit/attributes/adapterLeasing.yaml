@@ -62,17 +62,14 @@ attributes:
   isRuntimeState: false
 
 # ---------------------------------------------------------------------------------------
-# BORROWER side — assigned to Adapter. Set as a pair on an adapter whose LifecycleMode is
-# Leased, meaningless in every other mode, validated as a pair by the controller.
+# BORROWER side — moved out of this file in AB#5271.
+#
+# 4.0.0 put LentFromTenantId / LentFromAdapterPoolRtId here as plain attributes because a CK
+# association cannot cross a tenant database. AB#5271 removes that constraint by mirroring the
+# lent pool into the borrower as a local LentAdapterPool entity, so the adapter now carries an
+# ordinary association (associations/lentFrom.yaml) and the cross-tenant reference lives once on
+# the mirror (records/lenderReference.yaml) instead of twice on every leased adapter.
 # ---------------------------------------------------------------------------------------
-- id: LentFromTenantId
-  valueType: String
-  description: 'Borrower side of shared adapter leasing (AB#4924): the tenant whose adapter pool executes this adapter''s pipelines. Set together with LentFromPoolRtId on an adapter whose LifecycleMode is Leased; both are ignored in every other mode and the controller rejects either one appearing alone. An ATTRIBUTE rather than an association because the named tenant is a different tenant database — see the file header. The controller re-validates on every lease that the named tenant still lends to this one; a value naming a tenant outside the lending scope is refused at deploy time, never silently honoured.'
-  isRuntimeState: false
-- id: LentFromAdapterPoolRtId
-  valueType: String
-  description: 'Borrower side of shared adapter leasing (AB#4924): the RtId of the AdapterPool entity inside LentFromTenantId whose members execute this adapter''s pipelines. Stored as the bare 24-character hexadecimal RtId without a CkTypeId — the target is always an AdapterPool. It names the POOL and not an individual member on purpose: membership is elastic, so a reference to a member would dangle the moment that member is drained (concept §5, "the queue belongs to the pool, not to the member"). An ATTRIBUTE rather than an association for the cross-tenant-database reason in the file header, so nothing enforces that the target exists; the controller resolves it per lease and surfaces an unresolvable pool as a blocking reason.'
-  isRuntimeState: false
 
 # ---------------------------------------------------------------------------------------
 # EXECUTION side — runtime state written by the lease, on PipelineExecution in the
