@@ -100,16 +100,66 @@ pointing at a pool they may no longer use; that is already a defined state (AB#4
 Deleting the borrower's adapters because the lender changed its mind would be a far worse failure
 than a blocked deploy.
 
-## 7. Open decisions
+## 7. Decisions taken
 
-1. **Association vs the existing string fields.** Add the association and keep `LentFrom*` as the
-   wire-level truth, or migrate to the association and derive the strings? Coexistence is safer for
-   one release; a migration is cleaner and the migration machinery now exists (`RenameAttribute`,
-   `SetWellKnownName`).
-2. **What the mirror carries.** Name, sharing mode, replica range and deployment state are
+### 7.1 The association is the truth, not the strings
+
+`Adapter --LentFrom--> LentAdapterPool` replaces `LentFromTenantId` / `LentFromPoolRtId` on the
+adapter. They are not kept alongside it.
+
+🔴 **This is only clean because 4.0.0 has not shipped.** Both attributes were introduced by the
+single commit that created CK 4.0.0 (`ab0a7c1`), and the model is still unpublished — `ai-services`
+is structurally red waiting for exactly that catalog publish. There is therefore no installed base
+in the old shape and no migration to write; the only data that carries it is the demo blueprint in
+this repository, which we own.
+
+The earlier recommendation in this document was coexistence, on the grounds that making the
+association leading puts the mirror on the critical path: no mirror, no lease. That reasoning was
+about protecting an installed base during rollout. There is none, so it does not apply, and paying
+for a transitional shape that nobody needs would be the more expensive choice.
+
+### 7.2 The lender reference is one single-valued record, not two attributes
+
+```yaml
+records:
+  - recordId: LenderReference
+    attributes:
+      - id: ${this}/TenantId
+      - id: ${this}/AdapterPoolRtId
+```
+
+used on the mirror as `valueType: Record` — **single-valued, not `RecordArray`**.
+
+Two reasons. The values are meaningless apart: a tenant id without a pool id, or the reverse,
+is not a partial reference but a broken one, and a record makes that structural rather than a rule
+someone has to remember. And a mirror has exactly one lender, so an array would model a
+multiplicity that cannot occur.
+
+🔴 Single-valued also avoids the array traps this estate has already been bitten by: the
+polymorphic `{"_v":[…]}` wrapper that poisoned array attributes (AB#5160) and the flat-shape
+surprise of `RecordArray` values. `valueType: Record` is supported and in use in this very model
+(`attributes/energyCommunityConfiguration.yaml`).
+
+### 7.3 Consequence: the sync service is on the critical path
+
+With the association leading, a lease cannot be resolved before the mirror exists. That is accepted
+deliberately — see 7.1 — but it changes what a sync bug costs: an outage, not a display error. The
+service therefore has to be idempotent and to reconcile on startup, both of which the
+`ClientMirrorProvisioningService` pattern already provides.
+
+🔴 **Open follow-on:** the `AdapterPoolBorrowerDemo` blueprint currently seeds the borrower adapter
+with the two `LentFrom*` values. It cannot seed them any more. Either it seeds a `LentAdapterPool`
+directly — odd for an entity that is runtime state and controller-owned — or the demo depends on
+the sync service having run. Decide when the service exists, not before.
+
+### 7.4 What still has to be decided
+
+
+
+1. **What the mirror carries.** Name, sharing mode, replica range and deployment state are
    uncontroversial. Chart name/version and values are lender-side deployment detail and probably
    should not be copied into another tenant's database.
-3. **Who may see it.** Which role in the borrower reads the mirror — and does the parent-tenant
+2. **Who may see it.** Which role in the borrower reads the mirror — and does the parent-tenant
    administration boundary (AB#5060/5068/5070) have anything to say about a child displaying an
    ancestor's resource name?
 
