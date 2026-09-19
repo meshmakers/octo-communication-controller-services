@@ -224,7 +224,7 @@ public class DeploymentSiteController : ControllerBase
     /// </summary>
     /// <param name="workloadRtId">The runtime id of the AdapterPool workload.</param>
     /// <param name="replicas">Desired member count.</param>
-    [HttpPost("workloads/adapter-deploymentSite/scale")]
+    [HttpPost("workloads/adapter-pool/scale")]
     [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
     [ProducesResponseType(typeof(AdapterPoolScaleResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
@@ -262,7 +262,7 @@ public class DeploymentSiteController : ControllerBase
 }
 
 /// <summary>
-/// Result of an adapter-deploymentSite scale request (AB#4924): the member count actually requested from the
+/// Result of an adapter-pool scale request (AB#4924): the member count actually requested from the
 /// operator after the deploymentSite's declared <c>MinReplicas..MaxReplicas</c> range was applied.
 /// </summary>
 /// <param name="Replicas">Effective member count.</param>

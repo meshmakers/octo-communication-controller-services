@@ -58,7 +58,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
     /// <param name="serviceAccountProvisioningService">Provisions the adapter's pipeline service account on deploy (AB#5027)</param>
     /// <param name="serviceAccountResolver">Reads the adapter's provisioned service account so its credentials can be projected into the workload's Helm values (AB#5072)</param>
     /// <param name="lendingScopeResolver">Resolves which tenants an adapter deploymentSite may lend to, so a Leased workload naming an out-of-scope lender is refused at deploy time (AB#4924)</param>
-    /// <param name="workloadLifecycleService">Carries the AB#4917 scale verb to the operator owning the workload's deploymentSite; reused for adapter-deploymentSite scaling so the MinReplicas floor is enforced in one place (AB#4924)</param>
+    /// <param name="workloadLifecycleService">Carries the AB#4917 scale verb to the operator owning the workload's deploymentSite; reused for adapter-pool scaling so the MinReplicas floor is enforced in one place (AB#4924)</param>
     /// <param name="adapterPoolMirrorProvisioningService">Pushes an adapter pool's deploy/undeploy out to the LentAdapterPool mirrors its borrowers hold (AB#5271)</param>
     public DeploymentSiteService(ICommunicationRepository communicationRepository, IDeploymentSiteCache poolCache,
         ICommunicationEventService eventService,
@@ -1121,7 +1121,15 @@ internal class DeploymentSiteService : IDeploymentSiteService
         // search for anyway, and the only one that stays correct when a replica is rescheduled.
         // Writing a value here would pin every replica of the deployment to the same member id, and
         // the controller's registry keys members by it.
-        AddUnlessPinned(result, "adapterPool.adapterPoolTenantId", tenantId);
+        //
+        // 🔴 The two paths are `adapterPool.poolTenantId` and `adapterPool.poolRtId`, and they are a
+        // CHART CONTRACT — octo-mesh-adapter's `octo-mesh.isPoolMember` is literally
+        // `and .Values.adapterPool.poolTenantId .Values.adapterPool.poolRtId`. The DeploymentSite
+        // rename renamed the first one here and not in the chart, which is invisible until a pool
+        // is actually deployed: `isPoolMember` then reads false, the chart renders the member as an
+        // ordinary adapter, and helm fails on `secrets.databaseUser must be set` — a credential the
+        // pool is designed never to receive. The tell was that only ONE of the two was renamed.
+        AddUnlessPinned(result, "adapterPool.poolTenantId", tenantId);
         AddUnlessPinned(result, "adapterPool.poolRtId", deploymentSite.RtId.ToString());
 
         AddUnlessPinned(result, "replicaCount", deploymentSite.MinReplicas.ToString(CultureInfo.InvariantCulture));

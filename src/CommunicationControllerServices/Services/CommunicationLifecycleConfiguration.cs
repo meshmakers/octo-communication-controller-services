@@ -22,7 +22,7 @@ public class CommunicationLifecycleConfiguration
     public bool ScaleToZeroEnabled { get; set; }
 
     /// <summary>
-    ///     Master switch for adapter-deploymentSite leasing on this tenant (AB#4924 §14). Default false.
+    ///     Master switch for adapter-pool leasing on this tenant (AB#4924 §14). Default false.
     /// </summary>
     /// <remarks>
     ///     <para>

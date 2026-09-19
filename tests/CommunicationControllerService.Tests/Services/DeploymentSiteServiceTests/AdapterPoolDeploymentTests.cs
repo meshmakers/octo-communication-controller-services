@@ -10,7 +10,7 @@ using NSubstitute.ExceptionExtensions;
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.DeploymentSiteServiceTests;
 
 /// <summary>
-///     AB#4924 §7 — the controller half of adapter-deploymentSite deployment: deploy, undeploy and scale.
+///     AB#4924 §7 — the controller half of adapter-pool deployment: deploy, undeploy and scale.
 ///
 ///     A deploymentSite is <b>one workload with a replica range</b> (§13.2), so it rides the existing
 ///     1:1 workload ↔ helm release path and the AB#4917 scale verb. What is new is that the
@@ -111,6 +111,18 @@ internal class AdapterPoolDeploymentTests : PoolServiceTestsBase
     ///     "started without a configured deploymentSite … Doing nothing" and stays healthy for ever. Sizing and
     ///     replica count alone — all this method used to write — produce exactly that pod, which is
     ///     why every other test in this file passed while no deploymentSite member could run in a cluster.
+    ///
+    ///     <para>
+    ///     🔴 <b>The two literals are a CHART CONTRACT and must not be "tidied" to match the
+    ///     DeploymentSite vocabulary.</b> octo-mesh-adapter's <c>octo-mesh.isPoolMember</c> is
+    ///     literally <c>and .Values.adapterPool.poolTenantId .Values.adapterPool.poolRtId</c>
+    ///     (<c>templates/_helpers.tpl</c>), and the chart renders a pool member as an ordinary
+    ///     adapter when it reads false — which then fails the helm render on
+    ///     <c>secrets.databaseUser must be set</c>, a credential a pool is designed never to get.
+    ///     The rename renamed the tenant-id path here and not in the chart; the tell was that only
+    ///     ONE of the two was touched, and nothing caught it because this assertion was renamed
+    ///     along with the code it was meant to pin. Observed on a local kind deploy.
+    ///     </para>
     /// </summary>
     [Test]
     public async Task DeployWorkloadAsync_AdapterPool_SendsThePoolIdentityTheMemberNeedsToRegister()
@@ -119,7 +131,7 @@ internal class AdapterPoolDeploymentTests : PoolServiceTestsBase
 
         var dto = await DeployAndCaptureAsync(deploymentSite);
 
-        await Assert.That(dto.Values.Single(v => v.Path == "adapterPool.adapterPoolTenantId").Value)
+        await Assert.That(dto.Values.Single(v => v.Path == "adapterPool.poolTenantId").Value)
             .IsEqualTo(TenantId);
         await Assert.That(dto.Values.Single(v => v.Path == "adapterPool.poolRtId").Value)
             .IsEqualTo(deploymentSite.RtId.ToString());
@@ -138,7 +150,7 @@ internal class AdapterPoolDeploymentTests : PoolServiceTestsBase
 
         var dto = await DeployAndCaptureAsync(deploymentSite);
 
-        await Assert.That(dto.Values.Single(v => v.Path == "adapterPool.adapterPoolTenantId").Value)
+        await Assert.That(dto.Values.Single(v => v.Path == "adapterPool.poolTenantId").Value)
             .IsEqualTo(TenantId);
     }
 
