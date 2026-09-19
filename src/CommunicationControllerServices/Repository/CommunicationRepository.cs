@@ -394,7 +394,7 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
-    public async Task<OctoObjectId> UpsertLentAdapterPoolMirrorAsync(
+    public async Task<LentAdapterPoolMirrorUpsert> UpsertLentAdapterPoolMirrorAsync(
         string borrowerTenantId, LendableAdapterPool pool)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(borrowerTenantId);
@@ -414,6 +414,17 @@ internal class CommunicationRepository : ICommunicationRepository
                         StringComparison.OrdinalIgnoreCase)
                     && string.Equals(m.Lender?.LenderAdapterPoolRtId, pool.AdapterPoolRtId,
                         StringComparison.OrdinalIgnoreCase));
+
+            // 🔴 A mirror that already says the right thing is left alone. The reconcile runs on
+            // every tenant load and every pool deploy, so writing unconditionally would bump
+            // RtVersion and RtChangedDateTime of every borrower's mirror on every pass — and would
+            // make the reported counts meaningless, which is how "Refresh" came to report three
+            // pools provisioned on a run that changed nothing.
+            if (existing is not null && Matches(existing, pool))
+            {
+                await session.CommitTransactionAsync();
+                return LentAdapterPoolMirrorUpsert.Unchanged(existing.RtId);
+            }
 
             RtLentAdapterPool mirror;
             if (existing is null)
@@ -450,13 +461,33 @@ internal class CommunicationRepository : ICommunicationRepository
             }
 
             await session.CommitTransactionAsync();
-            return mirror.RtId;
+            return existing is null
+                ? LentAdapterPoolMirrorUpsert.Created(mirror.RtId)
+                : LentAdapterPoolMirrorUpsert.Updated(mirror.RtId);
         }
         catch
         {
             await session.AbortTransactionAsync();
             throw;
         }
+    }
+
+    /// <summary>
+    ///     Whether the stored mirror already carries exactly what the lender's pool says.
+    /// </summary>
+    /// <remarks>
+    ///     Only the mirrored fields are compared — the <c>Lender</c> record is the key the caller
+    ///     matched on and is equal by construction. Ordinal comparison for the display strings: a
+    ///     rename that differs only in case IS a rename the borrower should see.
+    /// </remarks>
+    private static bool Matches(RtLentAdapterPool mirror, LendableAdapterPool pool)
+    {
+        return string.Equals(mirror.Name, pool.Name, StringComparison.Ordinal)
+               && string.Equals(mirror.Description, pool.Description, StringComparison.Ordinal)
+               && (int)mirror.SharingMode == pool.Scope.Mode
+               && mirror.MinReplicas == pool.MinReplicas
+               && mirror.MaxReplicas == pool.MaxReplicas
+               && (int)mirror.DeploymentState == pool.DeploymentState;
     }
 
     /// <inheritdoc />

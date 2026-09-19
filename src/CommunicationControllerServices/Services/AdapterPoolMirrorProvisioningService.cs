@@ -90,8 +90,11 @@ internal sealed class AdapterPoolMirrorProvisioningService(
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                await communicationRepository.UpsertLentAdapterPoolMirrorAsync(borrowerTenantId, pool);
-                created++;
+                var upsert = await communicationRepository.UpsertLentAdapterPoolMirrorAsync(borrowerTenantId, pool);
+                if (upsert.Wrote)
+                {
+                    created++;
+                }
             }
             catch (Exception e)
             {

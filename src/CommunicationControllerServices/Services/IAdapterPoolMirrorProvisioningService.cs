@@ -60,7 +60,11 @@ public interface IAdapterPoolMirrorProvisioningService
 
 /// <summary>What one reconciliation run did (AB#5271).</summary>
 /// <param name="TenantsReconciled">How many borrowing tenants were walked.</param>
-/// <param name="MirrorsCreatedOrUpdated">Mirrors upserted — the pools the borrowers may use.</param>
+/// <param name="MirrorsCreatedOrUpdated">
+///     Mirrors actually written — created, or updated because the lender changed something. A
+///     mirror that already said the right thing is not counted, so a reconcile over an unchanged
+///     estate reports zero rather than reporting every pool as work.
+/// </param>
 /// <param name="MirrorsRemoved">Mirrors dropped because the pool no longer lends here, or is gone.</param>
 /// <param name="LendersUnreadable">
 ///     Candidate lenders whose pools could not be read. Counted rather than thrown: a tenant being

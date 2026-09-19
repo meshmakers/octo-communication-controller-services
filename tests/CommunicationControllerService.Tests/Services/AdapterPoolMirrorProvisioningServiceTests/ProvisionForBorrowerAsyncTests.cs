@@ -182,6 +182,34 @@ internal sealed class ProvisionForBorrowerAsyncTests : AdapterPoolMirrorProvisio
     }
 
     /// <summary>
+    ///     🔴 A reconcile over an unchanged estate must report that it changed nothing.
+    /// </summary>
+    /// <remarks>
+    ///     It runs on every tenant load and every pool deploy, so counting every mirror as work
+    ///     makes a no-op indistinguishable from a repair — and the Studio's Refresh then says
+    ///     "3 pool(s) available" every time it is pressed. The repository decides this (it compares
+    ///     the stored mirror against the pool); what is pinned here is that the service believes it.
+    /// </remarks>
+    [Test]
+    public async Task AMirrorThatIsAlreadyCorrect_IsNotCountedAsWork()
+    {
+        var poolRtId = NewPoolRtId().ToString();
+        ArrangeCandidateLenders(LenderTenantId);
+        ArrangePool(LenderTenantId, poolRtId, lends: true);
+        var mirror = ArrangeExistingMirror(LenderTenantId, poolRtId);
+
+        CommunicationRepository
+            .UpsertLentAdapterPoolMirrorAsync(BorrowerTenantId, Arg.Any<LendableAdapterPool>())
+            .Returns(_ => LentAdapterPoolMirrorUpsert.Unchanged(mirror.RtId));
+
+        var result = await Service.ProvisionForBorrowerAsync(BorrowerTenantId);
+
+        await Assert.That(result.MirrorsCreatedOrUpdated).IsEqualTo(0);
+        await Assert.That(result.MirrorsRemoved).IsEqualTo(0);
+        await Assert.That(result.IsNoOp).IsTrue();
+    }
+
+    /// <summary>
     ///     A mirror whose <c>Lender</c> record says nothing usable cannot serve an adapter —
     ///     <c>LentFromReference</c> refuses it — and cannot be matched against any desired pool.
     ///     Removing it is what lets the next run write a correct one.

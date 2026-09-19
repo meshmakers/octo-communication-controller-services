@@ -40,6 +40,15 @@ internal abstract class AdapterPoolMirrorProvisioningServiceTestsBase
         CommunicationRepository.GetLentAdapterPoolMirrorsAsync(BorrowerTenantId)
             .Returns(_ => (IReadOnlyCollection<RtLentAdapterPool>)_existingMirrors.ToList());
 
+        // Default: an upsert reports that it wrote. The "already correct, nothing written" case is
+        // the repository's own decision (it compares the stored mirror against the pool), so a
+        // substitute has to state which of the two it is standing in for — and the counters this
+        // service returns are read by the Studio's Refresh, so getting it wrong here would hide
+        // exactly the regression that made a no-op report three provisioned pools.
+        CommunicationRepository
+            .UpsertLentAdapterPoolMirrorAsync(Arg.Any<string>(), Arg.Any<LendableAdapterPool>())
+            .Returns(_ => LentAdapterPoolMirrorUpsert.Created(OctoObjectId.GenerateNewId()));
+
         // Default: nothing lends anything anywhere. Each test declares only what it needs.
         ArrangeCandidateLenders();
         CommunicationRepository.GetAdapterPoolsForMirroringAsync(Arg.Any<string>())

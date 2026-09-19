@@ -122,13 +122,17 @@ public interface ICommunicationRepository
         string borrowerTenantId, IReadOnlyCollection<OctoObjectId> adapterRtIds);
 
     /// <summary>
-    ///     Creates or updates the mirror of one lent pool in the borrower, and returns its RtId.
+    ///     Creates or updates the mirror of one lent pool in the borrower, and reports whether
+    ///     anything was written.
     /// </summary>
     /// <remarks>
     ///     Idempotent: matched on the <c>Lender</c> record, so a second call with the same lender
-    ///     and pool updates the existing mirror instead of adding a second one.
+    ///     and pool updates the existing mirror instead of adding a second one — and a mirror that
+    ///     already says the right thing is left untouched, so a reconcile over an unchanged estate
+    ///     writes nothing and reports nothing.
     /// </remarks>
-    Task<OctoObjectId> UpsertLentAdapterPoolMirrorAsync(string borrowerTenantId, LendableAdapterPool pool);
+    Task<LentAdapterPoolMirrorUpsert> UpsertLentAdapterPoolMirrorAsync(string borrowerTenantId,
+        LendableAdapterPool pool);
 
     /// <summary>
     ///     Removes a mirror that no longer corresponds to a pool this tenant may borrow.
