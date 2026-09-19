@@ -364,6 +364,21 @@ public class OperatorHub : Hub, IOperatorHub
                             status.TenantId, rtEntityId, newState, status.StatusMessage);
                         break;
                     }
+                // 🔴 AB#4924 — before RtAdapter, and present at all. An adapter pool is the third
+                // DeployableWorkload and this switch only ever knew two: its helm release rolled
+                // out, its pod came up, its member registered, and the entity sat at Pending for
+                // ever while the log said "unsupported type 'RtAdapterPool'; skipping status
+                // persist". Same hole the deploy path had (DeploymentSiteService
+                // .SetWorkloadDeploymentStateAsync) and the same fix; this one was missed because
+                // the deploy path is what the increment's tests exercise, and nothing asserts what
+                // the OPERATOR reports back. Observed on a local kind cluster.
+                case RtAdapterPool:
+                    {
+                        var rtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkAdapterPoolTypeId, workloadRtId);
+                        await _communicationRepository.SetAdapterPoolDeploymentStateAsync(
+                            status.TenantId, rtEntityId, newState, status.StatusMessage);
+                        break;
+                    }
                 case RtAdapter:
                     {
                         var rtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, workloadRtId);
@@ -448,6 +463,17 @@ public class OperatorHub : Hub, IOperatorHub
                     {
                         var rtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkApplicationTypeId, workloadRtId);
                         await _communicationRepository.SetApplicationDeploymentStateAsync(
+                            progress.TenantId, rtEntityId, RtDeploymentStateEnum.Pending, progress.Message);
+                        break;
+                    }
+                // AB#4924 — the third DeployableWorkload, same omission as in the terminal report
+                // above. Less damaging here (progress only ever writes Pending, which is where a
+                // deploying pool already is) but it means a pool's live status message never
+                // reaches the UI, which is the one thing progress exists for.
+                case RtAdapterPool:
+                    {
+                        var rtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkAdapterPoolTypeId, workloadRtId);
+                        await _communicationRepository.SetAdapterPoolDeploymentStateAsync(
                             progress.TenantId, rtEntityId, RtDeploymentStateEnum.Pending, progress.Message);
                         break;
                     }

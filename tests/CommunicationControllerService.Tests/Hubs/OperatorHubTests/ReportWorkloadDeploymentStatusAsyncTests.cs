@@ -62,6 +62,69 @@ internal class ReportWorkloadDeploymentStatusAsyncTests : IDisposable
             .Returns(application);
     }
 
+    private void GivenAdapterPoolInRepository()
+    {
+        var pool = new RtAdapterPool
+        {
+            RtId = new OctoObjectId(WorkloadRtId),
+            CkTypeId = SystemCommunicationCkIds.RtCkAdapterPoolTypeId,
+        };
+        _repository.GetWorkloadByRtIdAsync(TenantId, Arg.Is<OctoObjectId>(id => id.ToString() == WorkloadRtId))
+            .Returns(pool);
+    }
+
+    /// <summary>
+    ///     🔴 AB#4924 — an adapter pool is the THIRD DeployableWorkload and this switch only knew
+    ///     two.
+    /// </summary>
+    /// <remarks>
+    ///     The cost was invisible from every other test: the helm release rolled out, the pod came
+    ///     up, the member registered on the pool hub — and the entity sat at <c>Pending</c> for
+    ///     ever, because the operator's success report fell into the default arm and logged
+    ///     "unsupported type 'RtAdapterPool'; skipping status persist". Studio therefore showed a
+    ///     fully deployed pool as Pending with no error anywhere. The deploy PATH had the same hole
+    ///     and was fixed in increment 5; nothing covered what the OPERATOR reports back, which is
+    ///     the only thing that ever writes Deployed. Observed on a local kind cluster.
+    /// </remarks>
+    [Test]
+    public async Task Success_OnAdapterPool_WritesDeployedState()
+    {
+        GivenAdapterPoolInRepository();
+
+        await _hub.ReportWorkloadDeploymentStatusAsync(new WorkloadDeploymentStatusDto
+        {
+            TenantId = TenantId,
+            WorkloadName = "Adapter Pool",
+            WorkloadRtId = WorkloadRtId,
+            Success = true
+        });
+
+        await _repository.Received(1).SetAdapterPoolDeploymentStateAsync(TenantId,
+            Arg.Is<RtEntityId>(id => id.RtId.ToString() == WorkloadRtId),
+            RtDeploymentStateEnum.Deployed, null);
+        await _repository.DidNotReceive().SetAdapterDeploymentStateAsync(Arg.Any<string>(),
+            Arg.Any<RtEntityId>(), Arg.Any<RtDeploymentStateEnum>(), Arg.Any<string?>());
+    }
+
+    [Test]
+    public async Task Failure_OnAdapterPool_WritesErrorStateAndMessage()
+    {
+        GivenAdapterPoolInRepository();
+
+        await _hub.ReportWorkloadDeploymentStatusAsync(new WorkloadDeploymentStatusDto
+        {
+            TenantId = TenantId,
+            WorkloadName = "Adapter Pool",
+            WorkloadRtId = WorkloadRtId,
+            Success = false,
+            StatusMessage = "helm failed"
+        });
+
+        await _repository.Received(1).SetAdapterPoolDeploymentStateAsync(TenantId,
+            Arg.Is<RtEntityId>(id => id.RtId.ToString() == WorkloadRtId),
+            RtDeploymentStateEnum.Error, "helm failed");
+    }
+
     [Test]
     public async Task Success_OnAdapter_WritesDeployedStateAndNoMessage()
     {
