@@ -33,7 +33,8 @@ internal class ReportWorkloadDeploymentProgressAsyncTests : IDisposable
     public ReportWorkloadDeploymentProgressAsyncTests()
     {
         _hub = new OperatorHub(_connectionManager, _repository, _deploymentSiteService, _shutdownState,
-            _eventService, _workloadLifecycleService);
+            _eventService, _workloadLifecycleService,
+            Substitute.For<IAdapterPoolMirrorProvisioningService>());
     }
 
     public void Dispose()

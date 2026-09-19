@@ -25,6 +25,7 @@ public class OperatorHub : Hub, IOperatorHub
     private readonly IShutdownState _shutdownState;
     private readonly ICommunicationEventService _eventService;
     private readonly IWorkloadLifecycleService _workloadLifecycleService;
+    private readonly IAdapterPoolMirrorProvisioningService _adapterPoolMirrorProvisioningService;
 
     /// <summary>
     /// Constructor
@@ -34,7 +35,8 @@ public class OperatorHub : Hub, IOperatorHub
         IDeploymentSiteService poolService,
         IShutdownState shutdownState,
         ICommunicationEventService eventService,
-        IWorkloadLifecycleService workloadLifecycleService)
+        IWorkloadLifecycleService workloadLifecycleService,
+        IAdapterPoolMirrorProvisioningService adapterPoolMirrorProvisioningService)
     {
         _connectionManager = connectionManager;
         _communicationRepository = communicationRepository;
@@ -42,6 +44,7 @@ public class OperatorHub : Hub, IOperatorHub
         _shutdownState = shutdownState;
         _eventService = eventService;
         _workloadLifecycleService = workloadLifecycleService;
+        _adapterPoolMirrorProvisioningService = adapterPoolMirrorProvisioningService;
     }
 
     /// <inheritdoc />
@@ -377,6 +380,15 @@ public class OperatorHub : Hub, IOperatorHub
                         var rtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkAdapterPoolTypeId, workloadRtId);
                         await _communicationRepository.SetAdapterPoolDeploymentStateAsync(
                             status.TenantId, rtEntityId, newState, status.StatusMessage);
+
+                        // 🔴 AB#5271 — the borrowers' mirrors carry this DeploymentState, and THIS is
+                        // where it reaches its terminal value. DeploymentSiteService fans out at the end
+                        // of the deploy REQUEST, which is a moment when the pool is still Pending, so a
+                        // fan-out only there leaves every borrower permanently showing Pending for a
+                        // pool that has been Deployed for hours — and that field is the one thing a
+                        // borrower has to explain a queue that never drains. Observed on a local kind
+                        // cluster: lender Deployed, all three borrowers Pending.
+                        await FanOutAdapterPoolMirrorsAsync(status.TenantId);
                         break;
                     }
                 case RtAdapter:
@@ -421,6 +433,26 @@ public class OperatorHub : Hub, IOperatorHub
         // (same contract as the deployment status reports: a failed state write
         // must not break the hub for the rest of the connection's traffic).
         await _workloadLifecycleService.OnScaleStatusReportedAsync(status);
+    }
+
+    /// <summary>
+    ///     Pushes an adapter pool's freshly persisted state out to the mirrors its borrowers hold
+    ///     (AB#5271). Best effort — a mirror that could not be refreshed must never fail the status
+    ///     report, which is the only path that writes a pool's terminal deployment state.
+    /// </summary>
+    private async Task FanOutAdapterPoolMirrorsAsync(string lenderTenantId)
+    {
+        try
+        {
+            await _adapterPoolMirrorProvisioningService.ProvisionForLenderAsync(lenderTenantId);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex,
+                "[{LenderTenantId}] Could not refresh the lent adapter pool mirrors after a pool status report; " +
+                "borrowers keep the state they have until the next reconcile",
+                lenderTenantId);
+        }
     }
 
     /// <inheritdoc />

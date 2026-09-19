@@ -26,12 +26,17 @@ internal class ReportWorkloadDeploymentStatusAsyncTests : IDisposable
         Substitute.For<ICommunicationEventService>();
     private readonly IWorkloadLifecycleService _workloadLifecycleService =
         Substitute.For<IWorkloadLifecycleService>();
+    /// <summary>AB#5271 — substituted; the fan-out itself is covered by
+    ///     AdapterPoolMirrorProvisioningServiceTests. What this suite asserts is that a pool's
+    ///     terminal status triggers it and an adapter's does not.</summary>
+    private readonly IAdapterPoolMirrorProvisioningService _mirrorProvisioningService =
+        Substitute.For<IAdapterPoolMirrorProvisioningService>();
     private readonly OperatorHub _hub;
 
     public ReportWorkloadDeploymentStatusAsyncTests()
     {
         _hub = new OperatorHub(_connectionManager, _repository, _deploymentSiteService, _shutdownState,
-            _eventService, _workloadLifecycleService);
+            _eventService, _workloadLifecycleService, _mirrorProvisioningService);
     }
 
     public void Dispose()
@@ -104,6 +109,53 @@ internal class ReportWorkloadDeploymentStatusAsyncTests : IDisposable
             RtDeploymentStateEnum.Deployed, null);
         await _repository.DidNotReceive().SetAdapterDeploymentStateAsync(Arg.Any<string>(),
             Arg.Any<RtEntityId>(), Arg.Any<RtDeploymentStateEnum>(), Arg.Any<string?>());
+    }
+
+    /// <summary>
+    ///     🔴 AB#5271 — the borrowers' mirrors carry the lending pool's DeploymentState, and this is
+    ///     where it reaches its terminal value.
+    /// </summary>
+    /// <remarks>
+    ///     The deploy path fans out too, but at the end of the deploy REQUEST — a moment when the
+    ///     pool is still Pending. Without a fan-out here, every borrower shows Pending for a pool
+    ///     that has been Deployed for hours, and that field is the one thing a borrower has to
+    ///     explain a queue that never drains. Observed on a local kind cluster: lender Deployed,
+    ///     all three borrowers Pending.
+    /// </remarks>
+    [Test]
+    public async Task Success_OnAdapterPool_RefreshesTheBorrowersMirrors()
+    {
+        GivenAdapterPoolInRepository();
+
+        await _hub.ReportWorkloadDeploymentStatusAsync(new WorkloadDeploymentStatusDto
+        {
+            TenantId = TenantId,
+            WorkloadName = "Adapter Pool",
+            WorkloadRtId = WorkloadRtId,
+            Success = true
+        });
+
+        await _mirrorProvisioningService.Received(1)
+            .ProvisionForLenderAsync(TenantId, Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>An ordinary adapter is nobody's lender — a full reconcile per adapter report would
+    ///     be a real cost for no answer.</summary>
+    [Test]
+    public async Task Success_OnAdapter_RefreshesNoMirrors()
+    {
+        GivenAdapterInRepository();
+
+        await _hub.ReportWorkloadDeploymentStatusAsync(new WorkloadDeploymentStatusDto
+        {
+            TenantId = TenantId,
+            WorkloadName = "An Adapter",
+            WorkloadRtId = WorkloadRtId,
+            Success = true
+        });
+
+        await _mirrorProvisioningService.DidNotReceive()
+            .ProvisionForLenderAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     [Test]

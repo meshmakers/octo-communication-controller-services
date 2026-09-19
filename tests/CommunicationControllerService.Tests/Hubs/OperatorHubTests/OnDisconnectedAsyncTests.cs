@@ -30,7 +30,8 @@ internal class OnDisconnectedAsyncTests : IDisposable
     public OnDisconnectedAsyncTests()
     {
         _hub = new OperatorHub(_connectionManager, _repository, _deploymentSiteService, _shutdownState,
-            _eventService, _workloadLifecycleService);
+            _eventService, _workloadLifecycleService,
+            Substitute.For<IAdapterPoolMirrorProvisioningService>());
 
         var context = Substitute.For<HubCallerContext>();
         context.ConnectionId.Returns(ConnectionId);
