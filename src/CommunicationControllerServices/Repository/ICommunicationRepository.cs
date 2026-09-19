@@ -99,6 +99,32 @@ public interface ICommunicationRepository
     Task<IReadOnlyCollection<LendableAdapterPool>> GetAdapterPoolsForMirroringAsync(string lenderTenantId);
 
     /// <summary>
+    ///     One adapter pool of <paramref name="lenderTenantId" />, read in full so a BORROWER can
+    ///     inspect it (AB#5271).
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         🔴 <b>The live counterpart of <see cref="GetAdapterPoolsForMirroringAsync" />, and the
+    ///         reason the mirror stays small.</b> Chart, sizing and scale-up policy are the lender's
+    ///         deployment detail: copying them into every borrower's database would multiply the
+    ///         places they can go stale and would persist one tenant's configuration inside another.
+    ///         Read here instead, per request, and never written down.
+    ///     </para>
+    ///     <para>
+    ///         🔴 Returns the pool regardless of its sharing mode, exactly like
+    ///         <see cref="GetAdapterPoolsForMirroringAsync" />: whether the asking tenant may see it
+    ///         is decided by the caller through <c>MayLendAsync</c> against the returned
+    ///         <c>Scope</c>. Reading it here is not permission to show it.
+    ///     </para>
+    ///     <para>
+    ///         Null for every "cannot resolve" case — unparsable id, tenant gone, pool gone, read
+    ///         failed — because the caller answers all four the same way: no pool lends here under
+    ///         that id.
+    ///     </para>
+    /// </remarks>
+    Task<AdapterPoolDetails?> TryGetAdapterPoolDetailsAsync(string lenderTenantId, string adapterPoolRtId);
+
+    /// <summary>
     ///     The <c>LentAdapterPool</c> mirrors currently stored in <paramref name="borrowerTenantId" />.
     /// </summary>
     Task<IReadOnlyCollection<RtLentAdapterPool>> GetLentAdapterPoolMirrorsAsync(string borrowerTenantId);

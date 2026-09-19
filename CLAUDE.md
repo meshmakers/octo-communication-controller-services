@@ -2324,6 +2324,52 @@ values — lender-side deployment detail that changes on every rollout and would
 reason about a release it has no say over. Pool members and the lease queue are not mirrored at all
 (concept §8).
 
+### The borrower's read-only detail view
+
+`GET {borrowerTenantId}/v1/adapterPool/lent/{lenderTenantId}/{adapterPoolRtId}` →
+`LentAdapterPoolDetailsDto`. The other half of the decision above: the fields that are deliberately
+**not** mirrored are still worth seeing, so they are read **live** from the lender per request and
+never written down. That keeps the mirror small and, more importantly, keeps it from becoming a
+second, stale copy of the pool's shape.
+
+🔴 **The route tenant is the BORROWER here** — unlike every other verb on `AdapterPoolController`,
+where it is the lender.
+
+🔴 **The mirror is not consulted and is not trusted.** A tenant can edit entities in its own
+database, so a mirror pointed at an arbitrary pool must not become a way to read it: the pool is
+resolved from the route values and `MayLendAsync` runs against the **lender's own** sharing mode and
+allow-list, exactly as the lease path does. A pool that does not lend here answers **404 with the
+same message** as a pool that does not exist — distinguishing the two would turn the endpoint into a
+pool enumerator, and `AdapterPoolControllerLentDetailsTests` pins that the two messages stay equal.
+
+What it adds over the mirror: `ChartName` / `ChartVersion`, the four `PoolMember*` CPU and memory
+values, `ScaleUpPolicy` + its two thresholds, `StatusMessage`, and this tenant's own
+`MaxConcurrentLeasesPerTenant`. The lending **allow-list** is deliberately absent — it names the
+lender's other customers, and the one answer that concerns the caller is that it is reading the page.
+
+**Members** come back as counts only (`Connected` / `Busy` / `Draining`), never as member ids: a
+member id plus its active-lease tenant would tell one borrower which of the lender's other customers
+is running right now. ⚠️ They are per controller **instance**, the same property
+`IOperatorConnectionManager` has, and `IsPartialView` carries that on the wire so a surface renders
+the caveat instead of remembering it.
+
+**The queue** comes back split — the caller's own entries in full, everyone else's as counts
+(`OtherTenantsWaitingCount`, `OtherTenantsLeasedCount`, `OtherTenantsInRotation`). A pool's queue
+spans tenant databases, so serving the lender's whole queue would hand one borrower the execution
+ids, pipeline names and tenant ids of the lender's other customers. `OtherTenantsInRotation` is the
+number that actually governs the wait, because the pool serves tenants round-robin — and there is
+still no global rank, for the reason `AdapterPoolQueueEntryDto` gives. The split lives in one
+function, `AdapterPoolController.BuildBorrowerQueueView`, rather than in two filters at two call
+sites: every entry either lands in `MyEntries` or contributes only to a count, so a later field
+cannot slip through a third path.
+
+`LentAdapterPoolDetailsDto` is declared in the controller's `Models/`, **not** in
+`Communication.Contracts` — the same interim arrangement `AdapterPoolMemberDto` and
+`ServiceAccountHealthDto` live under. The only consumer is the Refinery Studio over plain HTTP, and
+putting it in the contracts package would make every change to that screen a package lift plus a
+version cascade through every service taking the package. Move it there together with
+`AdapterPoolMemberDto` when a typed .NET client needs it.
+
 **The demo blueprint seeds a mirror, and normally nothing should.** `AdapterPoolBorrowerDemo` needs
 a fixed rtId for its `LentFrom` edge and a controller-generated one has none. It is safe because the
 upsert keys on the `Lender` record: the first reconcile **adopts** the seeded entity rather than
@@ -2332,8 +2378,11 @@ refused deploy with a named reason, which is the loud failure the sample wants.
 
 Tests: `Services/AdapterPoolMirrorProvisioningServiceTests/` (borrower reconcile incl. the
 revocation and unreadable-lender rules, lender fan-out incl. the one-reconcile-per-borrower and
-failing-borrower rules) and the four fan-out cases in
-`Services/DeploymentSiteServiceTests/AdapterPoolDeploymentTests`.
+failing-borrower rules), the four fan-out cases in
+`Services/DeploymentSiteServiceTests/AdapterPoolDeploymentTests`, and
+`Controllers/AdapterPoolControllerLentDetailsTests` (the detail endpoint: the two 404 paths say the
+same thing, the scope resolver is not consulted for an unresolvable pool, members are counted and
+never named, and the queue split incl. its tenant-id casing).
 
 ## Leasing: metrics, alerts and rollout operability (AB#4924 increment 9)
 

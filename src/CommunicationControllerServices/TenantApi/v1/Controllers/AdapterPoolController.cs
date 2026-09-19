@@ -3,6 +3,7 @@ using Asp.Versioning;
 using Duende.IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -36,9 +37,11 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.C
 [ApiVersion("1.0")]
 public class AdapterPoolController : ControllerBase
 {
+    private readonly ICommunicationRepository _communicationRepository;
     private readonly IAdapterPoolConnectionManager _connectionManager;
     private readonly ILeaseSchedulerService _leaseScheduler;
     private readonly ILeaseService _leaseService;
+    private readonly ITenantLendingScopeResolver _lendingScopeResolver;
     private readonly IAdapterPoolMirrorProvisioningService _mirrorProvisioningService;
     private readonly ILogger<AdapterPoolController> _logger;
 
@@ -49,17 +52,23 @@ public class AdapterPoolController : ControllerBase
     /// <param name="leaseScheduler">Owns the pool queue and its rotation.</param>
     /// <param name="leaseService">Grants leases.</param>
     /// <param name="mirrorProvisioningService">Reconciles the borrower-local LentAdapterPool mirrors (AB#5271).</param>
+    /// <param name="communicationRepository">Reads the lending tenant's own pool (AB#5271).</param>
+    /// <param name="lendingScopeResolver">Decides whether a pool lends to the asking tenant (AB#5271).</param>
     /// <param name="logger">Logging object.</param>
     public AdapterPoolController(IAdapterPoolConnectionManager connectionManager,
         ILeaseSchedulerService leaseScheduler,
         ILeaseService leaseService,
         IAdapterPoolMirrorProvisioningService mirrorProvisioningService,
+        ICommunicationRepository communicationRepository,
+        ITenantLendingScopeResolver lendingScopeResolver,
         ILogger<AdapterPoolController> logger)
     {
         _connectionManager = connectionManager;
         _leaseScheduler = leaseScheduler;
         _leaseService = leaseService;
         _mirrorProvisioningService = mirrorProvisioningService;
+        _communicationRepository = communicationRepository;
+        _lendingScopeResolver = lendingScopeResolver;
         _logger = logger;
     }
 
@@ -129,6 +138,180 @@ public class AdapterPoolController : ControllerBase
             "{Removed} removed",
             tenantId, result.TenantsReconciled, result.MirrorsCreatedOrUpdated, result.MirrorsRemoved);
         return Ok(result);
+    }
+
+    /// <summary>
+    ///     Everything the route tenant may know about one adapter pool lent TO it (AB#5271).
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         🔴 <b>The route tenant is the BORROWER here</b>, unlike every other verb on this
+    ///         controller, where it is the lender. The pool is named by the pair that identifies it
+    ///         across the tenant boundary — lending tenant plus its RtId inside that tenant — which
+    ///         is exactly what the borrower's <c>LentAdapterPool</c> mirror carries in its
+    ///         <c>Lender</c> record.
+    ///     </para>
+    ///     <para>
+    ///         🔴 <b>The mirror is not consulted and is not trusted.</b> A tenant can edit entities in
+    ///         its own database, so a mirror pointed at an arbitrary pool must not become a way to
+    ///         read it: the pool is resolved from the route values and <c>MayLendAsync</c> is run
+    ///         against the LENDER's own sharing mode and allow-list, the same check the lease path
+    ///         makes. A pool that does not lend here answers 404 — the same answer as a pool that
+    ///         does not exist, so the endpoint cannot be used to probe for pools.
+    ///     </para>
+    ///     <para>
+    ///         Read-only and live. Chart, sizing and scale-up policy are deliberately absent from the
+    ///         mirror (see <c>LendableAdapterPool</c>) because they are the lender's deployment detail
+    ///         and copying them would persist one tenant's configuration inside another; a borrower
+    ///         that wants them reads the lender's current values through here instead.
+    ///     </para>
+    ///     <para>
+    ///         🔴 The queue is filtered to the caller's own entries plus counts for the rest — see
+    ///         <see cref="LentAdapterPoolQueueDto" />. Serving the lender's whole queue would hand one
+    ///         borrower the pipeline names and tenant ids of the lender's other customers.
+    ///     </para>
+    /// </remarks>
+    /// <param name="lenderTenantId">The tenant that owns the pool.</param>
+    /// <param name="adapterPoolRtId">RtId of the <c>AdapterPool</c> inside that tenant.</param>
+    [HttpGet("lent/{lenderTenantId}/{adapterPoolRtId}")]
+    [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
+    [ProducesResponseType(typeof(LentAdapterPoolDetailsDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetLentPoolDetailsAsync([Required] string lenderTenantId,
+        [Required] string adapterPoolRtId)
+    {
+        var borrowerTenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(borrowerTenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        var details = await _communicationRepository.TryGetAdapterPoolDetailsAsync(lenderTenantId, adapterPoolRtId);
+        if (details is null)
+        {
+            return NotFound(new ErrorResponse
+            {
+                ErrorMessage = $"No adapter pool '{adapterPoolRtId}' of tenant '{lenderTenantId}' lends to " +
+                               $"'{borrowerTenantId}'."
+            });
+        }
+
+        if (!await _lendingScopeResolver.MayLendAsync(lenderTenantId, borrowerTenantId, details.Scope,
+                HttpContext.RequestAborted))
+        {
+            // Deliberately the SAME message and status as an unresolvable pool: distinguishing
+            // "exists but not for you" from "does not exist" would turn this into a way to
+            // enumerate another tenant's pools.
+            _logger.LogInformation(
+                "Tenant '{BorrowerTenantId}' asked for adapter pool {AdapterPoolRtId} of '{LenderTenantId}', " +
+                "which does not lend to it",
+                borrowerTenantId, adapterPoolRtId, lenderTenantId);
+            return NotFound(new ErrorResponse
+            {
+                ErrorMessage = $"No adapter pool '{adapterPoolRtId}' of tenant '{lenderTenantId}' lends to " +
+                               $"'{borrowerTenantId}'."
+            });
+        }
+
+        var members = _connectionManager.GetMembers(lenderTenantId, details.AdapterPoolRtId).ToList();
+        var queue = await _leaseScheduler.GetQueueAsync(lenderTenantId, OctoObjectId.Parse(details.AdapterPoolRtId),
+            HttpContext.RequestAborted);
+
+        return Ok(new LentAdapterPoolDetailsDto
+        {
+            LenderTenantId = details.LenderTenantId,
+            AdapterPoolRtId = details.AdapterPoolRtId,
+            Name = details.Name,
+            Description = details.Description,
+            ChartName = details.ChartName,
+            ChartVersion = details.ChartVersion,
+            DeploymentState = details.DeploymentState,
+            StatusMessage = details.StatusMessage,
+            MinReplicas = details.MinReplicas,
+            MaxReplicas = details.MaxReplicas,
+            PoolMemberCpuRequest = details.PoolMemberCpuRequest,
+            PoolMemberCpuLimit = details.PoolMemberCpuLimit,
+            PoolMemberMemoryRequest = details.PoolMemberMemoryRequest,
+            PoolMemberMemoryLimit = details.PoolMemberMemoryLimit,
+            ScaleUpPolicy = details.ScaleUpPolicy,
+            ScaleUpQueueDepthThreshold = details.ScaleUpQueueDepthThreshold,
+            ScaleUpQueueWaitSeconds = details.ScaleUpQueueWaitSeconds,
+            SharingMode = details.Scope.Mode,
+            MaxConcurrentLeasesPerTenant = details.MaxConcurrentLeasesPerTenant,
+            Members = new LentAdapterPoolMembersDto
+            {
+                Connected = members.Count,
+                Busy = members.Count(m => m.ActiveLease is not null),
+                Draining = members.Count(m => m.IsDraining)
+            },
+            Queue = BuildBorrowerQueueView(queue, borrowerTenantId)
+        });
+    }
+
+    /// <summary>
+    ///     Splits a pool's queue into the asking tenant's own entries and counts for everyone else.
+    /// </summary>
+    /// <remarks>
+    ///     🔴 The split is the privacy boundary of <see cref="GetLentPoolDetailsAsync" />, so it is one
+    ///     function over the whole queue rather than a filter applied at two call sites: every entry
+    ///     either lands in <c>MyEntries</c> or contributes only to a count, and there is no third path
+    ///     for a later field to slip through.
+    /// </remarks>
+    internal static LentAdapterPoolQueueDto BuildBorrowerQueueView(IEnumerable<AdapterPoolQueueEntry> entries,
+        string borrowerTenantId)
+    {
+        var view = new LentAdapterPoolQueueDto();
+        var otherTenants = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in entries)
+        {
+            var isLeased = !string.IsNullOrEmpty(entry.LeasedOnMemberId);
+
+            if (!string.Equals(entry.BorrowerTenantId, borrowerTenantId, StringComparison.OrdinalIgnoreCase))
+            {
+                otherTenants.Add(entry.BorrowerTenantId);
+                if (isLeased)
+                {
+                    view.OtherTenantsLeasedCount++;
+                }
+                else
+                {
+                    view.OtherTenantsWaitingCount++;
+                }
+
+                continue;
+            }
+
+            view.MyEntries.Add(new AdapterPoolQueueEntryDto
+            {
+                ExecutionId = entry.ExecutionId,
+                BorrowerTenantId = entry.BorrowerTenantId,
+                PipelineRtId = entry.PipelineRtId,
+                PipelineName = entry.PipelineName,
+                ExecutionClass = entry.ExecutionClass,
+                QueuedAtUtc = entry.QueuedAtUtc,
+                PositionInTenant = entry.PositionInTenant,
+                TenantsAheadInRotation = entry.TenantsAheadInRotation,
+                LeasedOnMemberId = entry.LeasedOnMemberId,
+                LeaseExpiresAtUtc = entry.LeaseExpiresAtUtc
+            });
+
+            if (isLeased)
+            {
+                view.MyLeasedCount++;
+            }
+            else
+            {
+                view.MyWaitingCount++;
+                if (view.MyOldestQueuedAtUtc is null || entry.QueuedAtUtc < view.MyOldestQueuedAtUtc)
+                {
+                    view.MyOldestQueuedAtUtc = entry.QueuedAtUtc;
+                }
+            }
+        }
+
+        view.OtherTenantsInRotation = otherTenants.Count;
+        return view;
     }
 
     /// <summary>

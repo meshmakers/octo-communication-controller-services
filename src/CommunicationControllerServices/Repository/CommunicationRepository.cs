@@ -283,6 +283,104 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
+    public async Task<AdapterPoolDetails?> TryGetAdapterPoolDetailsAsync(string lenderTenantId,
+        string adapterPoolRtId)
+    {
+        // AB#5271 — the same cross-tenant read as TryGetAdapterPoolLendingScopeAsync, widened from
+        // the lending scope to the whole pool, because a borrower inspecting a lent pool asks about
+        // its shape (chart, sizing, scale-up) and not only about whether it may use it. Same
+        // null-for-everything contract: the caller cannot act differently on "tenant gone" than on
+        // "pool gone".
+        if (!OctoObjectId.TryParse(adapterPoolRtId, out var rtId))
+        {
+            _logger.LogWarning("[{LenderTenantId}] Adapter pool id '{AdapterPoolRtId}' is not a valid RtId",
+                lenderTenantId, adapterPoolRtId);
+            return null;
+        }
+
+        var tenantRepository = await _systemContext.TryFindTenantRepositoryAsync(lenderTenantId);
+        if (tenantRepository is null)
+        {
+            _logger.LogWarning("Lending tenant '{LenderTenantId}' cannot be resolved", lenderTenantId);
+            return null;
+        }
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            var pool = await tenantRepository.GetRtEntityByRtIdAsync<RtAdapterPool>(session, rtId);
+            if (pool is null)
+            {
+                return null;
+            }
+
+            // 🔴 Materialise inside the session. Every attribute list here is a live view over the
+            // entity, and the record outlives the session by construction — it is serialised to an
+            // HTTP caller.
+            return new AdapterPoolDetails(
+                lenderTenantId,
+                pool.RtId.ToString(),
+                // Name is optional on AdapterPool; the RtId is a poor display name but an honest
+                // one, and matches what the mirror shows for the same pool.
+                pool.Name ?? pool.RtId.ToString(),
+                pool.Description,
+                new LendingScope((int)pool.SharingMode, pool.LendingAllowedTenantIds?.ToList()),
+                ReadOptionalInt(pool, nameof(RtAdapterPool.LendingMaxConcurrentLeasesPerTenant)),
+                pool.MinReplicas,
+                pool.MaxReplicas,
+                ReadOptionalString(pool, nameof(RtAdapterPool.PoolMemberCpuRequest)),
+                ReadOptionalString(pool, nameof(RtAdapterPool.PoolMemberCpuLimit)),
+                ReadOptionalString(pool, nameof(RtAdapterPool.PoolMemberMemoryRequest)),
+                ReadOptionalString(pool, nameof(RtAdapterPool.PoolMemberMemoryLimit)),
+                (int)pool.ScaleUpPolicy,
+                pool.ScaleUpQueueDepthThreshold,
+                pool.ScaleUpQueueWaitSeconds,
+                ReadOptionalString(pool, nameof(RtAdapterPool.ChartName)),
+                ReadOptionalString(pool, nameof(RtAdapterPool.ChartVersion)),
+                (int)pool.DeploymentState,
+                ReadOptionalString(pool, nameof(RtAdapterPool.StatusMessage)));
+        }
+        catch (Exception e)
+        {
+            _logger.LogWarning(e, "[{LenderTenantId}] Failed to read adapter pool '{AdapterPoolRtId}'",
+                lenderTenantId, adapterPoolRtId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    ///     Reads an OPTIONAL string attribute without going through the generated property.
+    /// </summary>
+    /// <remarks>
+    ///     Same reason <c>LeaseSchedulerService.ReadPerTenantCap</c> does it: the generated property
+    ///     of an optional attribute throws when the entity was written before the attribute existed,
+    ///     and a pool that predates the sizing fields must render as "chart default" rather than
+    ///     fail the whole request.
+    /// </remarks>
+    private static string? ReadOptionalString(RtAdapterPool pool, string attributeName)
+    {
+        var raw = pool.GetAttributeValueOrDefault(attributeName);
+        return raw is string value && !string.IsNullOrWhiteSpace(value) ? value : null;
+    }
+
+    /// <summary>
+    ///     Reads an OPTIONAL positive int attribute; null when unset, zero, negative or absent.
+    /// </summary>
+    /// <remarks>See <see cref="ReadOptionalString" />. Zero is treated as unset on purpose — the one
+    ///     consumer is a per-tenant lease cap, where "0" is not "no leases allowed" but "never
+    ///     configured", matching <c>LeaseSchedulerService.ReadPerTenantCap</c>.</remarks>
+    private static int? ReadOptionalInt(RtAdapterPool pool, string attributeName)
+    {
+        var raw = pool.GetAttributeValueOrDefault(attributeName);
+        return raw switch
+        {
+            int value and > 0 => value,
+            long value and > 0 => (int)value,
+            _ => null
+        };
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyCollection<LendableAdapterPool>> GetAdapterPoolsForMirroringAsync(
         string lenderTenantId)
     {
