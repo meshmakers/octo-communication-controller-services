@@ -3,6 +3,17 @@ $schema: https://schemas.meshmakers.cloud/ck-migration-meta.schema.json
 # 3.35.0 every bump was additive and rode the engine's schema-only bridge, which is why
 # this file sat at 3.1.1 while the model was already at 3.35.0 ("schema-ahead-of-history").
 # 4.0.0 renames a type, so it needs a real script and the history catches up.
+#
+# 🔴 4.0.1 (AB#5271) deliberately adds NO entry, and this id deliberately stays at 4.0.0.
+# That is the documented "schema-ahead-of-history" state above, not an oversight: the history
+# names the last version that needed a script. 4.0.1 adds the LentAdapterPool type and the
+# LentFrom association and REMOVES Adapter.LentFromTenantId / .LentFromAdapterPoolRtId — and the
+# removal is precisely what cannot be scripted. The association's target is a mirror the
+# Communication Controller provisions at run time, so its RtId does not exist while a migration
+# runs; there is nothing to convert the two orphaned strings into. The relationship is
+# re-established by the mirror sync plus a re-link of the adapter, and a tenant on 4.0.0 rides the
+# post-chain schema-only bridge, leaving the two values as dead data. Verified on a local tenant
+# that was carrying 4.0.0.
 ckModelId: System.Communication-4.0.0
 migrations:
   - fromVersion: "3.0.1"
