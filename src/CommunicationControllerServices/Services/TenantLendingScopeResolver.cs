@@ -21,6 +21,9 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
     private readonly ConcurrentDictionary<string, CacheEntry> _cache =
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>child → parent for the whole tree; see <see cref="ResolveParentMapAsync" />.</summary>
+    private volatile ParentMapEntry? _parentMap;
+
     /// <inheritdoc />
     public async Task<bool> MayLendAsync(string lenderTenantId, string borrowerTenantId,
         LendingScope scope, CancellationToken cancellationToken = default)
@@ -246,16 +249,107 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
         }
     }
 
+    /// <summary>
+    ///     The tenant's parent, or null when it has none.
+    /// </summary>
+    /// <remarks>
+    ///     🔴 <b>This cannot be answered from <c>GetAllTenantsAsync</c> on the system context, and
+    ///     doing so was a silent bug (AB#5271).</b> A tenant's registry entry lives in its
+    ///     <b>parent's</b> database, so that call returns only the system tenant's own direct
+    ///     children: a grandchild is not in it at all, the lookup missed, and every tenant below the
+    ///     first level was reported as having no parent. Nothing failed loudly — ancestors and
+    ///     siblings simply came back empty, so a borrower two levels down was shown no lent pools
+    ///     and the upward-escalation guard in <see cref="WalkAsync" /> silently had nothing to
+    ///     subtract. The unit tests did not catch it because they substitute the registry.
+    ///
+    ///     <para>
+    ///     The answer therefore has to come from the same mechanism the descendant walk uses:
+    ///     <c>GetDirectChildTenantsAsync</c>, downwards from the roots, recording child → parent on
+    ///     the way. See <see cref="ResolveParentMapAsync" />.
+    ///     </para>
+    /// </remarks>
     private async Task<string?> ResolveParentAsync(string tenantId)
     {
-        using var session = await systemContext.GetAdminSessionAsync().ConfigureAwait(false);
-        session.StartTransaction();
-        var all = await systemContext.GetAllTenantsAsync(session).ConfigureAwait(false);
-        await session.CommitTransactionAsync().ConfigureAwait(false);
+        var parents = await ResolveParentMapAsync().ConfigureAwait(false);
+        return parents.GetValueOrDefault(tenantId);
+    }
 
-        return all.Items
-            .FirstOrDefault(t => string.Equals(t.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
-            ?.ParentTenantId;
+    /// <summary>
+    ///     child → parent for the whole tenant tree, built by walking it downwards and cached for
+    ///     <see cref="CacheDuration" />.
+    /// </summary>
+    /// <remarks>
+    ///     One traversal serves every ancestor and sibling question, which is what makes it
+    ///     affordable: <see cref="ResolveAncestorsAsync" /> would otherwise re-walk the tree once
+    ///     per level. Same cycle guard as the descendant walk — a tenant already seen is not
+    ///     enqueued again, so a corrupted registry degrades to a partial map instead of looping.
+    ///     A child whose context cannot be resolved is still recorded (its parent is known) but its
+    ///     own subtree is not walked, exactly as in <see cref="WalkAsync" />.
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<string, string>> ResolveParentMapAsync()
+    {
+        if (_parentMap is { IsExpired: false } cached)
+        {
+            return cached.Parents;
+        }
+
+        var parents = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            using (var session = await systemContext.GetAdminSessionAsync().ConfigureAwait(false))
+            {
+                session.StartTransaction();
+                var roots = await systemContext.GetAllTenantsAsync(session).ConfigureAwait(false);
+                await session.CommitTransactionAsync().ConfigureAwait(false);
+
+                var queue = new Queue<string>();
+                foreach (var root in roots.Items)
+                {
+                    // A root's own ParentTenantId is whatever the system registry recorded — it may
+                    // legitimately be null. Only the edges discovered below are added to the map.
+                    if (visited.Add(root.TenantId))
+                    {
+                        queue.Enqueue(root.TenantId);
+                    }
+                }
+
+                while (queue.Count > 0)
+                {
+                    var tenantId = queue.Dequeue();
+                    var context = await systemContext.TryFindTenantContextAsync(tenantId).ConfigureAwait(false);
+                    if (context is null)
+                    {
+                        continue;
+                    }
+
+                    using var childSession = await context.GetAdminSessionAsync().ConfigureAwait(false);
+                    childSession.StartTransaction();
+                    var children = await context.GetDirectChildTenantsAsync(childSession).ConfigureAwait(false);
+                    await childSession.CommitTransactionAsync().ConfigureAwait(false);
+
+                    foreach (var child in children.Items)
+                    {
+                        parents[child.TenantId] = tenantId;
+                        if (visited.Add(child.TenantId))
+                        {
+                            queue.Enqueue(child.TenantId);
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            // A partial map is still better than none: the caller degrades to "no ancestors", which
+            // is the conservative direction for every consumer — a narrower lending scope and a
+            // borrower shown fewer pools, never more.
+            Logger.Warn(e, "Could not build the tenant parent map; ancestor and sibling resolution will be partial");
+        }
+
+        _parentMap = new ParentMapEntry(parents, DateTimeOffset.UtcNow.Add(CacheDuration));
+        return parents;
     }
 
     private static IReadOnlyCollection<string> Intersect(IReadOnlyCollection<string> resolved,
@@ -273,6 +367,15 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
     private static IReadOnlyCollection<string> EmptySet() => new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     private readonly record struct CacheEntry(HashSet<string> Tenants, DateTimeOffset ExpiresAt)
+    {
+        public bool IsExpired => DateTimeOffset.UtcNow >= ExpiresAt;
+    }
+
+    /// <summary>
+    ///     A class rather than a struct: the field holding it is <c>volatile</c>, which C# does not
+    ///     allow for a value type, and a reference swap is what makes the refresh atomic.
+    /// </summary>
+    private sealed record ParentMapEntry(IReadOnlyDictionary<string, string> Parents, DateTimeOffset ExpiresAt)
     {
         public bool IsExpired => DateTimeOffset.UtcNow >= ExpiresAt;
     }

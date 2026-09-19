@@ -55,11 +55,22 @@ internal class TenantLendingScopeResolverTests
             _systemContext.TryFindTenantContextAsync(tenant).Returns(_ => tenantContext);
         }
 
-        var allTenants = _parents.Select(kvp => new OctoTenant(kvp.Key, $"db_{kvp.Key}", kvp.Value)).ToList();
+        // 🔴 ONLY the roots, because that is all the real system registry holds (AB#5271).
+        //
+        // A tenant's registry entry lives in its PARENT's database, so `GetAllTenantsAsync` on the
+        // system context returns the system tenant's own direct children and nothing deeper. This
+        // fake used to return every tenant with its parent filled in, which made the resolver look
+        // correct while it was reading a table that, in production, does not contain a grandchild at
+        // all — every tenant below the first level resolved to "no parent", so it had no ancestors
+        // and no siblings, silently. `AGrandchildResolvesItsAncestorsAndSiblings` is the test that
+        // fails if the parent lookup goes back to this call.
+        var roots = _parents.Where(kvp => kvp.Value is null)
+            .Select(kvp => new OctoTenant(kvp.Key, $"db_{kvp.Key}", null))
+            .ToList();
         var adminSession = Substitute.For<IOctoAdminSession>();
         _systemContext.GetAdminSessionAsync().Returns(adminSession);
         _systemContext.GetAllTenantsAsync(adminSession, Arg.Any<int?>(), Arg.Any<int?>())
-            .Returns(_ => CreateResultSet(allTenants));
+            .Returns(_ => CreateResultSet(roots));
     }
 
     private ITenantContext CreateContext(string tenantId)
@@ -136,6 +147,58 @@ internal class TenantLendingScopeResolverTests
         var result = await _resolver.ResolveLendableTenantsAsync("childA", DescendantsAndSiblings());
 
         await Assert.That(result).DoesNotContain(Lender);
+    }
+
+    /// <summary>
+    ///     🔴 AB#5271 — the candidate set for a tenant TWO levels down.
+    /// </summary>
+    /// <remarks>
+    ///     This is the shape the feature actually ships into (octosystem → accounting →
+    ///     meshmakers), and it is the one the resolver used to get wrong: the parent was looked up
+    ///     in <c>GetAllTenantsAsync</c> on the system context, which holds only the system tenant's
+    ///     own direct children. A grandchild is not in that table at all, so the lookup missed and
+    ///     the tenant resolved to "no parent" — no ancestors, no siblings, no lent pools, and no
+    ///     error anywhere. Nothing else in this file fails if the parent lookup regresses to that
+    ///     call; this test does.
+    /// </remarks>
+    [Test]
+    public async Task AGrandchildResolvesItsAncestorsAndSiblings()
+    {
+        GivenTree(
+            ("root", null),
+            ("accounting", "root"),
+            ("meshmakers", "accounting"),
+            ("gastroacker", "accounting"));
+
+        var candidates = await _resolver.ResolveCandidateLenderTenantsAsync("meshmakers");
+
+        await Assert.That(candidates).Contains("accounting");
+        await Assert.That(candidates).Contains("root");
+        await Assert.That(candidates).Contains("gastroacker");
+        await Assert.That(candidates).DoesNotContain("meshmakers");
+    }
+
+    /// <summary>
+    ///     The same depth, from the lending side: the ancestor subtraction that keeps a registry
+    ///     cycle from turning into an upward escalation needs a real ancestor chain, and at depth
+    ///     two it used to have none — so the guard was in the code and not in force.
+    /// </summary>
+    [Test]
+    public async Task AGrandchildsAncestorChainIsAvailableToTheUpwardGuard()
+    {
+        GivenTree(
+            ("root", null),
+            ("accounting", "root"),
+            ("meshmakers", "accounting"));
+
+        // The corrupted edge: meshmakers lists its own grandparent as a child.
+        _children["meshmakers"].Add("root");
+
+        var lendable = await _resolver.ResolveLendableTenantsAsync("meshmakers",
+            new LendingScope(LendingScope.Descendants, null));
+
+        await Assert.That(lendable).DoesNotContain("root");
+        await Assert.That(lendable).DoesNotContain("accounting");
     }
 
     [Test]
