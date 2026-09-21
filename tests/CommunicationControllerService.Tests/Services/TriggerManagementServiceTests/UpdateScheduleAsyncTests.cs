@@ -222,4 +222,102 @@ internal class UpdateScheduleAsyncTests : TriggerManagementServiceTestsBase
             .ScheduleRecurringSendAsync(Arg.Any<LifecycleWakeMessage>(), Arg.Any<string>(),
                 Arg.Any<RecurringSchedulingOptions>());
     }
+
+    /// <summary>
+    ///     AB#5278: a cron trigger whose pipeline runs on a Leased adapter is NOT scheduled onto the
+    ///     adapter's own trigger queue — a leased adapter has no process to consume it, and a pool
+    ///     member holding a lease must not consume it either (that run would bypass the lease
+    ///     bookkeeping). The tick goes to the controller's durable lease-trigger queue instead, same
+    ///     cron and same schedule group, and no co-wake is registered: there is nothing to wake.
+    /// </summary>
+    [Test]
+    public async Task UpdateScheduleAsync_LeasedAdapter_SchedulesTheTickOnTheLeaseQueueInsteadOfTheAdapterQueue()
+    {
+        // Arrange
+        var trigger = RtEntityCreator.CreatePipelineTrigger(cronExpression: "0 * * * *");
+        var pipeline = RtEntityCreator.CreatePipeline();
+        var adapter = RtEntityCreator.CreateAdapter();
+        adapter.LifecycleMode = RtLifecycleModeEnum.Leased;
+
+        CommunicationRepository.GetTriggersAndPipelinesAsync(TenantId)
+            .Returns(new Dictionary<RtPipelineTrigger, IList<RtPipeline>>
+            {
+                { trigger, new List<RtPipeline> { pipeline } }
+            });
+        CommunicationRepository.GetAdapterByPipelineAsync(TenantId,
+                Arg.Is<RtEntityId>(id => id.RtId == pipeline.RtId))
+            .Returns(adapter);
+
+        // Act
+        await TriggerManagementService.UpdateScheduleAsync(TenantId);
+
+        // Assert
+        using var _ = Assert.Multiple();
+
+        var expectedLeaseAddress = $"queue:{PipelineQueueNames.LeaseTriggerQueue.ToLower()}";
+        await DistributionEventHubService.Received(1)
+            .ScheduleRecurringSendAsync(
+                Arg.Is<LeaseTriggerMessage>(m =>
+                    m.TenantId == TenantId
+                    && m.PipelineRtId == pipeline.RtId.ToString()
+                    && m.TriggerRtId == trigger.RtId.ToString()),
+                expectedLeaseAddress,
+                Arg.Is<RecurringSchedulingOptions>(o =>
+                    o.CronExpression == trigger.CronExpression
+                    && o.ScheduleGroup == $"pipelineTrigger-{TenantId}"));
+
+        // 🔴 The adapter-side schedule is the defect: a message on a queue nobody may consume.
+        await DistributionEventHubService.DidNotReceiveWithAnyArgs()
+            .ScheduleRecurringSendAsync(Arg.Any<PipelineTriggerSchedule>(), Arg.Any<string>(),
+                Arg.Any<RecurringSchedulingOptions>());
+        await DistributionEventHubService.DidNotReceiveWithAnyArgs()
+            .ScheduleRecurringSendAsync(Arg.Any<LifecycleWakeMessage>(), Arg.Any<string>(),
+                Arg.Any<RecurringSchedulingOptions>());
+
+        await CommunicationRepository.Received(1).SetPipelineTriggerDeploymentStateAsync(
+            TenantId, trigger.RtId, RtDeploymentStateEnum.Deployed);
+    }
+
+    /// <summary>
+    ///     AB#5278: one trigger, two pipelines on two adapters of different modes — each pipeline is
+    ///     routed by ITS adapter, not by the trigger.
+    /// </summary>
+    [Test]
+    public async Task UpdateScheduleAsync_MixedAdapterModes_RoutesEachPipelineByItsOwnAdapter()
+    {
+        // Arrange
+        var trigger = RtEntityCreator.CreatePipelineTrigger(cronExpression: "0 * * * *");
+        var dedicatedPipeline = RtEntityCreator.CreatePipeline();
+        var leasedPipeline = RtEntityCreator.CreatePipeline();
+        var dedicated = RtEntityCreator.CreateAdapter();
+        dedicated.LifecycleMode = RtLifecycleModeEnum.AlwaysOn;
+        var leased = RtEntityCreator.CreateAdapter();
+        leased.LifecycleMode = RtLifecycleModeEnum.Leased;
+
+        CommunicationRepository.GetTriggersAndPipelinesAsync(TenantId)
+            .Returns(new Dictionary<RtPipelineTrigger, IList<RtPipeline>>
+            {
+                { trigger, new List<RtPipeline> { dedicatedPipeline, leasedPipeline } }
+            });
+        CommunicationRepository.GetAdapterByPipelineAsync(TenantId,
+                Arg.Is<RtEntityId>(id => id.RtId == dedicatedPipeline.RtId))
+            .Returns(dedicated);
+        CommunicationRepository.GetAdapterByPipelineAsync(TenantId,
+                Arg.Is<RtEntityId>(id => id.RtId == leasedPipeline.RtId))
+            .Returns(leased);
+
+        // Act
+        await TriggerManagementService.UpdateScheduleAsync(TenantId);
+
+        // Assert
+        using var _ = Assert.Multiple();
+        await DistributionEventHubService.Received(1)
+            .ScheduleRecurringSendAsync(Arg.Any<PipelineTriggerSchedule>(),
+                Arg.Is<string>(a => a.Contains(dedicatedPipeline.RtId.ToString().ToLower())),
+                Arg.Any<RecurringSchedulingOptions>());
+        await DistributionEventHubService.Received(1)
+            .ScheduleRecurringSendAsync(
+                Arg.Is<LeaseTriggerMessage>(m => m.PipelineRtId == leasedPipeline.RtId.ToString()),
+                Arg.Any<string>(), Arg.Any<RecurringSchedulingOptions>());
+    }
 }

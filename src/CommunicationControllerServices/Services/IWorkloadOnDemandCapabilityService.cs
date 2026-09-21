@@ -38,6 +38,25 @@ public interface IWorkloadOnDemandCapabilityService
         IReadOnlyList<NodeDescriptorDto>? nodeDescriptors);
 
     /// <summary>
+    /// AB#5278: the <c>Leased</c> evaluation. Stricter than <see cref="EvaluateAsync"/>: besides the
+    /// process-bound triggers (which a borrowed process can never fire) it refuses the triggers that
+    /// are wake-capable on a dedicated adapter but cannot produce a lease, because their message never
+    /// reaches the controller — <c>FromHttpRequest</c> (the pool has no ingress yet, AB#5258) and
+    /// <c>FromPipelineDataEvent</c> (adapter-to-adapter over the broker, AB#5231). A cron
+    /// <c>PipelineTrigger</c> and an explicit <c>ExecutePipeline</c> are the two ways work reaches a
+    /// leased adapter. Explicit beats silent: a pipeline that passed this gate runs on a lease; one
+    /// that did not is refused here instead of never running.
+    /// </summary>
+    Task<OnDemandCapabilityResult> EvaluateForLeaseAsync(string tenantId, RtEntityId adapterRtEntityId);
+
+    /// <summary>
+    /// AB#5278: the qualified names of the trigger nodes in a definition that cannot produce a lease
+    /// (see <see cref="EvaluateForLeaseAsync"/>). Empty = every trigger of the pipeline reaches the
+    /// controller. Independent of process-boundness, which <see cref="GetProcessBoundNodes"/> answers.
+    /// </summary>
+    IReadOnlyList<string> GetLeaseIncapableNodes(string? pipelineDefinition);
+
+    /// <summary>
     /// Evaluates and persists OnDemandCapable / OnDemandBlockingReasons on the workload
     /// entity for display in the Studio. Best-effort: never throws.
     /// </summary>

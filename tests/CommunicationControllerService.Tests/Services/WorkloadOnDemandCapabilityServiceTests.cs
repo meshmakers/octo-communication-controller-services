@@ -352,4 +352,112 @@ internal class WorkloadOnDemandCapabilityServiceTests
     }
 
     #endregion
+
+    // ---- AB#5278: the Leased evaluation -----------------------------------------------------
+
+    private const string CronOnlyDefinition =
+        """
+        triggers:
+          - type: FromPipelineTriggerEvent@1
+        """;
+
+    private const string HttpAndCronDefinition =
+        """
+        triggers:
+          - type: FromPipelineTriggerEvent@1
+          - type: FromHttpRequest@2
+        """;
+
+    private const string DataEventDefinition =
+        """
+        triggers:
+          - type: FromPipelineDataEvent@1
+        transformations:
+          - type: ToPipelineDataEvent@1
+        """;
+
+    [Test]
+    public async Task EvaluateForLeaseAsync_CronAndExecuteTriggersOnly_IsCapable()
+    {
+        GivenPipelines(CreatePipeline("nightly", CronOnlyDefinition),
+            CreatePipeline("manual", "triggers:\n  - type: FromExecutePipelineCommand@1"));
+
+        var result = await _service.EvaluateForLeaseAsync(TenantId, _rtAdapter.ToRtEntityId());
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.IsCapable).IsTrue();
+        await Assert.That(result.BlockingReasons).IsEmpty();
+    }
+
+    /// <summary>
+    ///     🔴 The defect this gate exists for: FromHttpRequest is wake-capable on a dedicated adapter
+    ///     (the activator holds the request), so EvaluateAsync accepts it — and on a Leased adapter
+    ///     the pipeline then deploys and never runs. The lease evaluation must name it.
+    /// </summary>
+    [Test]
+    public async Task EvaluateForLeaseAsync_HttpTrigger_IsWakeCapableButNotLeasable()
+    {
+        GivenPipelines(CreatePipeline("api", HttpAndCronDefinition));
+
+        var onDemand = await _service.EvaluateAsync(TenantId, _rtAdapter.ToRtEntityId());
+        var lease = await _service.EvaluateForLeaseAsync(TenantId, _rtAdapter.ToRtEntityId());
+
+        using var _ = Assert.Multiple();
+        await Assert.That(onDemand.IsCapable).IsTrue();
+        await Assert.That(lease.IsCapable).IsFalse();
+        await Assert.That(lease.BlockingReasons).HasSingleItem();
+        await Assert.That(lease.BlockingReasons[0]).Contains("'api'");
+        await Assert.That(lease.BlockingReasons[0]).Contains("FromHttpRequest@2");
+        await Assert.That(lease.BlockingReasons[0]).Contains("AB#5258");
+    }
+
+    [Test]
+    public async Task EvaluateForLeaseAsync_DataEventTrigger_IsNotLeasable_ButTheSenderNodeIsNot()
+    {
+        GivenPipelines(CreatePipeline("chain", DataEventDefinition));
+
+        var lease = await _service.EvaluateForLeaseAsync(TenantId, _rtAdapter.ToRtEntityId());
+
+        using var _ = Assert.Multiple();
+        await Assert.That(lease.IsCapable).IsFalse();
+        // The receiving trigger is the problem; ToPipelineDataEvent is an ordinary transformation.
+        await Assert.That(lease.BlockingReasons).HasSingleItem();
+        await Assert.That(lease.BlockingReasons[0]).Contains("FromPipelineDataEvent@1");
+        await Assert.That(lease.BlockingReasons[0]).DoesNotContain("ToPipelineDataEvent");
+    }
+
+    [Test]
+    public async Task EvaluateForLeaseAsync_ProcessBoundTrigger_IsListedTheSameWayAsForOnDemand()
+    {
+        GivenPipelines(CreatePipeline("poll", "triggers:\n  - type: FromPolling@1"));
+
+        var lease = await _service.EvaluateForLeaseAsync(TenantId, _rtAdapter.ToRtEntityId());
+
+        using var _ = Assert.Multiple();
+        await Assert.That(lease.IsCapable).IsFalse();
+        await Assert.That(lease.BlockingReasons).HasSingleItem();
+        await Assert.That(lease.BlockingReasons[0]).Contains("process-bound trigger 'FromPolling@1'");
+    }
+
+    [Test]
+    [Arguments("FromHttpRequest@1")]
+    [Arguments("fromhttprequest@2")]
+    [Arguments("FromPipelineDataEvent@1")]
+    public async Task GetLeaseIncapableNodes_NamesTheAdapterBoundTriggers(string nodeType)
+    {
+        var nodes = _service.GetLeaseIncapableNodes($"triggers:\n  - type: {nodeType}");
+
+        await Assert.That(nodes).IsEquivalentTo([nodeType]);
+    }
+
+    [Test]
+    [Arguments("FromPipelineTriggerEvent@1")]
+    [Arguments("FromExecutePipelineCommand@1")]
+    [Arguments("FromPolling@1")]
+    public async Task GetLeaseIncapableNodes_LeavesEveryOtherTriggerAlone(string nodeType)
+    {
+        var nodes = _service.GetLeaseIncapableNodes($"triggers:\n  - type: {nodeType}");
+
+        await Assert.That(nodes).IsEmpty();
+    }
 }

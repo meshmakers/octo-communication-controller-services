@@ -265,6 +265,11 @@ try
             // so this is a routed (durable, named) endpoint — not a temporary command queue.
             c.AddRoutedEventConsumer<LifecycleWakeConsumer, LifecycleWakeMessage>(
                 PipelineQueueNames.LifecycleWakeQueue);
+            // AB#5278: durable lease-trigger queue. Cron schedules of pipelines on Leased adapters
+            // land here instead of on the adapter's own trigger queue (which nobody consumes) and
+            // become queued work items. Durable for the same reason as the co-wake queue above.
+            c.AddRoutedEventConsumer<LeaseTriggerConsumer, LeaseTriggerMessage>(
+                PipelineQueueNames.LeaseTriggerQueue);
         });
 
     builder.Services.AddRuntimeEngine()

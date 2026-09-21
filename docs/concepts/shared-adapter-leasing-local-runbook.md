@@ -954,6 +954,14 @@ in RabbitMQ afterwards (queue present, 0 consumers). Two consequences, neither y
 2. Between leases the trigger events accumulate in that queue and arrive as a **burst** at the next
    lease. A neighbouring queue in the same estate was holding 14 such messages.
 
+**Half of this is closed by AB#5278 (2026-09-21):** a cron trigger of a pipeline on a `Leased`
+adapter is no longer scheduled onto the adapter's queue at all — the controller schedules it onto
+its own `octo::com-controller::lease-trigger` queue and enqueues a lease per tick (concept §2c).
+After the next `DeployTriggers` the queue observed above receives nothing; consequence 1 and 2 need
+a message to exist. What remains is the member's registration itself: it still declares and binds
+the borrower's trigger queue during a lease and leaves it behind on release — harmless while empty,
+still worth removing.
+
 ### 11.7 🔴 The scheduler tick is the throughput ceiling
 
 Intervals between the six grants: **5.136 / 5.115 / 5.112 / 5.116 / 5.124 s** — exactly

@@ -1711,11 +1711,13 @@ internal class DeploymentSiteService : IDeploymentSiteService
             return;
         }
 
-        // Same gate as OnDemand, and for the same reason: a lease is handed to a process BETWEEN
-        // work items, so a process-bound trigger — which only fires while a process of its own is
-        // running — can never be served by one. Reuses the AB#4984 classifier rather than
-        // duplicating the trigger list, so the two modes can never drift apart.
-        var capability = await _onDemandCapabilityService.EvaluateAsync(tenantId,
+        // The OnDemand gate plus one more (AB#5278): a lease is handed to a process BETWEEN work
+        // items, so a process-bound trigger — which only fires while a process of its own is
+        // running — can never be served by one; and a trigger whose message goes adapter-bound
+        // (FromHttpRequest, FromPipelineDataEvent) never reaches the controller, so nothing turns
+        // it into a lease and the pipeline would simply never run. Built on the AB#4984 classifier
+        // rather than a second trigger list, so the two modes cannot drift apart.
+        var capability = await _onDemandCapabilityService.EvaluateForLeaseAsync(tenantId,
             new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, adapter.RtId));
         if (!capability.IsCapable)
         {

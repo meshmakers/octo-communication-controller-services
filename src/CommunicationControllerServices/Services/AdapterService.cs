@@ -1059,13 +1059,27 @@ internal class AdapterService(
         }
 
         var processBoundNodes = onDemandCapabilityService.GetProcessBoundNodes(pipelineDefinition, nodeDescriptors);
+        if (workload.LifecycleMode == RtLifecycleModeEnum.Leased)
+        {
+            // AB#5278: a leased adapter additionally refuses the triggers that never reach the
+            // controller — deploying them would succeed and the pipeline would never run.
+            var blocking = processBoundNodes
+                .Concat(onDemandCapabilityService.GetLeaseIncapableNodes(pipelineDefinition))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (blocking.Count > 0)
+            {
+                throw AdapterServiceException.PipelineNotLeasable(tenantId, pipelineRtEntityId, workload.Name,
+                    blocking);
+            }
+
+            return;
+        }
+
         if (processBoundNodes.Count > 0)
         {
-            throw workload.LifecycleMode == RtLifecycleModeEnum.Leased
-                ? AdapterServiceException.PipelineNotLeasable(tenantId, pipelineRtEntityId, workload.Name,
-                    processBoundNodes)
-                : AdapterServiceException.PipelineNotOnDemandCompatible(tenantId, pipelineRtEntityId,
-                    workload.Name, processBoundNodes);
+            throw AdapterServiceException.PipelineNotOnDemandCompatible(tenantId, pipelineRtEntityId,
+                workload.Name, processBoundNodes);
         }
     }
 

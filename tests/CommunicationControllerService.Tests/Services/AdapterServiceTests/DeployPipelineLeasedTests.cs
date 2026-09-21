@@ -52,12 +52,12 @@ internal class DeployPipelineLeasedTests : AdapterServiceTestsBase
           - type: FromPolling@1
         """;
 
+    // AB#5278: an explicit ExecutePipeline is one of the two ways work reaches a leased adapter;
+    // an HTTP trigger is refused by the lease gate before elevation is even looked at.
     private const string ElevatedDefinition =
         """
         triggers:
-          - type: FromHttpRequest@2
-            method: Post
-            path: /elevated
+          - type: FromExecutePipelineCommand@1
         transformations:
           - type: GetRtEntitiesById@1
             identity: System
@@ -274,7 +274,7 @@ internal class DeployPipelineLeasedTests : AdapterServiceTestsBase
     [Test]
     public async Task DeployPipelineAsync_LeasedAdapter_ElevatedNode_UnauthorizedCaller_IsRejectedBeforeAnyWrite()
     {
-        GivenPoolMember([Descriptor("FromHttpRequest", 2, isTrigger: true, executionClass: Interactive)]);
+        GivenPoolMember([Descriptor("FromExecutePipelineCommand", 1, isTrigger: true, executionClass: Interactive)]);
         var (adapter, pipeline) = ArrangeLeasedPipeline(pipelineDefinition: null);
         SetCaller(withUserManagementRole: false);
 
@@ -295,7 +295,7 @@ internal class DeployPipelineLeasedTests : AdapterServiceTestsBase
     [Test]
     public async Task DeployPipelineAsync_LeasedAdapter_ElevatedNode_AuthorizedCaller_IsAccepted()
     {
-        GivenPoolMember([Descriptor("FromHttpRequest", 2, isTrigger: true, executionClass: Interactive)]);
+        GivenPoolMember([Descriptor("FromExecutePipelineCommand", 1, isTrigger: true, executionClass: Interactive)]);
         var (adapter, pipeline) = ArrangeLeasedPipeline(pipelineDefinition: null);
         SetCaller(withUserManagementRole: true);
 
@@ -342,6 +342,55 @@ internal class DeployPipelineLeasedTests : AdapterServiceTestsBase
         await Assert.That(ex!.Message).Contains("Leased");
         await CommunicationRepository.DidNotReceiveWithAnyArgs().SetPipelineDefinitionAsync(
             Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<string>(), Arg.Any<int>());
+    }
+
+    /// <summary>
+    ///     AB#5278: the same gate refuses a trigger that is wake-capable on a dedicated adapter but
+    ///     never reaches the controller — deploying it to a Leased adapter would succeed and the
+    ///     pipeline would never run. HTTP is the case that was found in the field (Document Ingest).
+    /// </summary>
+    [Test]
+    public async Task DeployPipelineAsync_LeasedAdapter_WithAnHttpTrigger_IsRejectedBecauseNothingCanLeaseIt()
+    {
+        GivenPoolMember([Descriptor("FromHttpRequest", 2, isTrigger: true, executionClass: Interactive,
+            requiresRunningProcess: false)]);
+        var (adapter, pipeline) = ArrangeLeasedPipeline(pipelineDefinition: null);
+
+        var ex = await Assert.ThrowsAsync<Exception>(async () =>
+            await AdapterService.DeployPipelineAsync(TenantId, adapter.ToRtEntityId(), pipeline.ToRtEntityId(),
+                """
+                triggers:
+                  - type: FromHttpRequest@2
+                """));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(ex!).IsTypeOf<AdapterServiceException>();
+        await Assert.That(ex!.Message).Contains("FromHttpRequest@2");
+        await Assert.That(ex!.Message).Contains("Leased");
+        await Assert.That(ex!.Message).Contains("AB#5278");
+        await CommunicationRepository.DidNotReceiveWithAnyArgs().SetPipelineDefinitionAsync(
+            Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<string>(), Arg.Any<int>());
+    }
+
+    /// <summary>
+    ///     AB#5278, the positive half: a cron-triggered pipeline is exactly what a leased adapter is
+    ///     for, and the gate lets it through.
+    /// </summary>
+    [Test]
+    public async Task DeployPipelineAsync_LeasedAdapter_WithACronTrigger_IsAccepted()
+    {
+        GivenPoolMember([Descriptor("FromPipelineTriggerEvent", 1, isTrigger: true, executionClass: Batch,
+            requiresRunningProcess: false)]);
+        var (adapter, pipeline) = ArrangeLeasedPipeline(pipelineDefinition: null);
+
+        await AdapterService.DeployPipelineAsync(TenantId, adapter.ToRtEntityId(), pipeline.ToRtEntityId(),
+            """
+            triggers:
+              - type: FromPipelineTriggerEvent@1
+            """);
+
+        await CommunicationRepository.Received(1).SetPipelineDefinitionAsync(TenantId,
+            Arg.Is<RtEntityId>(id => id.RtId == pipeline.RtId), Arg.Any<string>(), Arg.Any<int>());
     }
 
     [Test]

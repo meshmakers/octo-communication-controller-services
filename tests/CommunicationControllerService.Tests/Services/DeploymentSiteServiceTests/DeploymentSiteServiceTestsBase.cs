@@ -88,6 +88,9 @@ internal abstract class PoolServiceTestsBase
         OnDemandCapabilityService
             .EvaluateAsync(Arg.Any<string>(), Arg.Any<RtEntityId>())
             .Returns(new OnDemandCapabilityResult(true, []));
+        OnDemandCapabilityService
+            .EvaluateForLeaseAsync(Arg.Any<string>(), Arg.Any<RtEntityId>())
+            .Returns(new OnDemandCapabilityResult(true, []));
         PoolCachePublish = Substitute.For<IDeploymentSiteCachePublish>();
         DeploymentSiteTenant = new DeploymentSiteTenant(PoolCachePublish, TenantId);
 

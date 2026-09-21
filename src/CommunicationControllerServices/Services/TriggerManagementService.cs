@@ -284,6 +284,50 @@ internal class TriggerManagementService(
 
                     foreach (var meshPipeline in pipelineTriggerKeyValue.Value)
                     {
+                        // Resolved first because it decides WHERE the cron tick goes (AB#5278):
+                        // a dedicated adapter consumes its own per-pipeline trigger queue, a Leased
+                        // adapter has no process to consume anything and gets its ticks through the
+                        // controller instead.
+                        var executingAdapter = await communicationRepository.GetAdapterByPipelineAsync(tenantId,
+                            new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, meshPipeline.RtId));
+
+                        if (executingAdapter?.LifecycleMode == RtLifecycleModeEnum.Leased)
+                        {
+                            // AB#5278: a Leased adapter has no process of its own, so the per-pipeline
+                            // trigger queue below would have no consumer — and a pool member that
+                            // holds a lease at the moment the cron fires MUST NOT consume it either,
+                            // because a run started that way bypasses the lease bookkeeping (no
+                            // queued execution, no queue position, no lease span — runbook §11.6).
+                            // The tick therefore goes to the controller's own durable queue, whose
+                            // consumer turns it into a queued work item exactly as an explicit
+                            // ExecutePipeline does. Same cron, same schedule group, so it is added and
+                            // removed together with every other schedule of this tenant. No adapter
+                            // queue schedule and no co-wake: there is nothing to buffer for and
+                            // nothing to wake. Decided at registration time like the co-wake — a
+                            // LifecycleMode change takes effect with the next trigger deploy; the
+                            // consumer re-resolves the adapter at tick time, so a tick that outlives
+                            // the change simply runs the pipeline the way its current mode requires.
+                            var leaseAddress = $"queue:{PipelineQueueNames.LeaseTriggerQueue.ToLower()}";
+                            var leaseTriggerOptions = new RecurringSchedulingOptions(
+                                pipelineTrigger.CronExpression,
+                                DateTime.Now, null,
+                                $"{pipelineTrigger.RtId.ToString()}-lease-{meshPipeline.RtId.ToString()}",
+                                scheduleGroup,
+                                pipelineTrigger.Description ?? pipelineTrigger.Name ?? "Pipeline Trigger (leased adapter)",
+                                SchedulingMissedEventPolicy.Skip);
+
+                            await distributionEventHubService.ScheduleRecurringSendAsync(
+                                new LeaseTriggerMessage(tenantId, meshPipeline.RtId.ToString(),
+                                    pipelineTrigger.RtId.ToString()),
+                                leaseAddress, leaseTriggerOptions);
+
+                            logger.LogInformation(
+                                "[{TenantId}] Trigger '{TriggerRtId}' of pipeline '{PipelineRtId}' is routed through the " +
+                                "lease queue: adapter '{AdapterName}' is Leased (AB#5278)",
+                                tenantId, pipelineTrigger.RtId, meshPipeline.RtId, executingAdapter.Name);
+                            continue;
+                        }
+
                         var address =
                             $"{QueueNames.PipelineTriggerQueue.ToLower()}-{tenantId.ToLower()}-{meshPipeline.RtId.ToString().ToLower()}";
 
@@ -309,8 +353,6 @@ internal class TriggerManagementService(
                         // tenant's ScaleToZeroEnabled flag — the consumer-side gate no-ops when
                         // the feature is off, and flipping the flag later must not require a
                         // trigger redeploy.
-                        var executingAdapter = await communicationRepository.GetAdapterByPipelineAsync(tenantId,
-                            new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, meshPipeline.RtId));
                         if (executingAdapter?.LifecycleMode == RtLifecycleModeEnum.OnDemand)
                         {
                             var wakeAddress = $"queue:{PipelineQueueNames.LifecycleWakeQueue.ToLower()}";

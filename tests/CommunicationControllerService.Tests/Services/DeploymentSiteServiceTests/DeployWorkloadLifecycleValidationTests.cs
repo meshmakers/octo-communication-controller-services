@@ -133,4 +133,31 @@ internal class DeployWorkloadLifecycleValidationTests : PoolServiceTestsBase
         await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
             .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
     }
+
+    /// <summary>
+    ///     AB#5278: a Leased workload is validated with the STRICTER lease evaluation — a trigger
+    ///     that is wake-capable on a dedicated adapter but never reaches the controller (here an
+    ///     HTTP trigger) is refused with its reason instead of deploying and never running.
+    /// </summary>
+    [Test]
+    public async Task DeployWorkloadAsync_LeasedButNotLeasable_IsRejectedWithTheLeaseReasons()
+    {
+        var (_, adapter) = GivenEdgePoolWithAdapter(RtLifecycleModeEnum.Leased);
+        OnDemandCapabilityService
+            .EvaluateForLeaseAsync(TenantId, Arg.Any<RtEntityId>())
+            .Returns(new OnDemandCapabilityResult(false,
+                ["Pipeline 'api' uses trigger 'FromHttpRequest@2', which cannot produce a lease (AB#5258)"]));
+
+        var ex = await Assert.ThrowsAsync<Exception>(
+            async () => await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(ex!.Message).Contains("FromHttpRequest@2");
+        await Assert.That(ex!.Message).Contains("Leased");
+        await Assert.That(ex!.Message).Contains("cron PipelineTrigger");
+        // The OnDemand evaluation alone would have let it through — it must not be the one asked.
+        await OnDemandCapabilityService.DidNotReceiveWithAnyArgs().EvaluateAsync(default!, default!);
+        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
+            .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
+    }
 }

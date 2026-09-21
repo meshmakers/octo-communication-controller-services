@@ -189,9 +189,10 @@ internal class DeploymentSiteServiceException : Exception
     {
         return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}' with LifecycleMode 'Leased': " +
-            $"{string.Join("; ", blockingReasons)}. A lease can only be handed to a process whose triggers are " +
-            "wake-capable — a process-bound trigger would need a process of its own, which is exactly what a leased " +
-            "workload does not have (AB#4924). Same gate as LifecycleMode 'OnDemand'.");
+            $"{string.Join("; ", blockingReasons)}. Work reaches a leased adapter only through the controller " +
+            "— a cron PipelineTrigger or an explicit ExecutePipeline (AB#4924, AB#5278). A process-bound trigger " +
+            "would need a process of its own, which a leased workload does not have; FromHttpRequest (AB#5258) and " +
+            "FromPipelineDataEvent (AB#5231) never reach the controller and are not routed through a lease yet.");
     }
 
     internal static Exception LeasedWorkloadLenderIncomplete(string tenantId, OctoObjectId workloadRtId,

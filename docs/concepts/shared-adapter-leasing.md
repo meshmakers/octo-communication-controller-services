@@ -45,7 +45,7 @@ not derived — `OnDemandCapable` (§5 of the on-demand concept) remains the
 |---|---|---|
 | `AlwaysOn` | continuous data | process-bound triggers: `FromPolling`, `FromWatchRtEntity`, MQTT/EDA/Loxone consumers |
 | `OnDemand` | rare work, own process | wake-capable triggers, existing behaviour (AB#4914) |
-| `Leased` *(new)* | periodic work, shared process | wake-capable triggers **and** no tenant-pinned runtime state |
+| `Leased` *(new)* | periodic work, shared process | triggers whose work **reaches the controller** — cron `PipelineTrigger` and explicit `ExecutePipeline` — **and** no tenant-pinned runtime state (§2c) |
 
 Two kinds of adapter therefore coexist, and the distinction is worth naming because it
 shapes everything below:
@@ -63,6 +63,30 @@ too. Explicit beats silent, same rule as AB#4914.
 Deriving the mode automatically was considered and rejected: a mode that flips
 itself when someone deploys a pipeline is the kind of silent automation that is
 hard to reason about during an incident.
+
+## 2c. How work reaches a `Leased` adapter (AB#5278)
+
+A lease is created in exactly one place — `TriggerManagementService.StartExecutePipelineAsync`, which
+turns the work into a `Queued` execution instead of sending an execute command. Every way of starting
+a pipeline that does **not** pass through it therefore cannot be served by a pool, whatever the
+trigger's classification says on a dedicated adapter:
+
+| Trigger | Dedicated adapter | Leased adapter |
+|---|---|---|
+| explicit `ExecutePipeline` (Studio, REST, CLI) | execute command | **queued lease** — the original path |
+| cron `PipelineTrigger` → `FromPipelineTriggerEvent@1` | per-pipeline durable broker queue, consumed by the adapter; co-wake when `OnDemand` | **queued lease**: the controller registers the recurring send onto its own durable queue (`octo::com-controller::lease-trigger`, `LeaseTriggerMessage`) instead of the adapter's; `LeaseTriggerConsumer` calls the execute path per tick. No adapter-side schedule at all — a pool member that happens to hold a lease when the cron fires must not consume one, because a run started that way bypasses the lease bookkeeping (runbook §11.6). A tick whose previous run is still `Queued` is coalesced. |
+| `FromHttpRequest@1/@2` | ingress → adapter (activator wakes an `OnDemand` workload) | **refused at deploy** until the pool has an ingress and the activator can wake a *member* (AB#5258) |
+| `FromPipelineDataEvent@1` | adapter → broker → adapter | **refused at deploy** until the event is routed through the controller or the queue is durable and waked (AB#5231) |
+
+The refusal is the `Leased` evaluation (`IWorkloadOnDemandCapabilityService.EvaluateForLeaseAsync`):
+the `OnDemand` classifier plus the two adapter-bound triggers above, applied both when a workload is
+deployed with `LifecycleMode = Leased` and when a pipeline is deployed to such a workload. Explicit
+beats silent — before this, such a pipeline deployed cleanly and simply never ran.
+
+The routing decision is taken when the triggers are deployed (like the `OnDemand` co-wake): changing
+an adapter's `LifecycleMode` takes effect for its cron triggers with the next `DeployTriggers`. A tick
+that outlives the change is not lost — the consumer goes through the execute path, which resolves the
+adapter's *current* mode.
 
 ## 2b. Deploying a pipeline to a `Leased` adapter
 

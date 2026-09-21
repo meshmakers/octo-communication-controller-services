@@ -44,6 +44,22 @@ internal class WorkloadOnDemandCapabilityService(
         "FromRfcServerCall"         // octo-adapter-sap: RFC server socket hosted in the process
     };
 
+    /// <summary>
+    ///     AB#5278: triggers that are wake-capable on a dedicated adapter — their work buffers durably
+    ///     or arrives through a wake gate — but whose message goes adapter-bound and never passes the
+    ///     controller, so nothing can turn it into a queued lease. A pipeline using one of these on a
+    ///     Leased adapter would deploy fine and then never run; the gate names them instead. Each entry
+    ///     leaves the list with the work item that routes it through a lease.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, string> LeaseIncapableTriggerNames =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            // Needs the pool ingress and an activator that wakes a MEMBER rather than a workload.
+            ["FromHttpRequest"] = "AB#5258",
+            // Published adapter → broker → adapter; the controller never sees the event.
+            ["FromPipelineDataEvent"] = "AB#5231"
+        };
+
     public async Task<OnDemandCapabilityResult> EvaluateAsync(string tenantId, RtEntityId adapterRtEntityId)
     {
         var nodeDescriptors = GetNodeDescriptors(tenantId, adapterRtEntityId);
@@ -58,6 +74,38 @@ internal class WorkloadOnDemandCapabilityService(
         }
 
         return new OnDemandCapabilityResult(reasons.Count == 0, reasons);
+    }
+
+    public async Task<OnDemandCapabilityResult> EvaluateForLeaseAsync(string tenantId, RtEntityId adapterRtEntityId)
+    {
+        // The OnDemand half first: a leased adapter is a borrowed process BETWEEN work items, so
+        // everything that hibernation would silently stop, a lease can never start.
+        var onDemand = await EvaluateAsync(tenantId, adapterRtEntityId);
+        var reasons = new List<string>(onDemand.BlockingReasons);
+
+        var pipelines = await communicationRepository.GetPipelinesAsync(tenantId, adapterRtEntityId);
+        foreach (var pipeline in pipelines)
+        {
+            reasons.AddRange(GetLeaseIncapableNodes(pipeline.PipelineDefinition).Select(nodeType =>
+                $"Pipeline '{pipeline.Name ?? pipeline.RtId.ToString()}' uses trigger '{nodeType}', which cannot " +
+                $"produce a lease ({LeaseIncapableTriggerNames[StripVersion(nodeType)]})"));
+        }
+
+        return new OnDemandCapabilityResult(reasons.Count == 0, reasons);
+    }
+
+    public IReadOnlyList<string> GetLeaseIncapableNodes(string? pipelineDefinition)
+    {
+        if (string.IsNullOrEmpty(pipelineDefinition))
+        {
+            return [];
+        }
+
+        return pipelineDefinitionService.GetAllNodes(pipelineDefinition)
+            .Select(n => n.NodeType)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(nodeType => LeaseIncapableTriggerNames.ContainsKey(StripVersion(nodeType)))
+            .ToList();
     }
 
     public IReadOnlyList<string> GetProcessBoundNodes(string? pipelineDefinition,

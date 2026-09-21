@@ -123,14 +123,16 @@ internal class AdapterServiceException : Exception
     /// it either stops borrowing or stops using that trigger.
     /// </summary>
     internal static AdapterServiceException PipelineNotLeasable(string tenantId,
-        RtEntityId pipelineRtEntityId, string? workloadName, IReadOnlyList<string> processBoundNodes) =>
+        RtEntityId pipelineRtEntityId, string? workloadName, IReadOnlyList<string> blockingNodes) =>
         new($"[{tenantId}] Cannot deploy pipeline '{pipelineRtEntityId}' to workload '{workloadName}': " +
-            "the workload has LifecycleMode=Leased, but the pipeline uses the process-bound trigger(s) " +
-            $"{string.Join(", ", processBoundNodes.Select(n => $"'{n}'"))} (AB#4924). A leased adapter has no " +
-            "process of its own at all — it borrows one from an adapter deploymentSite between work items — so a trigger " +
-            "that only fires while its own process runs can never fire. Either give the adapter a process of its " +
-            "own (LifecycleMode AlwaysOn) or migrate the pipeline to a wake-capable trigger (cron PipelineTrigger, " +
-            "FromHttpRequest, FromPipelineDataEvent).");
+            "the workload has LifecycleMode=Leased, but the pipeline uses the trigger(s) " +
+            $"{string.Join(", ", blockingNodes.Select(n => $"'{n}'"))} that a leased adapter cannot serve " +
+            "(AB#4924, AB#5278). A leased adapter has no process of its own at all — it borrows one from an " +
+            "adapter pool between work items — so a process-bound trigger never fires, and only work that " +
+            "reaches the controller can be leased: a cron PipelineTrigger or an explicit ExecutePipeline. " +
+            "FromHttpRequest (AB#5258) and FromPipelineDataEvent (AB#5231) are not routed through a lease yet. " +
+            "Either give the adapter a process of its own (LifecycleMode AlwaysOn) or migrate the pipeline to " +
+            "a cron PipelineTrigger.");
 
     /// <summary>
     /// AB#5027 mandatory-identity guard. Deliberately an <see cref="AdapterServiceException" />
