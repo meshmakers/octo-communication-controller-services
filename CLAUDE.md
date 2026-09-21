@@ -2384,6 +2384,40 @@ failing-borrower rules), the four fan-out cases in
 same thing, the scope resolver is not consulted for an unresolvable pool, members are counted and
 never named, and the queue split incl. its tenant-id casing).
 
+## Helm repository resolution: explicit edge, else by purpose (AB#5295)
+
+`DeploymentSiteService.ResolveHelmRepositoryAsync` is the one place a workload's chart repository
+is decided; every deploy/DTO/deployability path goes through it. An explicit `HelmRepository`
+association always wins. Without one, the tenant's `HelmRepositoryConfiguration`s are filtered by
+`Purpose` against the workload type — `Adapter`/`AdapterPool` → `Adapters`, `Application` →
+`Applications` — and the fallback applies only when that leaves **exactly one** candidate. Zero or
+several resolve to null, which the callers already treat as "no repository linked" (the exception
+text names both ways out).
+
+🔴 **Why a modelled purpose and not the well-known name.** On the release channel adapter charts
+and tenant-app charts live in two different indexes (`github.io/charts` = `meshmakers-public`,
+`github.io/apps` = `meshmakers-apps`), so "the tenant's repository" is ambiguous there; on the dev
+channel both names point at one index. The only thing that told them apart was the
+`rtWellKnownName` convention. `System.Communication` 4.1.0 adds enum `HelmRepositoryPurpose`
+(`Adapters`, `Applications`) and the optional attribute `HelmRepositoryConfiguration.Purpose`;
+the channel blueprints (`System.Communication.Release-2.1.0`, `System.Communication.MainLatest-2.1.0`)
+stamp it. A repository that declares no purpose is **never** chosen by the fallback, so tenants seeded
+before 4.1.0 keep their exact previous behaviour until the blueprint bump reaches them.
+
+**Why this exists.** An app blueprint used to have to pin a channel-specific repository rtId in its
+seed. The accounting blueprint pinned `670…003` (`meshmakers-dev`, the DEV adapter index) on Release
+tenants: on prod-1 the operator's dry-run failed (`chart … not found in octo-d808d9351847 index`) and,
+on tenants that never had that entity, the import left a **dangling** `HelmRepository` row that the
+typed GraphQL resolver hides, the multiplicity check counts, and neither `CREATE` nor `DELETE` through
+the update mutation can remove (the mutation validates the target before touching the row). A raw
+row delete was the only repair. With the fallback, app seeds carry no repository edge at all.
+
+Read `Purpose` through `GetAttributeValueOrDefault` (see `ReadPurpose`), never the generated
+property — the attribute is optional and new, and a repository written before it existed must read
+as "no purpose" rather than throw inside a deploy.
+
+Tests: `Services/DeploymentSiteServiceTests/HelmRepositoryFallbackTests`.
+
 ## Leasing: metrics, alerts and rollout operability (AB#4924 increment 9)
 
 Plan: `docs/concepts/shared-adapter-leasing-implementation.md` §11. Alert rules live in

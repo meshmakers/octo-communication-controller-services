@@ -1,0 +1,17 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+# AB#5295 — what a Helm repository is FOR. The release channel publishes adapter/platform charts
+# and tenant-app charts from two different indexes (github.io/charts vs github.io/apps); the dev
+# channel serves both from one index. Without this the platform had no modelled way to tell the
+# two apart — only the rtWellKnownName convention — so a workload without an explicit
+# HelmRepository edge could not be resolved to a repository, and an app blueprint had to pin a
+# channel-specific repository rtId in its seed, which is exactly what broke prod-1 (the accounting
+# blueprint pinned the DEV adapter repository on Release tenants).
+- enumId: HelmRepositoryPurpose
+  description: Which kind of chart a Helm repository serves. Adapters covers adapter and platform charts, Applications covers tenant-app charts. Used by the Communication Controller to pick a repository for a workload that carries no explicit HelmRepository association; never a label only.
+  useFlags: false
+  values:
+  - key: 0
+    name: Adapters
+  - key: 1
+    name: Applications

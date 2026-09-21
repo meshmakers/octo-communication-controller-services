@@ -638,6 +638,25 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyCollection<RtHelmRepositoryConfiguration>> GetHelmRepositoryConfigurationsAsync(
+        string tenantId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtHelmRepositoryConfiguration>(
+                session, RtEntityQueryOptions.Create());
+            return resultSet.Items.ToList();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingWorkloads(tenantId, e);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<RtHelmRepositoryConfiguration?> GetHelmRepositoryForWorkloadAsync(string tenantId,
         OctoObjectId workloadRtId)
     {

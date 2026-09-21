@@ -70,8 +70,10 @@ internal class DeploymentSiteServiceException : Exception
     {
         return new DeploymentSiteServiceException(
             $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': " +
-            "no Helm repository is linked. Associate the workload with a HelmRepositoryConfiguration in the Studio " +
-            "(workload form → 'Helm Repository' field) so the operator knows where to pull the chart from.");
+            "no Helm repository is linked and none could be resolved by purpose. Either associate the workload with a " +
+            "HelmRepositoryConfiguration in the Studio (workload form → 'Helm Repository' field), or give the tenant " +
+            "exactly one repository whose Purpose matches the workload (Adapters for adapters and pools, Applications " +
+            "for applications) — the channel blueprints stamp that since System.Communication 4.1.0.");
     }
 
     internal static Exception WorkloadHelmRepositoryUrlEmpty(string tenantId, OctoObjectId workloadRtId, string? workloadName)

@@ -9,6 +9,9 @@ types:
         name: RepositoryUrl
       - id: ${this}/Channel
         name: Channel
+      - id: ${this}/HelmRepositoryPurpose
+        name: Purpose
+        isOptional: true
       - id: ${this}/Username
         name: Username
         isOptional: true

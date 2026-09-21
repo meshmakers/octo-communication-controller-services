@@ -493,7 +493,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
             throw DeploymentSiteServiceException.WorkloadMissingChartName(tenantId, workload.RtId, workload.Name);
         }
 
-        var repo = await _communicationRepository.GetHelmRepositoryForWorkloadAsync(tenantId, workload.RtId);
+        var repo = await ResolveHelmRepositoryAsync(tenantId, workload);
         if (repo == null)
         {
             throw DeploymentSiteServiceException.WorkloadMissingHelmRepository(tenantId, workload.RtId, workload.Name);
@@ -886,7 +886,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
             return null;
         }
 
-        var repo = await _communicationRepository.GetHelmRepositoryForWorkloadAsync(tenantId, workload.RtId);
+        var repo = await ResolveHelmRepositoryAsync(tenantId, workload);
         if (repo == null || string.IsNullOrWhiteSpace(repo.RepositoryUrl))
         {
             return null;
@@ -1797,11 +1797,97 @@ internal class DeploymentSiteService : IDeploymentSiteService
     /// optional and an empty value is valid (= "use latest"), so it does not gate this check.
     /// Used by the backfill to classify entities without throwing.
     /// </summary>
+    /// <summary>
+    ///     The Helm repository a workload pulls its chart from (AB#5295).
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         An explicit <c>HelmRepository</c> association always wins. Without one, the tenant's
+    ///         repositories are filtered by <c>Purpose</c> against the workload type — an
+    ///         <c>Adapter</c> or <c>AdapterPool</c> resolves to the tenant's <c>Adapters</c>
+    ///         repository, an <c>Application</c> to its <c>Applications</c> repository — and the
+    ///         fallback applies only when that leaves <b>exactly one</b> candidate. Zero or several
+    ///         resolve to null, which every caller already treats as "no repository linked".
+    ///     </para>
+    ///     <para>
+    ///         🔴 Why a modelled purpose and not the well-known name: on the release channel adapter
+    ///         charts and tenant-app charts live in two different indexes (<c>github.io/charts</c>
+    ///         vs <c>github.io/apps</c>), so "the tenant's repository" is ambiguous there, and the
+    ///         only thing that used to tell them apart was the <c>rtWellKnownName</c> convention. A
+    ///         repository that declares no purpose is therefore never chosen — tenants seeded
+    ///         before <c>System.Communication</c> 4.1.0 keep their exact previous behaviour until
+    ///         the channel blueprint stamps the attribute.
+    ///     </para>
+    ///     <para>
+    ///         This exists so an app blueprint no longer has to pin a channel-specific repository
+    ///         rtId in its seed: the accounting blueprint pinned the DEV adapter repository on
+    ///         Release tenants, which on prod-1 failed the operator's dry-run and left dangling
+    ///         edges that blocked the correct one (AB#5295).
+    ///     </para>
+    /// </remarks>
+    private async Task<RtHelmRepositoryConfiguration?> ResolveHelmRepositoryAsync(string tenantId,
+        RtDeployableWorkload workload)
+    {
+        var explicitRepo = await _communicationRepository.GetHelmRepositoryForWorkloadAsync(tenantId, workload.RtId);
+        if (explicitRepo is not null)
+        {
+            return explicitRepo;
+        }
+
+        var wanted = workload is RtApplication
+            ? RtHelmRepositoryPurposeEnum.Applications
+            : RtHelmRepositoryPurposeEnum.Adapters;
+
+        var candidates = (await _communicationRepository.GetHelmRepositoryConfigurationsAsync(tenantId))
+            .Where(r => ReadPurpose(r) == wanted)
+            .ToList();
+
+        if (candidates.Count != 1)
+        {
+            if (candidates.Count > 1)
+            {
+                Logger.Warn(
+                    "[{TenantId}] Workload '{WorkloadName}' ({WorkloadRtId}) has no HelmRepository association and " +
+                    "{Count} repositories declare purpose {Purpose} — refusing to guess; link one explicitly",
+                    tenantId, workload.Name, workload.RtId, candidates.Count, wanted);
+            }
+
+            return null;
+        }
+
+        Logger.Info(
+            "[{TenantId}] Workload '{WorkloadName}' ({WorkloadRtId}) has no HelmRepository association; using the " +
+            "tenant's {Purpose} repository '{RepositoryName}' ({RepositoryUrl})",
+            tenantId, workload.Name, workload.RtId, wanted,
+            candidates[0].RtWellKnownName ?? candidates[0].RtId.ToString(), candidates[0].RepositoryUrl);
+        return candidates[0];
+    }
+
+    /// <summary>
+    ///     <c>Purpose</c> of a repository, or null when it declares none.
+    /// </summary>
+    /// <remarks>
+    ///     Read through <c>GetAttributeValueOrDefault</c> rather than the generated property: the
+    ///     attribute is optional and new in 4.1.0, and a repository written before it existed must
+    ///     read as "no purpose" rather than throw inside a deploy.
+    /// </remarks>
+    private static RtHelmRepositoryPurposeEnum? ReadPurpose(RtHelmRepositoryConfiguration repository)
+    {
+        var raw = repository.GetAttributeValueOrDefault(nameof(RtHelmRepositoryConfiguration.Purpose));
+        return raw switch
+        {
+            RtHelmRepositoryPurposeEnum e => e,
+            int i when Enum.IsDefined(typeof(RtHelmRepositoryPurposeEnum), i) => (RtHelmRepositoryPurposeEnum)i,
+            long l when Enum.IsDefined(typeof(RtHelmRepositoryPurposeEnum), (int)l) => (RtHelmRepositoryPurposeEnum)(int)l,
+            _ => null
+        };
+    }
+
     private async Task<bool> IsWorkloadHelmDeployableAsync(string tenantId, RtDeployableWorkload workload)
     {
         if (string.IsNullOrWhiteSpace(workload.ChartName)) return false;
 
-        var repo = await _communicationRepository.GetHelmRepositoryForWorkloadAsync(tenantId, workload.RtId);
+        var repo = await ResolveHelmRepositoryAsync(tenantId, workload);
         if (repo == null) return false;
         return !string.IsNullOrWhiteSpace(repo.RepositoryUrl);
     }

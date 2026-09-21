@@ -17,6 +17,8 @@ entities:
         value: https://meshmakers.github.io/charts
       - id: System.Communication/Channel
         value: 1   # Release
+      - id: System.Communication/HelmRepositoryPurpose
+        value: 0   # Adapters (AB#5295: drives the no-edge fallback in the controller)
       - id: System.Communication/Username
         value: ""
       - id: System.Communication/Password
@@ -39,6 +41,8 @@ entities:
         value: https://meshmakers.github.io/apps
       - id: System.Communication/Channel
         value: 1   # Release
+      - id: System.Communication/HelmRepositoryPurpose
+        value: 1   # Applications (AB#5295: drives the no-edge fallback in the controller)
       - id: System.Communication/Username
         value: ""
       - id: System.Communication/Password

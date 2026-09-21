@@ -14,6 +14,9 @@ $schema: https://schemas.meshmakers.cloud/ck-migration-meta.schema.json
 # re-established by the mirror sync plus a re-link of the adapter, and a tenant on 4.0.0 rides the
 # post-chain schema-only bridge, leaving the two values as dead data. Verified on a local tenant
 # that was carrying 4.0.0.
+#
+# 4.1.0 (AB#5295) adds NO entry either: one enum (HelmRepositoryPurpose) and one optional
+# attribute (HelmRepositoryConfiguration.Purpose), both additive — rides the schema-only bridge.
 ckModelId: System.Communication-4.0.0
 migrations:
   - fromVersion: "3.0.1"

@@ -30,6 +30,11 @@ attributes:
   isRuntimeState: false
   defaultValues:
     - 0
+- id: HelmRepositoryPurpose
+  valueType: Enum
+  valueCkEnumId: ${this}/HelmRepositoryPurpose
+  description: 'What this repository serves — Adapters (adapter and platform charts) or Applications (tenant-app charts). AB#5295: unlike Channel this DOES drive behaviour: a DeployableWorkload with no HelmRepository association is resolved to the tenant''s single repository whose purpose matches the workload type (Adapter/AdapterPool -> Adapters, Application -> Applications). Optional and without a default on purpose — a repository that does not declare its purpose is never chosen by that fallback, so tenants seeded before this attribute keep their exact previous behaviour until the channel blueprint stamps it.'
+  isRuntimeState: false
 - id: IngressEnabled
   valueType: Boolean
   description: 'When true, the operator projects ingress.enabled=true plus the workload Hostname into the Helm values. Cluster-wide defaults (className, cluster-issuer, TLS) come from the operator config and are not overridable per workload. Runtime-state (AB#4706): per-tenant operator decision, preserved across blueprint re-apply.'

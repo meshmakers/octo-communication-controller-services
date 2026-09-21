@@ -186,6 +186,16 @@ public interface ICommunicationRepository
         OctoObjectId workloadRtId);
 
     /// <summary>
+    ///     Every <c>HelmRepositoryConfiguration</c> of the tenant (AB#5295).
+    /// </summary>
+    /// <remarks>
+    ///     Feeds the purpose-based fallback in <c>DeploymentSiteService.ResolveHelmRepositoryAsync</c>
+    ///     for workloads that carry no <c>HelmRepository</c> association. Returned in full — the
+    ///     caller filters by <c>Purpose</c> — so one read serves any workload type.
+    /// </remarks>
+    Task<IReadOnlyCollection<RtHelmRepositoryConfiguration>> GetHelmRepositoryConfigurationsAsync(string tenantId);
+
+    /// <summary>
     /// AB#5027: resolves the <c>ServiceAccountConfiguration</c> linked to an adapter through the
     /// dedicated <c>PipelineServiceAccount</c> association role. This is the adapter-wide default
     /// identity every pipeline of that adapter executes as, unless the pipeline carries its own
