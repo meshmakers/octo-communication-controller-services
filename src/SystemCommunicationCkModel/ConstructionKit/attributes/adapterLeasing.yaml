@@ -87,3 +87,39 @@ attributes:
   valueType: String
   isRuntimeState: true
   description: 'Identity of the individual pool member (the process) that held the lease for this execution (AB#4924). This is what concept §5 calls "an association from the execution to the assigned member" — it can NOT be an association, because the member belongs to the lending tenant''s database and this execution to the borrower''s (see the file header). It is also not an RtId: members are replicas of one pool workload, not separate entities, so the value is the member''s stable runtime identity (its pool-hub registration id). It exists so the per-adapter queue view — "what is this member holding, what waits behind it" — can be projected out of the pool queue.'
+# AB#5279 — the invoker of a queued work item. On a dedicated adapter the invoker of
+# POST /pipeline/execute travels on the execute command (AB#5126) and never touches the
+# database; on a leased adapter the work item waits in the queue, in ANOTHER request's
+# lifetime, so the only place the identity can survive until the lease is granted is the
+# execution entity itself. Token-free projection of ExecutePipelineCaller, one attribute per
+# field so the queue view can show who is waiting without parsing anything. All optional and
+# all isRuntimeState: written once at enqueue, never seeded, meaningless on a dedicated adapter.
+- id: CallerSubjectId
+  valueType: String
+  isRuntimeState: true
+  description: 'Subject (sub, or client_id for a client-credentials caller) of the invoker this queued work item was created for (AB#5279). Unset when the item was queued without an invoker — a cron tick or an internal caller.'
+- id: CallerTenantId
+  valueType: String
+  isRuntimeState: true
+  description: 'Tenant claim of the invoker of this queued work item (AB#5279).'
+- id: CallerEmail
+  valueType: String
+  isRuntimeState: true
+  description: 'E-mail claim of the invoker of this queued work item (AB#5279).'
+- id: CallerName
+  valueType: String
+  isRuntimeState: true
+  description: 'Display name (name / preferred_username) of the invoker of this queued work item (AB#5279).'
+- id: CallerRoles
+  valueType: StringArray
+  isRuntimeState: true
+  defaultValues: []
+  description: 'Role claims of the invoker of this queued work item (AB#5279).'
+- id: CallerTrustLevel
+  valueType: Int
+  isRuntimeState: true
+  description: 'Trust the invoker established (AB#5279): 2 = strongly authenticated (bearer on the execute route), 1 = weak, 0 = none. Mirrors CallerTrustLevel of the pipeline SDK.'
+- id: CallerAccessToken
+  valueType: String
+  isRuntimeState: true
+  description: 'The invoker''s bearer token for delegation, ENCRYPTED with the controller''s instance key (enc:v1: sentinel) — never plaintext (AB#5279). Written only when the controller has an encryption key; read back and decrypted at lease grant, dropped there when expired. Unset when no token was carried or no key was configured.'

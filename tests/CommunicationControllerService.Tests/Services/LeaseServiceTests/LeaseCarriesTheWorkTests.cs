@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
@@ -161,5 +162,91 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
             .CreatePipelineExecutionAsync(default!, default!, default!, default!);
         await CommunicationRepository.Received(1)
             .StampLeaseReleasedAsync(BorrowerTenantId, "exec-1", Arg.Any<DateTime>());
+    }
+
+    // ---- AB#5279: the lease carries the invoker ---------------------------------------------
+
+    private static ExecutePipelineCaller ACaller() => new()
+        { SubjectId = "user-42", TenantId = BorrowerTenantId, Name = "User 42", Roles = ["Admin"], TrustLevel = 2 };
+
+    /// <summary>A compact JWT whose only claim is <c>exp</c>; the signature is not looked at.</summary>
+    private static string AJwtExpiringAt(DateTimeOffset expiresAt)
+    {
+        var payload = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(
+            $"{{\"exp\":{expiresAt.ToUnixTimeSeconds()}}}")).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        return $"eyJhbGciOiJub25lIn0.{payload}.sig";
+    }
+
+    private LeaseRequest AWorkRequestFrom(ExecutePipelineCaller? caller, string? encryptedToken) =>
+        new(BorrowerTenantId, Borrower.RtId, "exec-1", null, PipelineRtId, PipelineInput, caller, encryptedToken);
+
+    [Test]
+    public async Task AGrantedLeaseCarriesTheInvokerAndItsDecryptedToken()
+    {
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+        var token = AJwtExpiringAt(DateTimeOffset.UtcNow.AddMinutes(30));
+        EncryptionService.Decrypt("enc:v1:xyz").Returns(token);
+
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId,
+            AWorkRequestFrom(ACaller(), "enc:v1:xyz"));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.Granted).IsTrue();
+        var lease = CapturePushedLease();
+        await Assert.That(lease.Caller).IsNotNull();
+        await Assert.That(lease.Caller!.SubjectId).IsEqualTo("user-42");
+        await Assert.That(lease.Caller.TrustLevel).IsEqualTo(2);
+        await Assert.That(lease.CallerAccessToken).IsEqualTo(token);
+    }
+
+    [Test]
+    public async Task AnExpiredTokenIsDroppedButTheInvokerStillTravels()
+    {
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+        EncryptionService.Decrypt("enc:v1:old").Returns(AJwtExpiringAt(DateTimeOffset.UtcNow.AddMinutes(-5)));
+
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequestFrom(ACaller(), "enc:v1:old"));
+
+        using var _ = Assert.Multiple();
+        var lease = CapturePushedLease();
+        await Assert.That(lease.Caller!.SubjectId).IsEqualTo("user-42");
+        // 🔴 A dead token would not fail the run at once - it would fail every delegated call inside
+        // it with 401. Dropped up front, the run is a run as the caller without delegation.
+        await Assert.That(lease.CallerAccessToken).IsNull();
+    }
+
+    [Test]
+    public async Task AnUndecryptableTokenIsDroppedButTheInvokerStillTravels()
+    {
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+        EncryptionService.Decrypt("enc:v1:bad").Returns(_ => throw new InvalidOperationException("tag mismatch"));
+
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId,
+            AWorkRequestFrom(ACaller(), "enc:v1:bad"));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.Granted).IsTrue();
+        var lease = CapturePushedLease();
+        await Assert.That(lease.Caller!.SubjectId).IsEqualTo("user-42");
+        await Assert.That(lease.CallerAccessToken).IsNull();
+    }
+
+    [Test]
+    public async Task AWorkItemQueuedWithoutAnInvokerLeasesWithoutOne()
+    {
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequest());
+
+        using var _ = Assert.Multiple();
+        var lease = CapturePushedLease();
+        await Assert.That(lease.Caller).IsNull();
+        await Assert.That(lease.CallerAccessToken).IsNull();
+        // (The encryption service is still asked for the borrower's own secret; only the caller
+        // token path must stay silent, which the null above proves.)
     }
 }

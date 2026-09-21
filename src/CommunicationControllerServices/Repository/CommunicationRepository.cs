@@ -3325,7 +3325,10 @@ internal class CommunicationRepository : ICommunicationRepository
                 new RtEntityId(pipeline.CkTypeId ?? SystemCommunicationCkIds.RtCkPipelineTypeId, pipeline.RtId),
                 new RtEntityId(adapter.CkTypeId ?? SystemCommunicationCkIds.RtCkAdapterTypeId, adapter.RtId),
                 execution.TriggerType,
-                execution.InputData);
+                execution.InputData,
+                // AB#5279: the retry runs as the same invoker as the interrupted attempt.
+                QueuedCaller.Read(execution),
+                QueuedCaller.ReadEncryptedAccessToken(execution));
         }
         catch (CommunicationRepositoryException)
         {
@@ -3441,7 +3444,10 @@ internal class CommunicationRepository : ICommunicationRepository
                 executionClass,
                 // AB#4924 §9.9 / D4: the input travels to the member on the lease. Read from the
                 // entity, never re-derived - a retry and its original attempt must run the same input.
-                execution.InputData));
+                execution.InputData,
+                // AB#5279: and so does the invoker, for the same reason.
+                QueuedCaller.Read(execution),
+                QueuedCaller.ReadEncryptedAccessToken(execution)));
         }
 
         return projected;

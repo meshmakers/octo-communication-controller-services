@@ -19,7 +19,8 @@ internal class TriggerManagementService(
     ICommunicationEventService eventService,
     IWorkloadLifecycleService workloadLifecycleService,
     ILifecycleConfigurationService lifecycleConfigurationService,
-    ILeaseSchedulerWakeSignal leaseSchedulerWakeSignal)
+    ILeaseSchedulerWakeSignal leaseSchedulerWakeSignal,
+    IWorkloadEncryptionService encryptionService)
     : ITriggerManagementService
 {
     public async Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId,
@@ -34,7 +35,8 @@ internal class TriggerManagementService(
         // pool member is leased to this tenant. Everything below this branch is the manual-adapter
         // path and is unchanged: a manual adapter has no queue and executes immediately, and that
         // asymmetry is intended (concept §5, "One queue per pool").
-        var queued = await TryEnqueueForLeasedAdapterAsync(tenantId, pipelineRtId, pipelineInput, isDryRun);
+        var queued = await TryEnqueueForLeasedAdapterAsync(tenantId, pipelineRtId, pipelineInput, isDryRun,
+            caller, callerAccessToken);
         if (queued is not null)
         {
             return queued;
@@ -121,7 +123,8 @@ internal class TriggerManagementService(
     ///     </para>
     /// </remarks>
     private async Task<PipelineExecutionDataDto?> TryEnqueueForLeasedAdapterAsync(string tenantId,
-        OctoObjectId pipelineRtId, string? pipelineInput, bool isDryRun)
+        OctoObjectId pipelineRtId, string? pipelineInput, bool isDryRun, ExecutePipelineCaller? caller,
+        string? callerAccessToken)
     {
         if (isDryRun)
         {
@@ -194,6 +197,14 @@ internal class TriggerManagementService(
             InputData = pipelineInput
         };
 
+        // AB#5279: the invoker survives the queue on the entity, exactly like the input. On a
+        // dedicated adapter it rides the execute command and never touches the database; here the
+        // work item waits in another request's lifetime, so the entity is the only carrier. The
+        // token is stored encrypted or not at all — a plaintext bearer at rest is not an option, and
+        // a run without the token is a run as the caller without delegation, which nodes already
+        // cope with.
+        QueuedCaller.Apply(execution, caller, EncryptCallerAccessTokenOrNull(tenantId, pipelineRtId, callerAccessToken));
+
         await communicationRepository.EnqueueExecutionAsync(tenantId, execution,
             new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipelineRtId),
             new RtEntityId(adapter.CkTypeId ?? SystemCommunicationCkIds.RtCkAdapterTypeId, adapter.RtId),
@@ -227,6 +238,31 @@ internal class TriggerManagementService(
         // The DateTime a caller gets back is the QUEUE time, not a start time — the execution has
         // not started and StartedAt is deliberately unset (concept §8, Q5).
         return new PipelineExecutionDataDto { Id = executionId, DateTime = queuedAt };
+    }
+
+    private string? EncryptCallerAccessTokenOrNull(string tenantId, OctoObjectId pipelineRtId, string? callerAccessToken)
+    {
+        if (string.IsNullOrEmpty(callerAccessToken))
+        {
+            return null;
+        }
+
+        try
+        {
+            return encryptionService.Encrypt(callerAccessToken);
+        }
+        catch (InvalidOperationException e)
+        {
+            // No instance key configured. Loud, because the run will visibly lack delegation, but
+            // not fatal: the principal still travels, and the queue must not stop over a missing
+            // key on a cluster that never configured one.
+            logger.LogWarning(e,
+                "[{TenantId}] The invoker's token for queued pipeline '{PipelineRtId}' was NOT kept: the controller " +
+                "has no encryption key (secrets.communicationInstanceSecretKey). The lease will carry the caller " +
+                "without delegation.",
+                tenantId, pipelineRtId);
+            return null;
+        }
     }
 
     public async Task RemoveScheduleAsync(string tenantId)

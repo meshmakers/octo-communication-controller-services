@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 
@@ -70,5 +71,25 @@ internal class QueuedWorkReachesTheLeaseTests : LeaseSchedulerServiceTestsBase
         await Scheduler.RunSchedulingRoundAsync();
 
         await Assert.That(Requests[0].PipelineInput).IsNull();
+    }
+
+    /// <summary>AB#5279: the invoker rides the request exactly like the input.</summary>
+    [Test]
+    public async Task TheLeaseRequestCarriesTheQueuedItemsInvoker()
+    {
+        ArrangeMembers(1);
+        var entry = Entry("exec-1", minutesAgo: 5) with
+        {
+            Caller = new ExecutePipelineCaller { SubjectId = "user-42", TrustLevel = 2 },
+            CallerAccessToken = "enc:v1:xyz"
+        };
+        ArrangeQueue(TenantA, entry);
+
+        await Scheduler.RunSchedulingRoundAsync();
+
+        using var _ = Assert.Multiple();
+        await Assert.That(Requests).Count().IsEqualTo(1);
+        await Assert.That(Requests[0].Caller!.SubjectId).IsEqualTo("user-42");
+        await Assert.That(Requests[0].CallerAccessToken).IsEqualTo("enc:v1:xyz");
     }
 }

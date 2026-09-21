@@ -1,5 +1,6 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -30,13 +31,23 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 ///     The queued work item's input, carried onto the lease verbatim. Null when the trigger supplied
 ///     none.
 /// </param>
+/// <param name="Caller">
+///     The invoker the work item was queued for (AB#5279), carried onto the lease so the member runs
+///     the pipeline as that principal. Null when the item was queued without one.
+/// </param>
+/// <param name="CallerAccessToken">
+///     The invoker's token as stored on the queued execution — encrypted at rest. The lease service
+///     decrypts it and drops it when it has expired before it reaches the lease.
+/// </param>
 public record LeaseRequest(
     string BorrowerTenantId,
     OctoObjectId BorrowerAdapterRtId,
     string? ExecutionId = null,
     TimeSpan? Ttl = null,
     OctoObjectId? PipelineRtId = null,
-    string? PipelineInput = null);
+    string? PipelineInput = null,
+    ExecutePipelineCaller? Caller = null,
+    string? CallerAccessToken = null);
 
 /// <summary>
 ///     Outcome of a lease attempt (AB#4924).

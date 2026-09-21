@@ -86,6 +86,30 @@ types:
     - id: ${this}/LeasedOnMemberId
       name: LeasedOnMemberId
       isOptional: true
+    # AB#5279 — the invoker the work item was queued for, so the lease can hand the member the
+    # same principal a dedicated adapter would have received on the execute command. Values,
+    # not an association: the invoker is a claim set of the borrower's user, not an entity.
+    - id: ${this}/CallerSubjectId
+      name: CallerSubjectId
+      isOptional: true
+    - id: ${this}/CallerTenantId
+      name: CallerTenantId
+      isOptional: true
+    - id: ${this}/CallerEmail
+      name: CallerEmail
+      isOptional: true
+    - id: ${this}/CallerName
+      name: CallerName
+      isOptional: true
+    - id: ${this}/CallerRoles
+      name: CallerRoles
+      isOptional: true
+    - id: ${this}/CallerTrustLevel
+      name: CallerTrustLevel
+      isOptional: true
+    - id: ${this}/CallerAccessToken
+      name: CallerAccessToken
+      isOptional: true
     - id: ${this}/ErrorMessage
       name: ErrorMessage
       isOptional: true

@@ -215,6 +215,33 @@ The alternative — mirroring the pool's account into every borrower — was rej
 the pool a standing credential in every borrower tenant even when no lease is active, which is
 the opposite of what leasing is for.
 
+### Borrower caller identity — the lease carries the invoker too (AB#5279)
+
+The two credentials above answer *as which service* the member works. They do not answer *for
+whom*. On a dedicated adapter the invoker of `POST {tenant}/v1/pipeline/execute` rides the execute
+command (AB#5126: token-free principal on `Caller`, raw token beside it) and the
+`FromExecutePipelineCommand` trigger enforces its `CallerBinding` rule against it. The lease path
+used to drop both — the work item was enqueued without them, `LeaseDto` had no field for them, and
+the run then completed and reported success under an identity other than the one the caller
+established. Silent, and exactly the shape AB#5136's channel binding was built to prevent.
+
+The fix follows the input's route: the invoker is persisted **on the queued `PipelineExecution`**
+(`CallerSubjectId`, `CallerTenantId`, `CallerEmail`, `CallerName`, `CallerRoles`,
+`CallerTrustLevel`, System.Communication 4.2.0) because the work item waits in another request's
+lifetime and the entity is the only carrier that survives it. The token is stored **encrypted with
+the controller's instance key or not at all** — no key configured means the principal travels and
+the token does not, logged as a warning. At grant, `LeaseService` reads both back, decrypts the
+token and drops it when its `exp` has passed (a dead token would not fail the run at once, it
+would fail every delegated call inside it), and hands `LeaseDto.Caller` / `CallerAccessToken` to
+the member. A retry after an interrupted lease copies both from the interrupted attempt.
+
+The member applies them through `LeaseCallerCarryThrough`, the lease twin of
+`ExecuteCommandCallerCarryThrough`: same mapping onto `ExecutePipelineOptions`, same three-state
+`CallerBindingMode` read from the pipeline's own execute trigger. **`BindingRequired` with no invoker
+on the lease fails the lease** — the work item is never run as the service account. A pipeline
+without an execute trigger (a cron pipeline reached through the lease queue, §2c) has no rule and
+runs as the service account, as its dedicated twin would.
+
 ### Borrower data access — the lease carries the database credential too
 
 **AB#4924.** Identity was only half of "become the borrower". A mesh adapter opens MongoDB

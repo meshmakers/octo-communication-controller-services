@@ -332,4 +332,62 @@ internal class LeasedAdapterEnqueueTests : TriggerManagementServiceTestsBase
 
         return map;
     }
+
+    // ---- AB#5279: the invoker survives the queue --------------------------------------------
+
+    private static ExecutePipelineCaller ACaller() => new()
+    {
+        SubjectId = "user-42", TenantId = TenantId, Email = "u@example.test", Name = "User 42",
+        Roles = ["Admin", "Reader"], TrustLevel = 2
+    };
+
+    [Test]
+    public async Task ALeasedAdapter_PersistsTheInvokerOnTheQueuedExecution()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+        ArrangeAdapter(RtLifecycleModeEnum.Leased, pipelineRtId);
+        EncryptionService.Encrypt("raw-bearer").Returns("enc:v1:xyz");
+
+        await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null,
+            caller: ACaller(), callerAccessToken: "raw-bearer");
+
+        // 🔴 The token is never written in plaintext: what reaches the entity is the ciphertext.
+        await CommunicationRepository.Received(1).EnqueueExecutionAsync(TenantId,
+            Arg.Is<RtPipelineExecution>(e =>
+                e.CallerSubjectId == "user-42" && e.CallerTenantId == TenantId && e.CallerEmail == "u@example.test"
+                && e.CallerName == "User 42" && e.CallerRoles != null && e.CallerRoles.Count == 2
+                && e.CallerTrustLevel == 2 && e.CallerAccessToken == "enc:v1:xyz"),
+            Arg.Any<RtEntityId>(), Arg.Any<RtEntityId>(), Arg.Any<DateTime>());
+    }
+
+    [Test]
+    public async Task ALeasedAdapter_WithoutAnEncryptionKey_KeepsTheCallerButNotTheToken()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+        ArrangeAdapter(RtLifecycleModeEnum.Leased, pipelineRtId);
+        EncryptionService.Encrypt(Arg.Any<string>()).Returns(_ => throw new InvalidOperationException("no key"));
+
+        await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null,
+            caller: ACaller(), callerAccessToken: "raw-bearer");
+
+        // A missing key must neither stop the queue nor leak the token: the principal travels, the
+        // token does not, and the run is a run as the caller without delegation.
+        await CommunicationRepository.Received(1).EnqueueExecutionAsync(TenantId,
+            Arg.Is<RtPipelineExecution>(e => e.CallerSubjectId == "user-42" && e.CallerAccessToken == null),
+            Arg.Any<RtEntityId>(), Arg.Any<RtEntityId>(), Arg.Any<DateTime>());
+    }
+
+    [Test]
+    public async Task ALeasedAdapter_WithoutAnInvoker_WritesNoCallerAttributes()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+        ArrangeAdapter(RtLifecycleModeEnum.Leased, pipelineRtId);
+
+        await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null);
+
+        await CommunicationRepository.Received(1).EnqueueExecutionAsync(TenantId,
+            Arg.Is<RtPipelineExecution>(e => e.CallerSubjectId == null && e.CallerAccessToken == null),
+            Arg.Any<RtEntityId>(), Arg.Any<RtEntityId>(), Arg.Any<DateTime>());
+        EncryptionService.DidNotReceiveWithAnyArgs().Encrypt(default!);
+    }
 }

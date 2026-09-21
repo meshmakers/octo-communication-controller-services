@@ -346,6 +346,61 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
     }
 
     /// <summary>
+    ///     AB#5279 — the invoker the work item was queued for survives the round trip through
+    ///     MongoDB and comes back on the projection, token still encrypted. Pinned here because the
+    ///     seven attributes are new in 4.2.0 and a mocked repository cannot prove they persist.
+    /// </summary>
+    [Fact]
+    public async Task GetQueuedExecutionsForAdapterAsync_CarriesTheInvokerTheItemWasQueuedFor()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var data = new TestData();
+
+        try
+        {
+            var (pipeline, adapter) = await CreateWorkAsync(data);
+            var execution = new RtPipelineExecution
+            {
+                RtId = OctoObjectId.GenerateNewId(),
+                ExecutionId = Guid.NewGuid().ToString(),
+                TriggerType = RtPipelineTriggerTypeEnum.Manual,
+                CallerSubjectId = "user-42",
+                CallerTenantId = fixture.TestTenantId,
+                CallerEmail = "u@example.test",
+                CallerName = "User 42",
+                CallerRoles = new AttributeStringValueList(["Admin", "Reader"]),
+                CallerTrustLevel = 2,
+                CallerAccessToken = "enc:v1:ciphertext"
+            };
+            await repository.EnqueueExecutionAsync(fixture.TestTenantId, execution, pipeline, adapter,
+                DateTime.UtcNow.AddMinutes(-1));
+            data.Executions.Add(new RtEntityId(SystemCommunicationCkIds.RtCkPipelineExecutionTypeId, execution.RtId));
+            var anonymous = await EnqueueAsync(data, pipeline, adapter, DateTime.UtcNow);
+
+            var queue = await repository.GetQueuedExecutionsForAdapterAsync(fixture.TestTenantId, adapter, 100);
+
+            var withCaller = queue.Single(q => q.ExecutionId == execution.ExecutionId);
+            withCaller.Caller.Should().NotBeNull();
+            withCaller.Caller!.SubjectId.Should().Be("user-42");
+            withCaller.Caller.TenantId.Should().Be(fixture.TestTenantId);
+            withCaller.Caller.Email.Should().Be("u@example.test");
+            withCaller.Caller.Name.Should().Be("User 42");
+            withCaller.Caller.Roles.Should().Equal("Admin", "Reader");
+            withCaller.Caller.TrustLevel.Should().Be(2);
+            // As stored: the repository never decrypts, the lease service does.
+            withCaller.CallerAccessToken.Should().Be("enc:v1:ciphertext");
+
+            var withoutCaller = queue.Single(q => q.ExecutionId == anonymous);
+            withoutCaller.Caller.Should().BeNull();
+            withoutCaller.CallerAccessToken.Should().BeNull();
+        }
+        finally
+        {
+            await CleanupAsync(data);
+        }
+    }
+
+    /// <summary>
     ///     🔴 <b>One work item is ONE execution entity, from enqueue through claim to release.</b>
     /// </summary>
     /// <remarks>

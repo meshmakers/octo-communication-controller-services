@@ -35,6 +35,12 @@ internal abstract class TriggerManagementServiceTestsBase
     /// </summary>
     protected readonly ILeaseSchedulerWakeSignal WakeSignal = Substitute.For<ILeaseSchedulerWakeSignal>();
 
+    /// <summary>
+    ///     AB#5279 — encrypts the invoker's token before it is persisted on a queued execution. The
+    ///     default substitute encrypts nothing and throws nothing; the enqueue suite arranges both.
+    /// </summary>
+    protected readonly IWorkloadEncryptionService EncryptionService = Substitute.For<IWorkloadEncryptionService>();
+
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
     protected TriggerManagementServiceTestsBase()
     {
@@ -57,7 +63,8 @@ internal abstract class TriggerManagementServiceTestsBase
             CommunicationEventService,
             WorkloadLifecycleService,
             LifecycleConfigurationService,
-            WakeSignal);
+            WakeSignal,
+            EncryptionService);
 
         LifecycleConfigurationService.IsLeasingEnabledAsync(Arg.Any<string>()).Returns(true);
 

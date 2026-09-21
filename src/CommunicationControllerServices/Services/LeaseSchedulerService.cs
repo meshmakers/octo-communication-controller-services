@@ -528,7 +528,10 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
         // the tenant's queue could pick a different one, and the claim below would then have latched a
         // different work item than the one that runs.
         var request = new LeaseRequest(candidate.Borrower.TenantId, candidate.Borrower.AdapterRtEntityId.RtId,
-            candidate.Queued.ExecutionId, ttl, candidate.Queued.PipelineRtId, candidate.Queued.InputData);
+            candidate.Queued.ExecutionId, ttl, candidate.Queued.PipelineRtId, candidate.Queued.InputData,
+            // AB#5279: the invoker the item was queued for travels with the work, read from the entity
+            // like the input - a retry and its original attempt run as the same principal.
+            candidate.Queued.Caller, candidate.Queued.CallerAccessToken);
 
         var result = await _leaseService.GrantLeaseAsync(key.LenderTenantId, adapterPoolRtId, request, cancellationToken,
             // The admission gate — see ILeaseService.GrantLeaseAsync. This is where the work item

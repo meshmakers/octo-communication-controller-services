@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 
@@ -34,6 +35,14 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 ///     execution id had nothing to run. Read from the entity rather than re-derived, so the retry of
 ///     an interrupted attempt and its original run the same input.
 /// </param>
+/// <param name="Caller">
+///     The invoker the work item was queued for (AB#5279) — token-free principal, read from the
+///     entity like the input. Null when queued without one (a cron tick, an internal caller).
+/// </param>
+/// <param name="CallerAccessToken">
+///     The invoker's token exactly as stored on the entity — encrypted, or null. Decrypting and
+///     judging its expiry is the lease service's job at grant time.
+/// </param>
 public sealed record QueuedExecution(
     string ExecutionId,
     OctoObjectId ExecutionRtId,
@@ -41,7 +50,9 @@ public sealed record QueuedExecution(
     OctoObjectId? PipelineRtId,
     string? PipelineName,
     int ExecutionClass,
-    string? InputData = null)
+    string? InputData = null,
+    ExecutePipelineCaller? Caller = null,
+    string? CallerAccessToken = null)
 {
     /// <summary><c>PipelineExecutionClass.Interactive</c>: work a human is waiting for.</summary>
     public const int InteractiveClass = 0;
@@ -113,8 +124,12 @@ public readonly record struct LeaseClaim(
 /// <param name="AdapterRtEntityId">The borrower's Leased adapter that owns the work.</param>
 /// <param name="TriggerType">Trigger type of the original attempt, carried onto the retry.</param>
 /// <param name="InputData">Pipeline input of the original attempt, carried onto the retry.</param>
+/// <param name="Caller">Invoker of the original attempt, carried onto the retry (AB#5279).</param>
+/// <param name="CallerAccessToken">The invoker's token as stored (encrypted), carried onto the retry as-is.</param>
 public sealed record InterruptedLeasedExecution(
     RtEntityId PipelineRtEntityId,
     RtEntityId AdapterRtEntityId,
     RtPipelineTriggerTypeEnum TriggerType,
-    string? InputData);
+    string? InputData,
+    ExecutePipelineCaller? Caller = null,
+    string? CallerAccessToken = null);

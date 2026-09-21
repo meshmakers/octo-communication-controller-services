@@ -201,6 +201,11 @@ internal class LeaseService : ILeaseService
             PipelineRtId = request.PipelineRtId?.ToString() ?? string.Empty,
             PipelineInput = request.PipelineInput,
             Pipeline = pipelineConfiguration,
+            // AB#5279: the invoker the item was queued for, and its token when the controller could
+            // keep it and it is still usable. Resolved before the member is reserved, like the
+            // projection above - a lease is built once and pushed as-is.
+            Caller = request.Caller,
+            CallerAccessToken = ResolveCallerAccessToken(request),
             ClientId = credential.Value.ClientId,
             ClientSecret = credential.Value.ClientSecret,
             // Three fields, filled here and nowhere else. The member formats no user name and knows
@@ -434,6 +439,46 @@ internal class LeaseService : ILeaseService
     }
 
     /// <inheritdoc />
+    /// <summary>
+    ///     AB#5279 — the invoker's token for the lease, or null. Stored encrypted on the queued
+    ///     execution; decrypted here and handed to the member only while it is still valid. An
+    ///     expired token would not make the run fail loudly at once — it would make every delegated
+    ///     call inside it fail with 401 — so it is dropped up front and the run proceeds as the
+    ///     caller without delegation, which is the documented shape of a lease without a token.
+    /// </summary>
+    private string? ResolveCallerAccessToken(LeaseRequest request)
+    {
+        if (string.IsNullOrEmpty(request.CallerAccessToken))
+        {
+            return null;
+        }
+
+        string token;
+        try
+        {
+            token = _encryptionService.Decrypt(request.CallerAccessToken);
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e,
+                "[{BorrowerTenantId}] The invoker's token of queued execution '{ExecutionId}' could not be decrypted; " +
+                "the lease carries the caller without delegation",
+                request.BorrowerTenantId, request.ExecutionId);
+            return null;
+        }
+
+        if (JwtExpiry.IsExpired(token, DateTime.UtcNow))
+        {
+            Logger.Info(
+                "[{BorrowerTenantId}] The invoker's token of queued execution '{ExecutionId}' expired while the item " +
+                "was waiting for a lease; the lease carries the caller without delegation",
+                request.BorrowerTenantId, request.ExecutionId);
+            return null;
+        }
+
+        return token;
+    }
+
     public async Task<string?> InterruptAndRequeueAsync(LeaseDto lease, LeaseInterruptReason interruptReason,
         string reason)
     {
@@ -465,6 +510,9 @@ internal class LeaseService : ILeaseService
                 TriggerType = interrupted.TriggerType,
                 InputData = interrupted.InputData
             };
+            // AB#5279: the retry is the same work item - same input, same invoker. The token is
+            // copied as stored (still encrypted); the grant decides whether it is still usable.
+            QueuedCaller.Apply(retry, interrupted.Caller, interrupted.CallerAccessToken);
 
             await _communicationRepository.EnqueueExecutionAsync(lease.TenantId, retry,
                 interrupted.PipelineRtEntityId, interrupted.AdapterRtEntityId, DateTime.UtcNow);
