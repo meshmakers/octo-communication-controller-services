@@ -97,7 +97,7 @@ internal sealed class WorkloadActivatorMiddleware(
     public async Task InvokeAsync(HttpContext context)
     {
         if (!options.Value.ActivatorEnabled ||
-            !hostnameIndex.TryResolve(context.Request.Host.Host, out var target))
+            !hostnameIndex.TryResolve(context.Request.Host.Host, context.Request.Path.Value, out var target))
         {
             await next(context);
             return;

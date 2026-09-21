@@ -43,10 +43,10 @@ internal class WorkloadActivatorMiddlewareTests
         HttpMessageHandler handler, bool indexHit = true, bool activatorEnabled = true,
         int forwardRetrySeconds = 0)
     {
-        _index.TryResolve(Arg.Any<string?>(), out Arg.Any<ActivatorTarget?>())
+        _index.TryResolve(Arg.Any<string?>(), Arg.Any<string?>(), out Arg.Any<ActivatorTarget?>())
             .Returns(x =>
             {
-                x[1] = indexHit ? _target : null;
+                x[2] = indexHit ? _target : null;
                 return indexHit;
             });
 

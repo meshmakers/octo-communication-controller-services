@@ -163,6 +163,18 @@ moved past the text:
 - **HTTP activator (AB#4923)** moved from follow-up into the shipped feature set: controller
   middleware behind the nginx `default-backend` annotation, request held through the wake,
   bodies ≤ 32 MB buffered and replayed across the forward retries. Off by default.
+- **Activator on a shared adapter host (AB#5300, 2026-09-21).** Every cluster's default layout puts
+  all Mesh Adapters on one host, `adapter.{{domain.default}}`, with one ingress rule `/<tenantId>`
+  per adapter. `WorkloadHostnameIndex` resolved by Host alone and kept the first claimant, so a
+  request for a hibernated adapter on the shared host woke whichever tenant had been indexed first
+  and forwarded it that tenant's request. The index now keeps every claimant per host and
+  resolves a shared host by the first path segment — the tenant id the adapter chart renders on
+  the rule, compared case-insensitively — while a host with a single claimant resolves regardless
+  of the path as before. A shared host whose first segment names no claimant is a miss (404),
+  never a guess; two workloads of the *same* tenant on one host remain first-one-wins with a
+  warning, because both would render the same path. The four HTTP-only adapters of AB#5281 item 6
+  avoided the defect with dedicated hosts (`<tenant>-adapter.{{domain.default}}`); the accounting
+  adapters, whose app expects the shared host, needed this fix before they can go OnDemand.
 - **Dash0 alert (§3.4):** the designed `Offline && LifecycleState=Running` join was not buildable
   from existing series — the controller now publishes the answer itself as the
   `octo.workload.offline_unexpected` event; alerting keys on that.

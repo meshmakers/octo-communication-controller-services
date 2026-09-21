@@ -207,4 +207,101 @@ internal class WorkloadHostnameIndexTests
         await Assert.That(_index.TryResolve("shared.test-2.mm.cloud", out var target)).IsTrue();
         await Assert.That(target!.WorkloadRtId).IsEqualTo(adapter.RtId);
     }
+
+    // ---- AB#5300: a host shared by several tenants -------------------------------------------
+
+    private RtAdapter IngressWorkloadOf(string tenantId, string hostname, string name = "Mesh Adapter")
+    {
+        var adapter = IngressWorkload(hostname);
+        adapter.Name = name;
+        _repository.GetWorkloadsAsync(tenantId).Returns([adapter]);
+        return adapter;
+    }
+
+    private void GivenTenants(params string[] tenantIds) =>
+        _adapterCache.GetEnabledTenantIds().Returns(tenantIds);
+
+    /// <summary>
+    ///     🔴 The defect: prod-1's eight accounting adapters all sit on adapter.prod-1.octo-mesh.com
+    ///     with one ingress rule /&lt;tenantId&gt; each. Host alone resolved to whichever tenant was
+    ///     indexed first, so a request for a hibernated adapter woke the WRONG one.
+    /// </summary>
+    [Test]
+    public async Task SharedHost_ResolvesByTheTenantInThePath()
+    {
+        GivenTenants("acme", "beta");
+        var acme = IngressWorkloadOf("acme", "adapter.prod-1.octo-mesh.com");
+        var beta = IngressWorkloadOf("beta", "adapter.prod-1.octo-mesh.com");
+
+        await _index.RefreshAsync();
+
+        using var multiple = Assert.Multiple();
+        await Assert.That(_index.TryResolve("adapter.prod-1.octo-mesh.com", "/beta/state", out var b)).IsTrue();
+        await Assert.That(b!.WorkloadRtId).IsEqualTo(beta.RtId);
+        await Assert.That(_index.TryResolve("adapter.prod-1.octo-mesh.com", "/acme", out var a)).IsTrue();
+        await Assert.That(a!.WorkloadRtId).IsEqualTo(acme.RtId);
+        // Tenant ids are lowercased on the ingress path; the entity may spell them otherwise.
+        await Assert.That(_index.TryResolve("adapter.prod-1.octo-mesh.com", "/BETA/x", out var upper)).IsTrue();
+        await Assert.That(upper!.TenantId).IsEqualTo("beta");
+    }
+
+    [Test]
+    public async Task SharedHost_UnknownTenantInThePath_IsAMissNotAGuess()
+    {
+        GivenTenants("acme", "beta");
+        IngressWorkloadOf("acme", "adapter.prod-1.octo-mesh.com");
+        IngressWorkloadOf("beta", "adapter.prod-1.octo-mesh.com");
+
+        await _index.RefreshAsync();
+
+        using var multiple = Assert.Multiple();
+        await Assert.That(_index.TryResolve("adapter.prod-1.octo-mesh.com", "/gamma/state", out var ignored1)).IsFalse();
+        await Assert.That(_index.TryResolve("adapter.prod-1.octo-mesh.com", "/", out var ignored2)).IsFalse();
+        // The host-only overload cannot tell the claimants apart either: ambiguous is a miss.
+        await Assert.That(_index.TryResolve("adapter.prod-1.octo-mesh.com", out var ignored3)).IsFalse();
+    }
+
+    [Test]
+    public async Task DedicatedHost_ResolvesRegardlessOfThePath()
+    {
+        // nginx has already matched the ingress rule; under a host with one claimant there is
+        // nobody else the request could be meant for. Unchanged behaviour (AB#4923).
+        ReturnWorkloads(IngressWorkload("familyos-adapter.prod-1.octo-mesh.com"));
+
+        await _index.RefreshAsync();
+
+        using var multiple = Assert.Multiple();
+        await Assert.That(_index.TryResolve("familyos-adapter.prod-1.octo-mesh.com", "/familyos/state", out var ignored4)).IsTrue();
+        await Assert.That(_index.TryResolve("familyos-adapter.prod-1.octo-mesh.com", "/whatever", out var ignored5)).IsTrue();
+        await Assert.That(_index.TryResolve("familyos-adapter.prod-1.octo-mesh.com", null, out var ignored6)).IsTrue();
+    }
+
+    [Test]
+    public async Task SameTenantTwiceOnOneHost_FirstWins()
+    {
+        // The one ambiguity the path cannot resolve: both would render "/acme".
+        var first = IngressWorkload("adapter.prod-1.octo-mesh.com");
+        first.Name = "first";
+        var second = IngressWorkload("adapter.prod-1.octo-mesh.com");
+        second.Name = "second";
+        ReturnWorkloads(first, second);
+
+        await _index.RefreshAsync();
+
+        await Assert.That(_index.TryResolve("adapter.prod-1.octo-mesh.com", "/acme", out var target)).IsTrue();
+        await Assert.That(target!.WorkloadRtId).IsEqualTo(first.RtId);
+    }
+
+    [Test]
+    [Arguments("/acme/state", "acme")]
+    [Arguments("/acme", "acme")]
+    [Arguments("acme/x", "acme")]
+    [Arguments("//acme", "acme")]
+    [Arguments("/", null)]
+    [Arguments("", null)]
+    [Arguments(null, null)]
+    public async Task FirstPathSegment_IsTheTenantOnTheAdapterIngressRule(string? path, string? expected)
+    {
+        await Assert.That(WorkloadHostnameIndex.FirstPathSegment(path)).IsEqualTo(expected);
+    }
 }

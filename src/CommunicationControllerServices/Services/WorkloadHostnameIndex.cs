@@ -20,18 +20,62 @@ internal sealed class WorkloadHostnameIndex(
     IWorkloadTemplateResolver templateResolver,
     IOptions<CommunicationControllerOptions> options) : IWorkloadHostnameIndex
 {
-    private volatile FrozenDictionary<string, ActivatorTarget> _byHost =
-        FrozenDictionary<string, ActivatorTarget>.Empty;
+    /// <summary>
+    ///     Every workload that claims a host, in enumeration order (AB#5300). One entry is the
+    ///     dedicated-host case; several are the shared-host layout every cluster ships by default.
+    /// </summary>
+    private volatile FrozenDictionary<string, ActivatorTarget[]> _byHost =
+        FrozenDictionary<string, ActivatorTarget[]>.Empty;
 
     public bool TryResolve(string? host, [NotNullWhen(true)] out ActivatorTarget? target)
+        => TryResolve(host, null, out target);
+
+    public bool TryResolve(string? host, string? path, [NotNullWhen(true)] out ActivatorTarget? target)
     {
         target = null;
-        return !string.IsNullOrWhiteSpace(host) && _byHost.TryGetValue(host, out target);
+        if (string.IsNullOrWhiteSpace(host) || !_byHost.TryGetValue(host, out var claimants))
+        {
+            return false;
+        }
+
+        if (claimants.Length == 1)
+        {
+            // A dedicated host: the ingress rule's path is the tenant's too, but nginx has already
+            // matched it, and a request that reaches the activator under this host can only be
+            // meant for this workload.
+            target = claimants[0];
+            return true;
+        }
+
+        // A shared host: the ingress path is "/<tenantId>" per adapter (adapter chart, lowercased),
+        // so the first path segment names the tenant - and therefore the claimant.
+        var tenantSegment = FirstPathSegment(path);
+        if (tenantSegment is null)
+        {
+            return false;
+        }
+
+        target = claimants.FirstOrDefault(c =>
+            string.Equals(c.TenantId, tenantSegment, StringComparison.OrdinalIgnoreCase));
+        return target is not null;
+    }
+
+    internal static string? FirstPathSegment(string? path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return null;
+        }
+
+        var trimmed = path.AsSpan().TrimStart('/');
+        var end = trimmed.IndexOf('/');
+        var segment = end < 0 ? trimmed : trimmed[..end];
+        return segment.IsEmpty ? null : segment.ToString();
     }
 
     public async Task RefreshAsync(CancellationToken cancellationToken = default)
     {
-        var map = new Dictionary<string, ActivatorTarget>(StringComparer.OrdinalIgnoreCase);
+        var map = new Dictionary<string, List<ActivatorTarget>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var tenantId in adapterCache.GetEnabledTenantIds())
         {
@@ -75,15 +119,26 @@ internal sealed class WorkloadHostnameIndex(
                     var target = new ActivatorTarget(tenantId, workload.RtId, workload.Name ?? string.Empty,
                         BuildAddress(tenantId, workload.RtId.ToString()));
 
-                    if (!map.TryAdd(hostname!, target))
+                    if (!map.TryGetValue(hostname!, out var claimants))
                     {
-                        // Two workloads claiming one hostname is a misconfiguration the ingress
-                        // cannot resolve either — first one wins here, but say so.
-                        logger.LogWarning(
-                            "[{TenantId}] Hostname '{Hostname}' is claimed by more than one workload; " +
-                            "the activator will use '{WorkloadName}'",
-                            tenantId, hostname, map[hostname!].WorkloadName);
+                        claimants = [];
+                        map[hostname!] = claimants;
                     }
+
+                    if (claimants.Any(c => string.Equals(c.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        // Two workloads of the SAME tenant on one host is the ambiguity the path
+                        // cannot resolve either (both render "/<tenantId>"); first one wins, say so.
+                        // Different tenants on one host are the platform's default layout and are
+                        // told apart by the path (AB#5300) - no warning for those.
+                        logger.LogWarning(
+                            "[{TenantId}] Hostname '{Hostname}' is claimed by more than one workload of this tenant; " +
+                            "the activator will use '{WorkloadName}'",
+                            tenantId, hostname, claimants.First(c => c.TenantId == tenantId).WorkloadName);
+                        continue;
+                    }
+
+                    claimants.Add(target);
                 }
             }
             catch (Exception e)
@@ -94,11 +149,12 @@ internal sealed class WorkloadHostnameIndex(
             }
         }
 
-        _byHost = map.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+        _byHost = map.ToFrozenDictionary(kv => kv.Key, kv => kv.Value.ToArray(), StringComparer.OrdinalIgnoreCase);
         // Info, not Debug: this is once per refresh interval, and it is the only signal that the
         // activator can attribute anything at all. A silent index is indistinguishable from a
         // feature that is switched off.
-        logger.LogInformation("Activator hostname index rebuilt with {Count} entries", _byHost.Count);
+        logger.LogInformation("Activator hostname index rebuilt with {Count} entries on {HostCount} host(s)",
+            map.Values.Sum(v => v.Count), _byHost.Count);
     }
 
     private Uri BuildAddress(string tenantId, string workloadRtId)

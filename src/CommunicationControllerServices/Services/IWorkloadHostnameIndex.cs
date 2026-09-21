@@ -36,6 +36,17 @@ public interface IWorkloadHostnameIndex
     bool TryResolve(string? host, [NotNullWhen(true)] out ActivatorTarget? target);
 
     /// <summary>
+    ///     Resolves an inbound Host header plus request path (AB#5300). A host claimed by exactly one
+    ///     workload resolves regardless of the path, as before. A host claimed by several — the
+    ///     platform's default layout, <c>adapter.{{domain.default}}</c> with one ingress rule
+    ///     <c>/&lt;tenantId&gt;</c> per adapter — is disambiguated by the first path segment, which
+    ///     the adapter chart renders as the lowercased tenant id. A shared host whose first segment
+    ///     names no claimant is a miss, never a guess: waking the wrong tenant's adapter and
+    ///     forwarding it somebody else's request is the one outcome this index must not produce.
+    /// </summary>
+    bool TryResolve(string? host, string? path, [NotNullWhen(true)] out ActivatorTarget? target);
+
+    /// <summary>
     ///     Rebuilds the index across every enabled tenant. Driven by
     ///     <c>WorkloadHostnameIndexBackgroundService</c> on a timer. Never throws for a single
     ///     tenant: one unreadable tenant must not empty the index for the others, because an empty
