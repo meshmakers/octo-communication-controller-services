@@ -28,10 +28,13 @@ $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 #
 # AB#5187 ownership classification, and it splits cleanly:
 #   isRuntimeState: false — the lending scope and the borrowing declaration. Both are
-#     deliberate statements about a tenant tree, exactly like LifecycleMode and
-#     IdleTimeoutMinutes in attributes/helmDeployment.yaml, and concept §8 Q9 decided them
-#     to be author configuration so a blueprint can seed BOTH halves: a parent tenant's
-#     blueprint declares the pool and its range, a child tenant's declares that it borrows.
+#     deliberate statements about a tenant tree, and concept §8 Q9 decided them to be author
+#     configuration so a blueprint can seed BOTH halves: a parent tenant's blueprint declares
+#     the pool and its range, a child tenant's declares that it borrows. (LifecycleMode /
+#     IdleTimeoutMinutes in attributes/helmDeployment.yaml, once cited here as the same
+#     kind, became runtime state with AB#5301 — a re-apply must not undo an operator's
+#     OnDemand. The scope and the borrowing edge stay seed-owned: nothing operational
+#     rewrites them at run time.)
 #   isRuntimeState: true — everything written by a running lease. None of it is seedable and
 #     a blueprint re-apply must never touch it.
 attributes:

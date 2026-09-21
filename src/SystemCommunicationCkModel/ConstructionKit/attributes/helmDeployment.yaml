@@ -45,20 +45,28 @@ attributes:
   valueType: String
   description: 'Public hostname used when IngressEnabled=true (e.g. adapter.staging.octo-mesh.com). Adapters get a tenant-scoped path automatically (https://<hostname>/<tenantId>); Applications use the root path. Ignored when IngressEnabled=false. Runtime-state (AB#4706): the productive hostname is tenant-specific (e.g. <tenant>.meshmakers.cloud) and operator-managed - a blueprint re-apply preserves it instead of resetting to the seeded default and silently breaking the deployed ingress/DNS.'
   isRuntimeState: true
-# AB#5187 — NOT runtime state, confirming what AB#4914 already documented in the description
-# below: LifecycleMode and IdleTimeoutMinutes are the author's policy, and LifecycleState /
-# LastActivityAt further down are the runtime half of the same feature.
+# AB#5301 — runtime state after all, reversing the AB#5187 classification these two carried. LifecycleMode
+# and IdleTimeoutMinutes are operational decisions about a DEPLOYED workload, taken by the
+# tenant's operator on the running system exactly like IngressEnabled, Hostname and
+# ChartVersion above — and the service-managed System.Communication blueprint, which seeds
+# the Mesh Adapter without a LifecycleMode, is re-applied on every controller upgrade and CK
+# bump. As author configuration the re-apply wrote the default (AlwaysOn) back over an
+# operator's OnDemand, silently: the adapter was woken on the next reconcile and simply
+# stayed up, so nothing broke and the memory saving was just gone after the next release
+# (observed on the local scale-to-zero walk, and what AB#5281 item 6 had to work around on
+# prod-1). Seeding still works — a blueprint's value lands on create — the re-apply merely
+# no longer overrides what the operator set since. Same change class as AB#5210 (client URIs).
 - id: LifecycleMode
   valueType: Enum
   valueCkEnumId: ${this}/LifecycleMode
-  description: 'Lifecycle policy of the workload (AB#4914). AlwaysOn (default) keeps it running permanently; OnDemand allows the controller to scale it to 0 replicas when idle and wake it on demand. Author configuration — a blueprint re-apply may reset it, so blueprints that opt workloads into OnDemand should seed the value.'
-  isRuntimeState: false
+  description: 'Lifecycle policy of the workload (AB#4914). AlwaysOn (default) keeps it running permanently; OnDemand allows the controller to scale it to 0 replicas when idle and wake it on demand; Leased borrows a process from an adapter pool per work item (AB#4924). Runtime-state (AB#5301): an operator decision about the deployed workload, preserved across blueprint re-apply — a blueprint may seed it, but a re-apply never resets it.'
+  isRuntimeState: true
   defaultValues:
     - 0
 - id: IdleTimeoutMinutes
   valueType: Int
-  description: 'Minutes without pipeline activity before an OnDemand workload is drained and scaled to 0 replicas (AB#4914). Ignored for AlwaysOn workloads.'
-  isRuntimeState: false
+  description: 'Minutes without pipeline activity before an OnDemand workload is drained and scaled to 0 replicas (AB#4914). Ignored for AlwaysOn workloads. Runtime-state (AB#5301), preserved across blueprint re-apply like LifecycleMode.'
+  isRuntimeState: true
   defaultValues:
     - 30
 - id: LifecycleState

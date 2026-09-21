@@ -21,6 +21,10 @@ $schema: https://schemas.meshmakers.cloud/ck-migration-meta.schema.json
 # 4.2.0 (AB#5279) adds NO entry either: seven optional runtime-state attributes on
 # PipelineExecution (the invoker of a queued work item), purely additive — rides the
 # schema-only bridge.
+#
+# 4.3.0 (AB#5301) adds NO entry either: LifecycleMode and IdleTimeoutMinutes become
+# isRuntimeState (minor per ck-semver-rules "isRuntimeState changed"); no stored value
+# changes, only what a blueprint re-apply may overwrite — rides the schema-only bridge.
 ckModelId: System.Communication-4.0.0
 migrations:
   - fromVersion: "3.0.1"

@@ -163,6 +163,14 @@ moved past the text:
 - **HTTP activator (AB#4923)** moved from follow-up into the shipped feature set: controller
   middleware behind the nginx `default-backend` annotation, request held through the wake,
   bodies ≤ 32 MB buffered and replayed across the forward retries. Off by default.
+- **LifecycleMode survives a blueprint re-apply (AB#5301, 2026-09-21).** `LifecycleMode` and
+  `IdleTimeoutMinutes` were author configuration; the service-managed System.Communication
+  blueprint, re-applied on every controller upgrade and CK bump, wrote the default `AlwaysOn`
+  back over an operator's `OnDemand` — silently, because the adapter was woken on the next
+  reconcile and stayed up. Both are `isRuntimeState` from System.Communication 4.3.0 on, like
+  `IngressEnabled`, `Hostname` and `ChartVersion`: a blueprint may seed them on create, a re-apply
+  never resets them. Until a cluster runs 4.3.0, re-check the mode of OnDemand adapters after
+  every core release.
 - **Activator on a shared adapter host (AB#5300, 2026-09-21).** Every cluster's default layout puts
   all Mesh Adapters on one host, `adapter.{{domain.default}}`, with one ingress rule `/<tenantId>`
   per adapter. `WorkloadHostnameIndex` resolved by Host alone and kept the first claimant, so a
