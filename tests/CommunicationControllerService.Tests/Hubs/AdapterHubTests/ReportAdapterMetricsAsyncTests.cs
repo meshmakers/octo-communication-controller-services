@@ -30,7 +30,7 @@ internal class ReportAdapterMetricsAsyncTests : IDisposable
             _eventService,
             _pipelineExecutionService,
             _executionReportQueue,
-            _shutdownState);
+            _shutdownState, Substitute.For<IWorkloadLifecycleService>());
 
         // Intentionally no HttpContext on the mock — the handler must swallow
         // the resulting "TenantId is null" exception, see test below.

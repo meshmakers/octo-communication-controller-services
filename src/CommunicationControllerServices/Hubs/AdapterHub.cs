@@ -22,6 +22,7 @@ internal class AdapterHub : Hub, IAdapterHub
     private readonly IPipelineExecutionService _pipelineExecutionService;
     private readonly IPipelineExecutionReportQueue _executionReportQueue;
     private readonly IShutdownState _shutdownState;
+    private readonly IWorkloadLifecycleService _workloadLifecycleService;
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
     /// <summary>
@@ -33,11 +34,14 @@ internal class AdapterHub : Hub, IAdapterHub
     /// <param name="pipelineExecutionService">Service for managing pipeline execution metrics</param>
     /// <param name="executionReportQueue">Queue for background processing of execution reports</param>
     /// <param name="shutdownState">Reports whether the controller is mid-shutdown — gates the Offline write in <see cref="OnDisconnectedAsync"/></param>
+    /// <param name="workloadLifecycleService">The wake gate an adapter asks for a target pipeline's workload before publishing a data event to it (AB#5231)</param>
     public AdapterHub(IAdapterService adapterService, IPipelineDebugService pipelineDebugService,
         ICommunicationEventService eventService, IPipelineExecutionService pipelineExecutionService,
         IPipelineExecutionReportQueue executionReportQueue,
-        IShutdownState shutdownState)
+        IShutdownState shutdownState,
+        IWorkloadLifecycleService workloadLifecycleService)
     {
+        _workloadLifecycleService = workloadLifecycleService;
         _adapterService = adapterService;
         _pipelineDebugService = pipelineDebugService;
         _eventService = eventService;
@@ -292,6 +296,20 @@ internal class AdapterHub : Hub, IAdapterHub
 
         _executionReportQueue.EnqueueInterruptedResult(tenantId, adapterRtEntityId, endDto);
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    ///     AB#5231: the send-path wake gate for pipeline data events. The tenant is the connection's
+    ///     own, so an adapter can only wake workloads of the tenant it authenticated for; the pipeline
+    ///     is resolved to its workload by the lifecycle service, which is a no-op for AlwaysOn
+    ///     workloads and tenants without scale-to-zero. Awaited on purpose: the caller publishes only
+    ///     once this returns.
+    /// </summary>
+    /// <param name="pipelineRtEntityId">The target pipeline whose executing workload must be running</param>
+    public async Task EnsurePipelineWorkloadRunningAsync(RtEntityId pipelineRtEntityId)
+    {
+        var tenantId = GetTenantId();
+        await _workloadLifecycleService.EnsureWorkloadRunningForPipelineAsync(tenantId, pipelineRtEntityId.RtId);
     }
 
     /// <summary>

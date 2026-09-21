@@ -101,7 +101,7 @@ Whether a workload *can* be OnDemand is not a free choice — it is derivable fr
 
 | Class | Triggers | Behavior at 0 replicas |
 |---|---|---|
-| **Wake-capable** | cron `FromPipelineTriggerEvent`, `FromExecutePipelineCommand`, `FromHttpRequest@1/2`, `FromPipelineDataEvent` (chaining, durable queue) | work buffers durably or arrives through a wake gate |
+| **Wake-capable** | cron `FromPipelineTriggerEvent`, `FromExecutePipelineCommand`, `FromHttpRequest@1/2`, `FromPipelineDataEvent` (chaining: durable queue per target pipeline **and** a send-path wake gate, AB#5231) | work buffers durably or arrives through a wake gate |
 | **Process-bound** | `FromPolling`, `FromWatchRtEntity`, `FromMicrosoftGraphEmail`, MQTT/EDA/Loxone event consumers | state is in-memory only, no external wake signal — **silently stops** |
 
 A workload is **`OnDemandCapable` iff none of its deployed pipelines uses a process-bound trigger.**
@@ -163,6 +163,22 @@ moved past the text:
 - **HTTP activator (AB#4923)** moved from follow-up into the shipped feature set: controller
   middleware behind the nginx `default-backend` annotation, request held through the wake,
   bodies ≤ 32 MB buffered and replayed across the forward retries. Off by default.
+- **Pipeline data events survive a hibernated target (AB#5231, 2026-09-21).** §5 called
+  `FromPipelineDataEvent` wake-capable "(chaining, durable queue)", and both halves were wrong: the
+  trigger bound a private auto-delete queue with a Guid suffix to the data flow's exchange, which
+  vanished with the scaled-to-zero workload so a message published then reached an exchange with no
+  bound queue and was discarded without an error — and `ToPipelineDataEvent` published adapter → broker
+  → adapter without the controller ever seeing it, so nothing woke the target. Now: the trigger
+  consumes a **durable, named queue per target pipeline** (`octo::com::pipeline-data-event-<tenant>-
+  <pipelineRtId>`, same overload as the cron trigger, replicas compete on it), the sender publishes
+  **to that queue**, and before it does it asks the controller over the adapter hub
+  (`IAdapterHub.EnsurePipelineWorkloadRunningAsync`) to bring the target's workload up — skipped when
+  the target is registered in the sender's own process, a no-op for AlwaysOn targets and tenants
+  without scale-to-zero, and a logged warning rather than a failed publish when the ask fails, since
+  the queue holds the event for the next wake. The `AwaitResult` command path is gated the same way
+  before its (still non-durable) request. Both ends ship in one SDK: a sender and a receiver on
+  different SDK generations do not meet, which is why this rides the 0.2 line. A `Leased` target
+  stays refused (AB#5278): its queue has no consumer and its wake is a no-op.
 - **LifecycleMode survives a blueprint re-apply (AB#5301, 2026-09-21).** `LifecycleMode` and
   `IdleTimeoutMinutes` were author configuration; the service-managed System.Communication
   blueprint, re-applied on every controller upgrade and CK bump, wrote the default `AlwaysOn`

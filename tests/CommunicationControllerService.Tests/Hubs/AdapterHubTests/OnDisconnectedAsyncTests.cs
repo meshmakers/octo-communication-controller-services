@@ -29,7 +29,7 @@ internal class OnDisconnectedAsyncTests : IDisposable
             _eventService,
             _pipelineExecutionService,
             _executionReportQueue,
-            _shutdownState);
+            _shutdownState, Substitute.For<IWorkloadLifecycleService>());
 
         var context = Substitute.For<HubCallerContext>();
         context.ConnectionId.Returns(ConnectionId);
