@@ -4,8 +4,12 @@ types:
     description: A data processing pipeline that defines a sequence of processing nodes. Pipelines are deployed to adapters for execution and can be organized within data flows.
     derivedFromCkTypeId: ${this}/DeployableEntity
     attributes:
+      # The seed decides the initial state (optional pipelines ship disabled); the operator
+      # flips it in the product. A blueprint re-apply / UpdateBlueprint must keep that flip -
+      # SeedOwned reset hand-enabled pipelines to the seed's false on every update (AB#5309).
       - id: ${System}/Enabled
         name: Enabled
+        ownership: TenantOwned
         isOptional: true
       - id: ${this}/PipelineDefinition
         name: PipelineDefinition

@@ -4,8 +4,12 @@ types:
     description: A scheduled trigger that executes one or more pipelines based on a cron expression. Organized within data flows alongside the pipelines they trigger.
     derivedFromCkTypeId: ${this}/DeployableEntity
     attributes:
+      # The seed decides the initial state (optional pipelines ship disabled); the operator
+      # flips it in the product. A blueprint re-apply / UpdateBlueprint must keep that flip -
+      # SeedOwned reset hand-enabled pipelines to the seed's false on every update (AB#5309).
       - id: ${System}/Enabled
         name: Enabled
+        ownership: TenantOwned
       - id: ${System.Bot}/CronExpression
         name: CronExpression
     associations:
