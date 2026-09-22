@@ -5,8 +5,8 @@ types:
     derivedFromCkTypeId: ${this}/DeployableEntity
     attributes:
       # The seed decides the initial state (optional pipelines ship disabled); the operator
-      # flips it in the product. A blueprint re-apply / UpdateBlueprint must keep that flip -
-      # SeedOwned reset hand-enabled pipelines to the seed's false on every update (AB#5309).
+      # flips it in the product. A blueprint re-apply / UpdateBlueprint must keep that flip;
+      # as SeedOwned, every update reset hand-enabled pipelines to the seed's false (AB#5309).
       - id: ${System}/Enabled
         name: Enabled
         ownership: TenantOwned
