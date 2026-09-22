@@ -2,6 +2,8 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Connections.Features;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.SignalR;
 using NSubstitute;
 
@@ -11,7 +13,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Hubs.Adap
 ///     AB#5231: the send-path wake gate an adapter calls before publishing a pipeline data event to a
 ///     pipeline on another workload. Tenant-bound: the gate runs for the connection's own tenant.
 /// </summary>
-internal class EnsurePipelineWorkloadRunningAsyncTests
+internal class EnsurePipelineWorkloadRunningAsyncTests : IDisposable
 {
     private const string TenantId = "acme";
 
@@ -29,13 +31,19 @@ internal class EnsurePipelineWorkloadRunningAsyncTests
     {
         var httpContext = new DefaultHttpContext();
         httpContext.Request.RouteValues["tenantId"] = tenantId;
-        var feature = Substitute.For<IHttpContextFeature>();
-        feature.HttpContext.Returns(httpContext);
         var features = new FeatureCollection();
-        features.Set(feature);
+        features.Set<IHttpContextFeature>(new HttpContextFeature(httpContext));
         var context = Substitute.For<HubCallerContext>();
         context.Features.Returns(features);
         _hub.Context = context;
+    }
+
+    public void Dispose() => _hub.Dispose();
+
+    /// <summary>What <c>HubCallerContext.GetHttpContext()</c> reads: the request the connection came in on.</summary>
+    private sealed class HttpContextFeature(HttpContext httpContext) : IHttpContextFeature
+    {
+        public HttpContext? HttpContext { get; set; } = httpContext;
     }
 
     [Test]
