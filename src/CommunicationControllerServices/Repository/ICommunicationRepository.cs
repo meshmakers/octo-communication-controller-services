@@ -742,10 +742,23 @@ public interface ICommunicationRepository
     /// adapter is not <c>Online</c>. Running executions on a live (Online) adapter are never failed,
     /// so legitimate long-running pipelines are unaffected.
     /// </summary>
+    /// <remarks>
+    ///     🔴 AB#5326: a LEASED execution is exempt while its lease can still be live. Its adapter
+    ///     owns no process and is therefore never <c>Online</c>, so the rule above would fail every
+    ///     leased run past the grace period rather than protect it. A leased run in flight is
+    ///     watched by the lease instead — a member that disconnects is handled at once, and a lease
+    ///     past its TTL is reclaimed and re-queued. Only a leased execution older than
+    ///     <paramref name="leasedGraceCutoff" /> (TTL + grace) is judged here, which is the case no
+    ///     lease can still cover.
+    /// </remarks>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="graceCutoff">Executions started before this instant are eligible</param>
+    /// <param name="leasedGraceCutoff">
+    ///     A leased execution whose lease was granted after this instant is left to the lease
+    ///     reaper. Pass the same value as <paramref name="graceCutoff" /> to disable the exemption.
+    /// </param>
     /// <returns>Number of executions failed</returns>
-    Task<int> FailStuckExecutionsAsync(string tenantId, DateTime graceCutoff);
+    Task<int> FailStuckExecutionsAsync(string tenantId, DateTime graceCutoff, DateTime leasedGraceCutoff);
 
     /// <summary>
     /// Fails all non-terminal (<c>Running</c> / <c>Interrupted</c>) executions for the given adapter

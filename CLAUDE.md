@@ -3390,9 +3390,44 @@ SDK safety net: `AdapterExecutionService.GetLocalExecutionStatus` returns `Faile
 optimistic `Completed`) when an interrupted execution cannot be found in the local registry — an
 execution interrupted mid-flight must never be recorded as a success.
 
+#### 🔴 A LEASED execution is exempt from the reaper while its lease can be live (AB#5326)
+
+Mechanism 3 spares a `Running` execution only while its adapter is `Online`, and the comment beside
+it says why: *"a long-running pipeline on a connected adapter must never be failed by the reaper,
+regardless of how long it runs"*. A **leased** adapter can never satisfy that condition — it owns no
+process and never registers, so its `CommunicationState` stays `Unregistered` by construction, and
+the process doing the work is a pool member hanging off the `AdapterPool`. The protection therefore
+inverted itself for leasing: instead of sparing a healthy long run it failed **every** leased run past
+`PipelineExecutionStuckGraceMinutes`.
+
+Measured on the local kind cluster on 2026-09-23: a 16-minute leased run reported
+`ReleaseLeaseAsync … Completed, success=true` from its member, and the reaper wrote `Failed` over it
+**12 ms later** with *"Adapter offline; running execution orphaned by adapter restart"*. Two separate
+defects, both fixed:
+
+- `FailStuckExecutionsAsync` takes a second cutoff, `leasedGraceCutoff`. An execution with a
+  `LeaseGrantedAt`, no `LeaseReleasedAt` and a grant newer than that cutoff is removed from the set
+  **before** the adapter-state filter — it has an owner already: a member that disconnects is handled
+  at once by `LeaseService.HandleMemberDisconnectedAsync`, and a lease past its TTL is reclaimed and
+  re-queued by `ReapExpiredLeasesAsync`. The service computes the cutoff as
+  `LeaseTtlMinutes + graceMinutes` from **the same option the scheduler grants with**, so the two
+  cannot drift; past it no lease can still be holding the work (the controller restarted while a
+  member died, and no disconnect was ever observed), which is the one case this reaper still owns.
+- `ApplyFailedStatusAsync` takes the status it expects and **re-reads the batch inside its own
+  transaction**, dropping anything that has moved on. The candidate read and the write live in
+  different sessions, so a terminal result arriving in between used to be overwritten — which is
+  exactly the 12 ms above. `FailOrphanedExecutionsForAdapterAsync` consequently applies its two
+  status sets separately instead of concatenating them.
+
+Note the neighbouring defaults are equal and independent: `PipelineExecutionStuckGraceMinutes` and
+`LeaseTtlMinutes` are both 15, and both reapers run in the same `ExecutionCleanupBackgroundService`
+iteration (stuck reaper first, lease reaper second).
+
 Integration coverage lives in
 `tests/CommunicationControllerServices.IntegrationTests/Repository/FailStuckAndOrphanedExecutionsTests.cs`
-(connection-aware sparing of live long-runners; adapter-scoped pre-start orphan resolution).
+(connection-aware sparing of live long-runners; adapter-scoped pre-start orphan resolution; the
+AB#5326 leased exemption, arranged so both executions hang off a non-Online adapter and only the age
+of the lease separates them; and that a finished execution is never overwritten).
 
 ### Hourly Statistics Buckets + Execution Fold (AB#4370)
 
@@ -3443,6 +3478,6 @@ Task UpdateStatisticsAsync(string tenantId, RtEntityId pipelineRtEntityId);
 Task UpdateAllStatisticsAsync(string tenantId);
 Task<int> CleanupOldExecutionsAsync(string tenantId, int retentionDays);
 Task<int> TimeoutStaleExecutionsAsync(string tenantId, int timeoutHours);       // legacy, connection-unaware
-Task<int> FailStuckExecutionsAsync(string tenantId, int graceMinutes);          // AB#4280 connection-aware reaper
+Task<int> FailStuckExecutionsAsync(string tenantId, int graceMinutes);          // AB#4280 connection-aware reaper, AB#5326 leased exemption
 Task<int> FailOrphanedExecutionsForAdapterAsync(string tenantId, RtEntityId adapterRtEntityId, DateTime beforeUtc); // AB#4280
 ```

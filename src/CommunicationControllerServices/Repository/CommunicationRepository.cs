@@ -2897,7 +2897,8 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task<int> FailStuckExecutionsAsync(string tenantId, DateTime graceCutoff)
+    public async Task<int> FailStuckExecutionsAsync(string tenantId, DateTime graceCutoff,
+        DateTime leasedGraceCutoff)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -2932,16 +2933,42 @@ internal class CommunicationRepository : ICommunicationRepository
                 var running = await GetExecutionsByStatusOlderThanAsync(
                     tenantRepository, session, RtPipelineExecutionStatusEnum.Running, graceCutoff);
 
-                offlineRunning = running.Count > 0
-                    ? await FilterExecutionsWithNonOnlineAdapterAsync(tenantRepository, session, running)
+                // 🔴 AB#5326 — a LEASED execution must never be judged by its adapter's
+                // CommunicationState, because that state cannot be Online for it. A leased adapter
+                // owns no process and never registers; the process doing the work is a pool member,
+                // and the member hangs off the AdapterPool, not off this adapter. Without this
+                // filter the rule one line above inverted itself: instead of protecting a healthy
+                // long run it failed EVERY leased run past the grace period. Measured on 23.09.2026:
+                // a 16-minute leased run reported success from its member and was overwritten with
+                // "Adapter offline" 12 ms later.
+                //
+                // A leased run in flight has an owner that already watches it: the lease. A member
+                // that disconnects is handled at once (HandleMemberDisconnectedAsync) and a lease
+                // that outlives its TTL is reclaimed by ReapExpiredLeasesAsync — both re-queue the
+                // work. So the only leased execution this reaper still has to catch is one whose
+                // lease can no longer be live at all (controller restarted while a member died, and
+                // nothing was left to notice), which is what leasedGraceCutoff expresses.
+                var stillLeased = running
+                    .Where(execution => IsLeaseInFlight(execution, leasedGraceCutoff))
+                    .ToList();
+
+                var judgedByAdapterState = stillLeased.Count == 0
+                    ? running
+                    : running.Except(stillLeased).ToList();
+
+                offlineRunning = judgedByAdapterState.Count > 0
+                    ? await FilterExecutionsWithNonOnlineAdapterAsync(tenantRepository, session,
+                        judgedByAdapterState)
                     : [];
             }
 
             var total = 0;
             total += await ApplyFailedStatusAsync(tenantRepository, interrupted,
-                "Adapter restarted; interrupted execution not recovered within grace period");
+                "Adapter restarted; interrupted execution not recovered within grace period",
+                RtPipelineExecutionStatusEnum.Interrupted);
             total += await ApplyFailedStatusAsync(tenantRepository, offlineRunning,
-                "Adapter offline; running execution orphaned by adapter restart");
+                "Adapter offline; running execution orphaned by adapter restart",
+                RtPipelineExecutionStatusEnum.Running);
             return total;
         }
         catch (CommunicationRepositoryException)
@@ -2961,23 +2988,29 @@ internal class CommunicationRepository : ICommunicationRepository
 
         try
         {
-            List<RtPipelineExecution> orphaned;
+            List<RtPipelineExecution> orphanedRunning;
+            List<RtPipelineExecution> orphanedInterrupted;
             using (var session = await tenantRepository.GetSessionAsync())
             {
                 // A freshly (re)started adapter process cannot own any execution that started before
                 // it began. Any Running / Interrupted execution for this adapter with an earlier
                 // StartedAt is therefore an orphan left behind by the previous process -> fail it.
+                // AB#5326: kept as two lists rather than one, because ApplyFailedStatusAsync now
+                // re-reads and only writes over the status it was told to expect.
                 var running = await GetExecutionsForAdapterByStatusAsync(
                     tenantRepository, session, adapterRtEntityId, RtPipelineExecutionStatusEnum.Running);
                 var interrupted = await GetExecutionsForAdapterByStatusAsync(
                     tenantRepository, session, adapterRtEntityId, RtPipelineExecutionStatusEnum.Interrupted);
 
-                orphaned = running.Concat(interrupted)
-                    .Where(e => e.StartedAt < beforeUtc)
-                    .ToList();
+                orphanedRunning = running.Where(e => e.StartedAt < beforeUtc).ToList();
+                orphanedInterrupted = interrupted.Where(e => e.StartedAt < beforeUtc).ToList();
             }
 
-            return await ApplyFailedStatusAsync(tenantRepository, orphaned, "Execution orphaned by adapter restart");
+            const string orphanMessage = "Execution orphaned by adapter restart";
+            return await ApplyFailedStatusAsync(tenantRepository, orphanedRunning, orphanMessage,
+                       RtPipelineExecutionStatusEnum.Running)
+                   + await ApplyFailedStatusAsync(tenantRepository, orphanedInterrupted, orphanMessage,
+                       RtPipelineExecutionStatusEnum.Interrupted);
         }
         catch (CommunicationRepositoryException)
         {
@@ -3510,6 +3543,22 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <summary>
+    ///     AB#5326: is this execution still inside a lease that something else is watching?
+    /// </summary>
+    /// <remarks>
+    ///     A lease was granted, nothing has released it, and it is recent enough that the lease
+    ///     reaper's TTL has not passed. In that window the member either works (and the adapter's
+    ///     <c>CommunicationState</c> says nothing about it) or has disconnected, which
+    ///     <c>LeaseService.HandleMemberDisconnectedAsync</c> handles the moment it happens.
+    /// </remarks>
+    private static bool IsLeaseInFlight(RtPipelineExecution execution, DateTime leasedGraceCutoff)
+    {
+        return execution.LeaseGrantedAt is { } grantedAt
+               && execution.LeaseReleasedAt is null
+               && grantedAt >= leasedGraceCutoff;
+    }
+
+    /// <summary>
     /// Given a set of executions, returns those whose owning adapter is not <c>Online</c>
     /// (or has no resolvable adapter). Used by the connection-aware reaper so that Running
     /// executions on a live adapter are never treated as stuck.
@@ -3549,7 +3598,8 @@ internal class CommunicationRepository : ICommunicationRepository
     /// completion time and duration. No-op for an empty list.
     /// </summary>
     private async Task<int> ApplyFailedStatusAsync(ITenantRepository tenantRepository,
-        IReadOnlyList<RtPipelineExecution> executions, string errorMessage)
+        IReadOnlyList<RtPipelineExecution> executions, string errorMessage,
+        RtPipelineExecutionStatusEnum expectedStatus)
     {
         if (executions.Count == 0)
         {
@@ -3562,10 +3612,25 @@ internal class CommunicationRepository : ICommunicationRepository
 
         for (var offset = 0; offset < executions.Count; offset += batchSize)
         {
-            var batch = executions.Skip(offset).Take(batchSize).ToList();
+            var candidates = executions.Skip(offset).Take(batchSize).ToList();
 
             using var session = await tenantRepository.GetSessionAsync();
             session.StartTransaction();
+
+            // 🔴 AB#5326 — re-read inside the transaction and drop anything that has moved on.
+            // The reads that produced this list ran in an earlier session, so an execution can
+            // reach a terminal state in between, and this write would then overwrite a real result
+            // with "orphaned". Measured on 23.09.2026: a leased run released Completed and the
+            // reaper stamped Failed over it 12 ms later. Cheap: one id read per batch of 100.
+            var current = await tenantRepository.GetRtEntitiesByIdAsync<RtPipelineExecution>(session,
+                candidates.Select(e => e.RtId).ToList(), RtEntityQueryOptions.Create());
+
+            var batch = current.Items.Where(e => e.Status == expectedStatus).ToList();
+            if (batch.Count == 0)
+            {
+                await session.CommitTransactionAsync();
+                continue;
+            }
 
             var entityUpdateInfoList = batch
                 .Select(e =>

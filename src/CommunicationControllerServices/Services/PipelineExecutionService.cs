@@ -7,6 +7,8 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
+using Microsoft.Extensions.Options;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -15,7 +17,8 @@ internal class PipelineExecutionService(
     ICommunicationRepository communicationRepository,
     IAdapterCache adapterCache,
     ICommunicationEventService eventService,
-    IWorkloadLifecycleService workloadLifecycleService)
+    IWorkloadLifecycleService workloadLifecycleService,
+    IOptions<CommunicationControllerOptions> options)
     : IPipelineExecutionService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
@@ -762,8 +765,20 @@ internal class PipelineExecutionService(
 
         try
         {
-            var graceCutoff = DateTime.UtcNow.AddMinutes(-graceMinutes);
-            var failedCount = await communicationRepository.FailStuckExecutionsAsync(tenantId, graceCutoff);
+            var now = DateTime.UtcNow;
+            var graceCutoff = now.AddMinutes(-graceMinutes);
+
+            // 🔴 AB#5326: a leased execution has its own owner — the lease. A member that drops is
+            // handled at once and a lease past its TTL is reclaimed by ReapExpiredLeasesAsync, both
+            // of which re-queue the work. This reaper is only the backstop for the one case neither
+            // can see: the lease is so old that nothing can still be holding it (the controller was
+            // restarted while a member died, so no disconnect was ever observed). TTL + grace is
+            // that point, and it is deliberately computed from the SAME LeaseTtlMinutes the
+            // scheduler grants with, so the two cannot drift.
+            var leasedGraceCutoff = now.AddMinutes(-(Math.Max(1, options.Value.LeaseTtlMinutes) + graceMinutes));
+
+            var failedCount = await communicationRepository.FailStuckExecutionsAsync(tenantId, graceCutoff,
+                leasedGraceCutoff);
 
             if (failedCount > 0)
             {

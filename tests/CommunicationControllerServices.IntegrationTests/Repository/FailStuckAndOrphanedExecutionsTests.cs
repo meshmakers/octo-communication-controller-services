@@ -52,13 +52,112 @@ public class FailStuckAndOrphanedExecutionsTests(CommunicationControllerFixture 
 
             var graceCutoff = DateTime.UtcNow.AddMinutes(-15);
 
-            var failedCount = await repository.FailStuckExecutionsAsync(tenantId, graceCutoff);
+            var failedCount = await repository.FailStuckExecutionsAsync(tenantId, graceCutoff, graceCutoff);
 
             failedCount.Should().Be(2);
             await AssertStatus(repository, runningOnOnline, RtPipelineExecutionStatusEnum.Running);
             await AssertStatus(repository, runningOnOffline, RtPipelineExecutionStatusEnum.Failed);
             await AssertStatus(repository, interrupted, RtPipelineExecutionStatusEnum.Failed);
             await AssertStatus(repository, recentOnOffline, RtPipelineExecutionStatusEnum.Running);
+        }
+        finally
+        {
+            await CleanupAsync(data);
+        }
+    }
+
+    /// <summary>
+    ///     🔴 AB#5326 — a LEASED execution is not judged by its adapter's connection state.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         A leased adapter owns no process and therefore never registers: its
+    ///         <c>CommunicationState</c> cannot be <c>Online</c>. The connection-aware rule the test
+    ///         above pins — spare a long runner on a live adapter — inverted itself for leasing and
+    ///         failed EVERY leased run past the grace period. Measured on 23.09.2026: a 16-minute
+    ///         leased run reported success from its pool member and was overwritten with "Adapter
+    ///         offline" twelve milliseconds later.
+    ///     </para>
+    ///     <para>
+    ///         The arrangement is what makes this a proof: BOTH executions hang off an adapter that
+    ///         is not Online, so the only thing separating them is the age of the lease.
+    ///     </para>
+    /// </remarks>
+    [Fact]
+    public async Task FailStuckExecutionsAsync_SparesALeasedExecutionWhoseLeaseCanStillBeLive()
+    {
+        var tenantId = fixture.TestTenantId;
+        var repository = fixture.GetService<ICommunicationRepository>();
+
+        var data = new TestData();
+        // A leased adapter is never Online — that is the whole point of the case.
+        var leasedAdapter = await CreateAdapterAsync(data, RtCommunicationStateEnum.Unregistered);
+        var dataFlow = await CreateDataFlowAsync(data);
+        var pipeline = await CreatePipelineWithAdapterAsync(data, dataFlow, leasedAdapter);
+
+        var stale = DateTime.UtcNow.AddHours(-1);
+
+        try
+        {
+            // Granted five minutes ago: the lease reaper still owns it.
+            var liveLease = await CreateLeasedExecutionAsync(data, pipeline, leasedAdapter, stale,
+                DateTime.UtcNow.AddMinutes(-5));
+            // Granted two hours ago: no lease can still be holding this one.
+            var deadLease = await CreateLeasedExecutionAsync(data, pipeline, leasedAdapter, stale,
+                DateTime.UtcNow.AddHours(-2));
+            // Released: not leased any more, so the ordinary rule applies again.
+            var released = await CreateLeasedExecutionAsync(data, pipeline, leasedAdapter, stale,
+                DateTime.UtcNow.AddMinutes(-5), releasedAt: DateTime.UtcNow.AddMinutes(-4));
+
+            var graceCutoff = DateTime.UtcNow.AddMinutes(-15);
+            var leasedGraceCutoff = DateTime.UtcNow.AddMinutes(-30);
+
+            var failedCount = await repository.FailStuckExecutionsAsync(tenantId, graceCutoff, leasedGraceCutoff);
+
+            failedCount.Should().Be(2);
+            await AssertStatus(repository, liveLease, RtPipelineExecutionStatusEnum.Running);
+            await AssertStatus(repository, deadLease, RtPipelineExecutionStatusEnum.Failed);
+            await AssertStatus(repository, released, RtPipelineExecutionStatusEnum.Failed);
+        }
+        finally
+        {
+            await CleanupAsync(data);
+        }
+    }
+
+    /// <summary>
+    ///     🔴 AB#5326 — the reaper never writes over a result that arrived in the meantime.
+    /// </summary>
+    /// <remarks>
+    ///     The candidate list is read in one session and applied in another, so an execution can
+    ///     reach a terminal state in between — which is exactly what happened when a pool member
+    ///     released Completed twelve milliseconds before the write. Here the race is made
+    ///     deterministic: the execution is completed after it would have been selected, and the
+    ///     reaper must leave it alone.
+    /// </remarks>
+    [Fact]
+    public async Task FailStuckExecutionsAsync_DoesNotOverwriteAnExecutionThatFinishedInTheMeantime()
+    {
+        var tenantId = fixture.TestTenantId;
+        var repository = fixture.GetService<ICommunicationRepository>();
+
+        var data = new TestData();
+        var offlineAdapter = await CreateAdapterAsync(data, RtCommunicationStateEnum.Offline);
+        var dataFlow = await CreateDataFlowAsync(data);
+        var pipeline = await CreatePipelineWithAdapterAsync(data, dataFlow, offlineAdapter);
+
+        var stale = DateTime.UtcNow.AddHours(-1);
+
+        try
+        {
+            var finished = await CreateExecutionAsync(data, pipeline, offlineAdapter,
+                RtPipelineExecutionStatusEnum.Completed, stale);
+
+            var graceCutoff = DateTime.UtcNow.AddMinutes(-15);
+            var failedCount = await repository.FailStuckExecutionsAsync(tenantId, graceCutoff, graceCutoff);
+
+            failedCount.Should().Be(0);
+            await AssertStatus(repository, finished, RtPipelineExecutionStatusEnum.Completed);
         }
         finally
         {
@@ -164,7 +263,7 @@ public class FailStuckAndOrphanedExecutionsTests(CommunicationControllerFixture 
 
             // 1. The AB#4280 connection-aware stuck reaper. The adapter is deliberately OFFLINE, so
             //    a Running execution in its place WOULD be failed here.
-            await repository.FailStuckExecutionsAsync(tenantId, cutoff);
+            await repository.FailStuckExecutionsAsync(tenantId, cutoff, cutoff);
             await AssertStatus(repository, executionId, RtPipelineExecutionStatusEnum.Queued);
 
             // 2. The AB#4280 orphan resolver, driven by a fresh adapter process start time.
@@ -334,6 +433,30 @@ public class FailStuckAndOrphanedExecutionsTests(CommunicationControllerFixture 
             Status = status,
             TriggerType = RtPipelineTriggerTypeEnum.Manual,
             StartedAt = startedAt
+        };
+
+        await repository.CreatePipelineExecutionAsync(fixture.TestTenantId, execution, pipeline, adapter);
+
+        data.Executions.Add(new RtEntityId(SystemCommunicationCkIds.RtCkPipelineExecutionTypeId, execution.RtId));
+        return executionId;
+    }
+
+    /// <summary>A <c>Running</c> execution that a pool member is (or was) serving under a lease.</summary>
+    private async Task<string> CreateLeasedExecutionAsync(TestData data, RtEntityId pipeline, RtEntityId adapter,
+        DateTime startedAt, DateTime leaseGrantedAt, DateTime? releasedAt = null)
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var executionId = Guid.NewGuid().ToString();
+
+        var execution = new RtPipelineExecution
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            ExecutionId = executionId,
+            Status = RtPipelineExecutionStatusEnum.Running,
+            TriggerType = RtPipelineTriggerTypeEnum.Manual,
+            StartedAt = startedAt,
+            LeaseGrantedAt = leaseGrantedAt,
+            LeaseReleasedAt = releasedAt
         };
 
         await repository.CreatePipelineExecutionAsync(fixture.TestTenantId, execution, pipeline, adapter);
