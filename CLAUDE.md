@@ -3103,6 +3103,39 @@ octo-ai-services shipped a full release in exactly that condition (AB#5051 → A
 label, the authority/issuer/audience contract, and a source-level guard that no second configurator
 reappears.
 
+### 🔴 Inbound claim mapping: never ask for the raw JWT name (AB#5328)
+
+The same scheme sets `MapInboundClaims` on, so by the time a `ClaimsPrincipal` exists the handler has
+already renamed the token's `sub` to `ClaimTypes.NameIdentifier`, `role` to `ClaimTypes.Role`, `email`
+to `ClaimTypes.Email` and `name` to `ClaimTypes.Name`. Code that asks for the raw spelling gets
+nothing back.
+
+`PipelineController.BuildExecutePipelineCaller` did exactly that, and because every read in it has a
+fallback the miss produced a **plausible wrong answer** instead of an error. Measured on 2026-09-23
+with a token carrying a subject and seventeen roles, the persisted `PipelineExecution` said:
+
+| field | expected | stored |
+|---|---|---|
+| `CallerSubjectId` | the `sub` | **`octo-cli`** — the `client_id` fallback |
+| `CallerRoles` | 17 roles | **empty** |
+| `CallerName` | — | survived, via the unmapped `preferred_username` fallback |
+
+Effects: audit and billing name the OAuth client instead of the person, anything later authorizing on
+`CallerRoles` sees a caller with no roles, and because a caller *is* present `CallerBinding` is
+satisfied and nothing complains.
+
+The counter-example sat in the same folder the whole time: `PrincipalRoleExtensions` (AB#5111) exists
+for this reason and says *"always probe the mapped and the raw claim type together"*, citing the
+AB#5030 finding on the MCP side. Every caller read now goes through `PrincipalClaimExtensions`
+(`SubjectId()`, `DisplayName()`, `Email()`, `RoleValues()`), which probes both spellings and
+de-duplicates roles; `client_id` stays as the **last** resort, which is the honest answer for a
+client-credentials token.
+
+🔴 **Why the tests did not catch it, and the rule that follows:** they build principals with
+`new Claim("sub", …)` / `new Claim("role", …)` — the shape the runtime never delivers. A test that
+constructs its own principal is testing its own assumption. `Controllers/PrincipalClaimExtensionsTests`
+therefore leads with the **mapped** shape and keeps the raw one only as a compatibility case.
+
 ### Tenant authorization for user tokens is staged (AB#5054)
 
 `TenantAuthorizationOptions.UserTokenEnforcement` (no `Disabled`; `LogOnly` | `Enforce`, platform

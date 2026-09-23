@@ -180,6 +180,13 @@ public class PipelineController : ControllerBase
     ///     (AB#4975). Returns null when the request is unauthenticated (never expected here — the
     ///     route requires a bearer — but kept defensive).
     /// </summary>
+    /// <remarks>
+    ///     🔴 AB#5328: every read goes through <see cref="PrincipalClaimExtensions" /> rather than
+    ///     naming a raw JWT claim type. The bearer pipeline maps inbound claims, so asking for
+    ///     <c>sub</c> or <c>role</c> directly returns nothing — and each read here has a fallback,
+    ///     so the miss produced a plausible wrong answer instead of an error: the subject arrived as
+    ///     the OAuth <c>client_id</c> and the roles arrived empty.
+    /// </remarks>
     private ExecutePipelineCaller? BuildExecutePipelineCaller()
     {
         if (User.Identity?.IsAuthenticated != true)
@@ -189,11 +196,11 @@ public class PipelineController : ControllerBase
 
         return new ExecutePipelineCaller
         {
-            SubjectId = User.FindFirstValue(JwtClaimTypes.Subject) ?? User.FindFirstValue("client_id"),
+            SubjectId = User.SubjectId(),
             TenantId = User.FindFirstValue(HubConnectionPrincipal.TenantIdClaimType),
-            Email = User.FindFirstValue(JwtClaimTypes.Email),
-            Name = User.FindFirstValue(JwtClaimTypes.Name) ?? User.FindFirstValue(JwtClaimTypes.PreferredUserName),
-            Roles = User.FindAll(JwtClaimTypes.Role).Select(claim => claim.Value).ToArray(),
+            Email = User.Email(),
+            Name = User.DisplayName(),
+            Roles = User.RoleValues(),
             // Bearer-authenticated invocation → strongly trusted (mirrors CallerTrustLevel.Strong=2).
             TrustLevel = 2
         };
