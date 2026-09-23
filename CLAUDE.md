@@ -2121,6 +2121,38 @@ What a member *does* get is the RabbitMQ command bus, the TLS trust anchor, and 
 secret in the platform namespace — none of which carries tenant authority. Tenant-scoped access
 arrives with a lease and leaves with it (increment 6).
 
+### 🔴 Sizing a member: one `ExecuteCSharp@1` run costs ~330 MiB, permanently (AB#5330)
+
+Measured on the local kind cluster on 2026-09-23, read from the pod's own
+`/sys/fs/cgroup/memory.current`:
+
+| | member memory |
+|---|---|
+| freshly started | **124 MiB** |
+| four leased runs **without** C# | 126 → 130 → 132 → **134 MiB** (~2 MiB per run) |
+| the **first** `ExecuteCSharp@1` run (eight lines) | 131 → **461 MiB** |
+| the same script again | +23, then +2 MiB (cached) |
+| a **second, different** C# script on that member | **OOMKilled, exit 137** |
+
+The +330 MiB is the Roslyn compiler platform, loaded once per process and never released, so a member
+that has compiled C# once sits permanently at 460–490 MiB. Against the 512Mi the sample used to seed
+that is about 20 MiB of headroom, and the next lease it accepts is enough. `AdapterPoolDemo` now seeds
+**1Gi**, and `PoolMemberMemoryLimit`'s own description carries the number (CK model 4.4.1, a patch — a
+description is documentational under `ck-semver-rules.md`, and the bump is what makes it reach a
+tenant at all).
+
+🔴 **Two things make this worse on a pool than on a dedicated adapter.** A member is shared across
+tenants, so each kill interrupts work belonging to whichever borrower happens to hold the lease — it
+happened twice in that session, to two different borrowers. And the controller's account of it is
+*"member '…' disconnected while holding this execution's lease"*: it reports a **disconnect**, because
+a disconnect is all it can see. The truth is in
+`containerStatuses[0].lastState.terminated.reason = OOMKilled`, so that is the first thing to read
+when a member "drops", not the controller log.
+
+The leasing machinery does catch it — `InterruptAndRequeueAsync` re-queued the work and the retry
+completed on the other member — but the work is **restarted, not resumed**, so a side-effecting
+pipeline gets at-least-once semantics out of it.
+
 ### The activator index skips pools
 
 `WorkloadHostnameIndex` publishes an address built from the release name alone

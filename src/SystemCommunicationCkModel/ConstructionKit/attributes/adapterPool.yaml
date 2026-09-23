@@ -38,7 +38,7 @@ attributes:
 - id: PoolMemberMemoryLimit
   valueType: String
   isRuntimeState: false
-  description: 'Kubernetes memory limit of each pool member, e.g. "1Gi" (AB#4924). See PoolMemberMemoryRequest. Size it against the LARGEST tenant that may borrow the pool, not the average: a member serves one tenant at a time but serves each of them in full.'
+  description: 'Kubernetes memory limit of each pool member, e.g. "1Gi" (AB#4924). See PoolMemberMemoryRequest. Size it against the LARGEST tenant that may borrow the pool, not the average: a member serves one tenant at a time but serves each of them in full. AB#5330, measured: a member idles around 124 MiB and gains ~2 MiB per leased run, but the FIRST ExecuteCSharp@1 run costs it ~330 MiB permanently (the Roslyn compiler platform, loaded once per process and never released). A pool whose borrowers may run C# therefore needs at least 1Gi; at 512Mi the member is OOM-killed on the next lease it accepts, and because members are shared it takes another tenant''s work down with it.'
 - id: PoolScaleUpPolicy
   valueType: Enum
   valueCkEnumId: ${this}/PoolScaleUpPolicy

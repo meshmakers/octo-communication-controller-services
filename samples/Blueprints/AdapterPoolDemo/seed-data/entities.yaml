@@ -72,8 +72,24 @@ entities:
       - id: System.Communication/MaxReplicas
         value: 2
 
-      # Per-member sizing. Deliberately small: a member holds one borrower's CK
-      # model at a time and drops it on release.
+      # Per-member sizing. A member holds one borrower's CK model at a time and drops
+      # it on release, so the steady state is small — but the LIMIT is not sized for
+      # the steady state, it is sized for the most expensive node a borrower may run.
+      #
+      # 🔴 AB#5330 — measured on 23.09.2026, and the reason this is 1Gi and not 512Mi:
+      # a member idles at ~124 MiB and gains ~2 MiB per leased run, but the FIRST
+      # `ExecuteCSharp@1` run costs it ~330 MiB that never come back (the Roslyn
+      # compiler platform, loaded once per process). At a 512Mi limit that leaves a
+      # member sitting ~20 MiB below its ceiling, and the next lease it accepts is
+      # enough: both members of this very pool were OOM-killed (exit 137) within
+      # seconds of taking one. Members are shared across tenants, so each kill also
+      # interrupted work belonging to a different borrower.
+      #
+      # The leasing machinery caught it — the work was re-queued and completed on the
+      # other member — but at the cost of a full re-run, and the controller's only
+      # account of it is "member disconnected while holding this lease". Size the limit
+      # against the LARGEST thing any borrower may run, not the average; the attribute
+      # description says the same.
       - id: System.Communication/PoolMemberCpuRequest
         value: 100m
       - id: System.Communication/PoolMemberCpuLimit
@@ -81,7 +97,7 @@ entities:
       - id: System.Communication/PoolMemberMemoryRequest
         value: 256Mi
       - id: System.Communication/PoolMemberMemoryLimit
-        value: 512Mi
+        value: 1Gi
 
       # --- Scale-up --------------------------------------------------------------
       - id: System.Communication/PoolScaleUpPolicy
