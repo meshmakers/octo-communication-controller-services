@@ -30,6 +30,13 @@ public enum LeaseRefusalReason
     /// <summary>The borrower's adapter is not <c>LifecycleMode = Leased</c>.</summary>
     BorrowerNotLeased,
 
+    /// <summary>
+    ///     AB#5329: the borrower's adapter IS <c>Leased</c> but names no lending pool — its
+    ///     <c>LentFrom</c> mirror is missing or carries an unusable <c>Lender</c> record. Enqueue
+    ///     stage: nothing is queued, because nothing downstream could ever serve it.
+    /// </summary>
+    BorrowerNamesNoPool,
+
     /// <summary>The borrower declares it borrows from a different lending tenant.</summary>
     BorrowerNamesAnotherLender,
 
@@ -736,6 +743,7 @@ internal static class AdapterLeasingMetrics
         LeaseRefusalReason.LeasingDisabledBorrower => "leasing_disabled_borrower",
         LeaseRefusalReason.BorrowerAdapterUnknown => "borrower_adapter_unknown",
         LeaseRefusalReason.BorrowerNotLeased => "borrower_not_leased",
+        LeaseRefusalReason.BorrowerNamesNoPool => "borrower_names_no_pool",
         LeaseRefusalReason.BorrowerNamesAnotherLender => "borrower_names_another_lender",
         LeaseRefusalReason.BorrowerNamesAnotherPool => "borrower_names_another_pool",
         LeaseRefusalReason.PoolUnknown => "pool_unknown",

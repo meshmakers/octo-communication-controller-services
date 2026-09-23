@@ -214,6 +214,55 @@ internal class LeasedAdapterEnqueueTests : TriggerManagementServiceTestsBase
     }
 
     /// <summary>
+    ///     🔴 AB#5329 — a leased adapter that names no pool is refused at the enqueue, not queued.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         The code this replaces said the lease would refuse it "with a named reason". It does
+    ///         not: <c>LeaseSchedulerService.GetTopologyAsync</c> drops a borrower with no usable
+    ///         mirror out of the topology, so nothing downstream ever reaches a grant. Measured on
+    ///         23.09.2026 against a tenant left over from the pre-4.0.1 model: the execute call
+    ///         answered 200, the execution sat in <c>Queued</c> with <c>errorMessage</c> null for as
+    ///         long as it was watched, and <c>CancelQueuedExecution</c> could not remove it either —
+    ///         that verb is keyed by pool, and this adapter belongs to none.
+    ///     </para>
+    ///     <para>
+    ///         So the assertion that matters is not only the exception: it is that <b>nothing was
+    ///         written</b>. An execution entity created here would be exactly the unreachable record
+    ///         the defect is made of.
+    ///     </para>
+    /// </remarks>
+    [Test]
+    public async Task ALeasedAdapterNamingNoPool_IsRefusedAndNothingIsQueued()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+        var adapter = RtEntityCreator.CreateAdapter();
+        adapter.Name = "orphaned-borrower";
+        adapter.LifecycleMode = RtLifecycleModeEnum.Leased;
+        CommunicationRepository
+            .GetAdapterByPipelineAsync(TenantId, Arg.Is<RtEntityId>(id => id.RtId == pipelineRtId))
+            .Returns(adapter);
+        // No ArrangeLentFrom: the LentFrom mirror is missing, which is what the 4.0.1 model change
+        // leaves behind on every adapter nobody re-linked by hand.
+        CommunicationRepository.GetLentAdapterPoolForAdapterAsync(TenantId, adapter.RtId)
+            .Returns((RtLentAdapterPool?)null);
+
+        var exception = await Assert.ThrowsAsync<TriggerManagementServiceException>(async () =>
+            await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId,
+                pipelineInput: "{\"x\":1}"));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(exception!.Message).Contains("names no usable adapter pool");
+        // Both repairs are named — the link, and the reconcile that rebuilds the mirror.
+        await Assert.That(exception!.Message).Contains("mirrors/refresh");
+        await CommunicationRepository.DidNotReceiveWithAnyArgs()
+            .EnqueueExecutionAsync(default!, default!, default!, default!, default);
+        await ExecuteMeshPipelineCommandClient.DidNotReceive()
+            .GetResponse<ExecutePipelineResponse>(Arg.Any<string>(), Arg.Any<ExecutePipelineRequest>(),
+                Arg.Any<CancellationToken>(), Arg.Any<TimeSpan?>());
+    }
+
+    /// <summary>
     ///     The switch is about <b>leasing</b>, not about executing. A manual adapter in a tenant with
     ///     leasing off keeps running exactly as before — it never had a queue and never needed one.
     /// </summary>

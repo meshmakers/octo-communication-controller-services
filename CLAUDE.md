@@ -2149,6 +2149,36 @@ no consumer, so a send would be a message nobody reads. A **dry run** deliberate
 it is a synchronous answer to a caller holding the request open, and parking it behind a rotation
 would turn "validate this pipeline" into something that returns minutes later.
 
+🔴 **A borrower that names no pool is refused at the enqueue, not queued (AB#5329).** The code here
+used to say the lease would refuse it "with a named reason". It does not:
+`LeaseSchedulerService.GetTopologyAsync` drops a leased adapter whose `LentFrom` mirror is missing or
+unusable out of the topology, so nothing downstream ever reaches `GrantLeaseAsync` and no refusal is
+ever produced. Measured on 2026-09-23 against a tenant carried over from the pre-4.0.1 model, where
+the association replaced two attributes and **nothing re-links the adapter** (the migration note says
+so explicitly): `POST /{tenant}/v1/pipeline/execute` answered **200**, the execution sat in `Queued`
+with `errorMessage` null for as long as it was watched, and `CancelQueuedExecution` could not reach it
+either — that verb is keyed by **pool**, and an adapter with no mirror belongs to none. The adapter
+itself showed `statusMessage: null` and `lastDeploymentError: null`. So: nothing written, same stance
+as the kill switch, and `TriggerManagementServiceException.LeasedAdapterNamesNoPool` names both
+repairs (link it in the Studio, or `POST {tenantId}/v1/adapterPool/mirrors/refresh`). Counted as
+`LeaseRefusalReason.BorrowerNamesNoPool` at the `Enqueue` stage.
+
+The scheduler's own warning about that adapter now fires on the **transition** only (WARN once, DEBUG
+on repeat) — the AB#4924 §9.8 rule, which this line had not been given: it warned on every scheduling
+round, i.e. once a minute per broken adapter for as long as it stayed broken, which is how a warning
+stops being read.
+
+🔴 **A memo may only be swept on the cadence of the thing that writes it**, and the first attempt at
+this got it wrong in a way no unit test could see. The refusal memo beside it is written on the
+scheduling tick and swept against `LeaseSchedulerIntervalSeconds` (5 s × 10 rounds = 50 s); this one
+is written by `GetTopologyAsync`, which rebuilds on `LeaseTopologyRefreshSeconds` (60 s). Swept
+against the tick the entry had always expired by the time the topology looked again, so every
+observation read as a transition and warned — measured live on 2026-09-23 as three consecutive rounds
+and three WARNs, exactly as before the change. `NoPoolMemoRetentionSeconds()` derives the window from
+the topology cadence (and never below the tick's own), and `NoPoolMemoRetentionTests` pins that
+derivation rather than an observed interval: the defaults differ by a factor of twelve, and both
+cadences cover two rounds run back to back.
+
 🔴 **Fairness is round-robin across tenants, never global FIFO — and the class never crosses a
 tenant boundary.** Both halves are load-bearing and both have a test that a global FIFO would fail:
 `FairnessTests` arranges the starving tenant's work to be **older** than everyone else's, so arrival

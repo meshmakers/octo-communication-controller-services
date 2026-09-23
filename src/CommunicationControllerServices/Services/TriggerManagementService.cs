@@ -154,11 +154,37 @@ internal class TriggerManagementService(
         }
 
         // AB#5271: the lending pool is the adapter's LentFrom mirror, not two attributes on the
-        // adapter. Resolved once here and used for both metric tags below. A borrower that names no
-        // pool is not rejected on this path — the lease itself will refuse it with a named reason —
-        // so an unresolvable mirror only costs the tags their values.
+        // adapter. Resolved once here and used for the metric tags below.
         var lentFrom = LentFromReference.FromMirror(
             await communicationRepository.GetLentAdapterPoolForAdapterAsync(tenantId, adapter.RtId));
+
+        // 🔴 AB#5329 — a borrower that names no pool is refused HERE, and the comment this replaced
+        // said the opposite ("the lease itself will refuse it with a named reason"). It does not:
+        // LeaseSchedulerService.GetTopologyAsync drops such an adapter from the topology with a
+        // warning, so nothing downstream ever reaches GrantLeaseAsync and no refusal is ever
+        // produced. Measured on 23.09.2026: the execute call answered 200, the execution sat in
+        // Queued with errorMessage null indefinitely, and CancelQueuedExecution could not reach it
+        // either — that verb is keyed by pool, and an adapter with no mirror belongs to none. The
+        // only signal was a controller warning repeated on every scheduling round.
+        //
+        // Writing nothing is the same stance as the kill switch below: no execution entity, no
+        // QueuedAt, no event that looks like progress — and the caller learns at once.
+        if (lentFrom is null)
+        {
+            AdapterLeasingMetrics.RecordRefused(tenantId, string.Empty, string.Empty, LeaseStage.Enqueue,
+                LeaseRefusalReason.BorrowerNamesNoPool);
+
+            logger.LogWarning(
+                "[{TenantId}] Pipeline '{PipelineRtId}' is executed by leased adapter '{AdapterName}', which names " +
+                "no usable adapter pool (no LentFrom mirror, or its Lender record is incomplete); nothing was queued",
+                tenantId, pipelineRtId, adapter.Name);
+            await eventService.StoreErrorEventAsync(tenantId,
+                $"Pipeline '{pipelineRtId}' was NOT queued: its leased adapter names no usable adapter pool. " +
+                "Link the adapter to a lent adapter pool (Studio → Adapter → Lent adapter pool), or refresh the " +
+                "mirrors with POST {tenantId}/v1/adapterPool/mirrors/refresh.");
+            throw TriggerManagementServiceException.LeasedAdapterNamesNoPool(tenantId, pipelineRtId,
+                adapter.Name ?? adapter.RtId.ToString());
+        }
 
         // 🔴 AB#4924 §14 — the per-tenant kill switch, enqueue half. Nothing is written: no execution
         // entity, no QueuedAt, no event that looks like progress. The other half sits in

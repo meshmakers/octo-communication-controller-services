@@ -79,6 +79,15 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     /// <summary>The last refusal seen for one queued execution.</summary>
     private readonly record struct RefusalMemo(LeaseRefusalReason Reason, DateTime LastSeenUtc);
 
+    /// <summary>
+    ///     AB#5329: leased adapters currently naming no usable pool, keyed <c>tenantId|adapterRtId</c>,
+    ///     so the warning about one fires on the transition instead of on every scheduling round.
+    ///     Swept by age like <see cref="_refusedExecutions" /> — several controller pods build the
+    ///     topology independently and each sees a different subset.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, DateTime> _adaptersNamingNoPool =
+        new(StringComparer.Ordinal);
+
     public LeaseSchedulerService(IAdapterCache adapterCache,
         ICommunicationRepository communicationRepository,
         IAdapterPoolConnectionManager connectionManager,
@@ -504,7 +513,8 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     /// </remarks>
     private void SweepStaleRefusals()
     {
-        var cutoff = DateTime.UtcNow - TimeSpan.FromSeconds(
+        var now = DateTime.UtcNow;
+        var cutoff = now - TimeSpan.FromSeconds(
             Math.Max(1, _options.LeaseSchedulerIntervalSeconds) * StaleRefusalRounds);
 
         foreach (var (executionId, memo) in _refusedExecutions)
@@ -514,6 +524,41 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
                 _refusedExecutions.TryRemove(executionId, out _);
             }
         }
+
+        // AB#5329: the same age rule for the "names no usable pool" memo — but measured against the
+        // cadence that actually refreshes it.
+        //
+        // 🔴 A memo may only be swept on the cadence of the thing that writes it. This one is written
+        // by GetTopologyAsync, which rebuilds on LeaseTopologyRefreshSeconds (60 s), while refusals
+        // are written on the scheduling tick (5 s). Swept against the tick the entry was always older
+        // than 50 s by the time the topology looked again, so every observation read as a transition
+        // and warned — the rate limit did nothing at all. Measured on 23.09.2026 against a broken
+        // borrower: three consecutive rounds, three WARNs, exactly as before the change.
+        var topologyCutoff = now - TimeSpan.FromSeconds(NoPoolMemoRetentionSeconds());
+
+        foreach (var (adapterKey, lastSeenUtc) in _adaptersNamingNoPool)
+        {
+            if (lastSeenUtc < topologyCutoff)
+            {
+                _adaptersNamingNoPool.TryRemove(adapterKey, out _);
+            }
+        }
+    }
+
+    /// <summary>
+    ///     How long a "names no usable pool" memo survives without being refreshed (AB#5329).
+    /// </summary>
+    /// <remarks>
+    ///     Derived from <c>LeaseTopologyRefreshSeconds</c> because that is what refreshes it, and
+    ///     never shorter than the scheduling tick's own window — a deployment where the topology is
+    ///     rebuilt more often than the scheduler runs would otherwise make this the shorter of the
+    ///     two again. Exposed for the test that pins which option it reads; the defaults differ by a
+    ///     factor of twelve, so reading the wrong one is invisible in any single round.
+    /// </remarks>
+    internal int NoPoolMemoRetentionSeconds()
+    {
+        return Math.Max(Math.Max(5, _options.LeaseTopologyRefreshSeconds),
+            Math.Max(1, _options.LeaseSchedulerIntervalSeconds)) * StaleRefusalRounds;
     }
 
     /// <summary>
@@ -960,12 +1005,38 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
                     {
                         // The deploy guard refuses this (increment 2); an entity that reached this
                         // state anyway is skipped rather than guessed at.
-                        Logger.Warn(
-                            "[{TenantId}] Leased adapter '{AdapterName}' names no usable pool " +
-                            "(LentFrom mirror: lender='{LenderTenantId}', pool='{AdapterPoolRtId}')",
-                            tenantId, adapter.Name, lentFrom?.LenderTenantId, lentFrom?.AdapterPoolRtId);
+                        //
+                        // 🔴 AB#5329 — on the TRANSITION only. This used to warn on every round, i.e.
+                        // roughly once a minute per broken adapter, for as long as it stayed broken:
+                        // measured on 23.09.2026, one adapter left over from the pre-4.0.1 model
+                        // produced an unbroken stream of identical warnings, which is how a warning
+                        // stops being read. Same shape as the refusal memo and the pool-exhaustion
+                        // line above — first occurrence WARN, repeats DEBUG.
+                        var memoKey = $"{tenantId}|{adapter.RtId}";
+                        var firstTime = _adaptersNamingNoPool.TryAdd(memoKey, DateTime.UtcNow);
+                        if (!firstTime)
+                        {
+                            _adaptersNamingNoPool[memoKey] = DateTime.UtcNow;
+                        }
+
+                        const string message = "[{TenantId}] Leased adapter '{AdapterName}' names no usable pool " +
+                                               "(LentFrom mirror: lender='{LenderTenantId}', pool='{AdapterPoolRtId}')";
+                        if (firstTime)
+                        {
+                            Logger.Warn(message, tenantId, adapter.Name, lentFrom?.LenderTenantId,
+                                lentFrom?.AdapterPoolRtId);
+                        }
+                        else
+                        {
+                            Logger.Debug(message, tenantId, adapter.Name, lentFrom?.LenderTenantId,
+                                lentFrom?.AdapterPoolRtId);
+                        }
+
                         continue;
                     }
+
+                    // Recovered: the next time this adapter loses its pool it is news again.
+                    _adaptersNamingNoPool.TryRemove($"{tenantId}|{adapter.RtId}", out _);
 
                     var key = AdapterPoolKey.Create(lentFrom.LenderTenantId, adapterPoolRtId.ToString());
                     if (!built.TryGetValue(key, out var borrowers))
