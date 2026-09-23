@@ -488,8 +488,28 @@ internal class DeploymentSiteService : IDeploymentSiteService
     /// </summary>
     private async Task EnsureWorkloadIsHelmDeployableAsync(string tenantId, RtDeployableWorkload workload)
     {
+        // 🔴 AB#5327 — leasing is validated FIRST, and the order is the whole point.
+        //
+        // This used to sit at the bottom of this method, behind the chart-name and Helm-repository
+        // checks. A canonical Leased adapter has no chart name on purpose (it owns no process, and
+        // chart fields would make it look deployable), so every deploy of one stopped at "the 'Chart
+        // Name' field is empty … set a Helm chart name" — advice that is wrong for this workload —
+        // and the AB#5278 gate below it was unreachable for exactly the shape it was written for.
+        // A pipeline whose trigger can never produce a lease could therefore be attached to a leased
+        // adapter without a word, and simply never run.
+        await EnsureLeasingConfigurationIsValidAsync(tenantId, workload);
+
         if (string.IsNullOrWhiteSpace(workload.ChartName))
         {
+            // Same AB#5327: once leasing itself is sound, a leased workload with no chart is not a
+            // misconfiguration to repair — it is the normal shape, and there is nothing to deploy.
+            // Say that instead of sending the operator to the Studio to invent a chart name.
+            if (workload.LifecycleMode == RtLifecycleModeEnum.Leased)
+            {
+                throw DeploymentSiteServiceException.WorkloadLeasedHasNothingToDeploy(tenantId, workload.RtId,
+                    workload.Name);
+            }
+
             throw DeploymentSiteServiceException.WorkloadMissingChartName(tenantId, workload.RtId, workload.Name);
         }
 
@@ -578,12 +598,9 @@ internal class DeploymentSiteService : IDeploymentSiteService
             }
         }
 
-        // AB#4924 leasing validation. Same enforcement rationale as the AB#4984 block above:
-        // LifecycleMode, SharingMode and the LentFrom* pair are plain CK author configuration with
-        // no service-layer hook, so the deploy is the net. A leasing misconfiguration is
-        // particularly worth failing loudly on, because its silent failure mode is a workload that
-        // deploys successfully and then never executes anything.
-        await EnsureLeasingConfigurationIsValidAsync(tenantId, workload);
+        // AB#4924 leasing validation has moved to the TOP of this method (AB#5327): behind the
+        // chart-name check it could never be reached by a leased workload, which is the only kind
+        // it judges.
 
         // AB#5027, deliberately NOT guarded here: the mandatory-service-account check lives on
         // the pipeline / data-flow deploy paths in AdapterService, not on the workload deploy.

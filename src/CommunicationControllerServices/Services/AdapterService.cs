@@ -956,6 +956,30 @@ internal class AdapterService(
                     throw AdapterServiceException.PipelineAdapterNotAssigned(tenantId, rtDeployPipeline.ToRtEntityId());
                 }
 
+                // 🔴 AB#5327: the leased branch the single-pipeline path has had since AB#4924, and
+                // this one never got. Everything below needs the adapter in the cache — that is, a
+                // live SignalR connection — which a Leased adapter never has, so DeployDataFlow
+                // answered "The adapter pod must be deployed and online before its pipeline
+                // configuration can be pushed", advice that cannot be followed for a workload that
+                // owns no pod. The AB#5278 trigger gate inside ValidateAndPersistPipelineAsync was
+                // unreachable here for the same reason. Same treatment as the single pipeline:
+                // validate, persist, no push — the definition travels on the lease.
+                //
+                // Placed BEFORE the wake gate deliberately: a leased adapter has no workload of its
+                // own to wake, and waking one from a borrower's deploy would let any borrower start
+                // the lender's capacity (see the matching note in DeployPipelineAsync).
+                if (rtAdapter.LifecycleMode == RtLifecycleModeEnum.Leased)
+                {
+                    var leasedCapabilities = await adapterNodeCapabilityService.ResolveAsync(tenantId,
+                        rtAdapter.ToRtEntityId(), rtAdapter);
+
+                    await DeployLeasedPipelineAsync(tenantId, rtAdapter.ToRtEntityId(),
+                        rtDeployPipeline.ToRtEntityId(), rtDeployPipeline.PipelineDefinition, rtAdapter,
+                        leasedCapabilities);
+
+                    continue;
+                }
+
                 // AB#4918 wake gate: a hibernated executing adapter would fail the cache lookup
                 // below with AdapterNotLoaded. No-op unless scale-to-zero applies.
                 await workloadLifecycleService.EnsureWorkloadRunningAsync(tenantId, rtAdapter);

@@ -58,6 +58,22 @@ internal class DeploymentSiteServiceException : Exception
             $"[{tenantId}] Workload '{workloadRtId}' is not currently in any deploymentSite — assign it to a deploymentSite before deploying");
     }
 
+    /// <summary>
+    ///     AB#5327: a <c>Leased</c> workload that carries no chart is correctly configured — it owns
+    ///     no process and nothing about it is deployed. Telling its operator to go and set a Helm
+    ///     chart name (which <see cref="WorkloadMissingChartName" /> does) sends them to fix the one
+    ///     thing that must stay empty.
+    /// </summary>
+    internal static Exception WorkloadLeasedHasNothingToDeploy(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName)
+    {
+        return new DeploymentSiteServiceException(
+            $"[{tenantId}] Workload '{workloadName ?? workloadRtId.ToString()}' has LifecycleMode 'Leased' and " +
+            "therefore nothing to deploy: it owns no process of its own, and its pipelines run on a member of the " +
+            "adapter pool it borrows from, one work item at a time. Deploy the POOL in the lending tenant instead. " +
+            "Its leasing configuration is valid, so no action is needed here.");
+    }
+
     internal static Exception WorkloadMissingChartName(string tenantId, OctoObjectId workloadRtId, string? workloadName)
     {
         return new DeploymentSiteServiceException(

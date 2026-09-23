@@ -1903,6 +1903,42 @@ the workload borrows a process when it runs its own; an `AdapterPool` may never 
 
 Read surface: `GET {tenantId}/v1/adapter/lending?adapterPoolRtId=…` → `AdapterLendingScopeDto`.
 
+🔴 **It runs FIRST in `EnsureWorkloadIsHelmDeployableAsync`, and the order is the fix (AB#5327).** It
+used to sit at the bottom of that method, behind the chart-name and Helm-repository checks — and a
+canonical leased adapter has **no chart name on purpose** (the borrower sample says so outright: chart
+fields "would make it look deployable"). So every deploy of one stopped at *"the 'Chart Name' field is
+empty … set a Helm chart name"*, advice that is wrong for a workload which must never have one, and
+this gate — including the AB#5278 trigger half — was unreachable for exactly the shape it judges: an
+`FromHttpRequest@2` pipeline could be attached to a leased adapter without a word and then never run.
+Proved by the message changing shape: the same adapter with the same pipelines, with nothing altered
+but `ChartName`, answered with the intended refusal instead.
+
+Once leasing itself is sound, a leased workload with no chart is no longer an error to repair but the
+normal shape, so it answers `WorkloadLeasedHasNothingToDeploy` — "it owns no process of its own, its
+pipelines run on a member of the adapter pool it borrows from, deploy the POOL in the lending tenant
+instead" — rather than sending the operator to fill in a field that must stay empty.
+
+**The second holder of the same gate had the same problem and the same cause.**
+`DeployDataFlowAsync` had no leased branch at all: everything in its loop needs the adapter in the
+cache, i.e. a live SignalR connection, which a leased adapter never has, so it answered *"The adapter
+pod must be deployed and online before its pipeline configuration can be pushed"* — an instruction
+that cannot be followed — and `ValidateAndPersistPipelineAsync`'s per-pipeline arm never ran either.
+It now takes the same route the single-pipeline path has had since AB#4924
+(`DeployLeasedPipelineAsync`: validate, persist, no push), placed **before** the AB#4918 wake gate for
+the reason given there — a borrower must not be able to start the lender's capacity by pressing Deploy.
+
+⚠️ **Deliberately unchanged: the capability evaluation ignores `System/Enabled`.** A disabled pipeline
+still blocks the deploy and is still named in the refusal. That is shared with the OnDemand
+evaluation (`EvaluateAsync` enumerates the same unfiltered pipeline set), so changing it for leasing
+alone would let the two modes drift — and it would silently weaken a gate that prod-1 adapters
+currently rely on. Note the data-flow *deploy loop* does skip disabled pipelines, so the two read the
+pipeline set differently; that asymmetry is known and is not what AB#5327 changed.
+
+Tests: `Services/DeploymentSiteServiceTests/DeployWorkloadLeasedGateOrderTests` — 🔴 a separate suite
+from `DeployWorkloadLifecycleValidationTests`, which covers the gate's CONTENT and cannot catch this:
+its arrange helper gives every adapter a chart name, so it always entered through the door that was
+shut.
+
 ### Execution class — `IPipelineExecutionClassService`
 
 The trigger node declares its class via `[NodeExecutionClass]` (SDK), the reflection descriptor scan
