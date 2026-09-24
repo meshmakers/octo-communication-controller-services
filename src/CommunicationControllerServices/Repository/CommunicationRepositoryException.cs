@@ -289,6 +289,14 @@ internal class CommunicationRepositoryException : Exception
             "(AB#5271)", exception);
     }
 
+    public static Exception CommonFailedLinkingAdapterToLentAdapterPoolMirror(string borrowerTenantId,
+        OctoObjectId adapterRtId, OctoObjectId mirrorRtId, Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{borrowerTenantId}] Failed to link leased adapter '{adapterRtId}' to its lent adapter pool mirror " +
+            $"'{mirrorRtId}' (AB#5349)", exception);
+    }
+
     public static Exception CommonFailedGettingServiceAccountByWellKnownName(string tenantId, string wellKnownName,
         Exception exception)
     {

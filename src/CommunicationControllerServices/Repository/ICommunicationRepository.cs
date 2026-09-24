@@ -172,6 +172,26 @@ public interface ICommunicationRepository
     Task RemoveLentAdapterPoolMirrorAsync(string borrowerTenantId, OctoObjectId mirrorRtId);
 
     /// <summary>
+    ///     Points one leased adapter's <c>LentFrom</c> edge at an existing mirror, and reports whether
+    ///     the edge was written (AB#5349).
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         🔴 It only ever <b>fills a gap</b>. An adapter that already has an edge — to this
+    ///         mirror or to any other — is left exactly as it is and <c>false</c> is returned. The one
+    ///         caller is the re-link sweep that restores the pointer AB#5271 left behind, and
+    ///         re-pointing an adapter is an operator decision, never a reconcile's.
+    ///     </para>
+    ///     <para>
+    ///         The current edge is read inside the same transaction as the insert: the outbound
+    ///         multiplicity is <c>ZeroOrOne</c>, so a second edge would be rejected by the engine
+    ///         anyway, and reading first is what makes a concurrent run a no-op rather than an error.
+    ///     </para>
+    /// </remarks>
+    Task<bool> TryLinkAdapterToLentAdapterPoolMirrorAsync(string borrowerTenantId, OctoObjectId adapterRtId,
+        OctoObjectId mirrorRtId);
+
+    /// <summary>
     ///     Returns the deployment site a workload is hosted at, or null when it is not assigned.
     /// </summary>
     Task<RtDeploymentSite?> GetDeploymentSiteForWorkloadAsync(string tenantId, OctoObjectId workloadRtId);

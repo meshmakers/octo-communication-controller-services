@@ -71,14 +71,23 @@ public interface IAdapterPoolMirrorProvisioningService
 ///     created or deleted while the sweep runs must not stop every other borrower from being
 ///     reconciled — but a persistently non-zero value means somebody is missing mirrors.
 /// </param>
+/// <param name="AdaptersRelinked">
+///     Leased adapters whose <c>LentFrom</c> edge was restored from the attribute values AB#5271
+///     orphaned (AB#5349). One-time per adapter, so a persistently non-zero value would mean the
+///     edge is not sticking. 🔴 It counts towards <see cref="IsNoOp" />: the run that surfaced this
+///     defect answered <c>isNoOp: true</c> while a borrower sat unlinked, because the backfill had no
+///     opinion about the adapter's edge — a repair that reports nothing is how the gap stayed
+///     invisible.
+/// </param>
 public sealed record AdapterPoolMirrorSyncResult(
     int TenantsReconciled,
     int MirrorsCreatedOrUpdated,
     int MirrorsRemoved,
-    int LendersUnreadable)
+    int LendersUnreadable,
+    int AdaptersRelinked = 0)
 {
     /// <summary>A run that did nothing — the neutral element for <see cref="Add" />.</summary>
-    public static readonly AdapterPoolMirrorSyncResult Nothing = new(0, 0, 0, 0);
+    public static readonly AdapterPoolMirrorSyncResult Nothing = new(0, 0, 0, 0, 0);
 
     /// <summary>Accumulates a per-tenant result into a fan-out total.</summary>
     public AdapterPoolMirrorSyncResult Add(AdapterPoolMirrorSyncResult other)
@@ -87,9 +96,10 @@ public sealed record AdapterPoolMirrorSyncResult(
             TenantsReconciled + other.TenantsReconciled,
             MirrorsCreatedOrUpdated + other.MirrorsCreatedOrUpdated,
             MirrorsRemoved + other.MirrorsRemoved,
-            LendersUnreadable + other.LendersUnreadable);
+            LendersUnreadable + other.LendersUnreadable,
+            AdaptersRelinked + other.AdaptersRelinked);
     }
 
     /// <summary>True when the run changed nothing — the normal outcome of a startup re-check.</summary>
-    public bool IsNoOp => MirrorsCreatedOrUpdated == 0 && MirrorsRemoved == 0;
+    public bool IsNoOp => MirrorsCreatedOrUpdated == 0 && MirrorsRemoved == 0 && AdaptersRelinked == 0;
 }

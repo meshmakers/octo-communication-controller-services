@@ -104,8 +104,9 @@ public class AdapterPoolController : ControllerBase
         var result = await _mirrorProvisioningService.ProvisionForBorrowerAsync(tenantId,
             HttpContext.RequestAborted);
         _logger.LogInformation(
-            "[{TenantId}] Lent adapter pool mirrors refreshed on request: {Created} present, {Removed} removed",
-            tenantId, result.MirrorsCreatedOrUpdated, result.MirrorsRemoved);
+            "[{TenantId}] Lent adapter pool mirrors refreshed on request: {Created} present, {Removed} removed, " +
+            "{Relinked} leased adapter(s) re-linked",
+            tenantId, result.MirrorsCreatedOrUpdated, result.MirrorsRemoved, result.AdaptersRelinked);
         return Ok(result);
     }
 
@@ -135,8 +136,9 @@ public class AdapterPoolController : ControllerBase
             HttpContext.RequestAborted);
         _logger.LogInformation(
             "[{TenantId}] Adapter pool mirrors published on request: {Tenants} borrower(s), {Created} present, " +
-            "{Removed} removed",
-            tenantId, result.TenantsReconciled, result.MirrorsCreatedOrUpdated, result.MirrorsRemoved);
+            "{Removed} removed, {Relinked} leased adapter(s) re-linked",
+            tenantId, result.TenantsReconciled, result.MirrorsCreatedOrUpdated, result.MirrorsRemoved,
+            result.AdaptersRelinked);
         return Ok(result);
     }
 

@@ -202,6 +202,59 @@ untouched. Treating a tenant that is mid-update as "lends nothing" would delete 
 mirrors — and with the association leading, that breaks every adapter borrowing from it. A transient
 read failure must not become an outage.
 
+### 7.6 ✅ Resolved (AB#5349) — the run also re-links the adapter
+
+§7.1 states that the association replaces the two attributes, and `migration-meta.yaml` states why
+no CK migration can convert them: the association's target is a mirror this service provisions at
+**run time**, so its RtId does not exist while a migration runs. That note ends with "the
+relationship is re-established by the mirror sync **plus a re-link of the adapter**" — and the second
+half had no implementation. The sync provisioned the mirror; nothing linked the adapter to it. With
+the association leading (§7.3), that is the outage §7.3 warns about, and it was silent in every
+direction:
+
+| observed on tenant `salzburgdev`, 2026-09-24 | |
+|---|---|
+| the mirror | correct and DEPLOYED — `Lender` = `accounting` / `49240000000000000000aa01` |
+| the leased adapter | `lentFrom.totalCount = 0` |
+| `POST {tenant}/v1/adapterPool/mirrors/refresh` | `{"isNoOp": true}` — correct, and useless: the backfill had no opinion about the adapter's edge |
+| the adapter's own health fields | `statusMessage` null, `lastDeploymentError` null |
+| the execute call | 200, then `Queued` forever (this is what AB#5329 later turned into a named refusal) |
+
+**The re-link is scriptable because the old data is still there.** The attribute removal rode the
+engine's post-chain schema-only bridge, which upgrades the schema and does **not** delete attribute
+values, so a tenant carried over from 4.0.0 still holds `attributes.lentFromTenantId` and
+`attributes.lentFromPoolRtId` on the borrowing adapter — read through `GetAttributeValueOrDefault`,
+because the engine's attribute dictionary is model-agnostic on both write and read and there is no
+generated property any more. 🔴 The stored key is `lentFromPoolRtId`, **not**
+`lentFromAdapterPoolRtId`: the `Pool` → `AdapterPool` rename happened later in the same 4.x line.
+
+A borrower-side run now, between the mirror upsert and the removal sweep, gives every
+`LifecycleMode = Leased` adapter with no `LentFrom` edge the edge its leftovers name — and only when
+those leftovers match the `Lender` record of a mirror **that this run just decided is lent here**.
+Four rules make it a repair rather than a second place where lending is decided:
+
+1. **Idempotent.** An adapter with an edge is skipped, and the repository re-checks inside its own
+   transaction. Running it twice changes nothing.
+2. 🔴 **It never invents an edge.** No leftovers, half of them, or a pair no mirror carries ⇒ the
+   adapter is left alone. An adapter pointing at nothing is a defined, reported state (§6) and since
+   AB#5329 a named refusal at the enqueue; an adapter pointing at a pool nobody lent it would send
+   lease requests to a lender that never agreed. An adapter already pointing at a *different* mirror
+   is not re-pointed either — that pointer is somebody's decision, and the leftovers are by
+   definition the older statement of the two.
+3. 🔴 **No lending decision is made here** (§4). The candidate mirrors are exactly the ones
+   `MayLendAsync` approved against each lender's own pool moments earlier, which is why that set is
+   handed to the re-link rather than re-read. What is restored is a pointer, not an entitlement.
+4. **The leftovers are not deleted.** They are harmless — nothing but this sweep reads them — and they
+   are the only surviving evidence of what the adapter borrowed. Deleting them would make the repair
+   unrepeatable for no gain: once the edge exists the sweep never looks at them again. A deliberate,
+   reported cleanup pass over a provably re-linked estate would be the way to retire them; a side
+   effect of something that runs on every tenant load would not.
+
+It is reported (`AdapterPoolMirrorSyncResult.AdaptersRelinked`, which also counts towards `isNoOp` —
+the run that exposed this said `isNoOp: true` while a borrower sat unlinked) and written once per
+adapter to the tenant's event log. And it is cheap where there is nothing to do: a tenant with no
+mirror cannot match anything, so the sweep returns before it reads the database at all.
+
 ## 8. Not mirrored
 
 Pool members and the lease queue. Both are live lender-side state, change constantly, and have no

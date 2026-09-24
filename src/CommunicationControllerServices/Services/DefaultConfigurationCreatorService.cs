@@ -205,11 +205,13 @@ internal class DefaultConfigurationCreatorService(
             if (!result.IsNoOp)
             {
                 logger.LogInformation(
-                    "Lent adapter pool mirrors for tenant '{TenantId}': {Created} present, {Removed} removed",
-                    tenantId, result.MirrorsCreatedOrUpdated, result.MirrorsRemoved);
+                    "Lent adapter pool mirrors for tenant '{TenantId}': {Created} present, {Removed} removed, " +
+                    "{Relinked} leased adapter(s) re-linked",
+                    tenantId, result.MirrorsCreatedOrUpdated, result.MirrorsRemoved, result.AdaptersRelinked);
                 await communicationEventService.StoreInformationEventAsync(tenantId,
                     $"Lent adapter pool mirrors reconciled (AB#5271): {result.MirrorsCreatedOrUpdated} available, " +
-                    $"{result.MirrorsRemoved} removed.");
+                    $"{result.MirrorsRemoved} removed, {result.AdaptersRelinked} leased adapter(s) re-linked " +
+                    "(AB#5349).");
             }
 
             if (result.LendersUnreadable > 0)

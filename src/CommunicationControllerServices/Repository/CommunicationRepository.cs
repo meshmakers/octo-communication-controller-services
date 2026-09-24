@@ -589,6 +589,58 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
+    public async Task<bool> TryLinkAdapterToLentAdapterPoolMirrorAsync(string borrowerTenantId,
+        OctoObjectId adapterRtId, OctoObjectId mirrorRtId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(borrowerTenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+        try
+        {
+            // 🔴 Read the current edge inside the transaction and give up if there is one. This is a
+            // gap filler: the outbound multiplicity is ZeroOrOne, so a blind insert would be rejected
+            // once an edge exists, and a second reconcile running concurrently must be a no-op rather
+            // than an error. Nothing here replaces an edge — re-pointing a borrower at a different
+            // pool is an operator decision.
+            var existingTargets = await tenantRepository
+                .GetRtAssociationTargetsAsync<RtAdapter, RtLentAdapterPool>(session,
+                    [adapterRtId], SystemCommunicationCkIds.RtCkLentFromRoleId,
+                    GraphDirections.Outbound, null, RtEntityQueryOptions.Create());
+
+            if (existingTargets.FirstOrDefault().Value?.Items.FirstOrDefault() is not null)
+            {
+                await session.CommitTransactionAsync();
+                return false;
+            }
+
+            var operationResult = new OperationResult();
+            var associations = new List<AssociationUpdateInfo>
+            {
+                AssociationUpdateInfo.CreateInsert(
+                    new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, adapterRtId),
+                    new RtEntityId(SystemCommunicationCkIds.RtCkLentAdapterPoolTypeId, mirrorRtId),
+                    SystemCommunicationCkIds.RtCkLentFromRoleId)
+            };
+
+            await tenantRepository.ApplyChangesAsync(session, associations, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+            return true;
+        }
+        catch (Exception e)
+        {
+            await session.AbortTransactionAsync();
+            throw CommunicationRepositoryException.CommonFailedLinkingAdapterToLentAdapterPoolMirror(
+                borrowerTenantId, adapterRtId, mirrorRtId, e);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task RemoveLentAdapterPoolMirrorAsync(string borrowerTenantId, OctoObjectId mirrorRtId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(borrowerTenantId);

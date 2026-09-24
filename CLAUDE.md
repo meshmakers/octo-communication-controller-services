@@ -2422,6 +2422,82 @@ values — lender-side deployment detail that changes on every rollout and would
 reason about a release it has no say over. Pool members and the lease queue are not mirrored at all
 (concept §8).
 
+### 🔴 The re-link: the second half of the migration note (AB#5349)
+
+`migration-meta.yaml` records why no CK migration can convert the two removed attributes into the
+association — the target is a mirror the controller provisions at **run time**, so its RtId does not
+exist while a migration runs — and ends with "the relationship is re-established by the mirror sync
+**plus a re-link of the adapter**". Until AB#5349 the second half had no implementation: the sync
+provisioned the mirror, and nothing linked the adapter to it.
+
+Measured on the local kind cluster, tenant `salzburgdev`, on 2026-09-24:
+
+| | |
+|---|---|
+| the mirror | correct — `LentAdapterPool 6aaecb0e6f3d1e1d08ede037`, `Lender` = `accounting` / `49240000000000000000aa01`, DEPLOYED |
+| the leased adapter `49240000000000000000bb01` | `lentFrom.totalCount = 0` |
+| `POST {tenant}/v1/adapterPool/mirrors/refresh` | `{"isNoOp": true}` — **correctly**: the mirror was right, and the backfill had no opinion about the adapter's edge |
+| the adapter's own health | `statusMessage` null, `lastDeploymentError` null, `LifecycleMode` Leased |
+| the repair | a hand-written GraphQL mutation |
+
+**It is scriptable because the old data is still there.** The attribute removal rode the engine's
+post-chain schema-only bridge, which upgrades the schema and does **not** delete attribute values.
+
+🔴 **The stored key is `lentFromPoolRtId`, NOT `lentFromAdapterPoolRtId`** — the `Pool` →
+`AdapterPool` rename happened later in the same 4.x line and the data carries the older spelling.
+And adapters live in the **polymorphic** collection `RtEntity_SystemCommunicationDeployableEntity`;
+there is no `RtEntity_SystemCommunicationAdapter`.
+
+`AdapterPoolMirrorProvisioningService.RelinkLeasedAdaptersAsync` runs **between the upsert and the
+removal sweep** — the mirror an adapter is linked to has to exist already, and a mirror the removal
+pass is about to delete must never gain an edge. For each `LifecycleMode = Leased` adapter with no
+`LentFrom` edge it reads the leftovers and, when they match the `Lender` record of a mirror that is
+in the desired set, writes the edge through
+`ICommunicationRepository.TryLinkAdapterToLentAdapterPoolMirrorAsync`.
+
+**How the leftovers are read.** `GetAttributeValueOrDefault(...)`, never a generated property —
+there is none any more. It works because the engine's attribute dictionary is **model-agnostic on
+both write and read**: `RtAttributeDictionarySerializer` camel-cases every key it writes and
+Pascal-cases every key it finds, without consulting the CK model, and `EntityRuleEngine` only ever
+validates *declared* mandatory attributes. So `attributes.lentFromPoolRtId` comes back as
+`LentFromPoolRtId` on an entity whose type no longer declares it. No projection is involved in
+`GetWorkloadsAsync`, so nothing filters it out.
+
+Properties, each with a test:
+
+- **Idempotent.** An adapter that already has an edge is skipped here *and* in the repository, which
+  re-reads the current edge inside its own transaction. A second run reports zero.
+- 🔴 **It never invents an edge.** Leftovers absent, blank, half present, or naming a pair no mirror
+  carries ⇒ the adapter is left alone. A leased adapter pointing at a pool nobody lent it is worse
+  than one pointing at nothing: the latter is already a loud, named refusal at the enqueue (AB#5329,
+  `LeaseRefusalReason.BorrowerNamesNoPool`), while the former would send lease requests to a lender
+  that never agreed. An adapter whose edge points at a *different* mirror is not re-pointed either —
+  the sweep fills a gap, it does not re-decide a pointer somebody set deliberately.
+- 🔴 **It makes no lending decision** (concept §4). The mirrors it matches against were just decided,
+  one by one, by `MayLendAsync` against each **lender's own** pool — that is why the desired set is
+  passed in rather than re-read. All it restores is a pointer the borrower already had, to a pool it
+  is already entitled to.
+- 🔴 **The leftover values are not deleted.** They are harmless dead data — nothing but this sweep
+  reads them — and the only remaining evidence of what the adapter borrowed. Deleting them would
+  make the repair unrepeatable, so it could only ever be right *after* the edge exists, and even then
+  it buys nothing but a write: the next reconcile finds the edge and never looks at them again. If
+  they are ever to go it should be one deliberate, reported cleanup pass over an estate where every
+  borrower is provably re-linked, not a side effect of something that runs on every tenant load.
+- **Best effort.** One adapter's failure is logged and the sweep continues; an unreadable workload
+  set gives up on the re-link only, leaving the mirror reconcile and tenant startup untouched.
+- **Cheap when there is nothing to do.** No mirror ⇒ no possible match ⇒ it returns before touching
+  the database, which is the case for the overwhelming majority of tenants. A tenant that does hold
+  mirrors pays one `GetWorkloadsAsync` — one query per tenant, the same read the lease-topology sweep
+  already makes every 60 s — and only a tenant that also has a leased adapter pays a second, batched
+  edge read.
+
+`AdapterPoolMirrorSyncResult.AdaptersRelinked` counts it and **counts towards `IsNoOp`**: the run
+that surfaced this defect answered `isNoOp: true` while a borrower sat unlinked, and a repair that
+reports nothing is how the gap stayed invisible. The count is surfaced on both refresh endpoints and
+in the tenant-load log line, and each re-link is written once to the tenant's **event log** — it is a
+one-time repair per adapter, and the operator who sees a borrower start working again should be able
+to find out why without reading pod logs.
+
 ### The borrower's read-only detail view
 
 `GET {borrowerTenantId}/v1/adapterPool/lent/{lenderTenantId}/{adapterPoolRtId}` →
@@ -2476,7 +2552,14 @@ refused deploy with a named reason, which is the loud failure the sample wants.
 
 Tests: `Services/AdapterPoolMirrorProvisioningServiceTests/` (borrower reconcile incl. the
 revocation and unreadable-lender rules, lender fan-out incl. the one-reconcile-per-borrower and
-failing-borrower rules), the four fan-out cases in
+failing-borrower rules, and `RelinkLeasedAdaptersTests` for every AB#5349 decision rule — edge
+present, edge elsewhere, leftovers missing / half present / blank / matching nothing / matching a
+doomed mirror, several mirrors, non-Leased modes, the idempotent second run, the event-log line, the
+best-effort paths and the two cheapness assertions), integration
+`Repository/LentAdapterPoolRelinkTests` (🔴 **the half a mock cannot show**: the orphaned values
+survive a round trip through a model that no longer declares them, the stored key really is
+`lentFromPoolRtId`, one reconcile writes the edge and the second changes nothing, and leftovers
+naming a pool that does not lend here leave the adapter unlinked), the four fan-out cases in
 `Services/DeploymentSiteServiceTests/AdapterPoolDeploymentTests`, and
 `Controllers/AdapterPoolControllerLentDetailsTests` (the detail endpoint: the two 404 paths say the
 same thing, the scope resolver is not consulted for an unresolvable pool, members are counted and

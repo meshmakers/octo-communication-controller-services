@@ -15,6 +15,14 @@ $schema: https://schemas.meshmakers.cloud/ck-migration-meta.schema.json
 # post-chain schema-only bridge, leaving the two values as dead data. Verified on a local tenant
 # that was carrying 4.0.0.
 #
+# ✅ Both halves of that sentence now exist (AB#5349). The mirror sync provisions the mirror, and
+# AdapterPoolMirrorProvisioningService.RelinkLeasedAdaptersAsync re-links the adapter: it reads the
+# two dead values off the adapter (GetAttributeValueOrDefault — the model no longer declares them,
+# and the stored key is `lentFromPoolRtId`, NOT `lentFromAdapterPoolRtId`) and writes the LentFrom
+# edge when they name a mirror the same run just decided is lent here. It never invents an edge, and
+# it deliberately does NOT delete the two values: they are the only remaining evidence of what the
+# adapter borrowed. See CLAUDE.md and docs/concepts/lent-adapter-pool-mirror.md §7.6.
+#
 # 4.1.0 (AB#5295) adds NO entry either: one enum (HelmRepositoryPurpose) and one optional
 # attribute (HelmRepositoryConfiguration.Purpose), both additive — rides the schema-only bridge.
 #
