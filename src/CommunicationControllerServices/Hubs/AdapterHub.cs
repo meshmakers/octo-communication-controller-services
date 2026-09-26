@@ -253,6 +253,30 @@ internal class AdapterHub : Hub, IAdapterHub
     }
 
     /// <summary>
+    /// Writes the status line a trigger node reported for one of this adapter's pipelines
+    /// (AB#5385) to that pipeline's <c>StatusMessage</c>. Fire-and-forget on the wire, like the
+    /// metrics sample: a failure is logged and swallowed so the connection stays usable for the
+    /// rest of the hub's traffic, and a rejected report (pipeline not deployed to this adapter)
+    /// is logged by the service and never written.
+    /// </summary>
+    /// <param name="status">The status line, its timestamp and whether it reports a failure</param>
+    public async Task ReportPipelineStatusAsync(PipelineStatusReportDto status)
+    {
+        try
+        {
+            var tenantId = GetTenantId();
+            var adapterRtEntityId = GetAdapterRtEntityId();
+
+            await _adapterService.ReportPipelineStatusAsync(tenantId, adapterRtEntityId, status);
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e, "Failed to record the status line for pipeline '{PipelineRtEntityId}'.",
+                status.PipelineRtEntityId);
+        }
+    }
+
+    /// <summary>
     /// Reports the start of a pipeline execution from the adapter.
     /// Enqueues the report for background processing to avoid blocking the SignalR connection.
     /// </summary>
