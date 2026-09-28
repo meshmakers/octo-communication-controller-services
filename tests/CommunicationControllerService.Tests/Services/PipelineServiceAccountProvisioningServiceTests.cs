@@ -338,7 +338,7 @@ internal class PipelineServiceAccountProvisioningServiceTests
     // ---------------------------------------------------------------- secret hygiene
 
     [Test]
-    [NotInParallel(nameof(PipelineServiceAccountProvisioningServiceTests))]
+    [NotInParallel(nameof(NLog.LogManager))]
     public async Task Provision_NeverWritesTheSecretToAnyLogTarget()
     {
         var adapter = RtEntityCreator.CreateAdapter();

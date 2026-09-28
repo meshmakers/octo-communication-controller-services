@@ -49,6 +49,46 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     private readonly ConcurrentDictionary<AdapterPoolKey, DateTime> _lastScaleUpUtc = new();
 
     /// <summary>
+    ///     AB#5256: when this pool last had lease activity — a grant this controller made, or a round
+    ///     that saw a member holding one. The clock <c>IdleTimeoutMinutes</c> is measured against
+    ///     before a member above <c>MinReplicas</c> is drained again (concept §4a).
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         🔴 <b>In memory, and seeded when the pool is first seen in a round.</b> There is no
+    ///         persisted "last lease" for a pool — the member view is this controller's own
+    ///         (<see cref="IAdapterPoolConnectionManager" />), and a lease span lives on the
+    ///         borrower's execution entity, which is the one thing a per-pool clock must not have to
+    ///         read every five seconds. Seeding on first sight makes a pool that has never been leased
+    ///         since this process started read as "idle since then" rather than "idle since forever":
+    ///         without it the very first round after a controller restart would drain a pool that was
+    ///         scaled up seconds earlier by the pod that went away.
+    ///     </para>
+    ///     <para>
+    ///         The cost of seeding is that a controller restart delays the first shrink by up to
+    ///         <c>IdleTimeoutMinutes</c>. Erring in that direction is the point: a member kept too long
+    ///         costs memory, a member drained too early costs a cold start on work that is about to
+    ///         arrive — and the pool only ever grew before this existed, so late is strictly better
+    ///         than never.
+    ///     </para>
+    /// </remarks>
+    private readonly ConcurrentDictionary<AdapterPoolKey, DateTime> _lastLeaseActivityUtc = new();
+
+    /// <summary>
+    ///     AB#5256: the replica count this controller last asked each pool to run, so a size change
+    ///     already in flight is not decided on twice.
+    /// </summary>
+    /// <remarks>
+    ///     🔴 <b>The member count does not drop the instant a scale is requested.</b> The pod needs
+    ///     seconds to terminate and disconnect, so the next round — five seconds later — would still
+    ///     count the leaving member, find the pool idle and above its floor, and issue a second scale
+    ///     on a stale reading. Holding off while the observed count has not caught up with the last
+    ///     request is self-limiting and needs no timer: the moment the pod disconnects the counts agree
+    ///     again.
+    /// </remarks>
+    private readonly ConcurrentDictionary<AdapterPoolKey, int> _lastRequestedReplicas = new();
+
+    /// <summary>
     ///     Pools currently observed with queued work and no idle member, so the condition is logged
     ///     once when it starts rather than on every five-second round while it lasts (AB#4924
     ///     increment 9).
@@ -352,6 +392,11 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
 
         var members = _connectionManager.GetMembers(key.LenderTenantId, key.AdapterPoolRtId);
 
+        // AB#5256: the idle clock is advanced (or seeded) on every round, before anything can return
+        // early — a pool that is busy must not age towards a shrink just because this round found
+        // nothing to hand out.
+        var idleSinceUtc = NoteLeaseActivity(key, members);
+
         // Named before anything can be counted for this pool, so every series carries something a
         // human can read from the first measurement rather than from the second round onwards.
         AdapterLeasingMetrics.NamePool(key.LenderTenantId, key.AdapterPoolRtId, pool?.Name);
@@ -378,6 +423,10 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
         if (depth == 0)
         {
             _exhaustedAdapterPools.TryRemove(key, out _);
+
+            // AB#5256: an empty queue is the only state a shrink is ever considered in, so this is
+            // the one place it can live.
+            await TryShrinkIdlePoolAsync(key, pool, members, idleSinceUtc);
             return 0;
         }
 
@@ -500,6 +549,178 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     }
 
     /// <summary>
+    ///     AB#5256: advances the pool's idle clock, seeding it the first time this controller sees the
+    ///     pool in a round, and returns the instant the pool has been without lease activity since.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Two things advance it. A grant (<see cref="TryGrantAsync" />) is the obvious one. The
+    ///         second is a round that finds any member holding a lease: that covers the hand-driven
+    ///         <c>POST …/lease</c>, which never goes through the scheduler, and the multi-pod case where
+    ///         the grant was made by a different controller instance and only the member state is
+    ///         shared. Both can only ever push a shrink further out, never bring one forward, which is
+    ///         the only direction this clock may be wrong in.
+    ///     </para>
+    /// </remarks>
+    private DateTime NoteLeaseActivity(AdapterPoolKey key, IReadOnlyCollection<PoolMemberConnection> members)
+    {
+        var now = DateTime.UtcNow;
+
+        // First sight = idle since now, never idle since DateTime.MinValue. See the field's remarks:
+        // a controller restart must not let the first round shrink a pool that grew seconds ago.
+        var idleSinceUtc = _lastLeaseActivityUtc.GetOrAdd(key, now);
+
+        if (!members.Any(m => m.ActiveLease is not null))
+        {
+            return idleSinceUtc;
+        }
+
+        _lastLeaseActivityUtc[key] = now;
+        return now;
+    }
+
+    /// <summary>
+    ///     AB#5256: drains one member of a pool that has been completely idle for longer than its
+    ///     <c>IdleTimeoutMinutes</c> and asks the pool to run one member fewer. Concept §4a — the pool,
+    ///     not the AB#4918 idle watchdog, owns its members' lifecycle.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         🔴 <b>Why the whole pool has to be idle, and not just the member being given up.</b>
+    ///         Scaling a Deployment down hands the choice of which pod dies to the ReplicaSet
+    ///         controller, and this service cannot steer it: the controller has no cluster access at
+    ///         all — every workload change travels to the operator as a declarative
+    ///         <c>ScaleWorkloadDto</c>. So a per-member idle rule would decide that member A may go and
+    ///         then watch Kubernetes terminate member B, which could be mid-execution for a borrower.
+    ///         When <b>nothing</b> is running the choice cannot hurt: whichever member Kubernetes
+    ///         picks is idle. Draining the one we nominated on top of that is not the mechanism, it is
+    ///         belt and braces — it stops that member accepting a lease in the seconds between this
+    ///         decision and the scale actually taking effect.
+    ///     </para>
+    ///     <para>
+    ///         Steering the victim is possible in principle
+    ///         (<c>controller.kubernetes.io/pod-deletion-cost</c> on the pod, so the ReplicaSet picks
+    ///         the cheapest one) but would need a new operator verb, a CRD/wire change and a release of
+    ///         three repositories for a benefit that is zero while the gate above holds. Deliberately
+    ///         out of scope; recorded as a follow-up in <c>docs/concepts/shared-adapter-leasing.md</c>
+    ///         §4a instead of half-built here.
+    ///     </para>
+    ///     <para>
+    ///         ⚠️ <b>The member view is this controller instance's own</b>, like every other member
+    ///         reading in this file: a SignalR connection lives on one pod. The estate runs the
+    ///         controller single-replica in steady state and the overlap window is a rolling upgrade, so
+    ///         a partial view is the exception rather than the rule — but it is the gate above that
+    ///         makes a partial view harmless rather than the deployment topology. Under-counting members
+    ///         can only make this method ask for a <i>smaller</i> pool than the whole estate would, and
+    ///         <c>WorkloadLifecycleService.ClampToAdapterPoolRange</c> bounds that at
+    ///         <c>MinReplicas</c>; a member held by the other pod is a member with a lease, which this
+    ///         pod cannot see either — hence the "no member here holds a lease" gate is joined by the
+    ///         empty queue of <i>every</i> borrower, which is read from the tenant databases and is not
+    ///         per-instance at all.
+    ///     </para>
+    ///     <para>
+    ///         Nothing is logged while the pool is merely being evaluated. A round runs every five
+    ///         seconds per pool, and the reasoning on <c>AdapterLeasingMetrics.ObserveRound</c> applies
+    ///         verbatim: a line per round per pool is the adapter log flood this estate has already
+    ///         lived through. An actual shrink is an event and gets one INFO line plus a tenant event —
+    ///         it changes what the lender is paying for.
+    ///     </para>
+    /// </remarks>
+    private async Task TryShrinkIdlePoolAsync(AdapterPoolKey key, RtAdapterPool? pool,
+        IReadOnlyCollection<PoolMemberConnection> members, DateTime idleSinceUtc)
+    {
+        if (pool is null)
+        {
+            // No entity, so neither MinReplicas nor IdleTimeoutMinutes is known. A pool that cannot be
+            // read must never be shrunk on assumed defaults.
+            return;
+        }
+
+        // A size change already asked for and not yet visible: see _lastRequestedReplicas. Checked
+        // first, because every reading below is the stale one it exists to distrust.
+        if (_lastRequestedReplicas.TryGetValue(key, out var lastRequested) && members.Count > lastRequested)
+        {
+            return;
+        }
+
+        // The whole-pool gate. Not "this member is idle" — see the remarks.
+        if (members.Any(m => m.ActiveLease is not null))
+        {
+            return;
+        }
+
+        // MinReplicas is the floor the pool declares, and it is deliberately allowed to be 0.
+        // ClampToAdapterPoolRange enforces it for every caller; asking for less than the floor and
+        // relying on the clamp to correct it would make this method's log line disagree with what the
+        // pool actually does.
+        if (members.Count <= pool.MinReplicas)
+        {
+            return;
+        }
+
+        var idleTimeout = ResolveIdleShrinkWindow(pool);
+        if (DateTime.UtcNow - idleSinceUtc < idleTimeout)
+        {
+            return;
+        }
+
+        // Every member is lease-free here, so IsAvailable only excludes one that is already draining —
+        // nominating that one would spend a round achieving nothing.
+        var victim = members
+            .Where(m => m.IsAvailable)
+            .OrderBy(m => m.MemberId, StringComparer.Ordinal)
+            .LastOrDefault();
+        if (victim is null)
+        {
+            return;
+        }
+
+        // One member per round. The next round re-derives everything from the new reading rather than
+        // continuing a plan, which is what keeps a shrink from racing work that arrives in between.
+        var desired = Math.Max(pool.MinReplicas, members.Count - 1);
+
+        // 🔴 Recorded BEFORE the scale request and kept whatever the request does. If the request
+        // fails the pool stays the size it is, the member we drained is replaced by a fresh one, and
+        // this pool is held until its count catches up — which for a permanently failing scale means
+        // no further shrink until the controller restarts. That is the safe direction: the alternative
+        // is a drain every five seconds against a scale verb that never applies.
+        _lastRequestedReplicas[key] = desired;
+
+        await _leaseService.DrainMemberAsync(victim.ConnectionId,
+            $"adapter pool '{pool.Name}' has been idle for {idleTimeout.TotalMinutes:F0} minute(s) and is giving up a member");
+
+        try
+        {
+            var effective = await _deploymentSiteService.ScaleAdapterPoolAsync(key.LenderTenantId, pool.RtId, desired);
+            _lastRequestedReplicas[key] = effective;
+
+            AdapterLeasingMetrics.RecordMemberDrained(key.LenderTenantId, key.AdapterPoolRtId,
+                LeaseDrainReason.PoolIdle);
+
+            Logger.Info(
+                "Adapter pool '{DeploymentSiteName}' ({AdapterPoolRtId}) of tenant '{LenderTenantId}' has been idle since " +
+                "{IdleSinceUtc:O} with an empty queue and no member holding a lease; member '{MemberId}' was drained and " +
+                "the pool scaled from {Members} to {Effective} member(s) (IdleTimeoutMinutes={IdleTimeoutMinutes}, " +
+                "MinReplicas={MinReplicas})",
+                pool.Name, key.AdapterPoolRtId, key.LenderTenantId, idleSinceUtc, victim.MemberId, members.Count,
+                effective, pool.IdleTimeoutMinutes, pool.MinReplicas);
+
+            await _eventService.StoreInformationEventAsync(key.LenderTenantId,
+                $"Adapter pool '{pool.Name}' gave up a member after {idleTimeout.TotalMinutes:F0} minute(s) without a " +
+                $"lease: it now runs {effective} member(s) (MinReplicas {pool.MinReplicas}). Queued work starts it back " +
+                "up automatically.");
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e,
+                "Could not scale idle adapter pool '{DeploymentSiteName}' ({AdapterPoolRtId}) of tenant " +
+                "'{LenderTenantId}' down to {Desired} member(s); member '{MemberId}' was already told to drain and is " +
+                "replaced by a fresh process",
+                pool.Name, key.AdapterPoolRtId, key.LenderTenantId, desired, victim.MemberId);
+        }
+    }
+
+    /// <summary>
     ///     Forgets refusals of executions that have not been seen in a round for a while, so the memo
     ///     that suppresses repeat log lines cannot grow for the life of the process.
     /// </summary>
@@ -595,6 +816,11 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
         if (result.Granted)
         {
             _refusedExecutions.TryRemove(candidate.Queued.ExecutionId, out _);
+
+            // AB#5256: the pool's idle clock restarts here. Stamped on the grant rather than on the
+            // release, because a member that is holding a lease is not idle either and a long-running
+            // work item must not age the pool towards a shrink while it runs.
+            _lastLeaseActivityUtc[key] = DateTime.UtcNow;
             return result.MemberId;
         }
 
@@ -829,6 +1055,12 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
             // and its MinReplicas..MaxReplicas clamp (increment 5). A second clamp written here
             // would be a second opinion about the pool's declared range, and the two would drift.
             var effective = await _deploymentSiteService.ScaleAdapterPoolAsync(key.LenderTenantId, pool.RtId, desired);
+
+            // AB#5256: this is a size change in flight too, and the shrink's hold-off reads the same
+            // memo. Without it a pool that grew again after a shrink would be held for the rest of the
+            // process, because its member count would never fall back to the smaller number asked for.
+            _lastRequestedReplicas[key] = effective;
+
             AdapterLeasingMetrics.RecordScaleUp(key.LenderTenantId, key.AdapterPoolRtId,
                 AdapterLeasingMetrics.ScaleUpOutcomes.Scaled);
             Logger.Info(
@@ -867,6 +1099,24 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     {
         /// <summary>A round that could not read the pool entity and therefore evaluated nothing.</summary>
         public static ScaleUpEvaluation Unknown => new(TimeSpan.Zero, false, false, false);
+    }
+
+    /// <summary>
+    ///     AB#5256: how long a pool has to be idle before it gives up a member.
+    /// </summary>
+    /// <remarks>
+    ///     The pool's own <c>IdleTimeoutMinutes</c> is the declared answer — that is what the CK model
+    ///     comment and concept §4a say the attribute is for, and until this method existed nothing read
+    ///     it for a pool at all. <c>LeaseIdleShrinkWindowSeconds</c> overrides every pool at once, in
+    ///     seconds, exactly as <c>LeaseScaleUpAveragingWindowSeconds</c> does for the depth window.
+    ///     Internal because a test has to be able to pin which of the two is read: the defaults differ
+    ///     by three orders of magnitude, so reading the wrong one is invisible in any single round.
+    /// </remarks>
+    internal TimeSpan ResolveIdleShrinkWindow(RtAdapterPool pool)
+    {
+        return _options.LeaseIdleShrinkWindowSeconds > 0
+            ? TimeSpan.FromSeconds(_options.LeaseIdleShrinkWindowSeconds)
+            : TimeSpan.FromMinutes(Math.Max(1, pool.IdleTimeoutMinutes));
     }
 
     /// <summary>

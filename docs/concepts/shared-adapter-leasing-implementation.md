@@ -1121,6 +1121,16 @@ explicitly, before the `LifecycleMode` filter, at every mode; `MinReplicas` + `I
 queue pressure own the lifecycle instead (concept §4a). This closes plan 1.0's Q7. See §7.5 for the
 `Waking` path, which that exclusion turned out to be the *only* thing guarding.
 
+🔴 **The `IdleTimeoutMinutes` half of that sentence was aspirational until AB#5256 (2026-09-28).**
+Nothing read the attribute for a pool, so the exclusion left the pool with no shrink at all and a pool
+only ever grew — measured on the local kind cluster, two members days after the burst that created the
+second one, against an empty queue. It now lives in `LeaseSchedulerService.TryShrinkIdlePoolAsync`
+(increment 7's round, `depth == 0` branch) and fires only while the **whole** pool is idle: no queued
+work for any borrower, no member holding a lease, nothing granted for `IdleTimeoutMinutes`, and more
+members than `MinReplicas`. Whole-pool rather than per-member because a Deployment scale-down lets the
+ReplicaSet pick the pod that dies and the controller cannot steer it; see concept §4a for the
+follow-up (`pod-deletion-cost`) that is deliberately not built.
+
 **Tests:** `PlatformNamespaceTests` (13, including 8 that pin the one-namespace assumption as
 unchanged for Adapter and Application), `PoolOwnerReferenceTests` (10), `AdapterPoolKindE2ETests`
 (6, against a live cluster — see §7.6), `WorkloadLifecycleWatchdogTests` pool cases (5),
@@ -1610,7 +1620,7 @@ pool exhaustion grows the queue rather than dropping work, `LeaseWaitMs` arithme
 | `Services/LeaseService` | `ApplyLeaseOutcomeAsync` (stamps `LeaseReleasedAt`, completes a still-`Running` execution), `InterruptAndRequeueAsync`, `DrainMemberAsync`, and the **admission gate** parameter on `GrantLeaseAsync` |
 | `Repository/CommunicationRepository` | `EnqueueExecutionAsync`, `GetQueuedExecutionsForAdapterAsync`, `GetQueuedExecutionPositionAsync`, `TryClaimQueuedExecutionAsync`, `TryCancelQueuedExecutionAsync`, `StampLeaseReleasedAsync`, `TryInterruptLeasedExecutionAsync`, `GetExecutionQueueEntryAsync` |
 | `TenantApi/v1/Controllers/AdapterPoolController` | `GET {tenantId}/v1/adapterPool/{id}/queue` and `DELETE …/queue/{executionId}` — the shared contract §10 asks for, built here |
-| `Options/CommunicationControllerOptions` | `LeaseSchedulerIntervalSeconds`, `LeaseTopologyRefreshSeconds`, `LeaseTtlMinutes`, `LeaseQueueReadLimitPerAdapter`, `LeaseScaleUpAveragingWindowSeconds` |
+| `Options/CommunicationControllerOptions` | `LeaseSchedulerIntervalSeconds`, `LeaseTopologyRefreshSeconds`, `LeaseTtlMinutes`, `LeaseQueueReadLimitPerAdapter`, `LeaseScaleUpAveragingWindowSeconds`, `LeaseIdleShrinkWindowSeconds` (**AB#5256**, 0 = use the pool's own `IdleTimeoutMinutes`) |
 
 **The admission gate is the shape of the increment.** `GrantLeaseAsync` gained an optional
 callback that runs **after** an idle member is reserved and **before** the lease is pushed to it.

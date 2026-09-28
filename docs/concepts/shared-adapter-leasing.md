@@ -379,6 +379,57 @@ child tenant's blueprint declares that it borrows. Both halves are author config
 lease, so CPU utilisation says nothing about whether work is piling up. The signal is queue
 depth and queue wait time (§5).
 
+### `IdleTimeoutMinutes` shrinks the pool — implemented 2026-09-28 (AB#5256)
+
+🔴 **This paragraph described something that did not exist.** The line above and the CK model comment
+both said `IdleTimeoutMinutes` is what drains a member above `MinReplicas`, and nothing read the
+attribute for a pool at all: the AB#4918 idle watchdog skips `RtAdapterPool` on purpose (a pool has no
+pipelines of its own, so it would read as idle since forever and drain to zero, taking every
+borrower's work with it), and nothing took its place. So a pool **only ever grew**. Measured on the
+local kind cluster: a queue-driven scale-up to two members on 2026-09-23 was still two members days
+later against an empty queue.
+
+The shrink now lives in the **lease scheduler's per-pool round**, which already holds the queue depth,
+the member list and the pool entity at the same instant. Its condition, all four parts required:
+
+| | |
+|---|---|
+| the pool's queue depth is **0** | across *every* borrower, read from the borrowers' own tenant databases |
+| **no** member holds a lease | `ActiveLease is null` for every member this controller sees |
+| the last lease is older than `IdleTimeoutMinutes` | the clock is in memory, seeded when the pool is first seen |
+| the member count is **greater than** `MinReplicas` | the floor is the declared value, and `0` is a legitimate one |
+
+Then **one** member is drained and the pool is asked to run one fewer. One per round: the next round
+re-derives everything from the new reading instead of continuing a plan.
+
+🔴 **Why the whole pool has to be idle, and not just the member being given up.** Scaling a Deployment
+down hands the choice of which pod dies to the ReplicaSet controller, and the controller cannot steer
+it — it has no cluster access at all, every workload change travels to the operator as a declarative
+scale request. A per-member idle rule would therefore decide that member A may go and then watch
+Kubernetes terminate member B, possibly mid-execution for a borrower. When nothing is running the
+choice cannot hurt: whichever member Kubernetes picks is idle. Draining the nominated member on top of
+that is belt and braces — it stops that one accepting a lease between the decision and the scale.
+
+**Two consequences worth knowing, and one non-goal:**
+
+- **A controller restart delays the first shrink by up to `IdleTimeoutMinutes`**, because the idle
+  clock is seeded when the pool is first seen rather than assumed to be "idle since forever". That is
+  deliberate: the alternative is a fresh controller pod draining a pool that the pod it replaced scaled
+  up seconds earlier.
+- ⚠️ **A pool with no borrowers at all never shrinks.** The sweep is built from the *borrowers'*
+  declarations (that is what keeps a lender from pushing work into a tenant that never asked for it),
+  so a pool whose last borrower was re-pointed or undeployed is invisible to it and stays at whatever
+  size it last reached. Known limitation, not a bug to work around here: fixing it means walking from
+  the pools as well, which is a second topology with its own cost and its own scoping question.
+- **Steering which pod dies is out of scope.** `controller.kubernetes.io/pod-deletion-cost` on the pod
+  would let the ReplicaSet pick the member we nominated, but it needs a new operator verb, a wire
+  change and a release of three repositories — for a benefit that is zero while the "nothing is
+  running" gate holds. Recorded as a follow-up, deliberately not built.
+
+The window is the pool's own `IdleTimeoutMinutes` (model default 30). The controller option
+`LeaseIdleShrinkWindowSeconds` overrides every pool at once, in seconds, default `0` = "use the pool's
+value" — the same relationship `LeaseScaleUpAveragingWindowSeconds` has to `ScaleUpQueueWaitSeconds`.
+
 ## 4b. Where pool members run, and who pays for them
 
 This section used to run two independent questions together. They are separated here.
@@ -523,6 +574,7 @@ the queue path.
 |---|---|
 | Lease holder crashes mid-execution | Lease has a TTL; controller re-queues the execution and marks the previous attempt `Interrupted` (existing status). At-least-once, so pipelines must stay idempotent — same contract as today. 🔴 **Clarified during increment 7:** the re-queue is a **new** `PipelineExecution`, not the old one moved back to `Queued`. One entity cannot be `Interrupted` and `Queued` at once, and reusing it would erase both the interrupted record this row asks for and the lease span that prices it (§4b). Each *attempt* is one entity; the history reads attempt 1 `Interrupted`, attempt 2 `Queued → Running`. |
 | Release never arrives | TTL expiry releases the lease server-side; the process is drained and restarted rather than re-used, because its post-lease cleanliness is unproven. |
+| Pool idle above `MinReplicas` | ✅ **AB#5256, 2026-09-28.** The scheduler drains one member and asks the pool to run one fewer, but only while the *whole* pool is idle — empty queue for every borrower, no member holding a lease, nothing granted for `IdleTimeoutMinutes` (§4a). Not a failure, but it shares the drain mechanism: the two are told apart on `octo.lease.member_drained.count` by `octo.lease.drain_reason` (`ttl_expiry` vs `pool_idle`), because a member that lost a borrower's work and a pool doing what it declares must not be one series. Queued work brings the member back through the normal scale-up. |
 | A borrowed tenant floods the queue | Round-robin bounds its share; a per-tenant concurrency cap bounds it further. |
 | Pool exhausted | Queue grows, visible in Studio. Scale the pool, or move the tenant to a dedicated adapter. |
 | Parent tenant deleted while lending | Borrowers fall back to `Deployed=false` and surface a blocking reason. Never silently stop executing. |

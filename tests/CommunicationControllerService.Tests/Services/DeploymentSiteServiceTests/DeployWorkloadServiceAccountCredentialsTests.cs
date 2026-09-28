@@ -248,7 +248,7 @@ internal class DeployWorkloadServiceAccountCredentialsTests : PoolServiceTestsBa
     }
 
     [Test]
-    [NotInParallel(nameof(DeployWorkloadServiceAccountCredentialsTests))]
+    [NotInParallel(nameof(NLog.LogManager))]
     public async Task DeployWorkloadAsync_NeverWritesTheClientSecretToAnyLogTarget()
     {
         const string secret = "sJ8k2p-QmZ4x7vNb1LcT0aRwEyUiOpAsDfGhJkLzXcVbNm";

@@ -22,11 +22,21 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 ///         truncated secret is still secret material. And that the run logged <i>something</i> —
 ///         an empty target would make the assertion vacuous.
 ///     </para>
+///     <para>
+///         🔴 <b>The constraint key is <c>NLog.LogManager</c>, not this class</b> (AB#5256).
+///         <c>LogManager.Configuration</c> is process-wide and every probe of this shape REPLACES it,
+///         so two such tests in different classes silently steal each other's lines — and the "the run
+///         logged something" assertion above is precisely the one that then fails, for a reason that
+///         has nothing to do with the secret. Same rule, and same reason, as
+///         <c>[NotInParallel(nameof(MeterListener))]</c> on the metrics suites: the key names the
+///         shared resource, not the test. Every class in this repository that swaps the NLog
+///         configuration uses this key.
+///     </para>
 /// </remarks>
 internal class LeaseSecretLogTargetTests : LeaseServiceTestsBase
 {
     [Test]
-    [NotInParallel(nameof(LeaseSecretLogTargetTests))]
+    [NotInParallel(nameof(NLog.LogManager))]
     public async Task GrantLeaseAsync_NeverWritesTheClientSecretToAnyLogTarget()
     {
         ArrangeGrantableLease();
@@ -68,7 +78,7 @@ internal class LeaseSecretLogTargetTests : LeaseServiceTestsBase
     ///     object, which is what a structured-logging call would do.
     /// </summary>
     [Test]
-    [NotInParallel(nameof(LeaseSecretLogTargetTests))]
+    [NotInParallel(nameof(NLog.LogManager))]
     public async Task RenderingTheLeaseObjectItselfDoesNotRevealTheSecret()
     {
         ArrangeGrantableLease();
@@ -113,7 +123,7 @@ internal class LeaseSecretLogTargetTests : LeaseServiceTestsBase
     ///     itself, or interpolated its <c>Pipeline</c> into a diagnostic.
     /// </summary>
     [Test]
-    [NotInParallel(nameof(LeaseSecretLogTargetTests))]
+    [NotInParallel(nameof(NLog.LogManager))]
     public async Task GrantLeaseAsync_NeverWritesTheWorkTheLeaseCarriesToAnyLogTarget()
     {
         ArrangeGrantableLease();
@@ -168,7 +178,7 @@ internal class LeaseSecretLogTargetTests : LeaseServiceTestsBase
     ///     call on the enlarged object would print the input and the whole pipeline configuration too.
     /// </summary>
     [Test]
-    [NotInParallel(nameof(LeaseSecretLogTargetTests))]
+    [NotInParallel(nameof(NLog.LogManager))]
     public async Task RenderingTheEnlargedLeaseObjectRevealsNeitherTheInputNorTheConfiguration()
     {
         ArrangeGrantableLease();
@@ -220,7 +230,7 @@ internal class LeaseSecretLogTargetTests : LeaseServiceTestsBase
     ///     database could not be used to recognise a cross-tenant read.
     /// </remarks>
     [Test]
-    [NotInParallel(nameof(LeaseSecretLogTargetTests))]
+    [NotInParallel(nameof(NLog.LogManager))]
     public async Task GrantLeaseAsync_NeverWritesTheDatabasePasswordToAnyLogTarget()
     {
         ArrangeGrantableLease();
@@ -268,7 +278,7 @@ internal class LeaseSecretLogTargetTests : LeaseServiceTestsBase
     ///     itself, whose generated record <c>ToString</c> would print every property.
     /// </summary>
     [Test]
-    [NotInParallel(nameof(LeaseSecretLogTargetTests))]
+    [NotInParallel(nameof(NLog.LogManager))]
     public async Task RenderingTheLeaseObjectItselfDoesNotRevealTheDatabasePassword()
     {
         ArrangeGrantableLease();

@@ -335,6 +335,23 @@ public class CommunicationControllerOptions
     public int LeaseScaleUpAveragingWindowSeconds { get; set; }
 
     /// <summary>
+    /// How long (SECONDS) an adapter pool has to be COMPLETELY idle before it gives up a member
+    /// above <c>MinReplicas</c> (AB#5256, concept §4a).
+    ///
+    /// 🔴 Default 0 means "derive it per pool from that pool's own <c>IdleTimeoutMinutes</c>", the
+    /// same relationship <see cref="LeaseScaleUpAveragingWindowSeconds"/> has to
+    /// <c>ScaleUpQueueWaitSeconds</c>. <c>IdleTimeoutMinutes</c> is what the model and the concept
+    /// declare this window to be, so it is the value that applies; the override exists because the
+    /// pool attribute is minutes and an estate may need to tune the whole estate at once without
+    /// touching every pool entity — and because a shrink that can only be observed after thirty
+    /// minutes cannot be observed at all.
+    ///
+    /// Shrinking is the only direction this bounds. Queue-driven scale-up is unaffected: it is what
+    /// brings a member back, on the first work item that waits.
+    /// </summary>
+    public int LeaseIdleShrinkWindowSeconds { get; set; }
+
+    /// <summary>
     /// Symmetric AES-256-GCM master key used to encrypt secret attributes
     /// at rest (e.g. <c>ValueOverride.Value</c> for secret-flagged Helm value
     /// overrides, <c>HelmRepositoryConfiguration.Password</c>). Base64-encoded

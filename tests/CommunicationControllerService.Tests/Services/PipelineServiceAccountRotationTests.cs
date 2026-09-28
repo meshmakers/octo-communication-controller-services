@@ -320,7 +320,7 @@ internal class PipelineServiceAccountRotationTests
     // ------------------------------------------------------------------ secret hygiene
 
     [Test]
-    [NotInParallel(nameof(PipelineServiceAccountRotationTests))]
+    [NotInParallel(nameof(NLog.LogManager))]
     public async Task Rotate_NeverWritesEitherSecretToAnyLogTarget()
     {
         var adapter = RtEntityCreator.CreateAdapter();
@@ -360,7 +360,7 @@ internal class PipelineServiceAccountRotationTests
     }
 
     [Test]
-    [NotInParallel(nameof(PipelineServiceAccountRotationTests))]
+    [NotInParallel(nameof(NLog.LogManager))]
     public async Task Rotate_FailureOnBothSides_StillWritesNoSecretToAnyLogTarget()
     {
         // The loudest code path — an error log plus a rollback error log — is also the one most

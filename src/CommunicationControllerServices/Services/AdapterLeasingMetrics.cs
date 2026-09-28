@@ -115,7 +115,20 @@ public enum LeaseStage
 public enum LeaseDrainReason
 {
     /// <summary>Its lease expired server-side; post-lease cleanliness is unproven (concept §6).</summary>
-    TtlExpiry
+    TtlExpiry,
+
+    /// <summary>
+    ///     AB#5256: the whole pool was idle for longer than its <c>IdleTimeoutMinutes</c> and gave up a
+    ///     member above <c>MinReplicas</c> (concept §4a).
+    /// </summary>
+    /// <remarks>
+    ///     Told apart from <see cref="TtlExpiry" /> because the two mean opposite things about the
+    ///     health of the pool: a TTL drain is a member that lost a borrower's work, an idle drain is the
+    ///     pool doing exactly what it declares. A drain-loop alert built on the counter has to be able
+    ///     to ignore this one, and a shrink that never happens is only visible if it has a label of its
+    ///     own.
+    /// </remarks>
+    PoolIdle
 }
 
 /// <summary>
@@ -776,6 +789,7 @@ internal static class AdapterLeasingMetrics
 
     private static string DrainTag(LeaseDrainReason reason) => reason switch
     {
+        LeaseDrainReason.PoolIdle => "pool_idle",
         _ => "ttl_expiry"
     };
 

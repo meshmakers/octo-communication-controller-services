@@ -281,4 +281,43 @@ internal class SchedulerMetricsTests : LeaseSchedulerServiceTestsBase
         await Assert.That(drain.Tags["octo.pool.tenant_id"]).IsEqualTo(LenderTenantId);
         await Assert.That(drain.Tags.Keys.Any(k => k.Contains("member_id"))).IsFalse();
     }
+
+    /// <summary>
+    ///     AB#5256: the idle shrink is the second thing that drains a member, and it carries its own
+    ///     reason. Without a label of its own a pool doing exactly what <c>IdleTimeoutMinutes</c>
+    ///     declares would be indistinguishable from a pool losing members to expired leases.
+    /// </summary>
+    [Test]
+    public async Task AnIdleShrink_CountsTheDrainAgainstThePoolAsPoolIdle()
+    {
+        // Arrange — an idle pool above its floor, with a window short enough to observe.
+        Options.LeaseIdleShrinkWindowSeconds = 1;
+        ArrangePool(minReplicas: 1, maxReplicas: 3, scaleUpQueueDepthThreshold: 500,
+            scaleUpQueueWaitSeconds: 0);
+        DeploymentSiteService
+            .ScaleAdapterPoolAsync(LenderTenantId, AdapterPoolRtId, Arg.Any<int>())
+            .Returns(call => call.ArgAt<int>(2));
+        ArrangeQueue($"t-{Guid.NewGuid():N}");
+        ArrangeMembers(2);
+
+        // Act — the first round seeds the idle clock, the second one shrinks.
+        var recorded = Collect(async () =>
+        {
+            await Scheduler.RunSchedulingRoundAsync();
+            await Task.Delay(TimeSpan.FromSeconds(1.3));
+            await Scheduler.RunSchedulingRoundAsync();
+        });
+
+        // Assert
+        var drain = recorded.Single(r => r.Instrument == "octo.lease.member_drained.count");
+
+        using var _ = Assert.Multiple();
+        await Assert.That(drain.Tags["octo.lease.drain_reason"]).IsEqualTo("pool_idle");
+        await Assert.That(drain.Tags["octo.pool.tenant_id"]).IsEqualTo(LenderTenantId);
+        // Counted against the pool, exactly like the TTL drain above: the member id changes on every
+        // restart and a shrink is precisely a restart.
+        await Assert.That(drain.Tags.Keys.Any(k => k.Contains("member_id"))).IsFalse();
+        // And the pool's name travels with it, so a dashboard reads the pool rather than an rtId.
+        await Assert.That(drain.Tags["octo.pool.name"]).IsEqualTo("shared-pool");
+    }
 }

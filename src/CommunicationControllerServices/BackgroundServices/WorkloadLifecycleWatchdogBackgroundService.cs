@@ -114,6 +114,13 @@ internal class WorkloadLifecycleWatchdogBackgroundService(
             // WorkloadLifecycleService.RequestScaleAsync clamps a pool to its declared range — this
             // filter protects against this caller, the clamp protects against every other one.
             //
+            // AB#5256: the pool's own use of IdleTimeoutMinutes lives in
+            // LeaseSchedulerService.TryShrinkIdlePoolAsync, which already holds the queue depth, the
+            // member list and the pool entity. It shrinks only while the WHOLE pool is idle — empty
+            // queue for every borrower, no member holding a lease, nothing granted for
+            // IdleTimeoutMinutes — which is the knowledge this watchdog structurally cannot have, and
+            // is why the exclusion here stays exactly as it is.
+            //
             // Written as an explicit type test rather than relying on the `workload is not RtAdapter`
             // guard further down: that guard exists to skip Applications, it happens to catch pools
             // as a side effect, and a side effect is not a safeguard for a cross-tenant outage.

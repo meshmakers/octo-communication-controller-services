@@ -246,6 +246,16 @@ test that rendering a `LeaseDto` **as an object** does not reveal it. `LeaseDto`
 for exactly that reason: a record's generated one prints every property, so the first
 `logger.LogDebug("… {Lease}", lease)` would leak the secret without anybody noticing.
 
+🔴 **Every test that swaps `NLog.LogManager.Configuration` carries
+`[NotInParallel(nameof(NLog.LogManager))]`** (AB#5256). The configuration is process-wide and each of
+these probes *replaces* it, so two of them in different classes steal each other's lines — and the "the
+run logged something" assertion that keeps such a probe from being vacuous is exactly the one that then
+fails, for a reason that has nothing to do with the secret. It happened the first time a sixth class
+opened one. The key names the shared resource, not the test, the same way
+`[NotInParallel(nameof(MeterListener))]` does for the metrics suites; the four classes that used their
+own class name as the key were changed to it. A probe that asserts *absence* of output should filter
+the target to its own subject as well — concurrent tests write into it.
+
 Tests: `Hubs/AdapterPoolHubTests/` (registration + the tenant-binding matrix in both modes, the
 `IShutdownState` refusal, lease routing to a member, a second lease never landing on a claimed member,
 release, stale release, disconnect mid-lease, draining, heartbeat),
@@ -2099,6 +2109,14 @@ The pool owns its members' lifecycle instead (concept §4a): `MinReplicas` is th
 `IdleTimeoutMinutes` and queue pressure decide what happens above it (the queue arrives in
 increment 7).
 
+🔴 **Where the pool's own `IdleTimeoutMinutes` lives, since AB#5256:**
+`LeaseSchedulerService.TryShrinkIdlePoolAsync`, on the scheduler's per-pool round — **not** here, and
+the exclusion above stays exactly as it is. The round already holds the queue depth of every borrower,
+the member list and the pool entity at one instant, which is the knowledge the watchdog structurally
+cannot have. Until then the attribute was dead configuration and a pool only ever grew: measured on
+the local kind cluster, a queue-driven scale-up to two members on 2026-09-23 was still two members
+days later with an empty queue. See the increment-7 section below for the condition and its traps.
+
 ### `MinReplicas` is enforced twice, on purpose
 
 The watchdog exclusion is a *filter* — it protects against one caller. `RequestScaleAsync` clamps
@@ -2168,7 +2186,7 @@ Plan: `docs/concepts/shared-adapter-leasing-implementation.md` §9.
 
 | Piece | Where |
 |---|---|
-| One queue per pool, rotation, priority, cap, TTL reaper, scale-up, queue projection, cancel | `Services/LeaseSchedulerService.cs` |
+| One queue per pool, rotation, priority, cap, TTL reaper, scale-up, **idle scale-down (AB#5256)**, queue projection, cancel | `Services/LeaseSchedulerService.cs` |
 | Scheduling round (default every **5 s**) | `BackgroundServices/LeaseSchedulerBackgroundService.cs` |
 | Lease reaper (on the cleanup service's cadence, next to the AB#4280 stuck reaper) | `BackgroundServices/ExecutionCleanupBackgroundService.cs` |
 | `Queued` is written here and nowhere else | `TriggerManagementService.StartExecutePipelineAsync` → `CommunicationRepository.EnqueueExecutionAsync` |
@@ -2315,6 +2333,75 @@ the one thing the decision rules out; the derived value is the author's own decl
 a work item may wait. The window applies to the **depth** signal only — the wait signal is already
 time-integrated. Samples are retained for **twice** the window: pruning at exactly the window drops
 the sample that proves the history is long enough, and the signal then never fires.
+
+### Scale-down: only while the WHOLE pool is idle (AB#5256)
+
+`IdleTimeoutMinutes` was dead configuration for a pool. Concept §4a and the CK model comment both said
+it drains a member above `MinReplicas`; nothing read it — the idle watchdog skips pools on purpose
+(increment 5) and nothing took its place, so a pool only ever grew. Measured on the local kind cluster:
+a queue-driven scale-up to two members on 2026-09-23 was still two members days later with an empty
+queue. `LeaseSchedulerService.TryShrinkIdlePoolAsync` now runs in the per-pool round, in the
+`depth == 0` branch, and every part of its condition is required:
+
+- queue depth **0** across every borrower, and **no** member holds a lease;
+- nothing granted for this pool for longer than `IdleTimeoutMinutes`;
+- member count **greater than** `MinReplicas`.
+
+⇒ `ILeaseService.DrainMemberAsync` on one member, then `ScaleAdapterPoolAsync(members.Count - 1)`. One
+per round; `WorkloadLifecycleService.ClampToAdapterPoolRange` still bounds the request, but the request
+is never below the floor in the first place — a log line that disagrees with what the pool did is worse
+than no log line.
+
+🔴 **Why the whole pool, and not the member being given up.** Scaling a Deployment down lets the
+ReplicaSet controller choose which pod dies, and this service cannot steer it: the controller has no
+cluster access, every change travels to the operator as a declarative scale. A per-member rule would
+nominate member A and watch Kubernetes kill member B, mid-execution for some borrower. With nothing
+running the choice cannot hurt; the drain then only stops the nominated member accepting work in the
+seconds before the scale lands. Steering the victim
+(`controller.kubernetes.io/pod-deletion-cost`) needs a new operator verb across three repos and is
+deliberately **out of scope** — recorded as a follow-up in concept §4a.
+
+Four traps, each with its comment in place:
+
+- **The "last lease" clock is in memory** (`ConcurrentDictionary<AdapterPoolKey, DateTime>`), advanced
+  on a successful grant *and* by any round that sees a member holding a lease — the second covers the
+  hand-driven `POST …/lease` and a grant made by another controller pod. 🔴 It is **seeded when the pool
+  is first seen in a round**, so a pool that has never been leased since process start counts as idle
+  *since then*, not since forever: otherwise the first round after a controller restart drains a pool
+  that the pod it replaced scaled up seconds earlier. The price is that a restart delays the first
+  shrink by up to `IdleTimeoutMinutes`, and erring that way round is the point.
+- **The member count does not drop when the scale is requested** — the pod needs seconds to
+  disconnect. `_lastRequestedReplicas` holds the pool off while the observed count has not caught up;
+  self-limiting, no timer. Without it the next round issues a second scale on a stale count. Written
+  before the scale request and kept whatever it does: a permanently failing scale then freezes the
+  shrink for that pool rather than draining a member every five seconds. The scale-**up** path writes
+  the same memo, or a pool that grew after a shrink would be held for the life of the process.
+- ⚠️ **The member view is per controller instance**, as everywhere else in this file. The estate is
+  single-replica in steady state and a rolling upgrade is the overlap window — but it is the
+  "nothing is running" gate that makes a partial view harmless, not the topology: under-counting can
+  only ask for a *smaller* pool, the floor clamp bounds that, and the empty-queue half is read from the
+  borrowers' databases and is not per-instance at all.
+- **A pool with no borrowers is invisible** — the topology is built from the borrowers' declarations,
+  so such a pool never shrinks. Named as a known limitation in concept §4a; not fixed here.
+
+**Logging:** the evaluation logs **nothing** per round — same reasoning as `ObserveRound`, twelve lines
+a minute per pool is how a log stops being read. An actual shrink is one INFO line plus a tenant event,
+because it changes what the lender pays for. The drain is counted as
+`LeaseDrainReason.PoolIdle` → `pool_idle`, a label of its own (increment 9).
+
+The window is the pool's `IdleTimeoutMinutes`; `LeaseIdleShrinkWindowSeconds` (default 0 = "use the
+pool's value") overrides every pool at once, exactly as `LeaseScaleUpAveragingWindowSeconds` does for
+the depth window — and is what makes a shrink observable in a test at all.
+
+Tests: `Services/LeaseSchedulerServiceTests/IdlePoolShrinkTests` (every part of the condition failing
+on its own, the happy path, one-per-round, the hold-off and its release, first-sight seeding, the
+silent evaluation with its positive control), the drain label in `Services/AdapterLeasingMetricsTests`
+and `SchedulerMetricsTests`, and `Repository/AdapterPoolIdleShrinkInputsTests` in the integration suite
+— 🔴 that last one exists because `IdleTimeoutMinutes` is **inherited from `DeployableWorkload`** and had
+never been read for a pool: it proves against real MongoDB that the attribute survives the round trip
+on an `RtAdapterPool` and that a pool which never declared it reads back as the model's **30**, not
+`0`. A zero would collapse onto the one-minute floor and make every seeded pool in the estate give up a
+member a minute after its last lease — and that is not a reading a mock can be wrong about visibly.
 
 ### ✅ The lease carries the work (§9.9 / D4)
 
@@ -2622,6 +2709,13 @@ octo-common-services' `ObservabilityBuilder` already registers it and nothing ha
 | `octo.lease.pool.undersized` | gauge | 1 while the pool should grow and is at `MaxReplicas` — the alertable condition |
 | `octo.lease.refused.count` | counter | by `octo.lease.stage` and `octo.lease.refusal_reason` |
 | `octo.lease.released.count` / `.interrupted.count` / `.requeued.count` / `.member_drained.count` | counters | outcomes, mid-lease failures, at-least-once retries, member churn |
+
+🔴 **`octo.lease.member_drained.count` carries two reasons, not one** (AB#5256): `ttl_expiry` is a
+member that lost a borrower's work, `pool_idle` is the pool giving up a member it no longer needs
+(increment 7's scale-down). They must not share a series — a drain-loop alert has to be able to ignore
+the healthy one. `LeaseDrainReason`'s label switch had a single default arm until then, so the new value
+would have reported itself as `ttl_expiry`; `EveryDrainReason_HasItsOwnStableSnakeCaseLabel` now holds
+that the same way `EveryRefusalReason_HasItsOwnStableSnakeCaseLabel` holds the refusal reasons.
 
 Tags on every series: `octo.tenant.id` (the **borrowing** tenant), `octo.pool.tenant_id`,
 `octo.pool.rt_id`, `octo.pool.name`.

@@ -458,6 +458,48 @@ internal class AdapterLeasingMetricsTests
     }
 
     /// <summary>
+    ///     The same rule the refusal reasons have, for the drain reasons: one stable lower_snake_case
+    ///     label per value, never the enum's own spelling.
+    /// </summary>
+    /// <remarks>
+    ///     🔴 AB#5256 added the second value, and the switch that maps them had a single default arm —
+    ///     which meant a new reason silently reported itself as <c>ttl_expiry</c>. That is the worst
+    ///     possible collision on this counter: a TTL drain is a member that lost a borrower's work and
+    ///     an idle drain is the pool doing what it declares, so a drain-loop alert would have started
+    ///     firing on healthy pools the moment the shrink shipped.
+    /// </remarks>
+    [Test]
+    public async Task EveryDrainReason_HasItsOwnStableSnakeCaseLabel()
+    {
+        // Arrange
+        var poolRtId = UniquePool();
+        var reasons = Enum.GetValues<LeaseDrainReason>().ToList();
+
+        // Act
+        var recorded = Collect(poolRtId, () =>
+        {
+            foreach (var reason in reasons)
+            {
+                AdapterLeasingMetrics.RecordMemberDrained(Lender, poolRtId, reason);
+            }
+        });
+
+        // Assert
+        var labels = recorded
+            .Where(r => r.Instrument == "octo.lease.member_drained.count")
+            .Select(r => r.Tags["octo.lease.drain_reason"])
+            .ToList();
+
+        using var _ = Assert.Multiple();
+        await Assert.That(labels).Count().IsEqualTo(reasons.Count);
+        await Assert.That(labels.Distinct().Count()).IsEqualTo(reasons.Count);
+        await Assert.That(labels.All(l => l == l.ToLowerInvariant() && !l.Contains(' '))).IsTrue();
+        await Assert.That(labels.Contains(nameof(LeaseDrainReason.PoolIdle))).IsFalse();
+        await Assert.That(labels.Contains("pool_idle")).IsTrue();
+        await Assert.That(labels.Contains("ttl_expiry")).IsTrue();
+    }
+
+    /// <summary>
     ///     The scale-up decisions the signals produced, next to the signals themselves. Without the
     ///     outcome label "the pool wanted to grow" and "the pool grew" are the same series.
     /// </summary>
