@@ -86,14 +86,19 @@ public class DeploymentSiteController : ControllerBase
     /// CR and broker secret. Edge-environment deploymentSites transition state without
     /// any operator notification.
     /// </summary>
-    /// <param name="poolRtId">The id of the deploymentSite.</param>
+    /// <param name="deploymentSiteRtId">The id of the deploymentSite.</param>
     [HttpPost("deploy")]
     [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(OperationFailedErrorDto), StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> DeployDeploymentSiteAsync([Required][FromQuery] OctoObjectId poolRtId)
+    // 🔴 AB#5303 — the AB#4924 rename renamed the route, this class, the SDK method and the CLI
+    // verb, but NOT this query parameter. The SDK sends `deploymentSiteRtId`, model binding found
+    // no `poolRtId`, and both endpoints answered every call with HTTP 400 "The poolRtId field is
+    // required" - unreachable, and the CLI verb along with them. Found while trying to bring a
+    // tenant's deployment site back up on a local kind cluster.
+    public async Task<IActionResult> DeployDeploymentSiteAsync([Required][FromQuery] OctoObjectId deploymentSiteRtId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
@@ -108,7 +113,7 @@ public class DeploymentSiteController : ControllerBase
 
         try
         {
-            await _deploymentSiteService.DeployDeploymentSiteAsync(tenantId, poolRtId);
+            await _deploymentSiteService.DeployDeploymentSiteAsync(tenantId, deploymentSiteRtId);
             return NoContent();
         }
         catch (DeploymentSiteServiceException e)
@@ -123,13 +128,18 @@ public class DeploymentSiteController : ControllerBase
     /// central Communication Operator to remove the DeploymentSite CR and
     /// broker secret.
     /// </summary>
-    /// <param name="poolRtId">The id of the deploymentSite.</param>
+    /// <param name="deploymentSiteRtId">The id of the deploymentSite.</param>
     [HttpPost("undeploy")]
     [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> UndeployDeploymentSiteAsync([Required][FromQuery] OctoObjectId poolRtId)
+    // 🔴 AB#5303 — the AB#4924 rename renamed the route, this class, the SDK method and the CLI
+    // verb, but NOT this query parameter. The SDK sends `deploymentSiteRtId`, model binding found
+    // no `poolRtId`, and both endpoints answered every call with HTTP 400 "The poolRtId field is
+    // required" - unreachable, and the CLI verb along with them. Found while trying to bring a
+    // tenant's deployment site back up on a local kind cluster.
+    public async Task<IActionResult> UndeployDeploymentSiteAsync([Required][FromQuery] OctoObjectId deploymentSiteRtId)
     {
         var tenantId = HttpContext.GetTenantId();
         if (string.IsNullOrEmpty(tenantId))
@@ -139,7 +149,7 @@ public class DeploymentSiteController : ControllerBase
 
         try
         {
-            await _deploymentSiteService.UndeployDeploymentSiteAsync(tenantId, poolRtId);
+            await _deploymentSiteService.UndeployDeploymentSiteAsync(tenantId, deploymentSiteRtId);
             return NoContent();
         }
         catch (DeploymentSiteServiceException e)
