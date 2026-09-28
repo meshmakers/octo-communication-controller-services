@@ -443,8 +443,12 @@ export OCTO_SYSTEM__ADMINUSERPASSWORD=OctoAdmin1
 export OCTO_SYSTEM__DATABASEUSERPASSWORD=OctoUser1
 export OCTO_SYSTEM__USEDIRECTCONNECTION=true
 
-export OCTO_ADAPTERPOOL__POOLTENANTID=accounting
-export OCTO_ADAPTERPOOL__POOLRTID=49240000000000000000aa01
+# 🔴 The property name repeats the section, and the short spelling binds NOTHING — it was the
+# chart's bug (AB#5303 item 5, fixed in octo-mesh-adapter 75b14a2). Since that item's second half,
+# a process whose AdapterPool section is set and does not bind REFUSES TO START rather than coming
+# up as an ordinary adapter, so a typo here is now an error message instead of a silent nothing.
+export OCTO_ADAPTERPOOL__ADAPTERPOOLTENANTID=accounting
+export OCTO_ADAPTERPOOL__ADAPTERPOOLRTID=49240000000000000000aa01
 export OCTO_ADAPTERPOOL__MEMBERID=octo-pool-0
 
 export OCTO_ADAPTER__COMMUNICATIONCONTROLLERSERVICESURI=https://localhost:5015
@@ -453,7 +457,7 @@ export OCTO_ADAPTER__ISSUERURI=https://localhost:5003/
 export OCTO_ADAPTER__CLIENTID=claude-agent          # any client_credentials client IN THE LENDER
 export OCTO_ADAPTER__CLIENTSECRET=...
 # 🔴 No OCTO_ADAPTER__DEDICATEDTENANTID. A member has no tenant of its own; its connection tenant
-# is derived from OCTO_ADAPTERPOOL__POOLTENANTID above. See the correction at the top of this section.
+# is derived from OCTO_ADAPTERPOOL__ADAPTERPOOLTENANTID above. See the correction at the top of this section.
 
 export Logging__LogLevel__Default=Debug             # the lease lifecycle lines are DEBUG
 ```
