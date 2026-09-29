@@ -214,6 +214,20 @@ public interface IAdapterService
     Task UpdateConfigurationStateAsync(string tenantId, RtEntityId adapterRtEntityId, DeploymentResult deploymentResult);
 
     /// <summary>
+    /// Writes the status line a trigger node reported for one of the adapter's pipelines to that
+    /// pipeline's <c>StatusMessage</c> (AB#5385). The pipeline must be one of the pipelines
+    /// deployed to the reporting adapter — the adapter identity comes from the hub connection, so
+    /// that check is what keeps an adapter from writing another adapter's pipeline; a report for a
+    /// pipeline the adapter does not run is rejected and logged, never written. The line is
+    /// truncated to <see cref="AdapterService.MaxPipelineStatusMessageLength"/>.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="adapterRtEntityId">Object id of the reporting adapter</param>
+    /// <param name="status">The reported status line</param>
+    /// <returns>True when the line was written, false when the report was rejected</returns>
+    Task<bool> ReportPipelineStatusAsync(string tenantId, RtEntityId adapterRtEntityId, PipelineStatusReportDto status);
+
+    /// <summary>
     /// Gets the deployment state of a pipeline
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>

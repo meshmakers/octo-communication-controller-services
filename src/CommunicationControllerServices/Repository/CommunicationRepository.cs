@@ -2023,6 +2023,50 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
+    public async Task SetPipelineStatusMessageAsync(string tenantId, RtEntityId pipelineRtEntityId,
+        string statusMessage)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            // Deliberately NOT SetPipelineDeploymentStateAsync with the current state: that path
+            // runs ApplyDeploymentErrorTracking, and re-writing "Deployed" would clear a
+            // LastDeploymentError the operator is still looking at. Only the one attribute.
+            var pipeline = new RtPipeline
+            {
+                StatusMessage = statusMessage
+            };
+
+            var entityUpdateInfoList = new List<EntityUpdateInfo<RtPipeline>>
+            {
+                EntityUpdateInfo<RtPipeline>.CreateUpdate(
+                    pipelineRtEntityId,
+                    pipeline)
+            };
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session, entityUpdateInfoList, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedSetPipelineStatusMessage(tenantId, pipelineRtEntityId, e);
+        }
+    }
+
     /// <inheritdoc />
     public async Task SetPipelineExecutionClassAsync(string tenantId, RtEntityId pipelineRtEntityId,
         int executionClass)

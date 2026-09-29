@@ -43,6 +43,13 @@ internal class AdapterService(
 
     private static readonly TimeSpan DeploymentTimeout = TimeSpan.FromSeconds(120);
 
+    /// <summary>
+    /// Server-side cap on a reported pipeline status line (AB#5385). The senders keep their lines
+    /// at a few hundred characters; the cap is what stops a misbehaving adapter from storing a
+    /// mail body in a runtime attribute every poll.
+    /// </summary>
+    public const int MaxPipelineStatusMessageLength = 1000;
+
     private readonly ConcurrentDictionary<RtEntityId, TaskCompletionSource<DeploymentResult>>
         _pendingDeployments = new();
 
@@ -1519,6 +1526,45 @@ internal class AdapterService(
             _pendingDeployments.TryRemove(adapterRtEntityId, out _);
             throw;
         }
+    }
+
+    public async Task<bool> ReportPipelineStatusAsync(string tenantId, RtEntityId adapterRtEntityId,
+        PipelineStatusReportDto status)
+    {
+        // Authorisation as the neighbouring hub paths do it: the tenant and the adapter come from
+        // the connection, and the pipeline has to be one the controller deployed to THAT adapter.
+        // The cache is the authority on that — it is what the adapter was handed on registration.
+        if (!adapterCache.TryGetTenant(tenantId, out var adapterTenant) ||
+            !adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
+        {
+            Logger.Warn(
+                "[{TenantId}] AdapterRtId='{AdapterRtId}' reported a status line for pipeline '{PipelineRtEntityId}' " +
+                "but is not registered; the line is dropped",
+                tenantId, adapterRtEntityId, status.PipelineRtEntityId);
+            return false;
+        }
+
+        if (adapter.Configuration.Pipelines.All(p => p.PipelineRtEntityId != status.PipelineRtEntityId))
+        {
+            Logger.Warn(
+                "[{TenantId}] AdapterRtId='{AdapterRtId}' reported a status line for pipeline '{PipelineRtEntityId}' " +
+                "which is not deployed to it; the line is dropped",
+                tenantId, adapterRtEntityId, status.PipelineRtEntityId);
+            return false;
+        }
+
+        var message = status.Message ?? string.Empty;
+        if (message.Length > MaxPipelineStatusMessageLength)
+        {
+            message = message[..MaxPipelineStatusMessageLength];
+        }
+
+        Logger.Debug(
+            "[{TenantId}] AdapterRtId='{AdapterRtId}' pipeline '{PipelineRtEntityId}' status (error={IsError}): {Message}",
+            tenantId, adapterRtEntityId, status.PipelineRtEntityId, status.IsError, message);
+
+        await communicationRepository.SetPipelineStatusMessageAsync(tenantId, status.PipelineRtEntityId, message);
+        return true;
     }
 
     public async Task UpdateConfigurationStateAsync(string tenantId, RtEntityId adapterRtEntityId,

@@ -3649,6 +3649,20 @@ Adapters report execution lifecycle via SignalR:
 - `ReportExecutionEndAsync(PipelineExecutionEndDto)` - Reports execution completion
 - `ReportInterruptedExecutionResultAsync(PipelineExecutionEndDto)` - Reports final status after reconnect
 - `GetInterruptedExecutionIdsAsync()` - Gets IDs of executions interrupted by disconnect
+- `ReportPipelineStatusAsync(PipelineStatusReportDto)` - Writes the status line a trigger node
+  reported after a poll (AB#5385) to that pipeline's live `StatusMessage` — and ONLY that
+  attribute: `AdapterService.ReportPipelineStatusAsync` → `CommunicationRepository.
+  SetPipelineStatusMessageAsync`, deliberately not `SetPipelineDeploymentStateAsync`, whose
+  `ApplyDeploymentErrorTracking` would clear a `LastDeploymentError` the operator is still looking
+  at. The pipeline must be one of the pipelines the cache says are deployed to the reporting
+  adapter (the adapter identity comes from the connection headers); anything else is logged at
+  Warn and dropped. The line is truncated server-side at `AdapterService.MaxPipelineStatusMessageLength`
+  (1000). Fire-and-forget on the wire like the metrics sample — the hub swallows and logs. An
+  adapter built before the contract never calls it; an adapter built after it and connected to a
+  controller WITHOUT this method has its `SendAsync` dropped server-side (SignalR logs an unknown
+  hub method), so the pipeline's `StatusMessage` simply stays what the deploy wrote. Tests:
+  `Hubs/AdapterHubTests/ReportPipelineStatusAsyncTests`, `Services/AdapterServiceTests/
+  ReportPipelineStatusAsyncTests`, integration `Repository/PipelineStatusMessageTests`.
 
 ### Interruption Handling
 

@@ -589,6 +589,18 @@ public interface ICommunicationRepository
         RtDeploymentStateEnum deploymentState, string? stateMessage);
 
     /// <summary>
+    /// Writes ONLY the live <c>StatusMessage</c> of a pipeline (AB#5385) — the line a trigger node
+    /// reports after every poll. Unlike <see cref="SetPipelineDeploymentStateAsync"/> it leaves
+    /// <c>DeploymentState</c>, <c>LastDeploymentError</c> and its timestamp untouched: a poll
+    /// outcome is a runtime breadcrumb, not a deployment transition.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="pipelineRtEntityId">Object id of the pipeline</param>
+    /// <param name="statusMessage">The status line; the caller truncates it</param>
+    /// <returns></returns>
+    Task SetPipelineStatusMessageAsync(string tenantId, RtEntityId pipelineRtEntityId, string statusMessage);
+
+    /// <summary>
     /// Set the pipeline definition YAML of a pipeline
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>

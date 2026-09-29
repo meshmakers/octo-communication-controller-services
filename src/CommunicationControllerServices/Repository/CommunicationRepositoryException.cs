@@ -237,6 +237,14 @@ internal class CommunicationRepositoryException : Exception
             exception);
     }
 
+    internal static Exception CommonFailedSetPipelineStatusMessage(string tenantId, RtEntityId pipelineRtEntityId,
+        Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to set the status message of pipeline '{pipelineRtEntityId}'",
+            exception);
+    }
+
     internal static Exception CommonFailedSetPipelineDefinition(string tenantId, RtEntityId pipelineRtEntityId,
         Exception exception)
     {
