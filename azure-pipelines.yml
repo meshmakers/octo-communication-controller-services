@@ -87,7 +87,10 @@ resources:
       # Deliberately the 0.5 line, not tpl-v0.6.x: 0.6 also rewrites
       # build-and-push-docker and handle-artifacts, which this pipeline uses and
       # which have nothing to do with the CK gate.
-      ref: refs/tags/tpl-v0.5.5
+      # tpl-v0.5.6 backports the lane catalog (AB#5412) onto this line for the same
+      # reason: it adds the publishCkModelsToLaneCatalog opt-in and the gate retarget,
+      # and touches nothing else.
+      ref: refs/tags/tpl-v0.5.6
 
 trigger:
   batch: true
@@ -119,9 +122,10 @@ variables:
   - name: isTest
     value: ${{ startsWith(variables['Build.SourceBranch'], 'refs/heads/test') }}
   # CK publish routing (effectivePublishCatalog: GitHub catalogs only on main/r* tags,
-  # incident: Industry.Basic-2.1.1) and the per-run local catalog root
-  # (OctoLocalCatalogRootPath -> Agent.TempDirectory, AB#4167) are exported as runtime
-  # variables by update-build-number.yml.
+  # incident: Industry.Basic-2.1.1 — plus the test/* lane catalog since AB#5412), the
+  # private catalog coordinates (OctoPrivateGitHubCatalog*, empty = compiled-in default)
+  # and the per-run local catalog root (OctoLocalCatalogRootPath -> Agent.TempDirectory,
+  # AB#4167) are exported as runtime variables by update-build-number.yml.
 
 stages:
   - stage: Build
@@ -135,6 +139,13 @@ stages:
             parameters:
               octoCoreLibVersionOverride: ${{ replace(parameters.octoCoreLibVersion, 'auto', '') }}
               octoCommVersionOverride: ${{ replace(parameters.octoCommVersion, 'auto', '') }}
+              # AB#5412: on refs/heads/test/* this routes the CK publish to
+              # PrivateGitHubCatalog with the coordinates of the lane catalog
+              # meshmakers/octo-catalog-dev instead of the run-isolated local catalog. Without
+              # it System.Communication 4.x exists in no catalog, and every lane model that
+              # depends on it (System.Ai-4.1.0 declares [4.0,5.0)) fails the SemVer gate with
+              # OCTO-CK103. No effect on main / r-tags.
+              publishCkModelsToLaneCatalog: true
           - checkout: self
             clean: true
             submodules: recursive
@@ -168,7 +179,7 @@ stages:
             inputs:
               command: 'build'
               projects: '$(solutionFile)'
-              arguments: '--configuration $(buildConfiguration) /p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCatalog="$(effectivePublishCatalog)" /p:OctoPrivateGitHubApiKey=$(GitHubPAT) /p:OctoPublicGitHubApiKey=$(GitHubPAT)'
+              arguments: '--configuration $(buildConfiguration) /p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCatalog="$(effectivePublishCatalog)" /p:OctoPrivateGitHubApiKey=$(GitHubPAT) /p:OctoPublicGitHubApiKey=$(GitHubPAT) /p:OctoPrivateGitHubCatalogOwner="$(OctoPrivateGitHubCatalogOwner)" /p:OctoPrivateGitHubCatalogRepositoryName="$(OctoPrivateGitHubCatalogRepositoryName)" /p:OctoPrivateGitHubCatalogBranch="$(OctoPrivateGitHubCatalogBranch)" /p:OctoPrivateGitHubCatalogPagesUri="$(OctoPrivateGitHubCatalogPagesUri)"'
               publishWebProjects: false
               zipAfterPublish: false
               modifyOutputPath: false
