@@ -141,6 +141,14 @@ internal class PipelineExecutionService(
 
             var updatedCount = await communicationRepository.BulkUpdatePipelineExecutionsAsync(tenantId, updates);
 
+            // AB#5425. Counted per reported outcome rather than per updated row: an execution whose
+            // start was never recorded (a model update swallowed it) still ran, and the adapter's
+            // report is the truth about that.
+            foreach (var byOutcome in updates.GroupBy(u => u.Status))
+            {
+                PipelineExecutionMetrics.RecordExecutionOutcomes(tenantId, byOutcome.Key, byOutcome.Count());
+            }
+
             // Log summary for failures
             var failedCount = dtos.Count(d => d.Status == PipelineExecutionStatus.Failed);
             if (failedCount > 0)
@@ -231,6 +239,10 @@ internal class PipelineExecutionService(
             {
                 await eventService.StoreInformationEventAsync(tenantId, eventMessage);
             }
+
+            // AB#5425: the exact, immediate event stream. Counted after the record was updated,
+            // so a failed write does not inflate the count.
+            PipelineExecutionMetrics.RecordExecutionOutcome(tenantId, ckStatus);
 
             Logger.Info("[{TenantId}] Execution '{ExecutionId}' completed with status '{Status}'",
                 tenantId, dto.ExecutionId, ckStatus);
@@ -336,6 +348,8 @@ internal class PipelineExecutionService(
 
             await eventService.StoreInformationEventAsync(tenantId,
                 $"Interrupted execution '{dto.ExecutionId}' final result reported: {ckStatus}.");
+
+            PipelineExecutionMetrics.RecordExecutionOutcome(tenantId, ckStatus);
 
             Logger.Info("[{TenantId}] Interrupted execution '{ExecutionId}' result reported with status '{Status}'",
                 tenantId, dto.ExecutionId, ckStatus);
@@ -445,6 +459,11 @@ internal class PipelineExecutionService(
             {
                 if (existingStatistics == null)
                 {
+                    // AB#5425: report anyway. A pipeline that has never executed must still have a
+                    // series — that is what keeps "no data" meaning "the controller is silent"
+                    // instead of "there is nothing to say".
+                    PipelineExecutionMetrics.ObserveStatistics(tenantId, pipelineRtEntityId.RtId, null, 0, 0);
+
                     Logger.Debug("[{TenantId}] No executions and no existing statistics for pipeline '{PipelineRtEntityId}', skipping update",
                         tenantId, pipelineRtEntityId);
                     return;
@@ -452,6 +471,9 @@ internal class PipelineExecutionService(
 
                 if (IsStatisticsEmpty(existingStatistics))
                 {
+                    PipelineExecutionMetrics.ObserveStatistics(tenantId, pipelineRtEntityId.RtId,
+                        existingStatistics.LastExecutionAt, 0, 0);
+
                     Logger.Debug("[{TenantId}] Statistics already empty for pipeline '{PipelineRtEntityId}', skipping update",
                         tenantId, pipelineRtEntityId);
                     return;
@@ -492,6 +514,12 @@ internal class PipelineExecutionService(
             };
 
             await communicationRepository.UpsertPipelineStatisticsAsync(tenantId, statistics, pipelineRtEntityId);
+
+            // AB#5425. The sweep is what makes the pipeline gauges unconditional: it runs for every
+            // pipeline of every enabled tenant, so a healthy pipeline publishes zeros and a dead one
+            // publishes a rising age, instead of both publishing nothing.
+            PipelineExecutionMetrics.ObserveStatistics(tenantId, pipelineRtEntityId.RtId,
+                statistics.LastExecutionAt, statistics.LastHourSuccessCount, statistics.LastHourFailureCount);
 
             Logger.Debug("[{TenantId}] Statistics updated for pipeline '{PipelineRtEntityId}' ({TotalExecutions} executions processed, {BucketCount} buckets)",
                 tenantId, pipelineRtEntityId, totalLoaded, buckets.Count);
@@ -574,6 +602,7 @@ internal class PipelineExecutionService(
                 {
                     // Note: CkTypeId should never be null for a valid pipeline
                     var pipelineRtEntityId = new RtEntityId(pipeline.CkTypeId!, pipeline.RtId);
+                    PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
                     await UpdateStatisticsAsync(tenantId, pipelineRtEntityId);
                 }
                 catch (Exception e)
@@ -582,6 +611,9 @@ internal class PipelineExecutionService(
                         tenantId, pipeline.RtId);
                 }
             }
+
+            PipelineExecutionMetrics.RetainPipelines(tenantId,
+                pipelines.Select(p => p.RtId.ToString()).ToHashSet());
 
             Logger.Info("[{TenantId}] Statistics updated for {Count} pipelines",
                 tenantId, pipelines.Count);
@@ -607,6 +639,11 @@ internal class PipelineExecutionService(
                 // Note: CkTypeId should never be null for a valid pipeline
                 var pipelineRtEntityId = new RtEntityId(pipeline.CkTypeId!, pipeline.RtId);
 
+                // AB#5425: the identity half of the gauge labels. Published before the fold so
+                // that a pipeline whose fold or statistics update throws is still exported with a
+                // readable name rather than an empty one.
+                PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
+
                 try
                 {
                     totalPruned += await FoldAndPrunePipelineAsync(tenantId, pipelineRtEntityId, olderThan);
@@ -621,6 +658,11 @@ internal class PipelineExecutionService(
                         tenantId, pipeline.RtId);
                 }
             }
+
+            // Drop pipelines that no longer exist; a deleted pipeline whose age gauge kept climbing
+            // would eventually alert about something nobody can fix.
+            PipelineExecutionMetrics.RetainPipelines(tenantId,
+                pipelines.Select(p => p.RtId.ToString()).ToHashSet());
 
             if (totalPruned > 0)
             {
@@ -864,6 +906,13 @@ internal class PipelineExecutionService(
 
                 await communicationRepository.BulkInsertPipelineExecutionsAsync(tenantId, executionsToInsert,
                     pipelineRtEntityId, adapterRtEntityId);
+
+                // AB#5425. Only the newly inserted ones are counted — duplicates were filtered out
+                // above, so a replayed buffer does not double-count.
+                foreach (var byOutcome in executionsToInsert.GroupBy(e => e.Status))
+                {
+                    PipelineExecutionMetrics.RecordExecutionOutcomes(tenantId, byOutcome.Key, byOutcome.Count());
+                }
 
                 syncedCount += executionsToInsert.Count;
             }

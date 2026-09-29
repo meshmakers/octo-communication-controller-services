@@ -2635,3 +2635,95 @@ Task<int> TimeoutStaleExecutionsAsync(string tenantId, int timeoutHours);       
 Task<int> FailStuckExecutionsAsync(string tenantId, int graceMinutes);          // AB#4280 connection-aware reaper
 Task<int> FailOrphanedExecutionsForAdapterAsync(string tenantId, RtEntityId adapterRtEntityId, DateTime beforeUtc); // AB#4280
 ```
+
+### OTel metrics for pipeline executions (AB#5425)
+
+Before this, a pipeline execution existed **only as unstructured log text**
+(`PipelineExecutionService.BatchStartExecutionsAsync|[tenant] Batch started N executions …`).
+Log bodies are not a dimension of the `dash0.logs` metric and the inferred
+`dash0.log.attribute.*` keys do not attach to it, so every rate grouped by them is 0 — there was
+no way to alert on a failing or a stalled pipeline at all. On 2026-09-29 the `Monitoring.CkHealth`
+pipeline on test-2 stopped after two runs (12:19, 13:19 UTC) and nobody noticed for four hours.
+
+`PipelineExecutionMetrics` (static, mirroring `WorkloadLifecycleMetrics`) emits four instruments on
+the **same meter `Meshmakers.Octo.Communication`** that octo-common-services' `ObservabilityBuilder`
+already registers — so no observability wiring changed.
+
+| Instrument | Kind | Tags | Meaning |
+|---|---|---|---|
+| `octo.pipeline.execution.count` | counter `{execution}` | `octo.tenant.id`, `octo.pipeline.outcome` (`completed`/`failed`/`cancelled`/`interrupted`) | Adapter-reported execution outcomes, as they arrive |
+| `octo.pipeline.execution.age` | observable gauge `s` | `octo.tenant.id`, `octo.pipeline.rt_id`, `octo.pipeline.name`, `octo.pipeline.deployment_state` | Seconds since this pipeline's last execution **started**; `-1` = never executed |
+| `octo.pipeline.execution.failures` | observable gauge `{execution}` | same as above | Failed executions in the last hour (**0 when healthy**) |
+| `octo.pipeline.execution.successes` | observable gauge `{execution}` | same as above | Succeeded executions in the last hour |
+
+🔴 **The mistake this does not repeat.** The existing `octo.ck.*` gauges (emitted by the
+`Monitoring.CkHealth` pipeline, not by this service) are **fault-only**: a healthy library emits
+nothing. Absence there is ambiguous — "repaired" and "dead" look identical — and a staleness rule
+built on them fires every time somebody fixes something. Every instrument here is published for
+**every pipeline the sweep enumerates**, healthy or not, so a missing series means exactly one
+thing: the controller is not reporting.
+
+**Where the gauges come from.** `UpdateStatisticsAsync` — which `ExecutionCleanupBackgroundService`
+already runs for every pipeline of every enabled tenant on each fold sweep
+(`PipelineExecutionStuckCheckIntervalMinutes`, default 5 min) — publishes them, on **every** exit
+path including the two that skip the database write. Two properties this buys over event-driven
+counters: the values derive from persisted state, so they **survive a controller restart** instead
+of starting from zero, and they exist for a pipeline that has not executed in weeks — the case that
+must be alertable. Freshness is the sweep interval; the *age* is computed against the wall clock in
+the gauge callback, so it keeps rising between sweeps. The identity half of the labels
+(`name`, `deployment_state`) comes from `FoldAndPruneExecutionsAsync` / `UpdateAllStatisticsAsync`
+via `ObservePipeline`, published **before** the fold so a pipeline whose statistics update throws is
+still exported with a readable name. After a controller restart the gauges are empty until the
+first sweep (the service's 5-minute startup delay plus one interval).
+
+**Cardinality** — the cost driver, bounded on purpose:
+
+- Gauges are tenant × pipeline (three series per pipeline). Pipelines are operator-authored, tens
+  per tenant, slowly changing. Deleted pipelines are dropped by `RetainPipelines(tenantId, seen)` at
+  the end of each sweep; a tenant that falls out of `GetEnabledTenantIds()` between two sweeps is
+  dropped by `ForgetTenant` (the diff is kept in `ExecutionCleanupBackgroundService._lastSweptTenantIds`).
+  Without either, a deleted pipeline's age gauge would climb forever and alert about nothing.
+- The counter is tenant × outcome only — four series per tenant. **Deliberately not per pipeline**:
+  executions are the high-frequency event here (batches of 100), the per-pipeline breakdown is
+  already covered by the gauges at fixed cost, and tenant × pipeline × outcome on a hot path is how
+  a metrics bill doubles overnight. The completion DTO does not carry the pipeline id either, so a
+  per-pipeline counter would need a per-execution lookup or an in-process correlation map.
+- Nothing carries an execution id (unbounded), an error message (effectively unbounded), a trigger
+  type or an adapter (multiply every series, change no alerting decision).
+
+`octo.pipeline.deployment_state` collapses `Enabled == false` and `DeploymentState` into one tag
+(`disabled` wins over the persisted state) so an alert rule can express "expected to run" as a
+single matcher instead of a join. A switched-off pipeline stays **visible** — silence would be
+ambiguous again — it is just filterable.
+
+**Counter semantics.** It counts *reported* outcomes, not distinct executions: an adapter replaying
+a completion after a reconnect is counted again (the buffered-sync path filters duplicates, the live
+batch path cannot). Executions the stuck reaper failed are **not** counted (no adapter ever reports
+them) — those show up in `octo.pipeline.execution.failures`, which is derived from persisted status
+and is therefore the authoritative per-pipeline number. `Running` is not an outcome.
+
+**Alerting contract (PromQL, Dash0):** metric names keep their dots as the value of
+`otel_metric_name`; only label keys become underscored.
+
+```promql
+# A pipeline is running into errors
+max by (octo_tenant_id, octo_pipeline_rt_id, octo_pipeline_name)
+  ({otel_metric_name="octo.pipeline.execution.failures", otel_metric_type="gauge"}) > 0
+
+# A pipeline that was running has stopped running (threshold in seconds; -1 = never ran, excluded by ">")
+max by (octo_tenant_id, octo_pipeline_rt_id, octo_pipeline_name)
+  ({otel_metric_name="octo.pipeline.execution.age", otel_metric_type="gauge",
+    octo_pipeline_deployment_state="deployed"}) > 3600
+```
+
+The stall threshold is per expectation, not per pipeline — pick it above the slowest schedule you
+want covered (an hourly pipeline: 2×3600; a daily one needs its own rule). A per-pipeline expected
+interval derived from the `RtPipelineTrigger` cron would remove that judgement call and is the
+obvious follow-up.
+
+Tests: `Services/PipelineExecutionMetricsTests` (through a real `MeterListener`, so the assertions
+are about the names and tags the exporter actually publishes; unique tenant per test because the
+instruments are process-wide and the suite runs concurrently) and
+`Services/PipelineExecutionServiceTests/ExecutionMetricsWiringTests` (that the service actually
+feeds them — a refactor dropping the calls would otherwise leave every test green while the
+alerting went blind again).
