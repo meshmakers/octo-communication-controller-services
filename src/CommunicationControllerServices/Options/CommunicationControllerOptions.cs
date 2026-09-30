@@ -170,6 +170,21 @@ public class CommunicationControllerOptions
     public int LifecycleWatchdogIntervalMinutes { get; set; } = 5;
 
     /// <summary>
+    /// Interval in minutes of the workload state metrics sweep (AB#5432): it republishes the
+    /// deployment, communication and configuration state of every adapter, application and pool of
+    /// every tenant that opted in via
+    /// <c>System/TenantModeConfiguration.PublishWorkloadObservability</c>. The same value is used as
+    /// the startup grace, so adapters can reconnect after a controller (re)start before their
+    /// communication state is reported.
+    ///
+    /// This is also the resolution of every one of those gauges and the floor under any
+    /// <c>for:</c> duration a check rule uses — a rule that fires faster than the sweep would
+    /// evaluate the same sample twice. Five minutes matches the other sweeps in this service and is
+    /// far below the minutes-to-hours at which a stuck deployment or configuration error matters.
+    /// </summary>
+    public int WorkloadStateMetricsIntervalMinutes { get; set; } = 5;
+
+    /// <summary>
     /// Enables the HTTP activator (AB#4923): an inbound request for a hibernated OnDemand
     /// workload is held while the workload wakes and is then forwarded to it, instead of the
     /// bare 502/503 the ingress would answer with no pod behind the workload's Service.

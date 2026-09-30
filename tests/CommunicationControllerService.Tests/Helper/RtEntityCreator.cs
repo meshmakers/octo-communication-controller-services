@@ -195,4 +195,31 @@ internal static class RtEntityCreator
         return new RtEntityId(entity.CkTypeId!, entity.RtId);
     }
 
+    /// <summary>
+    /// An Application workload (AB#5432). Carries only <c>DeploymentState</c> — the CK model puts
+    /// <c>CommunicationState</c> / <c>ConfigurationState</c> on Adapter and Pool, not on the shared
+    /// DeployableWorkload base, because an Application neither registers over SignalR nor receives a
+    /// pipeline configuration.
+    /// </summary>
+    public static RtApplication CreateApplication(string? name = null, string? id = null)
+    {
+        id ??= OctoObjectId.GenerateNewId().ToString();
+        return new RtApplication
+        {
+            RtId = new OctoObjectId(id),
+            CkTypeId = SystemCommunicationCkIds.RtCkApplicationTypeId,
+            Name = name ?? "Test Application"
+        };
+    }
+
+    public static RtPool CreatePool(string? name = null, string? id = null)
+    {
+        id ??= OctoObjectId.GenerateNewId().ToString();
+        return new RtPool
+        {
+            RtId = new OctoObjectId(id),
+            CkTypeId = SystemCommunicationCkIds.RtCkPoolTypeId,
+            Name = name ?? "Test Pool"
+        };
+    }
 }

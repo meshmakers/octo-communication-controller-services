@@ -138,6 +138,10 @@ try
     builder.Services.AddHostedService<AdapterOfflineReconciliationBackgroundService>();
     builder.Services.AddHostedService<WorkloadLifecycleWatchdogBackgroundService>();
 
+    // Publishes the deployment / communication / configuration state of adapters, applications and
+    // pools as OTel gauges for tenants that opted in (AB#5432).
+    builder.Services.AddHostedService<WorkloadStateMetricsBackgroundService>();
+
     // HTTP activator (AB#4923): hostname index plus the client that forwards a held request to the
     // woken workload. The client gets no timeout of its own — the wake already ran to completion by
     // the time it is used, and an adapter route may legitimately be a long-runner; the ingress's
