@@ -8,10 +8,6 @@
 # $(OctoCommVersion) is correct at restore but legacy CI has no way to
 # trigger r-tag hotfix flows through hotfix-service.yml.
 #
-# Coexists with devops-build/azure-pipelines.yml during pilot. Once the
-# first green build is verified, def 101 yamlFilename flips here and
-# devops-build/ can be deleted in a follow-up commit.
-#
 # controller-services-specific quirks preserved from the legacy YAML:
 #   - SSHKey + submodules:recursive — checkout pulls private submodules.
 #   - Build and both test steps pass /p:OctoPublishCkModel=false: they compile
@@ -31,11 +27,6 @@
 #   - HAS push-nuget — controller-services publishes Meshmakers.Octo.Communication
 #     NuGets (CommunicationController.Sdk, Common, Server contracts).
 #   - HAS CK library output: SystemCommunicationCkModel.
-#
-# Why tpl-v0.4.2 (not v0.3.1): aligns with octo-communication-sdk (the
-# direct upstream this repo references via $(OctoCommVersion)) — both
-# stay on the same template tag so future template upgrades roll forward
-# in lockstep on the Communication line.
 
 name: $(MajorVersion).$(MinorVersion).$(date:yyMM).$(DayOfMonth)$(rev:rrr)-$(Build.SourceBranchName)
 
