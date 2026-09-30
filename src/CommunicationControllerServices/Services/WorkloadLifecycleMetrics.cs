@@ -21,6 +21,44 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 ///     Cardinality is bounded by the number of ingress-managed workloads (dozens per cluster), so
 ///     tenant, rtId and name are all safe as tags. The rtId is the stable identity; the name is
 ///     carried because a dashboard nobody can read is not observability.
+///
+///     <para>
+///         <b>Governed by the one per-tenant switch (AB#5432).</b> These instruments predate
+///         <c>System/TenantModeConfiguration.PublishWorkloadObservability</c> and were unconditional;
+///         they are not any more. One flag decides whether a tenant's workload and pipeline
+///         observability is published at all, and two generations of gating would mean a tenant that
+///         opted out still paid for half of it. See <see cref="WorkloadObservabilityOptIn" /> for why
+///         the verdict is a cached synchronous flag rather than a repository call — these are
+///         event-driven call sites on paths a request waits behind (a wake) and
+///         <c>ObservableGauge</c> callbacks, neither of which can <c>await</c> anything.
+///     </para>
+///
+///     <para>
+///         Where the gate sits, and why it is not one place:
+///         <list type="bullet">
+///             <item>
+///                 <description>
+///                     <b>Counter and histogram: at the point of recording.</b> For a <c>Counter</c>
+///                     / <c>Histogram</c> the recording <i>is</i> the export; there is no later point
+///                     at which the measurement could be withheld.
+///                 </description>
+///             </item>
+///             <item>
+///                 <description>
+///                     <b>Gauges: at the point of export</b> (inside <see cref="Observe" />). The
+///                     state map keeps being maintained for every tenant, opted in or not — it is fed
+///                     from transitions that happen once and from a watchdog sweep that only runs
+///                     every few minutes, so gating the writes would leave a tenant that opts in
+///                     reporting nothing until it next hibernated. Gating the collection instead
+///                     makes an opt-out <i>stop</i> the series at the next scrape rather than freeze
+///                     it, and an opt-in start it immediately.
+///                 </description>
+///             </item>
+///         </list>
+///         The cost of the gate is that a wake or a hibernation happening before the first opt-in
+///         refresh of a freshly started pod is not counted. Counters restart at zero on a restart
+///         anyway, so a rate loses at most that window.
+///     </para>
 /// </summary>
 internal static class WorkloadLifecycleMetrics
 {
@@ -93,13 +131,21 @@ internal static class WorkloadLifecycleMetrics
 
     private sealed record WorkloadGaugeEntry(string WorkloadName, bool Hibernated, bool OfflineUnexpected);
 
-    /// <summary>Records a wake that reached <c>Configured</c> within the budget.</summary>
+    /// <summary>
+    ///     Records a wake that reached <c>Configured</c> within the budget. The gauge state is kept
+    ///     up to date for every tenant; only the two instruments are gated on the opt-in, so a tenant
+    ///     that opts in later starts reporting a correct hibernation gauge at once.
+    /// </summary>
     public static void RecordWakeSucceeded(string tenantId, OctoObjectId workloadRtId, string? workloadName,
         TimeSpan duration)
     {
-        var tags = Tags(tenantId, workloadRtId, workloadName);
-        Wakes.Add(1, [..tags, new KeyValuePair<string, object?>("octo.wake.outcome", "configured")]);
-        WakeDuration.Record(duration.TotalSeconds, tags);
+        if (WorkloadObservabilityOptIn.IsEnabled(tenantId))
+        {
+            var tags = Tags(tenantId, workloadRtId, workloadName);
+            Wakes.Add(1, [..tags, new KeyValuePair<string, object?>("octo.wake.outcome", "configured")]);
+            WakeDuration.Record(duration.TotalSeconds, tags);
+        }
+
         SetHibernated(tenantId, workloadRtId, workloadName, hibernated: false);
     }
 
@@ -110,6 +156,11 @@ internal static class WorkloadLifecycleMetrics
     /// </summary>
     public static void RecordWakeTimedOut(string tenantId, OctoObjectId workloadRtId, string? workloadName)
     {
+        if (!WorkloadObservabilityOptIn.IsEnabled(tenantId))
+        {
+            return;
+        }
+
         Wakes.Add(1,
             [..Tags(tenantId, workloadRtId, workloadName),
                 new KeyValuePair<string, object?>("octo.wake.outcome", "timeout")]);
@@ -118,7 +169,11 @@ internal static class WorkloadLifecycleMetrics
     /// <summary>Records a completed hibernation (the operator acknowledged the scale to 0).</summary>
     public static void RecordHibernated(string tenantId, OctoObjectId workloadRtId, string? workloadName)
     {
-        Hibernations.Add(1, Tags(tenantId, workloadRtId, workloadName));
+        if (WorkloadObservabilityOptIn.IsEnabled(tenantId))
+        {
+            Hibernations.Add(1, Tags(tenantId, workloadRtId, workloadName));
+        }
+
         SetHibernated(tenantId, workloadRtId, workloadName, hibernated: true);
     }
 
@@ -136,6 +191,24 @@ internal static class WorkloadLifecycleMetrics
     public static void Forget(string tenantId, OctoObjectId workloadRtId)
     {
         States.TryRemove((tenantId, workloadRtId.ToString()), out _);
+    }
+
+    /// <summary>
+    ///     Drops every workload of one tenant (AB#5432). The export gate already silences a tenant
+    ///     that opted out, but the entries would otherwise sit in the map for the lifetime of the
+    ///     process, and a tenant that opted out and back in a week later would come back with a
+    ///     week-old hibernation state until its next transition or watchdog sweep. Called from the
+    ///     workload-state sweep, which is the single place that knows a tenant dropped out.
+    /// </summary>
+    public static void ForgetTenant(string tenantId)
+    {
+        foreach (var key in States.Keys)
+        {
+            if (key.TenantId == tenantId)
+            {
+                States.TryRemove(key, out _);
+            }
+        }
     }
 
     /// <summary>
@@ -177,6 +250,14 @@ internal static class WorkloadLifecycleMetrics
     {
         foreach (var ((tenantId, workloadRtId), entry) in States)
         {
+            // The opt-in gate (AB#5432), evaluated per collection: an opt-out stops these series at
+            // the next scrape instead of freezing them at their last value, and an opt-in starts them
+            // without waiting for the next transition or watchdog sweep.
+            if (!WorkloadObservabilityOptIn.IsEnabled(tenantId))
+            {
+                continue;
+            }
+
             yield return new Measurement<int>(selector(entry) ? 1 : 0,
                 new KeyValuePair<string, object?>("octo.tenant.id", tenantId),
                 new KeyValuePair<string, object?>("octo.workload.rt_id", workloadRtId),

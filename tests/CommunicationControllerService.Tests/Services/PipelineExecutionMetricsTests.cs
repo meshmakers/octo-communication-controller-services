@@ -66,7 +66,19 @@ internal class PipelineExecutionMetricsTests
         return map;
     }
 
-    private static string UniqueTenant() => $"tenant-{Guid.NewGuid():N}";
+    /// <summary>
+    ///     A fresh tenant that has opted into observability (AB#5432). The opt-in is a precondition
+    ///     for every instrument in this class, so it is arranged here rather than repeated in twenty
+    ///     tests; the tests that pin the gate itself use <see cref="UniqueTenantWithoutOptIn" />.
+    /// </summary>
+    private static string UniqueTenant()
+    {
+        var tenantId = UniqueTenantWithoutOptIn();
+        WorkloadObservabilityOptIn.Refresh(tenantId, optedIn: true, TimeSpan.FromMinutes(5));
+        return tenantId;
+    }
+
+    private static string UniqueTenantWithoutOptIn() => $"tenant-{Guid.NewGuid():N}";
 
     private static double? Gauge(List<Recorded> recorded, string instrument, OctoObjectId pipelineRtId) =>
         recorded.SingleOrDefault(r =>
@@ -315,6 +327,83 @@ internal class PipelineExecutionMetricsTests
 
         // Act
         var recorded = Collect(tenantId, () => PipelineExecutionMetrics.ForgetTenant(tenantId), observeGauges: true);
+
+        // Assert
+        await Assert.That(recorded).IsEmpty();
+    }
+
+    /// <summary>
+    ///     AB#5432. One per-tenant flag decides whether a tenant's workload and pipeline
+    ///     observability is published at all, and a tenant that never opted in must produce nothing —
+    ///     not a counter increment, not a single gauge series. This is the half that used to be
+    ///     ungated: 175 pipeline series were on the wire from test-2 while nobody had opted in.
+    /// </summary>
+    [Test]
+    public async Task TenantThatDidNotOptIn_PublishesNothingAtAll()
+    {
+        // Arrange
+        var tenantId = UniqueTenantWithoutOptIn();
+        var pipeline = RtEntityCreator.CreatePipeline();
+
+        // Act
+        var recorded = Collect(tenantId, () =>
+        {
+            PipelineExecutionMetrics.RecordExecutionOutcome(tenantId, RtPipelineExecutionStatusEnum.Failed);
+            PipelineExecutionMetrics.RecordExecutionOutcomes(tenantId, RtPipelineExecutionStatusEnum.Completed, 5);
+            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
+            PipelineExecutionMetrics.ObserveStatistics(tenantId, pipeline.RtId, DateTime.UtcNow, 3, 1);
+        }, observeGauges: true);
+
+        // Assert
+        await Assert.That(recorded).IsEmpty();
+    }
+
+    /// <summary>
+    ///     Opting out has to <b>stop</b> the series, not freeze them at their last value — otherwise a
+    ///     tenant that switched observability off keeps a stalled-looking age on the wire until the pod
+    ///     restarts. The gate lives in the collection callback, which is what makes this immediate.
+    /// </summary>
+    [Test]
+    public async Task TenantThatOptsOut_StopsExportingTheGaugesItHadPublished()
+    {
+        // Arrange — a tenant that published, then opted out.
+        var tenantId = UniqueTenant();
+        var pipeline = RtEntityCreator.CreatePipeline();
+        PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
+        PipelineExecutionMetrics.ObserveStatistics(tenantId, pipeline.RtId, DateTime.UtcNow, 3, 1);
+
+        var whileOptedIn = Collect(tenantId, () => { }, observeGauges: true);
+
+        // Act
+        var afterOptOut = Collect(tenantId,
+            () => WorkloadObservabilityOptIn.Refresh(tenantId, optedIn: false, TimeSpan.FromMinutes(5)),
+            observeGauges: true);
+
+        // Assert
+        await Assert.That(Gauge(whileOptedIn, "octo.pipeline.execution.age", pipeline.RtId)).IsNotNull();
+        await Assert.That(afterOptOut).IsEmpty();
+    }
+
+    /// <summary>
+    ///     A verdict nobody has refreshed is a verdict this process can no longer confirm — the sweep
+    ///     that reads the flag has stopped. Publishing on it would be the same mistake as treating an
+    ///     unreadable opt-in as an opt-in, so the gate fails closed.
+    /// </summary>
+    [Test]
+    public async Task ExpiredOptIn_IsTreatedAsNotOptedIn()
+    {
+        // Arrange
+        var tenantId = UniqueTenantWithoutOptIn();
+        var pipeline = RtEntityCreator.CreatePipeline();
+        WorkloadObservabilityOptIn.Refresh(tenantId, optedIn: true, TimeSpan.Zero);
+
+        // Act
+        var recorded = Collect(tenantId, () =>
+        {
+            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
+            PipelineExecutionMetrics.ObserveStatistics(tenantId, pipeline.RtId, DateTime.UtcNow, 3, 1);
+            PipelineExecutionMetrics.RecordExecutionOutcome(tenantId, RtPipelineExecutionStatusEnum.Failed);
+        }, observeGauges: true);
 
         // Assert
         await Assert.That(recorded).IsEmpty();

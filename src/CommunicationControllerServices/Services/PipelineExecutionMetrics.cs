@@ -80,6 +80,34 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 ///         </item>
 ///     </list>
 ///
+///     <b>Governed by the one per-tenant switch.</b> Nothing here is published for a tenant that has
+///     not set <c>System/TenantModeConfiguration.PublishWorkloadObservability</c> (AB#5432) — see
+///     <see cref="WorkloadObservabilityOptIn" /> for why the verdict is a cached, synchronously
+///     readable flag rather than a repository call, and the two places this class consults it:
+///     <list type="bullet">
+///         <item>
+///             <description>
+///                 <b>The counter is gated where it is recorded</b> (<see cref="RecordExecutionOutcome" />
+///                 / <see cref="RecordExecutionOutcomes" />). For a <c>Counter</c> the recording <i>is</i>
+///                 the export — there is no later point at which an increment could be withheld.
+///             </description>
+///         </item>
+///         <item>
+///             <description>
+///                 <b>The gauges are gated where they are exported</b> (inside the collection
+///                 callbacks, <see cref="Observe" /> / <see cref="ObserveLong" />) rather than where
+///                 <see cref="ObservePipeline" /> / <see cref="ObserveStatistics" /> feed them. Those
+///                 two are called from the statistics sweep, which has to run for every enabled
+///                 tenant regardless — it maintains the persisted <c>RtPipelineStatistics</c>, not
+///                 just these metrics — so gating them there would mean either skipping real work or
+///                 gating in two places. Gating at the callback also gives the opt-out the one
+///                 property it needs: the series <i>stop</i> at the next collection instead of
+///                 freezing at their last value, and an opt-in takes effect at the next collection
+///                 instead of waiting a sweep interval for the map to refill.
+///             </description>
+///         </item>
+///     </list>
+///
 ///     Static, mirroring <see cref="WorkloadLifecycleMetrics" />: the instruments are process-wide
 ///     and threading a metrics dependency through the service would add wiring without adding a
 ///     seam worth having.
@@ -175,9 +203,17 @@ internal static class PipelineExecutionMetrics
         long LastHourSuccessCount,
         long LastHourFailureCount);
 
-    /// <summary>Counts one adapter-reported execution outcome.</summary>
+    /// <summary>
+    ///     Counts one adapter-reported execution outcome. Silently does nothing for a tenant that
+    ///     has not opted in — see <see cref="WorkloadObservabilityOptIn" />.
+    /// </summary>
     public static void RecordExecutionOutcome(string tenantId, RtPipelineExecutionStatusEnum status)
     {
+        if (!WorkloadObservabilityOptIn.IsEnabled(tenantId))
+        {
+            return;
+        }
+
         var outcome = OutcomeOf(status);
         if (outcome == null)
         {
@@ -194,7 +230,7 @@ internal static class PipelineExecutionMetrics
     /// <summary>Counts several outcomes of the same kind at once (the batch completion path).</summary>
     public static void RecordExecutionOutcomes(string tenantId, RtPipelineExecutionStatusEnum status, int count)
     {
-        if (count <= 0)
+        if (count <= 0 || !WorkloadObservabilityOptIn.IsEnabled(tenantId))
         {
             return;
         }
@@ -305,6 +341,15 @@ internal static class PipelineExecutionMetrics
     {
         foreach (var (key, entry) in States)
         {
+            // The opt-in gate (AB#5432). Evaluated per collection rather than per sweep so an
+            // opt-out stops the series at the next scrape instead of freezing it, and an opt-in does
+            // not have to wait for the statistics sweep to refill the map. The lookup is a
+            // dictionary hit against a set of tens of tenants — cheaper than building the tags.
+            if (!WorkloadObservabilityOptIn.IsEnabled(key.TenantId))
+            {
+                continue;
+            }
+
             yield return new Measurement<double>(selector(entry), Tags(key, entry));
         }
     }
@@ -313,6 +358,11 @@ internal static class PipelineExecutionMetrics
     {
         foreach (var (key, entry) in States)
         {
+            if (!WorkloadObservabilityOptIn.IsEnabled(key.TenantId))
+            {
+                continue;
+            }
+
             yield return new Measurement<long>(selector(entry), Tags(key, entry));
         }
     }

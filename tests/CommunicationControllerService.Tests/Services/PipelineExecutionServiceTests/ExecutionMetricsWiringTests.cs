@@ -39,6 +39,10 @@ internal class ExecutionMetricsWiringTests
     {
         _service = new PipelineExecutionService(_repository, _adapterCache, _eventService, _lifecycleService);
 
+        // AB#5432: the tenant has opted into observability. Without it every instrument in this file
+        // is silent by design — pinned by FoldAndPruneExecutionsAsync_OnATenantThatDidNotOptIn_….
+        WorkloadObservabilityOptIn.Refresh(_tenantId, optedIn: true, TimeSpan.FromMinutes(5));
+
         var adapterCachePublish = Substitute.For<IAdapterCachePublish>();
         var adapterTenant = new AdapterTenant(adapterCachePublish, _tenantId);
         _adapterCache.TryGetTenant(_tenantId, out Arg.Any<AdapterTenant?>())
@@ -196,5 +200,38 @@ internal class ExecutionMetricsWiringTests
         await Assert.That(recorded.Single(r =>
             r.Instrument == "octo.pipeline.execution.failures" &&
             r.Tags["octo.pipeline.rt_id"] == stalled.RtId.ToString()).Value).IsEqualTo(0);
+    }
+
+    /// <summary>
+    ///     AB#5432. The statistics sweep keeps running for a tenant that did not opt in — it maintains
+    ///     the persisted <c>RtPipelineStatistics</c>, which is not observability — but not one series
+    ///     may reach the exporter. That is the whole reason the gate sits in the gauge callbacks
+    ///     instead of at the <c>ObservePipeline</c> / <c>ObserveStatistics</c> call sites: the sweep
+    ///     must not be skipped, only its publication.
+    /// </summary>
+    [Test]
+    public async Task FoldAndPruneExecutionsAsync_OnATenantThatDidNotOptIn_SweepsButPublishesNothing()
+    {
+        // Arrange
+        WorkloadObservabilityOptIn.Refresh(_tenantId, optedIn: false, TimeSpan.FromMinutes(5));
+
+        var pipeline = RtEntityCreator.CreatePipeline();
+        _repository.GetAllPipelinesAsync(_tenantId).Returns([pipeline]);
+        _repository.GetTerminalExecutionsOlderThanAsync(_tenantId, Arg.Any<RtEntityId>(), Arg.Any<DateTime>(),
+            Arg.Any<int>()).Returns([]);
+        _repository.GetPipelineExecutionsAsync(_tenantId, Arg.Any<RtEntityId>(), Arg.Any<DateTime?>(),
+            Arg.Any<DateTime?>(), Arg.Any<int>(), Arg.Any<int>()).Returns([]);
+
+        var statistics = RtEntityCreator.CreatePipelineStatistics();
+        statistics.LastExecutionAt = DateTime.UtcNow.AddHours(-4);
+        _repository.GetPipelineStatisticsAsync(_tenantId, pipeline.ToRtEntityId()).Returns(statistics);
+
+        // Act
+        var recorded = await CollectAsync(
+            () => _service.FoldAndPruneExecutionsAsync(_tenantId, 1), observeGauges: true);
+
+        // Assert — nothing on the wire, but the sweep did its persistence work.
+        await Assert.That(recorded).IsEmpty();
+        await _repository.Received().GetAllPipelinesAsync(_tenantId);
     }
 }

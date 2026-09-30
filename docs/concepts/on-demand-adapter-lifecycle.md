@@ -84,6 +84,8 @@ sequenceDiagram
 
 When `LifecycleState ∈ {Draining, Hibernated}`: offline writers still record `Offline` but suppress error-audit events; `MarkExecutionsAsInterruptedAsync` should find nothing (log a warning if it does); the execution reaper is unchanged. Studio renders Hibernated/Waking distinctly and offers "wake now". Metrics: wake count, wake duration (scale-request → Configured), hibernated gauge, replayed-trigger count. Dash0 alerts fire only on `Offline && LifecycleState=Running`.
 
+**Since AB#5432 these instruments are published only for tenants that opted in** via `System/TenantModeConfiguration.PublishWorkloadObservability` — one per-tenant flag governs the whole workload and pipeline observability surface, not just the workload-state gauges. A tenant without the flag emits no lifecycle series at all; see CLAUDE.md → "The per-tenant observability switch (AB#5432)".
+
 ## 4. Activation & rollout (per-tenant testing)
 
 Activation is **runtime configuration, not a deployment switch** — no helm/env option, no controller redeploy to turn it on or off. Two levels must both be on before anything scales down:
