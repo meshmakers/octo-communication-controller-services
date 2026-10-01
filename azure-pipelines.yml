@@ -1,5 +1,5 @@
 # Root-level CI pipeline for octo-communication-controller-services, using shared
-# templates from octo-pipeline-templates@tpl-v0.7.0.
+# templates from octo-pipeline-templates@tpl-v1.0.0.
 #
 # Phase 7 finale (2026-06-14): the last two .NET services on the legacy
 # devops-build/ flow get their root yaml. Without the migration the
@@ -61,7 +61,7 @@ resources:
       type: github
       name: meshmakers/octo-pipeline-templates
       endpoint: meshmakers-access-token
-      ref: refs/tags/tpl-v0.7.0
+      ref: refs/tags/tpl-v1.0.0
 
 trigger:
   batch: true
@@ -184,7 +184,7 @@ stages:
               publishTestResults: false
             env:
               DOCKER_HOST: unix:///var/run/docker.sock
-          # CK SemVer and schema gate (AB#4420), and since tpl-v0.7.0 also the
+          # CK SemVer and schema gate (AB#4420), and since tpl-v1.0.0 also the
           # publish of System.Communication (AB#5121): main -> private catalog, r*
           # tags -> private AND public, never replacing a published version. It runs
           # after both test steps so a run whose build or tests fail never leaves a
@@ -192,7 +192,7 @@ stages:
           # The step compiles the model itself with the pinned octo-ckc, so it needs
           # nothing from the build; it only has to come before the image and the
           # NuGets.
-          - template: templates/steps/validate-ck-versions.yml@pipelineTemplates
+          - template: templates/steps/validate-and-publish-ck-versions.yml@pipelineTemplates
             parameters:
               constructionKitPaths:
                 - 'src/SystemCommunicationCkModel/ConstructionKit'
