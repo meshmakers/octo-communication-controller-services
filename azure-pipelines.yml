@@ -1,5 +1,5 @@
 # Root-level CI pipeline for octo-communication-controller-services, using shared
-# templates from octo-pipeline-templates@tpl-v0.4.2.
+# templates from octo-pipeline-templates@tpl-v1.0.0.
 #
 # Phase 7 finale (2026-06-14): the last two .NET services on the legacy
 # devops-build/ flow get their root yaml. Without the migration the
@@ -8,15 +8,12 @@
 # $(OctoCommVersion) is correct at restore but legacy CI has no way to
 # trigger r-tag hotfix flows through hotfix-service.yml.
 #
-# Coexists with devops-build/azure-pipelines.yml during pilot. Once the
-# first green build is verified, def 101 yamlFilename flips here and
-# devops-build/ can be deleted in a follow-up commit.
-#
 # controller-services-specific quirks preserved from the legacy YAML:
 #   - SSHKey + submodules:recursive — checkout pulls private submodules.
-#   - Build args include /p:OctoPrivateGitHubApiKey + /p:OctoPublicGitHubApiKey
-#     because SystemCommunicationCkModel publishes to GitHub catalogs on
-#     main / r* tags (effectivePublishCatalog).
+#   - Build and both test steps pass /p:OctoPublishCkModel=false: they compile
+#     the CK model and publish it nowhere. System.Communication is published by
+#     the shared CK step after the tests (main -> private catalog, r* -> private
+#     AND public).
 #   - Two separate test steps:
 #       1. Unit tests (TUnit) excluding *IntegrationTests.csproj.
 #       2. Integration tests (xUnit) with publishTestResults: false —
@@ -30,11 +27,6 @@
 #   - HAS push-nuget — controller-services publishes Meshmakers.Octo.Communication
 #     NuGets (CommunicationController.Sdk, Common, Server contracts).
 #   - HAS CK library output: SystemCommunicationCkModel.
-#
-# Why tpl-v0.4.2 (not v0.3.1): aligns with octo-communication-sdk (the
-# direct upstream this repo references via $(OctoCommVersion)) — both
-# stay on the same template tag so future template upgrades roll forward
-# in lockstep on the Communication line.
 
 name: $(MajorVersion).$(MinorVersion).$(date:yyMM).$(DayOfMonth)$(rev:rrr)-$(Build.SourceBranchName)
 
@@ -69,7 +61,7 @@ resources:
       type: github
       name: meshmakers/octo-pipeline-templates
       endpoint: meshmakers-access-token
-      ref: refs/tags/tpl-v0.5.0
+      ref: refs/tags/tpl-v1.0.0
 
 trigger:
   batch: true
@@ -100,10 +92,10 @@ variables:
     value: ${{ eq(variables['Build.SourceBranch'], 'refs/heads/main') }}
   - name: isTest
     value: ${{ startsWith(variables['Build.SourceBranch'], 'refs/heads/test') }}
-  # CK publish routing (effectivePublishCatalog: GitHub catalogs only on main/r* tags,
-  # incident: Industry.Basic-2.1.1) and the per-run local catalog root
-  # (OctoLocalCatalogRootPath -> Agent.TempDirectory, AB#4167) are exported as runtime
-  # variables by update-build-number.yml.
+  # CK publish routing (OctoPublishCkCatalogs: private on main, private AND public on
+  # r* tags; GitHub catalogs only on main/r*, incident: Industry.Basic-2.1.1) is
+  # exported as a runtime variable by update-build-number.yml and consumed by the
+  # shared CK step.
 
 stages:
   - stage: Build
@@ -128,13 +120,6 @@ stages:
               sshPassphrase: '$(SSHPassphrase)'
               sshKeySecureFile: '$(SSHPrivateKeyFile)'
           - template: templates/steps/set-version.yml@pipelineTemplates
-          # CK SemVer honesty gate (AB#4420): System.Communication is published
-          # DURING the dotnet build (/p:OctoPublishCatalog), so the gate must
-          # be able to fail first.
-          - template: templates/steps/validate-ck-versions.yml@pipelineTemplates
-            parameters:
-              constructionKitPaths:
-                - 'src/SystemCommunicationCkModel/ConstructionKit'
           - template: templates/steps/download-ca.yml@pipelineTemplates
           - task: DotNetCoreCLI@2
             retryCountOnTaskFailure: 2
@@ -144,13 +129,21 @@ stages:
               projects: '$(solutionFile)'
               restoreArguments: '--force /p:OctoNugetPrivateServer=$(nugetPrivateServer)'
               noCache: true
+          # The build compiles System.Communication and publishes it nowhere: the
+          # CK step below owns publishing, and CkCompile would publish with isForced
+          # hardcoded. No other CK in this solution depends on it, so a local catalog
+          # would never be read; the model, its embedded blueprints and its
+          # documentation are all produced by compiling alone. The command line
+          # overrides the csproj's <OctoPublishCkModel>, which stays for local
+          # development. The GitHub API keys keep CkCompile's catalog refresh clear
+          # of GitHub's unauthenticated rate limit.
           - task: DotNetCoreCLI@2
             retryCountOnTaskFailure: 2
             displayName: 'Build'
             inputs:
               command: 'build'
               projects: '$(solutionFile)'
-              arguments: '--configuration $(buildConfiguration) /p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCatalog="$(effectivePublishCatalog)" /p:OctoPrivateGitHubApiKey=$(GitHubPAT) /p:OctoPublicGitHubApiKey=$(GitHubPAT)'
+              arguments: '--configuration $(buildConfiguration) /p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false /p:OctoPrivateGitHubApiKey=$(GitHubPAT) /p:OctoPublicGitHubApiKey=$(GitHubPAT)'
               publishWebProjects: false
               zipAfterPublish: false
               modifyOutputPath: false
@@ -191,6 +184,18 @@ stages:
               publishTestResults: false
             env:
               DOCKER_HOST: unix:///var/run/docker.sock
+          # CK SemVer and schema gate (AB#4420), and since tpl-v1.0.0 also the
+          # publish of System.Communication (AB#5121): main -> private catalog, r*
+          # tags -> private AND public, never replacing a published version. It runs
+          # after both test steps so a run whose build or tests fail never leaves a
+          # version in a shared catalog — a published version cannot be withdrawn.
+          # The step compiles the model itself with the pinned octo-ckc, so it needs
+          # nothing from the build; it only has to come before the image and the
+          # NuGets.
+          - template: templates/steps/validate-and-publish-ck-versions.yml@pipelineTemplates
+            parameters:
+              constructionKitPaths:
+                - 'src/SystemCommunicationCkModel/ConstructionKit'
           # Communication Controller image
           # Multi-arch image (AB#4451): arm64 for Apple-Silicon kind clusters and
           # edge devices, amd64 for the managed clusters.
