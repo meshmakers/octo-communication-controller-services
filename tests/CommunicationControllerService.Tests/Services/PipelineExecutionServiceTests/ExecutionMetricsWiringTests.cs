@@ -234,4 +234,95 @@ internal class ExecutionMetricsWiringTests
         await Assert.That(recorded).IsEmpty();
         await _repository.Received().GetAllPipelinesAsync(_tenantId);
     }
+
+    /// <summary>
+    ///     AB#5492. The sweep is where the controller's knowledge of the schedule meets the
+    ///     statistics: it reads the enabled triggers through the same query the scheduler uses and
+    ///     hands each pipeline its own. The cron pipeline that stalled gets a count; the HTTP pipeline
+    ///     next to it — idle for a month, which is fine for an HTTP pipeline — gets no cron series at
+    ///     all, so the rule stays quiet for it.
+    /// </summary>
+    [Test]
+    public async Task FoldAndPruneExecutionsAsync_PublishesMissedExecutionsOnlyForCronTriggeredPipelines()
+    {
+        // Arrange — the finAPI case: hourly cron, last execution three fire times ago.
+        var cronPipeline = RtEntityCreator.CreatePipeline();
+        cronPipeline.Name = "Accounting.FinApiImport";
+        var httpPipeline = RtEntityCreator.CreatePipeline();
+        httpPipeline.Name = "Accounting.UploadDocuments";
+
+        var trigger = RtEntityCreator.CreatePipelineTrigger("0 * * * *");
+        _repository.GetTriggersAndPipelinesAsync(_tenantId).Returns(
+            new Dictionary<RtPipelineTrigger, IList<RtPipeline>> { [trigger] = [cronPipeline] });
+
+        _repository.GetAllPipelinesAsync(_tenantId).Returns([cronPipeline, httpPipeline]);
+        _repository.GetTerminalExecutionsOlderThanAsync(_tenantId, Arg.Any<RtEntityId>(), Arg.Any<DateTime>(),
+            Arg.Any<int>()).Returns([]);
+        _repository.GetPipelineExecutionsAsync(_tenantId, Arg.Any<RtEntityId>(), Arg.Any<DateTime?>(),
+            Arg.Any<DateTime?>(), Arg.Any<int>(), Arg.Any<int>()).Returns([]);
+
+        var cronStatistics = RtEntityCreator.CreatePipelineStatistics();
+        cronStatistics.LastExecutionAt = DateTime.UtcNow.Subtract(PipelineCronSchedule.Grace).AddHours(-3);
+        _repository.GetPipelineStatisticsAsync(_tenantId, cronPipeline.ToRtEntityId()).Returns(cronStatistics);
+
+        var httpStatistics = RtEntityCreator.CreatePipelineStatistics();
+        httpStatistics.LastExecutionAt = DateTime.UtcNow.AddDays(-30);
+        _repository.GetPipelineStatisticsAsync(_tenantId, httpPipeline.ToRtEntityId()).Returns(httpStatistics);
+
+        // Act
+        var recorded = await CollectAsync(
+            () => _service.FoldAndPruneExecutionsAsync(_tenantId, 1), observeGauges: true);
+
+        // Assert
+        var missed = recorded.Where(r => r.Instrument == "octo.pipeline.cron.missed_executions").ToList();
+        var cronSeries = missed.Single();
+        await Assert.That(cronSeries.Value).IsEqualTo(3);
+        await Assert.That(cronSeries.Tags["octo.pipeline.rt_id"]).IsEqualTo(cronPipeline.RtId.ToString());
+        await Assert.That(cronSeries.Tags["octo.pipeline.name"]).IsEqualTo("Accounting.FinApiImport");
+        await Assert.That(cronSeries.Tags["octo.cron.expression"]).IsEqualTo("0 * * * *");
+
+        // …while the HTTP pipeline keeps its age (a month, legitimately) and nothing cron-shaped.
+        await Assert.That(recorded.Any(r =>
+            r.Instrument.StartsWith("octo.pipeline.cron.") &&
+            r.Tags["octo.pipeline.rt_id"] == httpPipeline.RtId.ToString())).IsFalse();
+        await Assert.That(recorded.Any(r =>
+            r.Instrument == "octo.pipeline.execution.age" &&
+            r.Tags["octo.pipeline.rt_id"] == httpPipeline.RtId.ToString())).IsTrue();
+    }
+
+    /// <summary>
+    ///     A failing trigger read must neither stop the statistics sweep nor withdraw the schedule
+    ///     published on the previous pass — a transient repository error is not "no triggers".
+    /// </summary>
+    [Test]
+    public async Task FoldAndPruneExecutionsAsync_WhenTheTriggerReadFails_KeepsSweepingAndKeepsTheLastSchedule()
+    {
+        // Arrange — a pass that published the schedule, then a pass whose trigger read throws.
+        var pipeline = RtEntityCreator.CreatePipeline();
+        var trigger = RtEntityCreator.CreatePipelineTrigger("0 * * * *");
+        _repository.GetTriggersAndPipelinesAsync(_tenantId).Returns(
+            _ => new Dictionary<RtPipelineTrigger, IList<RtPipeline>> { [trigger] = [pipeline] },
+            _ => throw new InvalidOperationException("mongo away"));
+
+        _repository.GetAllPipelinesAsync(_tenantId).Returns([pipeline]);
+        _repository.GetTerminalExecutionsOlderThanAsync(_tenantId, Arg.Any<RtEntityId>(), Arg.Any<DateTime>(),
+            Arg.Any<int>()).Returns([]);
+        _repository.GetPipelineExecutionsAsync(_tenantId, Arg.Any<RtEntityId>(), Arg.Any<DateTime?>(),
+            Arg.Any<DateTime?>(), Arg.Any<int>(), Arg.Any<int>()).Returns([]);
+
+        var statistics = RtEntityCreator.CreatePipelineStatistics();
+        statistics.LastExecutionAt = DateTime.UtcNow.Subtract(PipelineCronSchedule.Grace).AddHours(-2);
+        _repository.GetPipelineStatisticsAsync(_tenantId, pipeline.ToRtEntityId()).Returns(statistics);
+
+        await _service.FoldAndPruneExecutionsAsync(_tenantId, 1);
+
+        // Act
+        var recorded = await CollectAsync(
+            () => _service.FoldAndPruneExecutionsAsync(_tenantId, 1), observeGauges: true);
+
+        // Assert — second pass completed (statistics were read twice) and the series is still there.
+        await _repository.Received(2).GetPipelineStatisticsAsync(_tenantId, pipeline.ToRtEntityId());
+        await Assert.That(recorded.Single(r => r.Instrument == "octo.pipeline.cron.missed_executions").Value)
+            .IsEqualTo(2);
+    }
 }

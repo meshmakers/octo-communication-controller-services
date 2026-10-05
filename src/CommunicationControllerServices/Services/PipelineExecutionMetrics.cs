@@ -150,6 +150,13 @@ internal static class PipelineExecutionMetrics
     private static readonly ConcurrentDictionary<(string TenantId, string PipelineRtId), PipelineGaugeEntry> States =
         new();
 
+    /// <summary>
+    ///     The zone the scheduler evaluates cron expressions in (AB#5492): <c>OctoRecurringSchedule</c>
+    ///     stamps every schedule with <see cref="TimeZoneInfo.Local" /> of this process. Declared before
+    ///     the gauges whose callbacks read it — static initialisers run in textual order.
+    /// </summary>
+    private static readonly TimeZoneInfo CronTimeZone = TimeZoneInfo.Local;
+
     // Assigning the gauges to fields is what keeps them alive; the callbacks do the reporting.
     // ReSharper disable NotAccessedField.Local
 
@@ -194,6 +201,39 @@ internal static class PipelineExecutionMetrics
         () => ObserveLong(e => e.LastHourSuccessCount),
         unit: "{execution}",
         description: "Executions of this pipeline that succeeded in the last hour");
+
+    /// <summary>
+    ///     The schedule-aware stall signal (AB#5492). Where <see cref="AgeGauge" /> says how long ago
+    ///     the last execution started, this says how many cron fire times have passed since without
+    ///     one — <c>0</c> for every healthy pipeline whatever its cadence, so a single rule covers the
+    ///     hourly and the daily pipeline alike, and nothing at all for a pipeline without an enabled
+    ///     cron trigger (HTTP, data-event), whose silence is not a stall.
+    ///
+    ///     Published only while the pipeline is <c>deployed</c> — the same collapsed predicate the
+    ///     <c>octo.pipeline.deployment_state</c> tag carries — because a disabled or undeployed
+    ///     pipeline is not expected to fire. Computed against the wall clock at collection time like
+    ///     the age, so the count grows between sweeps; the arithmetic is in <see cref="PipelineCronSchedule" />.
+    /// </summary>
+    private static readonly ObservableGauge<long> CronMissedExecutionsGauge = Meter.CreateObservableGauge(
+        "octo.pipeline.cron.missed_executions",
+        () => ObserveCron((entry, now) =>
+            PipelineCronSchedule.CountMissedExecutions(entry.CronTriggers, entry.LastExecutionAt, now, CronTimeZone)),
+        unit: "{execution}",
+        description:
+        "Number of cron fire times that passed since the pipeline's last recorded execution; " +
+        "0 when the pipeline runs on schedule");
+
+    /// <summary>
+    ///     The pipeline's expected cadence, for reading the count above: three missed executions of an
+    ///     every-minute pipeline and three of a daily one are different incidents.
+    /// </summary>
+    private static readonly ObservableGauge<double> CronIntervalGauge = Meter.CreateObservableGauge(
+        "octo.pipeline.cron.interval",
+        () => ObserveCron((entry, now) =>
+            PipelineCronSchedule.TypicalIntervalSeconds(entry.CronTriggers, now, CronTimeZone)),
+        unit: "s",
+        description: "Seconds between two consecutive cron fire times of this pipeline (the shortest " +
+                     "when several triggers apply)");
     // ReSharper restore NotAccessedField.Local
 
     private sealed record PipelineGaugeEntry(
@@ -201,7 +241,8 @@ internal static class PipelineExecutionMetrics
         string DeploymentState,
         DateTime? LastExecutionAt,
         long LastHourSuccessCount,
-        long LastHourFailureCount);
+        long LastHourFailureCount,
+        IReadOnlyList<CronTrigger> CronTriggers);
 
     /// <summary>
     ///     Counts one adapter-reported execution outcome. Silently does nothing for a tenant that
@@ -286,6 +327,38 @@ internal static class PipelineExecutionMetrics
     }
 
     /// <summary>
+    ///     Publishes the cron triggers a pipeline is expected to fire on (AB#5492). Called from the
+    ///     sweep with the pipeline's <b>enabled</b> triggers; an empty list is the normal case for an
+    ///     HTTP or data-event pipeline and withdraws the <c>octo.pipeline.cron.*</c> series. Only
+    ///     expressions that parse are kept — a malformed one could never have been scheduled, so it
+    ///     must not take down the series of a pipeline whose other trigger is fine.
+    ///
+    ///     The per-trigger anchor for a pipeline that has never executed is the trigger's last
+    ///     modification, falling back to its creation: the moment the schedule in its current form
+    ///     came into force. That is the conservative choice — a trigger's deployment state is rewritten
+    ///     on every tenant start, so after a controller restart a never-executed pipeline starts
+    ///     counting afresh — and it is the only anchor the entities carry; a pipeline has no
+    ///     deployment timestamp.
+    /// </summary>
+    public static void ObserveCronTriggers(string tenantId, OctoObjectId pipelineRtId,
+        IEnumerable<RtPipelineTrigger> enabledTriggers)
+    {
+        var cronTriggers = new List<CronTrigger>();
+        foreach (var trigger in enabledTriggers)
+        {
+            if (trigger.Enabled != true || !PipelineCronSchedule.TryParse(trigger.CronExpression, out var parsed))
+            {
+                continue;
+            }
+
+            cronTriggers.Add(new CronTrigger(trigger.CronExpression!.Trim(), parsed,
+                trigger.RtChangedDateTime ?? trigger.RtCreationDateTime));
+        }
+
+        Update(tenantId, pipelineRtId, e => e with { CronTriggers = cronTriggers });
+    }
+
+    /// <summary>
     ///     Drops every pipeline of the tenant that the sweep did not see. A deleted pipeline whose
     ///     age gauge kept climbing would eventually alert about something that no longer exists.
     /// </summary>
@@ -333,8 +406,36 @@ internal static class PipelineExecutionMetrics
         Func<PipelineGaugeEntry, PipelineGaugeEntry> change)
     {
         States.AddOrUpdate((tenantId, pipelineRtId.ToString()),
-            _ => change(new PipelineGaugeEntry(string.Empty, "unknown", null, 0, 0)),
+            _ => change(new PipelineGaugeEntry(string.Empty, "unknown", null, 0, 0, [])),
             (_, existing) => change(existing));
+    }
+
+    /// <summary>
+    ///     Collection for the <c>octo.pipeline.cron.*</c> gauges (AB#5492). Unlike <see cref="Observe" />
+    ///     this one is selective by contract: a series exists only for a deployed pipeline with at
+    ///     least one enabled cron trigger, and only when the selector has a value — so the rule written
+    ///     against it stays quiet for every pipeline the schedule says nothing about.
+    /// </summary>
+    private static IEnumerable<Measurement<T>> ObserveCron<T>(Func<PipelineGaugeEntry, DateTime, T?> selector)
+        where T : struct
+    {
+        var now = DateTime.UtcNow;
+        foreach (var (key, entry) in States)
+        {
+            if (entry.CronTriggers.Count == 0 || entry.DeploymentState != "deployed" ||
+                !WorkloadObservabilityOptIn.IsEnabled(key.TenantId))
+            {
+                continue;
+            }
+
+            var value = selector(entry, now);
+            if (value == null)
+            {
+                continue;
+            }
+
+            yield return new Measurement<T>(value.Value, CronTags(key, entry));
+        }
     }
 
     private static IEnumerable<Measurement<double>> Observe(Func<PipelineGaugeEntry, double> selector)
@@ -377,5 +478,19 @@ internal static class PipelineExecutionMetrics
         // not multiply series.
         new("octo.pipeline.name", entry.PipelineName),
         new("octo.pipeline.deployment_state", entry.DeploymentState),
+    ];
+
+    /// <summary>
+    ///     Tags of the cron gauges. No deployment state — the series only exists while deployed — but
+    ///     the expression(s), joined with <c>;</c>, so an alert can say what cadence was expected.
+    ///     1:1 with the pipeline's trigger set, so it does not multiply series.
+    /// </summary>
+    private static KeyValuePair<string, object?>[] CronTags((string TenantId, string PipelineRtId) key,
+        PipelineGaugeEntry entry) =>
+    [
+        new("octo.tenant.id", key.TenantId),
+        new("octo.pipeline.rt_id", key.PipelineRtId),
+        new("octo.pipeline.name", entry.PipelineName),
+        new("octo.cron.expression", string.Join(";", entry.CronTriggers.Select(t => t.Expression))),
     ];
 }

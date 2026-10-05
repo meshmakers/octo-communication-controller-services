@@ -595,6 +595,7 @@ internal class PipelineExecutionService(
         try
         {
             var pipelines = await communicationRepository.GetAllPipelinesAsync(tenantId);
+            var cronTriggersByPipeline = await LoadEnabledTriggersByPipelineAsync(tenantId);
 
             foreach (var pipeline in pipelines)
             {
@@ -603,6 +604,7 @@ internal class PipelineExecutionService(
                     // Note: CkTypeId should never be null for a valid pipeline
                     var pipelineRtEntityId = new RtEntityId(pipeline.CkTypeId!, pipeline.RtId);
                     PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
+                    ObserveCronTriggers(tenantId, pipeline, cronTriggersByPipeline);
                     await UpdateStatisticsAsync(tenantId, pipelineRtEntityId);
                 }
                 catch (Exception e)
@@ -633,6 +635,7 @@ internal class PipelineExecutionService(
         try
         {
             var pipelines = await communicationRepository.GetAllPipelinesAsync(tenantId);
+            var cronTriggersByPipeline = await LoadEnabledTriggersByPipelineAsync(tenantId);
 
             foreach (var pipeline in pipelines)
             {
@@ -643,6 +646,7 @@ internal class PipelineExecutionService(
                 // that a pipeline whose fold or statistics update throws is still exported with a
                 // readable name rather than an empty one.
                 PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
+                ObserveCronTriggers(tenantId, pipeline, cronTriggersByPipeline);
 
                 try
                 {
@@ -677,6 +681,64 @@ internal class PipelineExecutionService(
             Logger.Error(e, "[{TenantId}] Failed to fold and prune executions", tenantId);
             throw PipelineExecutionServiceException.CommonFailedCleanupOldExecutions(tenantId, e);
         }
+    }
+
+    /// <summary>
+    ///     AB#5492: the schedule half of the cron gauges. One repository read per sweep — the same
+    ///     enabled-trigger → pipelines query the scheduler uses — inverted to pipeline → triggers.
+    ///     Returns <c>null</c> when the read fails, so the sweep keeps the triggers it published last
+    ///     time instead of withdrawing every cron series over a transient repository error; the
+    ///     statistics work is unaffected either way.
+    /// </summary>
+    private async Task<Dictionary<OctoObjectId, List<RtPipelineTrigger>>?> LoadEnabledTriggersByPipelineAsync(
+        string tenantId)
+    {
+        try
+        {
+            var triggersAndPipelines = await communicationRepository.GetTriggersAndPipelinesAsync(tenantId);
+            var byPipeline = new Dictionary<OctoObjectId, List<RtPipelineTrigger>>();
+
+            foreach (var (trigger, pipelines) in triggersAndPipelines)
+            {
+                if (!PipelineCronSchedule.TryParse(trigger.CronExpression, out _))
+                {
+                    Logger.Warn("[{TenantId}] Trigger '{TriggerRtId}' has a cron expression that does not parse ('{CronExpression}'); it is not counted for missed executions",
+                        tenantId, trigger.RtId, trigger.CronExpression);
+                    continue;
+                }
+
+                foreach (var pipeline in pipelines)
+                {
+                    if (!byPipeline.TryGetValue(pipeline.RtId, out var triggers))
+                    {
+                        triggers = [];
+                        byPipeline[pipeline.RtId] = triggers;
+                    }
+
+                    triggers.Add(trigger);
+                }
+            }
+
+            return byPipeline;
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e, "[{TenantId}] Failed to load pipeline triggers for the cron gauges; keeping the previously published schedule",
+                tenantId);
+            return null;
+        }
+    }
+
+    private static void ObserveCronTriggers(string tenantId, RtPipeline pipeline,
+        Dictionary<OctoObjectId, List<RtPipelineTrigger>>? triggersByPipeline)
+    {
+        if (triggersByPipeline == null)
+        {
+            return;
+        }
+
+        PipelineExecutionMetrics.ObserveCronTriggers(tenantId, pipeline.RtId,
+            triggersByPipeline.GetValueOrDefault(pipeline.RtId) ?? []);
     }
 
     private async Task<int> FoldAndPrunePipelineAsync(string tenantId, RtEntityId pipelineRtEntityId,
