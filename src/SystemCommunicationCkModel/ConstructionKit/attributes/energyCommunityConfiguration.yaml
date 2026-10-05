@@ -2,15 +2,17 @@ $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 attributes:
   # AB#5187 — EnergyCommunityConfiguration is ONE community's own settings: its market
   # identifiers, its tariffs, its bank account, its branding. An EnergyCommunity app blueprint
-  # seeds the entity once and a re-apply upserts it (full ReplaceOne), so everything the
-  # community itself owns is isRuntimeState: true.
+  # seeds the entity once and a re-apply upserts it (full ReplaceOne), so every value the
+  # community itself owns carries a marker that keeps it. There are two, and they differ in
+  # the export: isRuntimeState: true keeps a value and leaves it out of an export,
+  # ownership: TenantOwned keeps it and still exports it. A new setting of the community
+  # takes ownership: TenantOwned.
   #
   # AB#5359 — nothing in this file is author-owned any more. The report template names, the
   # mail server reference and the request delay were kept seed-owned so that a version bump
   # could correct them, but the tenant-neutral seed carries no value for them (empty strings,
   # the default delay): every re-apply emptied what the community had configured, and billing
-  # lost its report template. They are ownership: TenantOwned — preserved like everything
-  # else here and, unlike isRuntimeState: true, still exported. A changed default therefore
+  # lost its report template. They are ownership: TenantOwned. A changed default therefore
   # reaches existing communities only through a CK migration.
   #
   # AB#5187 — the community's identity in the EDA market. Assigned to the tenant by the market
