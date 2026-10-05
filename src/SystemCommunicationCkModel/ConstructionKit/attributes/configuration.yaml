@@ -164,10 +164,15 @@ attributes:
     description: 'Temperature for AI response generation (0.0 = deterministic, 1.0 = creative).'
     defaultValues:
       - 0.1
-  # NOT runtime state: this points at an OctoMesh platform service of the installation, not at
-  # a tenant-owned system — same class as IssuerUri. When the MCP server moves, the seed must
-  # be able to correct it everywhere.
+  # Runtime state since 3.37.1 (AB#5495). It used to be false on the reasoning that the URL
+  # points at a platform service and "the seed must be able to correct it everywhere" — but
+  # no seed ever carries it: the URL is environment-specific (local https://localhost:5017,
+  # prod https://mcp.prod-1.octo-mesh.com) and is set per tenant after the install
+  # (AB#4541). A blueprint merge therefore re-applied the seed's NOTHING, and the AI query
+  # node then ran without any tools and let the model simulate them with invented data,
+  # silently, on every UpdateBlueprint. The operator's value has to survive like the
+  # credentials next to it.
   - id: McpServerUrl
     valueType: String
-    isRuntimeState: false
+    isRuntimeState: true
     description: 'URL of the OctoMesh MCP server for AI tool use (e.g. https://localhost:5017). The tenant ID is appended automatically.'
