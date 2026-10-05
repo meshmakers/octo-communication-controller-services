@@ -420,6 +420,18 @@ so a blueprint re-apply can no longer overwrite a live secret with the seeded
 placeholder. Details, blast radius and the first-install semantics: see
 "Pipeline Service Account — mandatory execution identity" below.
 
+**The last seed-owned `EnergyCommunityConfiguration` values are tenant-owned (3.39.0, AB#5359).**
+`BillingReportName`, `BillingReportFilePrefix`, `BillingMailServerConfiguration` and
+`ConsumptionRecordRequestDelay` moved from `isRuntimeState: false` to `ownership: TenantOwned`,
+and the type's `${System}/Name` assignment carries a per-assignment `ownership: TenantOwned`
+override (the shared `System/Name` definition stays seed-owned for every other type). They had
+been kept seed-owned so that a blueprint version could correct them, but the tenant-neutral
+`EnergyCommunity.Base` seed ships them empty (the delay with its default) and never seeds a name:
+every re-apply emptied what the community had configured, and billing lost its report template.
+`TenantOwned` rather than `isRuntimeState: true` because these are settings a tenant export has
+to carry — preserved on re-apply, still part of `ExportRt`. Consequence for blueprint authors: a
+changed default for these values reaches existing communities only through a CK migration.
+
 When adding a new attribute on `Adapter` / `Pool` / similar entities,
 decide at creation time: is the value driven by the blueprint author
 (configuration → leave `isRuntimeState` unset), or by services /
