@@ -2,11 +2,18 @@ $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 attributes:
   # AB#5187 — EnergyCommunityConfiguration is ONE community's own settings: its market
   # identifiers, its tariffs, its bank account, its branding. An EnergyCommunity app blueprint
-  # seeds the entity once and a re-apply upserts it (full ReplaceOne), so everything the
-  # community itself owns is isRuntimeState: true. What stays author-owned (false) is the
-  # small set of values that ship WITH the application and must be correctable by a version
-  # bump: the report template names, the well-known name wiring, the statutory default rates
-  # and the request-delay default.
+  # seeds the entity once and a re-apply upserts it (full ReplaceOne), so every value the
+  # community itself owns carries a marker that keeps it. There are two, and they differ in
+  # the export: isRuntimeState: true keeps a value and leaves it out of an export,
+  # ownership: TenantOwned keeps it and still exports it. A new setting of the community
+  # takes ownership: TenantOwned.
+  #
+  # AB#5359 — nothing in this file is author-owned any more. The report template names, the
+  # mail server reference and the request delay were kept seed-owned so that a version bump
+  # could correct them, but the tenant-neutral seed carries no value for them (empty strings,
+  # the default delay): every re-apply emptied what the community had configured, and billing
+  # lost its report template. They are ownership: TenantOwned. A changed default therefore
+  # reaches existing communities only through a CK migration.
   #
   # AB#5187 — the community's identity in the EDA market. Assigned to the tenant by the market
   # partner, not by the blueprint author; a reset silently detaches the community from every
@@ -33,10 +40,11 @@ attributes:
     valueType: BinaryLinked
     isRuntimeState: true
     description: "Image placed in the footer or imprint block of outgoing e-mails. Separate from FooterLogo, which brands the web application - the two are set independently on purpose."
-  # NOT runtime state: a process default that ships with the application logic.
+  # AB#5359 — each community sets its own delay; the default below still initialises a fresh
+  # one.
   - id: ConsumptionRecordRequestDelay
     valueType: Int
-    isRuntimeState: false
+    ownership: TenantOwned
     description: "Delay in days before automatic consumption record requests are sent"
     defaultValues:
       - 5
@@ -83,21 +91,20 @@ attributes:
     valueType: String
     isRuntimeState: true
     description: "Heading displayed in the application header bar"
-  # NOT runtime state: the Telerik report template and its file naming ship with the
-  # application. Renaming a template in a new app version must reach existing tenants.
+  # AB#5359 — each community names its own Telerik report template and file prefix; the seed
+  # ships both empty.
   - id: BillingReportName
     valueType: String
-    isRuntimeState: false
+    ownership: TenantOwned
     description: "Name of the Telerik billing report template (e.g. Billing.trdp)"
   - id: BillingReportFilePrefix
     valueType: String
-    isRuntimeState: false
+    ownership: TenantOwned
     description: "Filename prefix for generated billing report files (e.g. Billing_)"
-  # NOT runtime state: a well-known-name reference into entities the same blueprint seeds —
-  # author-owned wiring, and re-pointing it is exactly what a version bump is for.
+  # AB#5359 — names the community's own EMailSenderConfiguration; the seed ships it empty.
   - id: BillingMailServerConfiguration
     valueType: String
-    isRuntimeState: false
+    ownership: TenantOwned
     description: "Well-known name of the EMailSenderConfiguration used for outbound billing mail"
   # AB#5187 — branding, see the colour block above.
   - id: HeaderGradientStart
