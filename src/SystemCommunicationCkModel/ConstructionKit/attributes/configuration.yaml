@@ -164,7 +164,8 @@ attributes:
     description: 'Temperature for AI response generation (0.0 = deterministic, 1.0 = creative).'
     defaultValues:
       - 0.1
-  # Runtime state since 3.37.1 (AB#5495). It used to be false on the reasoning that the URL
+  # Runtime state since 3.38.0 (AB#5495; the CK semver gate rates an isRuntimeState flip as
+  # MINOR, hence no 3.37.1). It used to be false on the reasoning that the URL
   # points at a platform service and "the seed must be able to correct it everywhere" — but
   # no seed ever carries it: the URL is environment-specific (local https://localhost:5017,
   # prod https://mcp.prod-1.octo-mesh.com) and is set per tenant after the install
