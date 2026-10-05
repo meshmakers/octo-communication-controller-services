@@ -20,6 +20,9 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <!-- AB#5492: the cron parser Hangfire itself uses (internalised there, so not reachable through
+             MassTransit.Hangfire). Evaluates PipelineTrigger expressions the way the scheduler does. -->
+        <PackageReference Include="Cronos" Version="0.11.0" />
         <!-- direct reference: the released SDK still ships the legacy IdentityModel until the next libs train -->
         <PackageReference Include="Duende.IdentityModel" Version="8.1.0" />
         <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.11" />

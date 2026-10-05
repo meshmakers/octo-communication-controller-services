@@ -2733,9 +2733,77 @@ max by (octo_tenant_id, octo_pipeline_rt_id, octo_pipeline_name)
 ```
 
 The stall threshold is per expectation, not per pipeline — pick it above the slowest schedule you
-want covered (an hourly pipeline: 2×3600; a daily one needs its own rule). A per-pipeline expected
-interval derived from the `RtPipelineTrigger` cron would remove that judgement call and is the
-obvious follow-up.
+want covered (an hourly pipeline: 2×3600; a daily one needs its own rule). The schedule-aware
+counterpart that removes this judgement call for cron-triggered pipelines is
+`octo.pipeline.cron.missed_executions` below (AB#5492).
+
+### Cron-aware stall detection: `octo.pipeline.cron.*` (AB#5492)
+
+On prod-1 the finAPI adapter failed on **every** hourly cron execution from 1.10. to 5.10.2026 — the
+exception was thrown before the adapter reported the execution start — so
+`PipelineStatistics.LastExecutionAt` froze at 30.9. 21:00Z while every health signal (workload
+Deployed/Online, service account Healthy, pod Running) stayed green. `octo.pipeline.execution.age`
+rose, but it cannot be alerted on: an idle `FromHttpRequest` pipeline legitimately has an age of
+months. What only the controller knows is the **schedule** — the `RtPipelineTrigger` cron expressions
+it hands to the scheduler. `Services/PipelineCronSchedule` turns "how old is the last run" into "how
+many runs are missing".
+
+| Instrument | Kind | Tags | Meaning |
+|---|---|---|---|
+| `octo.pipeline.cron.missed_executions` | observable gauge `{execution}` | `octo.tenant.id`, `octo.pipeline.rt_id`, `octo.pipeline.name`, `octo.cron.expression` | Cron fire times that passed since the pipeline's last recorded execution; **0 when on schedule**; capped at 10 000 |
+| `octo.pipeline.cron.interval` | observable gauge `s` | same | Seconds between the next two fire times (shortest when several triggers apply) — the cadence the count has to be read against |
+
+🔴 **The series exists only for a pipeline the schedule says something about**: deployment state
+`deployed` (the same collapsed predicate as the `octo.pipeline.deployment_state` tag — `Enabled == false`
+wins) **and** at least one enabled `PipelineTrigger` whose expression parses. HTTP and data-event
+pipelines, disabled pipelines and disabled triggers publish **nothing** — not a zero — so a rule
+`> 0` stays quiet for them by construction. This is deliberately the opposite of the
+`octo.pipeline.execution.*` rule ("healthy publishes zero"): here absence means "no schedule", and a
+zero would mean "on schedule" for a pipeline that has none.
+
+Rules of the count (`PipelineCronSchedule.CountMissedExecutions`):
+
+- **Parsed like Hangfire parses it.** Triggers run through MassTransit.Hangfire
+  (`TriggerManagementService.UpdateScheduleAsync`), which evaluates with Cronos: six whitespace-separated
+  fields include seconds, five are standard; the zone is `TimeZoneInfo.Local` of the controller because
+  `OctoRecurringSchedule` stamps every schedule with it. The `Cronos` package is referenced directly —
+  Hangfire internalises its copy.
+- Fire times **strictly after** the anchor and **no later than `now − 1 min`** (the grace: a fire time
+  whose execution is still being started or reported is not a miss), **summed** over the pipeline's
+  enabled cron triggers (a sum, not a union — two triggers are two expected executions, and the simpler
+  arithmetic is the one an alert can explain).
+- **Anchor** = `PipelineStatistics.LastExecutionAt`. A pipeline that has **never executed** falls back,
+  per trigger, to the trigger's `RtChangedDateTime` ?? `RtCreationDateTime` — the moment the schedule in
+  its current form came into force. A pipeline carries no deployment timestamp, so this is the only
+  anchor the entities offer; it is conservative, because a trigger's deployment state is rewritten on
+  every tenant start, so after a controller restart a never-executed pipeline counts afresh from that
+  moment. No execution and no anchor ⇒ no series.
+- Computed against the wall clock in the gauge callback (like the age), so the count grows between
+  sweeps; the trigger set itself is refreshed by the statistics sweep
+  (`FoldAndPruneExecutionsAsync` / `UpdateAllStatisticsAsync` → `ObserveCronTriggers`), read once per
+  tenant per sweep through the scheduler's own `GetTriggersAndPipelinesAsync` (enabled triggers →
+  pipelines, inverted). A failing trigger read keeps the previously published schedule instead of
+  withdrawing every cron series over a transient error; an unparsable expression is logged and skipped.
+- Gated by the per-tenant opt-in like every other pipeline gauge (AB#5432), pruned by
+  `RetainPipelines` / `ForgetTenant` like them.
+
+**Alerting contract (PromQL, Dash0):**
+
+```promql
+# A cron-triggered pipeline has missed at least one scheduled execution
+max by (octo_tenant_id, octo_pipeline_rt_id, octo_pipeline_name, octo_cron_expression)
+  ({otel_metric_name="octo.pipeline.cron.missed_executions", otel_metric_type="gauge"}) > 0
+```
+
+Use `>= 2` (or a `for:` of one sweep interval) to tolerate a single late run; the `interval` gauge
+tells how long that is for the pipeline at hand.
+
+Tests: `Services/PipelineCronScheduleTests` (fixed clock — parse formats, exclusive start, grace,
+sum, anchors, cap, kind handling, interval), the cron section of `Services/PipelineExecutionMetricsTests`
+(wall clock — contract tags, zero on schedule, N after N fire times, no series without trigger / when
+not deployed / disabled / without anchor, cap, joined expressions, withdrawal, opt-in) and
+`Services/PipelineExecutionServiceTests/ExecutionMetricsWiringTests` (the sweep feeds the schedule and
+survives a failing trigger read).
 
 Tests: `Services/PipelineExecutionMetricsTests` (through a real `MeterListener`, so the assertions
 are about the names and tags the exporter actually publishes; unique tenant per test because the
@@ -2757,6 +2825,7 @@ of almost every tenant, and a log line per tenant per interval is how a log beco
 | `octo.workload.deployment_state`, `.communication_state`, `.configuration_state`, `.sweep.age`, `.sweep.entities` | `Services/WorkloadStateMetrics` | The sweep does not read a non-opted-in tenant's entities at all |
 | `octo.pipeline.execution.count` | `Services/PipelineExecutionMetrics` | Gated at the recording site (`RecordExecutionOutcome(s)`) |
 | `octo.pipeline.execution.age`, `.failures`, `.successes` | `Services/PipelineExecutionMetrics` | Gated inside the gauge collection callbacks |
+| `octo.pipeline.cron.missed_executions`, `.interval` (AB#5492) | `Services/PipelineExecutionMetrics` | Gated inside the gauge collection callbacks |
 | `octo.workload.wake.count`, `.wake.duration`, `.hibernation.count` | `Services/WorkloadLifecycleMetrics` | Gated at the recording sites |
 | `octo.workload.hibernated`, `.offline_unexpected` | `Services/WorkloadLifecycleMetrics` | Gated inside the gauge collection callbacks |
 

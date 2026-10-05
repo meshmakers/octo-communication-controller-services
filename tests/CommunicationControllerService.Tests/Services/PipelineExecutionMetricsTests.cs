@@ -434,4 +434,302 @@ internal class PipelineExecutionMetricsTests
         await Assert.That(failures.Value).IsEqualTo(1);
         await Assert.That(failures.Tags["octo.pipeline.name"]).IsEqualTo("Accounting.ImportMail");
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // AB#5492 — octo.pipeline.cron.missed_executions / octo.pipeline.cron.interval
+    //
+    // The prod-1 finAPI adapter failed on every hourly cron execution for five days while every
+    // health signal stayed green; the age gauge rose but cannot be alerted on because an idle HTTP
+    // pipeline legitimately has an age of months. These tests pin the series contract the Dash0 rule
+    // is written against: the names, the four tags, zero for a healthy pipeline, N after N fire
+    // times, and — as important — NO series for pipelines the schedule says nothing about.
+    //
+    // Wall-clock tests: an interval of exactly k hours ending at `now - grace` contains exactly k
+    // hourly fire times (exclusive start, inclusive end) unless a fire time coincides with the
+    // start to the millisecond. The exact boundary cases live in PipelineCronScheduleTests.
+    // ---------------------------------------------------------------------------------------------
+
+    private static RtPipelineTrigger HourlyTrigger(DateTime? changedAt = null)
+    {
+        var trigger = RtEntityCreator.CreatePipelineTrigger("0 * * * *");
+        trigger.RtChangedDateTime = changedAt;
+        return trigger;
+    }
+
+    private static void ObserveCronPipeline(string tenantId, RtPipeline pipeline, DateTime? lastExecutionAt,
+        params RtPipelineTrigger[] triggers)
+    {
+        PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
+        PipelineExecutionMetrics.ObserveCronTriggers(tenantId, pipeline.RtId, triggers);
+        PipelineExecutionMetrics.ObserveStatistics(tenantId, pipeline.RtId, lastExecutionAt, 0, 0);
+    }
+
+    [Test]
+    public async Task CronPipelineOnSchedule_PublishesZeroMissedExecutionsWithTheContractTags()
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var pipeline = RtEntityCreator.CreatePipeline();
+        pipeline.Name = "Accounting.FinApiImport";
+
+        // Act
+        var recorded = Collect(tenantId,
+            () => ObserveCronPipeline(tenantId, pipeline, DateTime.UtcNow, HourlyTrigger()),
+            observeGauges: true);
+
+        // Assert
+        var missed = recorded.Single(r => r.Instrument == "octo.pipeline.cron.missed_executions");
+        await Assert.That(missed.Value).IsEqualTo(0);
+        await Assert.That(missed.Tags["octo.tenant.id"]).IsEqualTo(tenantId);
+        await Assert.That(missed.Tags["octo.pipeline.rt_id"]).IsEqualTo(pipeline.RtId.ToString());
+        await Assert.That(missed.Tags["octo.pipeline.name"]).IsEqualTo("Accounting.FinApiImport");
+        await Assert.That(missed.Tags["octo.cron.expression"]).IsEqualTo("0 * * * *");
+        // Exactly the four tags of the contract — the series only exists while deployed, so no state tag.
+        await Assert.That(missed.Tags.Count).IsEqualTo(4);
+
+        await Assert.That(Gauge(recorded, "octo.pipeline.cron.interval", pipeline.RtId)).IsEqualTo(3600);
+    }
+
+    /// <summary>The finAPI outage: hourly cron, last execution three fire times ago.</summary>
+    [Test]
+    public async Task CronPipelineThatMissedThreeFireTimes_PublishesThree()
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var pipeline = RtEntityCreator.CreatePipeline();
+        var lastExecutionAt = DateTime.UtcNow.Subtract(PipelineCronSchedule.Grace).AddHours(-3);
+
+        // Act
+        var recorded = Collect(tenantId,
+            () => ObserveCronPipeline(tenantId, pipeline, lastExecutionAt, HourlyTrigger()),
+            observeGauges: true);
+
+        // Assert
+        await Assert.That(Gauge(recorded, "octo.pipeline.cron.missed_executions", pipeline.RtId)).IsEqualTo(3);
+    }
+
+    /// <summary>
+    ///     The reason this is a separate instrument and not a threshold on the age: an HTTP or
+    ///     data-event pipeline has no schedule, so its silence is not a stall and must not even be a
+    ///     series the rule could match.
+    /// </summary>
+    [Test]
+    public async Task PipelineWithoutCronTrigger_HasNoCronSeriesButKeepsItsOtherGauges()
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var pipeline = RtEntityCreator.CreatePipeline();
+
+        // Act
+        var recorded = Collect(tenantId,
+            () => ObserveCronPipeline(tenantId, pipeline, DateTime.UtcNow.AddDays(-90)),
+            observeGauges: true);
+
+        // Assert
+        await Assert.That(recorded.Any(r => r.Instrument.StartsWith("octo.pipeline.cron."))).IsFalse();
+        await Assert.That(Gauge(recorded, "octo.pipeline.execution.age", pipeline.RtId)).IsNotNull();
+    }
+
+    [Test]
+    [Arguments(RtDeploymentStateEnum.Undeployed)]
+    [Arguments(RtDeploymentStateEnum.Pending)]
+    [Arguments(RtDeploymentStateEnum.Error)]
+    public async Task CronPipelineThatIsNotDeployed_HasNoCronSeries(RtDeploymentStateEnum state)
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var pipeline = RtEntityCreator.CreatePipeline();
+        pipeline.DeploymentState = state;
+
+        // Act
+        var recorded = Collect(tenantId,
+            () => ObserveCronPipeline(tenantId, pipeline, DateTime.UtcNow.AddDays(-3), HourlyTrigger()),
+            observeGauges: true);
+
+        // Assert
+        await Assert.That(recorded.Any(r => r.Instrument.StartsWith("octo.pipeline.cron."))).IsFalse();
+    }
+
+    /// <summary>Same collapsed predicate as the state tag: a disabled pipeline is not expected to fire.</summary>
+    [Test]
+    public async Task DisabledCronPipeline_HasNoCronSeries()
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var pipeline = RtEntityCreator.CreatePipeline();
+        pipeline.Enabled = false;
+
+        // Act
+        var recorded = Collect(tenantId,
+            () => ObserveCronPipeline(tenantId, pipeline, DateTime.UtcNow.AddDays(-3), HourlyTrigger()),
+            observeGauges: true);
+
+        // Assert
+        await Assert.That(recorded.Any(r => r.Instrument.StartsWith("octo.pipeline.cron."))).IsFalse();
+    }
+
+    /// <summary>A trigger the operator switched off is not a schedule, whatever the sweep hands in.</summary>
+    [Test]
+    public async Task DisabledTrigger_IsNotASchedule()
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var pipeline = RtEntityCreator.CreatePipeline();
+        var trigger = HourlyTrigger();
+        trigger.Enabled = false;
+
+        // Act
+        var recorded = Collect(tenantId,
+            () => ObserveCronPipeline(tenantId, pipeline, DateTime.UtcNow.AddDays(-3), trigger),
+            observeGauges: true);
+
+        // Assert
+        await Assert.That(recorded.Any(r => r.Instrument.StartsWith("octo.pipeline.cron."))).IsFalse();
+    }
+
+    /// <summary>
+    ///     A pipeline that never executed has no <c>LastExecutionAt</c>. Counting starts at the
+    ///     trigger's modification timestamp — a schedule that never produced a run is a stall too.
+    /// </summary>
+    [Test]
+    public async Task NeverExecutedCronPipeline_CountsFromTheTriggerTimestamp()
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var pipeline = RtEntityCreator.CreatePipeline();
+        var trigger = HourlyTrigger(changedAt: DateTime.UtcNow.Subtract(PipelineCronSchedule.Grace).AddHours(-2));
+
+        // Act
+        var recorded = Collect(tenantId,
+            () => ObserveCronPipeline(tenantId, pipeline, null, trigger),
+            observeGauges: true);
+
+        // Assert
+        await Assert.That(Gauge(recorded, "octo.pipeline.cron.missed_executions", pipeline.RtId)).IsEqualTo(2);
+    }
+
+    /// <summary>
+    ///     No execution and no trigger timestamp: nothing can be said, so nothing is published —
+    ///     a zero here would read as "on schedule". The age gauge still carries its sentinel.
+    /// </summary>
+    [Test]
+    public async Task NeverExecutedCronPipelineWithoutAnchor_HasNoCronSeries()
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var pipeline = RtEntityCreator.CreatePipeline();
+        var trigger = HourlyTrigger();
+        trigger.RtCreationDateTime = null;
+
+        // Act
+        var recorded = Collect(tenantId,
+            () => ObserveCronPipeline(tenantId, pipeline, null, trigger),
+            observeGauges: true);
+
+        // Assert
+        await Assert.That(Gauge(recorded, "octo.pipeline.cron.missed_executions", pipeline.RtId)).IsNull();
+        await Assert.That(Gauge(recorded, "octo.pipeline.execution.age", pipeline.RtId))
+            .IsEqualTo(PipelineExecutionMetrics.NeverExecuted);
+    }
+
+    [Test]
+    public async Task CronPipelineStalledForAMonth_IsCappedAtTenThousand()
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var pipeline = RtEntityCreator.CreatePipeline();
+        var everyMinute = RtEntityCreator.CreatePipelineTrigger("* * * * *");
+
+        // Act
+        var recorded = Collect(tenantId,
+            () => ObserveCronPipeline(tenantId, pipeline, DateTime.UtcNow.AddDays(-30), everyMinute),
+            observeGauges: true);
+
+        // Assert
+        await Assert.That(Gauge(recorded, "octo.pipeline.cron.missed_executions", pipeline.RtId))
+            .IsEqualTo(PipelineCronSchedule.MaxMissedExecutions);
+    }
+
+    /// <summary>Several triggers: expressions joined with ';', fire times summed, shortest interval.</summary>
+    [Test]
+    public async Task SeveralCronTriggers_AreJoinedInTheTagAndSummedInTheValue()
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var pipeline = RtEntityCreator.CreatePipeline();
+        var lastExecutionAt = DateTime.UtcNow.Subtract(PipelineCronSchedule.Grace).AddHours(-2);
+
+        // Act — hourly misses 2, the quarter-hourly one 8.
+        var recorded = Collect(tenantId,
+            () => ObserveCronPipeline(tenantId, pipeline, lastExecutionAt, HourlyTrigger(),
+                RtEntityCreator.CreatePipelineTrigger("*/15 * * * *")),
+            observeGauges: true);
+
+        // Assert
+        var missed = recorded.Single(r => r.Instrument == "octo.pipeline.cron.missed_executions");
+        await Assert.That(missed.Value).IsEqualTo(10);
+        await Assert.That(missed.Tags["octo.cron.expression"]).IsEqualTo("0 * * * *;*/15 * * * *");
+        await Assert.That(Gauge(recorded, "octo.pipeline.cron.interval", pipeline.RtId)).IsEqualTo(900);
+    }
+
+    /// <summary>
+    ///     A malformed expression could never have been scheduled; it must not take down the series
+    ///     of a pipeline whose other trigger is fine.
+    /// </summary>
+    [Test]
+    public async Task UnparsableCronExpression_IsIgnored()
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var pipeline = RtEntityCreator.CreatePipeline();
+
+        // Act
+        var recorded = Collect(tenantId,
+            () => ObserveCronPipeline(tenantId, pipeline, DateTime.UtcNow, HourlyTrigger(),
+                RtEntityCreator.CreatePipelineTrigger("every full hour")),
+            observeGauges: true);
+
+        // Assert
+        var missed = recorded.Single(r => r.Instrument == "octo.pipeline.cron.missed_executions");
+        await Assert.That(missed.Tags["octo.cron.expression"]).IsEqualTo("0 * * * *");
+    }
+
+    /// <summary>
+    ///     The sweep hands in the current trigger set on every pass. A trigger that was deleted or
+    ///     disabled withdraws the series instead of leaving a stale count on the wire.
+    /// </summary>
+    [Test]
+    public async Task RemovingTheLastCronTrigger_WithdrawsTheCronSeries()
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var pipeline = RtEntityCreator.CreatePipeline();
+        ObserveCronPipeline(tenantId, pipeline, DateTime.UtcNow.AddDays(-3), HourlyTrigger());
+
+        // Act
+        var recorded = Collect(tenantId,
+            () => PipelineExecutionMetrics.ObserveCronTriggers(tenantId, pipeline.RtId, []),
+            observeGauges: true);
+
+        // Assert
+        await Assert.That(recorded.Any(r => r.Instrument.StartsWith("octo.pipeline.cron."))).IsFalse();
+        await Assert.That(Gauge(recorded, "octo.pipeline.execution.age", pipeline.RtId)).IsNotNull();
+    }
+
+    /// <summary>AB#5432 applies here as well: the cron gauges answer to the same per-tenant switch.</summary>
+    [Test]
+    public async Task CronGauges_HonourTheTenantOptIn()
+    {
+        // Arrange
+        var tenantId = UniqueTenantWithoutOptIn();
+        var pipeline = RtEntityCreator.CreatePipeline();
+
+        // Act
+        var recorded = Collect(tenantId,
+            () => ObserveCronPipeline(tenantId, pipeline, DateTime.UtcNow.AddDays(-3), HourlyTrigger()),
+            observeGauges: true);
+
+        // Assert
+        await Assert.That(recorded).IsEmpty();
+    }
 }
