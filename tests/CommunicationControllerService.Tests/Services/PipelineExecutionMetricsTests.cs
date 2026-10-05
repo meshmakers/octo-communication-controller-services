@@ -172,7 +172,7 @@ internal class PipelineExecutionMetricsTests
         // Act
         var recorded = Collect(tenantId, () =>
         {
-            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
+            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline, isScheduled: true);
             PipelineExecutionMetrics.ObserveStatistics(tenantId, pipeline.RtId, DateTime.UtcNow, 12, 0);
         }, observeGauges: true);
 
@@ -199,7 +199,7 @@ internal class PipelineExecutionMetricsTests
         // Act
         var recorded = Collect(tenantId, () =>
         {
-            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
+            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline, isScheduled: true);
             PipelineExecutionMetrics.ObserveStatistics(tenantId, pipeline.RtId,
                 DateTime.UtcNow.AddHours(-4), 2, 0);
         }, observeGauges: true);
@@ -225,7 +225,7 @@ internal class PipelineExecutionMetricsTests
         // Act
         var recorded = Collect(tenantId, () =>
         {
-            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
+            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline, isScheduled: true);
             PipelineExecutionMetrics.ObserveStatistics(tenantId, pipeline.RtId, null, 0, 0);
         }, observeGauges: true);
 
@@ -251,7 +251,7 @@ internal class PipelineExecutionMetricsTests
         // Act
         var recorded = Collect(tenantId, () =>
         {
-            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
+            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline, isScheduled: true);
             PipelineExecutionMetrics.ObserveStatistics(tenantId, pipeline.RtId,
                 DateTime.UtcNow.AddDays(-30), 0, 0);
         }, observeGauges: true);
@@ -276,7 +276,7 @@ internal class PipelineExecutionMetricsTests
         // Act
         var recorded = Collect(tenantId, () =>
         {
-            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
+            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline, isScheduled: true);
             PipelineExecutionMetrics.ObserveStatistics(tenantId, pipeline.RtId, DateTime.UtcNow, 0, 0);
         }, observeGauges: true);
 
@@ -298,7 +298,7 @@ internal class PipelineExecutionMetricsTests
         var deleted = RtEntityCreator.CreatePipeline();
         foreach (var pipeline in new[] { surviving, deleted })
         {
-            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
+            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline, isScheduled: true);
             PipelineExecutionMetrics.ObserveStatistics(tenantId, pipeline.RtId, DateTime.UtcNow, 0, 0);
         }
 
@@ -322,7 +322,7 @@ internal class PipelineExecutionMetricsTests
         // Arrange
         var tenantId = UniqueTenant();
         var pipeline = RtEntityCreator.CreatePipeline();
-        PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
+        PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline, isScheduled: true);
         PipelineExecutionMetrics.ObserveStatistics(tenantId, pipeline.RtId, DateTime.UtcNow, 0, 0);
 
         // Act
@@ -350,7 +350,7 @@ internal class PipelineExecutionMetricsTests
         {
             PipelineExecutionMetrics.RecordExecutionOutcome(tenantId, RtPipelineExecutionStatusEnum.Failed);
             PipelineExecutionMetrics.RecordExecutionOutcomes(tenantId, RtPipelineExecutionStatusEnum.Completed, 5);
-            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
+            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline, isScheduled: true);
             PipelineExecutionMetrics.ObserveStatistics(tenantId, pipeline.RtId, DateTime.UtcNow, 3, 1);
         }, observeGauges: true);
 
@@ -369,7 +369,7 @@ internal class PipelineExecutionMetricsTests
         // Arrange — a tenant that published, then opted out.
         var tenantId = UniqueTenant();
         var pipeline = RtEntityCreator.CreatePipeline();
-        PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
+        PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline, isScheduled: true);
         PipelineExecutionMetrics.ObserveStatistics(tenantId, pipeline.RtId, DateTime.UtcNow, 3, 1);
 
         var whileOptedIn = Collect(tenantId, () => { }, observeGauges: true);
@@ -400,7 +400,7 @@ internal class PipelineExecutionMetricsTests
         // Act
         var recorded = Collect(tenantId, () =>
         {
-            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
+            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline, isScheduled: true);
             PipelineExecutionMetrics.ObserveStatistics(tenantId, pipeline.RtId, DateTime.UtcNow, 3, 1);
             PipelineExecutionMetrics.RecordExecutionOutcome(tenantId, RtPipelineExecutionStatusEnum.Failed);
         }, observeGauges: true);
@@ -426,12 +426,88 @@ internal class PipelineExecutionMetricsTests
         var recorded = Collect(tenantId, () =>
         {
             PipelineExecutionMetrics.ObserveStatistics(tenantId, pipeline.RtId, DateTime.UtcNow, 3, 1);
-            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
+            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline, isScheduled: true);
         }, observeGauges: true);
 
         // Assert
         var failures = recorded.Single(r => r.Instrument == "octo.pipeline.execution.failures");
         await Assert.That(failures.Value).IsEqualTo(1);
         await Assert.That(failures.Tags["octo.pipeline.name"]).IsEqualTo("Accounting.ImportMail");
+    }
+
+    /// <summary>
+    ///     AB#5492. The age gauge alone cannot be alerted on: measured on test-2, <c>age &gt; 3600</c>
+    ///     over deployed pipelines matched 10 of 102 and their ages were 64 to 81 days — every one a
+    ///     <c>FromHttpRequest</c> pipeline resting between calls, for which "has not run in 64 days"
+    ///     is the normal state, not a fault. This tag is what lets a rule ask only the pipelines that
+    ///     owe an execution.
+    /// </summary>
+    [Test]
+    [Arguments(true, "scheduled")]
+    [Arguments(false, "unscheduled")]
+    public async Task TriggerKind_FollowsWhetherACronTriggerTargetsThePipeline(bool isScheduled, string expected)
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var pipeline = RtEntityCreator.CreatePipeline();
+
+        // Act
+        var recorded = Collect(tenantId, () =>
+        {
+            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline, isScheduled);
+            PipelineExecutionMetrics.ObserveStatistics(tenantId, pipeline.RtId, DateTime.UtcNow, 1, 0);
+        }, observeGauges: true);
+
+        // Assert
+        await Assert.That(recorded.First(r => r.Instrument == "octo.pipeline.execution.age")
+            .Tags["octo.pipeline.trigger_kind"]).IsEqualTo(expected);
+    }
+
+    /// <summary>
+    ///     A failed trigger read must report <c>unknown</c>, never <c>unscheduled</c>. The two are
+    ///     not interchangeable: a rule filters on <c>scheduled</c>, so labelling a cron pipeline
+    ///     "unscheduled" would silently remove it from the alert — the failure mode this whole epic
+    ///     exists to eliminate. Unknown matches no rule, which is the safe direction.
+    /// </summary>
+    [Test]
+    public async Task TriggerKind_WhenTheTriggersCouldNotBeRead_IsUnknownRatherThanUnscheduled()
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var pipeline = RtEntityCreator.CreatePipeline();
+
+        // Act
+        var recorded = Collect(tenantId, () =>
+        {
+            PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline, isScheduled: null);
+            PipelineExecutionMetrics.ObserveStatistics(tenantId, pipeline.RtId, DateTime.UtcNow, 1, 0);
+        }, observeGauges: true);
+
+        // Assert
+        var tag = recorded.First(r => r.Instrument == "octo.pipeline.execution.age")
+            .Tags["octo.pipeline.trigger_kind"];
+        await Assert.That(tag).IsEqualTo("unknown");
+        await Assert.That(tag).IsNotEqualTo("unscheduled");
+    }
+
+    /// <summary>
+    ///     A pipeline that only ever reached <c>ObserveStatistics</c> — the sweep threw before the
+    ///     identity half — must not claim a schedule it was never told about.
+    /// </summary>
+    [Test]
+    public async Task TriggerKind_WithoutObservePipeline_IsUnknown()
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var pipeline = RtEntityCreator.CreatePipeline();
+
+        // Act
+        var recorded = Collect(tenantId,
+            () => PipelineExecutionMetrics.ObserveStatistics(tenantId, pipeline.RtId, DateTime.UtcNow, 1, 0),
+            observeGauges: true);
+
+        // Assert
+        await Assert.That(recorded.First(r => r.Instrument == "octo.pipeline.execution.age")
+            .Tags["octo.pipeline.trigger_kind"]).IsEqualTo("unknown");
     }
 }

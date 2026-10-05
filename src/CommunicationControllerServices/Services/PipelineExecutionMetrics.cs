@@ -196,12 +196,34 @@ internal static class PipelineExecutionMetrics
         description: "Executions of this pipeline that succeeded in the last hour");
     // ReSharper restore NotAccessedField.Local
 
+    /// <summary>
+    ///     An enabled <c>PipelineTrigger</c> targets this pipeline, so it is expected to run on a
+    ///     schedule and a rising age is a fault.
+    /// </summary>
+    public const string TriggerKindScheduled = "scheduled";
+
+    /// <summary>
+    ///     No enabled <c>PipelineTrigger</c> targets this pipeline. It may still run — through a
+    ///     <c>FromHttpRequest</c> node, a data event, or by hand — but nothing here knows when it is
+    ///     supposed to, so a rising age says nothing.
+    /// </summary>
+    public const string TriggerKindUnscheduled = "unscheduled";
+
+    /// <summary>
+    ///     The triggers could not be read. Deliberately distinct from
+    ///     <see cref="TriggerKindUnscheduled" />: a failed read must not claim that a cron pipeline
+    ///     has no schedule, because an alert rule filtering on <see cref="TriggerKindScheduled" />
+    ///     would then stop seeing it. Unknown matches no rule, which is the safe direction.
+    /// </summary>
+    public const string TriggerKindUnknown = "unknown";
+
     private sealed record PipelineGaugeEntry(
         string PipelineName,
         string DeploymentState,
         DateTime? LastExecutionAt,
         long LastHourSuccessCount,
-        long LastHourFailureCount);
+        long LastHourFailureCount,
+        string TriggerKind);
 
     /// <summary>
     ///     Counts one adapter-reported execution outcome. Silently does nothing for a tenant that
@@ -251,7 +273,14 @@ internal static class PipelineExecutionMetrics
     ///     the sweep, which is the only place that holds the entity; the statistics arrive
     ///     separately via <see cref="ObserveStatistics" />.
     /// </summary>
-    public static void ObservePipeline(string tenantId, RtPipeline pipeline)
+    /// <param name="tenantId">The tenant the pipeline belongs to.</param>
+    /// <param name="pipeline">The pipeline entity the sweep is holding.</param>
+    /// <param name="isScheduled">
+    ///     Whether an enabled <c>PipelineTrigger</c> targets this pipeline. <c>null</c> when the
+    ///     triggers could not be read — see <see cref="TriggerKindUnknown" /> for why that is not
+    ///     folded into "unscheduled".
+    /// </param>
+    public static void ObservePipeline(string tenantId, RtPipeline pipeline, bool? isScheduled)
     {
         // Enabled=false wins over the persisted deployment state: a disabled pipeline is not
         // rolled out to its adapter regardless of what DeploymentState still says, and collapsing
@@ -261,10 +290,18 @@ internal static class PipelineExecutionMetrics
             ? "disabled"
             : pipeline.DeploymentState.ToString().ToLowerInvariant();
 
+        var triggerKind = isScheduled switch
+        {
+            true => TriggerKindScheduled,
+            false => TriggerKindUnscheduled,
+            null => TriggerKindUnknown,
+        };
+
         Update(tenantId, pipeline.RtId, e => e with
         {
             PipelineName = pipeline.Name ?? string.Empty,
             DeploymentState = deploymentState,
+            TriggerKind = triggerKind,
         });
     }
 
@@ -333,7 +370,7 @@ internal static class PipelineExecutionMetrics
         Func<PipelineGaugeEntry, PipelineGaugeEntry> change)
     {
         States.AddOrUpdate((tenantId, pipelineRtId.ToString()),
-            _ => change(new PipelineGaugeEntry(string.Empty, "unknown", null, 0, 0)),
+            _ => change(new PipelineGaugeEntry(string.Empty, "unknown", null, 0, 0, TriggerKindUnknown)),
             (_, existing) => change(existing));
     }
 
@@ -377,5 +414,11 @@ internal static class PipelineExecutionMetrics
         // not multiply series.
         new("octo.pipeline.name", entry.PipelineName),
         new("octo.pipeline.deployment_state", entry.DeploymentState),
+        // AB#5492. Without this the age gauge cannot be alerted on: measured on test-2,
+        // `age > 3600` over deployed pipelines matched 10 of 102 and their ages were 64 to 81
+        // days — all FromHttpRequest pipelines resting between calls, for which "has not run in
+        // 64 days" is the normal state. One bounded tag (three values) separates the pipelines
+        // that owe an execution from the ones that do not.
+        new("octo.pipeline.trigger_kind", entry.TriggerKind),
     ];
 }

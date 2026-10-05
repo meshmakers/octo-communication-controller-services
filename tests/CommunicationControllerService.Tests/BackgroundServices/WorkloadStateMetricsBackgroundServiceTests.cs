@@ -201,7 +201,7 @@ internal class WorkloadStateMetricsBackgroundServiceTests
         {
             await _service.SweepAllTenantsAsync();
 
-            PipelineExecutionMetrics.ObservePipeline(_tenantId, pipeline);
+            PipelineExecutionMetrics.ObservePipeline(_tenantId, pipeline, isScheduled: true);
             PipelineExecutionMetrics.ObserveStatistics(_tenantId, pipeline.RtId, DateTime.UtcNow, 1, 0);
             PipelineExecutionMetrics.RecordExecutionOutcome(_tenantId, RtPipelineExecutionStatusEnum.Failed);
             WorkloadLifecycleMetrics.RecordHibernated(_tenantId, workloadRtId, "Mesh Adapter");
@@ -229,7 +229,7 @@ internal class WorkloadStateMetricsBackgroundServiceTests
         var workloadRtId = OctoObjectId.GenerateNewId();
 
         await _service.SweepAllTenantsAsync();
-        PipelineExecutionMetrics.ObservePipeline(_tenantId, pipeline);
+        PipelineExecutionMetrics.ObservePipeline(_tenantId, pipeline, isScheduled: true);
         PipelineExecutionMetrics.ObserveStatistics(_tenantId, pipeline.RtId, DateTime.UtcNow, 1, 0);
         WorkloadLifecycleMetrics.RecordHibernated(_tenantId, workloadRtId, "Mesh Adapter");
 

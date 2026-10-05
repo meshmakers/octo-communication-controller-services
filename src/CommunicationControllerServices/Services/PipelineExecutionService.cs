@@ -588,6 +588,48 @@ internal class PipelineExecutionService(
         public long AvgDurationMs => ExecutionWithDurationCount > 0 ? TotalDurationMs / ExecutionWithDurationCount : 0;
     }
 
+    /// <summary>
+    ///     The rtIds of the tenant's pipelines that an ENABLED PipelineTrigger targets, or
+    ///     <c>null</c> when the triggers could not be read.
+    /// </summary>
+    /// <remarks>
+    ///     AB#5492. PipelineTrigger is the cron trigger and nothing else — the CK model defines it
+    ///     as "a scheduled trigger that executes one or more pipelines based on a cron expression"
+    ///     and gives it a CronExpression attribute. An HTTP-driven pipeline has no trigger entity at
+    ///     all; it runs from its own FromHttpRequest node. So membership in this set is exactly the
+    ///     question "does this pipeline owe an execution", which is what makes the age gauge
+    ///     alertable.
+    ///
+    ///     The repository filters on Enabled, so a pipeline whose trigger was switched off drops out
+    ///     and stops being expected to run — the same reasoning the deployment_state tag follows.
+    ///
+    ///     Returning null rather than an empty set on failure is deliberate: an empty set would
+    ///     label every pipeline "unscheduled" and silently suppress the very alert this enables.
+    ///     One read per sweep for the whole tenant, so it costs one query per sweep, not per
+    ///     pipeline.
+    /// </remarks>
+    private async Task<IReadOnlySet<string>?> TryGetScheduledPipelineRtIdsAsync(string tenantId)
+    {
+        try
+        {
+            var triggersAndPipelines = await communicationRepository.GetTriggersAndPipelinesAsync(tenantId);
+            return triggersAndPipelines.Values
+                .SelectMany(pipelines => pipelines)
+                .Select(pipeline => pipeline.RtId.ToString())
+                .ToHashSet();
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e,
+                "[{TenantId}] Failed to read pipeline triggers; trigger kind is reported as unknown",
+                tenantId);
+            return null;
+        }
+    }
+
+    private static bool? IsScheduled(IReadOnlySet<string>? scheduledRtIds, OctoObjectId pipelineRtId) =>
+        scheduledRtIds?.Contains(pipelineRtId.ToString());
+
     public async Task UpdateAllStatisticsAsync(string tenantId)
     {
         Logger.Debug("[{TenantId}] Updating statistics for all pipelines", tenantId);
@@ -595,6 +637,7 @@ internal class PipelineExecutionService(
         try
         {
             var pipelines = await communicationRepository.GetAllPipelinesAsync(tenantId);
+            var scheduledRtIds = await TryGetScheduledPipelineRtIdsAsync(tenantId);
 
             foreach (var pipeline in pipelines)
             {
@@ -602,7 +645,8 @@ internal class PipelineExecutionService(
                 {
                     // Note: CkTypeId should never be null for a valid pipeline
                     var pipelineRtEntityId = new RtEntityId(pipeline.CkTypeId!, pipeline.RtId);
-                    PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
+                    PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline,
+                        IsScheduled(scheduledRtIds, pipeline.RtId));
                     await UpdateStatisticsAsync(tenantId, pipelineRtEntityId);
                 }
                 catch (Exception e)
@@ -633,6 +677,7 @@ internal class PipelineExecutionService(
         try
         {
             var pipelines = await communicationRepository.GetAllPipelinesAsync(tenantId);
+            var scheduledRtIds = await TryGetScheduledPipelineRtIdsAsync(tenantId);
 
             foreach (var pipeline in pipelines)
             {
@@ -642,7 +687,8 @@ internal class PipelineExecutionService(
                 // AB#5425: the identity half of the gauge labels. Published before the fold so
                 // that a pipeline whose fold or statistics update throws is still exported with a
                 // readable name rather than an empty one.
-                PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline);
+                PipelineExecutionMetrics.ObservePipeline(tenantId, pipeline,
+                    IsScheduled(scheduledRtIds, pipeline.RtId));
 
                 try
                 {
