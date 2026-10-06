@@ -19,7 +19,10 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 /// <para><b>LastHour</b> is the exception: a rolling 60-minute count over the retained executions
 /// (it feeds the alertable failure gauge, which must not reset at every clock hour). The fold
 /// boundary never passes <c>now - retentionHours</c> (≥ 1h), so the rolling hour is always
-/// completely retained and the count is exact.</para>
+/// completely retained and the count is exact. Single exception: the one-time upgrade fold of
+/// statistics written before AB#5583 may move the boundary up to one hour further (see
+/// <c>PipelineExecutionService.FoldAndPrunePipelineAsync</c>), so LastHour can undercount for at
+/// most one hour after the upgrade.</para>
 /// <para><b>Classification</b> is shared by every path: Completed = success, Failed = failure;
 /// Running, Interrupted and Cancelled count as neither (<see cref="Classify" />).</para>
 /// </remarks>
@@ -60,7 +63,8 @@ internal static class PipelineStatisticsFolder
     /// <summary>
     /// Hour-aligned fold cutoff. Terminal executions that started before it are folded and
     /// deleted. Always at or before <c>now - retentionHours</c> (so an execution is kept at least
-    /// that long) and never moves backwards behind <paramref name="foldedBefore" />.
+    /// that long) and never moves backwards behind <paramref name="foldedBefore" />. The one-time
+    /// upgrade of pre-AB#5583 statistics may move the boundary past this cutoff by up to one hour.
     /// </summary>
     public static DateTime FoldCutoff(DateTime now, int retentionHours, DateTime? foldedBefore)
     {

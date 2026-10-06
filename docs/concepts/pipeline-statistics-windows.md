@@ -36,7 +36,8 @@ a 24-slot histogram ending with the current hour sums to `Last24Hours*`.
 **LastHour is rolling.** `LastHour*` stays a rolling 60-minute count over the retained
 executions: it feeds the alertable `octo.pipeline.execution.failures` gauge, which must not reset
 to zero at every clock hour. The fold cutoff never passes `now - retentionHours` (≥ 1 h), so the
-rolling hour is always fully retained and the count is exact.
+rolling hour is always fully retained and the count is exact — except once, right after the upgrade
+(see **Upgrade** below).
 
 **One classification.** Completed = success, Failed = failure; Running, Interrupted and Cancelled
 count as neither — in the fold, the snapshot and the rolling hour alike.
@@ -60,8 +61,14 @@ the next fold merges it into its hour (minutes later).
 **Upgrade.** Statistics written before AB#5583 have no `FoldedBefore` and their newest bucket may
 hold part of an hour whose rest is still retained. The first fold after the upgrade moves the
 boundary past that hour, i.e. it folds (and deletes) up to one hour of executions earlier than the
-retention would — once. Until that first fold the counters are computed from buckets + retained
-executions, but only the folded buckets are persisted.
+retention would — once. With the default retention of 1 h that hour can lie inside the rolling
+60 minutes, so `LastHour*` (and the failure gauge it feeds) can undercount for at most one hour after
+the upgrade. Capping the boundary instead would leave the hour split and lose its folded part for
+good. Until that first fold the counters are computed from buckets + retained
+executions, but only the folded buckets are persisted. Statistics without any folded bucket in the
+30-day window (a new pipeline, or old buckets that all aged out) cannot have a split hour: the
+first statistics sweep sets `FoldedBefore` to the start of the 30-day window and persists the live
+snapshot right away.
 
 ## Clients
 

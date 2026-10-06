@@ -408,6 +408,15 @@ internal class PipelineExecutionService(
                 .Where(b => b.HourStartAt >= windowStart30Days)
                 .ToList();
 
+            if (foldedBefore == null && foldedHistory.Count == 0)
+            {
+                // No folded history in the window (new statistics, or pre-AB#5583 statistics whose
+                // buckets all aged out): no hour can be split between folded and retained
+                // executions, so the boundary can be set right away and the live snapshot persisted
+                // in this sweep — instead of totals without bars until the next fold.
+                foldedBefore = windowStart30Days;
+            }
+
             // Retained executions are the live half. With a fold boundary, only hours at or after
             // it are snapshotted — earlier ones are folded history, and a straggler there (an
             // execution that turned terminal after its hour was folded) waits for the next fold

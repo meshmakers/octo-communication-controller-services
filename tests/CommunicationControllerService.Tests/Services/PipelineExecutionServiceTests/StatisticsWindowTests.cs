@@ -153,6 +153,27 @@ internal class StatisticsWindowTests : PipelineExecutionServiceTestsBase
         await Assert.That(_upserted.HourlyBuckets!.Count).IsEqualTo(1);
     }
 
+    [Test]
+    public async Task Update_NewStatistics_SetsTheBoundary_AndPersistsTheLiveSnapshotRightAway()
+    {
+        // No statistics yet: nothing is folded, so no hour can be split — bars and totals must
+        // agree from the very first sweep.
+        CommunicationRepository.GetPipelineStatisticsAsync(TenantId, PipelineId).Returns((RtPipelineStatistics?)null);
+        Retained(
+            Exec(CurrentHour.AddHours(-1).AddMinutes(40), RtPipelineExecutionStatusEnum.Failed),
+            Exec(CurrentHour.AddMinutes(10), RtPipelineExecutionStatusEnum.Completed));
+
+        await PipelineExecutionService.UpdateStatisticsAsync(TenantId, PipelineId);
+
+        var s = _upserted!;
+        await Assert.That(s.FoldedBefore)
+            .IsEqualTo(PipelineStatisticsFolder.WindowStart(Now, PipelineStatisticsFolder.RetentionWindowHours));
+        await Assert.That(s.HourlyBuckets!.Sum(b => b.SuccessCount)).IsEqualTo(s.Last24HoursSuccessCount);
+        await Assert.That(s.HourlyBuckets!.Sum(b => b.FailureCount)).IsEqualTo(s.Last24HoursFailureCount);
+        await Assert.That(s.Last24HoursSuccessCount).IsEqualTo(1);
+        await Assert.That(s.Last24HoursFailureCount).IsEqualTo(1);
+    }
+
     // ---------------------------------------------------------------- FoldAndPruneExecutionsAsync
 
     [Test]
@@ -264,6 +285,44 @@ internal class StatisticsWindowTests : PipelineExecutionServiceTestsBase
         await Assert.That(writes[0].FoldedBefore).IsEqualTo(CurrentHour.AddHours(-1));
         await Assert.That(writes[0].HourlyBuckets!.Count).IsEqualTo(0);
         await Assert.That(writes[^1].Last24HoursSuccessCount).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task Fold_RepeatedSweepsWithoutNewExecutions_AreIdempotent()
+    {
+        Statistics(CurrentHour.AddHours(-1),
+            Bucket(CurrentHour.AddHours(-3), 2, 1), // folded history
+            Bucket(CurrentHour.AddHours(-1), 9, 9)); // stale snapshot
+        CommunicationRepository.GetTerminalExecutionsOlderThanAsync(TenantId, PipelineId,
+                Arg.Any<DateTime>(), Arg.Any<int>())
+            .Returns(new List<RtPipelineExecution>());
+        Retained(
+            Exec(CurrentHour.AddHours(-1).AddMinutes(5), RtPipelineExecutionStatusEnum.Completed),
+            Exec(CurrentHour.AddMinutes(5), RtPipelineExecutionStatusEnum.Failed));
+
+        var writes = new List<RtPipelineStatistics>();
+        CommunicationRepository.UpsertPipelineStatisticsAsync(TenantId,
+                Arg.Do<RtPipelineStatistics>(s =>
+                {
+                    writes.Add(s);
+                    CommunicationRepository.GetPipelineStatisticsAsync(TenantId, PipelineId).Returns(s);
+                }), PipelineId)
+            .Returns(Task.CompletedTask);
+
+        await PipelineExecutionService.FoldAndPruneExecutionsAsync(TenantId, 1);
+        var first = writes[^1];
+        await PipelineExecutionService.FoldAndPruneExecutionsAsync(TenantId, 1);
+        var second = writes[^1];
+
+        // Same boundary, no fold write: the snapshot is replaced, never added to.
+        await Assert.That(writes.Count).IsEqualTo(2);
+        await Assert.That(second.FoldedBefore).IsEqualTo(first.FoldedBefore);
+        await Assert.That(second.Last24HoursSuccessCount).IsEqualTo(first.Last24HoursSuccessCount);
+        await Assert.That(second.Last24HoursFailureCount).IsEqualTo(first.Last24HoursFailureCount);
+        await Assert.That(second.Last24HoursSuccessCount).IsEqualTo(2 + 1);
+        await Assert.That(second.Last24HoursFailureCount).IsEqualTo(1 + 1);
+        await Assert.That(second.HourlyBuckets!.Select(b => (b.HourStartAt, b.SuccessCount, b.FailureCount)))
+            .IsEquivalentTo(first.HourlyBuckets!.Select(b => (b.HourStartAt, b.SuccessCount, b.FailureCount)));
     }
 
     // ---------------------------------------------------------------- helpers
