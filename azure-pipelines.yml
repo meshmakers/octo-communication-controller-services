@@ -1,5 +1,5 @@
 # Root-level CI pipeline for octo-communication-controller-services, using shared
-# templates from octo-pipeline-templates@tpl-v1.0.0.
+# templates from octo-pipeline-templates@tpl-v1.0.1.
 #
 # Phase 7 finale (2026-06-14): the last two .NET services on the legacy
 # devops-build/ flow get their root yaml. Without the migration the
