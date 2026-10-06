@@ -5,6 +5,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
 using NSubstitute;
 
@@ -17,6 +18,13 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Backgroun
 ///     tenant must publish adapters, applications AND pools in one pass, and a tenant that drops out
 ///     must stop publishing — otherwise its sweep-age gauge climbs forever and pages somebody about
 ///     a tenant nobody is watching.
+///
+///     <para>
+///         It is also the process's single reader of <c>PublishWorkloadObservability</c>: the verdict
+///         it publishes into <see cref="WorkloadObservabilityOptIn" /> is what gates the pipeline and
+///         lifecycle instruments, which cannot read the flag themselves. That wiring is pinned here
+///         too — it has no other test that would notice it breaking.
+///     </para>
 /// </summary>
 internal class WorkloadStateMetricsBackgroundServiceTests
 {
@@ -41,6 +49,9 @@ internal class WorkloadStateMetricsBackgroundServiceTests
         // be disposed. Forget the tenants too — the instruments are process-wide.
         _service.Dispose();
         WorkloadStateMetrics.ForgetTenant(_tenantId);
+        PipelineExecutionMetrics.ForgetTenant(_tenantId);
+        WorkloadLifecycleMetrics.ForgetTenant(_tenantId);
+        WorkloadObservabilityOptIn.Forget(_tenantId);
     }
 
     private readonly string _tenantId = $"tenant-{Guid.NewGuid():N}";
@@ -59,6 +70,10 @@ internal class WorkloadStateMetricsBackgroundServiceTests
         listener.SetMeasurementEventCallback<int>((instrument, _, tags, _) =>
             recorded.Add(new Recorded(instrument.Name, ToDictionary(tags))));
         listener.SetMeasurementEventCallback<double>((instrument, _, tags, _) =>
+            recorded.Add(new Recorded(instrument.Name, ToDictionary(tags))));
+        // The pipeline and lifecycle families share this meter and report longs — they are gated by
+        // the same opt-in this sweep publishes, so the tests below have to see them.
+        listener.SetMeasurementEventCallback<long>((instrument, _, tags, _) =>
             recorded.Add(new Recorded(instrument.Name, ToDictionary(tags))));
         listener.Start();
 
@@ -164,6 +179,106 @@ internal class WorkloadStateMetricsBackgroundServiceTests
 
         // Assert
         await Assert.That(recorded).IsEmpty();
+    }
+
+    /// <summary>
+    ///     AB#5432: one switch, one reader. This sweep is the only code that reads
+    ///     <c>PublishWorkloadObservability</c>, and the pipeline and lifecycle instruments — which are
+    ///     fed from event paths and gauge callbacks that cannot await a repository — decide from the
+    ///     verdict it publishes. If this wiring broke, those two families would go silent for every
+    ///     tenant and no test of theirs would notice.
+    /// </summary>
+    [Test]
+    public async Task OptedInTenant_AlsoOpensTheGateForThePipelineAndLifecycleFamilies()
+    {
+        // Arrange
+        ArrangeTenant(optedIn: true, [RtEntityCreator.CreateAdapter()], []);
+        var pipeline = RtEntityCreator.CreatePipeline();
+        var workloadRtId = OctoObjectId.GenerateNewId();
+
+        // Act
+        var recorded = Collect(async () =>
+        {
+            await _service.SweepAllTenantsAsync();
+
+            PipelineExecutionMetrics.ObservePipeline(_tenantId, pipeline, isScheduled: true);
+            PipelineExecutionMetrics.ObserveStatistics(_tenantId, pipeline.RtId, DateTime.UtcNow, 1, 0);
+            PipelineExecutionMetrics.RecordExecutionOutcome(_tenantId, RtPipelineExecutionStatusEnum.Failed);
+            WorkloadLifecycleMetrics.RecordHibernated(_tenantId, workloadRtId, "Mesh Adapter");
+        });
+
+        // Assert
+        await Assert.That(recorded.Any(r => r.Instrument == "octo.pipeline.execution.count")).IsTrue();
+        await Assert.That(recorded.Any(r => r.Instrument == "octo.pipeline.execution.age")).IsTrue();
+        await Assert.That(recorded.Any(r => r.Instrument == "octo.workload.hibernation.count")).IsTrue();
+        await Assert.That(recorded.Any(r => r.Instrument == "octo.workload.hibernated")).IsTrue();
+    }
+
+    /// <summary>
+    ///     Opting out has to stop <b>all three</b> families and drop their state. The gauges would stop
+    ///     on their own (their gate is in the collection callback), but the in-memory entries have to go
+    ///     as well, or a tenant that opts back in weeks later reports the state it had when it left.
+    ///     This sweep is the only place that sees the transition.
+    /// </summary>
+    [Test]
+    public async Task TenantThatOptsOut_ForgetsThePipelineAndLifecycleStateAsWell()
+    {
+        // Arrange — a tenant reporting in all three families.
+        ArrangeTenant(optedIn: true, [RtEntityCreator.CreateAdapter()], []);
+        var pipeline = RtEntityCreator.CreatePipeline();
+        var workloadRtId = OctoObjectId.GenerateNewId();
+
+        await _service.SweepAllTenantsAsync();
+        PipelineExecutionMetrics.ObservePipeline(_tenantId, pipeline, isScheduled: true);
+        PipelineExecutionMetrics.ObserveStatistics(_tenantId, pipeline.RtId, DateTime.UtcNow, 1, 0);
+        WorkloadLifecycleMetrics.RecordHibernated(_tenantId, workloadRtId, "Mesh Adapter");
+
+        // Act — the tenant opts out, the sweep notices, and the tenant is opted back in afterwards so
+        // that anything left in the maps would show up again.
+        var recorded = Collect(async () =>
+        {
+            _repository.IsWorkloadObservabilityEnabledAsync(_tenantId).Returns(false);
+            await _service.SweepAllTenantsAsync();
+            WorkloadObservabilityOptIn.Refresh(_tenantId, optedIn: true, TimeSpan.FromMinutes(5));
+        });
+
+        // Assert
+        await Assert.That(recorded).IsEmpty();
+    }
+
+    /// <summary>
+    ///     An opt-in that cannot be read is not an opt-in, and it must not cost the other tenants their
+    ///     observability either — one broken tenant configuration used to be enough to abort the pass.
+    /// </summary>
+    [Test]
+    public async Task TenantWhoseOptInReadThrows_IsTreatedAsOptedOutAndTheSweepCarriesOn()
+    {
+        // Arrange
+        var healthyTenantId = $"tenant-{Guid.NewGuid():N}";
+        _adapterCache.GetEnabledTenantIds().Returns([_tenantId, healthyTenantId]);
+        _repository.IsWorkloadObservabilityEnabledAsync(_tenantId)
+            .Returns<bool>(_ => throw new InvalidOperationException("boom"));
+        _repository.IsWorkloadObservabilityEnabledAsync(healthyTenantId).Returns(true);
+        _repository.GetWorkloadsAsync(healthyTenantId).Returns([RtEntityCreator.CreateAdapter()]);
+        _repository.GetPoolsAsync(healthyTenantId).Returns([]);
+
+        try
+        {
+            // Act
+            var recorded = Collect(() => _service.SweepAllTenantsAsync());
+
+            // Assert — the broken tenant publishes nothing and is never read for entities…
+            await Assert.That(recorded).IsEmpty();
+            await _repository.DidNotReceive().GetWorkloadsAsync(_tenantId);
+            await Assert.That(WorkloadObservabilityOptIn.IsEnabled(_tenantId)).IsFalse();
+            // …and the tenant behind it in the list still does.
+            await Assert.That(WorkloadObservabilityOptIn.IsEnabled(healthyTenantId)).IsTrue();
+        }
+        finally
+        {
+            WorkloadStateMetrics.ForgetTenant(healthyTenantId);
+            WorkloadObservabilityOptIn.Forget(healthyTenantId);
+        }
     }
 
     /// <summary>

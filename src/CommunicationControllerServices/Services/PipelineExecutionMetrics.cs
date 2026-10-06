@@ -80,6 +80,34 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 ///         </item>
 ///     </list>
 ///
+///     <b>Governed by the one per-tenant switch.</b> Nothing here is published for a tenant that has
+///     not set <c>System/TenantModeConfiguration.PublishWorkloadObservability</c> (AB#5432) — see
+///     <see cref="WorkloadObservabilityOptIn" /> for why the verdict is a cached, synchronously
+///     readable flag rather than a repository call, and the two places this class consults it:
+///     <list type="bullet">
+///         <item>
+///             <description>
+///                 <b>The counter is gated where it is recorded</b> (<see cref="RecordExecutionOutcome" />
+///                 / <see cref="RecordExecutionOutcomes" />). For a <c>Counter</c> the recording <i>is</i>
+///                 the export — there is no later point at which an increment could be withheld.
+///             </description>
+///         </item>
+///         <item>
+///             <description>
+///                 <b>The gauges are gated where they are exported</b> (inside the collection
+///                 callbacks, <see cref="Observe" /> / <see cref="ObserveLong" />) rather than where
+///                 <see cref="ObservePipeline" /> / <see cref="ObserveStatistics" /> feed them. Those
+///                 two are called from the statistics sweep, which has to run for every enabled
+///                 tenant regardless — it maintains the persisted <c>RtPipelineStatistics</c>, not
+///                 just these metrics — so gating them there would mean either skipping real work or
+///                 gating in two places. Gating at the callback also gives the opt-out the one
+///                 property it needs: the series <i>stop</i> at the next collection instead of
+///                 freezing at their last value, and an opt-in takes effect at the next collection
+///                 instead of waiting a sweep interval for the map to refill.
+///             </description>
+///         </item>
+///     </list>
+///
 ///     Static, mirroring <see cref="WorkloadLifecycleMetrics" />: the instruments are process-wide
 ///     and threading a metrics dependency through the service would add wiring without adding a
 ///     seam worth having.
@@ -168,16 +196,46 @@ internal static class PipelineExecutionMetrics
         description: "Executions of this pipeline that succeeded in the last hour");
     // ReSharper restore NotAccessedField.Local
 
+    /// <summary>
+    ///     An enabled <c>PipelineTrigger</c> targets this pipeline, so it is expected to run on a
+    ///     schedule and a rising age is a fault.
+    /// </summary>
+    public const string TriggerKindScheduled = "scheduled";
+
+    /// <summary>
+    ///     No enabled <c>PipelineTrigger</c> targets this pipeline. It may still run — through a
+    ///     <c>FromHttpRequest</c> node, a data event, or by hand — but nothing here knows when it is
+    ///     supposed to, so a rising age says nothing.
+    /// </summary>
+    public const string TriggerKindUnscheduled = "unscheduled";
+
+    /// <summary>
+    ///     The triggers could not be read. Deliberately distinct from
+    ///     <see cref="TriggerKindUnscheduled" />: a failed read must not claim that a cron pipeline
+    ///     has no schedule, because an alert rule filtering on <see cref="TriggerKindScheduled" />
+    ///     would then stop seeing it. Unknown matches no rule, which is the safe direction.
+    /// </summary>
+    public const string TriggerKindUnknown = "unknown";
+
     private sealed record PipelineGaugeEntry(
         string PipelineName,
         string DeploymentState,
         DateTime? LastExecutionAt,
         long LastHourSuccessCount,
-        long LastHourFailureCount);
+        long LastHourFailureCount,
+        string TriggerKind);
 
-    /// <summary>Counts one adapter-reported execution outcome.</summary>
+    /// <summary>
+    ///     Counts one adapter-reported execution outcome. Silently does nothing for a tenant that
+    ///     has not opted in — see <see cref="WorkloadObservabilityOptIn" />.
+    /// </summary>
     public static void RecordExecutionOutcome(string tenantId, RtPipelineExecutionStatusEnum status)
     {
+        if (!WorkloadObservabilityOptIn.IsEnabled(tenantId))
+        {
+            return;
+        }
+
         var outcome = OutcomeOf(status);
         if (outcome == null)
         {
@@ -194,7 +252,7 @@ internal static class PipelineExecutionMetrics
     /// <summary>Counts several outcomes of the same kind at once (the batch completion path).</summary>
     public static void RecordExecutionOutcomes(string tenantId, RtPipelineExecutionStatusEnum status, int count)
     {
-        if (count <= 0)
+        if (count <= 0 || !WorkloadObservabilityOptIn.IsEnabled(tenantId))
         {
             return;
         }
@@ -215,7 +273,14 @@ internal static class PipelineExecutionMetrics
     ///     the sweep, which is the only place that holds the entity; the statistics arrive
     ///     separately via <see cref="ObserveStatistics" />.
     /// </summary>
-    public static void ObservePipeline(string tenantId, RtPipeline pipeline)
+    /// <param name="tenantId">The tenant the pipeline belongs to.</param>
+    /// <param name="pipeline">The pipeline entity the sweep is holding.</param>
+    /// <param name="isScheduled">
+    ///     Whether an enabled <c>PipelineTrigger</c> targets this pipeline. <c>null</c> when the
+    ///     triggers could not be read — see <see cref="TriggerKindUnknown" /> for why that is not
+    ///     folded into "unscheduled".
+    /// </param>
+    public static void ObservePipeline(string tenantId, RtPipeline pipeline, bool? isScheduled)
     {
         // Enabled=false wins over the persisted deployment state: a disabled pipeline is not
         // rolled out to its adapter regardless of what DeploymentState still says, and collapsing
@@ -225,10 +290,18 @@ internal static class PipelineExecutionMetrics
             ? "disabled"
             : pipeline.DeploymentState.ToString().ToLowerInvariant();
 
+        var triggerKind = isScheduled switch
+        {
+            true => TriggerKindScheduled,
+            false => TriggerKindUnscheduled,
+            null => TriggerKindUnknown,
+        };
+
         Update(tenantId, pipeline.RtId, e => e with
         {
             PipelineName = pipeline.Name ?? string.Empty,
             DeploymentState = deploymentState,
+            TriggerKind = triggerKind,
         });
     }
 
@@ -297,7 +370,7 @@ internal static class PipelineExecutionMetrics
         Func<PipelineGaugeEntry, PipelineGaugeEntry> change)
     {
         States.AddOrUpdate((tenantId, pipelineRtId.ToString()),
-            _ => change(new PipelineGaugeEntry(string.Empty, "unknown", null, 0, 0)),
+            _ => change(new PipelineGaugeEntry(string.Empty, "unknown", null, 0, 0, TriggerKindUnknown)),
             (_, existing) => change(existing));
     }
 
@@ -305,6 +378,15 @@ internal static class PipelineExecutionMetrics
     {
         foreach (var (key, entry) in States)
         {
+            // The opt-in gate (AB#5432). Evaluated per collection rather than per sweep so an
+            // opt-out stops the series at the next scrape instead of freezing it, and an opt-in does
+            // not have to wait for the statistics sweep to refill the map. The lookup is a
+            // dictionary hit against a set of tens of tenants — cheaper than building the tags.
+            if (!WorkloadObservabilityOptIn.IsEnabled(key.TenantId))
+            {
+                continue;
+            }
+
             yield return new Measurement<double>(selector(entry), Tags(key, entry));
         }
     }
@@ -313,6 +395,11 @@ internal static class PipelineExecutionMetrics
     {
         foreach (var (key, entry) in States)
         {
+            if (!WorkloadObservabilityOptIn.IsEnabled(key.TenantId))
+            {
+                continue;
+            }
+
             yield return new Measurement<long>(selector(entry), Tags(key, entry));
         }
     }
@@ -327,5 +414,11 @@ internal static class PipelineExecutionMetrics
         // not multiply series.
         new("octo.pipeline.name", entry.PipelineName),
         new("octo.pipeline.deployment_state", entry.DeploymentState),
+        // AB#5492. Without this the age gauge cannot be alerted on: measured on test-2,
+        // `age > 3600` over deployed pipelines matched 10 of 102 and their ages were 64 to 81
+        // days — all FromHttpRequest pipelines resting between calls, for which "has not run in
+        // 64 days" is the normal state. One bounded tag (three values) separates the pipelines
+        // that owe an execution from the ones that do not.
+        new("octo.pipeline.trigger_kind", entry.TriggerKind),
     ];
 }

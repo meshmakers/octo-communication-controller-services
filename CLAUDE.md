@@ -420,6 +420,18 @@ so a blueprint re-apply can no longer overwrite a live secret with the seeded
 placeholder. Details, blast radius and the first-install semantics: see
 "Pipeline Service Account — mandatory execution identity" below.
 
+**The last seed-owned `EnergyCommunityConfiguration` values are tenant-owned (3.39.0, AB#5359).**
+`BillingReportName`, `BillingReportFilePrefix`, `BillingMailServerConfiguration` and
+`ConsumptionRecordRequestDelay` moved from `isRuntimeState: false` to `ownership: TenantOwned`,
+and the type's `${System}/Name` assignment carries a per-assignment `ownership: TenantOwned`
+override (the shared `System/Name` definition stays seed-owned for every other type). They had
+been kept seed-owned so that a blueprint version could correct them, but the tenant-neutral
+`EnergyCommunity.Base` seed ships them empty (the delay with its default) and never seeds a name:
+every re-apply emptied what the community had configured, and billing lost its report template.
+`TenantOwned` rather than `isRuntimeState: true` because these are settings a tenant export has
+to carry — preserved on re-apply, still part of `ExportRt`. Consequence for blueprint authors: a
+changed default for these values reaches existing communities only through a CK migration.
+
 When adding a new attribute on `Adapter` / `Pool` / similar entities,
 decide at creation time: is the value driven by the blueprint author
 (configuration → leave `isRuntimeState` unset), or by services /
@@ -1552,6 +1564,13 @@ without that registration the measurements are recorded and dropped.
 Tags on every instrument: `octo.tenant.id`, `octo.workload.rt_id`, `octo.workload.name`.
 Cardinality is bounded by the number of workloads (dozens per cluster).
 
+🔴 **Gated by the per-tenant opt-in since 2026-09-30 (AB#5432).** These four instruments shipped
+unconditional; they are not any more. Nothing is published for a tenant without
+`System/TenantModeConfiguration.PublishWorkloadObservability` — the counter and the histogram are gated
+where they are recorded, the gauges inside their collection callbacks, and a tenant that drops out is
+dropped from the state map by `ForgetTenant`. Details and reasoning: "The per-tenant observability
+switch (AB#5432)".
+
 Three decisions worth keeping:
 
 - **The wake is timed by the caller that started it**, in the `Hibernated`/`Draining` branch of
@@ -2619,7 +2638,7 @@ data-flow page). Executions are telemetry — `RtPipelineStatistics` is the dura
 |---------|----------|-------------|
 | `PipelineExecutionReportProcessor` | Continuous | Drains execution reports from Channel in batches, bulk-inserts starts and bulk-updates completions |
 | `ExecutionCleanupBackgroundService` | `PipelineExecutionStuckCheckIntervalMinutes` (default 5 min) | Per iteration: (1) connection-aware stuck reaper (AB#4280); (2) **execution fold** (AB#4370) — terminal executions older than `PipelineExecutionRetentionHours` (default 1h) are folded into the hourly buckets on `RtPipelineStatistics` and then **erased**, and the sliding-window counters are refreshed for every pipeline; (3) daily orphan sweep erasing executions older than `PipelineExecutionRetentionDays` unconditionally (safety net for executions whose pipeline no longer exists). All deletes use `DeleteOptions.Erase` (AB#4363) — the engine default `DeleteStrategies.Archive` only set `rtState=Archived` and let the collection grow unbounded (1M+ docs per tenant). The former hourly `PipelineStatisticsBackgroundService` was removed — folding owns statistics freshness. |
-| `WorkloadStateMetricsBackgroundService` | `WorkloadStateMetricsIntervalMinutes` (default 5 min, also the startup grace) | AB#5432: publishes the `DeploymentState` / `CommunicationState` / `ConfigurationState` severity of every adapter, application and pool of every tenant that opted in via `System/TenantModeConfiguration.PublishWorkloadObservability`, plus the per-tenant `octo.workload.sweep.*` sign of life. A tenant that did not opt in is skipped silently. See "OTel metrics for workload states". |
+| `WorkloadStateMetricsBackgroundService` | `WorkloadStateMetricsIntervalMinutes` (default 5 min, also the startup grace) | AB#5432: publishes the `DeploymentState` / `CommunicationState` / `ConfigurationState` severity of every adapter, application and pool of every tenant that opted in via `System/TenantModeConfiguration.PublishWorkloadObservability`, plus the per-tenant `octo.workload.sweep.*` sign of life. A tenant that did not opt in is skipped silently. It is also the process's **single reader of that flag**: the verdict is published into `WorkloadObservabilityOptIn`, which gates the pipeline and lifecycle instruments too, and a tenant that drops out is forgotten in all three families here. See "The per-tenant observability switch" and "OTel metrics for workload states". |
 
 ### Service Methods
 
@@ -2650,6 +2669,13 @@ pipeline on test-2 stopped after two runs (12:19, 13:19 UTC) and nobody noticed 
 `PipelineExecutionMetrics` (static, mirroring `WorkloadLifecycleMetrics`) emits four instruments on
 the **same meter `Meshmakers.Octo.Communication`** that octo-common-services' `ObservabilityBuilder`
 already registers — so no observability wiring changed.
+
+🔴 **Gated by the per-tenant opt-in since 2026-09-30 (AB#5432).** These instruments shipped
+unconditional (175 series from test-2 while nobody had opted in); they now answer to
+`System/TenantModeConfiguration.PublishWorkloadObservability` like the workload-state family. The
+counter is gated where it is recorded, the three gauges inside their collection callbacks — so the
+statistics sweep still does its persistence work for a non-opted-in tenant and only its publication
+stops. Details and reasoning: "The per-tenant observability switch (AB#5432)".
 
 | Instrument | Kind | Tags | Meaning |
 |---|---|---|---|
@@ -2730,6 +2756,102 @@ instruments are process-wide and the suite runs concurrently) and
 feeds them — a refactor dropping the calls would otherwise leave every test green while the
 alerting went blind again).
 
+## The per-tenant observability switch (AB#5432)
+
+🔴 **One flag decides whether a tenant's workload and pipeline observability is published at all.**
+That flag is `System/TenantModeConfiguration.PublishWorkloadObservability` (`System-2.3.0`, optional
+Boolean, default `false`). A tenant that has not opted in produces **no** series from any of the
+families below — the emitters skip it **silently**, which is a deliberate contract: that is the state
+of almost every tenant, and a log line per tenant per interval is how a log becomes unreadable.
+
+| Metric family | Emitter | How the flag reaches it |
+|---|---|---|
+| `octo.workload.deployment_state`, `.communication_state`, `.configuration_state`, `.sweep.age`, `.sweep.entities` | `Services/WorkloadStateMetrics` | The sweep does not read a non-opted-in tenant's entities at all |
+| `octo.pipeline.execution.count` | `Services/PipelineExecutionMetrics` | Gated at the recording site (`RecordExecutionOutcome(s)`) |
+| `octo.pipeline.execution.age`, `.failures`, `.successes` | `Services/PipelineExecutionMetrics` | Gated inside the gauge collection callbacks |
+| `octo.workload.wake.count`, `.wake.duration`, `.hibernation.count` | `Services/WorkloadLifecycleMetrics` | Gated at the recording sites |
+| `octo.workload.hibernated`, `.offline_unexpected` | `Services/WorkloadLifecycleMetrics` | Gated inside the gauge collection callbacks |
+
+Until 2026-09-30 only the first row honoured the flag. The other two families predate it
+(`WorkloadLifecycleMetrics` is AB#4919, `PipelineExecutionMetrics` AB#5425) and were unconditional —
+test-2 carried **175 pipeline series and 20 lifecycle series while no tenant had opted in**. Two
+generations of gating means a tenant that opted out still pays for most of it, so there is now exactly
+one switch.
+
+### One reader, one cached verdict
+
+`ICommunicationRepository.IsWorkloadObservabilityEnabledAsync` is the **only** code in the process
+that reads the attribute, and `WorkloadStateMetricsBackgroundService` is its **only** caller — once per
+enabled tenant per sweep (`WorkloadStateMetricsIntervalMinutes`, default 5 min). It pushes the verdict
+into `Services/WorkloadObservabilityOptIn`, a static registry the emitters read **synchronously**.
+
+🔴 **Neither of the two added emitters can `await` anything at the point it needs the answer**, which
+is the whole reason for the registry rather than a repository call at the gate:
+
+- five of the instruments are `ObservableGauge` callbacks — synchronous by contract, run on the
+  exporter's collection thread, once per scrape per series. A Mongo round trip in there stalls the
+  export.
+- `octo.pipeline.execution.count` is recorded on the completion path (batches of a hundred
+  executions), the wake/hibernation instruments on lifecycle paths a request waits behind. A tenant
+  configuration read per execution is a query per execution.
+
+So the shape is the one `LifecycleConfigurationService` already uses for the scale-to-zero gate — a
+per-tenant cache with a TTL — with one difference: the refresh is **pushed** by the sweep that already
+reads the flag instead of pulled lazily on a miss, because a lazy pull needs an `await` in exactly the
+two places that cannot have one. The opt-in refresh runs **before** the sweep's startup grace: the
+grace exists so a fresh pod does not publish a burst of `Offline` severities, an argument about the
+state sweep alone, while the pipeline and lifecycle instruments are event-driven and every outcome in
+the grace window would otherwise be dropped for an opted-in tenant.
+
+**TTL = 3 × the sweep interval** (`WorkloadStateMetricsBackgroundService.OptInValidityFor`). A healthy
+sweep refreshes every verdict every interval, so it never expires in normal operation; it only bites
+when the single reader has stopped. At that point the process can no longer confirm whether a tenant is
+opted in, and publishing on an unconfirmable verdict is the same mistake as treating an unreadable
+opt-in as an opt-in. Unknown, opted out, or expired all read as **not opted in** — the gate fails
+closed. The dead sweep itself stays visible through `octo.workload.sweep.age`.
+
+**An unreadable opt-in never fails the caller.** The repository answers `false` for an absent
+attribute, an absent configuration entity and a failed read alike, logging at Debug; the refresh loop
+additionally catches per tenant, so one broken tenant configuration cannot cost every other tenant its
+observability.
+
+### Opting out stops series, it does not freeze them
+
+This is why the gauge gates sit in the **collection callbacks** and not at the `Observe…` call sites
+that feed the state maps:
+
+- The series **stop at the next scrape** instead of staying on the wire at their last value until the
+  pod restarts — a frozen `execution.age` is indistinguishable from a stalled pipeline.
+- The state maps keep being maintained for every tenant, so a tenant that opts **in** reports its true
+  state at the next scrape instead of nothing until its next transition (lifecycle) or the next
+  statistics sweep (pipelines).
+- For pipelines it also keeps the two concerns apart: the statistics sweep must run for every enabled
+  tenant regardless — it maintains the persisted `RtPipelineStatistics`, which is not observability —
+  so only its publication is gated, never the work.
+
+A counter has no collection callback (recording *is* exporting), so those are gated where they are
+recorded. The cost: a wake, hibernation or execution outcome occurring before the first opt-in refresh
+of a freshly started pod is not counted. Counters restart at zero on a restart anyway, so a rate loses
+at most that window.
+
+On top of the gates, a tenant that falls out of the opted-in set is **forgotten** in all three
+families (`WorkloadStateMetrics.ForgetTenant`, `PipelineExecutionMetrics.ForgetTenant`,
+`WorkloadLifecycleMetrics.ForgetTenant`) by `RefreshOptInsAsync`, the only place that sees the
+transition — switched off, deleted, or opted back out. Without it the entries would sit in the maps for
+the lifetime of the process and a tenant that opted back in weeks later would briefly report the state
+it had when it left.
+
+Tests: `Services/PipelineExecutionMetricsTests` and `Services/WorkloadLifecycleMetricsTests` (a tenant
+that did not opt in publishes nothing at all; opting out stops the gauges it had published; an expired
+verdict reads as opted out; `ForgetTenant` drops a tenant's whole state; for lifecycle also that a
+tenant opting in later reports the state it already had),
+`Services/PipelineExecutionServiceTests/ExecutionMetricsWiringTests` (the fold sweep still does its
+persistence work for a non-opted-in tenant but publishes nothing) and
+`BackgroundServices/WorkloadStateMetricsBackgroundServiceTests` (the sweep's verdict opens the gate for
+the other two families, an opt-out forgets their state as well, and an opt-in read that throws leaves
+the tenant opted out without costing the next tenant in the list its observability).
+
+
 ## OTel metrics for workload states (AB#5432, item 3)
 
 `GetAdapters` and `GetPools` have always returned three states — `DeploymentState`,
@@ -2738,14 +2860,20 @@ adapter stuck at a deployment error, a pool that quietly fell offline, or the **
 this work item was asked for by name were visible in Studio and nowhere a check rule could reach.
 `WorkloadStateMetrics` + `WorkloadStateMetricsBackgroundService` publish them.
 
-🔴 **Nothing about `WorkloadLifecycleMetrics` changed.** Its two gauges
+🔴 **`WorkloadLifecycleMetrics` keeps its own class and its own instruments.** Its two gauges
 (`octo.workload.hibernated`, `octo.workload.offline_unexpected`) are live — verified on test-2 on
-2026-09-30, 20 series each, all zero — and their names and meanings are load-bearing. The new
-instruments live in a **separate** static class on the **same meter**, because the two families
-differ in every dimension that matters: AB#4919 is event-driven, written at the moment of a
-transition, ungated, workloads only; this one is sweep-driven, derived from persisted state, gated
-behind a per-tenant opt-in, and covers pools. Folding an opt-in gate into the class holding two
-ungated live series is how one of them would eventually be switched off by accident.
+2026-09-30, 20 series each, all zero — and their names and meanings are load-bearing. The state
+instruments live in a **separate** static class on the **same meter**, because the two families differ
+in every dimension but one: AB#4919 is event-driven, written at the moment of a transition, and covers
+workloads only; this one is sweep-driven, derived from persisted state, and covers pools as well.
+
+The dimension they no longer differ in is the **opt-in**. When this section was first written the
+lifecycle family was ungated and the gate lived only here, on the argument that folding it into a class
+holding two live series is how one of them gets switched off by accident. That argument lost: two
+generations of gating means a tenant that opted out still pays for most of its observability. Since
+2026-09-30 all three families answer to the one flag — see "The per-tenant observability switch
+(AB#5432)" above for where each gate sits and why the verdict is a cached synchronous flag rather than
+a repository read.
 
 (Historical note worth keeping: those two series were missing for months and three investigations
 each landed on a different wrong cause — a stale build, no lifecycle transitions, no on-demand
@@ -2836,6 +2964,10 @@ Per tenant, via `System/TenantModeConfiguration.PublishWorkloadObservability`
 (`System-2.3.0`, optional Boolean, default `false`). Absent entity, absent attribute, `false`, or a
 failed read ⇒ the tenant is **skipped silently**: no log line per tenant per sweep, because that is
 the state of almost every tenant and a per-sweep info line for each is how a log becomes unreadable.
+
+The same flag governs the pipeline and lifecycle families, and this sweep is the **only reader of it in
+the process** — it publishes the verdict into `WorkloadObservabilityOptIn` for the emitters that cannot
+await a repository. See "The per-tenant observability switch (AB#5432)" above.
 
 🔴 **The flag is read untyped** (`RtEntity.GetAttributeValueOrStandard<bool>("PublishWorkloadObservability")`,
 via `ICommunicationRepository.IsWorkloadObservabilityEnabledAsync`). The generated
