@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
 using System.Diagnostics.CodeAnalysis;
 using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Common.DistributionEventHub;
@@ -276,6 +277,69 @@ internal class UpdateScheduleAsyncTests : TriggerManagementServiceTestsBase
 
         await CommunicationRepository.Received(1).SetPipelineTriggerDeploymentStateAsync(
             TenantId, trigger.RtId, RtDeploymentStateEnum.Deployed);
+    }
+
+    /// <summary>
+    ///     AB#5867: after any number of tenant updates (each one re-runs UpdateScheduleAsync) the lease
+    ///     cron must exist exactly once. The controller's half of that guarantee: every run removes the
+    ///     schedule group first and re-registers the tick under the SAME schedule id and group, i.e. the
+    ///     same Hangfire job key (<c>{scheduleId}-{group}</c>), which the removal matches by group suffix.
+    ///     The doubled ticks seen on test-2-dev came from the scheduler side (the instance-shared Hangfire
+    ///     queue, fixed in octo-distributedEventHub), not from a second key here.
+    /// </summary>
+    [Test]
+    public async Task UpdateScheduleAsync_RepeatedTenantUpdates_RegisterTheLeaseTickUnderOneStableJobKey()
+    {
+        // Arrange
+        var trigger = RtEntityCreator.CreatePipelineTrigger(cronExpression: "0 */2 * * * ?");
+        var pipeline = RtEntityCreator.CreatePipeline();
+        var adapter = RtEntityCreator.CreateAdapter();
+        adapter.LifecycleMode = RtLifecycleModeEnum.Leased;
+
+        CommunicationRepository.GetTriggersAndPipelinesAsync(TenantId)
+            .Returns(new Dictionary<RtPipelineTrigger, IList<RtPipeline>>
+            {
+                { trigger, new List<RtPipeline> { pipeline } }
+            });
+        CommunicationRepository.GetAdapterByPipelineAsync(TenantId,
+                Arg.Is<RtEntityId>(id => id.RtId == pipeline.RtId))
+            .Returns(adapter);
+
+        var jobKeys = new List<string>();
+        var removedGroups = new List<string>();
+        var order = new List<string>();
+        DistributionEventHubService
+            .When(s => s.ScheduleRecurringSendAsync(Arg.Any<LeaseTriggerMessage>(), Arg.Any<string>(),
+                Arg.Any<RecurringSchedulingOptions>()))
+            .Do(ci =>
+            {
+                var o = ci.Arg<RecurringSchedulingOptions>();
+                jobKeys.Add($"{o.ScheduleId}-{o.ScheduleGroup}");
+                order.Add("schedule");
+            });
+        RemoveRecurringJobsCommandClient
+            .WhenForAnyArgs(c => c.GetResponseWithRetry<GenericCommandResponse>(
+                Arg.Any<RemoveRecurringJobsByScheduleGroupRequest>()))
+            .Do(ci =>
+            {
+                removedGroups.Add(ci.Arg<RemoveRecurringJobsByScheduleGroupRequest>().ScheduleGroup);
+                order.Add("remove");
+            });
+
+        // Act — startup plus two tenant updates (test-2-dev: 19:29:25 and 19:33:34).
+        for (var i = 0; i < 3; i++)
+        {
+            await TriggerManagementService.UpdateScheduleAsync(TenantId);
+        }
+
+        // Assert
+        using var _ = Assert.Multiple();
+        await Assert.That(jobKeys.Distinct().Count()).IsEqualTo(1);
+        await Assert.That(jobKeys[0])
+            .IsEqualTo($"{trigger.RtId}-lease-{pipeline.RtId}-pipelineTrigger-{TenantId}");
+        await Assert.That(removedGroups.All(g => jobKeys[0].EndsWith(g))).IsTrue();
+        await Assert.That(string.Join(",", order))
+            .IsEqualTo("remove,schedule,remove,schedule,remove,schedule");
     }
 
     /// <summary>

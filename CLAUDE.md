@@ -1690,6 +1690,14 @@ workload is AlwaysOn, or the workload is Running — Running just stamps `LastAc
   per-pipeline trigger queue. Co-wake schedules are registered independently of the tenant
   gate (the consumer-side gate no-ops when the feature is off) so flipping the flag needs no
   trigger redeploy.
+- **Schedule keys are stable (AB#5867).** Every `UpdateScheduleAsync` first removes the whole
+  group `pipelineTrigger-{tenant}` (`RemoveRecurringJobsByScheduleGroup`, bot services) and then
+  re-registers each tick under a deterministic schedule id (`{trigger}-pipeline|lease|wake-{pipeline}`),
+  i.e. one Hangfire job key `{id}-{group}` per tick, however many tenant updates run. Doubled cron
+  ticks after a tenant update (test-2-dev, 2026-10-07) were NOT a second key here: the Hangfire
+  scheduler queue was shared by all instances on the broker and stored schedules in another
+  instance's Hangfire database (fixed in octo-distributedEventHub). Pin:
+  `UpdateScheduleAsync_RepeatedTenantUpdates_RegisterTheLeaseTickUnderOneStableJobKey`.
 
 **Idle watchdog (AB#4918).** `WorkloadLifecycleWatchdogBackgroundService`
 (`LifecycleWatchdogIntervalMinutes`, default 5, also the startup grace; structure mirrors
