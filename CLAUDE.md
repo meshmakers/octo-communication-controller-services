@@ -933,9 +933,17 @@ instance-level pair dictionary can never match Pre with Pos, and the paired bran
 AB#4456: the relay had been dead in production. Any consumer that keeps cross-message
 state must hold it in a static field or a singleton service, never an instance field.
 
+**The "old message" filter compares against an eagerly captured start (AB#5866).**
+`ControllerStartTime` is created as the first statement of `Program` and registered as a
+singleton; consumers inject it. It replaced `Constants.StartTime`, a lazily initialised
+`static readonly … = DateTime.UtcNow` (beforefieldinit) that only the consumers read — the
+first consumed message initialised it and was therefore always dropped as "old". Never
+reintroduce a lazily initialised static for this.
+
 Tests: `Consumers/TenantManagementConsumerTests` (flush on pairing, flush despite
 disabled tenant, flush failure doesn't block relay, no flush on unpaired Pre,
-cross-instance pairing) and `Services/AdapterServiceTests/CkModelChangedAsyncTests`.
+cross-instance pairing, first pair after start processed) and
+`Services/AdapterServiceTests/CkModelChangedAsyncTests`.
 
 ### Pool Communication State Transitions
 
