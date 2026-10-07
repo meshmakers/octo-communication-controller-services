@@ -964,6 +964,54 @@ with the deployed pipeline set; `RegisterAdapter_NoPipelines_DoesNotRePush` pins
 the empty-config no-op). The `AdapterServiceTestsBase` mock already simulates the
 adapter's deploy ack, so the existing register tests exercise the ack path too.
 
+### Registration vs. tenant pre/post-update — the deaf adapter (AB#5827)
+
+Reproduced on test-2-dev: two `ClearCache` 8.6 s apart left a dedicated adapter connected, "registered"
+and deaf — metrics endpoint 404, every push lost, pod `1/1`, readiness green, AB#5409 watchdog disarmed.
+
+**Cause (lost update).** `RegisterAdapterInternalAsync` took the tenant's `AdapterTenant`, then read the
+adapter configuration from the repository (seconds under load) and wrote the adapter into **that**
+instance. `PreUpdateTenantAsync` (`RemoveTenant`) / `PosUpdateTenantAsync` (`AddOrUpdateTenant` → a
+**new, empty** instance) ran under `_semaphore`; the registration did not. A pre/post pair inside the
+read window left the adapter in an orphaned instance. The pair's `PreUpdateTenant` callback never
+reached it (only cached adapters are notified), and nothing could tell the adapter: the registration
+had returned success, and `RecordMetricsSample` dropped the samples of an unknown adapter at DEBUG.
+
+**Fix A — the commit is serialised with the cache flush.** A per-tenant lock
+(`_tenantCacheLocks`, case-insensitive) is taken by `PreUpdateTenantAsync` around notify-and-flush,
+by `PosUpdateTenantAsync` around the re-initialisation, and by the registration around its **commit**
+only — never across the repository read, and per tenant so registrations of different tenants never
+queue behind each other. The registration remembers which instance it read for; under the lock it
+writes only if that instance is still current. Otherwise: tenant flushed and not back yet →
+`TenantNotEnabled` (the adapter retries); instance replaced → read again, at most
+`RegistrationCacheRaceMaxAttempts` (3) times, then `RegistrationRaceLost`. After the reconcile push,
+`EnsureRegistrationStillCached` fails a registration whose adapter is gone from the cache
+(`RegistrationLost`) instead of reporting success. An adapter cached under **another** connection is
+left alone — that is a second process with the same rtId (see the dual-adapter trap), and failing it
+would make both steal the registration from each other forever.
+
+**Fix B — the controller finds an orphan and asks it to register again.** `_registeredConnections`
+records every connection with an accepted registration; it is forgotten on unregister, on disconnect,
+and for every adapter `PreUpdateTenantAsync` notifies (those restart anyway). The periodic metrics
+sample (`RecordMetricsSample(tenantId, connectionId, sample)`, every 10 s by default) of a connection
+that is still recorded, whose tenant is cached but whose adapter is not, starts a grace period
+(`OrphanedRegistrationGracePeriod`, 30 s); past it the outcome is `MetricsSampleOutcome.RegistrationLost`
+— once per connection — and `AdapterHub.ReportAdapterMetricsAsync` sends
+`IAdapterHubCallbacks.PreUpdateTenantAsync` to **that** connection plus a Warning event. That callback
+is the existing "restart and register again" signal every adapter build handles: no contract change,
+and an **old** adapter heals exactly like a new one. 🔴 A `HubException` (the AP-I5 pool-member
+pattern) does not work here: the adapter sends metrics with `SendAsync`, so nothing thrown on the
+server ever reaches it. A new adapter at an old controller behaves as today.
+
+Pool members are not affected by the race: their registration (`AdapterPoolHub.RegisterPoolMemberAsync`)
+is a synchronous in-memory write into the tenant-free pool registry, which no tenant update touches,
+and AP-I5 already rejects heartbeats of unregistered members.
+
+Tests: `Services/AdapterServiceTests/RegistrationTenantUpdateRaceTests` (real `AdapterCache`, the
+repository read parked on a `TaskCompletionSource` while a pre/post pair runs — deterministic; four of
+its seven cases fail against the pre-fix commit), `Services/AdapterServiceTests/OrphanedRegistrationDetectionTests`
+(grace, once-only, every regular way out of the cache stays silent), `Hubs/AdapterHubTests/ReportAdapterMetricsAsyncTests`.
+
 ### Adapter Offline Reconciliation (AB#4699)
 
 The rolling-upgrade race guard in `AdapterHub.OnDisconnectedAsync` skips the Offline

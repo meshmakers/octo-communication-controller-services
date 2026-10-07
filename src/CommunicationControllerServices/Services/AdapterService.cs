@@ -51,6 +51,56 @@ internal class AdapterService(
     private readonly ConcurrentDictionary<RtEntityId, TaskCompletionSource<DeploymentResult>>
         _pendingDeployments = new();
 
+    /// <summary>
+    /// AB#5827: one lock per tenant, shared by the cache commit of a registration and the cache
+    /// flush / re-initialisation of a tenant pre/post-update. Per tenant (not the global
+    /// <see cref="_semaphore"/>): registrations of different tenants must not queue behind each
+    /// other, and the lock is never held across the repository read of a registration.
+    /// Case-insensitive on purpose — a coarser lock can only serialise more, never less.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _tenantCacheLocks =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// AB#5827: connections that hold an accepted registration on this controller instance and
+    /// have not been asked to restart since. Keyed by SignalR connection id.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, RegisteredAdapterConnection> _registeredConnections = new();
+
+    private sealed class RegisteredAdapterConnection(string tenantId, RtEntityId adapterRtEntityId)
+    {
+        public string TenantId { get; } = tenantId;
+        public RtEntityId AdapterRtEntityId { get; } = adapterRtEntityId;
+
+        /// <summary>First time a sample showed this connection's adapter missing from the cache.</summary>
+        public DateTime? OrphanedSinceUtc { get; set; }
+    }
+
+    /// <summary>
+    /// AB#5827: how often a registration re-reads the configuration when a tenant update replaced
+    /// the tenant's adapter cache during the read, before it fails and leaves the retry to the adapter.
+    /// </summary>
+    internal int RegistrationCacheRaceMaxAttempts { get; set; } = 3;
+
+    /// <summary>
+    /// AB#5827: how long a registered connection's adapter has to be missing from the tenant's
+    /// adapter cache before the controller asks it to register again. Covers in-flight transitions
+    /// (a registration replacing its own cache entry, a disconnect being processed); every regular
+    /// path out of the cache either notifies the adapter or ends its connection well within it.
+    /// </summary>
+    internal TimeSpan OrphanedRegistrationGracePeriod { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Clock for <see cref="OrphanedRegistrationGracePeriod"/>; replaceable in tests.</summary>
+    internal Func<DateTime> UtcNow { get; set; } = () => DateTime.UtcNow;
+
+    private SemaphoreSlim GetTenantCacheLock(string tenantId) =>
+        _tenantCacheLocks.GetOrAdd(tenantId, _ => new SemaphoreSlim(1, 1));
+
+    private void ForgetRegisteredConnection(string connectionId)
+    {
+        _registeredConnections.TryRemove(connectionId, out _);
+    }
+
     public Task<AdapterConfigurationDto> RegisterAdapterAsync(string tenantId, RtEntityId adapterRtEntityId,
         string connectionId)
     {
@@ -118,83 +168,192 @@ internal class AdapterService(
         Logger.Info("[{TenantId}] Adapter '{AdapterRtId}' registered with connection id '{ConnectionId}'",
             tenantId, adapterRtEntityId, connectionId);
 
-        if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
+        if (!adapterCache.TryGetTenant(tenantId, out _))
         {
-            await eventService.StoreInformationEventAsync(tenantId,
-                $"Adapter '{adapterRtEntityId}' registered with connection id '{connectionId}'.",
-                adapterRtEntityId);
-
-            if (!adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
-            {
-                Logger.Info("[{TenantId}] Adapter '{AdapterRtId}' not found in cache, fetching from repository",
-                    tenantId, adapterRtEntityId);
-                var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId, true);
-                adapter = adapterTenant.AddAdapter(adapterRtEntityId, connectionId, configuration);
-                // Note: Online state is already set in OnConnectedAsync, no need to set it again here
-            }
-            else
-            {
-                Logger.Info("[{TenantId}] Adapter '{AdapterRtId}' found in cache, checking for updates",
-                    tenantId, adapterRtEntityId);
-                var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId, true);
-                if (!configuration.Equals(adapter.Configuration))
-                {
-                    adapterTenant.RemoveAdapter(adapterRtEntityId);
-                    adapter = adapterTenant.AddAdapter(adapterRtEntityId, connectionId, configuration);
-                    // Note: Online state is already set in OnConnectedAsync, no need to set it again here
-                }
-                else if (adapter.ConnectionId != connectionId)
-                {
-                    // The adapter reconnected on a NEW SignalR connection (e.g. after a
-                    // CkModelChanged / PreUpdateTenant restart) but its configuration is
-                    // unchanged. Registration always arrives on the adapter's current live
-                    // connection, so it is the authoritative source of the ConnectionId.
-                    // Refresh it unconditionally here — relying solely on
-                    // SetAdapterCommunicationStateOnlineAsync (OnConnectedAsync) is not enough,
-                    // because that update can be raced or no-op'd (e.g. if the adapter was
-                    // momentarily removed from the cache). If the cached ConnectionId is left
-                    // stale, AdapterConfigurationUpdatedAsync keeps sending config to the dead
-                    // connection via Clients.Client(adapter.ConnectionId) and every deploy
-                    // silently times out after 120s while the adapter stays Online (AB#4594).
-                    Logger.Info(
-                        "[{TenantId}] Adapter '{AdapterRtId}' reconnected with unchanged configuration; " +
-                        "refreshing cached connection id '{OldConnectionId}' -> '{NewConnectionId}'",
-                        tenantId, adapterRtEntityId, adapter.ConnectionId, connectionId);
-                    adapterTenant.UpdateConnectionId(adapterRtEntityId, connectionId);
-                }
-            }
-
-            if (nodeDescriptors != null)
-            {
-                Logger.Info("[{TenantId}] Adapter '{AdapterRtId}' reported {NodeCount} node descriptors",
-                    tenantId, adapterRtEntityId, nodeDescriptors.Count);
-                adapter.SetNodeDescriptors(nodeDescriptors);
-            }
-
-            if (pipelineSchemaJson != null)
-            {
-                Logger.Info("[{TenantId}] Adapter '{AdapterRtId}' reported pipeline schema ({SchemaLength} chars)",
-                    tenantId, adapterRtEntityId, pipelineSchemaJson.Length);
-                adapter.SetPipelineSchema(pipelineSchemaJson);
-            }
-
-            // AB#4594: reconcile the live adapter by actively re-pushing its deployed
-            // configuration onto the freshly registered connection. Returning the config DTO
-            // above is not sufficient on its own — during a coordinated controller+adapter
-            // rollout an adapter can come up Online with none of its pipeline routes registered
-            // (every FromHttpRequest endpoint 404s) while the controller still believes the
-            // pipelines are Deployed, and nothing re-drives the config onto the new connection.
-            await ReconcileAdapterConfigurationAsync(tenantId, adapterRtEntityId, adapter.Configuration);
-
-            // AB#4984: registration is the first moment the descriptors (incl.
-            // RequiresRunningProcess) are known — persist the computed on-demand
-            // capability for the Studio. Best-effort, never fails the registration.
-            await onDemandCapabilityService.RefreshWorkloadCapabilityAsync(tenantId, adapterRtEntityId);
-
-            return adapter.Configuration;
+            throw AdapterServiceException.TenantNotEnabled(tenantId);
         }
 
-        throw AdapterServiceException.TenantNotEnabled(tenantId);
+        await eventService.StoreInformationEventAsync(tenantId,
+            $"Adapter '{adapterRtEntityId}' registered with connection id '{connectionId}'.",
+            adapterRtEntityId);
+
+        Adapter adapter;
+        for (var attempt = 1;; attempt++)
+        {
+            // AB#5827: remember WHICH cache instance the configuration is read for. The repository
+            // read below takes seconds under load, and a tenant pre/post-update in that window
+            // replaces the tenant's AdapterTenant with a new, empty one. Writing the adapter into the
+            // instance captured here (as before) left it in an orphaned instance nothing reads: the
+            // adapter was told "registered", but every push, deploy and metrics read missed it, and
+            // the PreUpdateTenant of that update never reached it because it was not cached yet.
+            if (!adapterCache.TryGetTenant(tenantId, out var tenantAtRead))
+            {
+                throw AdapterServiceException.TenantNotEnabled(tenantId);
+            }
+
+            Logger.Info(
+                tenantAtRead.AdapterById.ContainsKey(adapterRtEntityId)
+                    ? "[{TenantId}] Adapter '{AdapterRtId}' found in cache, checking for updates"
+                    : "[{TenantId}] Adapter '{AdapterRtId}' not found in cache, fetching from repository",
+                tenantId, adapterRtEntityId);
+            var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId, true);
+
+            // The commit runs under the same per-tenant lock as the cache flush in
+            // PreUpdateTenantAsync and the re-initialisation in PosUpdateTenantAsync, so it either
+            // lands in the instance that is current, before the next PreUpdateTenant (which then
+            // notifies this adapter like every other cached one), or fails and the adapter retries.
+            var tenantLock = GetTenantCacheLock(tenantId);
+            await tenantLock.WaitAsync();
+            try
+            {
+                if (!adapterCache.TryGetTenant(tenantId, out var currentTenant))
+                {
+                    Logger.Warn(
+                        "[{TenantId}] Adapter '{AdapterRtId}' registration on connection '{ConnectionId}' refused: the tenant's " +
+                        "adapter cache was flushed by a tenant update while the configuration was read; the adapter retries",
+                        tenantId, adapterRtEntityId, connectionId);
+                    throw AdapterServiceException.TenantNotEnabled(tenantId);
+                }
+
+                if (!ReferenceEquals(currentTenant, tenantAtRead))
+                {
+                    if (attempt >= RegistrationCacheRaceMaxAttempts)
+                    {
+                        Logger.Warn(
+                            "[{TenantId}] Adapter '{AdapterRtId}' registration on connection '{ConnectionId}' refused after " +
+                            "{Attempts} attempts: the tenant's adapter cache was re-initialised during each of them",
+                            tenantId, adapterRtEntityId, connectionId, attempt);
+                        throw AdapterServiceException.RegistrationRaceLost(tenantId, adapterRtEntityId, attempt);
+                    }
+
+                    Logger.Warn(
+                        "[{TenantId}] Adapter '{AdapterRtId}' registration on connection '{ConnectionId}': the tenant's adapter " +
+                        "cache was re-initialised while the configuration was read (attempt {Attempt}/{MaxAttempts}); reading it again",
+                        tenantId, adapterRtEntityId, connectionId, attempt, RegistrationCacheRaceMaxAttempts);
+                    continue;
+                }
+
+                adapter = CommitRegistration(currentTenant, tenantId, adapterRtEntityId, connectionId, configuration);
+
+                if (nodeDescriptors != null)
+                {
+                    Logger.Info("[{TenantId}] Adapter '{AdapterRtId}' reported {NodeCount} node descriptors",
+                        tenantId, adapterRtEntityId, nodeDescriptors.Count);
+                    adapter.SetNodeDescriptors(nodeDescriptors);
+                }
+
+                if (pipelineSchemaJson != null)
+                {
+                    Logger.Info("[{TenantId}] Adapter '{AdapterRtId}' reported pipeline schema ({SchemaLength} chars)",
+                        tenantId, adapterRtEntityId, pipelineSchemaJson.Length);
+                    adapter.SetPipelineSchema(pipelineSchemaJson);
+                }
+
+                // AB#5827: from here on this connection holds a registration on this controller
+                // instance; RecordMetricsSample uses this to recognise it if it is ever orphaned.
+                _registeredConnections[connectionId] = new RegisteredAdapterConnection(tenantId, adapterRtEntityId);
+            }
+            finally
+            {
+                tenantLock.Release();
+            }
+
+            break;
+        }
+
+        // AB#4594: reconcile the live adapter by actively re-pushing its deployed
+        // configuration onto the freshly registered connection. Returning the config DTO
+        // above is not sufficient on its own — during a coordinated controller+adapter
+        // rollout an adapter can come up Online with none of its pipeline routes registered
+        // (every FromHttpRequest endpoint 404s) while the controller still believes the
+        // pipelines are Deployed, and nothing re-drives the config onto the new connection.
+        await ReconcileAdapterConfigurationAsync(tenantId, adapterRtEntityId, adapter.Configuration);
+
+        // AB#5827: never report success for a registration the cache no longer holds. A tenant
+        // update right after the commit notifies this adapter (it is cached), but a success
+        // returned now would still have it mark itself registered; failing makes it retry.
+        EnsureRegistrationStillCached(tenantId, adapterRtEntityId, connectionId);
+
+        // AB#4984: registration is the first moment the descriptors (incl.
+        // RequiresRunningProcess) are known — persist the computed on-demand
+        // capability for the Studio. Best-effort, never fails the registration.
+        await onDemandCapabilityService.RefreshWorkloadCapabilityAsync(tenantId, adapterRtEntityId);
+
+        return adapter.Configuration;
+    }
+
+    /// <summary>
+    /// Writes a registration into <paramref name="adapterTenant"/>. Runs under the tenant's cache
+    /// lock, so the found/not-found decision and the write see the same instance (AB#5827).
+    /// </summary>
+    private static Adapter CommitRegistration(AdapterTenant adapterTenant, string tenantId,
+        RtEntityId adapterRtEntityId, string connectionId, AdapterConfigurationDto configuration)
+    {
+        if (!adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
+        {
+            // Note: Online state is already set in OnConnectedAsync, no need to set it again here
+            return adapterTenant.AddAdapter(adapterRtEntityId, connectionId, configuration);
+        }
+
+        if (!configuration.Equals(adapter.Configuration))
+        {
+            adapterTenant.RemoveAdapter(adapterRtEntityId);
+            // Note: Online state is already set in OnConnectedAsync, no need to set it again here
+            return adapterTenant.AddAdapter(adapterRtEntityId, connectionId, configuration);
+        }
+
+        if (adapter.ConnectionId != connectionId)
+        {
+            // The adapter reconnected on a NEW SignalR connection (e.g. after a
+            // CkModelChanged / PreUpdateTenant restart) but its configuration is
+            // unchanged. Registration always arrives on the adapter's current live
+            // connection, so it is the authoritative source of the ConnectionId.
+            // Refresh it unconditionally here — relying solely on
+            // SetAdapterCommunicationStateOnlineAsync (OnConnectedAsync) is not enough,
+            // because that update can be raced or no-op'd (e.g. if the adapter was
+            // momentarily removed from the cache). If the cached ConnectionId is left
+            // stale, AdapterConfigurationUpdatedAsync keeps sending config to the dead
+            // connection via Clients.Client(adapter.ConnectionId) and every deploy
+            // silently times out after 120s while the adapter stays Online (AB#4594).
+            Logger.Info(
+                "[{TenantId}] Adapter '{AdapterRtId}' reconnected with unchanged configuration; " +
+                "refreshing cached connection id '{OldConnectionId}' -> '{NewConnectionId}'",
+                tenantId, adapterRtEntityId, adapter.ConnectionId, connectionId);
+            adapterTenant.UpdateConnectionId(adapterRtEntityId, connectionId);
+        }
+
+        return adapter;
+    }
+
+    /// <summary>
+    /// AB#5827: fails a registration whose adapter is gone from the tenant's adapter cache by the
+    /// time the registration would report success. An adapter that is cached under ANOTHER
+    /// connection is left alone on purpose: that is a second process with the same adapter rtId
+    /// (last registration wins, see local_dual_adapter_registration_trap) — failing here would only
+    /// make both processes steal the registration from each other.
+    /// </summary>
+    private void EnsureRegistrationStillCached(string tenantId, RtEntityId adapterRtEntityId, string connectionId)
+    {
+        if (adapterCache.TryGetTenant(tenantId, out var adapterTenant)
+            && adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var cachedAdapter))
+        {
+            if (cachedAdapter.ConnectionId != connectionId)
+            {
+                Logger.Warn(
+                    "[{TenantId}] Adapter '{AdapterRtId}' registered on connection '{ConnectionId}', but the cache now holds " +
+                    "connection '{CachedConnectionId}' for it. Is a second process running with the same adapter rtId?",
+                    tenantId, adapterRtEntityId, connectionId, cachedAdapter.ConnectionId);
+            }
+
+            return;
+        }
+
+        ForgetRegisteredConnection(connectionId);
+        Logger.Warn(
+            "[{TenantId}] Adapter '{AdapterRtId}' registration on connection '{ConnectionId}' was lost before it completed " +
+            "(no longer in the tenant's adapter cache); failing it so the adapter registers again",
+            tenantId, adapterRtEntityId, connectionId);
+        throw AdapterServiceException.RegistrationLost(tenantId, adapterRtEntityId);
     }
 
     /// <summary>
@@ -247,6 +406,9 @@ internal class AdapterService(
 
     public async Task UnregisterAsync(string tenantId, RtEntityId adapterRtEntityId, string connectionId)
     {
+        // AB#5827: an adapter that unregisters is stopping on purpose; never ask it to re-register.
+        ForgetRegisteredConnection(connectionId);
+
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
             if (adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
@@ -409,6 +571,9 @@ internal class AdapterService(
     public async Task SetAdapterCommunicationStateOfflineAsync(string tenantId, RtEntityId adapterRtEntityId,
         string connectionId)
     {
+        // AB#5827: a closed connection holds no registration any more.
+        ForgetRegisteredConnection(connectionId);
+
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
             if (adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
@@ -1693,28 +1858,53 @@ internal class AdapterService(
         try
         {
             await _semaphore.WaitAsync();
-            if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
+
+            // AB#5827: notify-and-flush runs under the tenant's cache lock, so a registration
+            // cannot commit between the notification fan-out and the flush (it would be flushed
+            // without being told) nor into the flushed instance afterwards (it would be orphaned).
+            var tenantLock = GetTenantCacheLock(tenantId);
+            await tenantLock.WaitAsync();
+            try
             {
-                // Inform all adapters that tenant is going to be updated
-                await adapterHubCallbacks.PreUpdateTenantAsync(tenantId);
-                // Remove all adapters from cache so we skip any communication
-                // attempts while the CK-cache is unloaded. The SignalR
-                // connections to adapter pods themselves are not torn down by
-                // this — they sit on the hub independently of the CK cache.
-                adapterCache.RemoveTenant(tenantId);
+                if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
+                {
+                    // Inform all adapters that tenant is going to be updated
+                    await adapterHubCallbacks.PreUpdateTenantAsync(tenantId);
 
-                // Note: we do NOT touch CommunicationState in the database
-                // here. The legacy code marked every adapter Unregistered on
-                // the assumption that the cache flush also dropped the
-                // SignalR connection — it doesn't. Live adapter pods stayed
-                // connected through the nightly tenant pre-update, so any
-                // state reset here just produced bogus "Unregistered"
-                // entries that flipped back to Online seconds later via the
-                // heartbeat. State in DB is authoritative; OnDisconnected
-                // / OnConnected callbacks own all CommunicationState writes.
+                    // AB#5827: every adapter cached here has just been told to restart and will
+                    // register again on a new connection; its current connection no longer holds a
+                    // registration that could be orphaned.
+                    foreach (var cachedAdapter in adapterTenant.AdapterById.Values)
+                    {
+                        if (!string.IsNullOrWhiteSpace(cachedAdapter.ConnectionId))
+                        {
+                            ForgetRegisteredConnection(cachedAdapter.ConnectionId);
+                        }
+                    }
 
-                await eventService.StoreInformationEventAsync(tenantId,
-                    $"Tenant pre-update completed. {adapterTenant.AdapterById.Count} adapter(s) flushed from cache.");
+                    // Remove all adapters from cache so we skip any communication
+                    // attempts while the CK-cache is unloaded. The SignalR
+                    // connections to adapter pods themselves are not torn down by
+                    // this — they sit on the hub independently of the CK cache.
+                    adapterCache.RemoveTenant(tenantId);
+
+                    // Note: we do NOT touch CommunicationState in the database
+                    // here. The legacy code marked every adapter Unregistered on
+                    // the assumption that the cache flush also dropped the
+                    // SignalR connection — it doesn't. Live adapter pods stayed
+                    // connected through the nightly tenant pre-update, so any
+                    // state reset here just produced bogus "Unregistered"
+                    // entries that flipped back to Online seconds later via the
+                    // heartbeat. State in DB is authoritative; OnDisconnected
+                    // / OnConnected callbacks own all CommunicationState writes.
+
+                    await eventService.StoreInformationEventAsync(tenantId,
+                        $"Tenant pre-update completed. {adapterTenant.AdapterById.Count} adapter(s) flushed from cache.");
+                }
+            }
+            finally
+            {
+                tenantLock.Release();
             }
         }
         catch (Exception e)
@@ -1735,7 +1925,18 @@ internal class AdapterService(
         try
         {
             await _semaphore.WaitAsync();
-            adapterCache.AddOrUpdateTenant(tenantId);
+
+            // AB#5827: same per-tenant lock as the registration commit — see PreUpdateTenantAsync.
+            var tenantLock = GetTenantCacheLock(tenantId);
+            await tenantLock.WaitAsync();
+            try
+            {
+                adapterCache.AddOrUpdateTenant(tenantId);
+            }
+            finally
+            {
+                tenantLock.Release();
+            }
 
             // Note: adapter CommunicationState is intentionally NOT reset
             // here — see PreUpdateTenantAsync above for the full rationale.
@@ -1875,24 +2076,86 @@ internal class AdapterService(
         }).ToList();
     }
 
+    public MetricsSampleOutcome RecordMetricsSample(string tenantId, string connectionId,
+        AdapterMetricsSampleDto sample)
+    {
+        if (!_registeredConnections.TryGetValue(connectionId, out var registration))
+        {
+            // Never registered here, registration still in flight, or already told to restart:
+            // the pre-AB#5827 behaviour (record when cached, drop silently otherwise).
+            return RecordMetricsSampleCore(tenantId, sample);
+        }
+
+        if (!adapterCache.TryGetTenant(registration.TenantId, out var adapterTenant))
+        {
+            // The tenant is between a pre- and a post-update (or communication was disabled). The
+            // pre-update notified every cached adapter; nothing to judge until the cache is back.
+            registration.OrphanedSinceUtc = null;
+            Logger.Debug("[{TenantId}] Dropping metrics sample for unknown tenant.", tenantId);
+            return MetricsSampleOutcome.Dropped;
+        }
+
+        if (adapterTenant.AdapterById.TryGetValue(registration.AdapterRtEntityId, out var adapter))
+        {
+            // Cached (possibly under another connection of a second process with the same rtId,
+            // which is deliberately not treated as orphaned — see EnsureRegistrationStillCached).
+            registration.OrphanedSinceUtc = null;
+            adapter.AddMetricsSample(sample);
+            return MetricsSampleOutcome.Recorded;
+        }
+
+        // Registered here, never told to restart, and yet not in the cache: deaf (AB#5827).
+        var now = UtcNow();
+        registration.OrphanedSinceUtc ??= now;
+        if (now - registration.OrphanedSinceUtc.Value < OrphanedRegistrationGracePeriod)
+        {
+            Logger.Debug(
+                "[{TenantId}] Adapter '{AdapterRtId}' on connection '{ConnectionId}' is registered but not cached since {Since:O}; " +
+                "waiting for the grace period before asking it to register again",
+                registration.TenantId, registration.AdapterRtEntityId, connectionId, registration.OrphanedSinceUtc);
+            return MetricsSampleOutcome.Dropped;
+        }
+
+        // Exactly once per connection: the adapter restarts on a new connection, which registers
+        // afresh. A second request on this one would start a second, overlapping restart.
+        if (!_registeredConnections.TryRemove(new KeyValuePair<string, RegisteredAdapterConnection>(connectionId,
+                registration)))
+        {
+            return MetricsSampleOutcome.Dropped;
+        }
+
+        Logger.Warn(
+            "[{TenantId}] Adapter '{AdapterRtId}' on connection '{ConnectionId}' holds an accepted registration but has not " +
+            "been in the adapter cache for {Elapsed}; it cannot receive configuration, deployments or metrics reads. " +
+            "Asking it to register again",
+            registration.TenantId, registration.AdapterRtEntityId, connectionId, now - registration.OrphanedSinceUtc.Value);
+        return MetricsSampleOutcome.RegistrationLost;
+    }
+
     public void RecordMetricsSample(string tenantId, AdapterMetricsSampleDto sample)
+    {
+        RecordMetricsSampleCore(tenantId, sample);
+    }
+
+    private MetricsSampleOutcome RecordMetricsSampleCore(string tenantId, AdapterMetricsSampleDto sample)
     {
         if (!adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
             // Tenant cache may be transiently absent during enable/disable; drop the
             // sample silently so the SignalR caller is not impacted.
             Logger.Debug("[{TenantId}] Dropping metrics sample for unknown tenant.", tenantId);
-            return;
+            return MetricsSampleOutcome.Dropped;
         }
 
         if (!adapterTenant.AdapterById.TryGetValue(sample.AdapterRtEntityId, out var adapter))
         {
             Logger.Debug("[{TenantId}] Dropping metrics sample for unknown adapter '{AdapterRtId}'.",
                 tenantId, sample.AdapterRtEntityId);
-            return;
+            return MetricsSampleOutcome.Dropped;
         }
 
         adapter.AddMetricsSample(sample);
+        return MetricsSampleOutcome.Recorded;
     }
 
     public IReadOnlyList<AdapterMetricsSampleDto> GetMetricsSamples(string tenantId, RtEntityId adapterRtEntityId,

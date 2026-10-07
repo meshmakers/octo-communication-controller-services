@@ -46,6 +46,30 @@ internal class AdapterServiceException : Exception
         return new AdapterServiceException($"[{tenantId}] Tenant not enabled.");
     }
 
+    /// <summary>
+    /// AB#5827: the tenant's adapter cache was re-initialised (tenant pre/post-update) again and
+    /// again while the registration was reading the adapter configuration. Thrown instead of
+    /// writing the adapter into a cache instance nothing reads any more; the adapter retries.
+    /// </summary>
+    internal static Exception RegistrationRaceLost(string tenantId, RtEntityId adapterRtEntityId, int attempts)
+    {
+        return new AdapterServiceException(
+            $"[{tenantId}] Registration of adapter '{adapterRtEntityId}' gave up after {attempts} attempts: " +
+            "the tenant's adapter cache was re-initialised by a tenant update during every attempt. Register again.");
+    }
+
+    /// <summary>
+    /// AB#5827: the registration completed but the adapter is no longer in the tenant's adapter
+    /// cache (e.g. a tenant update flushed it right after). Reporting success here would leave the
+    /// adapter connected but deaf, so the registration fails and the adapter registers again.
+    /// </summary>
+    internal static Exception RegistrationLost(string tenantId, RtEntityId adapterRtEntityId)
+    {
+        return new AdapterServiceException(
+            $"[{tenantId}] Registration of adapter '{adapterRtEntityId}' was lost right after it completed: " +
+            "the adapter is no longer in the tenant's adapter cache (tenant update in progress). Register again.");
+    }
+
     internal static Exception PipelineNotFound(string tenantId, RtEntityId pipelineRtEntityId)
     {
         return new AdapterServiceException($"[{tenantId}] Pipeline '{pipelineRtEntityId}' not found."); 
