@@ -20,6 +20,11 @@ internal class ExecutionCleanupBackgroundService : BackgroundService
     // Retention cleanup (deleting old records) runs at most once per day.
     private static readonly TimeSpan RetentionInterval = TimeSpan.FromHours(24);
 
+    // AB#5425: the tenants the previous fold sweep reported pipeline metrics for. Whatever falls
+    // out of this set between two sweeps is a tenant that was switched off, and its pipeline
+    // gauges have to go with it.
+    private IReadOnlyList<string> _lastSweptTenantIds = [];
+
     /// <summary>
     /// Constructor
     /// </summary>
@@ -174,6 +179,15 @@ internal class ExecutionCleanupBackgroundService : BackgroundService
                 Logger.Error(ex, "Unexpected error folding executions for tenant '{TenantId}'", tenantId);
             }
         }
+
+        // AB#5425: a tenant that was switched off is never swept again, so its pipelines would
+        // keep reporting a forever-rising execution age and eventually alert about nothing.
+        foreach (var goneTenantId in _lastSweptTenantIds.Except(tenantIds))
+        {
+            PipelineExecutionMetrics.ForgetTenant(goneTenantId);
+        }
+
+        _lastSweptTenantIds = tenantIds;
 
         if (totalPruned > 0)
         {

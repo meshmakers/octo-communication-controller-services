@@ -74,7 +74,20 @@ internal class WorkloadLifecycleMetricsTests
         return map;
     }
 
-    private static string UniqueTenant() => $"tenant-{Guid.NewGuid():N}";
+    /// <summary>
+    ///     A fresh tenant that has opted into observability (AB#5432). Since these instruments are
+    ///     governed by the same single per-tenant flag as the workload-state and pipeline families,
+    ///     the opt-in is a precondition for all of them; the gate itself is pinned by the tests that
+    ///     use <see cref="UniqueTenantWithoutOptIn" />.
+    /// </summary>
+    private static string UniqueTenant()
+    {
+        var tenantId = UniqueTenantWithoutOptIn();
+        WorkloadObservabilityOptIn.Refresh(tenantId, optedIn: true, TimeSpan.FromMinutes(5));
+        return tenantId;
+    }
+
+    private static string UniqueTenantWithoutOptIn() => $"tenant-{Guid.NewGuid():N}";
 
     [Test]
     public async Task SuccessfulWake_CountsOnceAndRecordsItsDuration()
@@ -230,6 +243,120 @@ internal class WorkloadLifecycleMetricsTests
         // Assert
         await Assert.That(recorded.First(r => r.Instrument == "octo.workload.offline_unexpected")
             .Tags["octo.workload.name"]).IsEqualTo("Mesh Adapter");
+    }
+
+    /// <summary>
+    ///     AB#5432. These instruments predate the per-tenant flag and were unconditional — 20 series
+    ///     from test-2 while nobody had opted in. One switch now governs the whole workload and
+    ///     pipeline surface, so a tenant that never opted in must produce nothing here either.
+    /// </summary>
+    [Test]
+    public async Task TenantThatDidNotOptIn_PublishesNothingAtAll()
+    {
+        // Arrange
+        var tenantId = UniqueTenantWithoutOptIn();
+        var rtId = OctoObjectId.GenerateNewId();
+
+        // Act
+        var recorded = Collect(tenantId, () =>
+        {
+            WorkloadLifecycleMetrics.RecordWakeSucceeded(tenantId, rtId, "Mesh Adapter", TimeSpan.FromSeconds(3));
+            WorkloadLifecycleMetrics.RecordWakeTimedOut(tenantId, rtId, "Mesh Adapter");
+            WorkloadLifecycleMetrics.RecordHibernated(tenantId, rtId, "Mesh Adapter");
+            WorkloadLifecycleMetrics.RecordOffline(tenantId, rtId, "Mesh Adapter", intentional: false);
+        }, observeGauges: true);
+
+        // Assert
+        await Assert.That(recorded).IsEmpty();
+    }
+
+    /// <summary>
+    ///     Opting out must stop the two gauges rather than leave their last value on the wire. The gate
+    ///     sits in the collection callback, so it takes effect on the next scrape.
+    /// </summary>
+    [Test]
+    public async Task TenantThatOptsOut_StopsExportingTheGaugesItHadPublished()
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var rtId = OctoObjectId.GenerateNewId();
+        WorkloadLifecycleMetrics.RecordHibernated(tenantId, rtId, "Mesh Adapter");
+
+        var whileOptedIn = Collect(tenantId, () => { }, observeGauges: true);
+
+        // Act
+        var afterOptOut = Collect(tenantId,
+            () => WorkloadObservabilityOptIn.Refresh(tenantId, optedIn: false, TimeSpan.FromMinutes(5)),
+            observeGauges: true);
+
+        // Assert
+        await Assert.That(Gauge(whileOptedIn, tenantId, rtId)).IsEqualTo(1);
+        await Assert.That(afterOptOut).IsEmpty();
+    }
+
+    /// <summary>
+    ///     The state map is maintained for every tenant on purpose — only the export is gated — so a
+    ///     tenant that opts in later reports its true hibernation state at the next scrape instead of
+    ///     a stale zero until its next transition.
+    /// </summary>
+    [Test]
+    public async Task TenantThatOptsInLater_ReportsTheStateItAlreadyHad()
+    {
+        // Arrange — the transition happens while the tenant is still opted out.
+        var tenantId = UniqueTenantWithoutOptIn();
+        var rtId = OctoObjectId.GenerateNewId();
+        WorkloadLifecycleMetrics.RecordHibernated(tenantId, rtId, "Mesh Adapter");
+
+        // Act
+        var recorded = Collect(tenantId,
+            () => WorkloadObservabilityOptIn.Refresh(tenantId, optedIn: true, TimeSpan.FromMinutes(5)),
+            observeGauges: true);
+
+        // Assert — the gauge is there and correct; the hibernation counter of the opted-out window is
+        // not, and cannot be: a counter has no state to replay.
+        await Assert.That(Gauge(recorded, tenantId, rtId)).IsEqualTo(1);
+        await Assert.That(recorded.Any(r => r.Instrument == "octo.workload.hibernation.count")).IsFalse();
+    }
+
+    /// <summary>
+    ///     A verdict nobody refreshed can no longer be confirmed — the sweep that reads the flag has
+    ///     stopped — so the gate fails closed rather than publishing on it.
+    /// </summary>
+    [Test]
+    public async Task ExpiredOptIn_IsTreatedAsNotOptedIn()
+    {
+        // Arrange
+        var tenantId = UniqueTenantWithoutOptIn();
+        var rtId = OctoObjectId.GenerateNewId();
+        WorkloadObservabilityOptIn.Refresh(tenantId, optedIn: true, TimeSpan.Zero);
+
+        // Act
+        var recorded = Collect(tenantId,
+            () => WorkloadLifecycleMetrics.RecordHibernated(tenantId, rtId, "Mesh Adapter"), observeGauges: true);
+
+        // Assert
+        await Assert.That(recorded).IsEmpty();
+    }
+
+    /// <summary>
+    ///     A tenant that was switched off or deleted is never swept again; its workloads must not stay
+    ///     in the map waiting to be re-exported if the tenant id ever comes back.
+    /// </summary>
+    [Test]
+    public async Task ForgetTenant_DropsEveryWorkloadOfThatTenant()
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var first = OctoObjectId.GenerateNewId();
+        var second = OctoObjectId.GenerateNewId();
+        WorkloadLifecycleMetrics.RecordHibernated(tenantId, first, "Mesh Adapter");
+        WorkloadLifecycleMetrics.RecordOffline(tenantId, second, "Energy App", intentional: false);
+
+        // Act
+        var recorded = Collect(tenantId, () => WorkloadLifecycleMetrics.ForgetTenant(tenantId), observeGauges: true);
+
+        // Assert
+        await Assert.That(recorded).IsEmpty();
     }
 
     private static double? Gauge(List<Recorded> recorded, string tenantId, OctoObjectId rtId,

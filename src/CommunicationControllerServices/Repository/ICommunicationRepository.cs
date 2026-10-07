@@ -514,6 +514,16 @@ public interface ICommunicationRepository
     Task<bool> IsTenantExistingAsync(string tenantId);
 
     /// <summary>
+    /// Reads the <c>PublishWorkloadObservability</c> opt-in from the tenant's
+    /// <c>System/TenantModeConfiguration</c> (AB#5432). False when the attribute is false, when it is
+    /// absent (older <c>System</c> CK models have no such attribute), when the tenant has no
+    /// configuration entity at all, or when the read fails — observability is never worth failing a
+    /// sweep over, and a tenant that has not opted in must cost nothing.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    Task<bool> IsWorkloadObservabilityEnabledAsync(string tenantId);
+
+    /// <summary>
     /// Gets the pipelines of a communication adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>

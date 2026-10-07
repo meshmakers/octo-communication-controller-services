@@ -18,6 +18,13 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 /// </summary>
 internal class CommunicationRepository : ICommunicationRepository
 {
+    /// <summary>
+    /// Attribute of <c>System/TenantModeConfiguration</c> that opts a tenant into the workload state
+    /// metrics (AB#5432, <c>System-2.3.0</c>). Named as a string rather than accessed through the
+    /// generated model — see <see cref="IsWorkloadObservabilityEnabledAsync"/>.
+    /// </summary>
+    private const string PublishWorkloadObservabilityAttributeName = "PublishWorkloadObservability";
+
     private readonly ISystemContext _systemContext;
     private readonly ILogger<CommunicationRepository> _logger;
 
@@ -1736,6 +1743,38 @@ internal class CommunicationRepository : ICommunicationRepository
         catch (Exception e)
         {
             throw CommunicationRepositoryException.CommonFailedIsTenantExisting(tenantId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> IsWorkloadObservabilityEnabledAsync(string tenantId)
+    {
+        try
+        {
+            var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+            using var session = await tenantRepository.GetSessionAsync();
+            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync(session,
+                SystemCkIds.RtCkTenantModeConfigurationTypeId, RtEntityQueryOptions.Create());
+
+            // Read untyped on purpose. PublishWorkloadObservability was added in System-2.3.0
+            // (AB#5432); the generated System CK model this service compiles against floats to the
+            // published line and lags behind the engine repository by a train, so a typed property
+            // access would not even build until the model is published — and would then pin the
+            // controller's build to that publish forever. The attribute dictionary comes straight
+            // from Mongo and carries the value the moment a tenant's model is migrated, whatever the
+            // generated class knows about it.
+            return resultSet.Items.Any(e =>
+                e.GetAttributeValueOrStandard<bool>(PublishWorkloadObservabilityAttributeName));
+        }
+        catch (Exception e)
+        {
+            // Never fail a sweep over the opt-in read: a tenant whose configuration cannot be read
+            // is treated as opted out, which is the same outcome as not having opted in.
+            _logger.LogDebug(e,
+                "[{TenantId}] Could not read the workload observability opt-in; treating the tenant as opted out",
+                tenantId);
+            return false;
         }
     }
 

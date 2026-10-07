@@ -4,9 +4,13 @@ types:
     derivedFromCkTypeId: ${this}/EdaConfiguration
     description: "Configuration for an energy community"
     attributes:
+      # AB#5359 — the community's own name, entered by the tenant; no seed carries one. Only
+      # this assignment is tenant-owned: the shared System/Name definition stays seed-owned
+      # for every other type.
       - id: ${System}/Name
         name: Name
         isOptional: true
+        ownership: TenantOwned
       - id: ${this}/EnergyCommunityId
         name: EnergyCommunityId
       - id: ${this}/HeaderLogo
