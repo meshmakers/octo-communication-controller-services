@@ -231,8 +231,8 @@ internal class WorkloadStateMetricsBackgroundService(
     {
         var observed = new HashSet<string>(StringComparer.Ordinal);
 
-        // Workloads = adapters and applications (RtDeployableWorkload); pools are the layer above and
-        // are read separately, the same split the operator model makes.
+        // Workloads = adapters, adapter pools and applications (RtDeployableWorkload); deployment
+        // sites are the layer above and are read separately, the same split the operator model makes.
         var workloads = await communicationRepository.GetWorkloadsAsync(tenantId);
         foreach (var workload in workloads)
         {
@@ -240,11 +240,11 @@ internal class WorkloadStateMetricsBackgroundService(
             observed.Add(workload.RtId.ToString());
         }
 
-        var pools = await communicationRepository.GetPoolsAsync(tenantId);
-        foreach (var pool in pools)
+        var deploymentSites = await communicationRepository.GetDeploymentSitesAsync(tenantId);
+        foreach (var deploymentSite in deploymentSites)
         {
-            WorkloadStateMetrics.ObservePool(tenantId, pool);
-            observed.Add(pool.RtId.ToString());
+            WorkloadStateMetrics.ObserveDeploymentSite(tenantId, deploymentSite);
+            observed.Add(deploymentSite.RtId.ToString());
         }
 
         // Only now: the liveness stamp means "a sweep ran to completion", not "a sweep was started".

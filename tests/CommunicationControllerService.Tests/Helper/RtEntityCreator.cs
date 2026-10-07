@@ -238,7 +238,7 @@ internal static class RtEntityCreator
         };
     }
 
-    public static RtDeploymentSite CreatePool(string? name = null, string? id = null)
+    public static RtDeploymentSite CreateDeploymentSite(string? name = null, string? id = null)
     {
         id ??= OctoObjectId.GenerateNewId().ToString();
         return new RtDeploymentSite
@@ -246,6 +246,23 @@ internal static class RtEntityCreator
             RtId = new OctoObjectId(id),
             CkTypeId = SystemCommunicationCkIds.RtCkDeploymentSiteTypeId,
             Name = name ?? "Test Deployment Site"
+        };
+    }
+
+    /// <summary>
+    /// An AdapterPool workload (AB#4924). A DeployableWorkload with a replica range and no
+    /// <c>CommunicationState</c> / <c>ConfigurationState</c> of its own.
+    /// </summary>
+    public static RtAdapterPool CreateAdapterPool(string? name = null, string? id = null)
+    {
+        id ??= OctoObjectId.GenerateNewId().ToString();
+        return new RtAdapterPool
+        {
+            RtId = new OctoObjectId(id),
+            CkTypeId = SystemCommunicationCkIds.RtCkAdapterPoolTypeId,
+            Name = name ?? "Test Adapter Pool",
+            MinReplicas = 1,
+            MaxReplicas = 3
         };
     }
 }

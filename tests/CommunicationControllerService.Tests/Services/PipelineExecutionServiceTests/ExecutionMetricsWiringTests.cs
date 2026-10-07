@@ -3,11 +3,12 @@ using System.Diagnostics.Metrics;
 using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using NSubstitute;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.PipelineExecutionServiceTests;
@@ -37,7 +38,8 @@ internal class ExecutionMetricsWiringTests
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
     public ExecutionMetricsWiringTests()
     {
-        _service = new PipelineExecutionService(_repository, _adapterCache, _eventService, _lifecycleService);
+        _service = new PipelineExecutionService(_repository, _adapterCache, _eventService, _lifecycleService,
+            Microsoft.Extensions.Options.Options.Create(new CommunicationControllerOptions()));
 
         // AB#5432: the tenant has opted into observability. Without it every instrument in this file
         // is silent by design — pinned by FoldAndPruneExecutionsAsync_OnATenantThatDidNotOptIn_….

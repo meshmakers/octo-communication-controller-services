@@ -6,7 +6,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using NSubstitute;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.BackgroundServices;
@@ -95,12 +95,12 @@ internal class WorkloadStateMetricsBackgroundServiceTests
     }
 
     private void ArrangeTenant(bool optedIn, IReadOnlyCollection<RtDeployableWorkload> workloads,
-        IReadOnlyCollection<RtPool> pools)
+        IReadOnlyCollection<RtDeploymentSite> pools)
     {
         _adapterCache.GetEnabledTenantIds().Returns([_tenantId]);
         _repository.IsWorkloadObservabilityEnabledAsync(_tenantId).Returns(optedIn);
         _repository.GetWorkloadsAsync(_tenantId).Returns(workloads);
-        _repository.GetPoolsAsync(_tenantId).Returns(pools);
+        _repository.GetDeploymentSitesAsync(_tenantId).Returns(pools);
     }
 
     /// <summary>
@@ -111,7 +111,7 @@ internal class WorkloadStateMetricsBackgroundServiceTests
     public async Task TenantThatDidNotOptIn_PublishesNothingAndIsNotRead()
     {
         // Arrange
-        ArrangeTenant(optedIn: false, [RtEntityCreator.CreateAdapter()], [RtEntityCreator.CreatePool()]);
+        ArrangeTenant(optedIn: false, [RtEntityCreator.CreateAdapter()], [RtEntityCreator.CreateDeploymentSite()]);
 
         // Act
         var recorded = Collect(() => _service.SweepAllTenantsAsync());
@@ -119,7 +119,7 @@ internal class WorkloadStateMetricsBackgroundServiceTests
         // Assert
         await Assert.That(recorded).IsEmpty();
         await _repository.DidNotReceive().GetWorkloadsAsync(_tenantId);
-        await _repository.DidNotReceive().GetPoolsAsync(_tenantId);
+        await _repository.DidNotReceive().GetDeploymentSitesAsync(_tenantId);
     }
 
     /// <summary>
@@ -133,7 +133,7 @@ internal class WorkloadStateMetricsBackgroundServiceTests
         // Arrange
         var adapter = RtEntityCreator.CreateAdapter();
         var application = RtEntityCreator.CreateApplication();
-        var pool = RtEntityCreator.CreatePool();
+        var pool = RtEntityCreator.CreateDeploymentSite();
         ArrangeTenant(optedIn: true, [adapter, application], [pool]);
 
         // Act
@@ -147,7 +147,7 @@ internal class WorkloadStateMetricsBackgroundServiceTests
             {
                 WorkloadStateMetrics.AdapterKind,
                 WorkloadStateMetrics.ApplicationKind,
-                WorkloadStateMetrics.PoolKind,
+                WorkloadStateMetrics.DeploymentSiteKind,
             });
 
         // Adapter and pool carry the other two gauges; the application carries neither.
@@ -260,7 +260,7 @@ internal class WorkloadStateMetricsBackgroundServiceTests
             .Returns<bool>(_ => throw new InvalidOperationException("boom"));
         _repository.IsWorkloadObservabilityEnabledAsync(healthyTenantId).Returns(true);
         _repository.GetWorkloadsAsync(healthyTenantId).Returns([RtEntityCreator.CreateAdapter()]);
-        _repository.GetPoolsAsync(healthyTenantId).Returns([]);
+        _repository.GetDeploymentSitesAsync(healthyTenantId).Returns([]);
 
         try
         {

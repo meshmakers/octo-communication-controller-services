@@ -2,7 +2,7 @@ using System.Diagnostics.Metrics;
 using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services;
 
@@ -82,10 +82,10 @@ internal class WorkloadStateMetricsTests
             WorkloadStateMetrics.CompleteSweep(tenantId, new HashSet<string> { workload.RtId.ToString() });
         });
 
-    private static List<Recorded> SweepPool(string tenantId, RtPool pool) =>
+    private static List<Recorded> SweepPool(string tenantId, RtDeploymentSite pool) =>
         Collect(tenantId, () =>
         {
-            WorkloadStateMetrics.ObservePool(tenantId, pool);
+            WorkloadStateMetrics.ObserveDeploymentSite(tenantId, pool);
             WorkloadStateMetrics.CompleteSweep(tenantId, new HashSet<string> { pool.RtId.ToString() });
         });
 
@@ -131,11 +131,11 @@ internal class WorkloadStateMetricsTests
     }
 
     [Test]
-    public async Task Pool_PublishesAllThreeGaugesUnderThePoolKind()
+    public async Task DeploymentSite_PublishesAllThreeGaugesUnderTheDeploymentSiteKind()
     {
         // Arrange
         var tenantId = UniqueTenant();
-        var pool = RtEntityCreator.CreatePool("Cloud");
+        var pool = RtEntityCreator.CreateDeploymentSite("Cloud");
         pool.DeploymentState = RtDeploymentStateEnum.Deployed;
         pool.CommunicationState = RtCommunicationStateEnum.Online;
         pool.ConfigurationState = RtConfigurationStateEnum.Configured;
@@ -151,7 +151,74 @@ internal class WorkloadStateMetricsTests
         await Assert.That(Value(recorded, "octo.workload.configuration_state", pool.RtId))
             .IsEqualTo(WorkloadStateMetrics.Healthy);
         await Assert.That(Entry(recorded, "octo.workload.deployment_state", pool.RtId)!
-            .Tags["octo.workload.kind"]).IsEqualTo(WorkloadStateMetrics.PoolKind);
+            .Tags["octo.workload.kind"]).IsEqualTo(WorkloadStateMetrics.DeploymentSiteKind);
+    }
+
+    /// <summary>
+    ///     AB#4924 / decision E4: an AdapterPool is a <c>DeployableWorkload</c> without communication
+    ///     or configuration state. Before the 0.2-lane port it fell into the application branch and
+    ///     was published as <c>application</c>; it now has a kind of its own and, like an
+    ///     application, publishes the deployment state only.
+    /// </summary>
+    [Test]
+    public async Task AdapterPool_PublishesDeploymentStateOnlyUnderTheAdapterPoolKind()
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var adapterPool = RtEntityCreator.CreateAdapterPool("accounting-pool");
+        adapterPool.DeploymentState = RtDeploymentStateEnum.Error;
+
+        // Act
+        var recorded = Sweep(tenantId, adapterPool);
+
+        // Assert
+        await Assert.That(Value(recorded, "octo.workload.deployment_state", adapterPool.RtId))
+            .IsEqualTo(WorkloadStateMetrics.Critical);
+        await Assert.That(Entry(recorded, "octo.workload.deployment_state", adapterPool.RtId)!
+            .Tags["octo.workload.kind"]).IsEqualTo(WorkloadStateMetrics.AdapterPoolKind);
+        await Assert.That(Entry(recorded, "octo.workload.communication_state", adapterPool.RtId)).IsNull();
+        await Assert.That(Entry(recorded, "octo.workload.configuration_state", adapterPool.RtId)).IsNull();
+    }
+
+    /// <summary>
+    ///     AB#4924: a <c>Leased</c> adapter owns no process — it is never deployed and never comes
+    ///     online. It must read healthy on every gauge (the not-expected-to-run suppression), or every
+    ///     borrower in the estate would sit at a permanent warning.
+    /// </summary>
+    [Test]
+    public async Task LeasedAdapter_NeverDeployedNorOnline_IsHealthyOnEveryGauge()
+    {
+        // Arrange
+        var tenantId = UniqueTenant();
+        var adapter = RtEntityCreator.CreateAdapter();
+        adapter.LifecycleMode = RtLifecycleModeEnum.Leased;
+        adapter.DeploymentState = RtDeploymentStateEnum.Undeployed;
+        adapter.CommunicationState = RtCommunicationStateEnum.Unregistered;
+        adapter.ConfigurationState = RtConfigurationStateEnum.Unconfigured;
+
+        // Act
+        var recorded = Sweep(tenantId, adapter);
+
+        // Assert
+        await Assert.That(Value(recorded, "octo.workload.deployment_state", adapter.RtId))
+            .IsEqualTo(WorkloadStateMetrics.Healthy);
+        await Assert.That(Value(recorded, "octo.workload.communication_state", adapter.RtId))
+            .IsEqualTo(WorkloadStateMetrics.Healthy);
+        await Assert.That(Value(recorded, "octo.workload.configuration_state", adapter.RtId))
+            .IsEqualTo(WorkloadStateMetrics.Healthy);
+    }
+
+    /// <summary>
+    ///     Decision E4 (2026-10-07): the 0.2 lane publishes the 4.x names, no alias. The check rules
+    ///     match on these literals, so they are pinned.
+    /// </summary>
+    [Test]
+    public async Task KindLabels_AreTheAgreedLiterals()
+    {
+        await Assert.That(WorkloadStateMetrics.AdapterKind).IsEqualTo("adapter");
+        await Assert.That(WorkloadStateMetrics.ApplicationKind).IsEqualTo("application");
+        await Assert.That(WorkloadStateMetrics.DeploymentSiteKind).IsEqualTo("deployment_site");
+        await Assert.That(WorkloadStateMetrics.AdapterPoolKind).IsEqualTo("adapter_pool");
     }
 
     /// <summary>
@@ -404,13 +471,13 @@ internal class WorkloadStateMetricsTests
         // Arrange
         var tenantId = UniqueTenant();
         var adapter = RtEntityCreator.CreateAdapter();
-        var pool = RtEntityCreator.CreatePool();
+        var pool = RtEntityCreator.CreateDeploymentSite();
 
         // Act
         var recorded = Collect(tenantId, () =>
         {
             WorkloadStateMetrics.ObserveWorkload(tenantId, adapter);
-            WorkloadStateMetrics.ObservePool(tenantId, pool);
+            WorkloadStateMetrics.ObserveDeploymentSite(tenantId, pool);
             WorkloadStateMetrics.CompleteSweep(tenantId,
                 new HashSet<string> { adapter.RtId.ToString(), pool.RtId.ToString() });
         });

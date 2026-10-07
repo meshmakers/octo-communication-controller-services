@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v3;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
@@ -108,12 +108,24 @@ internal static class WorkloadStateMetrics
     public const string ApplicationKind = "application";
 
     /// <summary>
-    ///     Tag value of <c>octo.workload.kind</c> for a pool. A pool is not a workload in the
-    ///     operator's model — it is the layer above — but it carries the same three states and the
-    ///     same opt-in covers it, so it shares the metric family and is told apart by this tag
-    ///     rather than by a parallel <c>octo.pool.*</c> contract nobody would remember to alert on.
+    ///     Tag value of <c>octo.workload.kind</c> for a deployment site (the 3.x <c>Pool</c>, renamed
+    ///     in System.Communication 4.0.0). A deployment site is not a workload in the operator's
+    ///     model — it is the layer above — but it carries the same three states and the same opt-in
+    ///     covers it, so it shares the metric family and is told apart by this tag rather than by a
+    ///     parallel contract nobody would remember to alert on. The main line publishes
+    ///     <c>pool</c> here; the 0.2 lane deliberately publishes the 4.x name without an alias
+    ///     (decision E4, AB#4924), and the check rules migrate with the major train.
     /// </summary>
-    public const string PoolKind = "pool";
+    public const string DeploymentSiteKind = "deployment_site";
+
+    /// <summary>
+    ///     Tag value of <c>octo.workload.kind</c> for an adapter pool (AB#4924, decision E4). An
+    ///     <see cref="RtAdapterPool" /> is a <see cref="RtDeployableWorkload" /> without
+    ///     <c>CommunicationState</c> / <c>ConfigurationState</c> — its members register on the pool
+    ///     hub, not the pool entity — so it publishes the deployment state only. Without its own
+    ///     value it would be reported as an <see cref="ApplicationKind" />, which it is not.
+    /// </summary>
+    public const string AdapterPoolKind = "adapter_pool";
 
     private static readonly Meter Meter = new(MeterName, "1.0.0");
 
@@ -202,8 +214,14 @@ internal static class WorkloadStateMetrics
     public static void ObserveWorkload(string tenantId, RtDeployableWorkload workload)
     {
         var adapter = workload as RtAdapter;
+        var kind = workload switch
+        {
+            RtAdapter => AdapterKind,
+            RtAdapterPool => AdapterPoolKind,
+            _ => ApplicationKind
+        };
         States[Key(tenantId, workload.RtId)] = new EntityEntry(
-            adapter != null ? AdapterKind : ApplicationKind,
+            kind,
             workload.Name ?? string.Empty,
             workload.DeploymentState,
             adapter?.CommunicationState,
@@ -211,16 +229,16 @@ internal static class WorkloadStateMetrics
             workload.LifecycleState);
     }
 
-    /// <summary>Publishes the state of one pool.</summary>
-    public static void ObservePool(string tenantId, RtPool pool)
+    /// <summary>Publishes the state of one deployment site.</summary>
+    public static void ObserveDeploymentSite(string tenantId, RtDeploymentSite deploymentSite)
     {
-        States[Key(tenantId, pool.RtId)] = new EntityEntry(
-            PoolKind,
-            pool.Name ?? string.Empty,
-            pool.DeploymentState,
-            pool.CommunicationState,
-            pool.ConfigurationState,
-            // A pool is not scaled to zero — it has no lifecycle state to suppress against.
+        States[Key(tenantId, deploymentSite.RtId)] = new EntityEntry(
+            DeploymentSiteKind,
+            deploymentSite.Name ?? string.Empty,
+            deploymentSite.DeploymentState,
+            deploymentSite.CommunicationState,
+            deploymentSite.ConfigurationState,
+            // A deployment site is not scaled to zero — it has no lifecycle state to suppress against.
             null);
     }
 

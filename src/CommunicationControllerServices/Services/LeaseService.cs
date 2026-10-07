@@ -418,8 +418,9 @@ internal class LeaseService : ILeaseService
                 ? (int)Math.Max(0, Math.Round((completedAt - startedAt).TotalMilliseconds))
                 : 0;
 
+            var outcome = success ? RtPipelineExecutionStatusEnum.Completed : RtPipelineExecutionStatusEnum.Failed;
             await _communicationRepository.UpdatePipelineExecutionAsync(lease.TenantId, lease.ExecutionId,
-                success ? RtPipelineExecutionStatusEnum.Completed : RtPipelineExecutionStatusEnum.Failed,
+                outcome,
                 completedAt, durationMs,
                 success ? null : statusMessage ?? "The leased execution failed without a reported reason.",
                 // 🔴 The release is the ONLY route a leased execution's output has. A dedicated adapter
@@ -427,6 +428,12 @@ internal class LeaseService : ILeaseService
                 // the connection - a pool member holds a tenant-free management channel and has no such
                 // connection to report on (AB#4924 §9.9 / D4).
                 outputData);
+
+            // AB#5425 on the 0.2 lane: a dedicated adapter's outcome is counted where it reports it
+            // (PipelineExecutionService). A leased execution never takes that path — the release is its
+            // only completion route — so without this it would be missing from
+            // octo.pipeline.execution.count entirely. Counted after the write, like the adapter path.
+            PipelineExecutionMetrics.RecordExecutionOutcome(lease.TenantId, outcome);
         }
         catch (Exception e)
         {
