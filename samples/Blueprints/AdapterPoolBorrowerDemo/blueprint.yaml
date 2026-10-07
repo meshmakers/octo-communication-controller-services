@@ -57,6 +57,6 @@ description: |
   secret is what `isRuntimeState` on `ClientSecret` exists to prevent.
 
 ckModelDependencies:
-  - System.Communication-[4.0,5.0)
+  - System.Communication-[4.5,5.0)
 
 seedDataPath: seed-data/entities.yaml

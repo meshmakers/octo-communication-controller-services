@@ -39,8 +39,12 @@ description: |
 # the floor alone would have made this blueprint unsatisfiable rather than merely stale.
 # The seed below also genuinely needs 4.0.0 now: it creates a DeploymentSite, a type that
 # does not exist before it.
+# AB#4924 (2026-10-07): floor [4.1,5.0) -> [4.5,5.0), the lane-wide floor for every
+# blueprint/seed on System.Communication 4.x. 4.5.0 is the embedded version and the first
+# 4.x any catalog will hold, so lint and validate resolve the floor again. No version bump:
+# the seed is unchanged and the descriptor above installs the embedded version anyway.
 ckModelDependencies:
-  - System.Communication-[4.1,5.0)
+  - System.Communication-[4.5,5.0)
 
 seedDataPath: seed-data/entities.yaml
 

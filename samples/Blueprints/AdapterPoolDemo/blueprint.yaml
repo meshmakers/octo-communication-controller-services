@@ -70,6 +70,6 @@ description: |
   producing a pool that looks installed and cannot deploy.
 
 ckModelDependencies:
-  - System.Communication-[4.0,5.0)
+  - System.Communication-[4.5,5.0)
 
 seedDataPath: seed-data/entities.yaml
