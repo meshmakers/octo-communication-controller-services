@@ -157,7 +157,12 @@ public interface IAdapterPoolConnectionManager
     LeaseDto? ReleaseLease(string connectionId, string leaseId);
 
     /// <summary>Marks a member as draining; it will not be offered another lease.</summary>
-    void MarkDraining(string connectionId);
+    /// <returns>
+    ///     True when this call moved the member into draining, false when it was draining already or
+    ///     this connection holds no registration (AB#5864) — so a caller can count and log the
+    ///     transition once rather than once per message that reports it.
+    /// </returns>
+    bool MarkDraining(string connectionId);
 
     /// <summary>
     ///     Records that a member is still alive. Returns false when this connection holds no member

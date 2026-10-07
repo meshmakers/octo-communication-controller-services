@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
@@ -26,6 +27,19 @@ internal class LeaseService : ILeaseService
     private readonly ILifecycleConfigurationService _lifecycleConfiguration;
 
     private readonly ILeaseSchedulerWakeSignal _wakeSignal;
+
+    /// <summary>
+    ///     AB#5864 — how often a work item may be refused by a draining member and returned to the
+    ///     queue before it is failed instead. Three: one refusal is the expected grant-vs-drain race,
+    ///     a second is a coincidence, a third in a row is a pattern nobody should wait out.
+    /// </summary>
+    internal const int MaxRefusedLeaseRequeues = 3;
+
+    private static readonly TimeSpan RefusalCountRetention = TimeSpan.FromHours(1);
+
+    // AB#5864 — refusal count per re-queued attempt, see RememberRefusalCount.
+    private readonly ConcurrentDictionary<string, (int Count, DateTime RecordedAtUtc)> _refusalCounts =
+        new(StringComparer.Ordinal);
 
     public LeaseService(IAdapterPoolConnectionManager connectionManager,
         ICommunicationRepository communicationRepository,
@@ -311,6 +325,19 @@ internal class LeaseService : ILeaseService
     /// <inheritdoc />
     public async Task ReleaseLeaseAsync(string connectionId, LeaseResultDto result)
     {
+        // 🔴 AB#5864 — a Drained release is the member saying "I take no further lease" (the DTO's
+        // contract). Before this, the controller logged the reason and nothing else: the registry
+        // kept the member available, the next round granted it the next lease, the member refused
+        // it in under a second, and that refusal FAILED the borrower's execution — for every grant,
+        // for as long as the process lived. Recorded first and independently of the release below:
+        // the member's drain flag never resets, so even a stale Drained release is true about the
+        // process, and marking it before the lease is freed means there is no instant in which it
+        // is both idle and not draining.
+        if (result.Reason == LeaseReleaseReasonDto.Drained)
+        {
+            RecordMemberSelfDrain(connectionId, result);
+        }
+
         var released = _connectionManager.ReleaseLease(connectionId, result.LeaseId);
         if (released is null)
         {
@@ -332,13 +359,26 @@ internal class LeaseService : ILeaseService
             DateTime.UtcNow - released.GrantedAtUtc,
             result.WorkDurationMs is { } ms ? TimeSpan.FromMilliseconds(ms) : null);
 
-        await ApplyLeaseOutcomeAsync(released, result.Success, result.StatusMessage, result.OutputData);
-
-        if (result is { Success: false, Reason: not LeaseReleaseReasonDto.Drained })
+        string? requeuedExecutionId = null;
+        if (IsRefusedWithoutRunning(result))
         {
-            await _eventService.StoreErrorEventAsync(released.TenantId,
-                $"A leased execution on adapter pool {released.AdapterPoolRtId} of tenant '{released.AdapterPoolTenantId}' " +
-                $"failed: {result.StatusMessage ?? "no detail reported"}");
+            // AB#5864 — the member never ran the work item, so there is no outcome to apply: the
+            // work goes back to the queue, at the position it held, instead of failing.
+            requeuedExecutionId = await ReturnRefusedWorkToQueueAsync(released, result.StatusMessage);
+        }
+        else
+        {
+            await ApplyLeaseOutcomeAsync(released, result.Success, result.StatusMessage, result.OutputData);
+
+            // A Drained release that DID run the work item reports that work item's own outcome
+            // (AB#5864, member side), so a failure here is the pipeline's and belongs in the
+            // borrower's event log exactly like a Failed release.
+            if (!result.Success)
+            {
+                await _eventService.StoreErrorEventAsync(released.TenantId,
+                    $"A leased execution on adapter pool {released.AdapterPoolRtId} of tenant '{released.AdapterPoolTenantId}' " +
+                    $"failed: {result.StatusMessage ?? "no detail reported"}");
+            }
         }
 
         // 🔴 AB#4924 §9.6 — a member just became available. Without this the next grant waits for the
@@ -348,10 +388,143 @@ internal class LeaseService : ILeaseService
         // a second lease while the first one's execution was still being written.
         //
         // Requested for a member that is now idle, NOT for a drain: a draining member takes no
-        // further work, so a round on its account would read every borrower's queue for nothing.
-        if (result.Reason != LeaseReleaseReasonDto.Drained)
+        // further work, so a round on its account would read every borrower's queue for nothing —
+        // UNLESS the drain handed work back to the queue (AB#5864). Then another member may well be
+        // idle, and the returned item must not wait a tick for it.
+        if (result.Reason != LeaseReleaseReasonDto.Drained || requeuedExecutionId is not null)
         {
-            _wakeSignal.RequestRound($"lease '{released.LeaseId}' released by its member");
+            _wakeSignal.RequestRound(requeuedExecutionId is null
+                ? $"lease '{released.LeaseId}' released by its member"
+                : $"lease '{released.LeaseId}' refused by a draining member; work re-queued as '{requeuedExecutionId}'");
+        }
+    }
+
+    /// <summary>
+    ///     AB#5864 — whether a release hands back a lease whose work item never ran.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Drained, unsuccessful and no work span: the member was already draining when the lease
+    ///         arrived and refused it up front (<c>AdapterPoolClient.LeaseAsync</c>), or a participant
+    ///         failed while entering the lease and the unwind drained the member. Either way the
+    ///         pipeline did not run, so re-queuing it cannot run anything twice.
+    ///     </para>
+    ///     <para>
+    ///         🔴 <c>WorkDurationMs</c> is the discriminator because the member stamps it around the
+    ///         work item and nowhere else (increment 9). A Drained release <b>with</b> a work span ran
+    ///         the pipeline and reports its outcome; re-queuing that would be a second run of work that
+    ///         already happened. A <c>Failed</c> release without a work span is deliberately NOT
+    ///         treated as a refusal — that is a borrower whose lease could not be entered (credential,
+    ///         CK model), which fails the same way every time and must surface rather than loop.
+    ///     </para>
+    /// </remarks>
+    private static bool IsRefusedWithoutRunning(LeaseResultDto result) =>
+        result is { Reason: LeaseReleaseReasonDto.Drained, Success: false, WorkDurationMs: null };
+
+    /// <summary>
+    ///     AB#5864 — marks the member that reported a drain as draining in the registry, so no
+    ///     further lease is granted to it, and records the transition once.
+    /// </summary>
+    private void RecordMemberSelfDrain(string connectionId, LeaseResultDto result)
+    {
+        if (!_connectionManager.MarkDraining(connectionId))
+        {
+            return;
+        }
+
+        var member = _connectionManager.TryGetMember(connectionId);
+        if (member is null)
+        {
+            return;
+        }
+
+        AdapterLeasingMetrics.RecordMemberDrained(member.AdapterPoolTenantId, member.AdapterPoolRtId,
+            LeaseDrainReason.MemberReported);
+
+        Logger.Warn(
+            "Pool member '{MemberId}' of pool {AdapterPoolRtId} (tenant '{AdapterPoolTenantId}') reported that it is " +
+            "draining (release of lease '{LeaseId}': {StatusMessage}). It is offered no further lease; the member " +
+            "exits once idle and the pool workload restarts it as a fresh process",
+            member.MemberId, member.AdapterPoolRtId, member.AdapterPoolTenantId, result.LeaseId,
+            result.StatusMessage ?? "no detail reported");
+    }
+
+    /// <summary>
+    ///     AB#5864 — puts the work item of a refused lease back into the queue at the position it held,
+    ///     or fails it once it has been refused <see cref="MaxRefusedLeaseRequeues" /> times in a row.
+    /// </summary>
+    /// <returns>The execution id of the re-queued attempt, or null when nothing was re-queued.</returns>
+    private async Task<string?> ReturnRefusedWorkToQueueAsync(LeaseDto lease, string? statusMessage)
+    {
+        if (string.IsNullOrWhiteSpace(lease.ExecutionId))
+        {
+            // A hand-driven lease with no work item behind it: nothing to return.
+            return null;
+        }
+
+        var refusals = TakeRefusalCount(lease.ExecutionId) + 1;
+        var detail = statusMessage ?? "no detail reported";
+
+        if (refusals > MaxRefusedLeaseRequeues)
+        {
+            // 🔴 The loop guard. With the registry fix above a draining member is never granted
+            // again, so a refusal needs a grant that raced a drain — but "needs a race" is not a
+            // bound. Past the cap the item fails loudly instead of circling.
+            var message =
+                $"The work item was refused by {refusals} adapter pool members in a row without running " +
+                $"(last: {detail}); it is not re-queued again.";
+            await ApplyLeaseOutcomeAsync(lease, false, message);
+            await _eventService.StoreErrorEventAsync(lease.TenantId,
+                $"Leased execution '{lease.ExecutionId}' on adapter pool {lease.AdapterPoolRtId} of tenant " +
+                $"'{lease.AdapterPoolTenantId}' failed: {message}");
+            return null;
+        }
+
+        var requeuedExecutionId = await InterruptAndEnqueueAsync(lease, LeaseInterruptReason.MemberRefused,
+            $"The adapter pool member refused this lease without running it ({detail}); the work item was " +
+            "returned to its place in the queue.",
+            keepQueuePosition: true);
+
+        if (requeuedExecutionId is null)
+        {
+            return null;
+        }
+
+        RememberRefusalCount(requeuedExecutionId, refusals);
+
+        await _eventService.StoreInformationEventAsync(lease.TenantId,
+            $"An adapter pool member of pool {lease.AdapterPoolRtId} (tenant '{lease.AdapterPoolTenantId}') refused " +
+            $"the lease for execution '{lease.ExecutionId}' without running it because it is draining; the work " +
+            $"was re-queued at its original position as execution '{requeuedExecutionId}'.");
+
+        return requeuedExecutionId;
+    }
+
+    /// <summary>Removes and returns how often the chain behind <paramref name="executionId" /> was refused.</summary>
+    private int TakeRefusalCount(string executionId)
+    {
+        return _refusalCounts.TryRemove(executionId, out var entry) ? entry.Count : 0;
+    }
+
+    /// <summary>
+    ///     Carries the refusal count of a chain onto its newest attempt. In memory and per controller
+    ///     process on purpose: the count only has to stop a loop, a restart that forgets it costs at
+    ///     most another <see cref="MaxRefusedLeaseRequeues" /> refusals, and a CK attribute for it
+    ///     would be a System.Communication bump for a guard.
+    /// </summary>
+    private void RememberRefusalCount(string executionId, int count)
+    {
+        var now = DateTime.UtcNow;
+        _refusalCounts[executionId] = (count, now);
+
+        // Pruned by age on the write path: an attempt that was granted and ran normally never comes
+        // back through here, so without this its entry would live for the life of the process.
+        foreach (var (key, entry) in _refusalCounts)
+        {
+            if (now - entry.RecordedAtUtc > RefusalCountRetention)
+            {
+                _refusalCounts.TryRemove(key, out _);
+            }
         }
     }
 
@@ -495,6 +668,25 @@ internal class LeaseService : ILeaseService
         AdapterLeasingMetrics.RecordInterrupted(lease.TenantId, lease.AdapterPoolTenantId, lease.AdapterPoolRtId,
             interruptReason, DateTime.UtcNow - lease.GrantedAtUtc);
 
+        return await InterruptAndEnqueueAsync(lease, interruptReason, reason, keepQueuePosition: false);
+    }
+
+    /// <summary>
+    ///     Marks the attempt <c>Interrupted</c> and enqueues a fresh one in its place.
+    /// </summary>
+    /// <param name="lease">The lease whose work item is re-queued.</param>
+    /// <param name="interruptReason">The re-queue counter's label.</param>
+    /// <param name="reason">Human-readable explanation, stored on the interrupted attempt.</param>
+    /// <param name="keepQueuePosition">
+    ///     🔴 AB#5864 — true for a lease the member refused without running it: the retry keeps the
+    ///     original <c>QueuedAt</c>, so it is served in the order (and inside its tenant, with the
+    ///     class) it had before. The work never left the queue in any sense a borrower can see, and
+    ///     a refusal must not send it to the back. False for an attempt that ran (TTL, member lost),
+    ///     whose retry gets its own <c>QueuedAt</c> and therefore its own honest <c>LeaseWaitMs</c>.
+    /// </param>
+    private async Task<string?> InterruptAndEnqueueAsync(LeaseDto lease, LeaseInterruptReason interruptReason,
+        string reason, bool keepQueuePosition)
+    {
         if (string.IsNullOrWhiteSpace(lease.ExecutionId))
         {
             return null;
@@ -521,8 +713,11 @@ internal class LeaseService : ILeaseService
             // copied as stored (still encrypted); the grant decides whether it is still usable.
             QueuedCaller.Apply(retry, interrupted.Caller, interrupted.CallerAccessToken);
 
+            var queuedAt = keepQueuePosition && interrupted.QueuedAt is { } originalQueuedAt
+                ? originalQueuedAt
+                : DateTime.UtcNow;
             await _communicationRepository.EnqueueExecutionAsync(lease.TenantId, retry,
-                interrupted.PipelineRtEntityId, interrupted.AdapterRtEntityId, DateTime.UtcNow);
+                interrupted.PipelineRtEntityId, interrupted.AdapterRtEntityId, queuedAt);
 
             AdapterLeasingMetrics.RecordRequeued(lease.TenantId, lease.AdapterPoolTenantId, lease.AdapterPoolRtId,
                 interruptReason);

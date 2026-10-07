@@ -126,10 +126,16 @@ public readonly record struct LeaseClaim(
 /// <param name="InputData">Pipeline input of the original attempt, carried onto the retry.</param>
 /// <param name="Caller">Invoker of the original attempt, carried onto the retry (AB#5279).</param>
 /// <param name="CallerAccessToken">The invoker's token as stored (encrypted), carried onto the retry as-is.</param>
+/// <param name="QueuedAt">
+///     When the original attempt was enqueued. AB#5864: a lease the member refused without running it
+///     re-queues its retry at this instant, so the refusal does not cost the work item its place in
+///     the queue. Null for an execution that was never queued.
+/// </param>
 public sealed record InterruptedLeasedExecution(
     RtEntityId PipelineRtEntityId,
     RtEntityId AdapterRtEntityId,
     RtPipelineTriggerTypeEnum TriggerType,
     string? InputData,
     ExecutePipelineCaller? Caller = null,
-    string? CallerAccessToken = null);
+    string? CallerAccessToken = null,
+    DateTime? QueuedAt = null);

@@ -2417,9 +2417,46 @@ Three properties, each load-bearing:
   `SweepStalePools` — several controllers act independently and each sees a different subset, so
   nothing may depend on having observed an event.
 
-🔴 **A `Drained` release wakes nobody.** A draining member takes no further work (concept §6 drains
-and restarts a member whose post-lease cleanliness is unproven), so a round on its account would read
-every borrower's queue and grant nothing.
+🔴 **A `Drained` release wakes nobody — unless it handed work back.** A draining member takes no
+further work (concept §6 drains and restarts a member whose post-lease cleanliness is unproven), so a
+round on its account would read every borrower's queue and grant nothing. Since AB#5864 a Drained
+release that never ran its work item re-queues it, and then a round IS requested: another member may
+be idle right now.
+
+### 🔴 A `Drained` release marks the member draining and re-queues refused work (AB#5864)
+
+Reproduced on test-2-dev (2026-10-07): a lease participant failed to leave, the member drained itself
+and released with `Reason=Drained` — and the controller only logged it. The registry kept the member
+available, the next round granted it the next lease, the member refused it in < 400 ms, and
+`ApplyLeaseOutcomeAsync` set the borrower's execution to **FAILED**. Every following execution of every
+borrower failed until the pod was deleted. `LeaseReleaseReasonDto.Drained` had promised the opposite all
+along ("the controller re-queues the work and does not hand this member another lease").
+
+`LeaseService.ReleaseLeaseAsync` now does both halves:
+
+- **Registry.** `MarkDraining` is called **before** the release frees the lease, so there is no instant
+  in which the member is idle and not draining — and also for a **stale** Drained release, because the
+  member's drain flag never resets. `MarkDraining` returns whether it was a transition, so the WARN and
+  `octo.lease.member_drained.count{octo.lease.drain_reason="member_reported"}` fire once per member.
+- **Outcome.** `Drained` + `Success=false` + **no `WorkDurationMs`** = the work item never ran (refused
+  up front, or the unwind after a failed enter drained the member). It is returned to the queue through
+  the interrupt + re-queue path with **`keepQueuePosition: true`**: the retry is enqueued with the
+  original `QueuedAt` (`InterruptedLeasedExecution.QueuedAt`), so a refusal neither sends the item to
+  the back nor changes its class order. Counted on `octo.lease.requeued.count` as `member_refused`,
+  never on `interrupted.count` (the lease did end with a release). A Drained release **with** a work
+  span ran the pipeline and applies its own outcome — re-queuing it would run work twice.
+- **Loop guard.** `MaxRefusedLeaseRequeues` (3): a chain refused more often is failed loudly. The count
+  rides in memory from attempt to retry (`_refusalCounts`, pruned after an hour); a controller restart
+  forgets it, which costs at most another three refusals.
+- 🔴 A `Failed` release without a work span is deliberately **not** treated as a refusal: that is a
+  lease that could not be entered (borrower credential, CK model), which fails the same way on every
+  member and must surface instead of looping.
+
+The member half (comm-sdk): a failed leave keeps the work item's own outcome, a draining member never
+registers again, is not ready, and **exits** once idle so the pool restarts it
+(`AdapterPoolMemberDrainExitService`). Tests: `Services/LeaseServiceTests/DrainedReleaseTests`, the two
+AB#5864 cases in `LeasingMetricsTests`, `MarkDraining_ReportsOnlyTheTransition`, integration
+`AdapterPoolQueueTests.ARefusedLease_RequeuedWithItsOriginalQueuedAt_KeepsItsPlaceInTheQueue`.
 
 🔴 **The request is a pending permit, not an event.** A release landing while a round is still running
 has nobody waiting at that instant; dropping it would leave the member it just freed idle until the

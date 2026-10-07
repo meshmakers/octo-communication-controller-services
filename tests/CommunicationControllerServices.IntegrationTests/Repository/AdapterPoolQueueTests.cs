@@ -247,6 +247,46 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
         }
     }
 
+    /// <summary>
+    ///     🔴 AB#5864 — a lease the member refused without running it is re-queued at the position it
+    ///     held. The interrupt hands back the original <c>QueuedAt</c>, and a retry enqueued with it
+    ///     is served before work that arrived later — against real MongoDB, because the queue order
+    ///     is the <c>QueuedAt</c> index and not anything a substitute could get wrong visibly.
+    /// </summary>
+    [Fact]
+    public async Task ARefusedLease_RequeuedWithItsOriginalQueuedAt_KeepsItsPlaceInTheQueue()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var data = new TestData();
+
+        try
+        {
+            var (pipeline, adapter) = await CreateWorkAsync(data);
+            var originalQueuedAt = DateTime.UtcNow.AddSeconds(-30);
+            var refused = await EnqueueAsync(data, pipeline, adapter, originalQueuedAt);
+            var later = await EnqueueAsync(data, pipeline, adapter, DateTime.UtcNow.AddSeconds(-10));
+            await repository.TryClaimQueuedExecutionAsync(fixture.TestTenantId, refused,
+                new LeaseClaim("lease-refused", LenderTenantId, PoolRtId, "member-draining", DateTime.UtcNow));
+
+            var interrupted = await repository.TryInterruptLeasedExecutionAsync(fixture.TestTenantId, refused,
+                DateTime.UtcNow, "refused by a draining member");
+
+            interrupted.Should().NotBeNull();
+            interrupted!.QueuedAt.Should().BeCloseTo(originalQueuedAt, TimeSpan.FromMilliseconds(1));
+
+            var retryId = await EnqueueAsync(data, interrupted.PipelineRtEntityId, interrupted.AdapterRtEntityId,
+                interrupted.QueuedAt!.Value);
+
+            var queue = await repository.GetQueuedExecutionsForAdapterAsync(fixture.TestTenantId, adapter, 10);
+            queue.Select(q => q.ExecutionId).Should().ContainInOrder(retryId, later);
+            queue.Select(q => q.ExecutionId).Should().NotContain(refused);
+        }
+        finally
+        {
+            await CleanupAsync(data);
+        }
+    }
+
     [Fact]
     public async Task GetQueuedExecutionsForAdapterAsync_ReturnsOnlyThisAdaptersQueuedWork()
     {

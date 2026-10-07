@@ -161,14 +161,17 @@ internal class AdapterPoolConnectionManager : IAdapterPoolConnectionManager
         }
     }
 
-    public void MarkDraining(string connectionId)
+    public bool MarkDraining(string connectionId)
     {
         lock (_claimLock)
         {
-            if (_membersByConnection.TryGetValue(connectionId, out var member))
+            if (!_membersByConnection.TryGetValue(connectionId, out var member) || member.IsDraining)
             {
-                _membersByConnection[connectionId] = member with { IsDraining = true };
+                return false;
             }
+
+            _membersByConnection[connectionId] = member with { IsDraining = true };
+            return true;
         }
     }
 

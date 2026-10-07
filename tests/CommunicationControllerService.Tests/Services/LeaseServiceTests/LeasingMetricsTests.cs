@@ -309,4 +309,65 @@ internal class LeasingMetricsTests : LeaseServiceTestsBase
         await Assert.That(recorded.Any(r => r.Instrument == "octo.lease.interrupted.count")).IsTrue();
         await Assert.That(recorded.Any(r => r.Instrument == "octo.lease.requeued.count")).IsFalse();
     }
+    /// <summary>
+    ///     AB#5864 — a member that reports its own drain is counted on
+    ///     <c>octo.lease.member_drained.count</c> under a label of its own, and once per member: a
+    ///     second Drained release from the same process is the same drain, not another one.
+    /// </summary>
+    [Test]
+    public async Task AMemberReportedDrain_IsCountedOnce_UnderItsOwnReason()
+    {
+        // Arrange
+        ArrangeGrantableLease();
+        var granted = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
+
+        // Act
+        var recorded = Collect(async () =>
+        {
+            await LeaseService.ReleaseLeaseAsync(ConnectionId, new LeaseResultDto
+            {
+                LeaseId = granted.LeaseId!, Reason = LeaseReleaseReasonDto.Drained, Success = true,
+                WorkDurationMs = 10
+            });
+            await LeaseService.ReleaseLeaseAsync(ConnectionId, new LeaseResultDto
+            {
+                LeaseId = "a-lease-the-member-refused-later", Reason = LeaseReleaseReasonDto.Drained
+            });
+        });
+
+        // Assert
+        var drained = recorded.Where(r => r.Instrument == "octo.lease.member_drained.count").ToList();
+        using var _ = Assert.Multiple();
+        await Assert.That(drained).Count().IsEqualTo(1);
+        await Assert.That(drained[0].Tags["octo.lease.drain_reason"]).IsEqualTo("member_reported");
+    }
+
+    /// <summary>
+    ///     AB#5864 — a refused lease is re-queued but was never interrupted (it ended with a release),
+    ///     so it counts on the re-queue counter only, labelled <c>member_refused</c>.
+    /// </summary>
+    [Test]
+    public async Task ARefusedLease_CountsTheRequeue_ButNoInterrupt()
+    {
+        // Arrange
+        ArrangeGrantableLease();
+        var granted = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-1"));
+        var pipeline = RtEntityCreator.CreatePipeline();
+        CommunicationRepository
+            .TryInterruptLeasedExecutionAsync(BorrowerTenantId, "exec-1", Arg.Any<DateTime>(), Arg.Any<string>())
+            .Returns(new InterruptedLeasedExecution(new RtEntityId(pipeline.CkTypeId!, pipeline.RtId),
+                new RtEntityId(Borrower.CkTypeId!, Borrower.RtId), RtPipelineTriggerTypeEnum.Manual, null));
+
+        // Act
+        var recorded = Collect(() => LeaseService.ReleaseLeaseAsync(ConnectionId, new LeaseResultDto
+        {
+            LeaseId = granted.LeaseId!, Reason = LeaseReleaseReasonDto.Drained, Success = false
+        }));
+
+        // Assert
+        using var _ = Assert.Multiple();
+        await Assert.That(recorded.Any(r => r.Instrument == "octo.lease.interrupted.count")).IsFalse();
+        await Assert.That(recorded.Single(r => r.Instrument == "octo.lease.requeued.count")
+            .Tags["octo.lease.interrupt_reason"]).IsEqualTo("member_refused");
+    }
 }

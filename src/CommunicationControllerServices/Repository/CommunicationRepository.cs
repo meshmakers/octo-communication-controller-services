@@ -3496,7 +3496,8 @@ internal class CommunicationRepository : ICommunicationRepository
                 execution.InputData,
                 // AB#5279: the retry runs as the same invoker as the interrupted attempt.
                 QueuedCaller.Read(execution),
-                QueuedCaller.ReadEncryptedAccessToken(execution));
+                QueuedCaller.ReadEncryptedAccessToken(execution),
+                execution.QueuedAt);
         }
         catch (CommunicationRepositoryException)
         {

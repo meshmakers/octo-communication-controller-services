@@ -128,7 +128,16 @@ public enum LeaseDrainReason
     ///     to ignore this one, and a shrink that never happens is only visible if it has a label of its
     ///     own.
     /// </remarks>
-    PoolIdle
+    PoolIdle,
+
+    /// <summary>
+    ///     AB#5864: the member drained <b>itself</b> and said so on a release
+    ///     (<c>LeaseReleaseReasonDto.Drained</c>) — typically a lease participant that failed to leave,
+    ///     so the process cannot prove it is clean (concept §6). Its own label because it is the one
+    ///     drain the controller did not decide: a rising count names a member-side fault (a node that
+    ///     cannot be torn down), not a pool that lost a release or shrank on purpose.
+    /// </summary>
+    MemberReported
 }
 
 /// <summary>
@@ -140,7 +149,14 @@ public enum LeaseInterruptReason
     TtlExpiry,
 
     /// <summary>The member disconnected while holding the lease.</summary>
-    MemberLost
+    MemberLost,
+
+    /// <summary>
+    ///     AB#5864: the member refused the lease without running the work item (it was already
+    ///     draining). Only ever recorded on the re-queue counter — the lease did end with a release, so
+    ///     it is not counted as interrupted.
+    /// </summary>
+    MemberRefused
 }
 
 /// <summary>
@@ -784,12 +800,14 @@ internal static class AdapterLeasingMetrics
     private static string InterruptTag(LeaseInterruptReason reason) => reason switch
     {
         LeaseInterruptReason.TtlExpiry => "ttl_expiry",
+        LeaseInterruptReason.MemberRefused => "member_refused",
         _ => "member_lost"
     };
 
     private static string DrainTag(LeaseDrainReason reason) => reason switch
     {
         LeaseDrainReason.PoolIdle => "pool_idle",
+        LeaseDrainReason.MemberReported => "member_reported",
         _ => "ttl_expiry"
     };
 

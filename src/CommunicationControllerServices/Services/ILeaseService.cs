@@ -174,6 +174,14 @@ public interface ILeaseService
     ///     Applies a member's release. A release naming a lease the member no longer holds is stale
     ///     and is ignored.
     /// </summary>
+    /// <remarks>
+    ///     🔴 AB#5864 — a <c>Drained</c> release marks the member draining in the registry (even when
+    ///     the release itself is stale: the member's drain flag never resets), so it is granted no
+    ///     further lease. A <c>Drained</c> release that never ran its work item (no
+    ///     <c>WorkDurationMs</c>) returns the work to the queue at its original position instead of
+    ///     failing it, bounded by <c>MaxRefusedLeaseRequeues</c>; one that did run reports that work
+    ///     item's own outcome.
+    /// </remarks>
     Task ReleaseLeaseAsync(string connectionId, LeaseResultDto result);
 
     /// <summary>

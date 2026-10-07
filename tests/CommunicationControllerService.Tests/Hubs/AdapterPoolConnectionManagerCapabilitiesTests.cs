@@ -75,6 +75,26 @@ internal class AdapterPoolConnectionManagerCapabilitiesTests
         await Assert.That(capabilities!.MemberId).IsEqualTo("zzz-new-member");
     }
 
+    /// <summary>
+    ///     AB#5864 — MarkDraining reports the transition, so the lease service can count and log a
+    ///     member-reported drain once rather than once per Drained release.
+    /// </summary>
+    [Test]
+    public async Task MarkDraining_ReportsOnlyTheTransition()
+    {
+        _manager.RegisterMember("conn-1", "octo-pool-0", LenderTenantId, AdapterPoolRtId);
+
+        var first = _manager.MarkDraining("conn-1");
+        var second = _manager.MarkDraining("conn-1");
+        var unknown = _manager.MarkDraining("conn-never-registered");
+
+        using var _ = Assert.Multiple();
+        await Assert.That(first).IsTrue();
+        await Assert.That(second).IsFalse();
+        await Assert.That(unknown).IsFalse();
+        await Assert.That(_manager.TryGetMember("conn-1")!.IsDraining).IsTrue();
+    }
+
     [Test]
     public async Task TheAnswerIsStableAcrossCalls()
     {
