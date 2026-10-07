@@ -85,9 +85,76 @@ migrations:
   # entities once the rename has happened, and the post-validation then passes trivially),
   # so a second entry pointing at the same script costs nothing and closes the hole.
   #
-  # Delete this entry only once no environment can be at 3.36.0 any more.
+  # Delete this entry only once no environment can be at 3.36.0 any more (E8: not before the prod
+  # migration). NOTE: 3.36.0 is ALSO a real main release (AB#5309, published 2026-09-22) — a second
+  # reason the entry stays.
   - fromVersion: "3.36.0"
     toVersion: "4.0.0"
     scriptPath: 3.35.0-to-4.0.0.yaml
     description: "Rename CK type Pool to DeploymentSite (AB#4924) — entry point for tenants that installed the withdrawn 3.36.0"
+    breaking: true
+
+  # 🔴 AB#4924 / G3 — one entry for EVERY System.Communication 3.x at or above 3.35.0 that main has
+  # released (or announced) since this major was cut, all pointing at the same script.
+  #
+  # Why each version needs its own line: the engine finds the 4.x data migration only through an
+  # entry point AT or ABOVE the installed version (start-gap bridge) or exactly AT it (partial path).
+  # A tenant above the highest fromVersion has no path at all. Before this block the highest entry
+  # was 3.36.0, so every main tenant on 3.37.0 … 3.40.0 (test-2, staging, prod) would have ridden
+  # the post-chain schema-only bridge to 4.x: no Pool -> DeploymentSite, no Manages -> Hosts, no
+  # well-known-name rename, no post-validation — and no error. The CK engine now refuses that bridge
+  # across a major (CkMigrationMajorVersionGuard), so a version missing here fails LOUDLY instead —
+  # but it still fails. Whoever bumps System.Communication 3.x on main before 0.2 lands there must
+  # add the new version here too.
+  #
+  # Content check (3.36.0 … 3.42.0 vs 4.5.0, 2026-10-07): Pool, the Manages role and the
+  # CommunicationPool well-known name are unchanged in every 3.x listed, so the one script is right
+  # for all of them. Everything 3.37–3.40 added on main (tenant-owned billing markers,
+  # McpServerUrl runtime state, System 2.5 repin) is already in 4.5.0 via the main merge. 3.41.0 and
+  # 3.42.0 add attributes 4.5.0 does not have yet (SECRET credentials of AB#5537, FoldedBefore of
+  # AB#5583, LastSuccessfulStatusAt/ConsecutiveStatusFailures of AB#5618): their entries are correct
+  # for the rename, but a 3.41/3.42 tenant must only meet a 4.x that carries those attributes
+  # (4.6.0 sync, plan G2) — 4.5.0 would treat the encrypted SECRET values as plain strings.
+  #
+  # The script is idempotent (see the 3.36.0 entry), so duplicates cost nothing. Keep all of them
+  # until no environment can be on 3.x any more (E8).
+  - fromVersion: "3.37.0"
+    toVersion: "4.0.0"
+    scriptPath: 3.35.0-to-4.0.0.yaml
+    description: "Rename CK type Pool to DeploymentSite (AB#4924) — entry point for 3.37.0 (main AB#5432 (System 2.3.0 cascade), published)"
+    breaking: true
+  - fromVersion: "3.37.1"
+    toVersion: "4.0.0"
+    scriptPath: 3.35.0-to-4.0.0.yaml
+    description: "Rename CK type Pool to DeploymentSite (AB#4924) — entry point for 3.37.1 (main AB#5495 (McpServerUrl runtime state), superseded by 3.38.0, never in the private catalog — local tenants only)"
+    breaking: true
+  - fromVersion: "3.38.0"
+    toVersion: "4.0.0"
+    scriptPath: 3.35.0-to-4.0.0.yaml
+    description: "Rename CK type Pool to DeploymentSite (AB#4924) — entry point for 3.38.0 (main AB#5495 (isRuntimeState flip as minor), published)"
+    breaking: true
+  - fromVersion: "3.39.0"
+    toVersion: "4.0.0"
+    scriptPath: 3.35.0-to-4.0.0.yaml
+    description: "Rename CK type Pool to DeploymentSite (AB#4924) — entry point for 3.39.0 (main AB#5359 (tenant-owned billing markers), published)"
+    breaking: true
+  - fromVersion: "3.39.1"
+    toVersion: "4.0.0"
+    scriptPath: 3.35.0-to-4.0.0.yaml
+    description: "Rename CK type Pool to DeploymentSite (AB#4924) — entry point for 3.39.1 (main AB#5528 (System 2.5 repin), superseded by 3.40.0, never in the private catalog — local tenants only)"
+    breaking: true
+  - fromVersion: "3.40.0"
+    toVersion: "4.0.0"
+    scriptPath: 3.35.0-to-4.0.0.yaml
+    description: "Rename CK type Pool to DeploymentSite (AB#4924) — entry point for 3.40.0 (main AB#5528 (System 2.5 repin), published; test-2/staging/prod main tenants)"
+    breaking: true
+  - fromVersion: "3.41.0"
+    toVersion: "4.0.0"
+    scriptPath: 3.35.0-to-4.0.0.yaml
+    description: "Rename CK type Pool to DeploymentSite (AB#4924) — entry point for 3.41.0 (announced: AB#5537 SECRET credentials + AB#5583 + AB#5618 (feat/gerald/secret-attribute-type, not yet on origin/main))"
+    breaking: true
+  - fromVersion: "3.42.0"
+    toVersion: "4.0.0"
+    scriptPath: 3.35.0-to-4.0.0.yaml
+    description: "Rename CK type Pool to DeploymentSite (AB#4924) — entry point for 3.42.0 (announced: AB#5618 deployable status history (feat/gerald/deployable-status-history, not yet on origin/main))"
     breaking: true

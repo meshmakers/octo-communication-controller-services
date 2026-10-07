@@ -50,6 +50,12 @@
     </ItemGroup>
 
     <ItemGroup>
+        <!-- AB#4924 (G3): System.Communication 3.40.0 exactly as published to the private catalog
+             (construction-kit-libraries-build), the shape test-2/staging/prod main tenants carry. -->
+        <EmbeddedResource Include="Migrations\Resources\*.json" />
+    </ItemGroup>
+
+    <ItemGroup>
         <Content Include="appsettings.test.json">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </Content>

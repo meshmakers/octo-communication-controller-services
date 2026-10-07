@@ -1907,6 +1907,26 @@ entry point, falls through to the post-chain schema-only bridge and would **skip
 silently** — 3.36.0 is in `dev/.octo/local-catalog`, so `migration-meta.yaml` carries a second,
 deletable `3.36.0 → 4.0.0` entry pointing at the same idempotent script.
 
+🔴 **G3 (2026-10-07): the same hole for every main release since the major was cut.** main kept
+shipping 3.x (3.36.0 is a real main release too, then 3.37.0 … 3.40.0, announced 3.41.0/3.42.0), and
+a tenant above the highest `fromVersion` has no path at all. `migration-meta.yaml` therefore lists
+**every** 3.x ≥ 3.35.0 that main released or announced (3.37.1 and 3.39.1 included — never in the
+private catalog, but on local tenants), all pointing at the one script. **Whoever bumps
+System.Communication 3.x on main before the 0.2 lane lands there must add the new version here.**
+Since engine `d035715` (`CkMigrationMajorVersionGuard`) a missing entry no longer slips through: the
+post-chain bridge is refused across a major, the upgrade fails, and the MigrationHistory stays at the
+3.x version until a model with the entry is deployed. 3.41.0/3.42.0 add attributes 4.5.0 does not
+have (AB#5537 SECRET credentials, AB#5583, AB#5618) — their entries are right for the rename, but
+such a tenant must only meet a 4.x that carries those attributes (the 4.6.0 sync).
+
+Tests: integration `Migrations/SystemCommunication4MigrationTests` — the published 3.40.0 model
+(embedded resource, re-labelled per version) plus the blueprint's 3.x seed, upgraded through the real
+`ImportCkModelAsync` for every listed version: path contains the script, a dry run fails the
+`no-legacy-pools` post-validation on the 3.x data, the real upgrade leaves no `Pool`, keeps the
+rtIds, renames the seeded well-known name only, resolves both adapters' sites over `Hosts`, and the
+post-validation then passes. A version above the last entry (3.99.0) is refused and stays on 3.x
+across a second start. With the pre-G3 meta, exactly the eight cases 3.37.0 … 3.42.0 fail.
+
 ### Out of scope of the rename, deliberately
 
 The operator's `DeploymentSite` **CRD** (its Kind is a hardcoded literal; the link to the CK
