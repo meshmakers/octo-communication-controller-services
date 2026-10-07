@@ -3032,6 +3032,16 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
+    /// <summary>
+    ///     AB#5826 — what a leased execution failed by the stuck reaper says. Names the cause (no
+    ///     member reported the lease's outcome), the two ways that happens, and that the result is
+    ///     unknown — not an adapter restart, which a leased adapter cannot have.
+    /// </summary>
+    internal const string LeaseLostMessage =
+        "Lease lost: no adapter pool member reported the outcome of this leased execution within the lease TTL " +
+        "plus grace. The controller lost the lease (it restarted while the member was gone, or the member could not " +
+        "report its release) or the member died without a disconnect being noticed; the result of the run is unknown.";
+
     public async Task<int> FailStuckExecutionsAsync(string tenantId, DateTime graceCutoff,
         DateTime leasedGraceCutoff)
     {
@@ -3101,8 +3111,19 @@ internal class CommunicationRepository : ICommunicationRepository
             total += await ApplyFailedStatusAsync(tenantRepository, interrupted,
                 "Adapter restarted; interrupted execution not recovered within grace period",
                 RtPipelineExecutionStatusEnum.Interrupted);
-            total += await ApplyFailedStatusAsync(tenantRepository, offlineRunning,
+            // 🔴 AB#5826 — a leased execution that reaches this point is NOT an adapter restart: its
+            // adapter owns no process and is never online by construction. It is a lease nobody
+            // reported back on within TTL + grace — the controller lost it (process restart while the
+            // member died, or a member built before AB#5826 whose release could not be attributed) or
+            // the member was lost without a disconnect being observed. Saying "adapter restart" sent
+            // the investigation of test-2-dev's F1 the wrong way.
+            var leasedLost = offlineRunning.Where(e => e.LeaseGrantedAt is not null).ToList();
+            var adapterOrphaned = leasedLost.Count == 0 ? offlineRunning : offlineRunning.Except(leasedLost).ToList();
+
+            total += await ApplyFailedStatusAsync(tenantRepository, adapterOrphaned,
                 "Adapter offline; running execution orphaned by adapter restart",
+                RtPipelineExecutionStatusEnum.Running);
+            total += await ApplyFailedStatusAsync(tenantRepository, leasedLost, LeaseLostMessage,
                 RtPipelineExecutionStatusEnum.Running);
             return total;
         }

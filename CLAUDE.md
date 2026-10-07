@@ -259,8 +259,9 @@ the target to its own subject as well — concurrent tests write into it.
 #### Member recovery on the registry side (AB#4924 AP-I5)
 
 The member half lives in comm-sdk (`AdapterPoolMemberService`, see its CLAUDE.md "Pool member
-recovery"); it re-registers whenever it believes the controller holds no registration for it, and defers
-the registration while a lease is still running. Three registry properties make that safe:
+recovery"); it re-registers whenever it believes the controller holds no registration for it, and — since
+AB#5826 — registers **with** a lease that is still running (`ResumePoolMemberAsync`, below), deferring
+only against a controller that does not support that. Three registry properties make that safe:
 
 - **Re-registration on the same connection keeps `ActiveLease` and `IsDraining`.** An invoke that timed
   out on the member but landed here is enough to trigger one; dropping a lease granted in between would
@@ -276,6 +277,57 @@ the registration while a lease is still running. Three registry properties make 
   swallowed. It is the one moment a member can learn it is not registered while its connection is up.
 
 Tests: `Hubs/AdapterPoolHubTests/MemberRecoveryTests`.
+
+#### A lease survives a controller restart and a dropped connection (AB#5826)
+
+Leases live only in this process's memory (`AdapterPoolConnectionManager`). Two failures followed from
+that, both reproduced on test-2-dev on 2026-10-07:
+
+- **Controller process restart mid-lease (F1).** The new process knew neither member nor lease; the
+  member's release on its new connection was dropped **without a log line**; the execution stayed
+  `Running` and the stuck reaper failed it 31 minutes later as *"orphaned by adapter restart"* — the
+  work had completed two minutes after the restart.
+- **Dropped connection, controller alive (double execution).** `HandleMemberDisconnectedAsync`
+  interrupted and re-queued at once while the member computed on and reconnected seconds later; the
+  retry ran the work a second time and the original's release was dropped.
+
+What changed — the persisted execution (`LeaseGrantedAt`, `LeasedOnMemberId`, `LeasedFrom*`, no
+`LeaseReleasedAt`) is the durable half of a lease; no new storage, no CK bump:
+
+| Piece | Where |
+|---|---|
+| `IAdapterPoolHub.ResumePoolMemberAsync` — the member registers **with** its running lease (`PoolMemberRegistrationDto.ActiveLease`); the result says `ActiveLeaseAdopted` | `Hubs/AdapterPoolHub.RegisterCoreAsync`, `LeaseService.ResumeLeaseAsync` |
+| Adoption, in order: the lease the superseded registration held → a lease held back after the disconnect → the persisted execution (`Running`, `LeasedOnMemberId` = member, same pool, no release stamped). Not provable ⇒ the member is still recorded **busy** with a lease that names no execution, so no second lease lands on it and its release touches nothing | `LeaseService.ResumeLeaseAsync` |
+| A release this connection does not hold: matched by **lease id** against held-back leases and against the member's previous connection (`FindMemberHoldingLease`), otherwise against the persisted execution named by `LeaseResultDto.ExecutionId`/`TenantId`/`MemberId`. Never applied to an execution that moved on. Logged in every outcome | `LeaseService.ResolveUnheldReleaseAsync` |
+| Reconnect grace: a disconnect mid-lease **holds the lease back** for `LeaseMemberReconnectGraceSeconds` (default 90, 0 = old behaviour) instead of re-queuing. Ends by resumption, late release, an idle re-registration of the same member id (re-queued at once), or the grace (`SweepLostLeasesAsync`, first thing in every scheduling round) | `LeaseService.HandleMemberDisconnectedAsync`, `LeaseSchedulerService.RunSchedulingRoundAsync` |
+| The reaper names a lost lease as such (`CommunicationRepository.LeaseLostMessage`) instead of "adapter restart" | `CommunicationRepository.FailStuckExecutionsAsync` |
+
+🔴 **Why a separate hub method, not a field on the registration.** A controller that pre-dates it
+ignores unknown members, so a lease announced on `RegisterPoolMemberAsync` would register the busy
+member as idle and the next grant would be refused (failing that borrower's execution). The new method
+makes such a controller answer "unknown hub method", and the member falls back to deferring its
+registration — the behaviour before AB#5826. `RegisterPoolMemberAsync` therefore never honours
+`ActiveLease`.
+
+**Proof, and its limits.** A lease id is a random 128-bit value sent to one member, so the two in-memory
+matches are a capability proof. The persisted match has only the member id (pod name) to go on, which is
+why it also requires a running execution without a stamped release, and why a late release on a
+connection is judged by the hub's staged tenant binding (`connectionTenantId`, refused only under
+`Enforce`). Persisting the lease id would make it a capability proof too (CK minor bump) — open
+decision, see the F1 report.
+
+⚠️ **Per controller instance.** The held-back leases live in this process. With more than one replica a
+member can resume on pod B while pod A's grace expires and re-queues: at-least-once, as before. A
+persisted lease record (or an "adopted" marker on the execution) is the multi-replica answer.
+
+Skew: old member + new controller — late releases without `ExecutionId` are matched by lease id only
+(held-back or previous connection), otherwise ignored as before, now with a WARN. New member + old
+controller — resumption answered as unknown method ⇒ deferral; pending releases are re-sent and ignored
+as before.
+
+Tests: `Services/LeaseServiceTests/LeaseSurvivesControllerRestartTests`,
+`Hubs/AdapterPoolHubTests/ResumePoolMemberAsyncTests`, `Services/LeaseSchedulerServiceTests/LostLeaseSweepTests`,
+integration `FailStuckExecutionsAsync_NamesALostLeaseAsSuch_AndKeepsTheAdapterMessageForTheRest`.
 
 Tests: `Hubs/AdapterPoolHubTests/` (registration + the tenant-binding matrix in both modes, the
 `IShutdownState` refusal, lease routing to a member, a second lease never landing on a claimed member,

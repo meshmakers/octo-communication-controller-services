@@ -126,6 +126,53 @@ public class FailStuckAndOrphanedExecutionsTests(CommunicationControllerFixture 
     }
 
     /// <summary>
+    ///     🔴 AB#5826 — a leased execution the reaper fails says what happened: a lease nobody reported
+    ///     back on, not an adapter restart. A leased adapter owns no process and cannot restart; the
+    ///     old text sent the analysis of test-2-dev's F1 (a controller restart mid-lease) the wrong way.
+    ///     A dedicated execution on an offline adapter keeps its message.
+    /// </summary>
+    [Fact]
+    public async Task FailStuckExecutionsAsync_NamesALostLeaseAsSuch_AndKeepsTheAdapterMessageForTheRest()
+    {
+        var tenantId = fixture.TestTenantId;
+        var repository = fixture.GetService<ICommunicationRepository>();
+
+        var data = new TestData();
+        var leasedAdapter = await CreateAdapterAsync(data, RtCommunicationStateEnum.Unregistered);
+        var offlineAdapter = await CreateAdapterAsync(data, RtCommunicationStateEnum.Offline);
+        var dataFlow = await CreateDataFlowAsync(data);
+        var pipeline = await CreatePipelineWithAdapterAsync(data, dataFlow, leasedAdapter);
+
+        var stale = DateTime.UtcNow.AddHours(-1);
+
+        try
+        {
+            var lostLease = await CreateLeasedExecutionAsync(data, pipeline, leasedAdapter, stale,
+                DateTime.UtcNow.AddHours(-2));
+            var dedicated = await CreateExecutionAsync(data, pipeline, offlineAdapter,
+                RtPipelineExecutionStatusEnum.Running, stale);
+
+            var graceCutoff = DateTime.UtcNow.AddMinutes(-15);
+            var failedCount = await repository.FailStuckExecutionsAsync(tenantId, graceCutoff,
+                DateTime.UtcNow.AddMinutes(-30));
+
+            failedCount.Should().Be(2);
+            var lost = await repository.GetPipelineExecutionAsync(tenantId, lostLease);
+            lost!.Status.Should().Be(RtPipelineExecutionStatusEnum.Failed);
+            lost.ErrorMessage.Should().Be(CommunicationRepository.LeaseLostMessage);
+            lost.ErrorMessage.Should().NotContain("adapter restart");
+
+            var orphan = await repository.GetPipelineExecutionAsync(tenantId, dedicated);
+            orphan!.Status.Should().Be(RtPipelineExecutionStatusEnum.Failed);
+            orphan.ErrorMessage.Should().Be("Adapter offline; running execution orphaned by adapter restart");
+        }
+        finally
+        {
+            await CleanupAsync(data);
+        }
+    }
+
+    /// <summary>
     ///     🔴 AB#5326 — the reaper never writes over a result that arrived in the meantime.
     /// </summary>
     /// <remarks>

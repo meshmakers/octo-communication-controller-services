@@ -182,12 +182,87 @@ public interface ILeaseService
     ///     failing it, bounded by <c>MaxRefusedLeaseRequeues</c>; one that did run reports that work
     ///     item's own outcome.
     /// </remarks>
-    Task ReleaseLeaseAsync(string connectionId, LeaseResultDto result);
+    /// <param name="connectionId">The connection the release arrived on.</param>
+    /// <param name="result">The member's report.</param>
+    /// <param name="connectionTenantId">
+    ///     The tenant the connection's token was issued for, if any — checked against the lending
+    ///     tenant when the release is not covered by a lease this connection holds (AB#5826).
+    /// </param>
+    /// <param name="requireConnectionTenant">
+    ///     Whether the pool hub gate enforces; then such a release is refused without a matching
+    ///     tenant-bound token, otherwise a mismatch is only logged.
+    /// </param>
+    /// <remarks>
+    ///     🔴 AB#5826 — a release this connection does not hold is no longer dropped silently. It is
+    ///     attributed to a lease held back after its member disconnected, to the member's previous
+    ///     connection, or — after a controller restart — to the persisted execution it names, when that
+    ///     execution is still running and was leased to this member of this pool. Otherwise it is
+    ///     logged and ignored.
+    /// </remarks>
+    Task ReleaseLeaseAsync(string connectionId, LeaseResultDto result, string? connectionTenantId = null,
+        bool requireConnectionTenant = false);
 
     /// <summary>
     ///     Handles a member that vanished. When it held a lease the work item is interrupted: concept
     ///     §6 makes this at-least-once, so the contract with pipeline authors — idempotency — is
     ///     unchanged from today's adapter disconnect path.
     /// </summary>
+    /// <remarks>
+    ///     🔴 AB#5826 — with a reconnect grace configured
+    ///     (<c>CommunicationController:LeaseMemberReconnectGraceSeconds</c>) the lease is held back
+    ///     instead of re-queued at once: the member usually keeps running and comes back within
+    ///     seconds, and re-queuing ran the work twice. See <see cref="SweepLostLeasesAsync" />,
+    ///     <see cref="ResumeLeaseAsync" /> and <see cref="ReleaseLostLeasesOfMemberAsync" /> for the
+    ///     three ways a held-back lease ends.
+    /// </remarks>
     Task HandleMemberDisconnectedAsync(PoolMemberConnection member);
+
+    /// <summary>
+    ///     Interrupts and re-queues every held-back lease whose reconnect grace has passed (AB#5826).
+    ///     Called on every scheduling round.
+    /// </summary>
+    /// <returns>How many leases were interrupted.</returns>
+    Task<int> SweepLostLeasesAsync(DateTime nowUtc);
+
+    /// <summary>
+    ///     A member registered again <b>without</b> a lease: every lease held back for it (except
+    ///     <paramref name="exceptLeaseId" />) is interrupted and re-queued at once (AB#5826).
+    /// </summary>
+    /// <remarks>
+    ///     The member reports outcomes it could not deliver before it registers, so whatever is still
+    ///     held back at this point is work it does not have any more — a process that restarted in
+    ///     place under the same member id, for instance. Waiting out the grace would only delay the
+    ///     retry.
+    /// </remarks>
+    Task<int> ReleaseLostLeasesOfMemberAsync(string memberId, string adapterPoolTenantId, string adapterPoolRtId,
+        string? exceptLeaseId = null);
+
+    /// <summary>
+    ///     Decides what a member that registers while still running a lease is recorded as (AB#5826).
+    /// </summary>
+    /// <param name="memberId">The registering member.</param>
+    /// <param name="adapterPoolTenantId">Its pool's (lending) tenant.</param>
+    /// <param name="adapterPoolRtId">Its pool.</param>
+    /// <param name="activeLease">What the member says it is running.</param>
+    /// <param name="transferredLease">
+    ///     The lease the registry still held under the member's previous connection, when the
+    ///     registration superseded one.
+    /// </param>
+    /// <returns>
+    ///     The lease to record the member as busy with, and whether it was adopted — i.e. whether the
+    ///     member's release will complete the borrower's execution.
+    /// </returns>
+    Task<LeaseResumption> ResumeLeaseAsync(string memberId, string adapterPoolTenantId, string adapterPoolRtId,
+        PoolMemberActiveLeaseDto activeLease, LeaseDto? transferredLease = null);
 }
+
+/// <summary>
+///     The outcome of <see cref="ILeaseService.ResumeLeaseAsync" /> (AB#5826).
+/// </summary>
+/// <param name="Lease">
+///     The lease the member is recorded as busy with. When <paramref name="Adopted" /> is false it
+///     names no execution, so its release frees the member without touching the borrower's work.
+/// </param>
+/// <param name="Adopted">Whether the member's release will complete the execution.</param>
+/// <param name="StatusMessage">Why the lease was not adopted; null when it was.</param>
+public record LeaseResumption(LeaseDto Lease, bool Adopted, string? StatusMessage);

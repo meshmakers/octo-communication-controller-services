@@ -89,7 +89,7 @@ public interface IAdapterPoolConnectionManager
     /// </remarks>
     PoolMemberConnection RegisterMember(string connectionId, string memberId, string adapterPoolTenantId,
         string adapterPoolRtId, IReadOnlyList<NodeDescriptorDto>? nodeDescriptors = null,
-        string? pipelineSchemaJson = null);
+        string? pipelineSchemaJson = null, LeaseDto? activeLease = null);
 
     /// <summary>
     ///     What one pool's members can execute, or null when no member of that pool is registered on
@@ -148,6 +148,17 @@ public interface IAdapterPoolConnectionManager
     ///     do, and until increment 7 that decision is "tell the caller the pool is exhausted".
     /// </remarks>
     PoolMemberConnection? TryClaimMember(string adapterPoolTenantId, string adapterPoolRtId, LeaseDto lease);
+
+    /// <summary>
+    ///     The member, on any connection, that holds the lease with this id, or null (AB#5826).
+    /// </summary>
+    /// <remarks>
+    ///     A lease id is a random 128-bit value handed to exactly one member over its own connection,
+    ///     so knowing it is proof of having been given that lease. Used for a release that arrives on a
+    ///     new connection while the registry still holds the lease under the member's previous one —
+    ///     the member reconnected before this instance noticed the old connection was gone.
+    /// </remarks>
+    PoolMemberConnection? FindMemberHoldingLease(string leaseId);
 
     /// <summary>
     ///     Releases a lease previously claimed on this connection. Returns the released lease, or null

@@ -20,10 +20,10 @@ internal class AdapterPoolConnectionManager : IAdapterPoolConnectionManager
 
     public PoolMemberConnection RegisterMember(string connectionId, string memberId, string adapterPoolTenantId,
         string adapterPoolRtId, IReadOnlyList<NodeDescriptorDto>? nodeDescriptors = null,
-        string? pipelineSchemaJson = null)
+        string? pipelineSchemaJson = null, LeaseDto? activeLease = null)
     {
         var member = new PoolMemberConnection(connectionId, memberId, adapterPoolTenantId, adapterPoolRtId,
-            ActiveLease: null, IsDraining: false, LastSeenUtc: DateTime.UtcNow,
+            ActiveLease: activeLease, IsDraining: false, LastSeenUtc: DateTime.UtcNow,
             // AB#4924: an empty list and "did not report any" are the same thing to every caller,
             // and null is the value the fallback path already understands.
             NodeDescriptors: nodeDescriptors is { Count: > 0 } ? nodeDescriptors : null,
@@ -36,7 +36,12 @@ internal class AdapterPoolConnectionManager : IAdapterPoolConnectionManager
             if (_membersByConnection.TryGetValue(connectionId, out var previous) &&
                 Matches(previous, adapterPoolTenantId, adapterPoolRtId))
             {
-                member = member with { ActiveLease = previous.ActiveLease, IsDraining = previous.IsDraining };
+                // AB#5826: a lease the caller hands in (a resumed one) wins over what the registry
+                // held for this connection; otherwise the registry's knowledge is kept.
+                member = member with
+                {
+                    ActiveLease = activeLease ?? previous.ActiveLease, IsDraining = previous.IsDraining
+                };
             }
 
             _membersByConnection[connectionId] = member;
@@ -123,6 +128,17 @@ internal class AdapterPoolConnectionManager : IAdapterPoolConnectionManager
             _membersByConnection[candidate.ConnectionId] = claimed;
             return claimed;
         }
+    }
+
+    public PoolMemberConnection? FindMemberHoldingLease(string leaseId)
+    {
+        if (string.IsNullOrWhiteSpace(leaseId))
+        {
+            return null;
+        }
+
+        return _membersByConnection.Values.FirstOrDefault(m =>
+            string.Equals(m.ActiveLease?.LeaseId, leaseId, StringComparison.Ordinal));
     }
 
     public LeaseDto? ReleaseLease(string connectionId, string leaseId)

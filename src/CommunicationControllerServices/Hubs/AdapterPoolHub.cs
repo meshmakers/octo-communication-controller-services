@@ -102,8 +102,30 @@ internal class AdapterPoolHub : Hub, IAdapterPoolHub
     }
 
     /// <inheritdoc />
-    public async Task<PoolMemberRegistrationResultDto> RegisterPoolMemberAsync(
-        PoolMemberRegistrationDto registration)
+    public Task<PoolMemberRegistrationResultDto> RegisterPoolMemberAsync(PoolMemberRegistrationDto registration)
+    {
+        // The plain registration never honours ActiveLease (see the contract): a member that runs a
+        // lease uses ResumePoolMemberAsync, so an older controller can refuse that method instead of
+        // registering a busy process as idle.
+        return RegisterCoreAsync(registration, activeLease: null);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    ///     🔴 AB#5826. After a controller restart the new process knows neither the member nor its
+    ///     lease, and after a dropped connection the lease is held back for the reconnect grace. Either
+    ///     way the member is still computing. Recording it as busy with that lease — adopted when the
+    ///     persisted execution proves it, a placeholder naming no execution otherwise — keeps a second
+    ///     lease off a process that would have to refuse it, and lets the member's release complete
+    ///     the borrower's execution instead of being dropped.
+    /// </remarks>
+    public Task<PoolMemberRegistrationResultDto> ResumePoolMemberAsync(PoolMemberRegistrationDto registration)
+    {
+        return RegisterCoreAsync(registration, registration.ActiveLease);
+    }
+
+    private async Task<PoolMemberRegistrationResultDto> RegisterCoreAsync(PoolMemberRegistrationDto registration,
+        PoolMemberActiveLeaseDto? activeLease)
     {
         var connectionId = Context.ConnectionId;
 
@@ -175,26 +197,52 @@ internal class AdapterPoolHub : Hub, IAdapterPoolHub
         // A superseded registration that held a lease is handled exactly like a disconnect mid-lease
         // — the same at-least-once re-queue OnDisconnectedAsync would run, only now rather than at
         // the SignalR client timeout — and under the same shutdown guard.
+        //
+        // AB#5826: unless it is the very lease the member resumes now — that one moves to the new
+        // connection instead of being interrupted.
+        LeaseDto? transferredLease = null;
         foreach (var superseded in _connectionManager.RemoveSupersededMembers(connectionId, memberId,
                      registration.AdapterPoolTenantId, registration.AdapterPoolRtId))
         {
+            if (activeLease is not null && superseded.ActiveLease is { } held &&
+                string.Equals(held.LeaseId, activeLease.LeaseId, StringComparison.Ordinal))
+            {
+                transferredLease = held;
+                continue;
+            }
+
             if (!_shutdownState.IsShuttingDown)
             {
                 await _leaseService.HandleMemberDisconnectedAsync(superseded);
             }
         }
 
+        // AB#5826: leases held back for this member that it does not run any more are re-queued now
+        // rather than at the end of the grace — the member is back and has reported what it could.
+        await _leaseService.ReleaseLostLeasesOfMemberAsync(memberId, registration.AdapterPoolTenantId,
+            registration.AdapterPoolRtId, activeLease?.LeaseId);
+
+        LeaseResumption? resumption = null;
+        if (activeLease is not null)
+        {
+            resumption = await _leaseService.ResumeLeaseAsync(memberId, registration.AdapterPoolTenantId,
+                registration.AdapterPoolRtId, activeLease, transferredLease);
+        }
+
         // AB#4924: the descriptors travel with the registration and are stored per pool, because a
         // BORROWER's DeployPipeline has to ask "which nodes can this pool run" — its own Leased
         // adapter has no process, and therefore no descriptors, of its own.
         _connectionManager.RegisterMember(connectionId, memberId, registration.AdapterPoolTenantId,
-            registration.AdapterPoolRtId, registration.NodeDescriptors, registration.PipelineSchemaJson);
+            registration.AdapterPoolRtId, registration.NodeDescriptors, registration.PipelineSchemaJson,
+            resumption?.Lease);
 
         return new PoolMemberRegistrationResultDto
         {
             Accepted = true,
             MemberId = memberId,
-            HeartbeatIntervalSeconds = HeartbeatIntervalSeconds
+            HeartbeatIntervalSeconds = HeartbeatIntervalSeconds,
+            ActiveLeaseAdopted = resumption?.Adopted ?? false,
+            StatusMessage = resumption?.StatusMessage
         };
     }
 
@@ -208,7 +256,11 @@ internal class AdapterPoolHub : Hub, IAdapterPoolHub
             return;
         }
 
-        await _leaseService.ReleaseLeaseAsync(Context.ConnectionId, result);
+        // AB#5826: the connection's tenant travels along so a release that is not covered by a lease
+        // this connection holds is judged by the same staged tenant binding as a registration.
+        await _leaseService.ReleaseLeaseAsync(Context.ConnectionId, result,
+            AdapterPoolHubAuthorizationFilter.GetConnectionTenantId(Context),
+            _authorizationOptions.Value.Mode == AdapterPoolHubAuthorizationMode.Enforce);
     }
 
     /// <inheritdoc />

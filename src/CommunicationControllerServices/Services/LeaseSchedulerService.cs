@@ -154,6 +154,19 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     /// <inheritdoc />
     public async Task<int> RunSchedulingRoundAsync(CancellationToken cancellationToken = default)
     {
+        // AB#5826 — leases held back after their member disconnected and not resumed within the
+        // reconnect grace are re-queued here, first, so the retry is already Queued when this
+        // round reads the queues. On the scheduling cadence because the grace is seconds, not the
+        // cleanup service's minutes.
+        try
+        {
+            await _leaseService.SweepLostLeasesAsync(DateTime.UtcNow);
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e, "Re-queuing the leases of disconnected pool members failed; retrying next round");
+        }
+
         var topology = await GetTopologyAsync(cancellationToken);
         var granted = 0;
 

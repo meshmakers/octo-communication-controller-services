@@ -119,7 +119,7 @@ internal class LeaseRoutingAndReleaseTests : AdapterPoolHubTestsBase
         // The hub delegates to the lease service, which owns the registry transition; the substitute
         // does not, so the release is applied here to assert the end state the real service produces.
         await LeaseService.Received(1).ReleaseLeaseAsync(ConnectionId,
-            Arg.Is<LeaseResultDto>(r => r.LeaseId == "lease-1"));
+            Arg.Is<LeaseResultDto>(r => r.LeaseId == "lease-1"), Arg.Any<string?>(), Arg.Any<bool>());
 
         ConnectionManager.ReleaseLease(ConnectionId, "lease-1");
         await Assert.That(ConnectionManager.TryClaimMember(LenderTenantId, AdapterPoolRtId, ALease("lease-2")))

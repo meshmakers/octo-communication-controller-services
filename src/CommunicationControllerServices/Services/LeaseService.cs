@@ -5,7 +5,9 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Options;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -41,6 +43,18 @@ internal class LeaseService : ILeaseService
     private readonly ConcurrentDictionary<string, (int Count, DateTime RecordedAtUtc)> _refusalCounts =
         new(StringComparer.Ordinal);
 
+    // 🔴 AB#5826 — leases whose member disconnected, keyed by lease id, held back for the reconnect
+    // grace instead of being re-queued at once. A disconnect does not stop the member: it keeps
+    // computing and reconnects within seconds, so an immediate re-queue ran the work twice and dropped
+    // the original result. In memory and per controller instance, like the registry it complements;
+    // a controller restart loses it, which is what the resumption on the member side covers.
+    private readonly ConcurrentDictionary<string, LostLease> _lostLeases = new(StringComparer.Ordinal);
+
+    private readonly TimeSpan _reconnectGrace;
+    private readonly TimeSpan _leaseTtl;
+
+    private sealed record LostLease(PoolMemberConnection Member, LeaseDto Lease, DateTime DeadlineUtc);
+
     public LeaseService(IAdapterPoolConnectionManager connectionManager,
         ICommunicationRepository communicationRepository,
         ICommunicationEventService eventService,
@@ -51,8 +65,16 @@ internal class LeaseService : ILeaseService
         ITenantDatabaseCredentialResolver databaseCredentialResolver,
         IAdapterService adapterService,
         ILifecycleConfigurationService lifecycleConfiguration,
-        ILeaseSchedulerWakeSignal wakeSignal)
+        ILeaseSchedulerWakeSignal wakeSignal,
+        IOptions<CommunicationControllerOptions>? options = null)
     {
+        // AB#5826: without options (a unit-test composition) there is no reconnect grace — the
+        // behaviour every test written before it was arranged against. Production always has them.
+        _reconnectGrace = TimeSpan.FromSeconds(Math.Max(0, options?.Value.LeaseMemberReconnectGraceSeconds ?? 0));
+        _leaseTtl = options is null
+            ? ILeaseService.DefaultLeaseTtl
+            : TimeSpan.FromMinutes(Math.Max(1, options.Value.LeaseTtlMinutes));
+
         _connectionManager = connectionManager;
         _communicationRepository = communicationRepository;
         _eventService = eventService;
@@ -323,7 +345,8 @@ internal class LeaseService : ILeaseService
     }
 
     /// <inheritdoc />
-    public async Task ReleaseLeaseAsync(string connectionId, LeaseResultDto result)
+    public async Task ReleaseLeaseAsync(string connectionId, LeaseResultDto result,
+        string? connectionTenantId = null, bool requireConnectionTenant = false)
     {
         // 🔴 AB#5864 — a Drained release is the member saying "I take no further lease" (the DTO's
         // contract). Before this, the controller logged the reason and nothing else: the registry
@@ -341,14 +364,25 @@ internal class LeaseService : ILeaseService
         var released = _connectionManager.ReleaseLease(connectionId, result.LeaseId);
         if (released is null)
         {
-            // Already covered by a warning inside the connection manager, which is the only place
-            // that can tell "stale" from "unknown connection" apart.
-            return;
+            // 🔴 AB#5826 — a lease this connection does not hold used to end here, silently: after a
+            // controller restart (or a reconnect) the member's release named a lease nobody knew, the
+            // execution stayed Running, and the stuck reaper failed it half an hour later with the
+            // result lost. It is now attributed if it provably belongs to the member, and logged
+            // either way. A release naming a DIFFERENT lease than the one this connection holds is
+            // still never applied to that lease (the connection manager warned about it).
+            released = await ResolveUnheldReleaseAsync(connectionId, result, connectionTenantId,
+                requireConnectionTenant);
+            if (released is null)
+            {
+                return;
+            }
         }
-
-        Logger.Info(
-            "Lease '{LeaseId}' of tenant '{BorrowerTenantId}' released by its member: {Reason}, success={Success}",
-            released.LeaseId, released.TenantId, result.Reason, result.Success);
+        else
+        {
+            Logger.Info(
+                "Lease '{LeaseId}' of tenant '{BorrowerTenantId}' released by its member: {Reason}, success={Success}",
+                released.LeaseId, released.TenantId, result.Reason, result.Success);
+        }
 
         // 🔴 AB#4924 increment 9 — the amortisation triple (plan §11). Held comes from this
         // controller's clock, work from the member's; the difference is the per-lease warm-up
@@ -537,15 +571,378 @@ internal class LeaseService : ILeaseService
         }
 
         var lease = member.ActiveLease;
+
+        if (_reconnectGrace > TimeSpan.Zero)
+        {
+            // 🔴 AB#5826 — held back, not re-queued. The member is very likely still running the work
+            // item and back within seconds; re-queuing now is what ran the same work twice. It either
+            // resumes the lease, reports its release, registers again without it (then it is
+            // re-queued at once), or stays away past the grace (SweepLostLeasesAsync re-queues it).
+            _lostLeases[lease.LeaseId] = new LostLease(member, lease, DateTime.UtcNow + _reconnectGrace);
+            Logger.Warn(
+                "Pool member '{MemberId}' disconnected while holding lease '{LeaseId}' of tenant '{BorrowerTenantId}' " +
+                "(execution '{ExecutionId}'); holding the work for up to {GraceSeconds}s for the member to resume the " +
+                "lease or report its outcome before it is interrupted and re-queued",
+                member.MemberId, lease.LeaseId, lease.TenantId, lease.ExecutionId, _reconnectGrace.TotalSeconds);
+            return;
+        }
+
+        await InterruptLostLeaseAsync(member, lease,
+            $"The adapter pool member '{member.MemberId}' disconnected while holding this execution's lease.");
+    }
+
+    /// <inheritdoc />
+    public async Task<int> SweepLostLeasesAsync(DateTime nowUtc)
+    {
+        var interrupted = 0;
+
+        foreach (var entry in _lostLeases)
+        {
+            if (entry.Value.DeadlineUtc > nowUtc)
+            {
+                continue;
+            }
+
+            // Conditional on the exact entry: a resumption or a late release that took it in the
+            // meantime wins, and the work is not re-queued behind its back.
+            if (!_lostLeases.TryRemove(entry))
+            {
+                continue;
+            }
+
+            await InterruptLostLeaseAsync(entry.Value.Member, entry.Value.Lease,
+                $"The adapter pool member '{entry.Value.Member.MemberId}' disconnected while holding this " +
+                $"execution's lease and did not come back within {_reconnectGrace.TotalSeconds:0}s.");
+            interrupted++;
+        }
+
+        return interrupted;
+    }
+
+    /// <inheritdoc />
+    public async Task<int> ReleaseLostLeasesOfMemberAsync(string memberId, string adapterPoolTenantId,
+        string adapterPoolRtId, string? exceptLeaseId = null)
+    {
+        var interrupted = 0;
+
+        foreach (var entry in _lostLeases)
+        {
+            var lost = entry.Value;
+            if (!string.Equals(lost.Member.MemberId, memberId, StringComparison.Ordinal) ||
+                !string.Equals(lost.Member.AdapterPoolTenantId, adapterPoolTenantId, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(lost.Member.AdapterPoolRtId, adapterPoolRtId, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(lost.Lease.LeaseId, exceptLeaseId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!_lostLeases.TryRemove(entry))
+            {
+                continue;
+            }
+
+            // The member is back and says it does not run this lease (any outcome it had was
+            // reported before it registered), so there is nothing left to wait for.
+            await InterruptLostLeaseAsync(lost.Member, lost.Lease,
+                $"The adapter pool member '{memberId}' disconnected while holding this execution's lease and " +
+                "registered again without it.");
+            interrupted++;
+        }
+
+        return interrupted;
+    }
+
+    /// <inheritdoc />
+    public async Task<LeaseResumption> ResumeLeaseAsync(string memberId, string adapterPoolTenantId,
+        string adapterPoolRtId, PoolMemberActiveLeaseDto activeLease, LeaseDto? transferredLease = null)
+    {
+        // 1. The registry still had it under the member's previous connection.
+        if (transferredLease is not null &&
+            string.Equals(transferredLease.LeaseId, activeLease.LeaseId, StringComparison.Ordinal))
+        {
+            Logger.Info(
+                "Pool member '{MemberId}' resumed lease '{LeaseId}' of tenant '{BorrowerTenantId}' on a new connection",
+                memberId, activeLease.LeaseId, activeLease.TenantId);
+            return new LeaseResumption(transferredLease, true, null);
+        }
+
+        // 2. It was held back after the member disconnected (this instance noticed the disconnect).
+        if (_lostLeases.TryGetValue(activeLease.LeaseId, out var lost) &&
+            string.Equals(lost.Member.MemberId, memberId, StringComparison.Ordinal) &&
+            _lostLeases.TryRemove(new KeyValuePair<string, LostLease>(activeLease.LeaseId, lost)))
+        {
+            Logger.Info(
+                "Pool member '{MemberId}' came back within the reconnect grace and resumed lease '{LeaseId}' of " +
+                "tenant '{BorrowerTenantId}'; nothing is re-queued",
+                memberId, activeLease.LeaseId, activeLease.TenantId);
+            return new LeaseResumption(lost.Lease, true, null);
+        }
+
+        // 3. This instance never knew the lease (it restarted, or the member came from another
+        //    instance): the persisted execution decides.
+        if (string.IsNullOrWhiteSpace(activeLease.ExecutionId))
+        {
+            // A hand-driven lease carries no work item, so there is nothing to prove or to complete;
+            // the member is simply busy.
+            return new LeaseResumption(BuildLease(activeLease.LeaseId, activeLease.TenantId, adapterPoolTenantId,
+                adapterPoolRtId, activeLease.AdapterRtId, activeLease.AdapterCkTypeId, string.Empty,
+                activeLease.GrantedAtUtc, activeLease.ExpiresAtUtc), true, null);
+        }
+
+        var (execution, refusal) = await VerifyLeasedExecutionAsync(activeLease.TenantId, activeLease.ExecutionId,
+            memberId, adapterPoolTenantId, adapterPoolRtId);
+        if (execution is not null)
+        {
+            Logger.Warn(
+                "Adopted lease '{LeaseId}' of tenant '{BorrowerTenantId}' (execution '{ExecutionId}') from pool member " +
+                "'{MemberId}': this controller instance did not hold it (it restarted, or the member moved here), and " +
+                "the execution proves it was leased to this member and is still running",
+                activeLease.LeaseId, activeLease.TenantId, activeLease.ExecutionId, memberId);
+            return new LeaseResumption(BuildLease(activeLease.LeaseId, activeLease.TenantId, adapterPoolTenantId,
+                adapterPoolRtId, activeLease.AdapterRtId, activeLease.AdapterCkTypeId, activeLease.ExecutionId,
+                execution.LeaseGrantedAt ?? activeLease.GrantedAtUtc, activeLease.ExpiresAtUtc), true, null);
+        }
+
+        // Not adopted. The member is still busy with it, so it is recorded with a lease that names no
+        // execution: no second lease lands on a process that has to refuse it, and the release frees
+        // the member without touching an execution that has moved on.
+        var message =
+            $"Lease '{activeLease.LeaseId}' was not adopted: execution '{activeLease.ExecutionId}' of tenant " +
+            $"'{activeLease.TenantId}' {refusal}. Its outcome will not be applied.";
+        Logger.Warn("Pool member '{MemberId}' resumed a lease that cannot be adopted. {Message}", memberId, message);
+        return new LeaseResumption(BuildLease(activeLease.LeaseId, activeLease.TenantId, adapterPoolTenantId,
+            adapterPoolRtId, activeLease.AdapterRtId, activeLease.AdapterCkTypeId, string.Empty,
+            activeLease.GrantedAtUtc, activeLease.ExpiresAtUtc), false, message);
+    }
+
+    /// <summary>
+    ///     AB#5826 — the lease a release names when the connection it arrived on does not hold it, or
+    ///     null when it cannot be attributed (logged).
+    /// </summary>
+    /// <remarks>
+    ///     Three places, in order of how strong the proof is:
+    ///     <list type="number">
+    ///         <item><description>held back after the member disconnected — matched by lease id;</description></item>
+    ///         <item><description>still registered under the member's previous connection — matched by lease id;</description></item>
+    ///         <item><description>
+    ///             nowhere in this instance (it restarted) — matched against the persisted execution,
+    ///             which must be running and leased to this member of this pool.
+    ///         </description></item>
+    ///     </list>
+    ///     A lease id is a random 128-bit value sent to one member over its own connection, so the
+    ///     first two are a capability proof. The third has only the member id to go on, which is why it
+    ///     also requires the execution to be still running with no release stamped: an outcome is never
+    ///     written over an execution that has moved on.
+    /// </remarks>
+    private async Task<LeaseDto?> ResolveUnheldReleaseAsync(string connectionId, LeaseResultDto result,
+        string? connectionTenantId, bool requireConnectionTenant)
+    {
+        var registered = _connectionManager.TryGetMember(connectionId);
+        if (registered is not null && !string.IsNullOrWhiteSpace(result.MemberId) &&
+            !string.Equals(registered.MemberId, result.MemberId, StringComparison.Ordinal))
+        {
+            Logger.Warn(
+                "Ignoring a release of lease '{LeaseId}' on connection '{ConnectionId}': it names member '{ReleasingMemberId}' " +
+                "but the connection is registered as member '{MemberId}'",
+                result.LeaseId, connectionId, result.MemberId, registered.MemberId);
+            return null;
+        }
+
+        var memberId = registered?.MemberId ?? result.MemberId;
+
+        if (_lostLeases.TryGetValue(result.LeaseId, out var lost) &&
+            (memberId is null || string.Equals(lost.Member.MemberId, memberId, StringComparison.Ordinal)) &&
+            IsLateReleaseBindingAcceptable(result, lost.Lease.AdapterPoolTenantId, connectionTenantId,
+                requireConnectionTenant) &&
+            _lostLeases.TryRemove(new KeyValuePair<string, LostLease>(result.LeaseId, lost)))
+        {
+            Logger.Warn(
+                "Lease '{LeaseId}' of tenant '{BorrowerTenantId}' released by its member '{MemberId}' after it had " +
+                "disconnected: {Reason}, success={Success}. The work was held back for the reconnect grace and is not re-queued",
+                lost.Lease.LeaseId, lost.Lease.TenantId, lost.Member.MemberId, result.Reason, result.Success);
+            return lost.Lease;
+        }
+
+        var holder = _connectionManager.FindMemberHoldingLease(result.LeaseId);
+        if (holder is not null && holder.ConnectionId != connectionId &&
+            (memberId is null || string.Equals(holder.MemberId, memberId, StringComparison.Ordinal)) &&
+            IsLateReleaseBindingAcceptable(result, holder.AdapterPoolTenantId, connectionTenantId,
+                requireConnectionTenant))
+        {
+            var taken = _connectionManager.ReleaseLease(holder.ConnectionId, result.LeaseId);
+            if (taken is not null)
+            {
+                Logger.Warn(
+                    "Lease '{LeaseId}' of tenant '{BorrowerTenantId}' released by member '{MemberId}' on connection " +
+                    "'{ConnectionId}', while it was still registered under its previous connection '{PreviousConnectionId}': " +
+                    "{Reason}, success={Success}",
+                    taken.LeaseId, taken.TenantId, holder.MemberId, connectionId, holder.ConnectionId, result.Reason,
+                    result.Success);
+                return taken;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(result.ExecutionId) || string.IsNullOrWhiteSpace(result.TenantId) ||
+            string.IsNullOrWhiteSpace(memberId))
+        {
+            Logger.Warn(
+                "Ignoring a release of lease '{LeaseId}' on connection '{ConnectionId}' ({Reason}, success={Success}): " +
+                "this controller instance holds no such lease, and the release names no execution to check it against " +
+                "(the member predates AB#5826). If the controller restarted while the lease ran, the execution stays " +
+                "Running until the stuck-execution reaper fails it",
+                result.LeaseId, connectionId, result.Reason, result.Success);
+            return null;
+        }
+
+        var (execution, refusal) = await VerifyLeasedExecutionAsync(result.TenantId, result.ExecutionId, memberId,
+            registered?.AdapterPoolTenantId, registered?.AdapterPoolRtId);
+        if (execution is null)
+        {
+            Logger.Warn(
+                "Ignoring a late release of lease '{LeaseId}' for execution '{ExecutionId}' of tenant '{BorrowerTenantId}' " +
+                "from member '{MemberId}' ({Reason}, success={Success}): the execution {Refusal}",
+                result.LeaseId, result.ExecutionId, result.TenantId, memberId, result.Reason, result.Success, refusal);
+            return null;
+        }
+
+        if (!IsLateReleaseBindingAcceptable(result, execution.LeasedFromTenantId, connectionTenantId,
+                requireConnectionTenant))
+        {
+            return null;
+        }
+
         Logger.Warn(
-            "Pool member '{MemberId}' disconnected while holding lease '{LeaseId}' of tenant '{BorrowerTenantId}'; " +
-            "the work item is interrupted",
+            "Applying a late release of lease '{LeaseId}' to execution '{ExecutionId}' of tenant '{BorrowerTenantId}' " +
+            "({Reason}, success={Success}): this controller instance did not hold the lease (it restarted, or the " +
+            "member reconnected to it), and the execution proves it was leased to member '{MemberId}' and is still running",
+            result.LeaseId, result.ExecutionId, result.TenantId, result.Reason, result.Success, memberId);
+
+        return BuildLease(result.LeaseId, result.TenantId, execution.LeasedFromTenantId ?? string.Empty,
+            execution.LeasedFromAdapterPoolRtId ?? string.Empty, string.Empty, string.Empty, result.ExecutionId,
+            execution.LeaseGrantedAt ?? execution.StartedAt ?? DateTime.UtcNow, default);
+    }
+
+    /// <summary>
+    ///     AB#5826 — whether the persisted execution proves that a lease of this member is still in
+    ///     flight on it, or why not.
+    /// </summary>
+    private async Task<(RtPipelineExecution? Execution, string? Refusal)> VerifyLeasedExecutionAsync(
+        string tenantId, string executionId, string memberId, string? adapterPoolTenantId, string? adapterPoolRtId)
+    {
+        RtPipelineExecution? execution;
+        try
+        {
+            execution = await _communicationRepository.GetPipelineExecutionAsync(tenantId, executionId);
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e, "[{BorrowerTenantId}] Could not read execution '{ExecutionId}' to attribute a lease",
+                tenantId, executionId);
+            return (null, $"could not be read ({e.Message})");
+        }
+
+        if (execution is null)
+        {
+            return (null, "does not exist");
+        }
+
+        if (execution.Status != RtPipelineExecutionStatusEnum.Running)
+        {
+            return (null, $"is {execution.Status} already (re-queued after the member was lost, expired, or completed)");
+        }
+
+        if (execution.LeaseReleasedAt is not null)
+        {
+            return (null, "has its lease released already");
+        }
+
+        if (!string.Equals(execution.LeasedOnMemberId, memberId, StringComparison.Ordinal))
+        {
+            return (null, $"was leased to member '{execution.LeasedOnMemberId ?? "<none>"}', not to '{memberId}'");
+        }
+
+        if (adapterPoolTenantId is not null &&
+            !string.Equals(execution.LeasedFromTenantId, adapterPoolTenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            return (null, $"was leased from tenant '{execution.LeasedFromTenantId}', not from '{adapterPoolTenantId}'");
+        }
+
+        if (adapterPoolRtId is not null &&
+            !string.Equals(execution.LeasedFromAdapterPoolRtId, adapterPoolRtId, StringComparison.OrdinalIgnoreCase))
+        {
+            return (null, $"was leased from pool {execution.LeasedFromAdapterPoolRtId}, not from {adapterPoolRtId}");
+        }
+
+        return (execution, null);
+    }
+
+    /// <summary>
+    ///     AB#5826 — the pool hub's tenant binding, applied to a release that is not covered by a
+    ///     registration on its connection. Same staging as the registration gate: a mismatch is refused
+    ///     only when the gate enforces, and logged otherwise.
+    /// </summary>
+    private static bool IsLateReleaseBindingAcceptable(LeaseResultDto result, string? lenderTenantId,
+        string? connectionTenantId, bool requireConnectionTenant)
+    {
+        if (string.IsNullOrEmpty(connectionTenantId))
+        {
+            if (requireConnectionTenant)
+            {
+                Logger.Warn(
+                    "Refusing a late release of lease '{LeaseId}': the connection presents no tenant-bound token",
+                    result.LeaseId);
+                return false;
+            }
+
+            return true;
+        }
+
+        if (string.Equals(connectionTenantId, lenderTenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        Logger.Warn(
+            "A late release of lease '{LeaseId}' arrives on a connection with a token of tenant '{ConnectionTenantId}', " +
+            "but the lease belongs to a pool of tenant '{LenderTenantId}'{Outcome}",
+            result.LeaseId, connectionTenantId, lenderTenantId,
+            requireConnectionTenant ? "; refused" : " and would be refused when AdapterPoolHubAuthorization:Mode is Enforce");
+        return !requireConnectionTenant;
+    }
+
+    /// <summary>
+    ///     AB#5826 — a lease rebuilt from identifiers. It carries no secret and no work: it only has to
+    ///     record that the member is busy and let the release complete the execution.
+    /// </summary>
+    private LeaseDto BuildLease(string leaseId, string tenantId, string adapterPoolTenantId, string adapterPoolRtId,
+        string adapterRtId, string adapterCkTypeId, string executionId, DateTime grantedAtUtc, DateTime expiresAtUtc)
+    {
+        var granted = grantedAtUtc == default ? DateTime.UtcNow : grantedAtUtc;
+        return new LeaseDto
+        {
+            LeaseId = leaseId,
+            TenantId = tenantId,
+            AdapterPoolTenantId = adapterPoolTenantId,
+            AdapterPoolRtId = adapterPoolRtId,
+            AdapterRtId = adapterRtId,
+            AdapterCkTypeId = adapterCkTypeId,
+            ExecutionId = executionId,
+            GrantedAtUtc = granted,
+            ExpiresAtUtc = expiresAtUtc > granted ? expiresAtUtc : granted + _leaseTtl
+        };
+    }
+
+    /// <summary>
+    ///     Concept §6: at-least-once. The attempt is marked Interrupted with its lease span closed, and
+    ///     a fresh attempt takes its place in the queue.
+    /// </summary>
+    private async Task InterruptLostLeaseAsync(PoolMemberConnection member, LeaseDto lease, string reason)
+    {
+        Logger.Warn(
+            "Pool member '{MemberId}' lost lease '{LeaseId}' of tenant '{BorrowerTenantId}'; the work item is interrupted",
             member.MemberId, lease.LeaseId, lease.TenantId);
 
-        // Concept §6: at-least-once. The attempt is marked Interrupted with its lease span closed,
-        // and a fresh attempt takes its place in the queue.
-        var requeuedExecutionId = await InterruptAndRequeueAsync(lease, LeaseInterruptReason.MemberLost,
-            $"The adapter pool member '{member.MemberId}' disconnected while holding this execution's lease.");
+        var requeuedExecutionId = await InterruptAndRequeueAsync(lease, LeaseInterruptReason.MemberLost, reason);
 
         await _eventService.StoreErrorEventAsync(lease.TenantId,
             $"The adapter pool member '{member.MemberId}' holding this tenant's lease " +

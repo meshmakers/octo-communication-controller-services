@@ -325,6 +325,21 @@ public class CommunicationControllerOptions
     public int LeaseTtlMinutes { get; set; } = 15;
 
     /// <summary>
+    /// How long (SECONDS) a lease whose pool member disconnected is held back before its work is
+    /// interrupted and re-queued (AB#5826). 0 = re-queue at once, the behaviour before AB#5826.
+    /// <para>
+    /// A disconnect does not stop the member: it keeps running the work item and reconnects within
+    /// seconds (the SignalR client retries every 1–5 s). Re-queuing at once ran the same work twice —
+    /// the retry on another member, the original to completion on the reconnected one, whose result
+    /// was then dropped. Within this window a member that comes back and resumes the lease
+    /// (<c>ResumePoolMemberAsync</c>) or reports its release keeps the work and nothing is re-queued.
+    /// The cost is that the work of a member that really died is re-queued this much later; a member
+    /// that restarts in place (same member id) and registers idle releases it at once.
+    /// </para>
+    /// </summary>
+    public int LeaseMemberReconnectGraceSeconds { get; set; } = 90;
+
+    /// <summary>
     /// Maximum queue entries read per borrowing adapter per scheduling round. A bound, not a
     /// policy: a queue deeper than this is already saturated and the scale-up signal and the queue
     /// surfaces are both reporting it, so reading further would only make the round slower without
