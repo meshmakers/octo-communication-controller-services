@@ -52,8 +52,11 @@ internal class LeaseTriggerConsumer(
             }
 
             // No caller and no input: a cron tick is the system acting on the author's schedule,
-            // exactly what the adapter-side FromPipelineTriggerEvent path carries — nothing.
-            await triggerManagementService.StartExecutePipelineAsync(message.TenantId, pipelineRtId, null);
+            // exactly what the adapter-side FromPipelineTriggerEvent path carries — nothing. Recorded
+            // as Scheduled (AB#5863) rather than Manual: the borrower's queue and execution history
+            // must tell its cron apart from somebody pressing Execute.
+            await triggerManagementService.StartExecutePipelineAsync(message.TenantId, pipelineRtId, null,
+                triggerType: RtPipelineTriggerTypeEnum.Scheduled);
         }
         catch (Exception e)
         {

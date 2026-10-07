@@ -25,7 +25,8 @@ internal class TriggerManagementService(
 {
     public async Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId,
         OctoObjectId pipelineRtId, string? pipelineInput, bool isDryRun = false,
-        ExecutePipelineCaller? caller = null, string? callerAccessToken = null)
+        ExecutePipelineCaller? caller = null, string? callerAccessToken = null,
+        RtPipelineTriggerTypeEnum triggerType = RtPipelineTriggerTypeEnum.Manual)
     {
         logger.LogInformation("[{TenantId}] Executing pipeline '{PipelineRtId}' (dry-run={IsDryRun})",
             tenantId, pipelineRtId, isDryRun);
@@ -36,7 +37,7 @@ internal class TriggerManagementService(
         // path and is unchanged: a manual adapter has no queue and executes immediately, and that
         // asymmetry is intended (concept §5, "One queue per pool").
         var queued = await TryEnqueueForLeasedAdapterAsync(tenantId, pipelineRtId, pipelineInput, isDryRun,
-            caller, callerAccessToken);
+            caller, callerAccessToken, triggerType);
         if (queued is not null)
         {
             return queued;
@@ -124,7 +125,7 @@ internal class TriggerManagementService(
     /// </remarks>
     private async Task<PipelineExecutionDataDto?> TryEnqueueForLeasedAdapterAsync(string tenantId,
         OctoObjectId pipelineRtId, string? pipelineInput, bool isDryRun, ExecutePipelineCaller? caller,
-        string? callerAccessToken)
+        string? callerAccessToken, RtPipelineTriggerTypeEnum triggerType)
     {
         if (isDryRun)
         {
@@ -219,7 +220,9 @@ internal class TriggerManagementService(
         {
             RtId = OctoObjectId.GenerateNewId(),
             ExecutionId = executionId.ToString(),
-            TriggerType = RtPipelineTriggerTypeEnum.Manual,
+            // AB#5863: a lease cron tick is Scheduled, not Manual — the queue view and the execution
+            // history must tell the borrower's cron apart from somebody pressing Execute.
+            TriggerType = triggerType,
             InputData = pipelineInput
         };
 

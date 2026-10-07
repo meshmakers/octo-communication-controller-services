@@ -80,6 +80,40 @@ internal class LeasedAdapterEnqueueTests : TriggerManagementServiceTestsBase
     }
 
     /// <summary>
+    ///     AB#5863 — a lease cron tick is recorded as <c>Scheduled</c>; it used to be indistinguishable
+    ///     from somebody pressing Execute (<c>MANUAL</c>) in the borrower's queue and history.
+    /// </summary>
+    [Test]
+    public async Task ALeaseCronTick_IsQueuedAsScheduled()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+        ArrangeAdapter(RtLifecycleModeEnum.Leased, pipelineRtId);
+
+        await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null,
+            triggerType: RtPipelineTriggerTypeEnum.Scheduled);
+
+        await CommunicationRepository.Received(1).EnqueueExecutionAsync(TenantId,
+            Arg.Is<RtPipelineExecution>(e => e.TriggerType == RtPipelineTriggerTypeEnum.Scheduled),
+            Arg.Any<RtEntityId>(), Arg.Any<RtEntityId>(), Arg.Any<DateTime>());
+    }
+
+    /// <summary>
+    ///     The other half of AB#5863: an execute call that names no trigger type stays manual.
+    /// </summary>
+    [Test]
+    public async Task AnExecuteCall_IsQueuedAsManualByDefault()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+        ArrangeAdapter(RtLifecycleModeEnum.Leased, pipelineRtId);
+
+        await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null);
+
+        await CommunicationRepository.Received(1).EnqueueExecutionAsync(TenantId,
+            Arg.Is<RtPipelineExecution>(e => e.TriggerType == RtPipelineTriggerTypeEnum.Manual),
+            Arg.Any<RtEntityId>(), Arg.Any<RtEntityId>(), Arg.Any<DateTime>());
+    }
+
+    /// <summary>
     ///     🔴 AB#4924 §9.6 — the half that decides whether the <c>Interactive</c> execution class means
     ///     anything. Work has just arrived and a member of the pool may be idle ALREADY, so without
     ///     pulling the round forward a Studio Execute waits up to a full

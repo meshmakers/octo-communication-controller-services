@@ -54,8 +54,9 @@ internal class LeaseTriggerConsumerTests
         await _consumer.ConsumeAsync(Tick());
 
         // No input and no caller: the tick carries what the adapter-side cron path carries — nothing.
+        // AB#5863: and it is recorded as Scheduled, not as a manual execute.
         await _triggerManagementService.Received(1)
-            .StartExecutePipelineAsync(TenantId, _pipelineRtId, null, false, null, null);
+            .StartExecutePipelineAsync(TenantId, _pipelineRtId, null, false, null, null, RtPipelineTriggerTypeEnum.Scheduled);
     }
 
     [Test]
@@ -73,7 +74,7 @@ internal class LeaseTriggerConsumerTests
         // 🔴 A cron that fires faster than the pool serves it must not grow the queue by one item
         // per tick; one waiting run of the pipeline is the whole cron's intent.
         await _triggerManagementService.DidNotReceiveWithAnyArgs()
-            .StartExecutePipelineAsync(default!, default, default, default, default, default);
+            .StartExecutePipelineAsync(default!, default, default, default, default, default, default);
     }
 
     [Test]
@@ -88,7 +89,7 @@ internal class LeaseTriggerConsumerTests
         await _consumer.ConsumeAsync(Tick());
 
         await _triggerManagementService.Received(1)
-            .StartExecutePipelineAsync(TenantId, _pipelineRtId, null, false, null, null);
+            .StartExecutePipelineAsync(TenantId, _pipelineRtId, null, false, null, null, RtPipelineTriggerTypeEnum.Scheduled);
     }
 
     [Test]
@@ -102,7 +103,7 @@ internal class LeaseTriggerConsumerTests
 
         using var _ = Assert.Multiple();
         await _triggerManagementService.Received(1)
-            .StartExecutePipelineAsync(TenantId, _pipelineRtId, null, false, null, null);
+            .StartExecutePipelineAsync(TenantId, _pipelineRtId, null, false, null, null, RtPipelineTriggerTypeEnum.Scheduled);
         await _repository.DidNotReceiveWithAnyArgs()
             .GetQueuedExecutionsForAdapterAsync(default!, default!, default);
     }
@@ -111,7 +112,7 @@ internal class LeaseTriggerConsumerTests
     public async Task AFailedTick_IsLoggedAndDoesNotThrow()
     {
         _triggerManagementService
-            .StartExecutePipelineAsync(TenantId, _pipelineRtId, null, false, null, null)
+            .StartExecutePipelineAsync(TenantId, _pipelineRtId, null, false, null, null, RtPipelineTriggerTypeEnum.Scheduled)
             .Returns<Task<Meshmakers.Octo.Communication.Contracts.DataTransferObjects.PipelineExecutionDataDto>>(
                 _ => throw new InvalidOperationException("pool leasing is disabled for this tenant"));
 

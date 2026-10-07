@@ -1,5 +1,6 @@
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
@@ -23,11 +24,16 @@ public interface ITriggerManagementService
     /// <param name="callerAccessToken">The invoker's raw access token, for a node that must act as
     /// the invoker against another service (delegation, AB#5031). Null when none is available; never
     /// logged.</param>
+    /// <param name="triggerType">What caused this execution, recorded on the execution entity when the
+    /// work item is queued for a leased adapter. <see cref="RtPipelineTriggerTypeEnum.Scheduled"/> for a
+    /// lease cron tick (AB#5863); everything else is a manual execute. Ignored on the dedicated path,
+    /// where the adapter reports the execution and its trigger type itself.</param>
     /// <returns>The pipeline execution id, if the start of execution was successful</returns>
     Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId, OctoObjectId pipelineRtId,
         string? pipelineInput, bool isDryRun = false,
         Meshmakers.Octo.Communication.Contracts.MessageObjects.ExecutePipelineCaller? caller = null,
-        string? callerAccessToken = null);
+        string? callerAccessToken = null,
+        RtPipelineTriggerTypeEnum triggerType = RtPipelineTriggerTypeEnum.Manual);
     
     /// <summary>
     /// Remove the schedule for the triggers of the tenant
