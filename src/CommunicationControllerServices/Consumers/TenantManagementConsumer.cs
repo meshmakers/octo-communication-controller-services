@@ -21,6 +21,7 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
     private readonly IAdapterService _adapterService;
     private readonly IConfigurationService _configurationService;
     private readonly ICommunicationEventService _eventService;
+    private readonly ControllerStartTime _startTime;
 
     // Static on purpose (AB#4456): the consumer is registered scoped (AddBroadcastEventConsumer →
     // AddScoped), so MassTransit creates a NEW instance per message. An instance field can never
@@ -44,13 +45,14 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
 
     public TenantManagementConsumer(ILogger<TenantManagementConsumer> logger, IPoolService poolService,
         IAdapterService adapterService, IConfigurationService configurationService,
-        ICommunicationEventService eventService)
+        ICommunicationEventService eventService, ControllerStartTime startTime)
     {
         _logger = logger;
         _poolService = poolService;
         _adapterService = adapterService;
         _configurationService = configurationService;
         _eventService = eventService;
+        _startTime = startTime;
     }
 
 
@@ -59,7 +61,7 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
         _logger.LogInformation("Pre update tenant received: {TenantId}", context.Message.TenantId);
         try
         {
-            if (context.Message.Timestamp < Constants.StartTime)
+            if (_startTime.IsBeforeStart(context.Message.Timestamp))
             {
                 _logger.LogInformation("Ignoring old message");
                 return;
@@ -97,7 +99,7 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
         _logger.LogInformation("Pos update tenant received: {TenantId}", context.Message.TenantId);
         try
         {
-            if (context.Message.Timestamp < Constants.StartTime)
+            if (_startTime.IsBeforeStart(context.Message.Timestamp))
             {
                 _logger.LogInformation("Ignoring old message");
                 return;
@@ -131,7 +133,7 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
         _logger.LogInformation("Pos create tenant received: {TenantId}", context.Message.TenantId);
         try
         {
-            if (context.Message.Timestamp < Constants.StartTime)
+            if (_startTime.IsBeforeStart(context.Message.Timestamp))
             {
                 _logger.LogInformation("Ignoring old message");
                 return;
@@ -157,7 +159,7 @@ internal class TenantManagementConsumer : IDistributedConsumer<PreUpdateTenant>,
         _logger.LogInformation("Pre delete tenant received: {TenantId}", context.Message.TenantId);
         try
         {
-            if (context.Message.Timestamp < Constants.StartTime)
+            if (_startTime.IsBeforeStart(context.Message.Timestamp))
             {
                 _logger.LogInformation("Ignoring old message");
                 return;

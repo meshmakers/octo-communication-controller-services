@@ -6,8 +6,6 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices;
 
 internal static class Constants
 {
-    internal static readonly DateTime StartTime = DateTime.UtcNow;
-
     private const string TenantId = "tenantId";
     private const string PoolName = "pool-name";
     private const string AdapterRtId = "adapter-rtId";

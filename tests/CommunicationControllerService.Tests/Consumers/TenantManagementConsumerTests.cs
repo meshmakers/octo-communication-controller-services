@@ -14,12 +14,12 @@ internal class TenantManagementConsumerTests
 {
     private const string TenantId = "tenantId";
 
-    // Constants.StartTime is `static readonly DateTime StartTime = DateTime.UtcNow` and is
-    // initialised on first access — which happens inside the consumer when it compares against
-    // `context.Message.Timestamp`. Messages created with `DateTime.UtcNow` in the test arrange
-    // step would therefore be timestamped *before* StartTime is set and silently dropped as
-    // "old" messages. Use a far-future timestamp so the comparison reliably accepts the message.
-    private static readonly DateTime FutureTimestamp = DateTime.UtcNow.AddYears(1);
+    // AB#5866: the controller start is an injected, explicitly captured value. Messages of the
+    // pairing tests are stamped one second after it; FutureTimestamp keeps its name for the
+    // existing tests.
+    private static readonly DateTime StartedAt = new(2026, 10, 7, 19, 28, 58, DateTimeKind.Utc);
+    private static readonly DateTime FutureTimestamp = StartedAt.AddSeconds(1);
+    private static readonly ControllerStartTime StartTime = new(StartedAt);
 
     private readonly TenantManagementConsumer _consumer;
     private readonly IPoolService _poolService;
@@ -37,7 +37,7 @@ internal class TenantManagementConsumerTests
         _configurationService.IsEnabledAsync(TenantId).Returns(true);
 
         _consumer = new TenantManagementConsumer(logger, _poolService, _adapterService,
-            _configurationService, eventService);
+            _configurationService, eventService, StartTime);
     }
 
     [Test]
@@ -294,7 +294,7 @@ internal class TenantManagementConsumerTests
         // instances (static), otherwise the paired branch silently never runs in production.
         var secondConsumer = new TenantManagementConsumer(
             Substitute.For<ILogger<TenantManagementConsumer>>(), _poolService, _adapterService,
-            _configurationService, Substitute.For<ICommunicationEventService>());
+            _configurationService, Substitute.For<ICommunicationEventService>(), StartTime);
 
         var correlationId = Guid.NewGuid();
         var preMessage = new PreUpdateTenant(TenantId, correlationId, FutureTimestamp);
@@ -328,6 +328,57 @@ internal class TenantManagementConsumerTests
         // Assert — the old Pre is ignored, so the Pos arrives "alone" and waits for a partner.
         await _adapterService.DidNotReceive().PreUpdateTenantAsync(Arg.Any<string>());
         await _adapterService.DidNotReceive().PosUpdateTenantAsync(Arg.Any<string>());
+    }
+
+    [Test]
+    public async Task FirstPairAfterStart_IsProcessed_EvenWhenTheConsumerIsCreatedMuchLater()
+    {
+        // AB#5866 regression: the start time used to be a lazily initialised static that the first
+        // consumed message set — so that very message was "older than the start" and dropped. Here
+        // the controller started at StartedAt, the tenant update was published 4 min 23 s later
+        // (test-2-dev: start 19:28:58, Pre 19:33:21) and the consumer instance is only created now.
+        // The first Pre/Pos pair after the start must run the full relay.
+        var consumer = new TenantManagementConsumer(Substitute.For<ILogger<TenantManagementConsumer>>(),
+            _poolService, _adapterService, _configurationService,
+            Substitute.For<ICommunicationEventService>(), StartTime);
+        var publishedAt = StartedAt.AddMinutes(4).AddSeconds(23);
+        var correlationId = Guid.NewGuid();
+
+        await consumer.ConsumeAsync(BuildContext(new PreUpdateTenant(TenantId, correlationId, publishedAt)));
+        await consumer.ConsumeAsync(BuildContext(new PosUpdateTenant(TenantId, correlationId, publishedAt)));
+
+        using var _ = Assert.Multiple();
+        await _adapterService.Received(1).CkModelChangedAsync(TenantId);
+        await _adapterService.Received(1).PreUpdateTenantAsync(TenantId);
+        await _adapterService.Received(1).PosUpdateTenantAsync(TenantId);
+    }
+
+    [Test]
+    public async Task PairPublishedJustBeforeStart_IsIgnored_AndLeavesNoUnpairedHalf()
+    {
+        // The filter itself stays: a pair published before this process started is dropped — both
+        // halves, so neither lingers in the static pairing dictionary.
+        var publishedAt = StartedAt.AddMilliseconds(-1);
+        var correlationId = Guid.NewGuid();
+
+        await _consumer.ConsumeAsync(BuildContext(new PreUpdateTenant(TenantId, correlationId, publishedAt)));
+        await _consumer.ConsumeAsync(BuildContext(new PosUpdateTenant(TenantId, correlationId, publishedAt)));
+        // A fresh message with the same correlation id must not pair with a dropped half.
+        await _consumer.ConsumeAsync(BuildContext(new PosUpdateTenant(TenantId, correlationId, FutureTimestamp)));
+
+        using var _ = Assert.Multiple();
+        await _adapterService.DidNotReceive().CkModelChangedAsync(Arg.Any<string>());
+        await _adapterService.DidNotReceive().PreUpdateTenantAsync(Arg.Any<string>());
+        await _adapterService.DidNotReceive().PosUpdateTenantAsync(Arg.Any<string>());
+    }
+
+    [Test]
+    public async Task ControllerStartTime_IsBeforeStart_ComparesAgainstTheCapturedInstant()
+    {
+        using var _ = Assert.Multiple();
+        await Assert.That(StartTime.IsBeforeStart(StartedAt.AddTicks(-1))).IsTrue();
+        await Assert.That(StartTime.IsBeforeStart(StartedAt)).IsFalse();
+        await Assert.That(StartTime.IsBeforeStart(StartedAt.AddTicks(1))).IsFalse();
     }
 
     [Test]

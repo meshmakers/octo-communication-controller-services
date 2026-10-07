@@ -36,6 +36,11 @@ using NLog;
 using NLog.Web;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
+// AB#5866: capture the process start before anything else. The broadcast consumers drop messages
+// stamped before this instant; the value used to be a lazily initialised static that only got set
+// by the first consumed message, so that message was always dropped as "old".
+var controllerStartTime = new ControllerStartTime(DateTime.UtcNow);
+
 // NLog: set up the logger first to catch all errors
 var nLogFactory = LogManager.Setup().RegisterNLogWeb().LoadConfigurationFromFile("nlog.config").LogFactory;
 var logger = nLogFactory.GetCurrentClassLogger();
@@ -71,6 +76,7 @@ try
     builder.Configuration.AddEnvironmentVariables("OCTO_").AddCommandLine(args)
         .AddUserSecrets(typeof(Program).Assembly, true);
 
+    builder.Services.AddSingleton(controllerStartTime);
     builder.Services.AddSingleton<ICommunicationRepository, CommunicationRepository>();
     builder.Services.AddSingleton<ICommunicationEventService, CommunicationEventService>();
     builder.Services.AddSingleton<IInstanceSecretCrypto, InstanceSecretCrypto>();
