@@ -31,6 +31,14 @@ internal class AdapterPoolConnectionManager : IAdapterPoolConnectionManager
 
         lock (_claimLock)
         {
+            // AP-I5 — a re-registration on the same connection keeps what the registry knows about
+            // the work on it. See the interface remarks.
+            if (_membersByConnection.TryGetValue(connectionId, out var previous) &&
+                Matches(previous, adapterPoolTenantId, adapterPoolRtId))
+            {
+                member = member with { ActiveLease = previous.ActiveLease, IsDraining = previous.IsDraining };
+            }
+
             _membersByConnection[connectionId] = member;
         }
 
@@ -164,15 +172,58 @@ internal class AdapterPoolConnectionManager : IAdapterPoolConnectionManager
         }
     }
 
-    public void Heartbeat(string connectionId, DateTime sampledAtUtc)
+    public bool Heartbeat(string connectionId, DateTime sampledAtUtc)
     {
         lock (_claimLock)
         {
-            if (_membersByConnection.TryGetValue(connectionId, out var member))
+            if (!_membersByConnection.TryGetValue(connectionId, out var member))
             {
-                _membersByConnection[connectionId] = member with { LastSeenUtc = sampledAtUtc };
+                return false;
+            }
+
+            _membersByConnection[connectionId] = member with { LastSeenUtc = sampledAtUtc };
+            return true;
+        }
+    }
+
+    public IReadOnlyList<PoolMemberConnection> RemoveSupersededMembers(string connectionId, string memberId,
+        string adapterPoolTenantId, string adapterPoolRtId)
+    {
+        List<PoolMemberConnection>? superseded = null;
+
+        lock (_claimLock)
+        {
+            foreach (var member in _membersByConnection.Values)
+            {
+                if (member.ConnectionId == connectionId ||
+                    !string.Equals(member.MemberId, memberId, StringComparison.Ordinal) ||
+                    !Matches(member, adapterPoolTenantId, adapterPoolRtId))
+                {
+                    continue;
+                }
+
+                if (_membersByConnection.TryRemove(member.ConnectionId, out var removed))
+                {
+                    (superseded ??= []).Add(removed);
+                }
             }
         }
+
+        if (superseded is null)
+        {
+            return [];
+        }
+
+        foreach (var removed in superseded)
+        {
+            Logger.Warn(
+                "Pool member '{MemberId}' registered on connection '{ConnectionId}'; dropping its stale " +
+                "registration on connection '{StaleConnectionId}' (held lease: {LeaseId}). If both connections " +
+                "are alive, two processes share this member id — member ids must be unique per process",
+                memberId, connectionId, removed.ConnectionId, removed.ActiveLease?.LeaseId ?? "<none>");
+        }
+
+        return superseded;
     }
 
     private static bool Matches(PoolMemberConnection member, string adapterPoolTenantId, string adapterPoolRtId)

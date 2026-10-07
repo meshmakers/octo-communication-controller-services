@@ -256,6 +256,27 @@ opened one. The key names the shared resource, not the test, the same way
 own class name as the key were changed to it. A probe that asserts *absence* of output should filter
 the target to its own subject as well — concurrent tests write into it.
 
+#### Member recovery on the registry side (AB#4924 AP-I5)
+
+The member half lives in comm-sdk (`AdapterPoolMemberService`, see its CLAUDE.md "Pool member
+recovery"); it re-registers whenever it believes the controller holds no registration for it, and defers
+the registration while a lease is still running. Three registry properties make that safe:
+
+- **Re-registration on the same connection keeps `ActiveLease` and `IsDraining`.** An invoke that timed
+  out on the member but landed here is enough to trigger one; dropping a lease granted in between would
+  offer a busy process as free, and the member must refuse the next grant — failing that execution.
+- **A registration on a new connection supersedes the same member id's registration on any other
+  connection of the same pool** (`RemoveSupersededMembers`). The stale entry would otherwise linger
+  until this pod notices the old connection is gone, and it is the claim's first pick (idle, least
+  recently seen) — every lease handed to it goes down a dead connection. A superseded entry that held a
+  lease goes through `HandleMemberDisconnectedAsync` (same shutdown guard as the disconnect path); the
+  later disconnect of the old connection finds nothing. Member ids are unique per process by
+  construction (pod name, the chart renders no `MemberId`); a WARN names both connections in case not.
+- **A heartbeat on a connection without a registration throws `HubException`** instead of being
+  swallowed. It is the one moment a member can learn it is not registered while its connection is up.
+
+Tests: `Hubs/AdapterPoolHubTests/MemberRecoveryTests`.
+
 Tests: `Hubs/AdapterPoolHubTests/` (registration + the tenant-binding matrix in both modes, the
 `IShutdownState` refusal, lease routing to a member, a second lease never landing on a claimed member,
 release, stale release, disconnect mid-lease, draining, heartbeat),

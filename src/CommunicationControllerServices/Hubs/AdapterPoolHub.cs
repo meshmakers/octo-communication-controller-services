@@ -169,6 +169,21 @@ internal class AdapterPoolHub : Hub, IAdapterPoolHub
             ? connectionId
             : registration.MemberId;
 
+        // 🔴 AB#4924 AP-I5 — a reconnected member's previous registration, if this instance has not
+        // noticed its old connection is gone yet. Left in place it is the first candidate the claim
+        // picks (idle, least recently seen) and every lease handed to it goes down a dead connection.
+        // A superseded registration that held a lease is handled exactly like a disconnect mid-lease
+        // — the same at-least-once re-queue OnDisconnectedAsync would run, only now rather than at
+        // the SignalR client timeout — and under the same shutdown guard.
+        foreach (var superseded in _connectionManager.RemoveSupersededMembers(connectionId, memberId,
+                     registration.AdapterPoolTenantId, registration.AdapterPoolRtId))
+        {
+            if (!_shutdownState.IsShuttingDown)
+            {
+                await _leaseService.HandleMemberDisconnectedAsync(superseded);
+            }
+        }
+
         // AB#4924: the descriptors travel with the registration and are stored per pool, because a
         // BORROWER's DeployPipeline has to ask "which nodes can this pool run" — its own Leased
         // adapter has no process, and therefore no descriptors, of its own.
@@ -197,10 +212,27 @@ internal class AdapterPoolHub : Hub, IAdapterPoolHub
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    ///     🔴 AB#4924 AP-I5 — a heartbeat on a connection without a registration is answered with a
+    ///     <see cref="HubException" />, not swallowed. A member heartbeats only while it believes it is
+    ///     registered, so this is the one moment it can learn otherwise (its registration was
+    ///     superseded, or never arrived here); it then registers again on its next tick. Swallowing
+    ///     the heartbeat, as before, left such a member connected, heartbeating and never leased.
+    /// </remarks>
     public Task HeartbeatAsync(PoolMemberHeartbeatDto heartbeat)
     {
-        _connectionManager.Heartbeat(Context.ConnectionId,
+        var known = _connectionManager.Heartbeat(Context.ConnectionId,
             heartbeat.SampledAtUtc == default ? DateTime.UtcNow : heartbeat.SampledAtUtc);
+        if (!known)
+        {
+            Logger.Info(
+                "Heartbeat from pool member '{MemberId}' on connection '{ConnectionId}', which holds no registration; " +
+                "asking it to register again",
+                heartbeat.MemberId, Context.ConnectionId);
+            throw new HubException(
+                "This connection holds no pool-member registration on this controller instance; register again.");
+        }
+
         return Task.CompletedTask;
     }
 

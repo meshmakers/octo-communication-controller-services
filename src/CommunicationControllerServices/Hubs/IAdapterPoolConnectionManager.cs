@@ -78,8 +78,15 @@ public interface IAdapterPoolConnectionManager
 {
     /// <summary>
     ///     Records a member as connected and eligible for leases. Replaces any previous registration
-    ///     of the same connection.
+    ///     of the same connection — but keeps that registration's lease and drain flag.
     /// </summary>
+    /// <remarks>
+    ///     🔴 AB#4924 AP-I5 — a member registers again on the SAME connection whenever it believes the
+    ///     controller holds no registration for it (a refused attempt, a rejected heartbeat, an
+    ///     invoke that timed out on the member but landed here). If a lease was granted in between,
+    ///     dropping it would make the registry offer a busy process as free: the next grant would
+    ///     land on a member that has to refuse it, and the refusal fails that borrower's execution.
+    /// </remarks>
     PoolMemberConnection RegisterMember(string connectionId, string memberId, string adapterPoolTenantId,
         string adapterPoolRtId, IReadOnlyList<NodeDescriptorDto>? nodeDescriptors = null,
         string? pipelineSchemaJson = null);
@@ -152,6 +159,32 @@ public interface IAdapterPoolConnectionManager
     /// <summary>Marks a member as draining; it will not be offered another lease.</summary>
     void MarkDraining(string connectionId);
 
-    /// <summary>Records that a member is still alive.</summary>
-    void Heartbeat(string connectionId, DateTime sampledAtUtc);
+    /// <summary>
+    ///     Records that a member is still alive. Returns false when this connection holds no member
+    ///     registration (AB#4924 AP-I5) — the caller tells the member, which then registers again.
+    /// </summary>
+    bool Heartbeat(string connectionId, DateTime sampledAtUtc);
+
+    /// <summary>
+    ///     Removes every registration of <paramref name="memberId" /> in the given pool that lives on a
+    ///     connection other than <paramref name="connectionId" />, and returns them (AB#4924 AP-I5).
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         A member that reconnects registers on a new connection, while the old connection's
+    ///         registration stays until this instance notices the old connection is gone — up to the
+    ///         SignalR client timeout when the member vanished without a close. During that window the
+    ///         stale entry is the most attractive candidate there is: idle, and least recently seen,
+    ///         which is exactly the order <see cref="TryClaimMember" /> picks in. A lease granted to it
+    ///         goes down a dead connection and is only recovered when the disconnect finally fires.
+    ///     </para>
+    ///     <para>
+    ///         Member ids are unique per process by construction (the pod name; the chart deliberately
+    ///         renders no <c>MemberId</c>), which is what makes "same member id, other connection" a
+    ///         safe definition of stale. The caller treats a returned registration that held a lease
+    ///         exactly like a disconnect mid-lease.
+    ///     </para>
+    /// </remarks>
+    IReadOnlyList<PoolMemberConnection> RemoveSupersededMembers(string connectionId, string memberId,
+        string adapterPoolTenantId, string adapterPoolRtId);
 }
