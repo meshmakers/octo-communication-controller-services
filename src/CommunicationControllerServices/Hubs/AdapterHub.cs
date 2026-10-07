@@ -341,20 +341,54 @@ internal class AdapterHub : Hub, IAdapterHub
     /// in-memory ring buffer. Fire-and-forget on the wire; failures are logged
     /// and swallowed so the next sample succeeds.
     /// </summary>
+    /// <remarks>
+    /// AB#5827: the periodic sample is also the controller's only regular contact with an
+    /// adapter that believes it is registered. When the service reports that this connection's
+    /// registration was lost (accepted, then orphaned in the adapter cache, never asked to restart),
+    /// the adapter is sent <see cref="IAdapterHubCallbacks.PreUpdateTenantAsync"/> on this very
+    /// connection — the existing "restart and register again" callback every adapter build already
+    /// handles, so no contract change and no skew: an old adapter heals exactly like a new one.
+    /// A <see cref="HubException"/> would not do: the adapter sends the sample with
+    /// <c>SendAsync</c>, so nothing thrown here ever reaches it.
+    /// </remarks>
     /// <param name="sample">The metrics sample</param>
-    public Task ReportAdapterMetricsAsync(AdapterMetricsSampleDto sample)
+    public async Task ReportAdapterMetricsAsync(AdapterMetricsSampleDto sample)
     {
         try
         {
             var tenantId = GetTenantId();
-            _adapterService.RecordMetricsSample(tenantId, sample);
+            var outcome = _adapterService.RecordMetricsSample(tenantId, Context.ConnectionId, sample);
+            if (outcome == MetricsSampleOutcome.RegistrationLost)
+            {
+                await RequestReRegistrationAsync(tenantId, sample.AdapterRtEntityId);
+            }
         }
         catch (Exception e)
         {
             Logger.Warn(e, "Failed to record adapter metrics sample.");
         }
+    }
 
-        return Task.CompletedTask;
+    private async Task RequestReRegistrationAsync(string tenantId, RtEntityId adapterRtEntityId)
+    {
+        Logger.Warn(
+            "[{TenantId}] Asking adapter '{AdapterRtId}' on connection '{ConnectionId}' to restart and register again: " +
+            "its registration was lost",
+            tenantId, adapterRtEntityId, Context.ConnectionId);
+
+        await Clients.Caller.SendAsync(nameof(IAdapterHubCallbacks.PreUpdateTenantAsync), tenantId);
+
+        try
+        {
+            await _eventService.StoreWarningEventAsync(tenantId,
+                $"Adapter '{adapterRtEntityId}' was connected but no longer registered (AB#5827); it was asked to restart and register again.",
+                adapterRtEntityId);
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e, "[{TenantId}] Failed to store the re-registration event for adapter '{AdapterRtId}'",
+                tenantId, adapterRtEntityId);
+        }
     }
 
     /// <summary>

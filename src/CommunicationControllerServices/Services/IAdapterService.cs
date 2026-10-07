@@ -252,6 +252,21 @@ public interface IAdapterService
     void RecordMetricsSample(string tenantId, AdapterMetricsSampleDto sample);
 
     /// <summary>
+    /// AB#5827: records a metrics sample that arrived on <paramref name="connectionId"/> and tells
+    /// the caller whether that connection lost its registration. A connection whose registration
+    /// this controller accepted, but whose adapter is no longer in the tenant's adapter cache — and
+    /// which was never told to restart — is "deaf": every push goes nowhere while the adapter
+    /// believes it is registered. Once that has lasted
+    /// the orphaned-registration grace period (30 s), the result is
+    /// <see cref="MetricsSampleOutcome.RegistrationLost" /> (exactly once per connection) and the
+    /// hub asks the adapter to register again.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier of the connection</param>
+    /// <param name="connectionId">The SignalR connection the sample arrived on</param>
+    /// <param name="sample">The metrics sample from the adapter</param>
+    MetricsSampleOutcome RecordMetricsSample(string tenantId, string connectionId, AdapterMetricsSampleDto sample);
+
+    /// <summary>
     /// Returns the buffered metrics samples for an adapter in chronological order.
     /// Throws <see cref="AdapterServiceException"/> when the tenant or adapter is not
     /// known so the REST controller can surface a 404.

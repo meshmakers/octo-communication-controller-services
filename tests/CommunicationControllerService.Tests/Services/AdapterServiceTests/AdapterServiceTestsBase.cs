@@ -100,11 +100,22 @@ internal abstract class AdapterServiceTestsBase
     /// </summary>
     protected readonly IHttpContextAccessor HttpContextAccessor = Substitute.For<IHttpContextAccessor>();
 
+    protected AdapterServiceTestsBase() : this(null)
+    {
+    }
+
+    /// <summary>
+    /// AB#5827: suites that exercise the interplay of registration and tenant pre/post-update need
+    /// the REAL <see cref="Caches.Adapters.AdapterCache" /> — the substitute hands out one fixed
+    /// <see cref="AdapterTenant" /> forever, so the instance swap the race is about cannot happen.
+    /// With a real cache the tenant is enabled through it and <see cref="AdapterTenant" /> is the
+    /// instance current at construction time.
+    /// </summary>
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
-    protected AdapterServiceTestsBase()
+    protected AdapterServiceTestsBase(IAdapterCache? realAdapterCache)
     {
         AdapterHubCallbacks = Substitute.For<IAdapterHubCallbacks>();
-        AdapterCache = Substitute.For<IAdapterCache>();
+        AdapterCache = realAdapterCache ?? Substitute.For<IAdapterCache>();
         CommunicationRepository = Substitute.For<ICommunicationRepository>();
         AdapterCachePublish = Substitute.For<IAdapterCachePublish>();
         CommunicationEventService = Substitute.For<ICommunicationEventService>();
@@ -137,14 +148,18 @@ internal abstract class AdapterServiceTestsBase
             // IssuerUri token resolution in the configuration projection runs the real machinery.
             new WorkloadTemplateResolver(optionsMonitor),
             IdentityClientReader, HttpContextAccessor, guardOptions);
-        AdapterTenant = new AdapterTenant(AdapterCachePublish, TenantId);
+        AdapterTenant = realAdapterCache?.AddOrUpdateTenant(TenantId) ?? new AdapterTenant(AdapterCachePublish, TenantId);
 
         // AB#5128: NSubstitute recursively auto-mocks HttpContext (non-null) by default, which
         // would look like a caller with no roles; make the default an explicit null so the base
         // represents a system-initiated deploy until a test calls SetCaller.
         HttpContextAccessor.HttpContext.Returns((HttpContext?)null);
 
-        InitAdapterCache();
+        if (realAdapterCache == null)
+        {
+            InitAdapterCache();
+        }
+
         InitAdapterServiceAccount();
         InitIdentityClientReader();
         InitSignalChannels();
