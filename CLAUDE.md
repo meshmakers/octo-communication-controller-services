@@ -2049,12 +2049,19 @@ private catalog, but on local tenants), all pointing at the one script. **Whoeve
 System.Communication 3.x on main before the 0.2 lane lands there must add the new version here.**
 Since engine `d035715` (`CkMigrationMajorVersionGuard`) a missing entry no longer slips through: the
 post-chain bridge is refused across a major, the upgrade fails, and the MigrationHistory stays at the
-3.x version until a model with the entry is deployed. 3.41.0/3.42.0 add attributes 4.5.0 does not
-have (AB#5537 SECRET credentials, AB#5583, AB#5618) — their entries are right for the rename, but
-such a tenant must only meet a 4.x that carries those attributes (the 4.6.0 sync).
+3.x version until a model with the entry is deployed.
 
-Tests: integration `Migrations/SystemCommunication4MigrationTests` — the published 3.40.0 model
-(embedded resource, re-labelled per version) plus the blueprint's 3.x seed, upgraded through the real
+**AB#5803 (2026-10-08, cutover W1): 3.41.0 → 4.6.0, and no 3.42.0 entry on purpose.** main's
+published 3.41.0 is the status-history release WITHOUT SECRET (AB#5618 `LastSuccessfulStatusAt` /
+`ConsecutiveStatusFailures`, AB#5583 `FoldedBefore`); **4.6.0** carries exactly that content into the
+4.x line, so a 3.41.0 tenant must meet 4.6.0 or later (ChangeCkType keeps the stored values; 4.5.0
+would not declare them). **3.42.0 is deliberately NOT listed:** phase 3 makes it the SECRET switch
+(AB#5537), whose 4.x counterpart is 4.7.0 — the major-version guard refuses 3.42.0 → 4.6.0 loudly
+instead of renaming encrypted values onto plain-string attributes. Add the 3.42.0 entry together
+with 4.7.0, checked against the then-published 3.42.0.
+
+Tests: integration `Migrations/SystemCommunication4MigrationTests` — the published 3.40.0 and
+3.41.0 models (embedded resources; other versions are the 3.40.0 re-labelled) plus the blueprint's 3.x seed, upgraded through the real
 `ImportCkModelAsync` for every listed version: path contains the script, a dry run fails the
 `no-legacy-pools` post-validation on the 3.x data, the real upgrade leaves no `Pool`, keeps the
 rtIds, renames the seeded well-known name only, resolves both adapters' sites over `Hosts`, and the
