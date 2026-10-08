@@ -33,41 +33,11 @@ public static class TenantInitializationExtensions
             {
                 var tenantContext = await systemContext.GetChildTenantContextAsync(importSession, tenantId);
 
-                // Import the base System CK model first (required dependency)
-                if (!await tenantContext.IsCkModelExistingAsync(SystemCkIds.CkModelId))
-                {
-                    var systemOperationResult = new OperationResult();
-                    await tenantContext.ImportCkModelAsync(SystemCkIds.CkModelId, systemOperationResult);
-                    if (systemOperationResult.HasErrors || systemOperationResult.HasFatalErrors)
-                    {
-                        throw new InvalidOperationException(
-                            $"Failed to import System CK model: {systemOperationResult.GetMessages()}");
-                    }
-                }
-
-                // Import the System.Bot CK model (required dependency for System.Communication)
-                if (!await tenantContext.IsCkModelExistingAsync(SystemBotCkIds.CkModelId))
-                {
-                    var botOperationResult = new OperationResult();
-                    await tenantContext.ImportCkModelAsync(SystemBotCkIds.CkModelId, botOperationResult);
-                    if (botOperationResult.HasErrors || botOperationResult.HasFatalErrors)
-                    {
-                        throw new InvalidOperationException(
-                            $"Failed to import System.Bot CK model: {botOperationResult.GetMessages()}");
-                    }
-                }
-
-                // Import the System.Communication CK model
-                if (!await tenantContext.IsCkModelExistingAsync(SystemCommunicationCkIds.CkModelId))
-                {
-                    var operationResult = new OperationResult();
-                    await tenantContext.ImportCkModelAsync(SystemCommunicationCkIds.CkModelId, operationResult);
-                    if (operationResult.HasErrors || operationResult.HasFatalErrors)
-                    {
-                        throw new InvalidOperationException(
-                            $"Failed to import System.Communication CK model: {operationResult.GetMessages()}");
-                    }
-                }
+                // Import the base System CK model first (required dependency), then System.Bot (required by
+                // System.Communication), then System.Communication.
+                await EnsureCkModelAsync(tenantContext, SystemCkIds.CkModelId);
+                await EnsureCkModelAsync(tenantContext, SystemBotCkIds.CkModelId);
+                await EnsureCkModelAsync(tenantContext, SystemCommunicationCkIds.CkModelId);
 
                 await importSession.CommitTransactionAsync();
             }
@@ -91,5 +61,31 @@ public static class TenantInitializationExtensions
         // Load the CK cache after the import transaction is committed.
         var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
         await tenantRepository.LoadCacheForTenantAsync(ckCacheService);
+    }
+
+    /// <summary>
+    /// Imports the embedded <paramref name="embeddedModelId"/> unless the tenant already has that version or a
+    /// NEWER one (CK v2 F1.0, AB#5900). The check is by name and minimum version
+    /// (<see cref="ITenantContext.IsCkModelSatisfiedAsync"/>), not exact: since the engine's embedded-import
+    /// downgrade guard a tenant may legitimately have a newer System / System.Bot / System.Communication than this
+    /// service embeds, and the import would only be skipped by the guard anyway.
+    /// </summary>
+    /// <param name="tenantContext">The tenant to initialize.</param>
+    /// <param name="embeddedModelId">The embedded CK model id (name + lowest acceptable version).</param>
+    /// <exception cref="InvalidOperationException">The import reported errors.</exception>
+    public static async Task EnsureCkModelAsync(ITenantContext tenantContext, CkModelId embeddedModelId)
+    {
+        if (await tenantContext.IsCkModelSatisfiedAsync(embeddedModelId))
+        {
+            return;
+        }
+
+        var operationResult = new OperationResult();
+        await tenantContext.ImportCkModelAsync(embeddedModelId, operationResult);
+        if (operationResult.HasErrors || operationResult.HasFatalErrors)
+        {
+            throw new InvalidOperationException(
+                $"Failed to import {embeddedModelId.Name} CK model: {operationResult.GetMessages()}");
+        }
     }
 }
