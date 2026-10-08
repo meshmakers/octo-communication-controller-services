@@ -43,6 +43,8 @@ description: |
 # blueprint/seed on System.Communication 4.x. 4.5.0 is the embedded version and the first
 # 4.x any catalog will hold, so lint and validate resolve the floor again. No version bump:
 # the seed is unchanged and the descriptor above installs the embedded version anyway.
+# AB#5803 (2026-10-08): the embedded version is 4.6.0 now (main 3.41.0 content). The floor stays
+# [4.5,5.0): the seed uses none of the three attributes 4.6.0 adds, so 4.5.0 still satisfies it.
 ckModelDependencies:
   - System.Communication-[4.5,5.0)
 

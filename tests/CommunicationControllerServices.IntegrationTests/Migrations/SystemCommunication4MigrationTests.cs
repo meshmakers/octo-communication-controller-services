@@ -45,8 +45,20 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTes
 public class SystemCommunication4MigrationTests(CommunicationControllerFixture fixture)
 {
     private const string ModelName = "System.Communication";
-    private const string PublishedVersion = "3.40.0";
-    private const string ResourceSuffix = "ck-system.communication-3.40.0.json";
+
+    /// <summary>
+    ///     The 3.x models embedded byte for byte from the private catalog. A version listed here is imported
+    ///     as published; any other version is the 3.40.0 JSON re-labelled (see the remarks).
+    ///     AB#5803: 3.41.0 is the real one — it carries the three runtime-state attributes (AB#5618, AB#5583)
+    ///     that 4.6.0 brings into the 4.x line, so the relabelled 3.40.0 cannot stand in for it.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> PublishedModels = new Dictionary<string, string>
+    {
+        ["3.40.0"] = "ck-system.communication-3.40.0.json",
+        ["3.41.0"] = "ck-system.communication-3.41.0.json"
+    };
+
+    private const string RelabelSourceVersion = "3.40.0";
 
     // The blueprint's rtIds (System.Communication.Release / .MainLatest seed) for the seeded site and
     // the Mesh Adapter, plus an operator-created Edge site with its own adapter.
@@ -54,17 +66,26 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
     private static readonly OctoObjectId MeshAdapterRtId = new("670000000000000000000002");
     private static readonly OctoObjectId EdgeSiteRtId = new("6700000000000000000000e1");
     private static readonly OctoObjectId EdgeAdapterRtId = new("6700000000000000000000e2");
+    private static readonly OctoObjectId PipelineRtId = new("6700000000000000000000f1");
+    private static readonly OctoObjectId StatisticsRtId = new("6700000000000000000000f2");
+
+    // AB#5803: values a 3.41.0 tenant holds in the three runtime-state attributes 4.6.0 re-declares.
+    private static readonly DateTime SiteLastSuccess = new(2026, 10, 1, 8, 0, 0, DateTimeKind.Utc);
+    private static readonly DateTime AdapterLastSuccess = new(2026, 10, 2, 9, 30, 0, DateTimeKind.Utc);
+    private static readonly DateTime PipelineLastSuccess = new(2026, 10, 3, 10, 15, 0, DateTimeKind.Utc);
+    private static readonly DateTime FoldBoundary = new(2026, 10, 4, 11, 0, 0, DateTimeKind.Utc);
 
     private static readonly RtCkId<CkTypeId> LegacyPoolTypeId = new("System.Communication/Pool");
 
     /// <summary>
     ///     Every System.Communication 3.x at or above the 4.x entry point that main has released or
     ///     announced — the same list as migration-meta.yaml. 3.37.1 and 3.39.1 never reached the private
-    ///     catalog but exist on local tenants; 3.41.0/3.42.0 are announced on unmerged main branches.
+    ///     catalog but exist on local tenants; 3.41.0 is main's status-history release (published 2026-10-08).
+    ///     3.42.0 is deliberately NOT here — see <see cref="TenantAboveTheLastEntryPoint_IsRefused_AndStaysOn3x" />.
     /// </summary>
     public static TheoryData<string> MainLineVersions =>
     [
-        "3.35.0", "3.36.0", "3.37.0", "3.37.1", "3.38.0", "3.39.0", "3.39.1", "3.40.0", "3.41.0", "3.42.0"
+        "3.35.0", "3.36.0", "3.37.0", "3.37.1", "3.38.0", "3.39.0", "3.39.1", "3.40.0", "3.41.0"
     ];
 
     [Theory]
@@ -134,15 +155,70 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
     }
 
     /// <summary>
+    ///     AB#5803 — a main tenant on the PUBLISHED 3.41.0 keeps its deployable status history
+    ///     (LastSuccessfulStatusAt, ConsecutiveStatusFailures on sites, adapters and pipelines) and its
+    ///     statistics fold boundary (FoldedBefore) through the Pool -> DeploymentSite migration, and 4.6.0
+    ///     reads them back through the typed model. The 3.40.0 cases cannot show this: that model does not
+    ///     declare the attributes, so nothing could be seeded into them.
+    /// </summary>
+    [Fact]
+    public async Task TenantOn3410_KeepsStatusHistoryAndFoldBoundary_On4x()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var tenantId = await CreateTenantOn3xAsync("3.41.0", withStatusHistory: true);
+
+        (await CountLegacyPoolsAsync(tenantId)).Should().Be(2);
+
+        await ImportCurrentModelAsync(tenantId);
+
+        var upgradeService = fixture.GetService<ICkModelUpgradeService>();
+        (await upgradeService.GetInstalledVersionsAsync(tenantId, ct))
+            .Should().ContainKey(ModelName).WhoseValue.Should().Be(SystemCommunicationCkIds.CkModelId.Version.ToString());
+        (await CountLegacyPoolsAsync(tenantId)).Should().Be(0);
+
+        var repository = fixture.GetService<ICommunicationRepository>();
+
+        // Site: the value rode ChangeCkType Pool -> DeploymentSite.
+        var seeded = (await repository.GetDeploymentSitesAsync(tenantId)).Single(s => s.RtId == SeededSiteRtId);
+        seeded.LastSuccessfulStatusAt.Should().Be(SiteLastSuccess);
+        seeded.ConsecutiveStatusFailures.Should().Be(2);
+        seeded.RtWellKnownName.Should().Be("DeploymentSite");
+
+        // Adapter and pipeline: untouched by the script, kept by the schema bridge within the path.
+        var adapter = await repository.GetAdapterAsync(tenantId,
+            new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, MeshAdapterRtId));
+        adapter.LastSuccessfulStatusAt.Should().Be(AdapterLastSuccess);
+        adapter.ConsecutiveStatusFailures.Should().Be(0);
+
+        var pipelineId = new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, PipelineRtId);
+        var pipeline = await repository.GetPipelineAsync(tenantId, pipelineId);
+        pipeline.Should().NotBeNull();
+        pipeline!.LastSuccessfulStatusAt.Should().Be(PipelineLastSuccess);
+        pipeline.ConsecutiveStatusFailures.Should().Be(5);
+
+        // Statistics: FoldedBefore and the counters next to it.
+        var statistics = await repository.GetPipelineStatisticsAsync(tenantId, pipelineId);
+        statistics.Should().NotBeNull();
+        statistics!.RtId.Should().Be(StatisticsRtId);
+        statistics.FoldedBefore.Should().Be(FoldBoundary);
+        statistics.Last24HoursSuccessCount.Should().Be(17);
+        statistics.Last24HoursFailureCount.Should().Be(3);
+    }
+
+    /// <summary>
     ///     The engine half of G3, end to end: a 3.x above the last entry point (the next main bump that
     ///     nobody added to the meta) must fail LOUDLY and leave the data where it is — not be lifted to 4.x
     ///     by the schema-only bridge, not now and not on the next start.
+    ///     AB#5803: 3.42.0 is such a version ON PURPOSE. On main it becomes the SECRET switch (AB#5537), whose
+    ///     4.x counterpart is 4.7.0; lifting it onto 4.6.0 would keep encrypted values under attributes 4.6.0
+    ///     declares as plain strings. Its entry arrives with 4.7.0.
     /// </summary>
-    [Fact]
-    public async Task TenantAboveTheLastEntryPoint_IsRefused_AndStaysOn3x()
+    [Theory]
+    [InlineData("3.42.0")]
+    [InlineData("3.99.0")]
+    public async Task TenantAboveTheLastEntryPoint_IsRefused_AndStaysOn3x(string unlistedVersion)
     {
         var ct = TestContext.Current.CancellationToken;
-        const string unlistedVersion = "3.99.0";
         var tenantId = await CreateTenantOn3xAsync(unlistedVersion);
         var targetModelId = SystemCommunicationCkIds.CkModelId;
 
@@ -170,7 +246,7 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
             .Contain("crosses a major version (3.x -> 4.x)").And.Contain($"add a migration entry for {unlistedVersion}");
     }
 
-    private async Task<string> CreateTenantOn3xAsync(string version)
+    private async Task<string> CreateTenantOn3xAsync(string version, bool withStatusHistory = false)
     {
         var tenantId = $"g3mig{version.Replace(".", "")}{Guid.NewGuid():N}"[..20];
         var systemContext = fixture.GetSystemContext();
@@ -196,9 +272,11 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
             dependencyResult.HasErrors.Should().BeFalse(dependencyResult.GetMessages());
         }
 
-        // The published 3.40.0, re-labelled to the version under test.
-        var json = (await ReadResourceAsync(ResourceSuffix))
-            .Replace($"{ModelName}-{PublishedVersion}", $"{ModelName}-{version}", StringComparison.Ordinal);
+        // The published model of this version, or the published 3.40.0 re-labelled to it.
+        var json = PublishedModels.TryGetValue(version, out var published)
+            ? await ReadResourceAsync(published)
+            : (await ReadResourceAsync(PublishedModels[RelabelSourceVersion]))
+                .Replace($"{ModelName}-{RelabelSourceVersion}", $"{ModelName}-{version}", StringComparison.Ordinal);
         var deserializeResult = new OperationResult();
         var model = await fixture.GetService<ICkJsonSerializer>()
             .DeserializeCompiledModelRootAsync(json, $"ck-system.communication-{version}.json", deserializeResult);
@@ -212,7 +290,8 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
         var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
         await tenantRepository.GetCkTypeGraphAsync(LegacyPoolTypeId);
         await fixture.GetService<IImportRtModelCommand>()
-            .ImportTextAsync(tenantRepository, SeedOf3xTenant, ImportStrategy.Insert);
+            .ImportTextAsync(tenantRepository, withStatusHistory ? SeedOf3410TenantWithStatusHistory : SeedOf3xTenant,
+                ImportStrategy.Insert);
 
         return tenantId;
     }
@@ -246,7 +325,85 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
     ///     The blueprint's seeded Cloud site + Mesh Adapter (System.Communication.Release seed on main),
     ///     and an Edge site an operator created by hand (no well-known name) with an adapter of its own.
     /// </summary>
-    private static string SeedOf3xTenant => $$"""
+    private static string SeedOf3xTenant => Seed3x(string.Empty, string.Empty, string.Empty);
+
+    /// <summary>
+    ///     AB#5803 — <see cref="SeedOf3xTenant" /> plus what a 3.41.0 controller writes: status history on the
+    ///     seeded site, the Mesh Adapter and a pipeline, and a statistics record with its fold boundary. Only
+    ///     valid against a model that declares those attributes (the published 3.41.0).
+    /// </summary>
+    private static string SeedOf3410TenantWithStatusHistory => Seed3x(
+        siteExtra: $$"""
+
+                  - id: System.Communication/LastSuccessfulStatusAt
+                    value: '{{SiteLastSuccess:O}}'
+                  - id: System.Communication/ConsecutiveStatusFailures
+                    value: 2
+            """,
+        adapterExtra: $$"""
+
+                  - id: System.Communication/LastSuccessfulStatusAt
+                    value: '{{AdapterLastSuccess:O}}'
+                  - id: System.Communication/ConsecutiveStatusFailures
+                    value: 0
+            """,
+        extraEntities: $$"""
+
+              - rtId: '{{PipelineRtId}}'
+                ckTypeId: System.Communication/Pipeline
+                associations:
+                  - roleId: System.Communication/Executes
+                    targetRtId: '{{MeshAdapterRtId}}'
+                    targetCkTypeId: System.Communication/Adapter
+                attributes:
+                  - id: System/Name
+                    value: status-history-pipeline
+                  - id: System.Communication/PipelineDefinition
+                    value: 'triggers: []'
+                  - id: System.Communication/DeploymentState
+                    value: 0
+                  - id: System.Communication/LastSuccessfulStatusAt
+                    value: '{{PipelineLastSuccess:O}}'
+                  - id: System.Communication/ConsecutiveStatusFailures
+                    value: 5
+              - rtId: '{{StatisticsRtId}}'
+                ckTypeId: System.Communication/PipelineStatistics
+                associations:
+                  - roleId: System.Communication/StatisticsForPipeline
+                    targetRtId: '{{PipelineRtId}}'
+                    targetCkTypeId: System.Communication/Pipeline
+                attributes:
+                  - id: System.Communication/LastHourSuccessCount
+                    value: 1
+                  - id: System.Communication/LastHourFailureCount
+                    value: 0
+                  - id: System.Communication/LastHourAvgDurationMs
+                    value: 120
+                  - id: System.Communication/Last12HoursSuccessCount
+                    value: 9
+                  - id: System.Communication/Last12HoursFailureCount
+                    value: 1
+                  - id: System.Communication/Last12HoursAvgDurationMs
+                    value: 130
+                  - id: System.Communication/Last24HoursSuccessCount
+                    value: 17
+                  - id: System.Communication/Last24HoursFailureCount
+                    value: 3
+                  - id: System.Communication/Last24HoursAvgDurationMs
+                    value: 140
+                  - id: System.Communication/Last30DaysSuccessCount
+                    value: 400
+                  - id: System.Communication/Last30DaysFailureCount
+                    value: 12
+                  - id: System.Communication/Last30DaysAvgDurationMs
+                    value: 150
+                  - id: System.Communication/FoldedBefore
+                    value: '{{FoldBoundary:O}}'
+            """);
+
+    // The extras are appended verbatim; each starts with a newline and carries the indentation of the
+    // block it extends (attribute list of the seeded site / Mesh Adapter, or the entity list).
+    private static string Seed3x(string siteExtra, string adapterExtra, string extraEntities) => $$"""
         $schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
         dependencies:
           - System.Communication-[3.0,4.0)
@@ -264,7 +421,7 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
               - id: System.Communication/CommunicationState
                 value: 0
               - id: System.Communication/ConfigurationState
-                value: 0
+                value: 0{{siteExtra}}
           - rtId: '{{EdgeSiteRtId}}'
             ckTypeId: System.Communication/Pool
             attributes:
@@ -299,7 +456,7 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
               - id: System.Communication/LastSyncedSequenceNumber
                 value: 0
               - id: System.Communication/ReceivesClusterSecrets
-                value: true
+                value: true{{adapterExtra}}
           - rtId: '{{EdgeAdapterRtId}}'
             ckTypeId: System.Communication/Adapter
             associations:
@@ -320,6 +477,7 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
               - id: System.Communication/LastSyncedSequenceNumber
                 value: 0
               - id: System.Communication/ReceivesClusterSecrets
-                value: false
+                value: false{{extraEntities}}
         """;
+
 }

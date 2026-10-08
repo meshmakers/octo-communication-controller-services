@@ -33,6 +33,14 @@ $schema: https://schemas.meshmakers.cloud/ck-migration-meta.schema.json
 # 4.3.0 (AB#5301) adds NO entry either: LifecycleMode and IdleTimeoutMinutes become
 # isRuntimeState (minor per ck-semver-rules "isRuntimeState changed"); no stored value
 # changes, only what a blueprint re-apply may overwrite — rides the schema-only bridge.
+#
+# 4.6.0 (AB#5803, cutover W1) adds NO entry either: it carries main's System.Communication 3.41.0
+# content into the 4.x line — DeployableEntity.LastSuccessfulStatusAt / .ConsecutiveStatusFailures
+# (AB#5618) and PipelineStatistics.FoldedBefore (AB#5583), all optional isRuntimeState attributes,
+# plus description-only changes. Purely additive within 4.x — rides the schema-only bridge from any
+# 4.x below it. The 3.41.0 entry point further down is what carries a MAIN tenant's values for those
+# three attributes across the major: ChangeCkType keeps every stored attribute value, and 4.6.0 is
+# the first 4.x that declares them.
 ckModelId: System.Communication-4.0.0
 migrations:
   - fromVersion: "3.0.1"
@@ -107,14 +115,24 @@ migrations:
   # but it still fails. Whoever bumps System.Communication 3.x on main before 0.2 lands there must
   # add the new version here too.
   #
-  # Content check (3.36.0 … 3.42.0 vs 4.5.0, 2026-10-07): Pool, the Manages role and the
-  # CommunicationPool well-known name are unchanged in every 3.x listed, so the one script is right
-  # for all of them. Everything 3.37–3.40 added on main (tenant-owned billing markers,
-  # McpServerUrl runtime state, System 2.5 repin) is already in 4.5.0 via the main merge. 3.41.0 and
-  # 3.42.0 add attributes 4.5.0 does not have yet (SECRET credentials of AB#5537, FoldedBefore of
-  # AB#5583, LastSuccessfulStatusAt/ConsecutiveStatusFailures of AB#5618): their entries are correct
-  # for the rename, but a 3.41/3.42 tenant must only meet a 4.x that carries those attributes
-  # (4.6.0 sync, plan G2) — 4.5.0 would treat the encrypted SECRET values as plain strings.
+  # Content check (3.36.0 … 3.41.0 vs 4.6.0, re-checked 2026-10-08 against the PUBLISHED 3.41.0 from
+  # construction-kit-libraries-build): Pool, the Manages role and the CommunicationPool well-known name
+  # are unchanged in every 3.x listed, so the one script is right for all of them. Everything 3.37–3.40
+  # added on main (tenant-owned billing markers, McpServerUrl runtime state, System 2.5 repin) is
+  # already in 4.5.0 via the main merge. 3.41.0 (AB#5618 deployable status history + AB#5583 fold
+  # boundary, NO SECRET) adds three optional runtime-state attributes — LastSuccessfulStatusAt,
+  # ConsecutiveStatusFailures, FoldedBefore — which 4.6.0 is the first 4.x to declare. A 3.41.0 tenant
+  # must therefore only meet 4.6.0 or later; on 4.5.0 the stored values would survive but be invisible
+  # to the model (SystemCommunication4MigrationTests pins that they come through on 4.6.0).
+  #
+  # 🔴 Deliberately NO entry for 3.42.0. Phase 3 (decisions 2026-10-08) makes 3.42.0 on main the
+  # SECRET switch (AB#5537: credentials as valueType Secret, encrypted values) — its 4.x counterpart is
+  # 4.7.0. An entry here would let a 3.42.0 tenant run the rename onto 4.6.0 and keep its `enc:` values
+  # under attributes 4.6.0 declares as plain strings: wrong, and silent. Without the entry the CK
+  # engine's major-version guard (CkMigrationMajorVersionGuard) REFUSES 3.42.0 -> 4.6.0 loudly and the
+  # history stays on 3.42.0. Add the 3.42.0 entry together with 4.7.0 (the SECRET line), after checking
+  # the then-published 3.42.0 against it. (A 3.42.0 that exists today only on local tenants — the
+  # superseded AB#5618-only cut — is refused too; such a tenant is local and can be rebuilt.)
   #
   # The script is idempotent (see the 3.36.0 entry), so duplicates cost nothing. Keep all of them
   # until no environment can be on 3.x any more (E8).
@@ -151,10 +169,5 @@ migrations:
   - fromVersion: "3.41.0"
     toVersion: "4.0.0"
     scriptPath: 3.35.0-to-4.0.0.yaml
-    description: "Rename CK type Pool to DeploymentSite (AB#4924) — entry point for 3.41.0 (announced: AB#5537 SECRET credentials + AB#5583 + AB#5618 (feat/gerald/secret-attribute-type, not yet on origin/main))"
-    breaking: true
-  - fromVersion: "3.42.0"
-    toVersion: "4.0.0"
-    scriptPath: 3.35.0-to-4.0.0.yaml
-    description: "Rename CK type Pool to DeploymentSite (AB#4924) — entry point for 3.42.0 (announced: AB#5618 deployable status history (feat/gerald/deployable-status-history, not yet on origin/main))"
+    description: "Rename CK type Pool to DeploymentSite (AB#4924) — entry point for 3.41.0 (main AB#5618 deployable status history + AB#5583 fold boundary, no SECRET; published 2026-10-08). Needs 4.6.0+ to see LastSuccessfulStatusAt/ConsecutiveStatusFailures/FoldedBefore"
     breaking: true
