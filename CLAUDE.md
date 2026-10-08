@@ -356,6 +356,34 @@ count and types by reflection (`Helper/HubCallbackContract`); a source sweep cou
 taken from an interface (justified exceptions are listed in `NotAHubCallbackSend`). Adding a send means
 nothing to do if it uses `nameof`; a new callback interface must be added to `CallbackInterfaces`.
 
+#### Decision counter of both hub gates (AB#5528 phase 3)
+
+Both filters count every decision on `octo.communication.hub.authorization.decisions` (counter,
+`{decision}`, meter `Meshmakers.Octo.Communication`) — `Hubs/HubAuthorizationMetrics`, registered as
+a singleton in `Program.cs`, resolved eagerly after `Build()` and created through `IMeterFactory`. The
+constructor writes a zero for every hub × mode × outcome × reason series (20), because PromQL's
+`increase()` does not count the first point of a new cumulative series — without the baseline a single
+anonymous connection after a restart would read as "no increase". Attributes, all closed sets:
+
+| Attribute | Values |
+|---|---|
+| `octo.hub.name` | `adapter`, `operator` |
+| `octo.hub.authorization.mode` | `log_only`, `enforce` |
+| `octo.hub.authorization.outcome` | `allowed`, `would_refuse` (LogOnly), `refused` (Enforce) |
+| `octo.hub.authorization.reason` | `authorized`, `cross_tenant_client` (allowed via the allow-list), `unauthenticated`, `missing_scope`, `no_route_tenant`, `no_tenant_claim`, `tenant_mismatch` |
+
+It is the go / no-go signal for arming `Enforce` per cluster (`would_refuse` must stay at zero); the
+warning log line names the caller and, for the adapter hub, the tenants — it now ends with
+`(reason code <reason>)`, the same value as the metric attribute. **No tenant attribute and no
+per-tenant opt-in gate**, unlike the workload/pipeline instruments: it is installation security
+posture, the operator hub is not tenant-scoped, and the series count stays fixed (a few dozen). The
+filters resolve the metrics through `HubAuthorizationMetrics.TryResolve` and `Record` swallows listener
+failures, so the metric can cost a measurement, never a connection. Rollout procedure: `docs/runbooks/hub-authorization-enforce-rollout.md`.
+
+Tests: `Hubs/HubAuthorizationMetricsTests` (every reason × outcome through a real `MeterListener`
+scoped to the test's own `IMeterFactory`, exactly four attributes, connection unaffected without the
+registration, registration pinned at the `Program.cs` source).
+
 ### External Dependencies
 
 - **Meshmakers.Octo.*** packages - Octo platform libraries for runtime, infrastructure, observability

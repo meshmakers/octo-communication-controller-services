@@ -48,35 +48,49 @@ internal class OperatorHubAuthorizationFilter : IHubFilter
     {
         var options = context.ServiceProvider
             .GetRequiredService<IOptions<OperatorHubAuthorizationOptions>>().Value;
+        var enforcing = options.Mode == OperatorHubAuthorizationMode.Enforce;
         var authorizationService = context.ServiceProvider.GetRequiredService<IAuthorizationService>();
+        // A missing or unresolvable metrics registration must cost the counter, never the
+        // connection. Program_RegistersTheDecisionMetrics pins the registration.
+        var metrics = HubAuthorizationMetrics.TryResolve(context.ServiceProvider);
 
         var user = await HubConnectionPrincipal.ResolveAsync(context);
+        var authenticated = user?.Identity is { IsAuthenticated: true };
         var authorized = user != null &&
                          (await authorizationService.AuthorizeAsync(user, null,
                              Constants.SystemCommunicationApiPolicy)).Succeeded;
 
         if (authorized)
         {
+            metrics?.Record(HubAuthorizationHub.Operator, enforcing, HubAuthorizationOutcome.Allowed,
+                HubAuthorizationReason.Authorized);
             await next(context);
             return;
         }
 
+        var reason = authenticated ? HubAuthorizationReason.MissingScope : HubAuthorizationReason.Unauthenticated;
+        metrics?.Record(HubAuthorizationHub.Operator, enforcing, HubAuthorizationMetrics.RefusalOutcome(enforcing),
+            reason);
+
+        var reasonCode = HubAuthorizationMetrics.ToTagValue(reason);
         var caller = HubConnectionPrincipal.Describe(user, context.Context.ConnectionId);
 
-        if (options.Mode == OperatorHubAuthorizationMode.Enforce)
+        if (enforcing)
         {
             Logger.Warn(
-                "Refused an operator connection to /operatorHub that does not satisfy '{PolicyName}': {Caller}",
-                Constants.SystemCommunicationApiPolicy, caller);
+                "Refused an operator connection to /operatorHub that does not satisfy '{PolicyName}': {Caller} " +
+                "(reason code {HubAuthorizationReason})",
+                Constants.SystemCommunicationApiPolicy, caller, reasonCode);
             throw new HubException(
                 $"Operator connection refused: the caller does not satisfy '{Constants.SystemCommunicationApiPolicy}'.");
         }
 
         // LogOnly — this line IS the consumer inventory. Read it before arming Enforce anywhere.
+        // The reason code is the octo.hub.authorization.reason value of the decision counter.
         Logger.Warn(
             "Operator connection to /operatorHub does not satisfy '{PolicyName}' and would be refused when " +
-            "OperatorHubAuthorization:Mode is Enforce: {Caller}",
-            Constants.SystemCommunicationApiPolicy, caller);
+            "OperatorHubAuthorization:Mode is Enforce: {Caller} (reason code {HubAuthorizationReason})",
+            Constants.SystemCommunicationApiPolicy, caller, reasonCode);
 
         await next(context);
     }

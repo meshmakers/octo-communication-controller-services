@@ -68,52 +68,75 @@ internal class AdapterHubAuthorizationFilter : IHubFilter
     {
         var options = context.ServiceProvider
             .GetRequiredService<IOptions<AdapterHubAuthorizationOptions>>().Value;
+        var enforcing = options.Mode == AdapterHubAuthorizationMode.Enforce;
+        // A missing or unresolvable metrics registration must cost the counter, never the
+        // connection. Program_RegistersTheDecisionMetrics pins the registration.
+        var metrics = HubAuthorizationMetrics.TryResolve(context.ServiceProvider);
 
         var user = await HubConnectionPrincipal.ResolveAsync(context);
         var routeTenantId = context.Context.GetHttpContext()?.GetTenantId();
 
-        var refusal = await RefusalReasonAsync(context, user, routeTenantId);
-        if (refusal == null)
+        var verdict = await EvaluateAsync(context, user, routeTenantId);
+        if (verdict.Refusal == null)
         {
+            metrics?.Record(HubAuthorizationHub.Adapter, enforcing, HubAuthorizationOutcome.Allowed,
+                verdict.Reason);
             await next(context);
             return;
         }
 
+        metrics?.Record(HubAuthorizationHub.Adapter, enforcing, HubAuthorizationMetrics.RefusalOutcome(enforcing),
+            verdict.Reason);
+
+        var refusal = verdict.Refusal;
+        var reasonCode = HubAuthorizationMetrics.ToTagValue(verdict.Reason);
         var caller = $"{HubConnectionPrincipal.Describe(user, context.Context.ConnectionId)}, " +
                      $"token tenant '{TokenTenantOrNone(user)}', " +
                      $"route tenant '{(string.IsNullOrEmpty(routeTenantId) ? "<none>" : routeTenantId)}'";
 
-        if (options.Mode == AdapterHubAuthorizationMode.Enforce)
+        if (enforcing)
         {
-            Logger.Warn("Refused an adapter connection to /{RouteTenantId}/adapterHub: {Reason}: {Caller}",
-                routeTenantId, refusal, caller);
+            Logger.Warn(
+                "Refused an adapter connection to /{RouteTenantId}/adapterHub: {Reason}: {Caller} " +
+                "(reason code {HubAuthorizationReason})",
+                routeTenantId, refusal, caller, reasonCode);
             throw new HubException($"Adapter connection refused: {refusal}.");
         }
 
         // LogOnly — this line IS the consumer inventory. Read it before arming Enforce anywhere.
+        // The reason code is the octo.hub.authorization.reason value of the decision counter, so a
+        // metric spike and its log lines can be joined.
         Logger.Warn(
             "Adapter connection to /{RouteTenantId}/adapterHub {Reason} and would be refused when " +
-            "AdapterHubAuthorization:Mode is Enforce: {Caller}",
-            routeTenantId, refusal, caller);
+            "AdapterHubAuthorization:Mode is Enforce: {Caller} (reason code {HubAuthorizationReason})",
+            routeTenantId, refusal, caller, reasonCode);
 
         await next(context);
     }
 
     /// <summary>
-    ///     Why the connection would be refused, or <c>null</c> when it passes both checks.
+    ///     A gate decision: the low-cardinality <see cref="Reason" /> that goes on the decision
+    ///     counter, and the <see cref="Refusal" /> phrase for the log line — <c>null</c> when the
+    ///     connection passes both checks.
+    /// </summary>
+    private readonly record struct Verdict(HubAuthorizationReason Reason, string? Refusal);
+
+    /// <summary>
+    ///     Why the connection would be refused, or a verdict without a refusal when it passes both
+    ///     checks.
     /// </summary>
     /// <remarks>
     ///     A phrase rather than a boolean, because the whole point of
     ///     <see cref="AdapterHubAuthorizationMode.LogOnly" /> is an inventory somebody has to act on:
     ///     "no token at all" and "right token, wrong tenant" are two entirely different pieces of work.
     /// </remarks>
-    private static async Task<string?> RefusalReasonAsync(HubLifetimeContext context, ClaimsPrincipal? user,
+    private static async Task<Verdict> EvaluateAsync(HubLifetimeContext context, ClaimsPrincipal? user,
         string? routeTenantId)
     {
         if (user?.Identity is not { IsAuthenticated: true })
         {
-            return "does not satisfy '" + Constants.TenantCommunicationApiReadWritePolicy +
-                   "' (unauthenticated)";
+            return new Verdict(HubAuthorizationReason.Unauthenticated,
+                "does not satisfy '" + Constants.TenantCommunicationApiReadWritePolicy + "' (unauthenticated)");
         }
 
         var authorizationService = context.ServiceProvider.GetRequiredService<IAuthorizationService>();
@@ -121,7 +144,8 @@ internal class AdapterHubAuthorizationFilter : IHubFilter
             Constants.TenantCommunicationApiReadWritePolicy);
         if (!authorized.Succeeded)
         {
-            return $"does not satisfy '{Constants.TenantCommunicationApiReadWritePolicy}'";
+            return new Verdict(HubAuthorizationReason.MissingScope,
+                $"does not satisfy '{Constants.TenantCommunicationApiReadWritePolicy}'");
         }
 
         // No tenant in the path means the connection addresses no tenant at all — AdapterHub itself
@@ -129,7 +153,7 @@ internal class AdapterHubAuthorizationFilter : IHubFilter
         // where this gate is more permissive than the hub it guards, so it fails closed.
         if (string.IsNullOrEmpty(routeTenantId))
         {
-            return "carries no route tenant";
+            return new Verdict(HubAuthorizationReason.NoRouteTenant, "carries no route tenant");
         }
 
         var tenantOptions = context.ServiceProvider
@@ -142,15 +166,15 @@ internal class AdapterHubAuthorizationFilter : IHubFilter
             // The operator's explicit escape hatch, shared with the HTTP gate. Never expected to
             // contain a pipeline service account — those are provisioned one per adapter inside one
             // tenant and must stay bound to it.
-            return null;
+            return new Verdict(HubAuthorizationReason.CrossTenantClient, null);
         }
 
         var tokenTenantId = user.FindFirst(HubConnectionPrincipal.TenantIdClaimType)?.Value;
         if (string.IsNullOrEmpty(tokenTenantId))
         {
-            return isServiceToken
+            return new Verdict(HubAuthorizationReason.NoTenantClaim, isServiceToken
                 ? "presents a service token with no tenant_id claim"
-                : "presents a user token with no tenant_id claim";
+                : "presents a user token with no tenant_id claim");
         }
 
         if (!string.Equals(tokenTenantId, routeTenantId, StringComparison.OrdinalIgnoreCase))
@@ -159,10 +183,11 @@ internal class AdapterHubAuthorizationFilter : IHubFilter
             // on endpoints marked IAllowParentTenantAdministration, and a mirrored service client
             // carries its parent's secret while a token minted without acr_values falls back to the
             // system tenant — the root of the hierarchy.
-            return "belongs to a different tenant than the hub path it uses";
+            return new Verdict(HubAuthorizationReason.TenantMismatch,
+                "belongs to a different tenant than the hub path it uses");
         }
 
-        return null;
+        return new Verdict(HubAuthorizationReason.Authorized, null);
     }
 
     private static string TokenTenantOrNone(ClaimsPrincipal? user)
