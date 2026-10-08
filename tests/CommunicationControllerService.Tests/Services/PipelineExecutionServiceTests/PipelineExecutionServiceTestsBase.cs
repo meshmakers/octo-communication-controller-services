@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
@@ -18,6 +19,7 @@ internal abstract class PipelineExecutionServiceTestsBase
     protected readonly IWorkloadLifecycleService WorkloadLifecycleService;
     protected readonly AdapterTenant AdapterTenant;
     protected readonly CommunicationControllerOptions ControllerOptions;
+    protected readonly FixedTimeProvider Clock = new(DateTime.UtcNow);
 
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
     protected PipelineExecutionServiceTestsBase()
@@ -29,7 +31,7 @@ internal abstract class PipelineExecutionServiceTestsBase
         WorkloadLifecycleService = Substitute.For<IWorkloadLifecycleService>();
         ControllerOptions = new CommunicationControllerOptions();
         PipelineExecutionService = new PipelineExecutionService(CommunicationRepository, AdapterCache,
-            CommunicationEventService, WorkloadLifecycleService, Microsoft.Extensions.Options.Options.Create(ControllerOptions));
+            CommunicationEventService, WorkloadLifecycleService, Microsoft.Extensions.Options.Options.Create(ControllerOptions), Clock);
         AdapterTenant = new AdapterTenant(AdapterCachePublish, TenantId);
 
         InitAdapterCache();

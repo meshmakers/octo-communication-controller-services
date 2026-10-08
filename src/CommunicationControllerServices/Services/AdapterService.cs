@@ -36,7 +36,8 @@ internal class AdapterService(
     IWorkloadTemplateResolver templateResolver,
     IIdentityClientReader identityClientReader,
     IHttpContextAccessor httpContextAccessor,
-    IOptions<ServiceAccountGuardOptions> serviceAccountGuardOptions)
+    IOptions<ServiceAccountGuardOptions> serviceAccountGuardOptions,
+    TimeProvider timeProvider)
     : IAdapterService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
@@ -1728,7 +1729,12 @@ internal class AdapterService(
             "[{TenantId}] AdapterRtId='{AdapterRtId}' pipeline '{PipelineRtEntityId}' status (error={IsError}): {Message}",
             tenantId, adapterRtEntityId, status.PipelineRtEntityId, status.IsError, message);
 
-        await communicationRepository.SetPipelineStatusMessageAsync(tenantId, status.PipelineRtEntityId, message);
+        // AB#5618: the outcome keeps LastSuccessfulStatusAt / ConsecutiveStatusFailures. The
+        // controller's clock, not the adapter's TimestampUtc: one clock for every deployable, and
+        // an adapter with a skewed clock cannot make an import look fresher than it is.
+        var isFailure = DeployableStatusTracking.IsFailure(status.IsError, status.Message);
+        await communicationRepository.SetPipelineStatusMessageAsync(tenantId, status.PipelineRtEntityId, message,
+            isFailure, timeProvider.GetUtcNow().UtcDateTime);
         return true;
     }
 

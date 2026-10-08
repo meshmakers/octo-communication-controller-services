@@ -22,3 +22,9 @@ types:
   - id: ${this}/LastDeploymentErrorTimestamp
     name: LastDeploymentErrorTimestamp
     isOptional: true
+  - id: ${this}/LastSuccessfulStatusAt
+    name: LastSuccessfulStatusAt
+    isOptional: true
+  - id: ${this}/ConsecutiveStatusFailures
+    name: ConsecutiveStatusFailures
+    isOptional: true

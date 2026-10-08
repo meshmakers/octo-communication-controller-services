@@ -32,7 +32,7 @@ public class PipelineStatusMessageTests(CommunicationControllerFixture fixture)
         try
         {
             await repository.SetPipelineStatusMessageAsync(tenantId, pipelineRtEntityId,
-                "2026-09-26T17:40:12Z · kbernkopf@tecob.at · Inbox · seen 12, imported 12, failed 0, skipped 0");
+                "2026-09-26T17:40:12Z · kbernkopf@tecob.at · Inbox · seen 12, imported 12, failed 0, skipped 0", false, DateTime.UtcNow);
 
             var pipeline = await repository.GetPipelineAsync(tenantId, pipelineRtEntityId);
             pipeline.Should().NotBeNull();
@@ -61,7 +61,7 @@ public class PipelineStatusMessageTests(CommunicationControllerFixture fixture)
                 RtDeploymentStateEnum.Error, "trigger registration failed");
 
             await repository.SetPipelineStatusMessageAsync(tenantId, pipelineRtEntityId,
-                "ERROR 2026-09-26T17:40:12Z · Mail folder 'Inbox.02_Steuern' not found");
+                "ERROR 2026-09-26T17:40:12Z · Mail folder 'Inbox.02_Steuern' not found", true, DateTime.UtcNow);
 
             var pipeline = await repository.GetPipelineAsync(tenantId, pipelineRtEntityId);
             pipeline.Should().NotBeNull();
@@ -86,11 +86,48 @@ public class PipelineStatusMessageTests(CommunicationControllerFixture fixture)
 
         try
         {
-            await repository.SetPipelineStatusMessageAsync(tenantId, pipelineRtEntityId, "first poll");
-            await repository.SetPipelineStatusMessageAsync(tenantId, pipelineRtEntityId, "second poll");
+            await repository.SetPipelineStatusMessageAsync(tenantId, pipelineRtEntityId, "first poll", false, DateTime.UtcNow);
+            await repository.SetPipelineStatusMessageAsync(tenantId, pipelineRtEntityId, "second poll", false, DateTime.UtcNow);
 
             var pipeline = await repository.GetPipelineAsync(tenantId, pipelineRtEntityId);
             pipeline!.StatusMessage.Should().Be("second poll");
+        }
+        finally
+        {
+            await CleanupAsync(data);
+        }
+    }
+
+    [Fact]
+    public async Task SetPipelineStatusMessageAsync_FailureKeepsLastSuccessAndCountsTheStreak()
+    {
+        // AB#5618: an error line overwrites StatusMessage but not WHEN the pipeline last succeeded.
+        var tenantId = fixture.TestTenantId;
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var data = new TestData();
+        var pipelineRtEntityId = await CreatePipelineAsync(data);
+        var succeededAt = new DateTime(2026, 10, 6, 8, 0, 0, DateTimeKind.Utc);
+
+        try
+        {
+            await repository.SetPipelineStatusMessageAsync(tenantId, pipelineRtEntityId, "ok", false, succeededAt);
+            await repository.SetPipelineStatusMessageAsync(tenantId, pipelineRtEntityId, "ERROR 1", true,
+                succeededAt.AddMinutes(5));
+            await repository.SetPipelineStatusMessageAsync(tenantId, pipelineRtEntityId, "ERROR 2", true,
+                succeededAt.AddMinutes(10));
+
+            var pipeline = await repository.GetPipelineAsync(tenantId, pipelineRtEntityId);
+            pipeline.Should().NotBeNull();
+            pipeline!.StatusMessage.Should().Be("ERROR 2");
+            pipeline.LastSuccessfulStatusAt.Should().Be(succeededAt);
+            pipeline.ConsecutiveStatusFailures.Should().Be(2);
+
+            await repository.SetPipelineStatusMessageAsync(tenantId, pipelineRtEntityId, "ok again", false,
+                succeededAt.AddMinutes(15));
+
+            pipeline = await repository.GetPipelineAsync(tenantId, pipelineRtEntityId);
+            pipeline!.LastSuccessfulStatusAt.Should().Be(succeededAt.AddMinutes(15));
+            pipeline.ConsecutiveStatusFailures.Should().Be(0);
         }
         finally
         {

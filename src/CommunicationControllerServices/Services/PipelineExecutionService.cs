@@ -18,7 +18,8 @@ internal class PipelineExecutionService(
     IAdapterCache adapterCache,
     ICommunicationEventService eventService,
     IWorkloadLifecycleService workloadLifecycleService,
-    IOptions<CommunicationControllerOptions> options)
+    IOptions<CommunicationControllerOptions> options,
+    TimeProvider timeProvider)
     : IPipelineExecutionService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
@@ -379,46 +380,68 @@ internal class PipelineExecutionService(
         return await communicationRepository.GetInterruptedExecutionIdsAsync(tenantId, adapterRtEntityId);
     }
 
-    public async Task UpdateStatisticsAsync(string tenantId, RtEntityId pipelineRtEntityId)
+    public Task UpdateStatisticsAsync(string tenantId, RtEntityId pipelineRtEntityId)
+    {
+        return UpdateStatisticsAsync(tenantId, pipelineRtEntityId, timeProvider.GetUtcNow().UtcDateTime);
+    }
+
+    /// <summary>
+    /// Recomputes the statistics of one pipeline as of <paramref name="now" />. See
+    /// <see cref="PipelineStatisticsFolder" /> for the window semantics (AB#5583): the persisted
+    /// HourlyBuckets are folded history plus a fresh snapshot of the retained executions, and
+    /// the 12h/24h/30d counters are summed from exactly that list.
+    /// </summary>
+    internal async Task UpdateStatisticsAsync(string tenantId, RtEntityId pipelineRtEntityId, DateTime now)
     {
         Logger.Debug("[{TenantId}] Updating statistics for pipeline '{PipelineRtEntityId}'",
             tenantId, pipelineRtEntityId);
 
         try
         {
-            var now = DateTime.UtcNow;
-            var from30Days = now.AddDays(-30);
-            var from24Hours = now.AddHours(-24);
-            var from12Hours = now.AddHours(-12);
-            var from1Hour = now.AddHours(-1);
+            var windowStart30Days = PipelineStatisticsFolder.WindowStart(now, PipelineStatisticsFolder.RetentionWindowHours);
+            var windowStart24Hours = PipelineStatisticsFolder.WindowStart(now, 24);
+            var windowStart12Hours = PipelineStatisticsFolder.WindowStart(now, 12);
+            var rollingHourStart = now.AddHours(-1);
 
-            // Sliding windows are computed from two disjoint sources (AB#4370): the hourly
-            // buckets (folded + pruned executions) and a live scan over the executions still
-            // retained (roughly the last retention hour plus anything non-terminal). The two
-            // never overlap because an execution is deleted in the same pass that folds it.
             var existingStatistics =
                 await communicationRepository.GetPipelineStatisticsAsync(tenantId, pipelineRtEntityId);
-            var buckets = (existingStatistics?.HourlyBuckets ?? Enumerable.Empty<RtPipelineStatisticsHourBucketRecord>())
-                .Where(b => b.HourStartAt >= from30Days)
+            var foldedBefore = existingStatistics?.FoldedBefore;
+            var foldedHistory = PipelineStatisticsFolder
+                .FoldedHistory(existingStatistics?.HourlyBuckets, foldedBefore)
+                .Where(b => b.HourStartAt >= windowStart30Days)
                 .ToList();
 
-            // Accumulate statistics across batches to avoid loading all executions at once.
-            // Using skip/take triggers the optimized MongoDB query path which applies $limit
-            // inside $lookup, preventing the 16MB BSON document size limit from being exceeded.
+            if (foldedBefore == null && foldedHistory.Count == 0)
+            {
+                // No folded history in the window (new statistics, or pre-AB#5583 statistics whose
+                // buckets all aged out): no hour can be split between folded and retained
+                // executions, so the boundary can be set right away and the live snapshot persisted
+                // in this sweep — instead of totals without bars until the next fold.
+                foldedBefore = windowStart30Days;
+            }
+
+            // Retained executions are the live half. With a fold boundary, only hours at or after
+            // it are snapshotted — earlier ones are folded history, and a straggler there (an
+            // execution that turned terminal after its hour was folded) waits for the next fold
+            // instead of being counted twice. Without a boundary (statistics written before
+            // AB#5583) the buckets hold folded executions only and every retained one is live.
+            var liveFrom = foldedBefore is { } boundary && boundary > windowStart30Days ? boundary : windowStart30Days;
+
+            var liveDeltas = new Dictionary<DateTime, PipelineStatisticsFolder.BucketAccumulator>();
             var lastHour = new StatisticsAccumulator();
-            var last12Hours = new StatisticsAccumulator();
-            var last24Hours = new StatisticsAccumulator();
-            var last30Days = new StatisticsAccumulator();
             DateTime? lastExecutionAt = null;
             var totalLoaded = 0;
 
+            // Accumulate across batches to avoid loading all executions at once. Using skip/take
+            // triggers the optimized MongoDB query path which applies $limit inside $lookup,
+            // preventing the 16MB BSON document size limit from being exceeded.
             const int batchSize = 5000;
             var skip = 0;
 
             while (true)
             {
                 var batch = await communicationRepository.GetPipelineExecutionsAsync(
-                    tenantId, pipelineRtEntityId, from30Days, now, skip, batchSize);
+                    tenantId, pipelineRtEntityId, windowStart30Days, now, skip, batchSize);
 
                 if (batch.Count == 0)
                 {
@@ -430,23 +453,14 @@ internal class PipelineExecutionService(
 
                 foreach (var exec in batch)
                 {
-                    AccumulateExecution(last30Days, exec);
-
-                    if (exec.StartedAt >= from24Hours)
-                    {
-                        AccumulateExecution(last24Hours, exec);
-                    }
-
-                    if (exec.StartedAt >= from12Hours)
-                    {
-                        AccumulateExecution(last12Hours, exec);
-                    }
-
-                    if (exec.StartedAt >= from1Hour)
+                    if (exec.StartedAt >= rollingHourStart)
                     {
                         AccumulateExecution(lastHour, exec);
                     }
                 }
+
+                MergeDeltas(liveDeltas, PipelineStatisticsFolder.ToBucketDeltas(
+                    batch.Where(exec => exec.StartedAt >= liveFrom)));
 
                 totalLoaded += batch.Count;
 
@@ -458,7 +472,7 @@ internal class PipelineExecutionService(
                 skip += batchSize;
             }
 
-            if (totalLoaded == 0 && buckets.Count == 0)
+            if (totalLoaded == 0 && foldedHistory.Count == 0)
             {
                 if (existingStatistics == null)
                 {
@@ -472,7 +486,7 @@ internal class PipelineExecutionService(
                     return;
                 }
 
-                if (IsStatisticsEmpty(existingStatistics))
+                if (IsStatisticsEmpty(existingStatistics) && (existingStatistics.HourlyBuckets?.Count ?? 0) == 0)
                 {
                     PipelineExecutionMetrics.ObserveStatistics(tenantId, pipelineRtEntityId.RtId,
                         existingStatistics.LastExecutionAt, 0, 0);
@@ -486,10 +500,16 @@ internal class PipelineExecutionService(
                 // Fall through to normal upsert with zero values
             }
 
-            var bucket1Hour = PipelineStatisticsFolder.SumBuckets(buckets, from1Hour);
-            var bucket12Hours = PipelineStatisticsFolder.SumBuckets(buckets, from12Hours);
-            var bucket24Hours = PipelineStatisticsFolder.SumBuckets(buckets, from24Hours);
-            var bucket30Days = PipelineStatisticsFolder.SumBuckets(buckets, from30Days);
+            // One list, one source: folded history + live snapshot. Without a boundary the live
+            // half is not persisted — nothing would tell the next fold which part is folded — but
+            // the counters are still computed from the combined list. The fold of the same sweep
+            // sets the boundary, so this legacy state lasts one sweep at most.
+            var combined = PipelineStatisticsFolder.MergeBuckets(foldedHistory, liveDeltas, windowStart30Days);
+            var persisted = foldedBefore != null ? combined : foldedHistory;
+
+            var window12Hours = PipelineStatisticsFolder.SumBuckets(combined, windowStart12Hours);
+            var window24Hours = PipelineStatisticsFolder.SumBuckets(combined, windowStart24Hours);
+            var window30Days = PipelineStatisticsFolder.SumBuckets(combined, windowStart30Days);
 
             if (lastExecutionAt == null || existingStatistics?.LastExecutionAt > lastExecutionAt)
             {
@@ -499,21 +519,22 @@ internal class PipelineExecutionService(
 
             var statistics = new RtPipelineStatistics
             {
-                LastHourSuccessCount = lastHour.SuccessCount + bucket1Hour.SuccessCount,
-                LastHourFailureCount = lastHour.FailureCount + bucket1Hour.FailureCount,
-                LastHourAvgDurationMs = CombinedAvgDurationMs(lastHour, bucket1Hour),
-                Last12HoursSuccessCount = last12Hours.SuccessCount + bucket12Hours.SuccessCount,
-                Last12HoursFailureCount = last12Hours.FailureCount + bucket12Hours.FailureCount,
-                Last12HoursAvgDurationMs = CombinedAvgDurationMs(last12Hours, bucket12Hours),
-                Last24HoursSuccessCount = last24Hours.SuccessCount + bucket24Hours.SuccessCount,
-                Last24HoursFailureCount = last24Hours.FailureCount + bucket24Hours.FailureCount,
-                Last24HoursAvgDurationMs = CombinedAvgDurationMs(last24Hours, bucket24Hours),
-                Last30DaysSuccessCount = last30Days.SuccessCount + bucket30Days.SuccessCount,
-                Last30DaysFailureCount = last30Days.FailureCount + bucket30Days.FailureCount,
-                Last30DaysAvgDurationMs = CombinedAvgDurationMs(last30Days, bucket30Days),
+                LastHourSuccessCount = lastHour.SuccessCount,
+                LastHourFailureCount = lastHour.FailureCount,
+                LastHourAvgDurationMs = (int)lastHour.AvgDurationMs,
+                Last12HoursSuccessCount = window12Hours.SuccessCount,
+                Last12HoursFailureCount = window12Hours.FailureCount,
+                Last12HoursAvgDurationMs = window12Hours.AvgDurationMs,
+                Last24HoursSuccessCount = window24Hours.SuccessCount,
+                Last24HoursFailureCount = window24Hours.FailureCount,
+                Last24HoursAvgDurationMs = window24Hours.AvgDurationMs,
+                Last30DaysSuccessCount = window30Days.SuccessCount,
+                Last30DaysFailureCount = window30Days.FailureCount,
+                Last30DaysAvgDurationMs = window30Days.AvgDurationMs,
                 LastUpdatedAt = now,
                 LastExecutionAt = lastExecutionAt,
-                HourlyBuckets = new AttributeRecordValueList<RtPipelineStatisticsHourBucketRecord>(buckets.Cast<RtRecord>().ToList())
+                FoldedBefore = foldedBefore,
+                HourlyBuckets = new AttributeRecordValueList<RtPipelineStatisticsHourBucketRecord>(persisted.Cast<RtRecord>().ToList())
             };
 
             await communicationRepository.UpsertPipelineStatisticsAsync(tenantId, statistics, pipelineRtEntityId);
@@ -525,7 +546,7 @@ internal class PipelineExecutionService(
                 statistics.LastExecutionAt, statistics.LastHourSuccessCount, statistics.LastHourFailureCount);
 
             Logger.Debug("[{TenantId}] Statistics updated for pipeline '{PipelineRtEntityId}' ({TotalExecutions} executions processed, {BucketCount} buckets)",
-                tenantId, pipelineRtEntityId, totalLoaded, buckets.Count);
+                tenantId, pipelineRtEntityId, totalLoaded, persisted.Count);
         }
         catch (Exception e)
         {
@@ -535,26 +556,34 @@ internal class PipelineExecutionService(
         }
     }
 
-    private static int CombinedAvgDurationMs(StatisticsAccumulator live, PipelineStatisticsFolder.WindowTotals buckets)
+    private static void MergeDeltas(Dictionary<DateTime, PipelineStatisticsFolder.BucketAccumulator> target,
+        Dictionary<DateTime, PipelineStatisticsFolder.BucketAccumulator> source)
     {
-        var durationCount = live.ExecutionWithDurationCount + buckets.DurationCount;
-        if (durationCount == 0)
+        foreach (var (hour, delta) in source)
         {
-            return 0;
-        }
+            if (!target.TryGetValue(hour, out var acc))
+            {
+                target[hour] = delta;
+                continue;
+            }
 
-        return (int)((live.TotalDurationMs + buckets.TotalDurationMs) / durationCount);
+            acc.SuccessCount += delta.SuccessCount;
+            acc.FailureCount += delta.FailureCount;
+            acc.TotalDurationMs += delta.TotalDurationMs;
+            acc.DurationCount += delta.DurationCount;
+        }
     }
 
     private static void AccumulateExecution(StatisticsAccumulator accumulator, RtPipelineExecution exec)
     {
-        if (exec.Status == RtPipelineExecutionStatusEnum.Completed)
+        switch (PipelineStatisticsFolder.Classify(exec.Status))
         {
-            accumulator.SuccessCount++;
-        }
-        else if (exec.Status == RtPipelineExecutionStatusEnum.Failed)
-        {
-            accumulator.FailureCount++;
+            case PipelineStatisticsFolder.ExecutionOutcome.Success:
+                accumulator.SuccessCount++;
+                break;
+            case PipelineStatisticsFolder.ExecutionOutcome.Failure:
+                accumulator.FailureCount++;
+                break;
         }
 
         if (exec.DurationMs.HasValue)
@@ -562,21 +591,6 @@ internal class PipelineExecutionService(
             accumulator.TotalDurationMs += exec.DurationMs.Value;
             accumulator.ExecutionWithDurationCount++;
         }
-    }
-
-    /// <summary>
-    /// Computes aggregate statistics from a list of executions starting from a given cutoff time
-    /// </summary>
-    private static ExecutionAggregateResult ComputeAggregate(IReadOnlyList<RtPipelineExecution> executions, DateTime from)
-    {
-        var filtered = executions.Where(e => e.StartedAt >= from).ToList();
-
-        var successCount = filtered.Count(e => e.Status == RtPipelineExecutionStatusEnum.Completed);
-        var failureCount = filtered.Count(e => e.Status == RtPipelineExecutionStatusEnum.Failed);
-        var executionsWithDuration = filtered.Where(e => e.DurationMs.HasValue).ToList();
-        var totalDurationMs = executionsWithDuration.Sum(e => (long)e.DurationMs!.Value);
-
-        return new ExecutionAggregateResult(successCount, failureCount, totalDurationMs, executionsWithDuration.Count);
     }
 
     /// <summary>
@@ -674,7 +688,9 @@ internal class PipelineExecutionService(
 
     public async Task<int> FoldAndPruneExecutionsAsync(string tenantId, int retentionHours)
     {
-        var olderThan = DateTime.UtcNow.AddHours(-Math.Max(1, retentionHours));
+        // One instant for the whole pass, so the fold boundary and the windows recomputed right
+        // after it agree on which clock hour is current (AB#5583).
+        var now = timeProvider.GetUtcNow().UtcDateTime;
         var totalPruned = 0;
 
         try
@@ -695,11 +711,12 @@ internal class PipelineExecutionService(
 
                 try
                 {
-                    totalPruned += await FoldAndPrunePipelineAsync(tenantId, pipelineRtEntityId, olderThan);
+                    totalPruned += await FoldAndPrunePipelineAsync(tenantId, pipelineRtEntityId, now,
+                        retentionHours);
 
-                    // Refresh the sliding windows on every pass — also when nothing was folded,
-                    // so counters decay once a pipeline stops executing.
-                    await UpdateStatisticsAsync(tenantId, pipelineRtEntityId);
+                    // Refresh the windows on every pass — also when nothing was folded, so
+                    // counters decay once a pipeline stops executing.
+                    await UpdateStatisticsAsync(tenantId, pipelineRtEntityId, now);
                 }
                 catch (Exception e)
                 {
@@ -728,55 +745,72 @@ internal class PipelineExecutionService(
         }
     }
 
+    /// <summary>
+    /// Folds the terminal executions that started before the hour-aligned fold cutoff into the
+    /// folded-history buckets and deletes them (AB#4370, AB#5583).
+    /// </summary>
+    /// <remarks>
+    /// The persisted buckets at or after the previous boundary are a snapshot of retained
+    /// executions, not history; the fold therefore merges into the folded history only and
+    /// carries the snapshot hours that stay live. Each write stores the new boundary together
+    /// with the merged history, so a crash between two batches leaves a consistent state: the
+    /// executions not yet deleted are still before the boundary and are folded by the next pass.
+    /// </remarks>
     private async Task<int> FoldAndPrunePipelineAsync(string tenantId, RtEntityId pipelineRtEntityId,
-        DateTime olderThan)
+        DateTime now, int retentionHours)
     {
         const int batchSize = 500;
         var pruned = 0;
 
+        var existing = await communicationRepository.GetPipelineStatisticsAsync(tenantId, pipelineRtEntityId);
+        var previousBoundary = existing?.FoldedBefore;
+        var cutoff = PipelineStatisticsFolder.FoldCutoff(now, retentionHours, previousBoundary);
+
+        if (previousBoundary == null && existing?.HourlyBuckets is { Count: > 0 } legacyBuckets)
+        {
+            // Statistics from before AB#5583: the fold cutoff was rolling (now - retention), so the
+            // newest folded bucket may hold part of an hour whose rest is still retained. Moving
+            // the boundary past that hour folds the rest of it now — once — so no hour is ever
+            // split between folded history and the live snapshot.
+            var afterNewestFolded = legacyBuckets.Max(b => b.HourStartAt).AddHours(1);
+            if (afterNewestFolded > cutoff)
+            {
+                cutoff = afterNewestFolded;
+            }
+        }
+
+        var pruneBefore = PipelineStatisticsFolder.WindowStart(now, PipelineStatisticsFolder.RetentionWindowHours);
+        var history = PipelineStatisticsFolder.FoldedHistory(existing?.HourlyBuckets, previousBoundary);
+        var liveSnapshot = previousBoundary != null
+            ? PipelineStatisticsFolder.SnapshotFrom(existing?.HourlyBuckets, cutoff)
+            : [];
+        var lastExecutionAt = existing?.LastExecutionAt;
+        var written = false;
+
         while (true)
         {
             var batch = await communicationRepository.GetTerminalExecutionsOlderThanAsync(
-                tenantId, pipelineRtEntityId, olderThan, batchSize);
+                tenantId, pipelineRtEntityId, cutoff, batchSize);
 
             if (batch.Count == 0)
             {
                 break;
             }
 
-            var deltas = PipelineStatisticsFolder.ToBucketDeltas(batch);
-
-            var existing = await communicationRepository.GetPipelineStatisticsAsync(tenantId, pipelineRtEntityId);
-            var merged = PipelineStatisticsFolder.MergeBuckets(existing?.HourlyBuckets, deltas,
-                DateTime.UtcNow.AddDays(-30));
+            history = PipelineStatisticsFolder.MergeBuckets(history,
+                PipelineStatisticsFolder.ToBucketDeltas(batch), pruneBefore);
 
             var maxStartedAt = batch.Max(e => e.StartedAt);
-            var updated = new RtPipelineStatistics
+            if (lastExecutionAt == null || maxStartedAt > lastExecutionAt)
             {
-                // Carry the current window values — they are recomputed right after the drain,
-                // but the update must not zero them in between.
-                LastHourSuccessCount = existing?.LastHourSuccessCount ?? 0,
-                LastHourFailureCount = existing?.LastHourFailureCount ?? 0,
-                LastHourAvgDurationMs = existing?.LastHourAvgDurationMs ?? 0,
-                Last12HoursSuccessCount = existing?.Last12HoursSuccessCount ?? 0,
-                Last12HoursFailureCount = existing?.Last12HoursFailureCount ?? 0,
-                Last12HoursAvgDurationMs = existing?.Last12HoursAvgDurationMs ?? 0,
-                Last24HoursSuccessCount = existing?.Last24HoursSuccessCount ?? 0,
-                Last24HoursFailureCount = existing?.Last24HoursFailureCount ?? 0,
-                Last24HoursAvgDurationMs = existing?.Last24HoursAvgDurationMs ?? 0,
-                Last30DaysSuccessCount = existing?.Last30DaysSuccessCount ?? 0,
-                Last30DaysFailureCount = existing?.Last30DaysFailureCount ?? 0,
-                Last30DaysAvgDurationMs = existing?.Last30DaysAvgDurationMs ?? 0,
-                LastUpdatedAt = existing?.LastUpdatedAt,
-                LastExecutionAt = existing?.LastExecutionAt > maxStartedAt
-                    ? existing.LastExecutionAt
-                    : maxStartedAt,
-                HourlyBuckets = new AttributeRecordValueList<RtPipelineStatisticsHourBucketRecord>(merged.Cast<RtRecord>().ToList())
-            };
+                lastExecutionAt = maxStartedAt;
+            }
 
             // Fold-then-delete: persist the buckets BEFORE erasing the batch. A crash between
             // the two double-counts at most one batch on the next run instead of losing it.
-            await communicationRepository.UpsertPipelineStatisticsAsync(tenantId, updated, pipelineRtEntityId);
+            await communicationRepository.UpsertPipelineStatisticsAsync(tenantId,
+                FoldedStatistics(existing, history, liveSnapshot, cutoff, lastExecutionAt), pipelineRtEntityId);
+            written = true;
             await communicationRepository.DeleteExecutionsAsync(tenantId,
                 batch.Select(e => e.ToRtEntityId()).ToList());
 
@@ -788,7 +822,49 @@ internal class PipelineExecutionService(
             }
         }
 
+        if (!written && existing != null && previousBoundary != cutoff)
+        {
+            // Nothing to fold, but the boundary moved (or is set for the first time): the
+            // snapshot hours that fell behind it have no retained executions left and are dropped.
+            await communicationRepository.UpsertPipelineStatisticsAsync(tenantId,
+                FoldedStatistics(existing, history, liveSnapshot, cutoff, lastExecutionAt), pipelineRtEntityId);
+        }
+
         return pruned;
+    }
+
+    private static RtPipelineStatistics FoldedStatistics(RtPipelineStatistics? existing,
+        IEnumerable<RtPipelineStatisticsHourBucketRecord> history,
+        IEnumerable<RtPipelineStatisticsHourBucketRecord> liveSnapshot,
+        DateTime foldedBefore, DateTime? lastExecutionAt)
+    {
+        var buckets = history.Where(b => b.HourStartAt < foldedBefore)
+            .Concat(liveSnapshot.Where(b => b.HourStartAt >= foldedBefore))
+            .OrderBy(b => b.HourStartAt)
+            .Cast<RtRecord>()
+            .ToList();
+
+        return new RtPipelineStatistics
+        {
+            // Carry the current window values — they are recomputed right after the drain,
+            // but the update must not zero them in between.
+            LastHourSuccessCount = existing?.LastHourSuccessCount ?? 0,
+            LastHourFailureCount = existing?.LastHourFailureCount ?? 0,
+            LastHourAvgDurationMs = existing?.LastHourAvgDurationMs ?? 0,
+            Last12HoursSuccessCount = existing?.Last12HoursSuccessCount ?? 0,
+            Last12HoursFailureCount = existing?.Last12HoursFailureCount ?? 0,
+            Last12HoursAvgDurationMs = existing?.Last12HoursAvgDurationMs ?? 0,
+            Last24HoursSuccessCount = existing?.Last24HoursSuccessCount ?? 0,
+            Last24HoursFailureCount = existing?.Last24HoursFailureCount ?? 0,
+            Last24HoursAvgDurationMs = existing?.Last24HoursAvgDurationMs ?? 0,
+            Last30DaysSuccessCount = existing?.Last30DaysSuccessCount ?? 0,
+            Last30DaysFailureCount = existing?.Last30DaysFailureCount ?? 0,
+            Last30DaysAvgDurationMs = existing?.Last30DaysAvgDurationMs ?? 0,
+            LastUpdatedAt = existing?.LastUpdatedAt,
+            LastExecutionAt = lastExecutionAt,
+            FoldedBefore = foldedBefore,
+            HourlyBuckets = new AttributeRecordValueList<RtPipelineStatisticsHourBucketRecord>(buckets)
+        };
     }
 
     public async Task<int> CleanupOldExecutionsAsync(string tenantId, int retentionDays)

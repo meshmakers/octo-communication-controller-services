@@ -2063,7 +2063,7 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     public async Task SetPipelineStatusMessageAsync(string tenantId, RtEntityId pipelineRtEntityId,
-        string statusMessage)
+        string statusMessage, bool isFailure, DateTime reportedAtUtc)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -2074,11 +2074,21 @@ internal class CommunicationRepository : ICommunicationRepository
 
             // Deliberately NOT SetPipelineDeploymentStateAsync with the current state: that path
             // runs ApplyDeploymentErrorTracking, and re-writing "Deployed" would clear a
-            // LastDeploymentError the operator is still looking at. Only the one attribute.
+            // LastDeploymentError the operator is still looking at. Only the status attributes.
             var pipeline = new RtPipeline
             {
                 StatusMessage = statusMessage
             };
+
+            // AB#5618: the failure streak counts on from the persisted value, read in the same
+            // transaction. Reports of one pipeline normally come from its single poll loop; if two
+            // connections report at once (briefly possible around a re-registration, AB#5827), the
+            // write conflict aborts one transaction, so that report is dropped instead of an
+            // increment being lost.
+            var current = isFailure
+                ? await tenantRepository.GetRtEntityByRtIdAsync<RtPipeline>(session, pipelineRtEntityId.RtId)
+                : null;
+            DeployableStatusTracking.Apply(pipeline, current, isFailure, reportedAtUtc);
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtPipeline>>
             {

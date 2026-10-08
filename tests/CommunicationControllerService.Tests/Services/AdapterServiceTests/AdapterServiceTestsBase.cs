@@ -34,6 +34,7 @@ internal abstract class AdapterServiceTestsBase
     // Real tracker (simple, deterministic) so the Online/Offline write paths exercise real
     // liveness tracking and the reconciliation tests can observe HasLiveConnection end-to-end.
     protected readonly AdapterConnectionTracker AdapterConnectionTracker;
+    protected readonly FixedTimeProvider Clock = new(DateTime.UtcNow);
     protected readonly IWorkloadLifecycleService WorkloadLifecycleService = Substitute.For<IWorkloadLifecycleService>();
     // Real capability service (AB#4984) on top of the substituted repository/cache so the
     // OnDemand deploy gates run the real trigger classification against real YAML.
@@ -147,7 +148,9 @@ internal abstract class AdapterServiceTestsBase
             // Real resolver (AB#5111), same reasoning as the service-account resolver above: the
             // IssuerUri token resolution in the configuration projection runs the real machinery.
             new WorkloadTemplateResolver(optionsMonitor),
-            IdentityClientReader, HttpContextAccessor, guardOptions);
+            IdentityClientReader, HttpContextAccessor, guardOptions,
+            // AB#5618: status reports are stamped with the controller clock; fixed so tests can assert it.
+            Clock);
         AdapterTenant = realAdapterCache?.AddOrUpdateTenant(TenantId) ?? new AdapterTenant(AdapterCachePublish, TenantId);
 
         // AB#5128: NSubstitute recursively auto-mocks HttpContext (non-null) by default, which

@@ -39,7 +39,7 @@ internal class ExecutionMetricsWiringTests
     public ExecutionMetricsWiringTests()
     {
         _service = new PipelineExecutionService(_repository, _adapterCache, _eventService, _lifecycleService,
-            Microsoft.Extensions.Options.Options.Create(new CommunicationControllerOptions()));
+            Microsoft.Extensions.Options.Options.Create(new CommunicationControllerOptions()), TimeProvider.System);
 
         // AB#5432: the tenant has opted into observability. Without it every instrument in this file
         // is silent by design — pinned by FoldAndPruneExecutionsAsync_OnATenantThatDidNotOptIn_….

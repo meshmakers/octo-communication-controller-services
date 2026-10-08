@@ -713,6 +713,8 @@ public record ExecutionAggregateResult(
 
 ### 7.3 Statistik-Berechnung
 
+> Überholt — aktuelle Fenster-Semantik (AB#4370, AB#5583): siehe [pipeline-statistics-windows.md](pipeline-statistics-windows.md).
+
 ```
 1. Background Service triggert alle 5 Minuten
    │

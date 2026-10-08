@@ -47,7 +47,8 @@ internal class ReportPipelineStatusAsyncTests : AdapterServiceTestsBase
         var written = await AdapterService.ReportPipelineStatusAsync(TenantId, adapter, Status(pipeline, line));
 
         await Assert.That(written).IsTrue();
-        await CommunicationRepository.Received(1).SetPipelineStatusMessageAsync(TenantId, pipeline, line);
+        await CommunicationRepository.Received(1).SetPipelineStatusMessageAsync(TenantId, pipeline, line,
+            false, Arg.Any<DateTime>());
         // Never the deployment-state path: it would run the error tracking and clear LastDeploymentError.
         await CommunicationRepository.DidNotReceiveWithAnyArgs().SetPipelineDeploymentStateAsync(
             Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<RtDeploymentStateEnum>(), Arg.Any<string?>());
@@ -62,7 +63,8 @@ internal class ReportPipelineStatusAsyncTests : AdapterServiceTestsBase
 
         await AdapterService.ReportPipelineStatusAsync(TenantId, adapter, Status(pipeline, line, isError: true));
 
-        await CommunicationRepository.Received(1).SetPipelineStatusMessageAsync(TenantId, pipeline, line);
+        await CommunicationRepository.Received(1).SetPipelineStatusMessageAsync(TenantId, pipeline, line,
+            true, Arg.Any<DateTime>());
     }
 
     [Test]
@@ -77,7 +79,8 @@ internal class ReportPipelineStatusAsyncTests : AdapterServiceTestsBase
 
         await Assert.That(written).IsFalse();
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
-            .SetPipelineStatusMessageAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<string>());
+            .SetPipelineStatusMessageAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<string>(),
+                Arg.Any<bool>(), Arg.Any<DateTime>());
     }
 
     [Test]
@@ -91,7 +94,8 @@ internal class ReportPipelineStatusAsyncTests : AdapterServiceTestsBase
 
         await Assert.That(written).IsFalse();
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
-            .SetPipelineStatusMessageAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<string>());
+            .SetPipelineStatusMessageAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<string>(),
+                Arg.Any<bool>(), Arg.Any<DateTime>());
     }
 
     [Test]
@@ -107,7 +111,8 @@ internal class ReportPipelineStatusAsyncTests : AdapterServiceTestsBase
 
         await Assert.That(written).IsFalse();
         await CommunicationRepository.DidNotReceiveWithAnyArgs()
-            .SetPipelineStatusMessageAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<string>());
+            .SetPipelineStatusMessageAsync(Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<string>(),
+                Arg.Any<bool>(), Arg.Any<DateTime>());
     }
 
     [Test]
@@ -120,6 +125,43 @@ internal class ReportPipelineStatusAsyncTests : AdapterServiceTestsBase
         await AdapterService.ReportPipelineStatusAsync(TenantId, adapter, Status(pipeline, line));
 
         await CommunicationRepository.Received(1).SetPipelineStatusMessageAsync(TenantId, pipeline,
-            Arg.Is<string>(m => m.Length == AdapterService.MaxPipelineStatusMessageLength));
+            Arg.Is<string>(m => m.Length == AdapterService.MaxPipelineStatusMessageLength),
+            Arg.Any<bool>(), Arg.Any<DateTime>());
+    }
+
+    [Test]
+    public async Task ReportPipelineStatusAsync_ErrorPrefixWithoutFlag_IsCountedAsFailure()
+    {
+        // AB#5618: a sender that follows the "ERROR " line convention but does not set the flag
+        // (IsError deserialises as false) must not reset the failure streak.
+        var pipeline = RtEntityCreator.CreatePipeline().ToRtEntityId();
+        var adapter = RegisterAdapterWithPipeline(pipeline);
+        const string line = "ERROR 2026-10-06T08:00:00Z · login failed";
+
+        await AdapterService.ReportPipelineStatusAsync(TenantId, adapter, Status(pipeline, line, isError: false));
+
+        await CommunicationRepository.Received(1).SetPipelineStatusMessageAsync(TenantId, pipeline, line,
+            true, Arg.Any<DateTime>());
+    }
+
+    [Test]
+    public async Task ReportPipelineStatusAsync_PassesTheControllerReceiveTimeInUtc()
+    {
+        // AB#5618: LastSuccessfulStatusAt runs on the controller's clock, not the adapter's.
+        var pipeline = RtEntityCreator.CreatePipeline().ToRtEntityId();
+        var adapter = RegisterAdapterWithPipeline(pipeline);
+        var skewed = new PipelineStatusReportDto
+        {
+            PipelineRtEntityId = pipeline,
+            Message = "line",
+            IsError = false,
+            TimestampUtc = DateTime.UtcNow.AddDays(1)
+        };
+        Clock.UtcNow = new DateTime(2026, 10, 6, 8, 0, 0, DateTimeKind.Utc);
+
+        await AdapterService.ReportPipelineStatusAsync(TenantId, adapter, skewed);
+
+        await CommunicationRepository.Received(1).SetPipelineStatusMessageAsync(TenantId, pipeline, "line",
+            false, Arg.Is<DateTime>(t => t.Kind == DateTimeKind.Utc && t == Clock.UtcNow));
     }
 }

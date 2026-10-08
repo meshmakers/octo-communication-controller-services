@@ -14,62 +14,62 @@ public record PipelineStatisticsDto
     public required RtEntityId PipelineRtEntityId { get; init; }
 
     /// <summary>
-    /// Successful executions in the last hour
+    /// Successful executions in the rolling last 60 minutes
     /// </summary>
     public int LastHourSuccessCount { get; init; }
 
     /// <summary>
-    /// Failed executions in the last hour
+    /// Failed executions in the rolling last 60 minutes
     /// </summary>
     public int LastHourFailureCount { get; init; }
 
     /// <summary>
-    /// Average duration in the last hour (ms)
+    /// Average duration in the rolling last 60 minutes (ms)
     /// </summary>
     public int LastHourAvgDurationMs { get; init; }
 
     /// <summary>
-    /// Successful executions in the last 12 hours
+    /// Successful executions in the last 12 UTC clock hours incl. the current partial hour (AB#5583)
     /// </summary>
     public int Last12HoursSuccessCount { get; init; }
 
     /// <summary>
-    /// Failed executions in the last 12 hours
+    /// Failed executions in the last 12 UTC clock hours incl. the current partial hour (AB#5583)
     /// </summary>
     public int Last12HoursFailureCount { get; init; }
 
     /// <summary>
-    /// Average duration in the last 12 hours (ms)
+    /// Average duration in the last 12 UTC clock hours incl. the current partial hour (AB#5583) (ms)
     /// </summary>
     public int Last12HoursAvgDurationMs { get; init; }
 
     /// <summary>
-    /// Successful executions in the last 24 hours
+    /// Successful executions in the last 24 UTC clock hours incl. the current partial hour (AB#5583)
     /// </summary>
     public int Last24HoursSuccessCount { get; init; }
 
     /// <summary>
-    /// Failed executions in the last 24 hours
+    /// Failed executions in the last 24 UTC clock hours incl. the current partial hour (AB#5583)
     /// </summary>
     public int Last24HoursFailureCount { get; init; }
 
     /// <summary>
-    /// Average duration in the last 24 hours (ms)
+    /// Average duration in the last 24 UTC clock hours incl. the current partial hour (AB#5583) (ms)
     /// </summary>
     public int Last24HoursAvgDurationMs { get; init; }
 
     /// <summary>
-    /// Successful executions in the last 30 days
+    /// Successful executions in the last 720 UTC clock hours incl. the current partial hour (AB#5583)
     /// </summary>
     public int Last30DaysSuccessCount { get; init; }
 
     /// <summary>
-    /// Failed executions in the last 30 days
+    /// Failed executions in the last 720 UTC clock hours incl. the current partial hour (AB#5583)
     /// </summary>
     public int Last30DaysFailureCount { get; init; }
 
     /// <summary>
-    /// Average duration in the last 30 days (ms)
+    /// Average duration in the last 720 UTC clock hours incl. the current partial hour (AB#5583) (ms)
     /// </summary>
     public int Last30DaysAvgDurationMs { get; init; }
 

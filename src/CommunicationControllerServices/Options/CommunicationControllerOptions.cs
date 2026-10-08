@@ -92,7 +92,8 @@ public class CommunicationControllerOptions
     /// Gets or sets the number of hours a terminal pipeline execution is retained before it is
     /// folded into the hourly statistics buckets and physically deleted (AB#4370). Executions are
     /// telemetry — RtPipelineStatistics is the durable record. Running executions are never
-    /// touched regardless of age.
+    /// touched regardless of age. The fold cutoff is hour-aligned (AB#5583), so an execution is
+    /// kept between this many hours and one hour longer.
     /// </summary>
     public int PipelineExecutionRetentionHours { get; set; } = 1;
 
