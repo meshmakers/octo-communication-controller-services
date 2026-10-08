@@ -338,6 +338,24 @@ matrix, the credential, TTL, the no-idle-member refusal, a failed push undoing t
 disconnect) and `Configuration/AdapterPoolHubWiringTests.cs` (mount, filter, section binding, the route
 carrying no tenant, and that the **adapter** hub keeps its own gate and its route tenant).
 
+#### 🔴 Controller → client sends are not type-checked — the contract test is (AB#5876)
+
+All three hubs are untyped (`IHubContext<THub>`), so `SendAsync(nameof(I…HubCallbacks.X), args…)`
+compiles with any argument list, while the clients (octo-sdk `AdapterHubClient`, `AdapterPoolHubClient`,
+`OperatorHubClient`) register `On<T1,…,Tn>` from the same interface. A send whose arguments do not bind
+is **dropped on the client with no error on either side**. `LeaseService.DrainMemberAsync` sent
+`DrainAsync` without its `reason` for the whole life of AB#4924: no controller drain (idle shrink, lease
+TTL) ever reached a member, the member stayed Ready and never exited, and the controller logged
+"Told pool member … to drain" (N8, test-2-dev 2026-10-08).
+
+`Hubs/HubCallbackContractTests` holds every send to the interface: runtime tests drive the real senders
+(`AdapterHubCallbacks`, `OperatorConnectionManager` incl. the replay that picks its method name at
+runtime; `LeaseService` in `Services/LeaseServiceTests/LeaseHubCallbackContractTests`) and check argument
+count and types by reflection (`Helper/HubCallbackContract`); a source sweep counts the arguments of
+**every** `SendAsync(nameof(I…HubCallbacks.X), …)` under `src/` and refuses a hub send whose name is not
+taken from an interface (justified exceptions are listed in `NotAHubCallbackSend`). Adding a send means
+nothing to do if it uses `nameof`; a new callback interface must be added to `CallbackInterfaces`.
+
 ### External Dependencies
 
 - **Meshmakers.Octo.*** packages - Octo platform libraries for runtime, infrastructure, observability

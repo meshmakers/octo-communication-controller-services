@@ -1144,8 +1144,12 @@ internal class LeaseService : ILeaseService
 
         try
         {
+            // The reason is part of the contract (IAdapterPoolHubCallbacks.DrainAsync(string reason)),
+            // not decoration: the member registers On<string>, and SignalR silently drops an
+            // invocation whose arguments do not bind — the member never drained, stayed Ready and
+            // never exited, while this side logged success (N8). Pinned by HubCallbackContractTests.
             await _hubContext.Clients.Client(connectionId)
-                .SendAsync(nameof(IAdapterPoolHubCallbacks.DrainAsync));
+                .SendAsync(nameof(IAdapterPoolHubCallbacks.DrainAsync), reason);
             Logger.Info("Told pool member on connection '{ConnectionId}' to drain: {Reason}", connectionId, reason);
         }
         catch (Exception e)
