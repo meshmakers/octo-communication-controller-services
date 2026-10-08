@@ -59,6 +59,14 @@ attributes:
   valueType: DateTime
   isRuntimeState: true
   description: Timestamp of the LastDeploymentError. Set when LastDeploymentError is set, cleared when LastDeploymentError is cleared.
+- id: LastSuccessfulStatusAt
+  valueType: DateTime
+  isRuntimeState: true
+  description: UTC time of the last status report that was a success (e.g. a mail poll that completed). Unlike StatusMessage it is NOT overwritten by an error report, so "last succeeded at" survives a failing streak. Empty until the first successful status report. Written by the controller's status reporting (AB#5618), which today covers pipelines only; a report counts as a success unless it is flagged as an error or its line starts with "ERROR ".
+- id: ConsecutiveStatusFailures
+  valueType: Int
+  isRuntimeState: true
+  description: Number of failed status reports since the last successful one. Incremented on every error report, reset to 0 by a successful report. Empty until the first status report. Pipelines only for now (AB#5618).
 - id: LastConfigurationError
   valueType: String
   isRuntimeState: true

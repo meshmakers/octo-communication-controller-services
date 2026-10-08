@@ -124,7 +124,8 @@ try
     builder.Services.AddSingleton<IAdapterService, AdapterService>();
     builder.Services.AddSingleton<IPoolService, PoolService>();
     builder.Services.AddSingleton<IPipelineDebugService, PipelineDebugService>();
-    // AB#5583: the statistics windows are clock-hour aligned; the clock is injectable for tests.
+    // AB#5583: the statistics windows are clock-hour aligned; AB#5618: status reports are stamped
+    // with the controller clock. Injectable for tests.
     builder.Services.TryAddSingleton(TimeProvider.System);
     builder.Services.AddSingleton<IPipelineExecutionService, PipelineExecutionService>();
     builder.Services.AddTransient<ITriggerManagementService, TriggerManagementService>();

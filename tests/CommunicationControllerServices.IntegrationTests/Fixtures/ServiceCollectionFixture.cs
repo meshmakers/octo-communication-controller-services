@@ -93,6 +93,9 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         // through the tenant repository).
         Services.AddSingleton<IServiceAccountRightsAnalysisService, ServiceAccountRightsAnalysisService>();
         Services.AddSingleton<IAdapterConnectionTracker, AdapterConnectionTracker>();
+        // AB#5618: AdapterService stamps status reports with the controller clock (Program.cs
+        // registers TimeProvider.System the same way).
+        Services.AddSingleton(TimeProvider.System);
         Services.AddSingleton<IAdapterService, AdapterService>();
         Services.AddSingleton<IPoolService, PoolService>();
         Services.AddSingleton<IPipelineDebugService, PipelineDebugService>();
