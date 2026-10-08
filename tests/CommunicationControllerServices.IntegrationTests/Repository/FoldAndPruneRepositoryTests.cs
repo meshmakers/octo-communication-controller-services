@@ -90,6 +90,8 @@ public class FoldAndPruneRepositoryTests(CommunicationControllerFixture fixture)
             {
                 Last24HoursSuccessCount = 4,
                 LastUpdatedAt = DateTime.UtcNow,
+                // AB#5583: the fold boundary must round-trip, it decides which buckets are history
+                FoldedBefore = hour.AddHours(1),
                 HourlyBuckets = new AttributeRecordValueList<RtPipelineStatisticsHourBucketRecord>(
                     new List<RtRecord>
                     {
@@ -118,7 +120,8 @@ public class FoldAndPruneRepositoryTests(CommunicationControllerFixture fixture)
             var loaded = await repository.GetPipelineStatisticsAsync(tenantId, pipeline);
 
             loaded.Should().NotBeNull();
-            var buckets = loaded!.HourlyBuckets.Should().NotBeNull().And.Subject!.ToList();
+            loaded!.FoldedBefore.Should().Be(hour.AddHours(1));
+            var buckets = loaded.HourlyBuckets.Should().NotBeNull().And.Subject!.ToList();
             buckets.Should().HaveCount(2);
             var first = buckets.Single(b => b.HourStartAt == hour);
             first.SuccessCount.Should().Be(3);

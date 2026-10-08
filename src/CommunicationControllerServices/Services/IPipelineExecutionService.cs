@@ -64,7 +64,9 @@ public interface IPipelineExecutionService
     Task<IReadOnlyList<string>> GetInterruptedExecutionIdsAsync(string tenantId, RtEntityId adapterRtEntityId);
 
     /// <summary>
-    /// Updates statistics for a specific pipeline
+    /// Updates statistics for a specific pipeline. 12h/24h/30d are clock-hour aligned windows
+    /// summed from the persisted HourlyBuckets, LastHour is a rolling 60 minutes (AB#5583, see
+    /// docs/concepts/pipeline-statistics-windows.md).
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="pipelineRtEntityId">Pipeline identifier</param>

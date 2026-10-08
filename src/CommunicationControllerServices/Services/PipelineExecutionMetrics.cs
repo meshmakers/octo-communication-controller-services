@@ -42,7 +42,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 ///     thing: the controller is not reporting.
 ///
 ///     <b>Where the numbers come from.</b> The three gauges are fed from
-///     <see cref="PipelineExecutionService.UpdateStatisticsAsync" />, which the execution-cleanup
+///     <see cref="PipelineExecutionService.UpdateStatisticsAsync(string, Meshmakers.Octo.ConstructionKit.Contracts.RtEntityId)" />, which the execution-cleanup
 ///     background service already runs for every pipeline of every enabled tenant on every sweep.
 ///     That has two properties worth more than event-driven counters here: the values are derived
 ///     from persisted state, so they survive a controller restart instead of starting from zero,

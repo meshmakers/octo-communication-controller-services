@@ -128,73 +128,73 @@ attributes:
 - id: LastHourSuccessCount
   valueType: Int
   isRuntimeState: true
-  description: Successful executions in the last hour
+  description: Successful executions in the rolling last 60 minutes (Completed = success, Failed = failure)
   defaultValues:
     - 0
 - id: LastHourFailureCount
   valueType: Int
   isRuntimeState: true
-  description: Failed executions in the last hour
+  description: Failed executions in the rolling last 60 minutes (Completed = success, Failed = failure)
   defaultValues:
     - 0
 - id: LastHourAvgDurationMs
   valueType: Int
   isRuntimeState: true
-  description: Average execution duration in the last hour (ms)
+  description: Average execution duration in the rolling last 60 minutes (ms)
   defaultValues:
     - 0
 - id: Last12HoursSuccessCount
   valueType: Int
   isRuntimeState: true
-  description: Successful executions in the last 12 hours
+  description: Successful executions in the last 12 UTC clock hours including the current partial hour (= sum of the HourlyBuckets in that window; Completed = success, Failed = failure)
   defaultValues:
     - 0
 - id: Last12HoursFailureCount
   valueType: Int
   isRuntimeState: true
-  description: Failed executions in the last 12 hours
+  description: Failed executions in the last 12 UTC clock hours including the current partial hour (= sum of the HourlyBuckets in that window; Completed = success, Failed = failure)
   defaultValues:
     - 0
 - id: Last12HoursAvgDurationMs
   valueType: Int
   isRuntimeState: true
-  description: Average execution duration in the last 12 hours (ms)
+  description: Average execution duration in the last 12 UTC clock hours including the current partial hour (ms)
   defaultValues:
     - 0
 - id: Last24HoursSuccessCount
   valueType: Int
   isRuntimeState: true
-  description: Successful executions in the last 24 hours
+  description: Successful executions in the last 24 UTC clock hours including the current partial hour (= sum of the HourlyBuckets in that window; Completed = success, Failed = failure)
   defaultValues:
     - 0
 - id: Last24HoursFailureCount
   valueType: Int
   isRuntimeState: true
-  description: Failed executions in the last 24 hours
+  description: Failed executions in the last 24 UTC clock hours including the current partial hour (= sum of the HourlyBuckets in that window; Completed = success, Failed = failure)
   defaultValues:
     - 0
 - id: Last24HoursAvgDurationMs
   valueType: Int
   isRuntimeState: true
-  description: Average execution duration in the last 24 hours (ms)
+  description: Average execution duration in the last 24 UTC clock hours including the current partial hour (ms)
   defaultValues:
     - 0
 - id: Last30DaysSuccessCount
   valueType: Int
   isRuntimeState: true
-  description: Successful executions in the last 30 days
+  description: Successful executions in the last 720 UTC clock hours (30 days) including the current partial hour (= sum of the HourlyBuckets in that window; Completed = success, Failed = failure)
   defaultValues:
     - 0
 - id: Last30DaysFailureCount
   valueType: Int
   isRuntimeState: true
-  description: Failed executions in the last 30 days
+  description: Failed executions in the last 720 UTC clock hours (30 days) including the current partial hour (= sum of the HourlyBuckets in that window; Completed = success, Failed = failure)
   defaultValues:
     - 0
 - id: Last30DaysAvgDurationMs
   valueType: Int
   isRuntimeState: true
-  description: Average execution duration in the last 30 days (ms)
+  description: Average execution duration in the last 720 UTC clock hours (30 days) including the current partial hour (ms)
   defaultValues:
     - 0
 - id: LastUpdatedAt
@@ -243,7 +243,11 @@ attributes:
   valueType: RecordArray
   valueCkRecordId: ${this}/PipelineStatisticsHourBucket
   isRuntimeState: true
-  description: Per-hour aggregation buckets (rolling 30 days). Written by the execution fold; the window counters are derived from these plus the still-retained recent executions.
+  description: Per-hour execution buckets (UTC clock hours, rolling 30 days) holding every counted execution of the hour — folded and still-retained alike. Hours before FoldedBefore are folded history; hours at or after it are recomputed from the retained executions on every statistics sweep. The 12h/24h/30d counters are exactly the sum of these buckets over the window (AB#5583).
+- id: FoldedBefore
+  valueType: DateTime
+  isRuntimeState: true
+  description: Hour-aligned fold boundary (AB#5583). HourlyBuckets before this instant are folded history (their executions were deleted); buckets at or after it are a snapshot of the still-retained executions. Unset on statistics written before AB#5583.
 
 # Adapter offline sync attribute
 - id: LastSyncedSequenceNumber

@@ -32,6 +32,7 @@ using Meshmakers.Octo.Services.Notifications.Services;
 using Meshmakers.Octo.Services.Observability;
 using Meshmakers.Octo.Services.Swagger.Configuration;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using NLog;
 using NLog.Web;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
@@ -123,6 +124,8 @@ try
     builder.Services.AddSingleton<IAdapterService, AdapterService>();
     builder.Services.AddSingleton<IPoolService, PoolService>();
     builder.Services.AddSingleton<IPipelineDebugService, PipelineDebugService>();
+    // AB#5583: the statistics windows are clock-hour aligned; the clock is injectable for tests.
+    builder.Services.TryAddSingleton(TimeProvider.System);
     builder.Services.AddSingleton<IPipelineExecutionService, PipelineExecutionService>();
     builder.Services.AddTransient<ITriggerManagementService, TriggerManagementService>();
 
