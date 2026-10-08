@@ -30,16 +30,14 @@ description: |
   at deploy time (`PoolService.AppendAdapterPoolMemberOverrides`); nothing has to
   be configured here for that.
 
-  🔴 THE CHART VERSION IS PINNED, AND HAS TO BE
+  THE CHART VERSION IS NOT PINNED (AB#5803, 0.2 -> main)
 
-  0.2-lane charts are published as SemVer PRERELEASES (`-test-0-2-dev`, AB#4948)
-  precisely so an unpinned `ChartVersion` keeps resolving main's newest STABLE
-  chart — Helm ignores prereleases unless the caller pins one. An empty value
-  here, the contract `System.Communication.MainLatest` relies on, would therefore
-  hand a 0.2 tenant a 0.1 chart that knows nothing about `adapterPool` and
-  silently render a dedicated adapter with no tenant. `ChartVersion` is
-  `isRuntimeState` (AB#4706), so this value applies on a FRESH install only and a
-  re-apply never overwrites what an operator pinned later.
+  On the 0.2 lane this seed pinned a `-test-0-2-dev` chart prerelease, because an
+  unpinned `ChartVersion` resolved main's newest STABLE chart, which then predated
+  the `adapterPool` wiring. Once the lane is main, main's own stable chart carries
+  that wiring, so the pin is dropped and the empty value resolves the newest stable
+  chart like every other workload (`System.Communication.MainLatest`). `ChartVersion`
+  is `isRuntimeState` (AB#4706): an operator can still pin one after install.
 
   WHAT IS DELIBERATELY NOT HERE
 

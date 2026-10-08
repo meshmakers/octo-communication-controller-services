@@ -1,5 +1,5 @@
 # Root-level CI pipeline for octo-communication-controller-services, using shared
-# templates from octo-pipeline-templates@tpl-v0.4.2.
+# templates from octo-pipeline-templates@tpl-v1.0.1.
 #
 # Phase 7 finale (2026-06-14): the last two .NET services on the legacy
 # devops-build/ flow get their root yaml. Without the migration the
@@ -15,8 +15,6 @@
 # controller-services-specific quirks preserved from the legacy YAML:
 #   - SSHKey + submodules:recursive — checkout pulls private submodules.
 #   - Build args include /p:OctoPrivateGitHubApiKey + /p:OctoPublicGitHubApiKey
-#     because SystemCommunicationCkModel publishes to GitHub catalogs on
-#     main / r* tags (effectivePublishCatalog).
 #   - Two separate test steps:
 #       1. Unit tests (TUnit) excluding *IntegrationTests.csproj.
 #       2. Integration tests (xUnit) with publishTestResults: false —
@@ -30,11 +28,6 @@
 #   - HAS push-nuget — controller-services publishes Meshmakers.Octo.Communication
 #     NuGets (CommunicationController.Sdk, Common, Server contracts).
 #   - HAS CK library output: SystemCommunicationCkModel.
-#
-# Why tpl-v0.4.2 (not v0.3.1): aligns with octo-communication-sdk (the
-# direct upstream this repo references via $(OctoCommVersion)) — both
-# stay on the same template tag so future template upgrades roll forward
-# in lockstep on the Communication line.
 
 name: $(MajorVersion).$(MinorVersion).$(date:yyMM).$(DayOfMonth)$(rev:rrr)-$(Build.SourceBranchName)
 
@@ -69,28 +62,7 @@ resources:
       type: github
       name: meshmakers/octo-pipeline-templates
       endpoint: meshmakers-access-token
-      # tpl-v0.5.3 derives the octo-ckc version from this build's own version line
-      # ($(MajorVersion).$(MinorVersion).*) instead of letting `dotnet tool install`
-      # resolve the globally-highest stable version. Without it the 0.2 dev lane
-      # installs octo-ckc 3.4.115 — 3.4.115 > 0.2.x — whose migration schema predates
-      # the RenameAssociationRole transform, so validate-ck-versions rejects the
-      # System.Communication 4.0.0 migration before restore even runs (build 46257).
-      #
-      # 🔴 tpl-v0.5.5 additionally lets the gate resolve a PRERELEASE tool on dev/*
-      # and test/*. Deriving the line was only half the fix: dev-lane builds stamp
-      # -dev onto PackageVersion, so a stable-only filter could still only ever see
-      # a tool from an earlier stable line — never the engine this lane just built.
-      # SetWellKnownName (AB#4924) was published as 0.2.2609.17001-dev and the gate
-      # resolved 0.2.2609.15001, rejecting valid YAML (build 46791). Release lanes
-      # keep the stable-only rule.
-      #
-      # Deliberately the 0.5 line, not tpl-v0.6.x: 0.6 also rewrites
-      # build-and-push-docker and handle-artifacts, which this pipeline uses and
-      # which have nothing to do with the CK gate.
-      # tpl-v0.5.6 backports the lane catalog (AB#5412) onto this line for the same
-      # reason: it adds the publishCkModelsToLaneCatalog opt-in and the gate retarget,
-      # and touches nothing else.
-      ref: refs/tags/tpl-v0.5.6
+      ref: refs/tags/tpl-v1.1.1
 
 trigger:
   batch: true
@@ -99,6 +71,15 @@ trigger:
       - dev/*
       - test/*
       - main
+  # Docs-only commits must not start CI (AB#5719). Excluded paths are
+  # never consumed by the build; a root README.md change reaches the
+  # packed NuGet readme with the next code commit.
+  paths:
+    exclude:
+      - '**/*.md'
+      - '*.md'
+      - '.claude/'
+      - 'docs/'
   tags:
     exclude:
       - '*'
@@ -121,11 +102,9 @@ variables:
     value: ${{ eq(variables['Build.SourceBranch'], 'refs/heads/main') }}
   - name: isTest
     value: ${{ startsWith(variables['Build.SourceBranch'], 'refs/heads/test') }}
-  # CK publish routing (effectivePublishCatalog: GitHub catalogs only on main/r* tags,
-  # incident: Industry.Basic-2.1.1 — plus the test/* lane catalog since AB#5412), the
-  # private catalog coordinates (OctoPrivateGitHubCatalog*, empty = compiled-in default)
-  # and the per-run local catalog root (OctoLocalCatalogRootPath -> Agent.TempDirectory,
-  # AB#4167) are exported as runtime variables by update-build-number.yml.
+  # CK publish routing (OctoPublishCkCatalogs) and the per-run local catalog root
+  # (OctoLocalCatalogRootPath -> Agent.TempDirectory, AB#4167) are exported as runtime
+  # variables by update-build-number.yml.
 
 stages:
   - stage: Build
@@ -139,13 +118,6 @@ stages:
             parameters:
               octoCoreLibVersionOverride: ${{ replace(parameters.octoCoreLibVersion, 'auto', '') }}
               octoCommVersionOverride: ${{ replace(parameters.octoCommVersion, 'auto', '') }}
-              # AB#5412: on refs/heads/test/* this routes the CK publish to
-              # PrivateGitHubCatalog with the coordinates of the lane catalog
-              # meshmakers/octo-catalog-dev instead of the run-isolated local catalog. Without
-              # it System.Communication 4.x exists in no catalog, and every lane model that
-              # depends on it (System.Ai-4.1.0 declares [4.0,5.0)) fails the SemVer gate with
-              # OCTO-CK103. No effect on main / r-tags.
-              publishCkModelsToLaneCatalog: true
           - checkout: self
             clean: true
             submodules: recursive
@@ -157,29 +129,24 @@ stages:
               sshPassphrase: '$(SSHPassphrase)'
               sshKeySecureFile: '$(SSHPrivateKeyFile)'
           - template: templates/steps/set-version.yml@pipelineTemplates
-          # CK SemVer honesty gate (AB#4420): System.Communication is published
-          # DURING the dotnet build (/p:OctoPublishCatalog), so the gate must
-          # be able to fail first.
-          - template: templates/steps/validate-ck-versions.yml@pipelineTemplates
-            parameters:
-              constructionKitPaths:
-                - 'src/SystemCommunicationCkModel/ConstructionKit'
           - template: templates/steps/download-ca.yml@pipelineTemplates
+          # Fresh package list for the private feed only; nuget.org stays cached.
+          # Replaces restore --force and noCache (AB#5720).
+          - template: templates/steps/purge-private-nuget-http-cache.yml@pipelineTemplates
           - task: DotNetCoreCLI@2
             retryCountOnTaskFailure: 2
             displayName: 'Restore NuGet packages'
             inputs:
               command: 'restore'
               projects: '$(solutionFile)'
-              restoreArguments: '--force /p:OctoNugetPrivateServer=$(nugetPrivateServer)'
-              noCache: true
+              restoreArguments: '/p:OctoNugetPrivateServer=$(nugetPrivateServer)'
           - task: DotNetCoreCLI@2
             retryCountOnTaskFailure: 2
             displayName: 'Build'
             inputs:
               command: 'build'
               projects: '$(solutionFile)'
-              arguments: '--configuration $(buildConfiguration) /p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCatalog="$(effectivePublishCatalog)" /p:OctoPrivateGitHubApiKey=$(GitHubPAT) /p:OctoPublicGitHubApiKey=$(GitHubPAT) /p:OctoPrivateGitHubCatalogOwner="$(OctoPrivateGitHubCatalogOwner)" /p:OctoPrivateGitHubCatalogRepositoryName="$(OctoPrivateGitHubCatalogRepositoryName)" /p:OctoPrivateGitHubCatalogBranch="$(OctoPrivateGitHubCatalogBranch)" /p:OctoPrivateGitHubCatalogPagesUri="$(OctoPrivateGitHubCatalogPagesUri)"'
+              arguments: '--configuration $(buildConfiguration) /p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false /p:OctoPrivateGitHubApiKey=$(GitHubPAT) /p:OctoPublicGitHubApiKey=$(GitHubPAT)'
               publishWebProjects: false
               zipAfterPublish: false
               modifyOutputPath: false
@@ -199,7 +166,7 @@ stages:
             displayName: 'Unit Tests (TUnit)'
             inputs:
               command: 'test'
-              arguments: '--configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false'
+              arguments: '--no-build --configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false'
               projects: |
                 **/*Tests.csproj
                 !**/*IntegrationTests.csproj
@@ -210,7 +177,7 @@ stages:
             displayName: 'Integration Tests (xUnit)'
             inputs:
               command: 'test'
-              arguments: '--configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false'
+              arguments: '--no-build --configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false'
               projects: '**/*IntegrationTests.csproj'
               # publishTestResults disabled: the project does not reference
               # Microsoft.Testing.Extensions.TrxReport, so the --report-trx flag the
@@ -220,6 +187,10 @@ stages:
               publishTestResults: false
             env:
               DOCKER_HOST: unix:///var/run/docker.sock
+          - template: templates/steps/validate-and-publish-ck-versions.yml@pipelineTemplates
+            parameters:
+              constructionKitPaths:
+                - 'src/SystemCommunicationCkModel/ConstructionKit'
           # Communication Controller image
           # Multi-arch image (AB#4451): arm64 for Apple-Silicon kind clusters and
           # edge devices, amd64 for the managed clusters.
