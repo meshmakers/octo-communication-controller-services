@@ -200,6 +200,9 @@ try
         builder.Configuration.GetSection(OperatorHubAuthorizationOptions.SectionName));
     builder.Services.Configure<AdapterHubAuthorizationOptions>(
         builder.Configuration.GetSection(AdapterHubAuthorizationOptions.SectionName));
+    // AB#5528 phase 3: decision counter of both hub gates (octo.communication.hub.authorization.decisions),
+    // the go / no-go signal for arming Enforce per cluster. See HubAuthorizationMetrics.
+    builder.Services.AddSingleton<HubAuthorizationMetrics>();
 
     // AB#5112: rollout switch of the hardened deploy guard's identity-client check — bound as
     // configuration for the same reason as the hub gates above: an environment can be loosened

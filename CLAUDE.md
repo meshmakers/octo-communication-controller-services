@@ -183,6 +183,31 @@ connection without a route tenant refused; default is `LogOnly`) and
 source, mode operator-settable, default when the section is absent, and that the two hub gates keep
 distinct configuration sections).
 
+#### Decision counter of both hub gates (AB#5528 phase 3)
+
+Both filters count every decision on `octo.communication.hub.authorization.decisions` (counter,
+`{connection}`, meter `Meshmakers.Octo.Communication`) — `Hubs/HubAuthorizationMetrics`, registered as
+a singleton in `Program.cs` and created through `IMeterFactory`. Attributes, all closed sets:
+
+| Attribute | Values |
+|---|---|
+| `octo.hub` | `adapter`, `operator` |
+| `octo.hub.authorization.mode` | `log_only`, `enforce` |
+| `octo.hub.authorization.outcome` | `allowed`, `would_refuse` (LogOnly), `refused` (Enforce) |
+| `octo.hub.authorization.reason` | `authorized`, `cross_tenant_client` (allowed via the allow-list), `unauthenticated`, `missing_scope`, `no_route_tenant`, `no_tenant_claim`, `tenant_mismatch` |
+
+It is the go / no-go signal for arming `Enforce` per cluster (`would_refuse` must stay at zero); the
+warning log line names the caller and, for the adapter hub, the tenants — it now ends with
+`(reason code <reason>)`, the same value as the metric attribute. **No tenant attribute and no
+per-tenant opt-in gate**, unlike the workload/pipeline instruments: it is installation security
+posture, the operator hub is not tenant-scoped, and the series count stays fixed (a few dozen). The
+filters resolve the metrics with `GetService`, so a missing registration costs the counter, never the
+connection. Rollout procedure: `docs/runbooks/hub-authorization-enforce-rollout.md`.
+
+Tests: `Hubs/HubAuthorizationMetricsTests` (every reason × outcome through a real `MeterListener`
+scoped to the test's own `IMeterFactory`, exactly four attributes, connection unaffected without the
+registration, registration pinned at the `Program.cs` source).
+
 ### External Dependencies
 
 - **Meshmakers.Octo.*** packages - Octo platform libraries for runtime, infrastructure, observability
