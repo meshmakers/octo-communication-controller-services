@@ -364,6 +364,9 @@ try
     }).AddVersion();
 
     var app = builder.Build();
+    // AB#5528 phase 3: construct the hub decision counter eagerly so its zero baseline is exported
+    // before the first hub connection (see HubAuthorizationMetrics).
+    app.Services.GetRequiredService<HubAuthorizationMetrics>();
 
     app.MapObservability();
 

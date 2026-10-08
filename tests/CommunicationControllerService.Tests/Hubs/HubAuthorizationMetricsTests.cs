@@ -68,13 +68,24 @@ internal class HubAuthorizationMetricsTests
 
                 lock (Decisions)
                 {
-                    Decisions.Add(new Decision(instrument.Name, value, map));
+                    if (value == 0)
+                    {
+                        Baseline.Add(new Decision(instrument.Name, value, map));
+                    }
+                    else
+                    {
+                        Decisions.Add(new Decision(instrument.Name, value, map));
+                    }
                 }
             });
             _listener.Start();
         }
 
+        /// <summary>Real decisions (value 1).</summary>
         public List<Decision> Decisions { get; } = [];
+
+        /// <summary>The zero baseline the constructor writes.</summary>
+        public List<Decision> Baseline { get; } = [];
 
         public void Dispose() => _listener.Dispose();
     }
@@ -165,7 +176,7 @@ internal class HubAuthorizationMetricsTests
         var decision = recorder.Decisions[0];
         await Assert.That(decision.Instrument).IsEqualTo("octo.communication.hub.authorization.decisions");
         await Assert.That(decision.Value).IsEqualTo(1);
-        await Assert.That(decision.Tags["octo.hub"]).IsEqualTo(hub);
+        await Assert.That(decision.Tags["octo.hub.name"]).IsEqualTo(hub);
         await Assert.That(decision.Tags["octo.hub.authorization.mode"]).IsEqualTo(mode);
         await Assert.That(decision.Tags["octo.hub.authorization.outcome"]).IsEqualTo(outcome);
         await Assert.That(decision.Tags["octo.hub.authorization.reason"]).IsEqualTo(reason);
@@ -361,6 +372,44 @@ internal class HubAuthorizationMetricsTests
     ///     octo-common-services' <c>ObservabilityBuilder</c> registers, or the counter is produced and
     ///     dropped (the AB#5430 failure mode).
     /// </summary>
+    /// <summary>
+    ///     Every refusal series exists with a zero before the first decision, so increase() in Dash0
+    ///     counts the first would_refuse after a restart (see the constructor remarks).
+    /// </summary>
+    [Test]
+    public async Task Construction_WritesAZeroBaselineForEveryRefusalSeries()
+    {
+        await using var provider = BuildServiceProvider();
+        using var recorder = new Recorder(provider);
+
+        provider.GetRequiredService<HubAuthorizationMetrics>();
+
+        string Key(Decision d) => string.Join("|", d.Tags["octo.hub.name"], d.Tags["octo.hub.authorization.mode"],
+            d.Tags["octo.hub.authorization.outcome"], d.Tags["octo.hub.authorization.reason"]);
+        var keys = recorder.Baseline.Select(Key).ToHashSet();
+
+        await Assert.That(recorder.Decisions.Count).IsEqualTo(0);
+        await Assert.That(keys).Contains("adapter|log_only|would_refuse|unauthenticated");
+        await Assert.That(keys).Contains("adapter|enforce|refused|tenant_mismatch");
+        await Assert.That(keys).Contains("adapter|enforce|allowed|cross_tenant_client");
+        await Assert.That(keys).Contains("operator|log_only|would_refuse|missing_scope");
+        await Assert.That(keys).Contains("operator|enforce|refused|unauthenticated");
+        // Operator hub has no tenant reasons; 7 adapter + 3 operator reasons, both modes.
+        await Assert.That(keys.Count).IsEqualTo(20);
+    }
+
+    [Test]
+    public async Task TwoConnections_AreTwoDecisions()
+    {
+        await using var provider = BuildServiceProvider();
+        using var recorder = new Recorder(provider);
+
+        await ConnectAdapterAsync(CreateContext(provider, ServiceToken()));
+        await ConnectAdapterAsync(CreateContext(provider, Anonymous()));
+
+        await Assert.That(recorder.Decisions.Count).IsEqualTo(2);
+    }
+
     [Test]
     public async Task Meter_IsTheServiceMeter()
     {
@@ -378,6 +427,7 @@ internal class HubAuthorizationMetricsTests
             "src", "CommunicationControllerServices", "Program.cs"));
 
         await Assert.That(program).Contains("AddSingleton<HubAuthorizationMetrics>()");
+        await Assert.That(program).Contains("app.Services.GetRequiredService<HubAuthorizationMetrics>()");
     }
 
     private static string RepositoryRoot([CallerFilePath] string sourceFile = "") =>

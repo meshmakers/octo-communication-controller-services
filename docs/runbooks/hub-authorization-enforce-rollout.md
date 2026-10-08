@@ -46,18 +46,29 @@ After the last fix on a cluster, roll the controller once (`deploy-octo-mesh-cor
 `kubectl rollout restart` via Breakglass/Semaphore) — every operator and adapter reconnects and is
 evaluated within minutes. Count the review window from that restart.
 
-**Metric (Dash0, dataset = cluster)** — the go / no-go signal:
+**Metric (Dash0, dataset = cluster)** — the go / no-go signal. The counter is cumulative and restarts
+at 0 with every controller pod; the controller writes a 0 for every series at startup, so both the raw
+value (count since the last restart) and `increase()` work. Use the raw value since the restart from
+the step above, it covers the whole review window:
 
 ```promql
-# Must be 0 for the whole review window (>= 72 h incl. the restart above), per hub
-sum by (octo_hub, octo_hub_authorization_reason) (
-  increase({otel_metric_name="octo.communication.hub.authorization.decisions",
-            octo_hub_authorization_outcome="would_refuse"}[24h]))
+# Must be 0 (or empty) on every series for the whole review window (>= 72 h after the restart), per hub
+sum by (octo_hub_name, octo_hub_authorization_reason) (
+  {otel_metric_name="octo.communication.hub.authorization.decisions",
+   octo_hub_authorization_outcome="would_refuse"})
 
-# The gate is alive (allowed decisions exist) and shows the mode in effect
-sum by (octo_hub, octo_hub_authorization_mode, octo_hub_authorization_outcome) (
-  increase({otel_metric_name="octo.communication.hub.authorization.decisions"}[24h]))
+# The gate is alive (allowed > 0 since the restart) and shows the mode in effect
+sum by (octo_hub_name, octo_hub_authorization_mode, octo_hub_authorization_outcome) (
+  {otel_metric_name="octo.communication.hub.authorization.decisions"})
+
+# Trend over the window (e.g. a dashboard panel); a controller restart inside the window is handled by increase()
+sum by (octo_hub_name, octo_hub_authorization_reason) (
+  increase({otel_metric_name="octo.communication.hub.authorization.decisions",
+            octo_hub_authorization_outcome="would_refuse"}[72h]))
 ```
+
+Note that long-lived connections are counted once, when they connect: a quiet `increase(allowed[24h])`
+on day three is normal, the raw value is the liveness check.
 
 `reason` tells you what kind of work is left: `unauthenticated` (no token — client not configured,
 image too old, or not redeployed), `missing_scope` (token without `octo_api` — wrong client setup),
@@ -97,8 +108,8 @@ connection or a token-acquired log line in the window.
    `deploy-octo-mesh-core-services.yml` for staging/prod). The controller restarts, so every
    connection is re-evaluated immediately.
 3. Verify within 15 minutes:
-   - `octo_hub_authorization_outcome="refused"` stays 0 (same query as above, `[15m]`), and the series
-     for the switched hub now carry `octo_hub_authorization_mode="enforce"`;
+   - the raw `octo_hub_authorization_outcome="refused"` value stays 0 since the restart (first query above
+     with `refused`), and the series for the switched hub now carry `octo_hub_authorization_mode="enforce"`;
    - operator hub: every pool `CommunicationState=Online` (`octo-cli -c GetPools` per tenant, or Studio);
      test-2: the edge pools too;
    - adapter hub: adapters `Online` + `Configured`, a manual pipeline execution on one adapter per
@@ -119,10 +130,12 @@ deploy sets `Enforce` again.
 
 ## 5. Operator credential rotation
 
-octo-cli has no verb to change a client secret, so rotate by client, not by secret: create a second
-client (`AddClientCredentialsClient -id octo-communication-operator-<n>`, same shape), put its id and
-secret into Vault (`setup-vault-octomesh-secrets.yml -e operator_client_id=… -e operator_client_secret=…`
-— the playbook rewrites the whole secret and preserves the other keys), redeploy the operator (the
+Rotate by client, not by secret: octo-cli has client secret verbs (`CreateApiSecretClient` /
+`UpdateApiSecretClient`), but whether a client can hold two valid secrets at once after the OpenIddict
+migration (AB#4989) is not verified, and a second client works regardless. Create a second client
+(`AddClientCredentialsClient -id octo-communication-operator-<n>`, same shape), put its id and secret
+into Vault (`vault kv patch secret/meshmakers/<cluster>/octomesh operator_client_id=… operator_client_secret=…`
+or `setup-vault-octomesh-secrets.yml`, which preserves the other keys), redeploy the operator (the
 chart's checksum annotation restarts the pod), check `Operator access token acquired for client
 octo-communication-operator-<n>`, then `DeleteClient` the old one. Deleting the old client before the
 new pod is up refuses the operator at its next reconnect once the hub enforces.

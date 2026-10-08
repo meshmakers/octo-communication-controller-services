@@ -50,9 +50,9 @@ internal class OperatorHubAuthorizationFilter : IHubFilter
             .GetRequiredService<IOptions<OperatorHubAuthorizationOptions>>().Value;
         var enforcing = options.Mode == OperatorHubAuthorizationMode.Enforce;
         var authorizationService = context.ServiceProvider.GetRequiredService<IAuthorizationService>();
-        // GetService, not GetRequiredService: a missing metrics registration must cost the counter,
-        // never the connection. Program_RegistersTheDecisionMetrics pins the registration.
-        var metrics = context.ServiceProvider.GetService<HubAuthorizationMetrics>();
+        // A missing or unresolvable metrics registration must cost the counter, never the
+        // connection. Program_RegistersTheDecisionMetrics pins the registration.
+        var metrics = HubAuthorizationMetrics.TryResolve(context.ServiceProvider);
 
         var user = await HubConnectionPrincipal.ResolveAsync(context);
         var authenticated = user?.Identity is { IsAuthenticated: true };

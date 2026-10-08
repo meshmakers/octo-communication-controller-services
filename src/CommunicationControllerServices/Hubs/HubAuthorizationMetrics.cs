@@ -1,10 +1,11 @@
 using System.Diagnostics.Metrics;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 
 /// <summary>
-///     Which hub gate made a decision. Rendered as the <c>octo.hub</c> attribute.
+///     Which hub gate made a decision. Rendered as the <c>octo.hub.name</c> attribute.
 /// </summary>
 internal enum HubAuthorizationHub
 {
@@ -108,10 +109,12 @@ internal sealed class HubAuthorizationMetrics
     /// <summary>Instrument name. In PromQL: <c>{otel_metric_name="octo.communication.hub.authorization.decisions"}</c>.</summary>
     public const string InstrumentName = "octo.communication.hub.authorization.decisions";
 
-    public const string HubTag = "octo.hub";
+    public const string HubTag = "octo.hub.name";
     public const string ModeTag = "octo.hub.authorization.mode";
     public const string OutcomeTag = "octo.hub.authorization.outcome";
     public const string ReasonTag = "octo.hub.authorization.reason";
+
+    private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
     private readonly Counter<long> _decisions;
 
@@ -120,12 +123,38 @@ internal sealed class HubAuthorizationMetrics
         var meter = meterFactory.Create(MeterName, "1.0.0");
         _decisions = meter.CreateCounter<long>(
             InstrumentName,
-            unit: "{connection}",
+            unit: "{decision}",
             description:
             "Hub connection authorization decisions of the communication controller, by hub " +
             "(adapter / operator), mode (log_only / enforce), outcome (allowed / would_refuse / refused) " +
             "and reason. would_refuse must be zero before a hub is switched to Enforce");
+
+        // Zero baseline for every refusal series (and the allowed ones). A cumulative counter series
+        // only exists from its first measurement on, and PromQL's increase() does not count that
+        // first point - so a single anonymous connection right after a controller restart would
+        // otherwise read as "no increase" and make a cluster look ready for Enforce. Program.cs
+        // resolves this singleton at startup so the zeros are exported before the first connection.
+        foreach (var (hub, reasons) in BaselineReasons)
+        {
+            foreach (var enforcing in new[] { false, true })
+            {
+                foreach (var reason in reasons)
+                {
+                    var outcome = reason is HubAuthorizationReason.Authorized or HubAuthorizationReason.CrossTenantClient
+                        ? HubAuthorizationOutcome.Allowed
+                        : RefusalOutcome(enforcing);
+                    _decisions.Add(0, Tags(hub, enforcing, outcome, reason));
+                }
+            }
+        }
     }
+
+    private static readonly (HubAuthorizationHub Hub, HubAuthorizationReason[] Reasons)[] BaselineReasons =
+    [
+        (HubAuthorizationHub.Adapter, Enum.GetValues<HubAuthorizationReason>()),
+        (HubAuthorizationHub.Operator,
+            [HubAuthorizationReason.Authorized, HubAuthorizationReason.Unauthenticated, HubAuthorizationReason.MissingScope])
+    ];
 
     /// <summary>
     ///     Counts one decision. <paramref name="enforcing" /> is the gate's mode at the time of the
@@ -134,11 +163,41 @@ internal sealed class HubAuthorizationMetrics
     public void Record(HubAuthorizationHub hub, bool enforcing, HubAuthorizationOutcome outcome,
         HubAuthorizationReason reason)
     {
-        _decisions.Add(1,
-            new KeyValuePair<string, object?>(HubTag, ToTagValue(hub)),
-            new KeyValuePair<string, object?>(ModeTag, enforcing ? "enforce" : "log_only"),
-            new KeyValuePair<string, object?>(OutcomeTag, ToTagValue(outcome)),
-            new KeyValuePair<string, object?>(ReasonTag, ToTagValue(reason)));
+        try
+        {
+            _decisions.Add(1, Tags(hub, enforcing, outcome, reason));
+        }
+        catch (Exception e)
+        {
+            // A listener callback that throws must cost the measurement, never the connection.
+            Logger.Debug(e, "Could not record a hub authorization decision");
+        }
+    }
+
+    private static KeyValuePair<string, object?>[] Tags(HubAuthorizationHub hub, bool enforcing,
+        HubAuthorizationOutcome outcome, HubAuthorizationReason reason) =>
+    [
+        new(HubTag, ToTagValue(hub)),
+        new(ModeTag, enforcing ? "enforce" : "log_only"),
+        new(OutcomeTag, ToTagValue(outcome)),
+        new(ReasonTag, ToTagValue(reason))
+    ];
+
+    /// <summary>
+    ///     The registered instance, or <c>null</c> when it is missing or cannot be constructed - the
+    ///     hub filters must never fail a connection over a metric.
+    /// </summary>
+    public static HubAuthorizationMetrics? TryResolve(IServiceProvider serviceProvider)
+    {
+        try
+        {
+            return serviceProvider.GetService<HubAuthorizationMetrics>();
+        }
+        catch (Exception e)
+        {
+            Logger.Debug(e, "Could not resolve the hub authorization metrics");
+            return null;
+        }
     }
 
     /// <summary>
