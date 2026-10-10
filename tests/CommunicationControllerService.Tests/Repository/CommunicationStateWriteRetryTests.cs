@@ -102,4 +102,27 @@ internal class CommunicationStateWriteRetryTests
 
         await Assert.That(ApplyCalls()).IsEqualTo(1);
     }
+
+    [Test]
+    public async Task SetDeploymentSiteCommunicationState_Retry_ReusesTheLogicalTimestamp()
+    {
+        var timestamps = new List<DateTime?>();
+        _tenantRepository
+            .ApplyChangesAsync(Arg.Any<IOctoSession>(), Arg.Any<IReadOnlyList<IEntityUpdateInfo<RtEntity>>>(),
+                Arg.Any<OperationResult>())
+            .Returns(call =>
+            {
+                var update = call.Arg<IReadOnlyList<IEntityUpdateInfo<RtEntity>>>().Single();
+                timestamps.Add(((RtDeploymentSite)update.RtEntity!).CommunicationStateTimestamp);
+                return timestamps.Count == 1 ? Task.FromException(WriteConflict()) : Task.CompletedTask;
+            });
+
+        await _sut.SetDeploymentSiteCommunicationStateAsync(TenantId, OctoObjectId.GenerateNewId(),
+            RtCommunicationStateEnum.Offline);
+
+        // A retried (possibly stale) write must not get a newer timestamp than its first attempt,
+        // otherwise it could overwrite a later Online at the AttributeNewerThanGuard.
+        await Assert.That(timestamps.Count).IsEqualTo(2);
+        await Assert.That(timestamps[1]).IsEqualTo(timestamps[0]);
+    }
 }

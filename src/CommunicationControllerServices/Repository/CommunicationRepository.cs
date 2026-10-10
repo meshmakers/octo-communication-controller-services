@@ -1420,14 +1420,18 @@ internal class CommunicationRepository : ICommunicationRepository
         RtCommunicationStateEnum communicationState)
     {
         // AB#6435: a transient write conflict is repeated (max 2x); anything else surfaces at once.
+        // The logical write timestamp is taken ONCE, so a repeated stale write (e.g. a late Offline) still
+        // loses against a newer Online at the AttributeNewerThanGuard instead of getting a fresh timestamp.
+        var newTimestamp = DateTime.UtcNow;
         return StateWriteRetry.ExecuteAsync(
-            () => SetDeploymentSiteCommunicationStateOnceAsync(tenantId, adapterPoolRtId, communicationState),
+            () => SetDeploymentSiteCommunicationStateOnceAsync(tenantId, adapterPoolRtId, communicationState,
+                newTimestamp),
             _logger,
             $"communication state '{communicationState}' of deploymentSite '{adapterPoolRtId}' in tenant '{tenantId}'");
     }
 
     private async Task SetDeploymentSiteCommunicationStateOnceAsync(string tenantId, OctoObjectId adapterPoolRtId,
-        RtCommunicationStateEnum communicationState)
+        RtCommunicationStateEnum communicationState, DateTime newTimestamp)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -1436,11 +1440,10 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             session.StartTransaction();
 
-            // Capture the timestamp once; the same value goes into the entity (so it lands
-            // in the DB) AND into the guard (so a stale write with an older timestamp from
-            // a parallel writer — e.g. a controller pod mid-shutdown — is rejected at the
-            // MongoDB filter level).
-            var newTimestamp = DateTime.UtcNow;
+            // The timestamp is captured once per logical write (by the caller, shared by all retries);
+            // the same value goes into the entity (so it lands in the DB) AND into the guard (so a
+            // stale write with an older timestamp from a parallel writer — e.g. a controller pod
+            // mid-shutdown — is rejected at the MongoDB filter level).
             var rtDeploymentSite = new RtDeploymentSite
             {
                 RtId = adapterPoolRtId,
@@ -1648,14 +1651,18 @@ internal class CommunicationRepository : ICommunicationRepository
         RtCommunicationStateEnum communicationState)
     {
         // AB#6435: a transient write conflict is repeated (max 2x); anything else surfaces at once.
+        // The logical write timestamp is taken ONCE, so a repeated stale write (e.g. a late Offline) still
+        // loses against a newer Online at the AttributeNewerThanGuard instead of getting a fresh timestamp.
+        var newTimestamp = DateTime.UtcNow;
         return StateWriteRetry.ExecuteAsync(
-            () => SetAdapterCommunicationStateOnceAsync(tenantId, adapterRtEntityId, communicationState),
+            () => SetAdapterCommunicationStateOnceAsync(tenantId, adapterRtEntityId, communicationState,
+                newTimestamp),
             _logger,
             $"communication state '{communicationState}' of adapter '{adapterRtEntityId}' in tenant '{tenantId}'");
     }
 
     private async Task SetAdapterCommunicationStateOnceAsync(string tenantId, RtEntityId adapterRtEntityId,
-        RtCommunicationStateEnum communicationState)
+        RtCommunicationStateEnum communicationState, DateTime newTimestamp)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -1664,12 +1671,12 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             session.StartTransaction();
 
-            // Capture the timestamp once; the same value goes into the entity (so it lands
-            // in the DB) AND into the guard (so a stale write with an older timestamp from
-            // a parallel writer — e.g. a controller pod mid-shutdown whose OnDisconnectedAsync
-            // commits late, after the replacement pod has already written Online — is
-            // rejected at the MongoDB filter level instead of clobbering the newer state).
-            var newTimestamp = DateTime.UtcNow;
+            // The timestamp is captured once per logical write (by the caller, shared by all retries);
+            // the same value goes into the entity (so it lands in the DB) AND into the guard (so a
+            // stale write with an older timestamp from a parallel writer — e.g. a controller pod
+            // mid-shutdown whose OnDisconnectedAsync commits late, after the replacement pod has
+            // already written Online — is rejected at the MongoDB filter level instead of clobbering
+            // the newer state).
             var rtAdapter = new RtAdapter
             {
                 CommunicationState = communicationState,
