@@ -26,6 +26,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
     private readonly ITenantLendingScopeResolver _lendingScopeResolver;
     private readonly IWorkloadLifecycleService _workloadLifecycleService;
     private readonly IAdapterPoolMirrorProvisioningService _adapterPoolMirrorProvisioningService;
+    private readonly IShutdownState _shutdownState;
 
     /// <summary>
     /// Helm values path carrying the adapter's own OAuth client id (AB#5072). Must stay in lockstep
@@ -60,6 +61,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
     /// <param name="lendingScopeResolver">Resolves which tenants an adapter deploymentSite may lend to, so a Leased workload naming an out-of-scope lender is refused at deploy time (AB#4924)</param>
     /// <param name="workloadLifecycleService">Carries the AB#4917 scale verb to the operator owning the workload's deploymentSite; reused for adapter-pool scaling so the MinReplicas floor is enforced in one place (AB#4924)</param>
     /// <param name="adapterPoolMirrorProvisioningService">Pushes an adapter pool's deploy/undeploy out to the LentAdapterPool mirrors its borrowers hold (AB#5271)</param>
+    /// <param name="shutdownState">Lets the offline-reconciliation sweep stop writing once the host is stopping (AB#6418)</param>
     public DeploymentSiteService(ICommunicationRepository communicationRepository, IDeploymentSiteCache poolCache,
         ICommunicationEventService eventService,
         IOperatorConnectionManager operatorConnectionManager,
@@ -70,7 +72,8 @@ internal class DeploymentSiteService : IDeploymentSiteService
         IPipelineServiceAccountResolver serviceAccountResolver,
         ITenantLendingScopeResolver lendingScopeResolver,
         IWorkloadLifecycleService workloadLifecycleService,
-        IAdapterPoolMirrorProvisioningService adapterPoolMirrorProvisioningService)
+        IAdapterPoolMirrorProvisioningService adapterPoolMirrorProvisioningService,
+        IShutdownState shutdownState)
     {
         _communicationRepository = communicationRepository;
         _deploymentSiteCache = poolCache;
@@ -84,6 +87,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
         _lendingScopeResolver = lendingScopeResolver;
         _workloadLifecycleService = workloadLifecycleService;
         _adapterPoolMirrorProvisioningService = adapterPoolMirrorProvisioningService;
+        _shutdownState = shutdownState;
     }
     
     /// <inheritdoc />
@@ -1363,18 +1367,40 @@ internal class DeploymentSiteService : IDeploymentSiteService
                 continue;
             }
 
+            // The surviving pod is the authoritative state holder once shutdown begins (same rule as
+            // the hub): a sweep already in progress must not issue newer Offline writes.
+            if (_shutdownState.IsShuttingDown)
+            {
+                break;
+            }
+
             Logger.Warn(
                 "[{TenantId}] DeploymentSite '{DeploymentSiteRtId}' ('{DeploymentSiteName}') is persisted Online but no operator " +
                 "connection on this pod owns it; reconciling to Offline (AB#6418)",
                 tenantId, deploymentSite.RtId, deploymentSite.Name);
 
+            // The repository write carries an AttributeNewerThanGuard, which only rejects OLDER
+            // timestamps - it cannot tell that a registration landed between the ownership check
+            // above and this write. So write first, then look again.
+            await _communicationRepository.SetDeploymentSiteCommunicationStateAsync(tenantId, deploymentSite.RtId,
+                RtCommunicationStateEnum.Offline);
+
+            if (_operatorConnectionManager
+                    .GetConnectionsForDeploymentSite(tenantId, deploymentSite.RtId.ToString()).Count > 0)
+            {
+                // An operator claimed the site while we wrote Offline: its own Online write may have
+                // landed before ours. Restore Online so a live, claimed site is not left Offline.
+                Logger.Info(
+                    "[{TenantId}] DeploymentSite '{DeploymentSiteRtId}' was claimed while being reconciled; restoring Online",
+                    tenantId, deploymentSite.RtId);
+                await _communicationRepository.SetDeploymentSiteCommunicationStateAsync(tenantId, deploymentSite.RtId,
+                    RtCommunicationStateEnum.Online);
+                continue;
+            }
+
             await _eventService.StoreInformationEventAsync(tenantId,
                 $"DeploymentSite '{deploymentSite.Name}' had no owning operator connection and was reconciled to Offline.",
                 new RtEntityId(SystemCommunicationCkIds.RtCkDeploymentSiteTypeId, deploymentSite.RtId));
-
-            // The repository write carries an AttributeNewerThanGuard on the state timestamp.
-            await _communicationRepository.SetDeploymentSiteCommunicationStateAsync(tenantId, deploymentSite.RtId,
-                RtCommunicationStateEnum.Offline);
             reconciled++;
         }
 

@@ -101,7 +101,7 @@ internal class ReconcileOrphanedOnlineDeploymentSitesAsyncTests : PoolServiceTes
         var service = new DeploymentSiteService(CommunicationRepository, DeploymentSiteCache,
             CommunicationEventService, manager, EncryptionService, TemplateResolver, OnDemandCapabilityService,
             ServiceAccountProvisioningService, ServiceAccountResolver, LendingScopeResolver,
-            WorkloadLifecycleService, AdapterPoolMirrorProvisioningService);
+            WorkloadLifecycleService, AdapterPoolMirrorProvisioningService, ShutdownState);
 
         var reclaimed = Site(RtCommunicationStateEnum.Online);
         var orphan = Site(RtCommunicationStateEnum.Online);
@@ -118,5 +118,42 @@ internal class ReconcileOrphanedOnlineDeploymentSitesAsyncTests : PoolServiceTes
             .SetDeploymentSiteCommunicationStateAsync(TenantId, reclaimed.RtId, Arg.Any<RtCommunicationStateEnum>());
         await CommunicationRepository.Received(2)
             .SetDeploymentSiteCommunicationStateAsync(TenantId, orphan.RtId, RtCommunicationStateEnum.Offline);
+    }
+
+    [Test]
+    public async Task ClaimLandingWhileOfflineIsWritten_RestoresOnline()
+    {
+        // Deterministic interleaving: the ownership check sees no owner, then an operator claims the
+        // site while the Offline write is in flight. The Offline write carries the newer timestamp,
+        // so the sweep must put Online back instead of leaving a live site Offline.
+        var site = Site(RtCommunicationStateEnum.Online);
+        ReturnSites(site);
+        CommunicationRepository
+            .When(r => r.SetDeploymentSiteCommunicationStateAsync(TenantId, site.RtId, RtCommunicationStateEnum.Offline))
+            .Do(_ => OperatorConnectionManager.GetConnectionsForDeploymentSite(TenantId, site.RtId.ToString())
+                .Returns(new[] { ConnectionId }));
+
+        await DeploymentSiteService.ReconcileOrphanedOnlineDeploymentSitesAsync(TenantId);
+
+        Received.InOrder(() =>
+        {
+            CommunicationRepository.SetDeploymentSiteCommunicationStateAsync(TenantId, site.RtId, RtCommunicationStateEnum.Offline);
+            CommunicationRepository.SetDeploymentSiteCommunicationStateAsync(TenantId, site.RtId, RtCommunicationStateEnum.Online);
+        });
+    }
+
+    [Test]
+    public async Task ShutdownBeginningMidSweep_StopsBeforeTheNextWrite()
+    {
+        var first = Site(RtCommunicationStateEnum.Online);
+        var second = Site(RtCommunicationStateEnum.Online);
+        ReturnSites(first, second);
+        ShutdownState.IsShuttingDown.Returns(false, true);
+
+        var count = await DeploymentSiteService.ReconcileOrphanedOnlineDeploymentSitesAsync(TenantId);
+
+        await Assert.That(count).IsEqualTo(1);
+        await CommunicationRepository.DidNotReceive()
+            .SetDeploymentSiteCommunicationStateAsync(TenantId, second.RtId, Arg.Any<RtCommunicationStateEnum>());
     }
 }

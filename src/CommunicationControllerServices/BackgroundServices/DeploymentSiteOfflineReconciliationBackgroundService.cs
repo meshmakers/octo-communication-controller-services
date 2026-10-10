@@ -89,6 +89,12 @@ internal class DeploymentSiteOfflineReconciliationBackgroundService : Background
 
         foreach (var tenantId in _adapterCache.GetEnabledTenantIds())
         {
+            if (_shutdownState.IsShuttingDown)
+            {
+                // Shutdown began mid-sweep: leave the remaining tenants to the surviving pod.
+                return;
+            }
+
             try
             {
                 var count = await _deploymentSiteService.ReconcileOrphanedOnlineDeploymentSitesAsync(tenantId);

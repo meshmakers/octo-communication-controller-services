@@ -47,6 +47,17 @@ internal class DeploymentSiteOfflineReconciliationTests
     }
 
     [Test]
+    public async Task Sweep_ShutdownBeginsAfterFirstTenant_SkipsTheRest()
+    {
+        _shutdownState.IsShuttingDown.Returns(false, false, true);
+
+        await _service.ReconcileAllTenantsAsync();
+
+        await _deploymentSiteService.Received(1).ReconcileOrphanedOnlineDeploymentSitesAsync("t1");
+        await _deploymentSiteService.DidNotReceive().ReconcileOrphanedOnlineDeploymentSitesAsync("t2");
+    }
+
+    [Test]
     public async Task Sweep_FailingTenant_DoesNotStopTheOthers()
     {
         _deploymentSiteService.ReconcileOrphanedOnlineDeploymentSitesAsync("t1").Returns(Task.FromException<int>(new InvalidOperationException("boom")));

@@ -135,7 +135,7 @@ public interface IDeploymentSiteService
     /// reach them when the controller pod restarted (the old pod skips the Offline write while
     /// shutting down, the new pod never saw the claim) or when an operator reconnected without
     /// claiming the deploymentSite again. Ownership is judged against
-    /// <see cref="Hubs.IOperatorConnectionManager"/> and re-checked right before every write.
+    /// <see cref="Hubs.IOperatorConnectionManager"/> and re-checked right before and right after every write (a claim that raced the write restores Online). The sweep stops once the host is shutting down.
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
     /// <returns>Number of deploymentSites set to <c>Offline</c></returns>

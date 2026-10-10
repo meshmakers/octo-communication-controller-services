@@ -1334,8 +1334,9 @@ Studio then showed the site `Online` while every workload notification for it wa
 for every enabled tenant) calls `DeploymentSiteService.ReconcileOrphanedOnlineDeploymentSitesAsync`:
 every site persisted `Online` for which `IOperatorConnectionManager.GetConnectionsForDeploymentSite`
 is empty is written `Offline` (information event on the site). Ownership is re-checked right before
-each write; the repository write carries the `AttributeNewerThanGuard`; the sweep does nothing while
-the host is shutting down. A site that is claimed later turns `Online` through the normal
+and right after each write (the `AttributeNewerThanGuard` only rejects older timestamps, so a claim that
+raced the Offline write makes the sweep restore Online); the sweep stops as soon as the host is shutting
+down, also in the middle of a sweep. A site that is claimed later turns `Online` through the normal
 `RegisterDeploymentSiteAsync` path, so the sweep never needs to undo anything.
 
 Cloud sites after a controller restart: the central operator reconnects, `RegisterOperatorAsync`

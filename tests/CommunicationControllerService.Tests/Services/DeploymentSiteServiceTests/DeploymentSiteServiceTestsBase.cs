@@ -38,6 +38,8 @@ internal abstract class PoolServiceTestsBase
     ///     triggers it and an adapter deploy does not.</summary>
     protected readonly IAdapterPoolMirrorProvisioningService AdapterPoolMirrorProvisioningService =
         Substitute.For<IAdapterPoolMirrorProvisioningService>();
+    /// <summary>AB#6418 — not shutting down by default.</summary>
+    protected readonly IShutdownState ShutdownState = Substitute.For<IShutdownState>();
     protected readonly IDeploymentSiteCachePublish PoolCachePublish;
     protected readonly DeploymentSiteTenant DeploymentSiteTenant;
     protected readonly DeploymentSiteService DeploymentSiteService;
@@ -119,7 +121,8 @@ internal abstract class PoolServiceTestsBase
             ServiceAccountResolver,
             LendingScopeResolver,
             WorkloadLifecycleService,
-            AdapterPoolMirrorProvisioningService);
+            AdapterPoolMirrorProvisioningService,
+            ShutdownState);
     }
 
     [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]
