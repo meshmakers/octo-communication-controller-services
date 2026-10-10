@@ -6,8 +6,12 @@ using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 
-internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : IOperatorConnectionManager
+internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext, TimeProvider? timeProvider = null)
+    : IOperatorConnectionManager
 {
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+    private long _lastOperatorRegisteredAtTicks;
+
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly ConcurrentDictionary<string, bool> _connectedOperators = new();
 
@@ -57,8 +61,19 @@ internal class OperatorConnectionManager(IHubContext<OperatorHub> hubContext) : 
     private readonly ConcurrentDictionary<(string TenantId, string DeploymentSiteRtId), ConcurrentDictionary<string, object>>
         _pendingWorkloadNotificationsByDeploymentSite = new();
 
+    public DateTimeOffset? LastOperatorRegisteredAt
+    {
+        get
+        {
+            var ticks = Interlocked.Read(ref _lastOperatorRegisteredAtTicks);
+            return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
+        }
+    }
+
     public void AddOperator(string connectionId)
     {
+        // Quiet-period anchor of the offline-reconciliation grace (ReconciliationGrace).
+        Interlocked.Exchange(ref _lastOperatorRegisteredAtTicks, _timeProvider.GetUtcNow().UtcTicks);
         _connectedOperators.TryAdd(connectionId, true);
         Logger.Info("Operator added, total connected: {Count}", _connectedOperators.Count);
     }

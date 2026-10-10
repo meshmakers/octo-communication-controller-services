@@ -1,4 +1,5 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Microsoft.Extensions.Options;
@@ -17,11 +18,14 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.BackgroundServ
 /// edge device offline, operator reconnected without claiming the site) therefore stayed
 /// <c>Online</c> in Studio while workload notifications for it were queued silently.
 ///
-/// Safety: the first sweep waits a startup grace equal to the configured interval so the operators
-/// (re)connect and claim their sites before any of them is judged orphaned — in particular the
-/// central operator, which re-creates the Cloud site CRs from <c>RegisterOperatorAsync</c>.
-/// Ownership is re-checked right before every write, and a site claimed later simply turns
-/// <c>Online</c> again through the normal registration path.
+/// Safety: the sweep does not judge anything before <see cref="ReconciliationGrace"/> is over — one
+/// interval after the last operator registered on this pod (at the latest three intervals after the
+/// start, also when none ever registers). A fixed delay from the controller start is not enough: the operators reconnect on their
+/// own schedule, and on test-2 they were more than a minute later than the old 5 minute grace, so every
+/// Cloud site was written Offline shortly before the central operator claimed it again (and the
+/// persisted-state metric published that as a critical alert). Ownership is re-checked right before
+/// every write, and a site claimed later simply turns <c>Online</c> again through the normal
+/// registration path.
 /// </summary>
 internal class DeploymentSiteOfflineReconciliationBackgroundService : BackgroundService
 {
@@ -29,28 +33,37 @@ internal class DeploymentSiteOfflineReconciliationBackgroundService : Background
     private readonly IAdapterCache _adapterCache;
     private readonly IDeploymentSiteService _deploymentSiteService;
     private readonly IShutdownState _shutdownState;
+    private readonly IOperatorConnectionManager _operatorConnectionManager;
+    private readonly TimeProvider _timeProvider;
     private readonly CommunicationControllerOptions _options;
+    private readonly DateTimeOffset _startedAt;
 
     public DeploymentSiteOfflineReconciliationBackgroundService(
         IAdapterCache adapterCache,
         IDeploymentSiteService deploymentSiteService,
         IShutdownState shutdownState,
+        IOperatorConnectionManager operatorConnectionManager,
+        TimeProvider timeProvider,
         IOptions<CommunicationControllerOptions> options)
     {
         _adapterCache = adapterCache;
         _deploymentSiteService = deploymentSiteService;
         _shutdownState = shutdownState;
+        _operatorConnectionManager = operatorConnectionManager;
+        _timeProvider = timeProvider;
         _options = options.Value;
+        _startedAt = timeProvider.GetUtcNow();
     }
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var interval = TimeSpan.FromMinutes(Math.Max(1, _options.DeploymentSiteOfflineReconciliationIntervalMinutes));
+        var interval = Interval;
 
         Logger.Info(
-            "Deployment-site offline-reconciliation background service starting with interval / startup grace of {IntervalMinutes} minute(s)",
-            interval.TotalMinutes);
+            "Deployment-site offline-reconciliation background service starting with interval / grace of {IntervalMinutes} minute(s); " +
+            "the sweep waits for a quiet period after the last operator registration (at the latest {MaxWaitMinutes} minute(s) after the start)",
+            interval.TotalMinutes, interval.TotalMinutes * ReconciliationGrace.MaxWaitIntervals);
 
         try
         {
@@ -60,7 +73,7 @@ internal class DeploymentSiteOfflineReconciliationBackgroundService : Background
             {
                 try
                 {
-                    await ReconcileAllTenantsAsync();
+                    await SweepIfSettledAsync();
                 }
                 catch (Exception ex)
                 {
@@ -74,6 +87,30 @@ internal class DeploymentSiteOfflineReconciliationBackgroundService : Background
         {
             // Normal shutdown.
         }
+    }
+
+    private TimeSpan Interval =>
+        TimeSpan.FromMinutes(Math.Max(1, _options.DeploymentSiteOfflineReconciliationIntervalMinutes));
+
+    /// <summary>
+    /// One timer tick: sweeps once the operators have had their chance to reconnect and claim
+    /// (<see cref="ReconciliationGrace"/>), otherwise waits for the next tick. Internal so tests can
+    /// drive it without the timer.
+    /// </summary>
+    internal async Task SweepIfSettledAsync()
+    {
+        if (!ReconciliationGrace.IsOver(_timeProvider.GetUtcNow(), _startedAt,
+                _operatorConnectionManager.LastOperatorRegisteredAt, Interval))
+        {
+            Logger.Info(
+                "Deployment-site offline reconciliation waits: {State}",
+                _operatorConnectionManager.LastOperatorRegisteredAt is null
+                    ? "no operator has registered since the controller started yet"
+                    : "an operator registered less than one interval ago and may still be claiming its sites");
+            return;
+        }
+
+        await ReconcileAllTenantsAsync();
     }
 
     /// <summary>

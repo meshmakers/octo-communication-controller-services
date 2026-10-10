@@ -35,4 +35,11 @@ internal interface IAdapterConnectionTracker
     /// <paramref name="adapterRtEntityId"/> on this pod.
     /// </summary>
     bool HasLiveConnection(string tenantId, RtEntityId adapterRtEntityId);
+
+    /// <summary>
+    /// When the latest adapter connection was tracked on this pod, or <c>null</c> if none has since the
+    /// process started. Anchor of the quiet period of the adapter offline-reconciliation grace: the sweep must
+    /// not judge an adapter orphaned while adapters are still reconnecting after a controller restart.
+    /// </summary>
+    DateTimeOffset? LastConnectedAt { get; }
 }
