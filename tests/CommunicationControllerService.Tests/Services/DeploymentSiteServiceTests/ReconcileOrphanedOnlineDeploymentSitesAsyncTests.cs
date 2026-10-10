@@ -156,4 +156,19 @@ internal class ReconcileOrphanedOnlineDeploymentSitesAsyncTests : PoolServiceTes
         await CommunicationRepository.DidNotReceive()
             .SetDeploymentSiteCommunicationStateAsync(TenantId, second.RtId, Arg.Any<RtCommunicationStateEnum>());
     }
+
+    [Test]
+    public async Task EventStoreFailure_DoesNotStopTheSweep()
+    {
+        var first = Site(RtCommunicationStateEnum.Online);
+        var second = Site(RtCommunicationStateEnum.Online);
+        ReturnSites(first, second);
+        CommunicationEventService
+            .StoreInformationEventAsync(TenantId, Arg.Any<string>(), Arg.Any<RtEntityId?>())
+            .Returns(Task.FromException(new InvalidOperationException("event store down")));
+
+        var count = await DeploymentSiteService.ReconcileOrphanedOnlineDeploymentSitesAsync(TenantId);
+
+        await Assert.That(count).IsEqualTo(2);
+    }
 }

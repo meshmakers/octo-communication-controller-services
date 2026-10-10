@@ -1398,9 +1398,19 @@ internal class DeploymentSiteService : IDeploymentSiteService
                 continue;
             }
 
-            await _eventService.StoreInformationEventAsync(tenantId,
-                $"DeploymentSite '{deploymentSite.Name}' had no owning operator connection and was reconciled to Offline.",
-                new RtEntityId(SystemCommunicationCkIds.RtCkDeploymentSiteTypeId, deploymentSite.RtId));
+            // The state is repaired; the audit event is best effort and must not stop the sweep.
+            try
+            {
+                await _eventService.StoreInformationEventAsync(tenantId,
+                    $"DeploymentSite '{deploymentSite.Name}' had no owning operator connection and was reconciled to Offline.",
+                    new RtEntityId(SystemCommunicationCkIds.RtCkDeploymentSiteTypeId, deploymentSite.RtId));
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn(ex, "[{TenantId}] Could not store the reconciliation event for deploymentSite '{DeploymentSiteRtId}'",
+                    tenantId, deploymentSite.RtId);
+            }
+
             reconciled++;
         }
 
