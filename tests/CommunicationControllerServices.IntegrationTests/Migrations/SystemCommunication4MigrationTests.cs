@@ -210,8 +210,8 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
     ///     nobody added to the meta) must fail LOUDLY and leave the data where it is — not be lifted to 4.x
     ///     by the schema-only bridge, not now and not on the next start.
     ///     AB#5803: 3.42.0 is such a version ON PURPOSE. On main it becomes the SECRET switch (AB#5537), whose
-    ///     4.x counterpart is 4.7.0; lifting it onto 4.6.0 would keep encrypted values under attributes 4.6.0
-    ///     declares as plain strings. Its entry arrives with 4.7.0.
+    ///     4.x counterpart is the 4.x minor after 4.7.0; lifting it onto 4.6.0/4.7.0 would keep encrypted values
+    ///     under attributes those models declare as plain strings. Its entry arrives with that release.
     /// </summary>
     [Theory]
     [InlineData("3.42.0")]

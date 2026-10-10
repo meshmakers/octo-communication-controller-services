@@ -37,10 +37,17 @@ attributes:
   description: Where the pool's adapter workloads are hosted. Edge (default) means an external operator installs and runs the pool; Cloud means the central Communication Operator auto-deploys it into the OctoMesh cluster.
   defaultValues:
     - 0
+# AB#6312 (incident AB#6310): the tenant types the connection settings of an adapter into this
+# JSON (for the EDA adapter the Ponton host, user and password), and a blueprint seed can only ever
+# carry the empty skeleton. Seed-owned, every blueprint update replaced the stored value with that
+# skeleton (a full ReplaceOne). `Secret` keeps it on a re-apply and out of an ExportRt: the JSON
+# holds a password, so it must not travel in an export file. A fresh tenant still gets the seed
+# value; a blueprint can no longer CHANGE the configuration of an existing adapter (use a CK
+# migration step or a documented manual step). Read and write paths are unchanged.
 - id: AdapterConfiguration
   valueType: String
-  isRuntimeState: false
-  description: JSON-serialized adapter-specific configuration that is deployed to the adapter.
+  ownership: Secret
+  description: JSON-serialized adapter-specific configuration that is deployed to the adapter. Entered by the tenant and may hold credentials, so it is owned by the tenant - a blueprint update or re-apply keeps the stored value and only initialises a new adapter - and it is not carried in an ExportRt.
 - id: PipelineDefinition
   valueType: String
   isRuntimeState: false

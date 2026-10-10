@@ -34,6 +34,10 @@ $schema: https://schemas.meshmakers.cloud/ck-migration-meta.schema.json
 # isRuntimeState (minor per ck-semver-rules "isRuntimeState changed"); no stored value
 # changes, only what a blueprint re-apply may overwrite — rides the schema-only bridge.
 #
+# 4.7.0 (AB#6312, incident AB#6310) adds NO entry either: Adapter.AdapterConfiguration becomes
+# `ownership: Secret` (kept on a blueprint re-apply, left out of ExportRt). Only what a re-apply may
+# overwrite changes, no stored value does - rides the schema-only bridge from any 4.x below it.
+#
 # 4.6.0 (AB#5803, cutover W1) adds NO entry either: it carries main's System.Communication 3.41.0
 # content into the 4.x line — DeployableEntity.LastSuccessfulStatusAt / .ConsecutiveStatusFailures
 # (AB#5618) and PipelineStatistics.FoldedBefore (AB#5583), all optional isRuntimeState attributes,
@@ -127,10 +131,11 @@ migrations:
   #
   # 🔴 Deliberately NO entry for 3.42.0. Phase 3 (decisions 2026-10-08) makes 3.42.0 on main the
   # SECRET switch (AB#5537: credentials as valueType Secret, encrypted values) — its 4.x counterpart is
-  # 4.7.0. An entry here would let a 3.42.0 tenant run the rename onto 4.6.0 and keep its `enc:` values
-  # under attributes 4.6.0 declares as plain strings: wrong, and silent. Without the entry the CK
+  # the next 4.x minor after 4.7.0 (4.7.0 itself is the AB#6312 ownership change). An entry here would let a
+  # 3.42.0 tenant run the rename onto 4.6.0/4.7.0 and keep its `enc:` values
+  # under attributes 4.6.0/4.7.0 declare as plain strings: wrong, and silent. Without the entry the CK
   # engine's major-version guard (CkMigrationMajorVersionGuard) REFUSES 3.42.0 -> 4.6.0 loudly and the
-  # history stays on 3.42.0. Add the 3.42.0 entry together with 4.7.0 (the SECRET line), after checking
+  # history stays on 3.42.0. Add the 3.42.0 entry together with the SECRET line's 4.x release, after checking
   # the then-published 3.42.0 against it. (A 3.42.0 that exists today only on local tenants — the
   # superseded AB#5618-only cut — is refused too; such a tenant is local and can be rebuilt.)
   #

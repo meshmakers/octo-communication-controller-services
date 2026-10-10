@@ -652,6 +652,26 @@ every re-apply emptied what the community had configured, and billing lost its r
 to carry — preserved on re-apply, still part of `ExportRt`. Consequence for blueprint authors: a
 changed default for these values reaches existing communities only through a CK migration.
 
+**`Adapter.AdapterConfiguration` is `ownership: Secret` (4.7.0, AB#6312, incident AB#6310).** The
+JSON a tenant types into an adapter (for the EDA adapter the Ponton host, user and password) was
+seed-owned, and a blueprint seed can only carry the empty skeleton, so every blueprint update
+(`EnergyCommunity.EdaIntegration`, `Base`) replaced the stored value through the Upsert's full
+ReplaceOne — three prod-2 communities lost their EDA credentials on 2026-10-08. Now a re-apply keeps the
+stored value (also when the seed omits the attribute) and an `ExportRt` leaves it out. `Secret`
+rather than `TenantOwned` because the JSON holds a password and must not travel in an export file;
+for a `String` attribute `Secret` ownership changes exactly two things — preserve on upsert and
+exclude from export — so the read path (`GetAdapterAsync`, `AdapterService`, the SignalR push to the
+adapter) and the Studio edit path (`systemCommunicationAdapters.update` with `item.configuration`)
+are untouched. It is **not** the `valueType: Secret` of AB#5528 (no encryption, no is-set read
+state). Consequences: a fresh adapter still gets the seed value; a blueprint can no longer *change*
+the configuration of an existing adapter (use a CK migration step or a documented manual step); an
+exported adapter re-imported elsewhere starts without its configuration. Regression test:
+`IntegrationTests/Repository/AdapterConfigurationOwnershipTests` (empty-skeleton seed, seed that omits
+the attribute, fresh adapter, compiled ownership) against real MongoDB. It drives
+`IImportRtModelCommand` with `Upsert`, the choke point of every blueprint apply; the orchestration
+above it (Update/Merge modes, preview) is covered by the engine stories and the test-2 verification.
+The long-term replacement is a dedicated configuration type with real `Secret` fields (AB#5360).
+
 When adding a new attribute on `Adapter` / `Pool` / similar entities,
 decide at creation time: is the value driven by the blueprint author
 (configuration → leave `isRuntimeState` unset), or by services /
@@ -2095,9 +2115,9 @@ published 3.41.0 is the status-history release WITHOUT SECRET (AB#5618 `LastSucc
 `ConsecutiveStatusFailures`, AB#5583 `FoldedBefore`); **4.6.0** carries exactly that content into the
 4.x line, so a 3.41.0 tenant must meet 4.6.0 or later (ChangeCkType keeps the stored values; 4.5.0
 would not declare them). **3.42.0 is deliberately NOT listed:** phase 3 makes it the SECRET switch
-(AB#5537), whose 4.x counterpart is 4.7.0 — the major-version guard refuses 3.42.0 → 4.6.0 loudly
+(AB#5537), whose 4.x counterpart is the 4.x minor after 4.7.0 (4.7.0 is the AB#6312 ownership change) — the major-version guard refuses 3.42.0 → 4.6.0/4.7.0 loudly
 instead of renaming encrypted values onto plain-string attributes. Add the 3.42.0 entry together
-with 4.7.0, checked against the then-published 3.42.0.
+with that SECRET release, checked against the then-published 3.42.0.
 
 Tests: integration `Migrations/SystemCommunication4MigrationTests` — the published 3.40.0 and
 3.41.0 models (embedded resources; other versions are the 3.40.0 re-labelled) plus the blueprint's 3.x seed, upgraded through the real
