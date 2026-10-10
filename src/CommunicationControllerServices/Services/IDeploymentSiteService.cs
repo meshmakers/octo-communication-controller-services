@@ -130,6 +130,18 @@ public interface IDeploymentSiteService
         string disconnectingConnectionId);
 
     /// <summary>
+    /// Reconciles deploymentSites persisted as <c>Online</c> that no live operator connection on
+    /// this pod owns: each one is written <c>Offline</c> (AB#6418). The disconnect path cannot
+    /// reach them when the controller pod restarted (the old pod skips the Offline write while
+    /// shutting down, the new pod never saw the claim) or when an operator reconnected without
+    /// claiming the deploymentSite again. Ownership is judged against
+    /// <see cref="Hubs.IOperatorConnectionManager"/> and re-checked right before every write.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <returns>Number of deploymentSites set to <c>Offline</c></returns>
+    Task<int> ReconcileOrphanedOnlineDeploymentSitesAsync(string tenantId);
+
+    /// <summary>
     /// Sets a deploymentSite online unconditionally.
     /// </summary>
     Task SetCommunicationStateOnlineAsync(string tenantId, OctoObjectId poolRtId);

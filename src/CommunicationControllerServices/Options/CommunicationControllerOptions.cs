@@ -154,6 +154,20 @@ public class CommunicationControllerOptions
     public int AdapterOfflineReconciliationIntervalMinutes { get; set; } = 5;
 
     /// <summary>
+    /// Gets or sets the interval in minutes at which the deployment-site offline-reconciliation
+    /// sweep runs (AB#6418). The sweep marks any deployment site persisted as <c>Online</c> that
+    /// no live operator connection on this pod owns as <c>Offline</c>, catching the case where the
+    /// owning operator never reached the controller again after a controller restart (the old pod
+    /// skips the Offline write while shutting down) or reconnected without claiming the site.
+    ///
+    /// The same value is used as the startup grace: the first sweep only runs after this delay so
+    /// operators can reconnect and claim their sites (the central operator re-creates its CRs from
+    /// <c>RegisterOperatorAsync</c>) before any site is judged orphaned. It must comfortably exceed
+    /// the worst-case operator reconnect time after a controller restart.
+    /// </summary>
+    public int DeploymentSiteOfflineReconciliationIntervalMinutes { get; set; } = 5;
+
+    /// <summary>
     /// Maximum seconds a wake gate waits for a woken OnDemand workload to reach
     /// <c>ConfigurationState=Configured</c> before it reverts the workload to Hibernated and
     /// fails the caller with a typed error (AB#4918). Baseline measured wake-to-Configured is

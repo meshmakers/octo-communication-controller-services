@@ -1342,6 +1342,46 @@ internal class DeploymentSiteService : IDeploymentSiteService
     }
 
     /// <inheritdoc />
+    public async Task<int> ReconcileOrphanedOnlineDeploymentSitesAsync(string tenantId)
+    {
+        var deploymentSites = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
+
+        var reconciled = 0;
+        foreach (var deploymentSite in deploymentSites)
+        {
+            if (deploymentSite.CommunicationState != RtCommunicationStateEnum.Online)
+            {
+                continue;
+            }
+
+            // Re-check ownership immediately before the write so a registration that landed after
+            // the sweep started is not clobbered. The connection manager is not flushed by tenant
+            // updates, so an empty result reliably means "no live operator connection claims it".
+            if (_operatorConnectionManager
+                    .GetConnectionsForDeploymentSite(tenantId, deploymentSite.RtId.ToString()).Count > 0)
+            {
+                continue;
+            }
+
+            Logger.Warn(
+                "[{TenantId}] DeploymentSite '{DeploymentSiteRtId}' ('{DeploymentSiteName}') is persisted Online but no operator " +
+                "connection on this pod owns it; reconciling to Offline (AB#6418)",
+                tenantId, deploymentSite.RtId, deploymentSite.Name);
+
+            await _eventService.StoreInformationEventAsync(tenantId,
+                $"DeploymentSite '{deploymentSite.Name}' had no owning operator connection and was reconciled to Offline.",
+                new RtEntityId(SystemCommunicationCkIds.RtCkDeploymentSiteTypeId, deploymentSite.RtId));
+
+            // The repository write carries an AttributeNewerThanGuard on the state timestamp.
+            await _communicationRepository.SetDeploymentSiteCommunicationStateAsync(tenantId, deploymentSite.RtId,
+                RtCommunicationStateEnum.Offline);
+            reconciled++;
+        }
+
+        return reconciled;
+    }
+
+    /// <inheritdoc />
     public async Task SetCommunicationStateOnlineAsync(string tenantId, OctoObjectId deploymentSiteRtId)
     {
         Logger.Info("[{TenantId}] Setting deploymentSite '{DeploymentSiteRtId}' online", tenantId, deploymentSiteRtId);
