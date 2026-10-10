@@ -8,6 +8,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using NSubstitute;
+using Recorded = Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper.RecordedMeasurement;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.BackgroundServices;
 
@@ -28,8 +29,6 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Backgroun
 /// </summary>
 internal class WorkloadStateMetricsBackgroundServiceTests
 {
-    private sealed record Recorded(string Instrument, Dictionary<string, string> Tags);
-
     private readonly IAdapterCache _adapterCache = Substitute.For<IAdapterCache>();
     private readonly ICommunicationRepository _repository = Substitute.For<ICommunicationRepository>();
     private readonly WorkloadStateMetricsBackgroundService _service;
@@ -56,43 +55,12 @@ internal class WorkloadStateMetricsBackgroundServiceTests
 
     private readonly string _tenantId = $"tenant-{Guid.NewGuid():N}";
 
-    private List<Recorded> Collect(Func<Task> act)
-    {
-        var recorded = new List<Recorded>();
-        using var listener = new MeterListener();
-        listener.InstrumentPublished = (instrument, l) =>
-        {
-            if (instrument.Meter.Name == WorkloadStateMetrics.MeterName)
-            {
-                l.EnableMeasurementEvents(instrument);
-            }
-        };
-        listener.SetMeasurementEventCallback<int>((instrument, _, tags, _) =>
-            recorded.Add(new Recorded(instrument.Name, ToDictionary(tags))));
-        listener.SetMeasurementEventCallback<double>((instrument, _, tags, _) =>
-            recorded.Add(new Recorded(instrument.Name, ToDictionary(tags))));
-        // The pipeline and lifecycle families share this meter and report longs — they are gated by
-        // the same opt-in this sweep publishes, so the tests below have to see them.
-        listener.SetMeasurementEventCallback<long>((instrument, _, tags, _) =>
-            recorded.Add(new Recorded(instrument.Name, ToDictionary(tags))));
-        listener.Start();
-
-        act().GetAwaiter().GetResult();
-        listener.RecordObservableInstruments();
-
-        return recorded.Where(r => r.Tags.GetValueOrDefault("octo.tenant.id") == _tenantId).ToList();
-    }
-
-    private static Dictionary<string, string> ToDictionary(ReadOnlySpan<KeyValuePair<string, object?>> tags)
-    {
-        var map = new Dictionary<string, string>();
-        foreach (var tag in tags)
-        {
-            map[tag.Key] = tag.Value?.ToString() ?? string.Empty;
-        }
-
-        return map;
-    }
+    private List<Recorded> Collect(Func<Task> act) =>
+        // The pipeline and lifecycle families share this meter — they are gated by the same opt-in
+        // this sweep publishes, so the tests below have to see them.
+        MeasurementCapture.Collect(WorkloadStateMetrics.MeterName,
+            MeasurementCapture.TaggedWith("octo.tenant.id", _tenantId),
+            () => act().GetAwaiter().GetResult(), observeGauges: true);
 
     private void ArrangeTenant(bool optedIn, IReadOnlyCollection<RtDeployableWorkload> workloads,
         IReadOnlyCollection<RtDeploymentSite> pools)

@@ -1,5 +1,4 @@
 using System.Diagnostics.Metrics;
-using System.Runtime.CompilerServices;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Communication.Contracts.MessageObjects;
@@ -9,6 +8,7 @@ using NSubstitute;
 using TUnit.Assertions;
 using TUnit.Assertions.Extensions;
 using TUnit.Core;
+using Recorded = Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper.RecordedMeasurement;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.TriggerManagementServiceTests;
 
@@ -376,45 +376,10 @@ internal class LeasedAdapterEnqueueTests : TriggerManagementServiceTestsBase
         await Assert.That(recorded.Any(r => r.Instrument == "octo.lease.enqueued.count")).IsFalse();
     }
 
-    private sealed record Recorded(string Instrument, double Value, Dictionary<string, string> Tags);
-
-    private async Task<List<Recorded>> CollectAsync(Func<Task> act)
-    {
-        var recorded = new List<Recorded>();
-        using var listener = new MeterListener();
-        listener.InstrumentPublished = (instrument, l) =>
-        {
-            if (instrument.Meter.Name == AdapterLeasingMetrics.MeterName)
-            {
-                l.EnableMeasurementEvents(instrument);
-            }
-        };
-        listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
-            recorded.Add(new Recorded(instrument.Name, value, ToDictionary(tags))));
-        // 🔴 The instruments have to EXIST before the listener starts. They are static fields of
-        // AdapterLeasingMetrics, so the first test in the process to touch that class is the one
-        // that creates them — and if that happens inside the act below, it happens while this
-        // listener is already running and racing its own subscription. Forcing the class
-        // constructor here makes every run look like the second one.
-        RuntimeHelpers.RunClassConstructor(typeof(AdapterLeasingMetrics).TypeHandle);
-
-        listener.Start();
-
-        await act();
-
-        return recorded.Where(r => r.Tags.GetValueOrDefault("octo.pool.rt_id") == _poolRtId).ToList();
-    }
-
-    private static Dictionary<string, string> ToDictionary(ReadOnlySpan<KeyValuePair<string, object?>> tags)
-    {
-        var map = new Dictionary<string, string>();
-        foreach (var tag in tags)
-        {
-            map[tag.Key] = tag.Value?.ToString() ?? string.Empty;
-        }
-
-        return map;
-    }
+    private Task<List<Recorded>> CollectAsync(Func<Task> act) =>
+        MeasurementCapture.CollectAsync(AdapterLeasingMetrics.MeterName,
+            MeasurementCapture.TaggedWith("octo.pool.rt_id", _poolRtId), act,
+            instrumentsOwner: typeof(AdapterLeasingMetrics));
 
     // ---- AB#5279: the invoker survives the queue --------------------------------------------
 

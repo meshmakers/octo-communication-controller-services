@@ -10,6 +10,7 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using NSubstitute;
+using Recorded = Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper.RecordedMeasurement;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.PipelineExecutionServiceTests;
 
@@ -26,8 +27,6 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]
 internal class ExecutionMetricsWiringTests
 {
-    private sealed record Recorded(string Instrument, double Value, Dictionary<string, string> Tags);
-
     private readonly ICommunicationRepository _repository = Substitute.For<ICommunicationRepository>();
     private readonly IAdapterCache _adapterCache = Substitute.For<IAdapterCache>();
     private readonly ICommunicationEventService _eventService = Substitute.For<ICommunicationEventService>();
@@ -55,43 +54,9 @@ internal class ExecutionMetricsWiringTests
             });
     }
 
-    private async Task<List<Recorded>> CollectAsync(Func<Task> act, bool observeGauges = false)
-    {
-        var recorded = new List<Recorded>();
-        using var listener = new MeterListener();
-        listener.InstrumentPublished = (instrument, l) =>
-        {
-            if (instrument.Meter.Name == PipelineExecutionMetrics.MeterName)
-            {
-                l.EnableMeasurementEvents(instrument);
-            }
-        };
-        listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
-            recorded.Add(new Recorded(instrument.Name, value, ToDictionary(tags))));
-        listener.SetMeasurementEventCallback<double>((instrument, value, tags, _) =>
-            recorded.Add(new Recorded(instrument.Name, value, ToDictionary(tags))));
-        listener.Start();
-
-        await act();
-
-        if (observeGauges)
-        {
-            listener.RecordObservableInstruments();
-        }
-
-        return recorded.Where(r => r.Tags.GetValueOrDefault("octo.tenant.id") == _tenantId).ToList();
-    }
-
-    private static Dictionary<string, string> ToDictionary(ReadOnlySpan<KeyValuePair<string, object?>> tags)
-    {
-        var map = new Dictionary<string, string>();
-        foreach (var tag in tags)
-        {
-            map[tag.Key] = tag.Value?.ToString() ?? string.Empty;
-        }
-
-        return map;
-    }
+    private Task<List<Recorded>> CollectAsync(Func<Task> act, bool observeGauges = false) =>
+        MeasurementCapture.CollectAsync(PipelineExecutionMetrics.MeterName,
+            MeasurementCapture.TaggedWith("octo.tenant.id", _tenantId), act, observeGauges);
 
     [Test]
     public async Task CompleteExecutionAsync_CountsTheReportedOutcome()

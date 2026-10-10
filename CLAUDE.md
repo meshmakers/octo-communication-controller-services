@@ -3037,6 +3037,22 @@ started or disposed on one thread mutates the subscription lists another thread'
 and the symptom is a measurement that is never delivered — one short of sixteen, once in a few dozen
 runs. Each harness also forces the metrics class constructor before starting its listener.
 
+🔴 **`[NotInParallel]` does not make the listener callback single-threaded (AB#6332).** It keeps other
+*listeners* away, nothing else: tests that never open one still run concurrently and record on the same
+static instruments, and the callback runs on **their** threads. Every harness used to collect into a
+plain `List<T>` from that callback, which loses measurements (two `Add`s on one slot) and leaves `null`
+slots behind a concurrent resize — CI build #51361 failed `SchedulerMetricsTests.AnIdleShrink_…` with a
+`NullReferenceException` while filtering, and a local stress run (four suite loops side by side) also
+produced a "never recorded" `octo.pipeline.execution.count` in `PipelineExecutionMetricsTests`, a
+class without the constraint key. **Every metrics test collects through `Helper/MeasurementCapture`**
+(`Collect` / `CollectAsync`, filter usually `MeasurementCapture.TaggedWith(tag, uniqueValue)`,
+`instrumentsOwner` for statics-backed instruments): it applies the test's filter *inside* the callback,
+keeps what passes in a `ConcurrentQueue`, and disposes the listener before returning a snapshot. Do not
+write another hand-rolled `MeterListener` harness. `Helper/MeasurementCaptureTests` pins the concurrent
+case on a meter of its own (fails 3/3 when the queue is swapped back to a `List`).
+`Hubs/HubAuthorizationMetricsTests` keeps its own `Recorder` — it was already locked and listens to a
+per-test `IMeterFactory`.
+
 ## Pipeline Service Account — mandatory execution identity (Epic AB#4979; AB#5027 phases 1 + 2)
 
 Pipeline execution runs under a real identity instead of anonymously. Granularity:

@@ -1,10 +1,11 @@
 using System.Diagnostics.Metrics;
-using System.Runtime.CompilerServices;
+using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using NSubstitute;
+using Recorded = Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper.RecordedMeasurement;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.LeaseServiceTests;
 
@@ -24,45 +25,11 @@ internal class LeaseExecutionOutcomeMetricsTests : LeaseServiceTestsBase
 {
     private const string ExecutionId = "7a1d6f1c-6f2f-4f2a-9a43-2a0f0a3a9c22";
 
-    private sealed record Recorded(string Instrument, Dictionary<string, string> Tags);
-
-    private static List<Recorded> Collect(Func<Task> act)
-    {
-        var recorded = new List<Recorded>();
-        using var listener = new MeterListener();
-        listener.InstrumentPublished = (instrument, l) =>
-        {
-            if (instrument.Meter.Name == PipelineExecutionMetrics.MeterName)
-            {
-                l.EnableMeasurementEvents(instrument);
-            }
-        };
-        listener.SetMeasurementEventCallback<long>((instrument, _, tags, _) =>
-        {
-            var map = new Dictionary<string, string>();
-            foreach (var tag in tags)
-            {
-                map[tag.Key] = tag.Value?.ToString() ?? string.Empty;
-            }
-
-            lock (recorded)
-            {
-                recorded.Add(new Recorded(instrument.Name, map));
-            }
-        });
-        RuntimeHelpers.RunClassConstructor(typeof(PipelineExecutionMetrics).TypeHandle);
-        listener.Start();
-
-        act().GetAwaiter().GetResult();
-
-        lock (recorded)
-        {
-            return recorded
-                .Where(r => r.Instrument == "octo.pipeline.execution.count"
-                            && r.Tags.GetValueOrDefault("octo.tenant.id") == BorrowerTenantId)
-                .ToList();
-        }
-    }
+    private static List<Recorded> Collect(Func<Task> act) =>
+        MeasurementCapture.Collect(PipelineExecutionMetrics.MeterName,
+            m => m.Instrument == "octo.pipeline.execution.count"
+                 && m.Tags.GetValueOrDefault("octo.tenant.id") == BorrowerTenantId,
+            () => act().GetAwaiter().GetResult(), instrumentsOwner: typeof(PipelineExecutionMetrics));
 
     private async Task<string> GrantWithRunningExecutionAsync()
     {

@@ -1,7 +1,8 @@
 using System.Diagnostics.Metrics;
-using System.Runtime.CompilerServices;
+using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using NSubstitute;
+using Recorded = Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper.RecordedMeasurement;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.LeaseSchedulerServiceTests;
 
@@ -23,60 +24,25 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 ///     measurement at random is worse than no test: it fails for a reason that has nothing to do with
 ///     the metric. Every class in this repository that opens a listener shares this constraint key.
 /// </remarks>
+/// <remarks>
+///     🔴 <b>[NotInParallel] does not make the callback single-threaded (AB#6332).</b> It only keeps
+///     other <i>listeners</i> away. Tests that never open a listener still run concurrently and
+///     record on the same static instruments, and the listener callback runs on their threads. A
+///     plain <c>List.Add</c> from that callback left a <c>null</c> slot behind a concurrent resize —
+///     the <c>NullReferenceException</c> in <see cref="AnIdleShrink_CountsTheDrainAgainstThePoolAsPoolIdle" />,
+///     whose 1.3 s window made it the most exposed. Collect through
+///     <see cref="Helper.MeasurementCapture" />: it filters inside the callback and keeps what passes
+///     in a thread-safe queue.
+/// </remarks>
 [NotInParallel(nameof(MeterListener))]
 internal class SchedulerMetricsTests : LeaseSchedulerServiceTestsBase
 {
-    private sealed record Recorded(string Instrument, double Value, Dictionary<string, string> Tags);
-
-    private List<Recorded> Collect(Func<Task> act, bool observeGauges = false)
-    {
-        var recorded = new List<Recorded>();
-        using var listener = new MeterListener();
-        listener.InstrumentPublished = (instrument, l) =>
-        {
-            if (instrument.Meter.Name == AdapterLeasingMetrics.MeterName)
-            {
-                l.EnableMeasurementEvents(instrument);
-            }
-        };
-        listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
-            recorded.Add(new Recorded(instrument.Name, value, ToDictionary(tags))));
-        listener.SetMeasurementEventCallback<double>((instrument, value, tags, _) =>
-            recorded.Add(new Recorded(instrument.Name, value, ToDictionary(tags))));
-        listener.SetMeasurementEventCallback<int>((instrument, value, tags, _) =>
-            recorded.Add(new Recorded(instrument.Name, value, ToDictionary(tags))));
-        // 🔴 The instruments have to EXIST before the listener starts. They are static fields of
-        // AdapterLeasingMetrics, so the first test in the process to touch that class is the one
-        // that creates them — and if that happens inside the act below, it happens while this
-        // listener is already running and racing its own subscription. Forcing the class
-        // constructor here makes every run look like the second one.
-        RuntimeHelpers.RunClassConstructor(typeof(AdapterLeasingMetrics).TypeHandle);
-
-        listener.Start();
-
-        act().GetAwaiter().GetResult();
-
-        if (observeGauges)
-        {
-            listener.RecordObservableInstruments();
-        }
-
+    private List<Recorded> Collect(Func<Task> act, bool observeGauges = false) =>
         // This test instance's own pool only: the instruments are process-wide statics and the suite
-        // runs concurrently.
-        return recorded.Where(r => r.Tags.GetValueOrDefault("octo.pool.rt_id") == AdapterPoolRtId.ToString())
-            .ToList();
-    }
-
-    private static Dictionary<string, string> ToDictionary(ReadOnlySpan<KeyValuePair<string, object?>> tags)
-    {
-        var map = new Dictionary<string, string>();
-        foreach (var tag in tags)
-        {
-            map[tag.Key] = tag.Value?.ToString() ?? string.Empty;
-        }
-
-        return map;
-    }
+        // runs concurrently. The filter runs inside the listener callback (AB#6332).
+        MeasurementCapture.Collect(AdapterLeasingMetrics.MeterName,
+            MeasurementCapture.TaggedWith("octo.pool.rt_id", AdapterPoolRtId.ToString()),
+            () => act().GetAwaiter().GetResult(), observeGauges, typeof(AdapterLeasingMetrics));
 
     /// <summary>
     ///     §9.2 chose round-robin over global FIFO to prevent starvation. Depth published per

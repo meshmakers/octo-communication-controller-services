@@ -3,6 +3,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
+using Recorded = Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper.RecordedMeasurement;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services;
 
@@ -19,49 +20,15 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services;
 /// </summary>
 internal class WorkloadStateMetricsTests
 {
-    private sealed record Recorded(string Instrument, double Value, Dictionary<string, string> Tags);
-
     /// <summary>
     ///     Collects measurements on the communication meter while <paramref name="act" /> runs,
     ///     keeping only those tagged with <paramref name="tenantId" />. The instruments are
     ///     process-wide and the suite runs tests concurrently, so an unfiltered listener also sees
     ///     every other test's measurements — hence the unique tenant per test.
     /// </summary>
-    private static List<Recorded> Collect(string tenantId, Action act)
-    {
-        var recorded = new List<Recorded>();
-        using var listener = new MeterListener();
-        listener.InstrumentPublished = (instrument, l) =>
-        {
-            if (instrument.Meter.Name == WorkloadStateMetrics.MeterName)
-            {
-                l.EnableMeasurementEvents(instrument);
-            }
-        };
-        listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
-            recorded.Add(new Recorded(instrument.Name, value, ToDictionary(tags))));
-        listener.SetMeasurementEventCallback<double>((instrument, value, tags, _) =>
-            recorded.Add(new Recorded(instrument.Name, value, ToDictionary(tags))));
-        listener.SetMeasurementEventCallback<int>((instrument, value, tags, _) =>
-            recorded.Add(new Recorded(instrument.Name, value, ToDictionary(tags))));
-        listener.Start();
-
-        act();
-        listener.RecordObservableInstruments();
-
-        return recorded.Where(r => r.Tags.GetValueOrDefault("octo.tenant.id") == tenantId).ToList();
-    }
-
-    private static Dictionary<string, string> ToDictionary(ReadOnlySpan<KeyValuePair<string, object?>> tags)
-    {
-        var map = new Dictionary<string, string>();
-        foreach (var tag in tags)
-        {
-            map[tag.Key] = tag.Value?.ToString() ?? string.Empty;
-        }
-
-        return map;
-    }
+    private static List<Recorded> Collect(string tenantId, Action act) =>
+        MeasurementCapture.Collect(WorkloadStateMetrics.MeterName,
+            MeasurementCapture.TaggedWith("octo.tenant.id", tenantId), act, observeGauges: true);
 
     private static string UniqueTenant() => $"tenant-{Guid.NewGuid():N}";
 

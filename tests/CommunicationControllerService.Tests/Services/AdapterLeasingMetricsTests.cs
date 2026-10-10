@@ -1,7 +1,8 @@
 using System.Diagnostics.Metrics;
-using System.Runtime.CompilerServices;
+using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Recorded = Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper.RecordedMeasurement;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services;
 
@@ -35,57 +36,10 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services;
 [NotInParallel(nameof(MeterListener))]
 internal class AdapterLeasingMetricsTests
 {
-    private sealed record Recorded(string Instrument, double Value, Dictionary<string, string> Tags);
-
-    private static List<Recorded> Collect(string poolRtId, Action act, bool observeGauges = false)
-    {
-        var recorded = new List<Recorded>();
-        using var listener = new MeterListener();
-        listener.InstrumentPublished = (instrument, l) =>
-        {
-            if (instrument.Meter.Name == AdapterLeasingMetrics.MeterName)
-            {
-                l.EnableMeasurementEvents(instrument);
-            }
-        };
-        // One callback per numeric type: counters are long, histograms double, gauges int or double.
-        // A missing callback is not an error, it is silence — which in a metrics test reads exactly
-        // like "the instrument was never recorded".
-        listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
-            recorded.Add(new Recorded(instrument.Name, value, ToDictionary(tags))));
-        listener.SetMeasurementEventCallback<double>((instrument, value, tags, _) =>
-            recorded.Add(new Recorded(instrument.Name, value, ToDictionary(tags))));
-        listener.SetMeasurementEventCallback<int>((instrument, value, tags, _) =>
-            recorded.Add(new Recorded(instrument.Name, value, ToDictionary(tags))));
-        // 🔴 The instruments have to EXIST before the listener starts. They are static fields of
-        // AdapterLeasingMetrics, so the first test in the process to touch that class is the one
-        // that creates them — and if that happens inside the act below, it happens while this
-        // listener is already running and racing its own subscription. Forcing the class
-        // constructor here makes every run look like the second one.
-        RuntimeHelpers.RunClassConstructor(typeof(AdapterLeasingMetrics).TypeHandle);
-
-        listener.Start();
-
-        act();
-
-        if (observeGauges)
-        {
-            listener.RecordObservableInstruments();
-        }
-
-        return recorded.Where(r => r.Tags.GetValueOrDefault("octo.pool.rt_id") == poolRtId).ToList();
-    }
-
-    private static Dictionary<string, string> ToDictionary(ReadOnlySpan<KeyValuePair<string, object?>> tags)
-    {
-        var map = new Dictionary<string, string>();
-        foreach (var tag in tags)
-        {
-            map[tag.Key] = tag.Value?.ToString() ?? string.Empty;
-        }
-
-        return map;
-    }
+    private static List<Recorded> Collect(string poolRtId, Action act, bool observeGauges = false) =>
+        MeasurementCapture.Collect(AdapterLeasingMetrics.MeterName,
+            MeasurementCapture.TaggedWith("octo.pool.rt_id", poolRtId), act, observeGauges,
+            typeof(AdapterLeasingMetrics));
 
     private static string UniquePool() => OctoObjectId.GenerateNewId().ToString();
 
