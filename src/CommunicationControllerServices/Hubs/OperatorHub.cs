@@ -119,6 +119,17 @@ public class OperatorHub : Hub, IOperatorHub
                 : "legacy (unknown)");
         _connectionManager.AddOperator(Context.ConnectionId);
         _connectionManager.SetOperatorMode(Context.ConnectionId, autoManageDeploymentSites);
+
+        // AB#6418: the deployed Cloud deploymentSites (tenant id + site rtId of every tenant) are the
+        // central operator's input for auto-creating its CRs. An edge operator (explicit
+        // AutoManageDeploymentSites=false) never acts on them — it ignored the list but still received
+        // the tenant-crossing ids and logged them as if it owned them. Legacy operators (null) keep
+        // the old behaviour so a rolling upgrade does not change what they get.
+        if (autoManageDeploymentSites == false)
+        {
+            return Task.FromResult<IEnumerable<DeployedDeploymentSiteDto>>([]);
+        }
+
         return Task.FromResult(_connectionManager.GetDeployedDeploymentSites());
     }
 

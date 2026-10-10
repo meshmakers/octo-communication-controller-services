@@ -1319,6 +1319,44 @@ stale-disconnect-keeps-live / reconnect-then-stale-disconnect) and
 Online → Offline, live connection kept, non-Online skipped, missing CkTypeId skipped,
 mixed fleet, and the real Online-write-populates-tracker path).
 
+### Deployment Site Offline Reconciliation (AB#6418)
+
+Same problem, same fix as for adapters, for `DeploymentSite` entities. Operator ownership of a site
+lives only in memory (`OperatorConnectionManager._poolsByConnection`), the `CommunicationState` in
+MongoDB. `OperatorHub.OnDisconnectedAsync` / `UnregisterOperatorAsync` reset what a *connection*
+claimed — which does not help when the controller pod restarted (the old pod skips the Offline write
+while shutting down, the new pod never saw the claim) and the operator never claims the site again
+(CR finalizer removed by hand, edge device unreachable, operator reconnected without the site).
+Studio then showed the site `Online` while every workload notification for it was queued with
+"No operator currently owns deployment site ...".
+
+`DeploymentSiteOfflineReconciliationBackgroundService` (after a startup grace, then periodically,
+for every enabled tenant) calls `DeploymentSiteService.ReconcileOrphanedOnlineDeploymentSitesAsync`:
+every site persisted `Online` for which `IOperatorConnectionManager.GetConnectionsForDeploymentSite`
+is empty is written `Offline` (information event on the site). Ownership is re-checked right before
+and right after each write (the `AttributeNewerThanGuard` only rejects older timestamps, so a claim that
+raced the Offline write makes the sweep restore Online); the sweep stops as soon as the host is shutting
+down, also in the middle of a sweep. A site that is claimed later turns `Online` through the normal
+`RegisterDeploymentSiteAsync` path, so the sweep never needs to undo anything.
+
+Cloud sites after a controller restart: the central operator reconnects, `RegisterOperatorAsync`
+returns the deployed Cloud sites, the operator re-creates/keeps its CRs and re-claims them. That
+happens within seconds, well inside the startup grace, so a Cloud site is not flipped. If the central
+operator is slower than the grace, the site goes `Offline` and back `Online` on its claim — a visible
+blip, never a lost state.
+
+Config: `CommunicationControllerOptions.DeploymentSiteOfflineReconciliationIntervalMinutes` (default 5)
+is sweep cadence and startup grace; it must exceed the worst-case operator reconnect time. Single
+replica assumption as for adapters (the connection manager is per pod).
+
+`RegisterOperatorAsync` returns the deployed Cloud sites only to central and legacy operators; an
+edge operator (`AutoManageDeploymentSites=false`) gets an empty list — it never acts on them, and the
+list carries tenant ids and site rtIds of other tenants.
+
+Tests: `Services/DeploymentSiteServiceTests/ReconcileOrphanedOnlineDeploymentSitesAsyncTests`,
+`BackgroundServices/DeploymentSiteOfflineReconciliationTests`,
+`Hubs/OperatorHubTests/RegisterOperatorAsyncTests`.
+
 ### Cloud Pool Deploy Tracking (for the PreDeleteTenant cascade)
 
 The `OperatorConnectionManager` keeps an in-memory map

@@ -178,6 +178,8 @@ try
 
     // Reconciles adapters stuck at a stale Online state with no live SignalR connection (AB#4699).
     builder.Services.AddHostedService<AdapterOfflineReconciliationBackgroundService>();
+    // Same for deployment sites persisted Online that no operator connection owns (AB#6418).
+    builder.Services.AddHostedService<DeploymentSiteOfflineReconciliationBackgroundService>();
     builder.Services.AddHostedService<WorkloadLifecycleWatchdogBackgroundService>();
     builder.Services.AddHostedService<LeaseSchedulerBackgroundService>();
 
