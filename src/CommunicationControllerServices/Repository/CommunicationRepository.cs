@@ -1416,7 +1416,17 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task SetDeploymentSiteCommunicationStateAsync(string tenantId, OctoObjectId adapterPoolRtId,
+    public Task SetDeploymentSiteCommunicationStateAsync(string tenantId, OctoObjectId adapterPoolRtId,
+        RtCommunicationStateEnum communicationState)
+    {
+        // AB#6435: a transient write conflict is repeated (max 2x); anything else surfaces at once.
+        return StateWriteRetry.ExecuteAsync(
+            () => SetDeploymentSiteCommunicationStateOnceAsync(tenantId, adapterPoolRtId, communicationState),
+            _logger,
+            $"communication state '{communicationState}' of deploymentSite '{adapterPoolRtId}' in tenant '{tenantId}'");
+    }
+
+    private async Task SetDeploymentSiteCommunicationStateOnceAsync(string tenantId, OctoObjectId adapterPoolRtId,
         RtCommunicationStateEnum communicationState)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
@@ -1634,7 +1644,17 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task SetAdapterCommunicationStateAsync(string tenantId, RtEntityId adapterRtEntityId,
+    public Task SetAdapterCommunicationStateAsync(string tenantId, RtEntityId adapterRtEntityId,
+        RtCommunicationStateEnum communicationState)
+    {
+        // AB#6435: a transient write conflict is repeated (max 2x); anything else surfaces at once.
+        return StateWriteRetry.ExecuteAsync(
+            () => SetAdapterCommunicationStateOnceAsync(tenantId, adapterRtEntityId, communicationState),
+            _logger,
+            $"communication state '{communicationState}' of adapter '{adapterRtEntityId}' in tenant '{tenantId}'");
+    }
+
+    private async Task SetAdapterCommunicationStateOnceAsync(string tenantId, RtEntityId adapterRtEntityId,
         RtCommunicationStateEnum communicationState)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);

@@ -443,6 +443,15 @@ public class MyService(ICommunicationEventService eventService)
 }
 ```
 
+**Communication-state write retry (AB#6435).** `SetDeploymentSiteCommunicationStateAsync` and
+`SetAdapterCommunicationStateAsync` run through `StateWriteRetry.ExecuteAsync`: when MongoDB aborts the
+transaction with a `TransientTransactionError` label or a `WriteConflict` (code 112) — found anywhere in the
+exception chain — the whole write (new session, new guard timestamp) is repeated, at most 2 times, after a
+jittered 50-200 ms backoff, with a warning per retry. The last exception surfaces unchanged; every other
+error is not retried. Seen on test-2 (tenant wwc26, 2026-10-10) where a lost Online write healed only when
+the operator re-claimed the site 10 s later. Other writes (deployment state, configuration state) are not
+covered.
+
 ## Development Commands
 
 ### Build & Test
