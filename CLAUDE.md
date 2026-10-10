@@ -1310,8 +1310,10 @@ tracker immediately before each write, and the repository's `AttributeNewerThanG
 on the state timestamp rejects a stale Offline that raced past a concurrent Online.
 
 Config: `CommunicationControllerOptions.AdapterOfflineReconciliationIntervalMinutes`
-(default 5) is both the sweep cadence and the startup grace — it must comfortably
-exceed the worst-case adapter reconnect time after a controller restart.
+(default 5) is the sweep cadence and the length of the quiet period after the last adapter
+connection (`Services/ReconciliationGrace`, cap 3 intervals from the start). A fixed delay from the
+controller start was too short on test-2 (AB#6418: cloud adapters reconnected 72 s after it) and wrote
+live adapters Offline.
 
 Tests: `Services/AdapterConnectionTrackerTests` (track / compare-and-remove /
 stale-disconnect-keeps-live / reconnect-then-stale-disconnect) and
@@ -1330,7 +1332,7 @@ while shutting down, the new pod never saw the claim) and the operator never cla
 Studio then showed the site `Online` while every workload notification for it was queued with
 "No operator currently owns deployment site ...".
 
-`DeploymentSiteOfflineReconciliationBackgroundService` (after a startup grace, then periodically,
+`DeploymentSiteOfflineReconciliationBackgroundService` (after the quiet period below, then periodically,
 for every enabled tenant) calls `DeploymentSiteService.ReconcileOrphanedOnlineDeploymentSitesAsync`:
 every site persisted `Online` for which `IOperatorConnectionManager.GetConnectionsForDeploymentSite`
 is empty is written `Offline` (information event on the site). Ownership is re-checked right before
@@ -1340,22 +1342,35 @@ down, also in the middle of a sweep. A site that is claimed later turns `Online`
 `RegisterDeploymentSiteAsync` path, so the sweep never needs to undo anything.
 
 Cloud sites after a controller restart: the central operator reconnects, `RegisterOperatorAsync`
-returns the deployed Cloud sites, the operator re-creates/keeps its CRs and re-claims them. That
-happens within seconds, well inside the startup grace, so a Cloud site is not flipped. If the central
-operator is slower than the grace, the site goes `Offline` and back `Online` on its claim — a visible
-blip, never a lost state.
+returns the deployed Cloud sites, the operator re-creates/keeps its CRs and re-claims them. **Do not
+assume this happens "within seconds"**: on test-2 (2026-10-10) both operators connected 6 minutes after
+the controller start (SignalR reconnect backoff) and the claims of 19 tenants took another 70 s. The first
+version of this sweep used a fixed 5 minute delay from the start and therefore wrote every Cloud site
+(and, through the adapter sweep, every Cloud Mesh Adapter) Offline shortly before its owner claimed it
+again — and the persisted-state metric `octo.workload.communication_state` published that as a critical
+`OctoMeshWorkloadCommunicationDegraded` for up to one metric sweep interval (the first five tenants of
+the sweep order, because the metric sweep trails the reconcile sweep by seconds). Nothing was lost: the
+claims' Online writes landed, the metric just follows the persisted state with up to one interval
+(+ export and alert evaluation) delay.
 
-Config: `CommunicationControllerOptions.DeploymentSiteOfflineReconciliationIntervalMinutes` (default 5)
-is sweep cadence and startup grace; it must exceed the worst-case operator reconnect time. Single
-replica assumption as for adapters (the connection manager is per pod).
+**Grace = quiet period, not a fixed delay (`Services/ReconciliationGrace`).** Both sweeps (sites and
+adapters) judge only when `now - start >= 3 intervals` (also if nobody ever registered: then the owners are
+really gone and the sites end up Offline) **or** when the last operator registration
+(`IOperatorConnectionManager.LastOperatorRegisteredAt`) / adapter connection
+(`IAdapterConnectionTracker.LastConnectedAt`) is at least one interval old. While owners are still
+arriving the sweep keeps waiting; the 3-interval cap stops a flapping owner from blocking it. Rejected:
+"unowned for N consecutive sweeps" — adds a per-site counter and a full extra interval of latency for
+every truly ownerless site, and still fails whenever the owners need longer than N intervals.
 
 `RegisterOperatorAsync` returns the deployed Cloud sites only to central and legacy operators; an
 edge operator (`AutoManageDeploymentSites=false`) gets an empty list — it never acts on them, and the
 list carries tenant ids and site rtIds of other tenants.
 
 Tests: `Services/DeploymentSiteServiceTests/ReconcileOrphanedOnlineDeploymentSitesAsyncTests`,
-`BackgroundServices/DeploymentSiteOfflineReconciliationTests`,
-`Hubs/OperatorHubTests/RegisterOperatorAsyncTests`.
+`BackgroundServices/DeploymentSiteOfflineReconciliationTests` (the test-2 timeline: operator registers
+372 s after the start, ticks before the quiet period is over do not write),
+`BackgroundServices/AdapterOfflineReconciliationTests`, `Services/ReconciliationGraceTests`,
+`Hubs/OperatorConnectionManagerTests`, `Hubs/OperatorHubTests/RegisterOperatorAsyncTests`.
 
 ### Cloud Pool Deploy Tracking (for the PreDeleteTenant cascade)
 

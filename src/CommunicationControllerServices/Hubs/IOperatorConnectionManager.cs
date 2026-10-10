@@ -14,6 +14,13 @@ public interface IOperatorConnectionManager
     void AddOperator(string connectionId);
 
     /// <summary>
+    /// When the latest operator registered on this pod, or <c>null</c> if none has since the process started. Anchor of the quiet period of the deployment-site offline-reconciliation grace (AB#6418): the
+    /// sweep must not judge a site ownerless while operators are still registering and claiming their
+    /// sites after a controller restart.
+    /// </summary>
+    DateTimeOffset? LastOperatorRegisteredAt { get; }
+
+    /// <summary>
     /// Records the operator's declared <c>AutoManageDeploymentSites</c> mode for this
     /// connection. <c>true</c> = central operator (Cloud deploymentSites only),
     /// <c>false</c> = edge operator (Edge deploymentSites only), <c>null</c> = legacy

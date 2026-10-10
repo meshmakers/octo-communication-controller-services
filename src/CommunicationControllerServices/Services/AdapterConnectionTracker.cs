@@ -5,8 +5,11 @@ using NLog;
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
 /// <inheritdoc cref="IAdapterConnectionTracker" />
-internal class AdapterConnectionTracker : IAdapterConnectionTracker
+internal class AdapterConnectionTracker(TimeProvider? timeProvider = null) : IAdapterConnectionTracker
 {
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+    private long _lastConnectedAtTicks;
+
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
     // tenantId -> (adapterRtEntityId -> connectionId). Purely in-memory / per-pod, mutated only
@@ -14,8 +17,19 @@ internal class AdapterConnectionTracker : IAdapterConnectionTracker
     // pre/post-update so it stays an accurate liveness view when the config cache is flushed.
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<RtEntityId, string>> _connectionsByTenant = new();
 
+    public DateTimeOffset? LastConnectedAt
+    {
+        get
+        {
+            var ticks = Interlocked.Read(ref _lastConnectedAtTicks);
+            return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
+        }
+    }
+
     public void TrackConnected(string tenantId, RtEntityId adapterRtEntityId, string connectionId)
     {
+        // Quiet-period anchor of the offline-reconciliation grace (ReconciliationGrace).
+        Interlocked.Exchange(ref _lastConnectedAtTicks, _timeProvider.GetUtcNow().UtcTicks);
         var adapters = _connectionsByTenant.GetOrAdd(tenantId, _ => new ConcurrentDictionary<RtEntityId, string>());
         adapters[adapterRtEntityId] = connectionId;
         Logger.Debug("[{TenantId}] Tracking live connection for adapter '{AdapterRtId}' on '{ConnectionId}'",

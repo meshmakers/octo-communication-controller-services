@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
@@ -18,6 +19,30 @@ internal class OperatorConnectionManagerTests
 
     private static OperatorConnectionManager CreateSut() =>
         new(Substitute.For<IHubContext<OperatorHub>>());
+
+    [Test]
+    public async Task LastOperatorRegisteredAt_NoOperator_IsNull()
+    {
+        var sut = new OperatorConnectionManager(Substitute.For<IHubContext<OperatorHub>>(),
+            new FixedTimeProvider(new DateTime(2026, 10, 10, 16, 0, 0, DateTimeKind.Utc)));
+
+        await Assert.That(sut.LastOperatorRegisteredAt).IsNull();
+    }
+
+    [Test]
+    public async Task LastOperatorRegisteredAt_FollowsTheLatestRegistration_AndSurvivesRemoval()
+    {
+        var clock = new FixedTimeProvider(new DateTime(2026, 10, 10, 16, 0, 0, DateTimeKind.Utc));
+        var sut = new OperatorConnectionManager(Substitute.For<IHubContext<OperatorHub>>(), clock);
+
+        sut.AddOperator("conn-1");
+        clock.UtcNow = clock.UtcNow.AddMinutes(2);
+        sut.AddOperator("conn-2");
+        sut.RemoveOperator("conn-2");
+
+        // A disconnect is not a registration: the quiet period must not restart because an operator left.
+        await Assert.That(sut.LastOperatorRegisteredAt).IsEqualTo(new DateTimeOffset(clock.UtcNow, TimeSpan.Zero));
+    }
 
     private static DeployedDeploymentSiteDto PoolDto(string tenantId, string poolRtId) =>
         new() { TenantId = tenantId, DeploymentSiteRtId = poolRtId };

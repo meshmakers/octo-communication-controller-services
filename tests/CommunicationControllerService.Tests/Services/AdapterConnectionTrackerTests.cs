@@ -89,4 +89,25 @@ internal class AdapterConnectionTrackerTests
 
         await Assert.That(tracker.HasLiveConnection("unknownTenant", AdapterId())).IsFalse();
     }
+
+    [Test]
+    public async Task LastConnectedAt_NothingTracked_IsNull()
+    {
+        var tracker = new AdapterConnectionTracker(new FixedTimeProvider(new DateTime(2026, 10, 10, 16, 0, 0, DateTimeKind.Utc)));
+
+        await Assert.That(tracker.LastConnectedAt).IsNull();
+    }
+
+    [Test]
+    public async Task LastConnectedAt_FollowsTheLatestConnection()
+    {
+        var clock = new FixedTimeProvider(new DateTime(2026, 10, 10, 16, 0, 0, DateTimeKind.Utc));
+        var tracker = new AdapterConnectionTracker(clock);
+
+        tracker.TrackConnected(TenantId, AdapterId(), ConnectionId);
+        clock.UtcNow = clock.UtcNow.AddMinutes(2);
+        tracker.TrackConnected(TenantId, AdapterId(), "other");
+
+        await Assert.That(tracker.LastConnectedAt).IsEqualTo(new DateTimeOffset(clock.UtcNow, TimeSpan.Zero));
+    }
 }
