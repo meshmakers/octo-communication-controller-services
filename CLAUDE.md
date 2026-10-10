@@ -446,7 +446,7 @@ public class MyService(ICommunicationEventService eventService)
 **Communication-state write retry (AB#6435).** `SetDeploymentSiteCommunicationStateAsync` and
 `SetAdapterCommunicationStateAsync` run through `StateWriteRetry.ExecuteAsync`: when MongoDB aborts the
 transaction with a `TransientTransactionError` label or a `WriteConflict` (code 112) — found anywhere in the
-exception chain — the whole write (new session, new guard timestamp) is repeated, at most 2 times, after a
+exception chain — the whole write (new session and transaction) is repeated, at most 2 times, after a
 jittered 50-200 ms backoff, with a warning per retry. The logical write timestamp (entity + `AttributeNewerThanGuard`)
 is taken once before the first attempt and reused by every retry, so a retried stale write cannot overwrite a newer
 state. The last exception surfaces unchanged; every other
