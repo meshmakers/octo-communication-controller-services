@@ -1580,9 +1580,19 @@ covers it. `OperatorHub.RegisterDeploymentSiteAsync` therefore calls
 `DeploymentSiteService.ReconcilePendingWorkloadsAsync` after the AB#4371 flush: every workload of the
 pool still in `DeploymentState=Pending` gets its deploy re-dispatched through the normal
 `DeployWorkloadAsync` path. Best effort — lookup or per-workload failures are logged and never
-fail the registration. Re-dispatching a genuinely in-flight deploy is safe: the operator queue
-is serial and `helm upgrade --install` is idempotent. Tests:
-`Services/PoolServiceTests/ReconcilePendingWorkloadsAsyncTests`.
+fail the registration. Tests: `Services/PoolServiceTests/ReconcilePendingWorkloadsAsyncTests`.
+
+**The re-dispatch is idempotent on the operator side (AB#6471).** The controller cannot tell a lost dispatch
+from one the operator is still running or has finished with the report lost into a dead connection, so the
+re-dispatch of a *genuinely in-flight* deploy is NOT safe by itself: the operator's SignalR queue is serial only
+per connection, and a deploy started on the old connection keeps running across the reconnect. On test-2 (CD run
+52427, 2026-10-10) that produced a second Helm revision per workload (mrotest v39/v40, energytest v38/v39,
+meshtest v104/v105, handelsdemo v52/v53) and `Error` reports for releases Helm had deployed. The fix lives in the
+operator (`WorkloadReconciler`: single-flight per release, desired-state fingerprint stamped as helm
+`--description`, a reconciliation whose release already runs that state does no helm run and reports success — see
+the operator's CLAUDE.md "Idempotent Dispatch After a Controller Restart"). No hub-contract change; an operator
+that pre-dates it keeps the old behaviour (duplicate revision, possible `Error`), so edge operators should be rolled
+before relying on this on a pool that is re-registered often.
 
 **A reconcile is not a release decision (AB#4955).** The re-dispatch above fires on events that
 have nothing to do with releasing software — an operator restart, a blueprint re-apply, a CK-model
