@@ -817,6 +817,25 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyCollection<RtServiceAccountConfiguration>> GetServiceAccountsAsync(string tenantId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtServiceAccountConfiguration>(session,
+                RtEntityQueryOptions.Create());
+
+            return resultSet.Items.ToList();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingServiceAccounts(tenantId, e);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<RtAdapter?> GetAdapterForServiceAccountAsync(string tenantId, OctoObjectId serviceAccountRtId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);

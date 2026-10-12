@@ -1,3 +1,4 @@
+using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -257,4 +258,140 @@ public interface IPipelineServiceAccountProvisioningService
     /// </summary>
     Task<PipelineServiceAccountRotationResult> RotateConfigurationSecretAsync(string tenantId,
         RtServiceAccountConfiguration configuration);
+
+    /// <summary>
+    /// AB#5537 / AB#5114 (concept decision 7): moves one <b>standalone</b> account (a per-pipeline
+    /// override, linked to its pipelines only via <c>Uses</c>) from its stored client secret to
+    /// impersonation by the own clients of the adapters running those pipelines, so no secret of
+    /// it remains stored.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Eligibility.</b> Only standalone accounts that hold a usable secret and whose every using
+    /// adapter has an own account (AB#5072 — the pod's credentials) with a usable secret and a
+    /// different client. An adapter's own account is never switched: it IS the identity the pod
+    /// logs in with, and impersonation needs an actor that can authenticate (see
+    /// <see cref="ServiceAccountImpersonationSwitchOutcome.SkippedAdapterOwnIdentity" />).
+    /// </para>
+    /// <para>
+    /// <b>Order when <paramref name="apply" /> is set</b>, chosen so every intermediate state still
+    /// works: (a) the identity client is converged with its MayActAs edges and the CURRENT secret
+    /// (no rotation yet — running pipelines keep authenticating); (b) the stored secret is cleared
+    /// (an explicit <c>null</c>, which clears a String and a Secret attribute alike). The result is
+    /// <see cref="ServiceAccountImpersonationSwitchOutcome.SwitchedPendingInvalidation" />: the old
+    /// secret is still valid identity-side, because adapters cache it in their pipeline
+    /// configuration until (c) the data flows are redeployed. Only after a successful redeploy does
+    /// the caller (<see cref="IServiceAccountImpersonationSwitchService" />) run (d)
+    /// <see cref="InvalidateSwitchedSecretAsync" />. A failure in (a) or (b) is reported as
+    /// <see cref="ServiceAccountImpersonationSwitchOutcome.Failed" /> with nothing invalidated.
+    /// </para>
+    /// <para>
+    /// A secret-less standalone account whose every using adapter qualifies as actor is reported as
+    /// <see cref="ServiceAccountImpersonationSwitchOutcome.AlreadyImpersonating" /> WITH its
+    /// <see cref="ServiceAccountImpersonationSwitchResult.ActorClientIds" />, so a re-run can complete
+    /// a pending invalidation idempotently.
+    /// </para>
+    /// <para>Never throws for a per-account problem; the outcome carries it.</para>
+    /// </remarks>
+    /// <param name="tenantId">Tenant identifier.</param>
+    /// <param name="configuration">The account to judge (and switch).</param>
+    /// <param name="apply"><c>false</c> = dry run: classify only, write nothing.</param>
+    Task<ServiceAccountImpersonationSwitchResult> SwitchToImpersonationAsync(string tenantId,
+        RtServiceAccountConfiguration configuration, bool apply);
+
+    /// <summary>
+    /// AB#5537: step (d) of the impersonation switch — invalidates the old secret of a switched
+    /// (secret-less) standalone account at the identity service with a throwaway secret that is
+    /// stored nowhere, re-asserting the additive MayActAs edges. Call it only after every data flow
+    /// running a pipeline of the account was redeployed. Idempotent.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier.</param>
+    /// <param name="configuration">The account (re-read; refused when it carries a usable secret again).</param>
+    /// <param name="actorClientIds">The adapter clients that impersonate it (non-empty).</param>
+    /// <exception cref="InvalidOperationException">The account is gone, carries a secret again, or has no client id / actors.</exception>
+    Task InvalidateSwitchedSecretAsync(string tenantId, RtServiceAccountConfiguration configuration,
+        IReadOnlyList<string> actorClientIds);
+}
+
+/// <summary>
+/// AB#5537: what <see cref="IPipelineServiceAccountProvisioningService.SwitchToImpersonationAsync" />
+/// did (or, on a dry run, would do) with one account.
+/// </summary>
+public enum ServiceAccountImpersonationSwitchOutcome
+{
+    /// <summary>Dry run: eligible, nothing written.</summary>
+    WouldSwitch,
+
+    /// <summary>
+    /// The stored secret was cleared, every data flow of the account was redeployed and the old
+    /// secret was invalidated identity-side.
+    /// </summary>
+    Switched,
+
+    /// <summary>
+    /// The stored secret was cleared, but the old secret is still valid at the identity service:
+    /// the data flows were not redeployed (<c>redeployDataFlows=false</c>), a redeploy failed, or the
+    /// identity service could not be reached for the invalidation. Re-run the switch with
+    /// <c>redeployDataFlows=true</c> to complete it (idempotent).
+    /// </summary>
+    SwitchedPendingInvalidation,
+
+    /// <summary>The account holds no usable secret — it already runs on impersonation.</summary>
+    AlreadyImpersonating,
+
+    /// <summary>
+    /// The account is an adapter's own identity (the <c>PipelineServiceAccount</c> edge). Its secret
+    /// is the credential the adapter pod logs in with (AB#5072) — the actor every impersonation
+    /// needs — and cannot be cleared until adapters receive an installation-level credential.
+    /// </summary>
+    SkippedAdapterOwnIdentity,
+
+    /// <summary>
+    /// No pipeline uses the account, or at least one using adapter has no own client with a usable
+    /// secret that could impersonate it; clearing the secret would break those pipelines.
+    /// </summary>
+    SkippedNoCapableActor,
+
+    /// <summary>The account has no client id; reconcile it first.</summary>
+    SkippedIncomplete,
+
+    /// <summary>The switch failed; the message names the step. Nothing was cleared unless it says so.</summary>
+    Failed
+}
+
+/// <summary>
+/// AB#5537: result of switching one account to impersonation.
+/// </summary>
+/// <param name="ConfigurationRtId">The account.</param>
+/// <param name="WellKnownName">Its <c>RtWellKnownName</c> (or rtId when unnamed).</param>
+/// <param name="ClientId">Its identity client id, when known.</param>
+/// <param name="Outcome">What happened.</param>
+/// <param name="Message">Human-readable reason. Never contains a secret.</param>
+/// <param name="PipelineRtIds">The pipelines using the account — the ones to redeploy after a switch.</param>
+/// <param name="ActorClientIds">
+/// The adapter clients that impersonate the account, when every using adapter qualifies; empty
+/// otherwise. Non-empty on <see cref="ServiceAccountImpersonationSwitchOutcome.SwitchedPendingInvalidation" />
+/// and on an <see cref="ServiceAccountImpersonationSwitchOutcome.AlreadyImpersonating" /> account
+/// whose (possibly pending) invalidation a run may complete.
+/// </param>
+public record ServiceAccountImpersonationSwitchResult(
+    OctoObjectId ConfigurationRtId,
+    string WellKnownName,
+    string? ClientId,
+    ServiceAccountImpersonationSwitchOutcome Outcome,
+    string Message,
+    IReadOnlyList<OctoObjectId> PipelineRtIds,
+    IReadOnlyList<string>? ActorClientIds = null)
+{
+    /// <summary>True when the stored secret was cleared by this run.</summary>
+    public bool SecretCleared => Outcome is ServiceAccountImpersonationSwitchOutcome.Switched
+        or ServiceAccountImpersonationSwitchOutcome.SwitchedPendingInvalidation;
+
+    /// <summary>
+    /// True when a run with a successful redeploy may invalidate the account's old secret
+    /// (step (d)): its secret is cleared and every using adapter qualifies as actor.
+    /// </summary>
+    public bool CanCompleteInvalidation => ActorClientIds is { Count: > 0 } &&
+                                           Outcome is ServiceAccountImpersonationSwitchOutcome.SwitchedPendingInvalidation
+                                               or ServiceAccountImpersonationSwitchOutcome.AlreadyImpersonating;
 }

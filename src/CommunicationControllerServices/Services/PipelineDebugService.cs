@@ -25,10 +25,28 @@ internal class PipelineDebugService : IPipelineDebugService
             {
                 Messages = debugPoint.Messages,
                 Input = ToElement(debugPoint.Input),
-                Output = ToElement(debugPoint.Output)
+                Output = ToElement(debugPoint.Output),
+                RedactedPaths = SnapshotRedactedPaths(debugPoint.RedactedPaths)
             };
 
             _debugInfo.AddOrUpdate(nodePath, debugInfo, (_, _) => debugInfo);
+        }
+
+        /// <summary>
+        /// Handover section 11: the paths are rooted at the delivered snapshot object, which has
+        /// <c>input</c> and <c>output</c> only; paths into parts Studio never receives (the adapter also
+        /// reports <c>$.dryRunIntent…</c>) are dropped. <c>null</c> when nothing remains.
+        /// </summary>
+        private static IReadOnlyList<string>? SnapshotRedactedPaths(IReadOnlyList<string>? paths)
+        {
+            var kept = paths?.Where(p => IsUnderRoot(p, "$.input") || IsUnderRoot(p, "$.output")).ToArray();
+            return kept is { Length: > 0 } ? kept : null;
+        }
+
+        private static bool IsUnderRoot(string path, string root)
+        {
+            return path.StartsWith(root, StringComparison.Ordinal) &&
+                   (path.Length == root.Length || path[root.Length] is '.' or '[');
         }
 
         /// <summary>

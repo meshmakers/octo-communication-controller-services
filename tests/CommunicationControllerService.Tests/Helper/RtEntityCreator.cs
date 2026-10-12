@@ -107,7 +107,7 @@ internal static class RtEntityCreator
             // All four attributes are mandatory on the CK type — the generated getters throw
             // InvalidAttributeValueException on null, and Serialize() reads every one of them.
             ClientId = "client-id",
-            ClientSecret = "client-secret",
+            ClientSecret = SecretTestValues.Stored("client-secret"),
             IssuerUri = "https://identity.example.com",
             TenantId = "tenantId"
         };

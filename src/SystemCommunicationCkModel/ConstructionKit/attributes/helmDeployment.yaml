@@ -99,16 +99,25 @@ attributes:
   isRuntimeState: true
 - id: Value
   valueType: String
-  description: 'String value of a ValueOverride entry. Encrypted at rest when the entry is flagged IsSecret.'
+  description: 'String value of a ValueOverride entry (plain text, readable and templatable). For entries flagged IsSecret the value belongs in SecretValue; a legacy enc:v1 Value on an IsSecret entry is still decrypted at deploy time but deprecated (AB#5537).'
   isRuntimeState: true
+# AB#5537 (4.8.0): the value of a secret-flagged ValueOverride entry, encrypted by the engine.
+# A separate definition instead of turning Value into Secret: Value is shared by the non-secret
+# overrides (image.tag, publicUri, {{service.*}} templates, seeded by app blueprints), which must
+# stay readable, templatable and seedable (the seed lint only allows placeholders for Secret
+# values). Readers take SecretValue for IsSecret entries and fall back to a legacy (enc:v1) Value.
+- id: SecretValue
+  valueType: Secret
+  ownership: Secret
+  description: 'Secret value of a ValueOverride entry flagged IsSecret. Write the plaintext (never an encrypt-value ciphertext); the engine encrypts it. Reads only report whether it is set. Path identifies the entry: keep at most one entry with a SecretValue per Path.'
 - id: IsSecret
   valueType: Boolean
-  description: 'When true, the ValueOverride.Value is encrypted at rest in MongoDB and rendered as a Kubernetes Secret reference at deploy time.'
+  description: 'When true, the entry is a secret: its value is stored in SecretValue (a Secret attribute, encrypted by the engine) and rendered as a Kubernetes Secret reference at deploy time. Value is not encrypted; a legacy enc:v1 Value is still honoured but deprecated (AB#5537).'
   isRuntimeState: true
   defaultValues:
     - false
 - id: Values
   valueType: RecordArray
   valueCkRecordId: ${this}/ValueOverride
-  description: 'Structured Helm value overrides. Deep-merged on top of ValuesYaml during deploy. Entries flagged IsSecret are stored encrypted. Runtime-state (AB#4706): operator-managed overrides (e.g. publicUri, clientId) are preserved across blueprint re-apply; a blueprint that needs to ship NEW default overrides only seeds them on fresh installs.'
+  description: 'Structured Helm value overrides. Deep-merged on top of ValuesYaml during deploy. Entries flagged IsSecret keep their value in SecretValue (encrypted by the engine); at most one entry carrying a SecretValue per Path. Runtime-state (AB#4706): operator-managed overrides (e.g. publicUri, clientId) are preserved across blueprint re-apply; a blueprint that needs to ship NEW default overrides only seeds them on fresh installs.'
   isRuntimeState: true

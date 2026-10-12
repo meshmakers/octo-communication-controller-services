@@ -9,6 +9,7 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using Meshmakers.Octo.Runtime.Contracts.Secrets;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands.Payloads;
 using Microsoft.Extensions.Options;
@@ -29,7 +30,8 @@ internal class PipelineServiceAccountProvisioningService(
     IPipelineServiceAccountResolver serviceAccountResolver,
     IServiceProvider serviceProvider,
     ICommunicationEventService eventService,
-    IOptions<CommunicationControllerOptions> options)
+    IOptions<CommunicationControllerOptions> options,
+    IWorkloadEncryptionService encryptionService)
     : IPipelineServiceAccountProvisioningService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
@@ -189,7 +191,7 @@ internal class PipelineServiceAccountProvisioningService(
             // impersonating itself, which authorizes nothing the client cannot already do. The
             // meaningful edges (adapter-own client → per-pipeline override client) are materialised
             // by the standalone branch of ReconcileConfigurationAsync.
-            mayActAsClientIds: null,
+            mayActAsClientIds: null, impersonationCapable: false,
             (entity, isNewEntity) => communicationRepository.SavePipelineServiceAccountAsync(tenantId,
                 adapter.ToRtEntityId(), entity, isNewEntity));
 
@@ -237,8 +239,16 @@ internal class PipelineServiceAccountProvisioningService(
         var mayActAsClientIds = await ResolveImpersonationActorClientIdsAsync(tenantId, configuration.RtId,
             wellKnownName, clientId);
 
+        // AB#5537: whether impersonation may STAND IN for a missing secret is judged strictly —
+        // every adapter running a pipeline of the account must hold a usable own secret (the same
+        // check the impersonation switch uses). The lenient actor list above only decides which
+        // edges to declare; a single incapable adapter means the account needs a real secret.
+        var impersonationCapable = mayActAsClientIds is { Count: > 0 } &&
+                                   await IsImpersonationCapableAsync(tenantId, configuration.RtId, wellKnownName,
+                                       clientId);
+
         var result = await ReconcileCoreAsync(tenantId, configuration, isLinked: true, wellKnownName, clientId,
-            BuildStandaloneClientDisplayName(wellKnownName), context, mayActAsClientIds,
+            BuildStandaloneClientDisplayName(wellKnownName), context, mayActAsClientIds, impersonationCapable,
             (entity, _) => communicationRepository.UpdateServiceAccountAsync(tenantId, entity));
 
         if (result.Outcome != PipelineServiceAccountProvisioningOutcome.AlreadyProvisioned)
@@ -273,11 +283,16 @@ internal class PipelineServiceAccountProvisioningService(
     ///     as additive <c>MayActAs</c> edges. <c>null</c> = no edge changes (the adapter path, and
     ///     standalone accounts whose using adapters could not be resolved).
     /// </param>
+    /// <param name="impersonationCapable">
+    ///     AB#5537: every adapter using the account holds a usable own secret (strict check, see
+    ///     <see cref="AnalyseImpersonationActorsAsync" />). Only then may a missing secret stand in
+    ///     for impersonation; otherwise a fresh secret is issued. Always <c>false</c> on the adapter path.
+    /// </param>
     /// <param name="saveAsync">Writes the (new or repaired) entity; receives <c>isNewEntity</c>.</param>
     private async Task<ServiceAccountReconcileResult> ReconcileCoreAsync(string tenantId,
         RtServiceAccountConfiguration? existing, bool isLinked, string wellKnownName, string clientId,
         string clientDisplayName, ServiceAccountReconcileContext context, IList<string>? mayActAsClientIds,
-        Func<RtServiceAccountConfiguration, bool, Task> saveAsync)
+        bool impersonationCapable, Func<RtServiceAccountConfiguration, bool, Task> saveAsync)
     {
         // Read through GetAttributeValueOrDefault, never through the generated properties — kept
         // even though 3.33.0 made IssuerUri/ClientSecret/TenantId optional (their getters no
@@ -285,7 +300,13 @@ internal class PipelineServiceAccountProvisioningService(
         // half-written entity is exactly what this method exists to repair. The two declaration
         // attributes are optional and read through their (OrDefault-based) generated properties
         // below.
-        var existingSecret = ReadAttribute(existing, nameof(RtServiceAccountConfiguration.ClientSecret));
+        // AB#5537: the stored secret is revealed — it is re-sent to identity below. A secret that
+        // cannot be decrypted (key ring missing on this pod, unknown key id — KeyMissing, e.g. after a
+        // restore from another environment —, tampered value) aborts the pass BEFORE anything is
+        // written, with an error log: treating it as "no secret" would rotate a live credential (or
+        // one that becomes readable once its key is added) as a side effect of a configuration
+        // problem (decisions 2026-10-06, item 2). Re-entry or the rotate endpoint resolves it.
+        var existingSecret = RevealClientSecret(tenantId, existing);
         var existingClientId = ReadAttribute(existing, nameof(RtServiceAccountConfiguration.ClientId));
         var existingIssuerUri = ReadAttribute(existing, nameof(RtServiceAccountConfiguration.IssuerUri));
         var existingTenantId = ReadAttribute(existing, nameof(RtServiceAccountConfiguration.TenantId));
@@ -293,10 +314,20 @@ internal class PipelineServiceAccountProvisioningService(
         // AB#5115: IssuerUri and TenantId are no longer part of "complete" — empty is the
         // canonical value ("the adapter's own installation / the tenant the adapter runs for"),
         // and a concrete foreign value is a deliberate author choice. What still makes an entity
-        // incomplete: no secret (the dual-path transition keeps issuing one — impersonation-only
-        // accounts are authored, never generated), no client id, no well-known name.
+        // incomplete: no usable secret (unless impersonation stands in, see below), no client id,
+        // no well-known name.
+        //
+        // AB#5114/AB#5537: an account without a usable secret (unset, or a legacy clear-text seed
+        // placeholder that the migration has not converted yet) is complete when
+        // impersonation can stand in: a standalone account whose using adapters' own clients may
+        // act as it (mayActAsClientIds non-empty) AND every one of which holds a usable own secret
+        // (impersonationCapable — the strict check of the impersonation switch). Issuing a secret
+        // for it would silently undo a deliberate switch to impersonation (decision 7). The adapter path passes no actors, so
+        // an adapter's own account always gets a real secret — it is the pod's identity.
+        var secretUsable = IsSecretUsable(existingSecret);
+        var impersonating = !secretUsable && impersonationCapable && mayActAsClientIds is { Count: > 0 };
         var isComplete = existing != null &&
-                         !string.IsNullOrWhiteSpace(existingSecret) &&
+                         (secretUsable || impersonating) &&
                          !string.IsNullOrWhiteSpace(existingClientId) &&
                          // The projection keys GlobalConfiguration on RtWellKnownName and throws on
                          // null — an unnamed entity is unusable and gets the deterministic name.
@@ -369,7 +400,11 @@ internal class PipelineServiceAccountProvisioningService(
         // deleted underneath us. A fresh secret is generated ONLY when none exists (AB#5111
         // tightened this: AB#5027 also re-issued when some OTHER attribute was missing, which
         // rotated a live credential as a side effect of an unrelated repair).
-        var secret = !string.IsNullOrWhiteSpace(existingSecret)
+        //
+        // On the impersonation path the identity client still requires a secret, so it receives a
+        // fresh throwaway value that is never stored anywhere: nothing can authenticate with it,
+        // and any secret the account carried before stops working.
+        var secret = secretUsable
             ? existingSecret!
             : GenerateSecret();
 
@@ -385,7 +420,7 @@ internal class PipelineServiceAccountProvisioningService(
                 clientId, wellKnownName, roleChangesSkipped);
         }
 
-        var entity = BuildServiceAccount(existing?.RtId, wellKnownName, clientId, secret,
+        var entity = BuildServiceAccount(existing?.RtId, wellKnownName, clientId, impersonating ? null : secret,
             // AB#5115: a new entity is born with issuer and tenant EMPTY (the adapter's own
             // installation and tenant); a repaired entity carries the converged values — empty for
             // the installation spellings, verbatim for a deliberate foreign target.
@@ -474,7 +509,20 @@ internal class PipelineServiceAccountProvisioningService(
     {
         // The plaintext currently in the configuration, i.e. the one every running pipeline of this
         // account is presenting. Kept only to be able to put it back if the write below fails.
-        var previousSecret = ReadAttribute(existing, nameof(RtServiceAccountConfiguration.ClientSecret));
+        // AB#5537: revealed; a value that cannot be decrypted simply leaves nothing to roll back to.
+        string? previousSecret;
+        try
+        {
+            previousSecret = RevealClientSecret(tenantId, existing);
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(
+                "[{TenantId}] The current secret of pipeline service account '{WellKnownName}' could not be decrypted ({ExceptionType}); the rotation proceeds without a rollback value",
+                tenantId, wellKnownName, e.GetType().Name);
+            previousSecret = null;
+        }
+
         var isNewEntity = existing == null;
         var allowDelegation = existing?.AllowDelegation ?? true;
 
@@ -503,7 +551,7 @@ internal class PipelineServiceAccountProvisioningService(
             // The only genuinely inconsistent window: the client already carries the new hash while
             // the configuration still holds the old plaintext. Push the old one back so the adapters
             // running on it keep working, then let the failure surface.
-            if (!string.IsNullOrWhiteSpace(previousSecret))
+            if (IsSecretUsable(previousSecret))
             {
                 try
                 {
@@ -529,6 +577,304 @@ internal class PipelineServiceAccountProvisioningService(
         return new PipelineServiceAccountRotationResult(clientId, wellKnownName, isNewEntity);
     }
 
+    /// <inheritdoc />
+    public async Task<ServiceAccountImpersonationSwitchResult> SwitchToImpersonationAsync(string tenantId,
+        RtServiceAccountConfiguration configuration, bool apply)
+    {
+        var wellKnownName = configuration.RtWellKnownName ?? configuration.RtId.ToString();
+        var clientId = ReadAttribute(configuration, nameof(RtServiceAccountConfiguration.ClientId));
+        IReadOnlyList<OctoObjectId> pipelineRtIds = [];
+        IReadOnlyList<string> actors = [];
+
+        ServiceAccountImpersonationSwitchResult Result(ServiceAccountImpersonationSwitchOutcome outcome,
+            string message)
+        {
+            return new ServiceAccountImpersonationSwitchResult(configuration.RtId, wellKnownName, clientId, outcome,
+                message, pipelineRtIds, actors);
+        }
+
+        try
+        {
+            var owningAdapter = await communicationRepository.GetAdapterForServiceAccountAsync(tenantId,
+                configuration.RtId);
+            if (owningAdapter != null)
+            {
+                return Result(ServiceAccountImpersonationSwitchOutcome.SkippedAdapterOwnIdentity,
+                    $"Own identity of adapter '{owningAdapter.Name ?? owningAdapter.RtId.ToString()}': the pod logs in " +
+                    "with this secret (AB#5072) and every impersonation needs it as the actor. It can only be cleared " +
+                    "once adapters authenticate with an installation-level credential.");
+            }
+
+            if (string.IsNullOrWhiteSpace(clientId))
+            {
+                return Result(ServiceAccountImpersonationSwitchOutcome.SkippedIncomplete,
+                    "The configuration names no ClientId; reconcile it first.");
+            }
+
+            var storedSecret = configuration.GetAttributeValueOrDefault(nameof(RtServiceAccountConfiguration.ClientSecret));
+            var pipelines = await communicationRepository.GetPipelinesUsingServiceAccountAsync(tenantId,
+                configuration.RtId) ?? [];
+            pipelineRtIds = pipelines.Select(p => p.RtId).ToList();
+
+            var (actorClientIds, incapableAdapters) = await AnalyseImpersonationActorsAsync(tenantId, pipelines,
+                clientId!);
+            var actorsCapable = actorClientIds.Count > 0 && incapableAdapters.Count == 0;
+
+            var storedSecretInfo = encryptionService.DescribeSecret(storedSecret);
+            if (storedSecretInfo.KeyMissing)
+            {
+                // Decisions 2026-10-06, item 2: stored but unreadable here. Not "no secret": the switch
+                // needs the current plaintext (step a), and clearing it would destroy a value that
+                // becomes readable once its key is added.
+                return Result(ServiceAccountImpersonationSwitchOutcome.SkippedIncomplete,
+                    $"The stored client secret is encrypted with key id '{storedSecretInfo.KeyId}', which is not in " +
+                    "this environment's key ring. Add the key to the ring, or enter / rotate the secret first.");
+            }
+
+            if (!storedSecretInfo.IsSet)
+            {
+                // A secret-less account whose actors all qualify may still have an old secret valid
+                // identity-side (an earlier switch whose invalidation is pending). The actors are
+                // carried so the tenant-wide switch can complete that invalidation after a
+                // successful redeploy — idempotently (a throwaway secret replaces a throwaway one).
+                actors = actorsCapable ? actorClientIds.ToList() : [];
+                return Result(ServiceAccountImpersonationSwitchOutcome.AlreadyImpersonating,
+                    "No usable secret is stored; the account already runs on impersonation.");
+            }
+
+            if (!actorsCapable)
+            {
+                var reason = incapableAdapters.Count > 0
+                    ? $"adapter(s) {string.Join(", ", incapableAdapters.Select(a => $"'{a}'"))} have no own client with a usable secret that could impersonate it"
+                    : "no pipeline uses it, so no adapter client could impersonate it";
+                return Result(ServiceAccountImpersonationSwitchOutcome.SkippedNoCapableActor,
+                    $"Not switched: {reason}. Reconcile the adapters (or link the account) first.");
+            }
+
+            actors = actorClientIds.ToList();
+            if (!apply)
+            {
+                return Result(ServiceAccountImpersonationSwitchOutcome.WouldSwitch,
+                    $"Eligible: impersonated by {string.Join(", ", actorClientIds)}; {pipelineRtIds.Count} pipeline(s) to redeploy.");
+            }
+
+            var displayName = BuildStandaloneClientDisplayName(wellKnownName);
+            var allowDelegation = configuration.AllowDelegation ?? true;
+
+            // (a) Edges first, with the CURRENT secret — no rotation, running pipelines keep working.
+            var currentSecret = RevealClientSecret(tenantId, configuration);
+            if (!IsSecretUsable(currentSecret))
+            {
+                actors = [];
+                return Result(ServiceAccountImpersonationSwitchOutcome.AlreadyImpersonating,
+                    "No usable secret is stored; the account already runs on impersonation.");
+            }
+
+            await SendIdentityClientAsync(tenantId, displayName, clientId!, currentSecret!, assignedRoleNames: null,
+                allowDelegation, actorClientIds);
+
+            // (b) Clear the stored secret. The old secret stays VALID identity-side: adapters that
+            // still hold it in their cached pipeline configuration keep authenticating until the
+            // data flows are redeployed (c); only then is it invalidated (d,
+            // InvalidateSwitchedSecretAsync). A failed write here leaves everything as it was
+            // (edges are additive and harmless) and is reported as Failed.
+            await communicationRepository.UpdateServiceAccountAsync(tenantId,
+                BuildServiceAccount(configuration.RtId, wellKnownName, clientId!, secret: null,
+                    ConvergeIssuerUri(ReadAttribute(configuration, nameof(RtServiceAccountConfiguration.IssuerUri)),
+                        options.Value.AuthorityUrl),
+                    ConvergeTenantId(ReadAttribute(configuration, nameof(RtServiceAccountConfiguration.TenantId)),
+                        tenantId),
+                    configuration.AssignedRoleNames, configuration.AllowDelegation));
+
+            await StoreSwitchEventAsync(tenantId,
+                $"Pipeline service account '{wellKnownName}' (client '{clientId}') switched to impersonation " +
+                $"(AB#5114, decision 7): its stored client secret was cleared; adapters {string.Join(", ", actorClientIds)} " +
+                "impersonate it. The old secret is invalidated once its data flows are redeployed.");
+
+            Logger.Info(
+                "[{TenantId}] Pipeline service account '{WellKnownName}' (client '{ClientId}') cleared its stored secret for impersonation by {ActorCount} adapter client(s); invalidation pending the redeploy",
+                tenantId, wellKnownName, clientId, actorClientIds.Count);
+            return Result(ServiceAccountImpersonationSwitchOutcome.SwitchedPendingInvalidation,
+                $"Stored secret cleared; impersonated by {string.Join(", ", actorClientIds)}. The old secret stays " +
+                "valid until the data flows are redeployed and it is invalidated.");
+        }
+        catch (Exception e)
+        {
+            // 🔴 Exception messages on these paths never carry a secret (repository and bus errors
+            // name ids only), but log the type and message, not the entity.
+            Logger.Error(e,
+                "[{TenantId}] Switching pipeline service account '{WellKnownName}' to impersonation failed",
+                tenantId, wellKnownName);
+            actors = [];
+            return Result(ServiceAccountImpersonationSwitchOutcome.Failed,
+                $"Failed ({e.GetType().Name}): {e.Message}");
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task InvalidateSwitchedSecretAsync(string tenantId, RtServiceAccountConfiguration configuration,
+        IReadOnlyList<string> actorClientIds)
+    {
+        if (actorClientIds.Count == 0)
+        {
+            throw new InvalidOperationException("No impersonation actors are known; nothing may be invalidated.");
+        }
+
+        var wellKnownName = configuration.RtWellKnownName ?? configuration.RtId.ToString();
+
+        // Re-read: between clearing and invalidating, another pass (a reconcile) may have issued a
+        // fresh STORED secret — invalidating it identity-side would break the account.
+        var current = await communicationRepository.GetServiceAccountByRtIdAsync(tenantId, configuration.RtId)
+                      ?? throw new InvalidOperationException(
+                          $"Service account configuration '{configuration.RtId}' no longer exists.");
+        // Anything stored counts here - a value whose key id is unknown as well: it is not ours to
+        // invalidate.
+        if (encryptionService.DescribeSecret(
+                current.GetAttributeValueOrDefault(nameof(RtServiceAccountConfiguration.ClientSecret))).State !=
+            SecretValueState.NotSet)
+        {
+            throw new InvalidOperationException(
+                "The account carries a stored secret again (reconciled or edited meanwhile); it was not invalidated.");
+        }
+
+        var clientId = ReadAttribute(current, nameof(RtServiceAccountConfiguration.ClientId));
+        if (string.IsNullOrWhiteSpace(clientId))
+        {
+            throw new InvalidOperationException("The configuration names no ClientId.");
+        }
+
+        // A throwaway secret stored nowhere replaces the old one; the (additive) edges are
+        // re-asserted on the same call, exactly like a reconcile of an impersonating account.
+        await SendIdentityClientAsync(tenantId, BuildStandaloneClientDisplayName(wellKnownName), clientId!,
+            GenerateSecret(), assignedRoleNames: null, current.AllowDelegation ?? true, actorClientIds.ToList());
+
+        Logger.Info(
+            "[{TenantId}] Pipeline service account '{WellKnownName}' (client '{ClientId}'): the old secret was invalidated at the identity service after the redeploy",
+            tenantId, wellKnownName, clientId);
+    }
+
+    /// <summary>
+    /// AB#5537: the strict impersonation check for the reconcile — <c>true</c> only when the account
+    /// is used and every adapter running one of its pipelines can act as it
+    /// (<see cref="AnalyseImpersonationActorsAsync" />). A lookup failure answers <c>false</c>: the
+    /// reconcile then issues a real secret, the safe direction for a running pipeline.
+    /// </summary>
+    private async Task<bool> IsImpersonationCapableAsync(string tenantId, OctoObjectId configurationRtId,
+        string wellKnownName, string targetClientId)
+    {
+        try
+        {
+            var pipelines = await communicationRepository
+                .GetPipelinesUsingServiceAccountAsync(tenantId, configurationRtId) ?? [];
+            var (actorClientIds, incapableAdapters) =
+                await AnalyseImpersonationActorsAsync(tenantId, pipelines, targetClientId);
+            if (incapableAdapters.Count > 0)
+            {
+                Logger.Warn(
+                    "[{TenantId}] Standalone pipeline service account '{WellKnownName}' (client '{ClientId}') cannot run on impersonation: adapter(s) {Adapters} hold no usable own secret. A stored secret is issued instead (AB#5537).",
+                    tenantId, wellKnownName, targetClientId, string.Join(", ", incapableAdapters));
+            }
+
+            return actorClientIds.Count > 0 && incapableAdapters.Count == 0;
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e,
+                "[{TenantId}] Could not verify the impersonation actors of standalone pipeline service account '{WellKnownName}' (client '{ClientId}'); treating it as not impersonation-capable (AB#5537)",
+                tenantId, wellKnownName, targetClientId);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// AB#5537: the impersonation actors of a standalone account — and the adapters that could NOT
+    /// act as it. Stricter than <see cref="ResolveImpersonationActorClientIdsAsync" /> (which only
+    /// needs a client id to declare edges): clearing a secret is only safe when every adapter
+    /// running a pipeline of the account can authenticate itself, i.e. its own account carries a
+    /// usable secret and is a different client.
+    /// </summary>
+    private async Task<(IList<string> ActorClientIds, IList<string> IncapableAdapters)>
+        AnalyseImpersonationActorsAsync(string tenantId, IEnumerable<RtPipeline> pipelines, string targetClientId)
+    {
+        var actorClientIds = new SortedSet<string>(StringComparer.Ordinal);
+        var incapableAdapters = new SortedSet<string>(StringComparer.Ordinal);
+        var seenAdapterRtIds = new HashSet<OctoObjectId>();
+        foreach (var pipeline in pipelines)
+        {
+            RtAdapter? adapter;
+            try
+            {
+                adapter = await communicationRepository.GetAdapterByPipelineAsync(tenantId, pipeline.ToRtEntityId());
+            }
+            catch (CommunicationRepositoryException)
+            {
+                // Not assigned to any adapter: nothing executes it, nothing breaks.
+                continue;
+            }
+
+            if (adapter == null || !seenAdapterRtIds.Add(adapter.RtId))
+            {
+                continue;
+            }
+
+            var adapterDefault = await serviceAccountResolver.GetAdapterDefaultAsync(tenantId, adapter.RtId);
+            var actorClientId = ReadAttribute(adapterDefault, nameof(RtServiceAccountConfiguration.ClientId));
+            if (string.IsNullOrWhiteSpace(actorClientId) || actorClientId == targetClientId ||
+                !IsActorSecretUsable(tenantId, adapterDefault))
+            {
+                incapableAdapters.Add(adapter.Name ?? adapter.RtId.ToString());
+                continue;
+            }
+
+            actorClientIds.Add(actorClientId!);
+        }
+
+        return (actorClientIds.ToList(), incapableAdapters.ToList());
+    }
+
+    /// <summary>
+    /// AB#5537: whether an impersonation actor's own secret is usable — the check that decides
+    /// whether another account may lose (or never receive) its stored secret, so it is stricter than
+    /// the presence check (<see cref="IWorkloadEncryptionService.DescribeSecret" />) for exactly one
+    /// form: a <see cref="RtSecretValue.IsLegacyPlaintext" /> value is revealed, so strict mode
+    /// rejecting legacy clear text answers "not usable". Everything else is judged without
+    /// decrypting; a key id that is not in the ring (<see cref="SecretValueState.KeyMissing" />) is not
+    /// usable. A reveal that fails answers "not usable" — the safe direction.
+    /// </summary>
+    private bool IsActorSecretUsable(string tenantId, RtServiceAccountConfiguration? actorAccount)
+    {
+        var raw = actorAccount?.GetAttributeValueOrDefault(nameof(RtServiceAccountConfiguration.ClientSecret));
+        var info = encryptionService.DescribeSecret(raw);
+        if (!info.IsSet || raw is not RtSecretValue { IsLegacyPlaintext: true })
+        {
+            return info.IsSet;
+        }
+
+        try
+        {
+            return IsSecretUsable(RevealClientSecret(tenantId, actorAccount));
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e,
+                "[{TenantId}] The legacy client secret of impersonation actor '{WellKnownName}' could not be revealed; it counts as not usable",
+                tenantId, actorAccount!.RtWellKnownName);
+            return false;
+        }
+    }
+
+    private async Task StoreSwitchEventAsync(string tenantId, string message)
+    {
+        try
+        {
+            await eventService.StoreInformationEventAsync(tenantId, message);
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e, "[{TenantId}] Could not store the impersonation switch event", tenantId);
+        }
+    }
+
     /// <summary>
     /// The configuration entity every convergence and rotation path writes. Kept in one place so a
     /// rotated entity can never drift from a provisioned one.
@@ -536,7 +882,11 @@ internal class PipelineServiceAccountProvisioningService(
     /// <param name="existingRtId">The entity to update in place, or <c>null</c> to mint a new id.</param>
     /// <param name="wellKnownName">The deterministic <c>RtWellKnownName</c>.</param>
     /// <param name="clientId">The identity client id.</param>
-    /// <param name="secret">The plaintext secret. 🔴 Never log the returned entity.</param>
+    /// <param name="secret">
+    ///     The plaintext secret, or <c>null</c> to clear it (AB#5114 impersonation — an explicit
+    ///     <c>null</c> clears a String and a Secret attribute alike on update). 🔴 Never log the
+    ///     returned entity.
+    /// </param>
     /// <param name="issuerUri">
     ///     AB#5115: <c>null</c> keeps the attribute absent — the canonical "this adapter's own
     ///     installation", which the adapter resolves against its own authority configuration. A
@@ -555,7 +905,7 @@ internal class PipelineServiceAccountProvisioningService(
     /// </param>
     /// <param name="allowDelegation"><c>null</c> keeps the attribute absent (legacy = true).</param>
     private static RtServiceAccountConfiguration BuildServiceAccount(OctoObjectId? existingRtId,
-        string wellKnownName, string clientId, string secret, string? issuerUri, string? tenantId,
+        string wellKnownName, string clientId, string? secret, string? issuerUri, string? tenantId,
         IAttributeValueList<string>? assignedRoleNames, bool? allowDelegation)
     {
         var serviceAccount = new RtServiceAccountConfiguration
@@ -564,10 +914,11 @@ internal class PipelineServiceAccountProvisioningService(
             CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
             RtWellKnownName = wellKnownName,
             ClientId = clientId,
-            // `ClientSecret` is marked isRuntimeState (AB#5027), which only stops a blueprint
-            // re-apply from overwriting it — the runtime write path used here is unaffected, and it
-            // is exactly why rotation has to go through this path rather than through a seed.
-            ClientSecret = secret
+            // `ClientSecret` has ownership Secret (4.8.0, AB#5537): a blueprint re-apply keeps it,
+            // the runtime write path used here is unaffected — exactly why rotation has to go
+            // through this path rather than through a seed. The plaintext is handed to the engine
+            // as a pending value and encrypted on write; null (explicit) clears it.
+            ClientSecret = secret == null ? null : RtSecretValue.Pending(secret)
         };
 
         if (issuerUri != null)
@@ -766,15 +1117,60 @@ internal class PipelineServiceAccountProvisioningService(
     }
 
     /// <summary>
-    /// AB#5114: whether a persisted <c>ClientSecret</c> is an actual credential. Mirrors the mesh
-    /// adapter's <c>ServiceAccountTokenService.IsSecretUsable</c> byte for byte — empty and the
-    /// angle-bracket seed placeholder (<c>&lt;insert secret here&gt;</c>) both mean "no secret",
-    /// i.e. the account is used via impersonation, and guard/health must judge it the same way the
-    /// adapter will.
+    /// AB#5114: whether a (revealed) <c>ClientSecret</c> is an actual credential — any non-blank
+    /// value. Mirrors the mesh adapter's <c>ServiceAccountTokenService.IsSecretUsable</c>: empty means
+    /// "no secret", i.e. the account is used via impersonation, and guard/health must judge it the
+    /// same way the adapter will. A placeholder-looking value is an ordinary secret (decisions
+    /// 2026-10-06, item 1); legacy seed placeholders still stored as clear text are "not set" by the
+    /// presence check (<see cref="IWorkloadEncryptionService.DescribeSecret" />) and converted by the
+    /// encrypt sweep / CK migration.
     /// </summary>
     internal static bool IsSecretUsable(string? clientSecret)
     {
-        return !string.IsNullOrWhiteSpace(clientSecret) && !clientSecret.TrimStart().StartsWith('<');
+        return !string.IsNullOrWhiteSpace(clientSecret);
+    }
+
+    /// <summary>
+    /// AB#5537: the plaintext client secret of an account, through the controller's reveal point —
+    /// strict, for the paths that WRITE based on it (reconcile, rotation rollback, impersonation
+    /// switch). Classified first (<see cref="IWorkloadEncryptionService.DescribeSecret" />), never
+    /// decrypting for it:
+    /// <list type="bullet">
+    ///   <item><description>not set (null, empty, a legacy clear-text seed placeholder) → <c>null</c>;</description></item>
+    ///   <item><description>key id not in the key ring (<see cref="SecretValueState.KeyMissing" />, e.g.
+    ///   after a restore from another environment) → error log naming the key id, then the reveal
+    ///   throws (<see cref="UnknownSecretKeyIdException" />, or
+    ///   <see cref="SecretEncryptionNotConfiguredException" /> on a pod without key ring). The stored
+    ///   value is "unusable", not "absent": treating it as not set would overwrite a credential that
+    ///   becomes readable again once its key is added (decisions 2026-10-06, item 2);</description></item>
+    ///   <item><description>tampered / corrupt → the reveal throws as well.</description></item>
+    /// </list>
+    /// 🔴 Never log the result.
+    /// </summary>
+    private string? RevealClientSecret(string tenantId, RtServiceAccountConfiguration? configuration)
+    {
+        if (configuration == null)
+        {
+            return null;
+        }
+
+        var raw = configuration.GetAttributeValueOrDefault(nameof(RtServiceAccountConfiguration.ClientSecret));
+        var context = new SecretAccessContext(tenantId, configuration.CkTypeId?.ToString(),
+            nameof(RtServiceAccountConfiguration.ClientSecret));
+        var info = encryptionService.DescribeSecret(raw, context);
+        if (info.State == SecretValueState.NotSet && info.Form != SecretStorageForm.Corrupt)
+        {
+            return null;
+        }
+
+        if (info.KeyMissing)
+        {
+            Logger.Error(
+                "[{TenantId}] The client secret of pipeline service account '{WellKnownName}' is stored, but encrypted with key id '{KeyId}', which is not in this controller's key ring. It is treated as unusable and is NOT replaced automatically: add the key to the ring, or enter / rotate the secret",
+                tenantId, configuration.RtWellKnownName ?? configuration.RtId.ToString(), info.KeyId ?? "?");
+        }
+
+        return encryptionService.Reveal(raw, context);
     }
 
     /// <summary>

@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using System.Diagnostics.CodeAnalysis;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.DeploymentSites;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
@@ -22,6 +23,7 @@ internal abstract class PoolServiceTestsBase
     protected readonly ICommunicationEventService CommunicationEventService;
     protected readonly IOperatorConnectionManager OperatorConnectionManager;
     protected readonly IWorkloadEncryptionService EncryptionService;
+    protected readonly TestSecretEncryption SecretEncryption;
     protected readonly IWorkloadTemplateResolver TemplateResolver;
     protected readonly IWorkloadOnDemandCapabilityService OnDemandCapabilityService;
     protected readonly IPipelineServiceAccountProvisioningService ServiceAccountProvisioningService;
@@ -60,10 +62,11 @@ internal abstract class PoolServiceTestsBase
         OperatorConnectionManager
             .GetConnectionsForDeploymentSite(Arg.Any<string>(), Arg.Any<string>())
             .Returns(Array.Empty<string>());
-        EncryptionService = Substitute.For<IWorkloadEncryptionService>();
-        // Default: Decrypt passes the value through unchanged (so non-secret
-        // tests don't have to set up Decrypt). Specific tests override this.
-        EncryptionService.Decrypt(Arg.Any<string>()).Returns(ci => ci.Arg<string>());
+        // AB#5537: the REAL reveal point over a generated key ring — plaintext passes through,
+        // enc:v1 / enc:v2 / RtSecretValue are decrypted exactly as in production. Tests encrypt
+        // their fixtures with SecretEncryption instead of stubbing Decrypt.
+        SecretEncryption = TestSecretEncryption.Create();
+        EncryptionService = SecretEncryption.EncryptionService;
         TemplateResolver = Substitute.For<IWorkloadTemplateResolver>();
         // Default: literal pass-through (no placeholders configured). Tests
         // that exercise template behaviour override TryResolve explicitly.

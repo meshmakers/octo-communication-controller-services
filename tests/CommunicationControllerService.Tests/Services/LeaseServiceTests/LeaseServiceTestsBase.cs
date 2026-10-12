@@ -5,6 +5,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
+using Meshmakers.Octo.Runtime.Contracts.Secrets;
 using Microsoft.AspNetCore.SignalR;
 using NSubstitute;
 
@@ -58,6 +59,13 @@ internal abstract class LeaseServiceTestsBase
     protected readonly ICommunicationEventService EventService = Substitute.For<ICommunicationEventService>();
     protected readonly IWorkloadEncryptionService EncryptionService =
         Substitute.For<IWorkloadEncryptionService>();
+
+    /// <summary>
+    ///     AB#5537 (System.Communication 4.8.0): a real key ring behind the reveal of the borrower's
+    ///     <c>ClientSecret</c>, a Secret attribute. The substitute above stays for <c>Decrypt</c>
+    ///     (the caller token is still an enc:v1 String), its <c>RevealOrNull</c> delegates here.
+    /// </summary>
+    protected readonly TestSecretEncryption SecretEncryption = TestSecretEncryption.Create();
     protected readonly IHubContext<AdapterPoolHub> HubContext = Substitute.For<IHubContext<AdapterPoolHub>>();
     protected readonly ITenantLendingScopeResolver LendingScopeResolver =
         Substitute.For<ITenantLendingScopeResolver>();
@@ -106,6 +114,9 @@ internal abstract class LeaseServiceTestsBase
 
         // Decrypt is a pass-through without the `enc:v1:` sentinel, exactly as in production.
         EncryptionService.Decrypt(Arg.Any<string>()).Returns(call => call.Arg<string>());
+        EncryptionService.RevealOrNull(Arg.Any<object?>(), Arg.Any<SecretAccessContext?>())
+            .Returns(call => SecretEncryption.EncryptionService.RevealOrNull(call.ArgAt<object?>(0),
+                call.ArgAt<SecretAccessContext?>(1)));
 
         LifecycleConfiguration.IsLeasingEnabledAsync(Arg.Any<string>()).Returns(true);
 
@@ -185,7 +196,24 @@ internal abstract class LeaseServiceTestsBase
     {
         var configuration = RtEntityCreator.CreateServiceAccountConfiguration("borrower-service-account");
         configuration.ClientId = clientId;
-        configuration.ClientSecret = clientSecret;
+        // 4.8.0: stored the way the engine leaves a written secret — protected under the key ring.
+        configuration.ClientSecret = string.IsNullOrEmpty(clientSecret)
+            ? null
+            : SecretEncryption.Protector.Protect(clientSecret);
+        ServiceAccountResolver.GetAdapterDefaultAsync(BorrowerTenantId, Borrower.RtId).Returns(configuration);
+        return configuration;
+    }
+
+    /// <summary>
+    ///     AB#5537: the borrower's account with an arbitrary RAW <c>ClientSecret</c> value — a legacy
+    ///     String (plaintext or enc:v1) as found before the encrypt sweep, an <c>RtSecretValue</c>, or null.
+    /// </summary>
+    protected RtServiceAccountConfiguration ArrangeBorrowerCredentialRaw(object? storedSecret,
+        string clientId = "octo-pipeline-sa-borrower")
+    {
+        var configuration = RtEntityCreator.CreateServiceAccountConfiguration("borrower-service-account");
+        configuration.ClientId = clientId;
+        configuration.SetAttributeRawValue(nameof(RtServiceAccountConfiguration.ClientSecret), storedSecret);
         ServiceAccountResolver.GetAdapterDefaultAsync(BorrowerTenantId, Borrower.RtId).Returns(configuration);
         return configuration;
     }

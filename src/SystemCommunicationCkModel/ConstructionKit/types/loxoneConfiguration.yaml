@@ -13,6 +13,7 @@ types:
         name: Username
       - id: ${this}/Password
         name: Password
+        isOptional: true # AB#5528: a Secret is never seeded; "not set" is a valid state
       - id: ${this}/IsSslEnabled
         name: IsSslEnabled
       - id: ${this}/PollIntervalSeconds

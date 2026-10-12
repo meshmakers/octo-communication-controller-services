@@ -37,9 +37,11 @@ attributes:
   # value when the target entity already exists AND already has a value for the
   # attribute (ImportRtModelCommand.PreserveAttributesForEntity). A fresh tenant, or a
   # pre-existing entity that has never had a ClientSecret, still gets the seeded value.
+  # AB#5537 (4.8.0): valueType Secret, ownership Secret — all three users (FinApi,
+  # MicrosoftGraph, ServiceAccount) hold a credential here, so the definition is not split.
   - id: ClientSecret
-    valueType: String
-    isRuntimeState: true
+    valueType: Secret
+    ownership: Secret
     description: "OAuth2 Client Secret for authenticating with the external API. Runtime state (AB#5027): issued/rotated at runtime, preserved across blueprint re-apply."
   # AB#5187 — the last member of the finAPI connection tuple. finAPI credentials are
   # environment-bound (a sandbox client id does not work against live), so this flag belongs

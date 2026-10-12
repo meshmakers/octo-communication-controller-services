@@ -5,6 +5,7 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
+using Meshmakers.Octo.Runtime.Contracts.Secrets;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
@@ -1313,8 +1314,32 @@ internal class LeaseService : ILeaseService
 
         var clientId =
             serviceAccount.GetAttributeValueOrDefault(nameof(RtServiceAccountConfiguration.ClientId)) as string;
-        var clientSecret =
-            serviceAccount.GetAttributeValueOrDefault(nameof(RtServiceAccountConfiguration.ClientSecret)) as string;
+
+        // AB#5537 (System.Communication 4.8.0): ClientSecret is a Secret attribute — the raw value is
+        // an RtSecretValue, not a string, so an `as string` read would see "no secret" for every
+        // migrated account and refuse every lease. Revealed through the controller's single reveal
+        // point instead, exactly like the deploy path (DeploymentSiteService.
+        // AppendPipelineServiceAccountOverridesAsync): a legacy String value (plaintext or enc:v1)
+        // still works, a stored but unreadable secret (unknown key id, tampered, corrupt) reads as
+        // not set, and a missing key ring degrades to a refused lease instead of an exception out of
+        // a hub method.
+        string? clientSecret;
+        try
+        {
+            clientSecret = _encryptionService.RevealOrNull(
+                serviceAccount.GetAttributeValueOrDefault(nameof(RtServiceAccountConfiguration.ClientSecret)),
+                new SecretAccessContext(borrowerTenantId, serviceAccount.CkTypeId?.ToString(),
+                    nameof(RtServiceAccountConfiguration.ClientSecret)));
+        }
+        catch (Exception e)
+        {
+            // Names the adapter and the exception type, never the value or the message.
+            Logger.Warn(
+                "[{BorrowerTenantId}] The client secret of the pipeline service account of adapter " +
+                "'{AdapterName}' could not be decrypted ({ExceptionType}); no lease can be granted for it",
+                borrowerTenantId, borrower.Name, e.GetType().Name);
+            return null;
+        }
 
         if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
         {
@@ -1326,8 +1351,7 @@ internal class LeaseService : ILeaseService
             return null;
         }
 
-        // Same lane as every other secret leaving this service: Decrypt is a no-op without the
-        // `enc:v1:` sentinel, and the wire must carry plaintext either way.
-        return (clientId!, _encryptionService.Decrypt(clientSecret!));
+        // The wire carries plaintext: the member authenticates with it as the borrower's adapter.
+        return (clientId!, clientSecret!);
     }
 }

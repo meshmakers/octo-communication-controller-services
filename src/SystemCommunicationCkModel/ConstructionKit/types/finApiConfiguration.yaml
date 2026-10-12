@@ -11,10 +11,12 @@ types:
         name: ClientId
       - id: ${this}/ClientSecret
         name: ClientSecret
+        isOptional: true # AB#5528: a Secret is never seeded; "not set" is a valid state
       - id: ${this}/Username
         name: Username
       - id: ${this}/Password
         name: Password
+        isOptional: true # AB#5528: a Secret is never seeded; "not set" is a valid state
       - id: ${this}/IsSandbox
         name: IsSandbox
         isOptional: true

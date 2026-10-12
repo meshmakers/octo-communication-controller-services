@@ -58,7 +58,9 @@ internal class PipelineServiceAccountReconcileTests
             {
                 AuthorityUrl = AuthorityUrl,
                 PublicUrl = PublicUrl
-            }));
+            }),
+            // AB#5537: the real reveal point over a generated key ring.
+            TestSecretEncryption.Create().EncryptionService);
     }
 
     private void ArrangeIdentityResponse(CreateIdentityDataResult result)
@@ -83,7 +85,7 @@ internal class PipelineServiceAccountReconcileTests
             CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
             RtWellKnownName = PipelineServiceAccountProvisioningService.BuildWellKnownName(adapter.RtId),
             ClientId = PipelineServiceAccountProvisioningService.BuildClientId(adapter.RtId),
-            ClientSecret = ExistingSecret,
+            ClientSecret = SecretTestValues.Stored(ExistingSecret),
             AssignedRoleNames = new AttributeStringValueList([CommonConstants.CommunicationManagementRole]),
             AllowDelegation = true
         };
@@ -109,7 +111,7 @@ internal class PipelineServiceAccountReconcileTests
             CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
             RtWellKnownName = PipelineServiceAccountProvisioningService.BuildWellKnownName(adapter.RtId),
             ClientId = PipelineServiceAccountProvisioningService.BuildClientId(adapter.RtId),
-            ClientSecret = ExistingSecret,
+            ClientSecret = SecretTestValues.Stored(ExistingSecret),
             IssuerUri = AuthorityUrl,
             TenantId = TenantId
         };
@@ -251,7 +253,7 @@ internal class PipelineServiceAccountReconcileTests
         await Assert.That(saved.IssuerUri).IsNull();
         await Assert.That(saved.TenantId).IsNull();
         await Assert.That(saved.AssignedRoleNames).IsNull();
-        await Assert.That(saved.ClientSecret).IsEqualTo(ExistingSecret);
+        await Assert.That(SecretTestValues.Plain(saved.ClientSecret)).IsEqualTo(ExistingSecret);
     }
 
     [Test]
@@ -274,7 +276,7 @@ internal class PipelineServiceAccountReconcileTests
         await Assert.That(saved.IssuerUri).IsEqualTo("https://identity.old-cluster.example.com");
         await Assert.That(saved.TenantId).IsNull();
         await Assert.That(saved.AssignedRoleNames).IsNull();
-        await Assert.That(saved.ClientSecret).IsEqualTo(ExistingSecret);
+        await Assert.That(SecretTestValues.Plain(saved.ClientSecret)).IsEqualTo(ExistingSecret);
     }
 
     [Test]
@@ -299,7 +301,7 @@ internal class PipelineServiceAccountReconcileTests
         // the foreign tenant rides through untouched.
         await Assert.That(saved.TenantId).IsEqualTo("some-other-tenant");
         await Assert.That(saved.IssuerUri).IsNull();
-        await Assert.That(saved.ClientSecret).IsEqualTo(ExistingSecret);
+        await Assert.That(SecretTestValues.Plain(saved.ClientSecret)).IsEqualTo(ExistingSecret);
         await Assert.That(SentClient().ClientSecret).IsEqualTo(ExistingSecret);
     }
 
@@ -327,7 +329,7 @@ internal class PipelineServiceAccountReconcileTests
         using var _ = Assert.Multiple();
         await Assert.That(result.Outcome).IsEqualTo(PipelineServiceAccountProvisioningOutcome.Repaired);
         await Assert.That(saved.IssuerUri).IsEqualTo(expectedPersisted);
-        await Assert.That(saved.ClientSecret).IsEqualTo(ExistingSecret);
+        await Assert.That(SecretTestValues.Plain(saved.ClientSecret)).IsEqualTo(ExistingSecret);
     }
 
     [Test]
@@ -492,7 +494,7 @@ internal class PipelineServiceAccountReconcileTests
             CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
             RtWellKnownName = "pipeline-override-account",
             ClientId = "octo-pipeline-sa-custom",
-            ClientSecret = ExistingSecret,
+            ClientSecret = SecretTestValues.Stored(ExistingSecret),
             IssuerUri = "https://identity.old-cluster.example.com",
             TenantId = TenantId,
             AssignedRoleNames = new AttributeStringValueList(["AccountingRead"]),
@@ -516,7 +518,7 @@ internal class PipelineServiceAccountReconcileTests
         await Assert.That(SentClient().AssignedRoleNames).IsEquivalentTo(new[] { "AccountingRead" });
         // Repaired in place, keeping the secret; and never through the adapter-edge write.
         await Assert.That(updated.RtId).IsEqualTo(standalone.RtId);
-        await Assert.That(updated.ClientSecret).IsEqualTo(ExistingSecret);
+        await Assert.That(SecretTestValues.Plain(updated.ClientSecret)).IsEqualTo(ExistingSecret);
         await _communicationRepository.DidNotReceiveWithAnyArgs().SavePipelineServiceAccountAsync(
             Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<RtServiceAccountConfiguration>(), Arg.Any<bool>());
     }
@@ -530,7 +532,7 @@ internal class PipelineServiceAccountReconcileTests
             CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
             RtWellKnownName = "pipeline-override-account",
             ClientId = "octo-pipeline-sa-custom",
-            ClientSecret = ExistingSecret,
+            ClientSecret = SecretTestValues.Stored(ExistingSecret),
             // IssuerUri / TenantId absent — the AB#5115 steady state.
             AssignedRoleNames = new AttributeStringValueList(["AccountingRead"]),
             AllowDelegation = true
@@ -571,7 +573,7 @@ internal class PipelineServiceAccountReconcileTests
             CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
             RtWellKnownName = "pipeline-override-account",
             ClientId = "octo-pipeline-sa-custom",
-            ClientSecret = ExistingSecret,
+            ClientSecret = SecretTestValues.Stored(ExistingSecret),
             AssignedRoleNames = new AttributeStringValueList(["AccountingRead"]),
             AllowDelegation = true
         };
@@ -611,7 +613,7 @@ internal class PipelineServiceAccountReconcileTests
             CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
             RtWellKnownName = "pipeline-override-account",
             ClientId = "octo-pipeline-sa-custom",
-            ClientSecret = ExistingSecret,
+            ClientSecret = SecretTestValues.Stored(ExistingSecret),
             AssignedRoleNames = new AttributeStringValueList(["AccountingRead"]),
             AllowDelegation = true
         };
@@ -642,7 +644,7 @@ internal class PipelineServiceAccountReconcileTests
             CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
             RtWellKnownName = "pipeline-override-account",
             ClientId = "octo-pipeline-sa-custom",
-            ClientSecret = ExistingSecret,
+            ClientSecret = SecretTestValues.Stored(ExistingSecret),
             IssuerUri = PipelineServiceAccountProvisioningService.IssuerUriToken,
             TenantId = TenantId,
             AssignedRoleNames = new AttributeStringValueList(["AccountingRead"]),
@@ -664,7 +666,7 @@ internal class PipelineServiceAccountReconcileTests
         await Assert.That(result.ClientId).IsEqualTo("octo-pipeline-sa-custom");
         // A new secret, identical on both sides.
         await Assert.That(sentClient.ClientSecret).IsNotEqualTo(ExistingSecret);
-        await Assert.That(updated.ClientSecret).IsEqualTo(sentClient.ClientSecret);
+        await Assert.That(SecretTestValues.Plain(updated.ClientSecret)).IsEqualTo(sentClient.ClientSecret);
         // 🔴 A rotation must never sync roles — null on the wire leaves the edges untouched.
         await Assert.That(sentClient.AssignedRoleNames).IsNull();
         // The declaration survives the write.

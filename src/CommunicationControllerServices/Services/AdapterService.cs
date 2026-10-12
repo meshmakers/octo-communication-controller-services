@@ -13,6 +13,8 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using Meshmakers.Octo.Runtime.Contracts.Secrets;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using NLog;
@@ -37,6 +39,7 @@ internal class AdapterService(
     IIdentityClientReader identityClientReader,
     IHttpContextAccessor httpContextAccessor,
     IOptions<ServiceAccountGuardOptions> serviceAccountGuardOptions,
+    IWorkloadEncryptionService encryptionService,
     TimeProvider timeProvider)
     : IAdapterService
 {
@@ -199,7 +202,8 @@ internal class AdapterService(
                     ? "[{TenantId}] Adapter '{AdapterRtId}' found in cache, checking for updates"
                     : "[{TenantId}] Adapter '{AdapterRtId}' not found in cache, fetching from repository",
                 tenantId, adapterRtEntityId);
-            var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId, true);
+            var configuration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId, true,
+                revealSecrets: true);
 
             // The commit runs under the same per-tenant lock as the cache flush in
             // PreUpdateTenantAsync and the re-initialisation in PosUpdateTenantAsync, so it either
@@ -457,7 +461,7 @@ internal class AdapterService(
     }
 
     public async Task<AdapterConfigurationDto> GetAdapterConfigurationAsync(string tenantId,
-        RtEntityId adapterRtEntityId, bool onlyDeployedPipelines)
+        RtEntityId adapterRtEntityId, bool onlyDeployedPipelines, bool revealSecrets = false)
     {
         try
         {
@@ -498,7 +502,7 @@ internal class AdapterService(
                 {
                     pipelineConfigurations.Add(
                         await CreatePipelineConfigurationAsync(tenantId, dataFlow.RtId, adapterRtEntityId.RtId,
-                            rtPipeline));
+                            rtPipeline, revealSecrets: revealSecrets));
                 }
             }
 
@@ -558,7 +562,11 @@ internal class AdapterService(
                 return null;
             }
 
-            return await CreatePipelineConfigurationAsync(tenantId, dataFlow.RtId, adapterRtEntityId.RtId, pipeline);
+            // AB#5537: the projection travels on the lease to the pool member, which executes the
+            // pipeline as the borrower's adapter — like every adapter-bound configuration it carries
+            // the revealed secrets (the member never sees a Secret marker it could not resolve).
+            return await CreatePipelineConfigurationAsync(tenantId, dataFlow.RtId, adapterRtEntityId.RtId, pipeline,
+                revealSecrets: true);
         }
         catch (Exception e)
         {
@@ -771,7 +779,7 @@ internal class AdapterService(
             if (adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
             {
                 var configuration =
-                    await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId, false);
+                    await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId, false, revealSecrets: true);
 
                 // Always push: the user-initiated "Update Configuration" must
                 // reach the live adapter pod, even when the controller-side
@@ -914,7 +922,8 @@ internal class AdapterService(
                 }
                 else
                 {
-                    adapterConfiguration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId, true);
+                    adapterConfiguration = await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId, true,
+                        revealSecrets: true);
                 }
 
                 var deployedPipeline =
@@ -926,7 +935,7 @@ internal class AdapterService(
 
                 adapterConfiguration.Pipelines.Add(
                     await CreatePipelineConfigurationAsync(tenantId, dataFlow.RtId, adapterRtEntityId.RtId, pipeline,
-                        pipelineDefinition));
+                        revealSecrets: true, pipelineDefinition));
 
                 if (!adapterConfiguration.Equals(adapter.Configuration))
                 {
@@ -1202,7 +1211,7 @@ internal class AdapterService(
 
                     adapterConfig.Pipelines.Add(
                         await CreatePipelineConfigurationAsync(tenantId, dataFlowRtId, rtAdapter.RtId,
-                            rtDeployPipeline));
+                            rtDeployPipeline, revealSecrets: true));
 
                     await StoreDeprecatedNodeWarningEventsAsync(tenantId, adapter.NodeDescriptors,
                         rtDeployPipeline.ToRtEntityId(),
@@ -1318,13 +1327,17 @@ internal class AdapterService(
         // Defensive reads, same reasoning as the whole service-account path (and ClientId is still
         // mandatory on the CK type since 3.33.0, so its generated getter throws on exactly the
         // half-configured entity this guard exists to refuse with a useful message instead).
+        // AB#5537: the RAW value — a string before System.Communication 4.8, an RtSecretValue
+        // after it (`as string` would read every Secret as missing). Presence only, no decrypt; a
+        // value whose key id is not in the key ring (KeyMissing) is not usable (decisions
+        // 2026-10-06, item 2).
         var secret = serviceAccount.GetAttributeValueOrDefault(
-            nameof(RtServiceAccountConfiguration.ClientSecret)) as string;
+            nameof(RtServiceAccountConfiguration.ClientSecret));
         var serviceAccountClientId = serviceAccount.GetAttributeValueOrDefault(
             nameof(RtServiceAccountConfiguration.ClientId)) as string;
 
-        // AB#5114 credential-aware refusal: a configuration without a usable secret (empty, or an
-        // angle-bracket seed placeholder) is refused ONLY when impersonation cannot stand in — the
+        // AB#5114 credential-aware refusal: a configuration without a usable secret (empty, a legacy
+        // clear-text seed placeholder, or unreadable here) is refused ONLY when impersonation cannot stand in — the
         // adapter's own client (AB#5072: its default pipeline service account, whose credentials
         // travel in the pod's Helm values) must exist with a usable secret and be a different
         // client than the account itself. The MayActAs edge that ultimately authorizes the
@@ -1333,7 +1346,17 @@ internal class AdapterService(
         // client-existence check below, so its absence never blocks a deploy here; the identity
         // token endpoint refuses the impersonation request if it is missing, and the reconcile
         // materialises it.
-        if (!PipelineServiceAccountProvisioningService.IsSecretUsable(secret))
+        var secretInfo = encryptionService.DescribeSecret(secret);
+        if (secretInfo.KeyMissing || secretInfo.Form == SecretStorageForm.Corrupt)
+        {
+            // Decisions 2026-10-06, item 2: stored but unreadable here (unknown key id / corrupt). The adapter
+            // refuses the impersonation fallback for such an account (the value becomes usable again once its
+            // key is added, or after re-entry), so the deploy is refused instead of failing at runtime.
+            throw AdapterServiceException.PipelineServiceAccountSecretMissing(tenantId, pipelineRtEntityId,
+                wellKnownName, adapterRtId, adapterName);
+        }
+
+        if (!secretInfo.IsSet)
         {
             var actorClientId = string.IsNullOrWhiteSpace(serviceAccountClientId)
                 ? null
@@ -1515,10 +1538,10 @@ internal class AdapterService(
             var actorClientId = adapterDefault?.GetAttributeValueOrDefault(
                 nameof(RtServiceAccountConfiguration.ClientId)) as string;
             var actorSecret = adapterDefault?.GetAttributeValueOrDefault(
-                nameof(RtServiceAccountConfiguration.ClientSecret)) as string;
+                nameof(RtServiceAccountConfiguration.ClientSecret));
 
             if (string.IsNullOrWhiteSpace(actorClientId) || actorClientId == targetClientId ||
-                !PipelineServiceAccountProvisioningService.IsSecretUsable(actorSecret))
+                !IsActorSecretUsable(tenantId, adapterDefault!, actorSecret))
             {
                 return null;
             }
@@ -1532,6 +1555,31 @@ internal class AdapterService(
                 tenantId, adapterRtId);
             return null;
         }
+    }
+
+    /// <summary>
+    /// AB#5537: the same actor rule as the reconcile and the impersonation switch
+    /// (<c>PipelineServiceAccountProvisioningService.IsActorSecretUsable</c>): presence is judged
+    /// without decrypting, except for a <see cref="RtSecretValue.IsLegacyPlaintext" /> value, which is
+    /// revealed so that a legacy value the reveal point rejects (strict mode, an enc:v1 text without
+    /// the matching LegacyV1Key) counts as not usable. A failing reveal throws and the caller's catch
+    /// fails closed.
+    /// </summary>
+    private bool IsActorSecretUsable(string tenantId, RtEntity adapterDefault, object? actorSecret)
+    {
+        if (!encryptionService.DescribeSecret(actorSecret).IsSet)
+        {
+            return false;
+        }
+
+        if (actorSecret is not RtSecretValue { IsLegacyPlaintext: true })
+        {
+            return true;
+        }
+
+        var context = new SecretAccessContext(tenantId, adapterDefault.CkTypeId?.ToString(),
+            nameof(RtServiceAccountConfiguration.ClientSecret));
+        return !string.IsNullOrWhiteSpace(encryptionService.Reveal(actorSecret, context));
     }
 
     public async Task<bool> SetPipelineDebuggingAsync(string tenantId, RtEntityId pipelineRtEntityId, bool isEnabled)
@@ -1871,7 +1919,7 @@ internal class AdapterService(
     /// </summary>
     private async Task<PipelineConfigurationDto> CreatePipelineConfigurationAsync(string tenantId,
         OctoObjectId dataFlowRtId, OctoObjectId adapterRtId, RtPipeline rtPipeline,
-        string? pipelineDefinition = null)
+        bool revealSecrets, string? pipelineDefinition = null)
     {
         var pipelineConfigurations = (await communicationRepository
             .GetConfigurationsByPipelineAsync(tenantId, rtPipeline.RtId)).ToList();
@@ -1909,10 +1957,15 @@ internal class AdapterService(
             ResolveServiceAccountIssuerUri(tenantId, serviceAccount);
         }
 
+        // AB#5537: Secret attributes serialise as the {"isSet":…} marker only; the adapter needs the
+        // credential itself, so it is revealed here — server-side, counted, never logged — and
+        // travels over the adapter's authenticated SignalR connection exactly as it did while the
+        // attributes were plain strings. See ConfigurationSecretSerializer.
         var configurationsDto = pipelineConfigurations.Select(c => new ConfigurationDto(c.RtId,
             c.CkTypeId ?? throw AdapterServiceException.CkTypeIdUndefined(),
             c.RtWellKnownName ?? throw AdapterServiceException.RtWellKnownNameUndefined(),
-            c.Serialize()));
+            // Only the adapter channel gets plaintext; the REST read path keeps the marker.
+            revealSecrets ? c.SerializeWithRevealedSecrets(encryptionService, tenantId) : c.Serialize()));
 
         return new PipelineConfigurationDto(
             dataFlowRtId,
