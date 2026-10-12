@@ -58,7 +58,8 @@ internal class DeployPipelineAfterProvisioningTests : AdapterServiceTestsBase
             new PipelineServiceAccountResolver(CommunicationRepository),
             services.BuildServiceProvider(),
             CommunicationEventService,
-            Options.Create(new CommunicationControllerOptions { AuthorityUrl = AuthorityUrl }));
+            Options.Create(new CommunicationControllerOptions { AuthorityUrl = AuthorityUrl }),
+            EncryptionService);
     }
 
     private (RtAdapter Adapter, RtPipeline Pipeline) ArrangeUnprovisionedTenant()

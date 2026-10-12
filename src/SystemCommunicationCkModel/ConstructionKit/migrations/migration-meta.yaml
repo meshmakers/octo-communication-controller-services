@@ -45,6 +45,19 @@ $schema: https://schemas.meshmakers.cloud/ck-migration-meta.schema.json
 # 4.x below it. The 3.41.0 entry point further down is what carries a MAIN tenant's values for those
 # three attributes across the major: ChangeCkType keeps every stored attribute value, and 4.6.0 is
 # the first 4.x that declares them.
+#
+# 4.8.0 (AB#5537 / AB#5528, SECRET phase 3) adds NO entry either: Password, PrivateKey,
+# PrivateKeyPassphrase, ClientSecret, ApiKey, BotToken and AdminPassword become valueType Secret
+# (String -> Secret is MINOR per CkSemVerClassifier, concept decision 2), all optional, and
+# ValueOverride gains the optional Secret member SecretValue (recordKey Path). Stored values need no
+# script: readers accept legacy plaintext / enc:v1 strings in a Secret slot, and the only data change —
+# legacy placeholders and empty strings become "not set" — is done by the engine's post-migration hook
+# (CkModelMigrationService.NormalizeSecretPlaceholdersAsync), which runs after every successful
+# migration including the schema-only bridge. The encrypt sweep re-encrypts the rest. A main tenant on
+# 3.41.0 reaches 4.8.0 through the 3.41.0 entry point (rename) plus that bridge. 4.8.0 keeps 4.7.0's
+# Adapter.AdapterConfiguration `ownership: Secret` (AB#6312) as it is — that attribute stays a String.
+# (The SECRET switch was first numbered 4.7.0 on its feature branch; main gave 4.7.0 to AB#6312, so the
+# switch took the next free minor.)
 ckModelId: System.Communication-4.0.0
 migrations:
   - fromVersion: "3.0.1"
@@ -129,15 +142,18 @@ migrations:
   # must therefore only meet 4.6.0 or later; on 4.5.0 the stored values would survive but be invisible
   # to the model (SystemCommunication4MigrationTests pins that they come through on 4.6.0).
   #
-  # 🔴 Deliberately NO entry for 3.42.0. Phase 3 (decisions 2026-10-08) makes 3.42.0 on main the
-  # SECRET switch (AB#5537: credentials as valueType Secret, encrypted values) — its 4.x counterpart is
-  # the next 4.x minor after 4.7.0 (4.7.0 itself is the AB#6312 ownership change). An entry here would let a
-  # 3.42.0 tenant run the rename onto 4.6.0/4.7.0 and keep its `enc:` values
-  # under attributes 4.6.0/4.7.0 declare as plain strings: wrong, and silent. Without the entry the CK
-  # engine's major-version guard (CkMigrationMajorVersionGuard) REFUSES 3.42.0 -> 4.6.0 loudly and the
-  # history stays on 3.42.0. Add the 3.42.0 entry together with the SECRET line's 4.x release, after checking
-  # the then-published 3.42.0 against it. (A 3.42.0 that exists today only on local tenants — the
-  # superseded AB#5618-only cut — is refused too; such a tenant is local and can be rebuilt.)
+  # 🔴 Deliberately NO entry for 3.42.0. 3.42.0 was the planned 3.x cut of the SECRET switch (AB#5537:
+  # credentials as valueType Secret, encrypted values). It was NEVER released: the published 3.x line in
+  # construction-kit-libraries-build ends at 3.41.0 (checked 2026-10-12); a 3.42.0 exists only on local
+  # dev tenants (the SECRET feature branch or the superseded AB#5618-only cut). The SECRET switch ships on
+  # the 4.x line instead, as the next free 4.x minor after 4.7.0 (4.7.0 itself is the AB#6312 ownership
+  # change) — see the header and ckModel.yaml for the number. An entry here would let such a 3.42.0
+  # tenant run the rename onto a 4.x and possibly keep `enc:` values under attributes that 4.x declares
+  # as plain strings: wrong, and silent; and there is no published 3.42.0 to check the rename against.
+  # Without the entry the CK engine's major-version guard (CkMigrationMajorVersionGuard) REFUSES
+  # 3.42.0 -> 4.x loudly and the history stays on 3.42.0; such a tenant is local and is rebuilt. The last
+  # 3.x a main tenant can be on is the published 3.41.0 below. Should a 3.42.0 ever be published (a 3.x
+  # maintenance line), add its entry then, after checking it against the then-current 4.x.
   #
   # The script is idempotent (see the 3.36.0 entry), so duplicates cost nothing. Keep all of them
   # until no environment can be on 3.x any more (E8).

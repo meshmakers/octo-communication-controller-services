@@ -9,3 +9,4 @@ types:
         name: BaseUrl
       - id: ${this}/ApiKey
         name: ApiKey
+        isOptional: true # AB#5528: a Secret is never seeded; "not set" is a valid state

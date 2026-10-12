@@ -57,7 +57,9 @@ internal class PipelineServiceAccountRotationTests
             {
                 AuthorityUrl = AuthorityUrl,
                 PublicUrl = PublicUrl
-            }));
+            }),
+            // AB#5537: the real reveal point over a generated key ring.
+            TestSecretEncryption.Create().EncryptionService);
     }
 
     private void ArrangeIdentityResponse(CreateIdentityDataResult result)
@@ -77,7 +79,7 @@ internal class PipelineServiceAccountRotationTests
             CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
             RtWellKnownName = PipelineServiceAccountProvisioningService.BuildWellKnownName(adapter.RtId),
             ClientId = PipelineServiceAccountProvisioningService.BuildClientId(adapter.RtId),
-            ClientSecret = secret,
+            ClientSecret = SecretTestValues.Stored(secret),
             IssuerUri = AuthorityUrl,
             TenantId = TenantId
         };
@@ -125,7 +127,7 @@ internal class PipelineServiceAccountRotationTests
         // The point of the whole feature: a NEW secret, and the identical one on both sides.
         await Assert.That(sentSecret).IsNotNull();
         await Assert.That(sentSecret).IsNotEqualTo(ExistingSecret);
-        await Assert.That(saved.ClientSecret).IsEqualTo(sentSecret);
+        await Assert.That(SecretTestValues.Plain(saved.ClientSecret)).IsEqualTo(sentSecret);
 
         // Everything else about the entity stays put — same rtId (an update, not a second entity),
         // same well-known name (the key the mesh adapter resolves by), same client.
@@ -201,11 +203,11 @@ internal class PipelineServiceAccountRotationTests
         var existing = ArrangeProvisionedAdapter(adapter);
 
         await _sut.RotateAdapterSecretAsync(TenantId, adapter);
-        var firstSecret = SavedConfigurations().Single().ClientSecret;
+        var firstSecret = SecretTestValues.Plain(SavedConfigurations().Single().ClientSecret);
 
         // The repository is a stub, so mirror the write the first rotation just made — otherwise
         // the second call would still read the pre-rotation plaintext.
-        existing.ClientSecret = firstSecret;
+        existing.ClientSecret = SecretTestValues.Stored(firstSecret);
 
         await _sut.RotateAdapterSecretAsync(TenantId, adapter);
 
@@ -216,8 +218,8 @@ internal class PipelineServiceAccountRotationTests
         await Assert.That(sentSecrets.Count).IsEqualTo(2);
         await Assert.That(savedConfigurations.Count).IsEqualTo(2);
         // Each pass is internally consistent …
-        await Assert.That(savedConfigurations[0].ClientSecret).IsEqualTo(sentSecrets[0]);
-        await Assert.That(savedConfigurations[1].ClientSecret).IsEqualTo(sentSecrets[1]);
+        await Assert.That(SecretTestValues.Plain(savedConfigurations[0].ClientSecret)).IsEqualTo(sentSecrets[0]);
+        await Assert.That(SecretTestValues.Plain(savedConfigurations[1].ClientSecret)).IsEqualTo(sentSecrets[1]);
         // … and the second pass really rotated rather than re-sending the first secret.
         await Assert.That(sentSecrets[1]).IsNotEqualTo(sentSecrets[0]);
         // Still one entity, not a new one per rotation.
@@ -312,7 +314,7 @@ internal class PipelineServiceAccountRotationTests
         using var _ = Assert.Multiple();
         await Assert.That(result.WasCreated).IsTrue();
         await Assert.That(result.RequiresPipelineRedeploy).IsFalse();
-        await Assert.That(saved.ClientSecret).IsEqualTo(SentSecrets().Single());
+        await Assert.That(SecretTestValues.Plain(saved.ClientSecret)).IsEqualTo(SentSecrets().Single());
         await Assert.That(saved.ClientId)
             .IsEqualTo(PipelineServiceAccountProvisioningService.BuildClientId(adapter.RtId));
     }
@@ -339,7 +341,7 @@ internal class PipelineServiceAccountRotationTests
         {
             await _sut.RotateAdapterSecretAsync(TenantId, adapter);
 
-            var newSecret = SavedConfigurations().Single().ClientSecret!;
+            var newSecret = SecretTestValues.Plain(SavedConfigurations().Single().ClientSecret)!;
 
             using var _ = Assert.Multiple();
             // Neither the new secret nor the retired one — a retired secret is still secret

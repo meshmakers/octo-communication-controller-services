@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
-using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using NLog;
 
@@ -44,7 +43,10 @@ internal class AdapterCache
 
     public Task ReloadConfigurationAsync(ComControllerAdapterUpdate configuration)
     {
-        Logger.Debug("Reloading AdapterCache configuration: {Configuration}", configuration.Serialize());
+        // AB#5537: never dump the configuration — its pipeline configurations carry revealed
+        // credentials (ConfigurationSecretSerializer). Identify the update, not its content.
+        Logger.Debug("Reloading AdapterCache configuration for tenant '{TenantId}' ({AdapterCount} adapter(s))",
+            configuration.TenantId, configuration.Adapters.Count());
 
         _tenantDescriptions.AddOrUpdate(configuration.TenantId, 
             _ => new AdapterTenant(this, configuration.TenantId, configuration.Adapters.ToList()),
@@ -81,6 +83,9 @@ internal class AdapterCache
     {
         Logger.Info("Publishing AdapterCache configuration for tenant '{TenantId}'", tenantId);
 
+        // 🔴 AB#5537: the cached adapter configurations hold REVEALED secrets (plaintext for the
+        // adapter channel). Do not re-enable this publish without masking them first — it would put
+        // credentials into the distributed cache and onto the message bus.
         // if (_tenantDescriptions.TryGetValue(tenantId, out var desc))
         // {
         //     using MemoryStream memoryStream = new MemoryStream();

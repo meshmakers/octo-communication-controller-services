@@ -7,6 +7,7 @@ using Meshmakers.Octo.Communication.Contracts.Hubs;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Runtime.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.Secrets;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -552,21 +553,45 @@ internal class DeploymentSiteService : IDeploymentSiteService
                 tenantId, workload.RtId, workload.Name, "Hostname", workload.Hostname, unknownInHostname!);
         }
 
+        // AB#5537: Path is the record key of ValueOverride — the engine carries an omitted
+        // SecretValue over from the stored entry with the same Path on update/replace. Two entries
+        // carrying a SecretValue under one Path make that carry-over (and which secret Helm
+        // receives) ambiguous. The overrides are written through the asset repository only, so the
+        // deploy is the enforcement net.
+        var duplicateSecretPaths = (workload.Values ?? Enumerable.Empty<RtValueOverrideRecord>())
+            .Where(v => v.GetAttributeValueOrDefault(nameof(RtValueOverrideRecord.SecretValue)) != null)
+            .GroupBy(v => v.Path ?? string.Empty, StringComparer.Ordinal)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .ToList();
+        if (duplicateSecretPaths.Count > 0)
+        {
+            throw DeploymentSiteServiceException.WorkloadDuplicateSecretValuePaths(tenantId, workload.RtId, workload.Name,
+                duplicateSecretPaths);
+        }
+
         // Non-secret ValueOverrides flow through the resolver. Secret-flagged
         // entries are NOT validated/substituted here — the encryption layer
         // owns those values, and running templating over decrypted secret
         // material would mix two contracts.
         foreach (var v in workload.Values ?? Enumerable.Empty<RtValueOverrideRecord>())
         {
-            if (v.IsSecret || string.IsNullOrEmpty(v.Value))
+            if (IsSecretOverride(v))
             {
                 continue;
             }
-            if (!_templateResolver.TryResolve(v.Value, ctx, out _, out var unknownInOverride))
+
+            var overrideValue = ReadValueOverrideValue(tenantId, workload, v);
+            if (string.IsNullOrEmpty(overrideValue))
+            {
+                continue;
+            }
+            if (!_templateResolver.TryResolve(overrideValue, ctx, out _, out var unknownInOverride))
             {
                 throw DeploymentSiteServiceException.WorkloadTemplateUnknownPlaceholder(
                     tenantId, workload.RtId, workload.Name,
-                    $"ValueOverride[{v.Path ?? string.Empty}]", v.Value, unknownInOverride!);
+                    $"ValueOverride[{v.Path ?? string.Empty}]", overrideValue, unknownInOverride!);
             }
         }
 
@@ -924,10 +949,10 @@ internal class DeploymentSiteService : IDeploymentSiteService
                 // Non-secret values are substituted; EnsureWorkloadIsHelmDeployableAsync
                 // has already validated every placeholder, so TryResolve cannot
                 // fail here.
-                Value = v.IsSecret
-                    ? _encryptionService.Decrypt(v.Value ?? string.Empty)
-                    : ResolveTemplate(v.Value, ctx) ?? string.Empty,
-                IsSecret = v.IsSecret,
+                Value = IsSecretOverride(v)
+                    ? ReadValueOverrideValue(tenantId, workload, v) ?? string.Empty
+                    : ResolveTemplate(ReadValueOverrideValue(tenantId, workload, v), ctx) ?? string.Empty,
+                IsSecret = IsSecretOverride(v),
             })
             .ToArray();
 
@@ -943,9 +968,14 @@ internal class DeploymentSiteService : IDeploymentSiteService
             WorkloadType = WorkloadWireMapping.ResolveWorkloadType(workload),
             RepositoryUrl = repo.RepositoryUrl,
             RepositoryUsername = repo.Username,
-            RepositoryPassword = string.IsNullOrEmpty(repo.Password)
-                ? null
-                : _encryptionService.Decrypt(repo.Password),
+            // AB#5537: read raw and revealed — a String (plaintext / enc:v1) before
+            // System.Communication 4.8, an RtSecretValue after it. Same lane either way. A Secret
+            // whose key id is unknown (or that is tampered / corrupt) counts as not set, with an
+            // error log (decisions 2026-10-06, item 2).
+            RepositoryPassword = NullIfEmpty(_encryptionService.RevealOrNull(
+                repo.GetAttributeValueOrDefault(nameof(RtHelmRepositoryConfiguration.Password)),
+                new SecretAccessContext(tenantId, repo.CkTypeId?.ToString(),
+                    nameof(RtHelmRepositoryConfiguration.Password)))),
             ChartName = workload.ChartName,
             // Coalesce a null/missing ChartVersion to empty string — the DTO is
             // non-nullable on the operator side and an empty value carries the
@@ -1060,8 +1090,25 @@ internal class DeploymentSiteService : IDeploymentSiteService
         // PipelineServiceAccountProvisioningService.ReadAttribute.
         var clientId =
             serviceAccount.GetAttributeValueOrDefault(nameof(RtServiceAccountConfiguration.ClientId)) as string;
-        var clientSecret =
-            serviceAccount.GetAttributeValueOrDefault(nameof(RtServiceAccountConfiguration.ClientSecret)) as string;
+        // AB#5537: the secret is revealed through the controller's single reveal point — it is a
+        // String before System.Communication 4.8 and an RtSecretValue after it. A value that
+        // cannot be decrypted (unknown key id, tampered: null with an engine error log; no key ring:
+        // exception) degrades to "no credentials" like every other failure on this path.
+        string? clientSecret;
+        try
+        {
+            clientSecret = _encryptionService.RevealOrNull(
+                serviceAccount.GetAttributeValueOrDefault(nameof(RtServiceAccountConfiguration.ClientSecret)),
+                new SecretAccessContext(tenantId, serviceAccount.CkTypeId?.ToString(),
+                    nameof(RtServiceAccountConfiguration.ClientSecret)));
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(
+                "[{TenantId}] The client secret of the pipeline service account of adapter '{WorkloadName}' ({WorkloadRtId}) could not be decrypted ({ExceptionType}); deploying without adapter credentials",
+                tenantId, workload.Name, workload.RtId, e.GetType().Name);
+            return overrides;
+        }
 
         if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
         {
@@ -1076,12 +1123,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
         // overrule a deliberate manual pin.
         var result = new List<ValueOverrideDto>(overrides);
         AddUnlessPresent(result, ServiceAccountClientIdValuePath, clientId!, false);
-        AddUnlessPresent(result, ServiceAccountClientSecretValuePath,
-            // The provisioning path writes this attribute in plaintext, so this is normally a
-            // pass-through. It goes through Decrypt anyway to sit in the same lane as every other
-            // secret leaving this method — if the attribute ever carries the `enc:v1:` sentinel, the
-            // wire must still carry the plaintext (Decrypt is a no-op without the sentinel).
-            _encryptionService.Decrypt(clientSecret!), true);
+        AddUnlessPresent(result, ServiceAccountClientSecretValuePath, clientSecret!, true);
         return result.ToArray();
 
         static void AddUnlessPresent(List<ValueOverrideDto> target, string path, string value, bool isSecret)
@@ -1178,6 +1220,52 @@ internal class DeploymentSiteService : IDeploymentSiteService
 
             target.Add(new ValueOverrideDto { Path = path, Value = value, IsSecret = false });
         }
+    }
+
+    /// <summary>
+    /// AB#5537: the value of a <c>ValueOverride</c> entry, revealed. Read raw — never through the
+    /// generated properties — so String and Secret storage are handled alike:
+    /// <list type="bullet">
+    ///   <item><description>a secret entry (<c>IsSecret</c> or a <c>SecretValue</c>) takes <c>SecretValue</c> (Secret since
+    ///   System.Communication 4.8, encrypted by the engine) and falls back to a legacy
+    ///   <c>Value</c> (plaintext or <c>enc:v1</c> written by <c>encrypt-value</c>; an <c>enc:v2</c> text in a String slot is refused);</description></item>
+    ///   <item><description>a non-secret entry takes <c>Value</c> verbatim, exactly as before — only
+    ///   <c>IsSecret</c> entries ever went through decryption.</description></item>
+    /// </list>
+    /// </summary>
+    private string? ReadValueOverrideValue(string tenantId, RtDeployableWorkload workload,
+        RtValueOverrideRecord valueOverride)
+    {
+        var stored = valueOverride.GetAttributeValueOrDefault(nameof(RtValueOverrideRecord.Value));
+        if (!IsSecretOverride(valueOverride))
+        {
+            return stored as string ?? _encryptionService.Reveal(stored);
+        }
+
+        var context = new SecretAccessContext(tenantId, workload.CkTypeId?.ToString(),
+            $"{nameof(RtDeployableWorkload.Values)}.{nameof(RtValueOverrideRecord.SecretValue)}");
+        var secretValue = valueOverride.GetAttributeValueOrDefault(nameof(RtValueOverrideRecord.SecretValue));
+        // A SecretValue whose key id is unknown reads as not set (null, error log) — and does NOT fall
+        // back to the legacy Value: the override is configured, just unreadable here.
+        return secretValue != null
+            ? _encryptionService.RevealOrNull(secretValue, context)
+            : _encryptionService.RevealOrNull(stored, context);
+    }
+
+    /// <summary>
+    /// A <c>ValueOverride</c> is secret when it is flagged <c>IsSecret</c> (legacy) or carries a
+    /// <c>SecretValue</c> (System.Communication 4.8, handover section 5): Studio writes the plaintext into
+    /// <c>SecretValue</c> and need not set the flag, and such a value must never be skipped or templated.
+    /// </summary>
+    private static bool IsSecretOverride(RtValueOverrideRecord valueOverride)
+    {
+        return valueOverride.IsSecret ||
+               valueOverride.GetAttributeValueOrDefault(nameof(RtValueOverrideRecord.SecretValue)) != null;
+    }
+
+    private static string? NullIfEmpty(string? value)
+    {
+        return string.IsNullOrEmpty(value) ? null : value;
     }
 
     private string? ResolveHostname(string? hostname, WorkloadTemplateContext ctx)

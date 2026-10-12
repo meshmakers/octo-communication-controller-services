@@ -7,6 +7,7 @@ types:
     attributes:
       - id: ${this}/BotToken
         name: BotToken
+        isOptional: true # AB#5528: a Secret is never seeded; "not set" is a valid state
       - id: ${this}/GuildId
         name: GuildId
         isOptional: true

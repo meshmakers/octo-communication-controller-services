@@ -36,7 +36,8 @@ internal class ServiceAccountHealthTests
     {
         var options = Substitute.For<IOptions<CommunicationControllerOptions>>();
         options.Value.Returns(_options);
-        return new ServiceAccountHealthService(_repo, _resolver, _identityReader, options);
+        return new ServiceAccountHealthService(_repo, _resolver, _identityReader, options,
+            TestSecretEncryption.Create().EncryptionService);
     }
 
     /// <summary>
@@ -70,7 +71,7 @@ internal class ServiceAccountHealthTests
         };
         if (withSecret)
         {
-            configuration.ClientSecret = "client-secret";
+            configuration.ClientSecret = SecretTestValues.Stored("client-secret");
         }
 
         return configuration;
@@ -636,19 +637,53 @@ internal class ServiceAccountHealthTests
     }
 
     [Test]
-    public async Task GetConfigurationHealth_PlaceholderSecret_CountsAsNoSecret()
+    public async Task GetConfigurationHealth_LegacyPlaceholderSecret_CountsAsNoSecret()
     {
         var sut = CreateSut();
         var configuration = CreateHealthyConfiguration();
-        configuration.ClientSecret = "<insert secret here>";
+        configuration.ClientSecret = SecretTestValues.Stored("<insert secret here>");
         ArrangeMatchingIdentityClient();
 
         var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
 
         using var _ = Assert.Multiple();
-        // Same rule as the adapter-side token service: an angle-bracket placeholder is no secret.
+        // A legacy clear-text seed placeholder (not yet converted by the migration) reads as not set.
         await Assert.That(Check(dto, "secret").Status).IsEqualTo("Violation");
         await Assert.That(Check(dto, "secret").Code).IsEqualTo("secret-missing");
+    }
+
+    [Test]
+    public async Task GetConfigurationHealth_ProtectedPlaceholderLookingSecret_IsAnOrdinarySecret()
+    {
+        // Decisions 2026-10-06, item 1: a "<...>" value entered through an API is a real secret.
+        var sut = CreateSut();
+        var configuration = CreateHealthyConfiguration();
+        configuration.ClientSecret = SecretTestValues.Protected("<insert secret here>");
+        ArrangeMatchingIdentityClient();
+
+        var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
+
+        await Assert.That(Check(dto, "secret").Status).IsEqualTo("Healthy");
+    }
+
+    [Test]
+    public async Task GetConfigurationHealth_SecretWithUnknownKeyId_IsAKeyMissingViolation()
+    {
+        // Decisions 2026-10-06, item 2: stored, but its key id is not in the ring (restore from another
+        // environment) - not usable, and named as such instead of "missing".
+        var sut = CreateSut();
+        var configuration = CreateHealthyConfiguration();
+        configuration.ClientSecret = TestSecretEncryption.Create(keyId: "k9").Protector.Protect("client-secret");
+        ArrangeMatchingIdentityClient();
+
+        var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(dto.OverallStatus).IsEqualTo("Unhealthy");
+        await Assert.That(Check(dto, "secret").Status).IsEqualTo("Violation");
+        await Assert.That(Check(dto, "secret").Code).IsEqualTo("secret-key-missing");
+        await Assert.That(Check(dto, "secret").Message!).Contains("'k9'");
+        await Assert.That(Check(dto, "secret").Message!).DoesNotContain("client-secret");
     }
 
     // ---------------------------------------------------------------- identity unreachable

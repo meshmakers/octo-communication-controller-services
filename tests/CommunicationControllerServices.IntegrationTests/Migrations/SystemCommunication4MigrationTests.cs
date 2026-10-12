@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts.Serialization;
 using Meshmakers.Octo.ConstructionKit.Models.System.Bot.Generated.System.Bot.v3;
@@ -9,6 +10,8 @@ using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Runtime.Contracts.CkModelMigrations;
 using Meshmakers.Octo.Runtime.Contracts.Exchange;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using Meshmakers.Octo.Runtime.Contracts.Secrets;
 using Xunit;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTests.Migrations;
@@ -76,6 +79,14 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
     private static readonly DateTime FoldBoundary = new(2026, 10, 4, 11, 0, 0, DateTimeKind.Utc);
 
     private static readonly RtCkId<CkTypeId> LegacyPoolTypeId = new("System.Communication/Pool");
+    private static readonly RtCkId<CkTypeId> ServiceAccountTypeId = new("System.Communication/ServiceAccountConfiguration");
+    private static readonly RtCkId<CkTypeId> HelmRepositoryTypeId = new("System.Communication/HelmRepositoryConfiguration");
+
+    // AB#5537: credentials a 3.41.0 tenant holds as plain String attributes, which 4.8.0 declares Secret.
+    private static readonly OctoObjectId LegacySecretAccountRtId = new("6700000000000000000000a1");
+    private static readonly OctoObjectId PlaceholderAccountRtId = new("6700000000000000000000a2");
+    private static readonly OctoObjectId HelmRepositoryRtId = new("6700000000000000000000a3");
+    private const string LegacyClientSecret = "legacy-plaintext-client-secret";
 
     /// <summary>
     ///     Every System.Communication 3.x at or above the 4.x entry point that main has released or
@@ -206,12 +217,66 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
     }
 
     /// <summary>
+    ///     AB#5537 — a main tenant on the published 3.41.0 holds its credentials as plain String attributes.
+    ///     On 4.8.0 the same attributes are valueType Secret (String -> Secret is a MINOR, no migration
+    ///     script): a stored clear-text value must stay readable through the controller's reveal point, and a
+    ///     legacy seed placeholder must read as NOT SET (the engine's post-migration hook normalises it, and
+    ///     every reader classifies it as not set until then). Proves end to end that 4.7.0 -> 4.8.0 needs no
+    ///     migration-meta entry and that the 3.41.0 entry point carries a main tenant onto the SECRET line.
+    /// </summary>
+    [Fact]
+    public async Task TenantOn3410_CredentialsStayUsable_AsSecretsOn480()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        // Precondition: the embedded model is on the SECRET line (4.8.0 is its first 4.x version; 4.7.0 is
+        // the AB#6312 ownership change without Secret value types). Later 4.x minors keep the switch.
+        global::System.Version.Parse(SystemCommunicationCkIds.CkModelId.Version.ToString())
+            .Should().BeGreaterThanOrEqualTo(new global::System.Version(4, 8, 0)).And.BeLessThan(new global::System.Version(5, 0, 0));
+        var tenantId = await CreateTenantOn3xAsync("3.41.0", withCredentials: true);
+
+        await ImportCurrentModelAsync(tenantId);
+
+        var upgradeService = fixture.GetService<ICkModelUpgradeService>();
+        (await upgradeService.GetInstalledVersionsAsync(tenantId, ct))
+            .Should().ContainKey(ModelName).WhoseValue.Should().Be(SystemCommunicationCkIds.CkModelId.Version.ToString());
+        (await CountLegacyPoolsAsync(tenantId)).Should().Be(0);
+
+        var encryption = fixture.GetService<IWorkloadEncryptionService>();
+
+        // The legacy clear text is still the credential — revealed exactly as before the switch.
+        var legacy = await ReadRawAttributeAsync(tenantId, ServiceAccountTypeId, LegacySecretAccountRtId,
+            nameof(RtServiceAccountConfiguration.ClientSecret));
+        // Stored as 3.41.0 left it (a plain string), surfaced by 4.8.0 as a legacy Secret value.
+        legacy.Should().BeOfType<RtSecretValue>().Which.IsLegacyPlaintext.Should().BeTrue();
+        encryption.DescribeSecret(legacy).State.Should().Be(SecretValueState.Set);
+        encryption.RevealOrNull(legacy, new SecretAccessContext(tenantId, null, "ClientSecret"))
+            .Should().Be(LegacyClientSecret);
+
+        // The typed 4.8.0 read sees a Secret, not a string.
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var typed = await repository.GetServiceAccountByWellKnownNameAsync(tenantId, "legacy-secret-account");
+        typed.Should().NotBeNull();
+        typed!.ClientSecret.Should().NotBeNull();
+        typed.ClientSecret!.IsProtected.Should().BeFalse("nothing encrypts a migrated value but the sweep");
+        typed.ClientSecret.ToString().Should().Be("***");
+
+        // Seed placeholders are not credentials: not set, whether or not the hook has rewritten them yet.
+        var placeholderSecret = await ReadRawAttributeAsync(tenantId, ServiceAccountTypeId, PlaceholderAccountRtId,
+            nameof(RtServiceAccountConfiguration.ClientSecret));
+        encryption.DescribeSecret(placeholderSecret).State.Should().Be(SecretValueState.NotSet);
+        var placeholderPassword = await ReadRawAttributeAsync(tenantId, HelmRepositoryTypeId, HelmRepositoryRtId,
+            nameof(RtHelmRepositoryConfiguration.Password));
+        encryption.DescribeSecret(placeholderPassword).State.Should().Be(SecretValueState.NotSet);
+    }
+
+    /// <summary>
     ///     The engine half of G3, end to end: a 3.x above the last entry point (the next main bump that
     ///     nobody added to the meta) must fail LOUDLY and leave the data where it is — not be lifted to 4.x
     ///     by the schema-only bridge, not now and not on the next start.
-    ///     AB#5803: 3.42.0 is such a version ON PURPOSE. On main it becomes the SECRET switch (AB#5537), whose
-    ///     4.x counterpart is the 4.x minor after 4.7.0; lifting it onto 4.6.0/4.7.0 would keep encrypted values
-    ///     under attributes those models declare as plain strings. Its entry arrives with that release.
+    ///     AB#5803 / AB#5537: 3.42.0 is such a version ON PURPOSE. It was the planned 3.x cut of the SECRET
+    ///     switch and was never released — the switch ships as the next free 4.x minor after 4.7.0 (4.7.0 is the
+    ///     AB#6312 ownership change) — so there is no published 3.42.0 to check an entry against, and a 3.42.0
+    ///     that exists on a local tenant is refused and rebuilt.
     /// </summary>
     [Theory]
     [InlineData("3.42.0")]
@@ -246,7 +311,8 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
             .Contain("crosses a major version (3.x -> 4.x)").And.Contain($"add a migration entry for {unlistedVersion}");
     }
 
-    private async Task<string> CreateTenantOn3xAsync(string version, bool withStatusHistory = false)
+    private async Task<string> CreateTenantOn3xAsync(string version, bool withStatusHistory = false,
+        bool withCredentials = false)
     {
         var tenantId = $"g3mig{version.Replace(".", "")}{Guid.NewGuid():N}"[..20];
         var systemContext = fixture.GetSystemContext();
@@ -290,7 +356,10 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
         var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
         await tenantRepository.GetCkTypeGraphAsync(LegacyPoolTypeId);
         await fixture.GetService<IImportRtModelCommand>()
-            .ImportTextAsync(tenantRepository, withStatusHistory ? SeedOf3410TenantWithStatusHistory : SeedOf3xTenant,
+            .ImportTextAsync(tenantRepository,
+                withCredentials ? SeedOf3410TenantWithCredentials
+                : withStatusHistory ? SeedOf3410TenantWithStatusHistory
+                : SeedOf3xTenant,
                 ImportStrategy.Insert);
 
         return tenantId;
@@ -310,6 +379,16 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
         using var session = await tenantRepository.GetSessionAsync();
         var (entities, _) = await tenantRepository.GetRtEntitiesByTypeForMigrationAsync(session, LegacyPoolTypeId);
         return entities.Count;
+    }
+
+    private async Task<object?> ReadRawAttributeAsync(string tenantId, RtCkId<CkTypeId> typeId, OctoObjectId rtId,
+        string attributeName)
+    {
+        var tenantRepository = await fixture.GetSystemContext().FindTenantRepositoryAsync(tenantId);
+        using var session = await tenantRepository.GetSessionAsync();
+        var (entities, _) = await tenantRepository.GetRtEntitiesByTypeForMigrationAsync(session, typeId);
+        var entity = entities.Single(e => e.RtId == rtId);
+        return entity.GetAttributeValueOrDefault(attributeName);
     }
 
     private static async Task<string> ReadResourceAsync(string suffix)
@@ -399,6 +478,40 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
                     value: 150
                   - id: System.Communication/FoldedBefore
                     value: '{{FoldBoundary:O}}'
+            """);
+
+    /// <summary>
+    ///     AB#5537 — <see cref="SeedOf3xTenant" /> plus credentials as a 3.41.0 tenant stores them: plain
+    ///     String values, one real clear-text client secret and two legacy seed placeholders.
+    /// </summary>
+    private static string SeedOf3410TenantWithCredentials => Seed3x(string.Empty, string.Empty,
+        extraEntities: $$"""
+
+              - rtId: '{{LegacySecretAccountRtId}}'
+                ckTypeId: System.Communication/ServiceAccountConfiguration
+                rtWellKnownName: legacy-secret-account
+                attributes:
+                  - id: System.Communication/ClientId
+                    value: octo-pipeline-sa-legacy
+                  - id: System.Communication/ClientSecret
+                    value: {{LegacyClientSecret}}
+              - rtId: '{{PlaceholderAccountRtId}}'
+                ckTypeId: System.Communication/ServiceAccountConfiguration
+                rtWellKnownName: placeholder-account
+                attributes:
+                  - id: System.Communication/ClientId
+                    value: octo-pipeline-sa-placeholder
+                  - id: System.Communication/ClientSecret
+                    value: TODO_SET_CLIENT_SECRET
+              - rtId: '{{HelmRepositoryRtId}}'
+                ckTypeId: System.Communication/HelmRepositoryConfiguration
+                attributes:
+                  - id: System.Communication/RepositoryUrl
+                    value: https://charts.example.com
+                  - id: System.Communication/Channel
+                    value: 0
+                  - id: System.Communication/Password
+                    value: '<helm-repository-password>'
             """);
 
     // The extras are appended verbatim; each starts with a newline and carries the indentation of the

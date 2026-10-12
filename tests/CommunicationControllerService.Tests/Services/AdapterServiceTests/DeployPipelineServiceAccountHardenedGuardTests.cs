@@ -4,6 +4,7 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using NSubstitute;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.AdapterServiceTests;
@@ -152,7 +153,7 @@ internal class DeployPipelineServiceAccountHardenedGuardTests : AdapterServiceTe
         };
         if (placeholderSecret != null)
         {
-            overrideAccount.ClientSecret = placeholderSecret;
+            overrideAccount.ClientSecret = SecretTestValues.Stored(placeholderSecret);
         }
 
         CommunicationRepository.GetConfigurationsByPipelineAsync(TenantId, pipeline.RtId)
@@ -162,7 +163,7 @@ internal class DeployPipelineServiceAccountHardenedGuardTests : AdapterServiceTe
 
     [Test]
     [Arguments(null)]
-    [Arguments("<insert secret here>")] // the angle-bracket seed placeholder is "no secret" too
+    [Arguments("<insert secret here>")] // a legacy clear-text seed placeholder is "no secret" too
     public async Task DeployPipelineAsync_SecretlessOverrideWithCapableAdapterOwnClient_Deploys(
         string? placeholderSecret)
     {
@@ -205,12 +206,78 @@ internal class DeployPipelineServiceAccountHardenedGuardTests : AdapterServiceTe
         ArrangeSecretlessPipelineOverride(pipeline);
         // The adapter's own account exists but carries only a seed placeholder — the adapter could
         // not authenticate as itself, so impersonation cannot stand in.
-        DefaultAdapterServiceAccount.ClientSecret = "<insert secret here>";
+        DefaultAdapterServiceAccount.ClientSecret = SecretTestValues.Stored("<insert secret here>");
 
         var ex = await Assert.ThrowsAsync<Exception>(async () =>
             await AdapterService.DeployPipelineAsync(TenantId, adapter.ToRtEntityId(), pipeline.ToRtEntityId()));
 
         await Assert.That(ex!).IsTypeOf<AdapterServiceException>();
+    }
+
+    [Test]
+    public async Task DeployPipelineAsync_SecretlessOverrideAndAdapterOwnUnrevealableLegacySecret_IsRejected()
+    {
+        // AB#5537: same actor rule as the reconcile and the impersonation switch
+        // (PipelineServiceAccountProvisioningService.IsActorSecretUsable): a legacy value in the Secret
+        // slot is revealed, and one that cannot be revealed (here an enc:v1 text under a foreign
+        // instance key) leaves the adapter without own credentials.
+        var (adapter, _, pipeline) = ArrangeDeployablePipeline();
+        ArrangeSecretlessPipelineOverride(pipeline);
+        DefaultAdapterServiceAccount.ClientSecret =
+            RtSecretValue.LegacyPlaintext(TestSecretEncryption.Create().EncryptV1("adapter-own"));
+
+        var ex = await Assert.ThrowsAsync<Exception>(async () =>
+            await AdapterService.DeployPipelineAsync(TenantId, adapter.ToRtEntityId(), pipeline.ToRtEntityId()));
+
+        await Assert.That(ex!).IsTypeOf<AdapterServiceException>();
+    }
+
+    [Test]
+    public async Task DeployPipelineAsync_SecretlessOverrideAndAdapterOwnLegacyPlaintextSecret_Deploys()
+    {
+        var (adapter, _, pipeline) = ArrangeDeployablePipeline();
+        ArrangeSecretlessPipelineOverride(pipeline);
+        DefaultAdapterServiceAccount.ClientSecret = RtSecretValue.LegacyPlaintext("adapter-own");
+
+        await AdapterService.DeployPipelineAsync(TenantId, adapter.ToRtEntityId(), pipeline.ToRtEntityId());
+
+        await AdapterHubCallbacks.Received(1)
+            .AdapterConfigurationUpdatedAsync(TenantId, Arg.Any<AdapterConfigurationDto>());
+    }
+
+    [Test]
+    public async Task DeployPipelineAsync_SecretlessOverrideAndAdapterOwnSecretWithUnknownKeyId_IsRejected()
+    {
+        // Decisions 2026-10-06, item 2: the adapter's own secret is stored but its key id is not in the
+        // ring - the adapter cannot authenticate as itself, so impersonation cannot stand in.
+        var (adapter, _, pipeline) = ArrangeDeployablePipeline();
+        ArrangeSecretlessPipelineOverride(pipeline);
+        DefaultAdapterServiceAccount.ClientSecret =
+            TestSecretEncryption.Create(keyId: "k9").Protector.Protect("adapter-own");
+
+        var ex = await Assert.ThrowsAsync<Exception>(async () =>
+            await AdapterService.DeployPipelineAsync(TenantId, adapter.ToRtEntityId(), pipeline.ToRtEntityId()));
+
+        await Assert.That(ex!).IsTypeOf<AdapterServiceException>();
+    }
+
+    [Test]
+    public async Task DeployPipelineAsync_OverrideSecretWithUnknownKeyId_IsRejectedDespiteCapableAdapterOwnClient()
+    {
+        // Decisions 2026-10-06, item 2: the override account's secret is stored but unreadable here. The
+        // adapter refuses the impersonation fallback for it, so the deploy must not take that path.
+        var (adapter, _, pipeline) = ArrangeDeployablePipeline();
+        var overrideAccount = ArrangeSecretlessPipelineOverride(pipeline);
+        overrideAccount.ClientSecret = TestSecretEncryption.Create(keyId: "k9").Protector.Protect("override");
+
+        var ex = await Assert.ThrowsAsync<Exception>(async () =>
+            await AdapterService.DeployPipelineAsync(TenantId, adapter.ToRtEntityId(), pipeline.ToRtEntityId()));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(ex!).IsTypeOf<AdapterServiceException>();
+        await Assert.That(ex!.Message).Contains("secretless-override");
+        await AdapterHubCallbacks.DidNotReceive()
+            .AdapterConfigurationUpdatedAsync(TenantId, Arg.Any<AdapterConfigurationDto>());
     }
 
     [Test]
@@ -333,5 +400,27 @@ internal class DeployPipelineServiceAccountHardenedGuardTests : AdapterServiceTe
         // The guard asks for exactly the resolved account's client, without the role detail —
         // existence is the deploy question, drift belongs to the health endpoint.
         await IdentityClientReader.Received(1).GetClientAsync(TenantId, "client-id", false);
+    }
+
+    [Test]
+    public async Task DeployPipelineAsync_EncryptedSecret_PassesTheGuardAndIsProjectedAsPlaintext()
+    {
+        // AB#5537 (System.Communication 4.8): the stored secret is an enc:v2 envelope — the guard
+        // checks presence without decrypting, the projection reveals it for the adapter.
+        var (adapter, _, pipeline) = ArrangeDeployablePipeline();
+        DefaultAdapterServiceAccount.ClientSecret = SecretEncryption.Protector.Protect("adapter-own-secret");
+        AdapterConfigurationDto? captured = null;
+        AdapterHubCallbacks
+            .When(x => x.AdapterConfigurationUpdatedAsync(TenantId, Arg.Any<AdapterConfigurationDto>()))
+            .Do(callInfo => captured = callInfo.Arg<AdapterConfigurationDto>());
+
+        await AdapterService.DeployPipelineAsync(TenantId, adapter.ToRtEntityId(), pipeline.ToRtEntityId());
+
+        var projected = captured!.Pipelines.Single().Configurations
+            .Single(c => c.ConfigurationRtId == DefaultAdapterServiceAccount.RtId);
+        using var _ = Assert.Multiple();
+        await Assert.That(projected.ConfigurationValue).Contains("\"ClientSecret\":\"adapter-own-secret\"");
+        await Assert.That(projected.ConfigurationValue).Contains("\"clientSecret\":\"adapter-own-secret\"");
+        await Assert.That(projected.ConfigurationValue.Contains("isSet", StringComparison.Ordinal)).IsFalse();
     }
 }

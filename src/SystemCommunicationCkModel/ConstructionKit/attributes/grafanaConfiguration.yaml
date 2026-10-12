@@ -13,9 +13,10 @@ attributes:
     valueType: String
     isRuntimeState: true
     description: "Grafana Server Admin username for organization management API."
+  # AB#5537 (4.8.0): valueType Secret, ownership Secret (cross-tenant server-admin credential).
   - id: AdminPassword
-    valueType: String
-    isRuntimeState: true
+    valueType: Secret
+    ownership: Secret
     description: "Grafana Server Admin password."
   # NOT runtime state: these two point back at OctoMesh's OWN platform services, not at
   # anything the tenant owns — same class as ${this}/IssuerUri. When the installation moves,

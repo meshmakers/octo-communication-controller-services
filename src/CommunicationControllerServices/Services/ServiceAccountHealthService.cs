@@ -29,7 +29,8 @@ internal class ServiceAccountHealthService(
     ICommunicationRepository communicationRepository,
     IPipelineServiceAccountResolver serviceAccountResolver,
     IIdentityClientReader identityClientReader,
-    IOptions<CommunicationControllerOptions> options)
+    IOptions<CommunicationControllerOptions> options,
+    IWorkloadEncryptionService encryptionService)
     : IServiceAccountHealthService
 {
     // Check names — the machine-readable half of every finding.
@@ -165,9 +166,9 @@ internal class ServiceAccountHealthService(
                     : ReadAttribute(adapterDefault, nameof(RtServiceAccountConfiguration.ClientId));
                 var actorSecret = adapterDefault == null
                     ? null
-                    : ReadAttribute(adapterDefault, nameof(RtServiceAccountConfiguration.ClientSecret));
+                    : ReadRawAttribute(adapterDefault, nameof(RtServiceAccountConfiguration.ClientSecret));
                 if (!string.IsNullOrWhiteSpace(actorClientId) && actorClientId != targetClientId &&
-                    PipelineServiceAccountProvisioningService.IsSecretUsable(actorSecret))
+                    encryptionService.DescribeSecret(actorSecret).IsSet)
                 {
                     return new ImpersonationContext(HasAdapterContext: true, actorClientId, null);
                 }
@@ -197,7 +198,10 @@ internal class ServiceAccountHealthService(
         List<ServiceAccountHealthCheckDto> checks, ImpersonationContext impersonation)
     {
         var clientId = ReadAttribute(configuration, nameof(RtServiceAccountConfiguration.ClientId));
-        var secret = ReadAttribute(configuration, nameof(RtServiceAccountConfiguration.ClientSecret));
+        // AB#5537: raw — a string or an RtSecretValue. The check reports presence only; the value
+        // is never decrypted here (DescribeSecret classifies it, KeyMissing included).
+        var secret = encryptionService.DescribeSecret(
+            ReadRawAttribute(configuration, nameof(RtServiceAccountConfiguration.ClientSecret)));
         var issuerUri = ReadAttribute(configuration, nameof(RtServiceAccountConfiguration.IssuerUri));
         var configuredTenantId = ReadAttribute(configuration, nameof(RtServiceAccountConfiguration.TenantId));
 
@@ -245,14 +249,25 @@ internal class ServiceAccountHealthService(
         }
 
         // ---- local checks: secret/impersonation, tenant, issuer (AB#5115/AB#5114 semantics) ----
-        var secretUsable = PipelineServiceAccountProvisioningService.IsSecretUsable(secret);
+        var secretUsable = secret.IsSet;
 
-        // Credential-aware secret check: an empty (or placeholder) secret is a violation ONLY when
-        // impersonation cannot stand in for it — the adapter-side dual path (AB#5114) makes a
-        // secretless account with a capable actor a fully legitimate configuration.
+        // Credential-aware secret check: an empty secret is a violation ONLY when impersonation cannot
+        // stand in for it — the adapter-side dual path (AB#5114) makes a secretless account with a
+        // capable actor a fully legitimate configuration. A secret that is stored but whose key id is
+        // not in the key ring (decisions 2026-10-06, item 2) is always a violation: nothing can use it
+        // (the adapter refuses to impersonate in its place) and the reconcile deliberately does not
+        // replace it — it needs re-entry, a rotation or the missing key.
         if (secretUsable)
         {
             checks.Add(Healthy(SecretCheck));
+        }
+        else if (secret.KeyMissing)
+        {
+            checks.Add(Violation(SecretCheck, "secret-key-missing",
+                $"The configuration holds a client secret encrypted with key id '{secret.KeyId}', which is not in " +
+                "this environment's key ring (e.g. after a restore from another environment). It is not usable " +
+                "and the reconcile does not replace it: add the key to the ring, or enter a new secret / rotate it " +
+                "(POST .../serviceAccount/rotateSecret)."));
         }
         else if (impersonation.ActorClientId != null)
         {
@@ -533,5 +548,10 @@ internal class ServiceAccountHealthService(
     private static string? ReadAttribute(RtServiceAccountConfiguration configuration, string attributeName)
     {
         return configuration.GetAttributeValueOrDefault(attributeName) as string;
+    }
+
+    private static object? ReadRawAttribute(RtServiceAccountConfiguration configuration, string attributeName)
+    {
+        return configuration.GetAttributeValueOrDefault(attributeName);
     }
 }

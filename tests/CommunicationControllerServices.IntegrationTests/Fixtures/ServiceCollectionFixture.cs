@@ -1,3 +1,5 @@
+using Meshmakers.Octo.Runtime.Engine.Secrets;
+using Meshmakers.Octo.Sdk.Common.Encryption;
 using MartinCostello.Logging.XUnit;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.DeploymentSites;
@@ -49,6 +51,20 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         // Add runtime engine with MongoDB AFTER CK models
         Services.AddRuntimeEngine()
             .AddMongoDbRuntimeRepository();
+
+        // AB#5537: a generated key ring (per fixture, never fixed key material) — the engine
+        // encrypts Secret attributes on write and the controller reveals them for adapters and
+        // workloads through IWorkloadEncryptionService.
+        var secretKey = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        Services.Configure<SecretEncryptionOptions>(options =>
+        {
+            options.Keys ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            options.Keys["k1"] = secretKey;
+            options.ActiveKeyId = "k1";
+            options.LegacyV1Key = secretKey;
+        });
+        Services.AddSingleton<IInstanceSecretCrypto, InstanceSecretCrypto>();
+        Services.AddSingleton<IWorkloadEncryptionService, WorkloadEncryptionService>();
 
         // Add communication controller services
         Services.AddSingleton<ICommunicationRepository, CommunicationRepository>();

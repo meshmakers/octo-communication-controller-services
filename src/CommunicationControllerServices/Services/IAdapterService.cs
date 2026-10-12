@@ -93,9 +93,14 @@ public interface IAdapterService
     /// <param name="tenantId">Tenant identifier</param>
     /// <param name="adapterRtEntityId">Object Id of adapter</param>
     /// <param name="onlyDeployedPipelines">Include only deployed pipelines</param>
+    /// <param name="revealSecrets">
+    /// AB#5537: <c>true</c> only for the configuration an adapter receives over its SignalR
+    /// connection — Secret attributes are revealed (plaintext). <c>false</c> (default) for every
+    /// other consumer, e.g. the REST API: Secret attributes stay the <c>{"isSet":…}</c> marker.
+    /// </param>
     /// <returns></returns>
     Task<AdapterConfigurationDto> GetAdapterConfigurationAsync(string tenantId, RtEntityId adapterRtEntityId,
-        bool onlyDeployedPipelines);
+        bool onlyDeployedPipelines, bool revealSecrets = false);
 
     /// <summary>
     ///     Projects ONE deployed pipeline of an adapter into what a member needs in order to run it

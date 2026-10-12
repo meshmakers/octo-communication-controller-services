@@ -118,6 +118,78 @@ public class ServiceAccountController : ControllerBase
     }
 
     /// <summary>
+    /// AB#5537 / AB#5114 (concept decision 7): moves the tenant's standalone pipeline service
+    /// accounts (per-pipeline overrides) from a stored client secret to impersonation by their
+    /// adapters' own clients, then redeploys the affected data flows. Dry run by default.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Eligible: a standalone account with a usable secret whose every using adapter has an own
+    /// client with a usable secret. Adapter-own accounts are never switched — the pod logs in with
+    /// that secret (<c>SkippedAdapterOwnIdentity</c>).
+    /// </para>
+    /// <para>
+    /// 🔴 <c>apply=true</c> sets the MayActAs edges, clears the stored secrets, redeploys the
+    /// affected data flows and — only for accounts whose data flows all redeployed — invalidates the
+    /// old secret identity-side. Otherwise the account is reported as
+    /// <c>SwitchedPendingInvalidation</c>; re-run with <c>redeployDataFlows=true</c> to complete it.
+    /// It is refused with 409 unless <c>ServiceAccountImpersonation:AllowSecretClearing</c> is armed
+    /// for the environment. Read the dry-run report first.
+    /// </para>
+    /// </remarks>
+    /// <param name="switchService">The tenant-wide switch.</param>
+    /// <param name="apply"><c>false</c> (default) = report only.</param>
+    /// <param name="redeployDataFlows">
+    /// Redeploy the data flows of switched accounts and then invalidate their old secrets (default
+    /// <c>true</c>); <c>false</c> clears without invalidating (<c>SwitchedPendingInvalidation</c>).
+    /// </param>
+    [HttpPost("switchToImpersonation")]
+    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [ProducesResponseType(typeof(ServiceAccountImpersonationSwitchReportDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> SwitchToImpersonation(
+        [FromServices] IServiceAccountImpersonationSwitchService switchService,
+        [FromQuery] bool apply = false,
+        [FromQuery] bool redeployDataFlows = true)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
+        }
+
+        try
+        {
+            var report = await switchService.SwitchTenantAsync(tenantId, apply, redeployDataFlows);
+            return Ok(new ServiceAccountImpersonationSwitchReportDto(
+                report.TenantId,
+                report.Applied,
+                report.Accounts.Select(a => new ServiceAccountImpersonationSwitchEntryDto(
+                    a.ConfigurationRtId.ToString(),
+                    a.WellKnownName,
+                    a.ClientId,
+                    a.Outcome.ToString(),
+                    a.Message,
+                    a.PipelineRtIds.Select(p => p.ToString()).ToList())).ToList(),
+                report.RedeployedDataFlowRtIds.Select(d => d.ToString()).ToList(),
+                report.FailedDataFlowRedeploys
+                    .Select(f => new DataFlowRedeployFailureDto(f.Key.ToString(), f.Value)).ToList()));
+        }
+        catch (ServiceAccountImpersonationSwitchDisabledException e)
+        {
+            return Conflict(new ErrorResponse { ErrorMessage = e.Message });
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "The impersonation switch of tenant '{TenantId}' failed", tenantId);
+            return BadRequest(new ErrorResponse
+                { ErrorMessage = $"The impersonation switch failed: {e.Message}" });
+        }
+    }
+
+    /// <summary>
     /// Read-only identity-health aggregate of a <c>ServiceAccountConfiguration</c> (AB#5112): one
     /// answer covering everything the AB#5111 reconcile converges — configuration completeness,
     /// identity-client existence, role drift against the declaration, the on-behalf-of grant,
