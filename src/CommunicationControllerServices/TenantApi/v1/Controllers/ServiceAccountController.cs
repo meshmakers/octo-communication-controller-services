@@ -10,6 +10,10 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
+// The communication SDK now ships a report DTO of the same name (octo-sdk AB#6642). This endpoint returns the
+// controller's own model, so the alias resolves the ambiguity with the imported Contracts namespace.
+using ServiceAccountImpersonationSwitchReportDto = Meshmakers.Octo.Backend.CommunicationControllerServices.Models.ServiceAccountImpersonationSwitchReportDto;
+
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
 
 /// <summary>
