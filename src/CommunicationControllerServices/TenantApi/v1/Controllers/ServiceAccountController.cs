@@ -10,6 +10,12 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
+// The communication SDK now ships three DTOs of the same names (octo-sdk AB#6642: report, entry, redeploy failure). This endpoint returns the
+// controller's own model, so the alias resolves the ambiguity with the imported Contracts namespace.
+using ServiceAccountImpersonationSwitchReportDto = Meshmakers.Octo.Backend.CommunicationControllerServices.Models.ServiceAccountImpersonationSwitchReportDto;
+using ServiceAccountImpersonationSwitchEntryDto = Meshmakers.Octo.Backend.CommunicationControllerServices.Models.ServiceAccountImpersonationSwitchEntryDto;
+using DataFlowRedeployFailureDto = Meshmakers.Octo.Backend.CommunicationControllerServices.Models.DataFlowRedeployFailureDto;
+
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
 
 /// <summary>
