@@ -183,6 +183,7 @@ internal class GetDisableBlockerAsyncTests
         Substitute.For<IDiagnosticsService>(),
         Microsoft.Extensions.Options.Options.Create(new CommunicationControllerOptions()),
         Substitute.For<ITriggerManagementService>(),
+        Substitute.For<INotificationScheduleService>(),
         Substitute.For<ICommandClient<CreateIdentityDataCommandRequest>>(),
         systemContext,
         poolService,

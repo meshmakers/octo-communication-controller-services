@@ -1,0 +1,50 @@
+$schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+dependencies:
+  - System.Communication-[4.5,5.0)
+  - System.Notification-[2.5.0,3.0)
+entities:
+  - rtId: '670000000000000000002580'
+    ckTypeId: System.Communication/DataFlow
+    rtWellKnownName: notification-engine
+    attributes:
+      - id: System/Name
+        value: Notification Engine
+      - id: System/Description
+        value: Mails the recipients of deployed notification subscriptions the query rows that are new since their previous run.
+
+  - rtId: '670000000000000000002581'
+    ckTypeId: System.Communication/Pipeline
+    rtWellKnownName: notification-engine-pipeline
+    associations:
+      - roleId: System/ParentChild
+        targetRtId: '670000000000000000002580'
+        targetCkTypeId: System.Communication/DataFlow
+      - roleId: System.Communication/Executes
+        targetRtId: '670000000000000000000002'
+        targetCkTypeId: System.Communication/Adapter
+    attributes:
+      - id: System.Communication/DeploymentState
+        value: 0
+      - id: System/Name
+        value: Notification Engine Pipeline
+      - id: System/Enabled
+        value: true
+      - id: System.Communication/PipelineDefinition
+        value: |-
+          triggers:
+            - type: FromNotificationSchedule@1
+          transformations:
+            - type: PrepareNotification@1
+              description: Run the subscription query and render what is new for this recipient
+            - type: ResolveNotificationChannel@1
+              description: Look up the recipient's e-mail address
+              subjectIdPath: $.notification.subjectId
+            - type: SendEMail@2
+              description: Send via the EmailSender SMTP configuration
+              serverConfiguration: EmailSender
+              subjectPath: $.notification.subject
+              path: $.notification.body
+              bodyFormatPath: $.notification.renderingType
+              toPath: $.recipient.email
+            - type: CommitNotificationState@1
+              description: Remember what was sent, only after a successful send

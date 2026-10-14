@@ -1,0 +1,36 @@
+$schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
+blueprintId: System.Communication.Notifications-1.0.0
+description: |
+  Service-managed notification engine (AB#2585). Seeds one DataFlow with one Pipeline on the
+  default Mesh Adapter (670000000000000000000002, seeded by System.Communication.Release /
+  System.Communication.MainLatest). The pipeline mails every recipient of a deployed
+  NotificationSubscription the rows of the subscription's query that are new since that
+  recipient's previous run:
+
+    FromNotificationSchedule@1 -> PrepareNotification@1 -> ResolveNotificationChannel@1
+      -> SendEMail@2 -> CommitNotificationState@1
+
+  The Communication Controller owns the schedule: one recurring tick per preference of a
+  deployed subscription, sent to the queue keyed by this pipeline's rtId, so the rtId is part of
+  the contract (NotificationEngine.PipelineRtId). The pipeline ships undeployed; deploying a
+  subscription deploys it.
+
+  Applied after the Release / MainLatest blueprints because Program.cs registers it after them -
+  the Executes association needs the adapter they seed.
+
+  Post-install:
+  - Provide an EMailSenderConfiguration named 'EmailSender' (the platform mailer's name) and
+    ASSOCIATE it (System.Communication/Uses) to the pipeline 670000000000000000002581.
+    SendEMail@2 resolves serverConfiguration only against the pipeline's own
+    GlobalConfiguration, which is built from its Uses associations, and the entity is created
+    per tenant, so no blueprint can seed the association. Without it every run fails with
+    "Global configuration parameter 'ServerConfiguration' with value 'EmailSender' not found",
+    shown as LastError on the recipient's delivery state. The association is read when the
+    DataFlow is deployed, so add it and then DeployDataFlow.
+
+# Satisfiability floors for the seed below.
+ckModelDependencies:
+  - System.Communication-[4.5,5.0)
+  - System.Notification-[2.5.0,3.0)
+
+seedDataPath: seed-data/entities.yaml

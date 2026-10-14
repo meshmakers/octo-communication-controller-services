@@ -710,6 +710,58 @@ tenants ship with empty `ChartVersion` and the CD pipeline overwrites it on ever
 main-CI run. The same path works for any workload whose operator wants to track a
 channel instead of pinning a specific version.
 
+### Notification Subscriptions — schedule and engine (AB#2585)
+
+A `System.Notification/NotificationSubscription` (a SimpleRtQuery + a template, `Enabled` = Deployed) has one
+`NotificationPreference` per recipient (cron, time zone, Onwards / Catch up). This service owns WHEN; the
+mesh adapter's engine pipeline decides WHAT (see octo-mesh-adapter CLAUDE.md, `PrepareNotification@1`).
+
+| Route | Policy | Behaviour |
+|---|---|---|
+| `POST {tenantId}/v1/notifications/subscriptions/{rtId}/deploy` | ReadWrite | `Enabled=true`, `DeployedAt=now` (a redeploy is a new start), only this subscription's preferences rescheduled, engine DataFlow deployed if it is not, then one immediate tick per Onwards preference. |
+| `POST {tenantId}/v1/notifications/subscriptions/{rtId}/undeploy` | ReadWrite | `Enabled=false`, this subscription's recurring sends cancelled; preferences and delivery states are kept. |
+| `POST {tenantId}/v1/notifications/schedule/sync[?preferenceRtId=]` | ReadWrite | With `preferenceRtId`: cancel that preference's ticks and schedule it again if its subscription is deployed (immediate tick when it never ran); Studio calls this after a preference is saved or deleted. Without it: full rebuild, plus an immediate tick for every preference that has never run. |
+
+Error codes (`NotificationScheduleServiceException.Kind`): `SubscriptionNotFound` → 404; `EngineUnavailable`
+(pipeline missing or disabled, DataFlow deploy failed) → 409; `ScheduleIncomplete` (some preferences could not
+be scheduled; the rest are) → 503 plus one error event naming them (the tenant-start wrapper does not store a second one); anything else → 500.
+
+- `NotificationScheduleService.UpdateScheduleAsync` mirrors `TriggerManagementService`: remove the group
+  `notification-{tenant}`, then one `ScheduleRecurringSendAsync(NotificationScheduleTick)` per preference of a
+  deployed subscription, `TimeZoneId` = the preference's zone (UTC when unset or unknown, with a warning),
+  misfire policy Skip. One preference failing does not stop the others. Runs on tenant start; `StopTenantAsync`
+  removes the group. A failure there is logged and stored as an error event and never stops the tenant
+  (`DefaultConfigurationCreatorService.RunNotificationScheduleStepAsync`). A preference with an empty cron, or
+  one that fires more than once a minute (`NotificationCron`: the seconds field of a six- or seven-field cron
+  must be a single value), is skipped with a warning; the Studio enforces the same limit, but an API write
+  must not get 86 400 ticks a day.
+- **The immediate tick is the Onwards baseline, and only Onwards gets it.** Without it a preference with a daily
+  cron would record its baseline only at the first scheduled time, and every row created before that would be
+  mailed as new. A Catch up preference needs no baseline and loses nothing by waiting, so it gets no immediate
+  tick: otherwise a recipient of a 07:00 digest received the backlog the moment the preference was saved or the
+  subscription deployed (`NotificationPreferenceSchedule.TakesBaseline`, from `SkipExistingRows`). The tick
+  goes to the same queue as the recurring ones; a failed send only logs a warning, the next scheduled tick
+  covers it.
+- **Co-wake.** When the engine adapter's `LifecycleMode` is OnDemand, every preference gets a companion
+  recurring `LifecycleWakeMessage` (`{pref}-notification-wake-{tenant}`) on the same cron, as cron triggers do.
+- Ticks go to `queue:{NotificationScheduleChannelName}-{tenant}-{NotificationEngine.PipelineRtId}`; the adapter
+  trigger listens on the same name, so the engine pipeline's rtId is a cross-repo contract.
+- The engine is the service-managed blueprint `System.Communication.Notifications` (DataFlow
+  `670000000000000000002580`, Pipeline `670000000000000000002581` on the default adapter). It is registered in
+  `Program.cs` AFTER Release / MainLatest because its `Executes` edge needs the adapter they seed — the apply
+  loop runs in registration order. It ships undeployed; subscription Deploy deploys it
+  (`NotificationScheduleServiceException.EngineMissing` / `EngineDeployFailed` otherwise).
+- SMTP follows the EnergyCommunity pattern: the pipeline names `serverConfiguration: EmailSender`, and an
+  operator associates (`Uses`) the tenant's EMailSenderConfiguration of that name, then redeploys the DataFlow.
+- **Not routed through leases (yet).** Ticks go straight to the engine pipeline's queue, the way manual
+  adapters receive them. If an operator switches the default adapter to `LifecycleMode=Leased` (AB#4924),
+  it has no process of its own and the ticks are not consumed - `TriggerManagementService` routes cron
+  triggers of leased adapters through the lease queue, the notification schedule does not.
+
+Tests: `Services/NotificationScheduleServiceTests.cs`, `Controllers/NotificationsControllerTests.cs`,
+integration `Repository/NotificationRepositoryTests.cs`. The integration fixture imports System.Notification
+after System.Communication (`InitializeTenantForTestingAsync`).
+
 ### Signal Channel Self-Service (AB#5143)
 
 Tenant self-service activation of a Signal phone number against the cluster-shared
