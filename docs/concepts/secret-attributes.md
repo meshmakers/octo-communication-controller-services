@@ -129,6 +129,17 @@ legacy clear text makes it "not usable").
   Eligible = standalone, usable secret, and every adapter running one of its pipelines has its own
   account with a usable secret and a different client.
 
+**CLI.** `octo-cli -c SwitchServiceAccountsToImpersonation` (communication services group, since
+release r3.5.20) calls this endpoint for the tenant of the current context (`--context` selects
+another). It is a **dry run by default**: it prints the outcome per account and changes nothing.
+What it switches: only the eligible accounts above, i.e. standalone accounts with a usable secret
+whose adapters all have their own identity; adapter-own accounts are skipped by design
+(`SkippedAdapterOwnIdentity`, see below). `-a` / `--apply` runs the switch (confirmation prompt;
+`-y` skips it), `-rdf` / `--redeployDataFlows` `true|false` controls the data-flow redeploy
+(default `true`) and `-j` / `--json` prints the raw report. Applying additionally needs the server
+flag `OCTO_SERVICEACCOUNTIMPERSONATION__ALLOWSECRETCLEARING=true`, which is off by default; without
+it the server answers 409.
+
 **What is missing for adapter-own accounts.** The adapter's own account (the `PipelineServiceAccount`
 edge) is the identity the pod logs in with (AB#5072: client id and secret travel in the Helm
 values), and it is the actor of every impersonation. Clearing its secret would leave the adapter
