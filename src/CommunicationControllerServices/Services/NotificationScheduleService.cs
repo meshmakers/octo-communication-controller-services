@@ -161,8 +161,16 @@ internal class NotificationScheduleService(
 
     private async Task SendBaselineTicksAsync(string tenantId, IEnumerable<NotificationPreferenceSchedule> schedules)
     {
+        var baselines = schedules.Where(schedule => schedule.TakesBaseline).ToList();
+        if (baselines.Count == 0)
+        {
+            return;
+        }
+
+        await WakeOnDemandEngineAsync(tenantId);
+
         var address = new Uri(NotificationEngine.CreateScheduleAddress(tenantId));
-        foreach (var schedule in schedules.Where(schedule => schedule.TakesBaseline))
+        foreach (var schedule in baselines)
         {
             try
             {
@@ -174,6 +182,28 @@ internal class NotificationScheduleService(
                     "[{TenantId}] First run of notification preference '{PreferenceRtId}' could not be started; it starts with its next scheduled tick",
                     tenantId, schedule.PreferenceRtId);
             }
+        }
+    }
+
+    private async Task WakeOnDemandEngineAsync(string tenantId)
+    {
+        try
+        {
+            var wakeAdapterRtId = await GetOnDemandEngineAdapterAsync(tenantId);
+            if (wakeAdapterRtId == null)
+            {
+                return;
+            }
+
+            var address = new Uri($"queue:{PipelineQueueNames.LifecycleWakeQueue.ToLower()}");
+            await await distributionEventHubService.SendAsync(address,
+                new LifecycleWakeMessage(tenantId, wakeAdapterRtId.Value.ToString()));
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e,
+                "[{TenantId}] The on-demand notification engine could not be woken for the first runs; they start when it next wakes",
+                tenantId);
         }
     }
 

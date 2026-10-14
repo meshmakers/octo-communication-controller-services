@@ -735,15 +735,19 @@ be scheduled; the rest are) → 503 plus one error event naming them (the tenant
   one that fires more than once a minute (`NotificationCron`: the seconds field of a six- or seven-field cron
   must be a single value), is skipped with a warning; the Studio enforces the same limit, but an API write
   must not get 86 400 ticks a day.
-- **The immediate tick is the Onwards baseline, and only Onwards gets it.** Without it a preference with a daily
-  cron would record its baseline only at the first scheduled time, and every row created before that would be
-  mailed as new. A Catch up preference needs no baseline and loses nothing by waiting, so it gets no immediate
+- **The immediate tick is the Onwards baseline, and only Onwards gets it.** The engine's first Onwards run holds
+  back everything the query returns at that moment, so without it a preference with a daily cron would record its
+  baseline only at the first scheduled time, and every row created between the start and that run would never be
+  mailed. A Catch up preference needs no baseline and loses nothing by waiting, so it gets no immediate
   tick: otherwise a recipient of a 07:00 digest received the backlog the moment the preference was saved or the
   subscription deployed (`NotificationPreferenceSchedule.TakesBaseline`, from `SkipExistingRows`). The tick
   goes to the same queue as the recurring ones; a failed send only logs a warning, the next scheduled tick
   covers it.
 - **Co-wake.** When the engine adapter's `LifecycleMode` is OnDemand, every preference gets a companion
   recurring `LifecycleWakeMessage` (`{pref}-notification-wake-{tenant}`) on the same cron, as cron triggers do.
+  The immediate ticks get one `LifecycleWakeMessage` of their own, sent before them to the same durable wake queue:
+  a hibernated engine would otherwise consume them only at its next scheduled wake, and every row created in
+  between would fall into the baseline and never be mailed. A failed wake only logs a warning.
 - Ticks go to `queue:{NotificationScheduleChannelName}-{tenant}-{NotificationEngine.PipelineRtId}`; the adapter
   trigger listens on the same name, so the engine pipeline's rtId is a cross-repo contract.
 - The engine is the service-managed blueprint `System.Communication.Notifications` (DataFlow

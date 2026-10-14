@@ -208,6 +208,59 @@ internal class NotificationScheduleServiceTests
     }
 
     [Test]
+    public async Task DeploySubscriptionAsync_OnDemandEngineAdapter_WakesItOnceForTheFirstRuns()
+    {
+        var adapter = RtEntityCreator.CreateAdapter();
+        adapter.LifecycleMode = RtLifecycleModeEnum.OnDemand;
+        _communicationRepository.GetAdapterByPipelineAsync(TenantId, EnginePipelineId).Returns(adapter);
+        _distributionEventHubService.SendAsync(Arg.Any<Uri>(), Arg.Any<LifecycleWakeMessage>(),
+                Arg.Any<CancellationToken?>())
+            .Returns(Task.FromResult(Task.CompletedTask));
+        var subscriptionRtId = OctoObjectId.GenerateNewId();
+        _notificationRepository.GetDeployedPreferenceSchedulesAsync(TenantId, subscriptionRtId)
+            .Returns([Schedule(), Schedule()]);
+
+        await _service.DeploySubscriptionAsync(TenantId, subscriptionRtId);
+
+        await _distributionEventHubService.Received(1).SendAsync(
+            new Uri($"queue:{PipelineQueueNames.LifecycleWakeQueue.ToLower()}"),
+            Arg.Is<LifecycleWakeMessage>(m => m.TenantId == TenantId && m.WorkloadRtId == adapter.RtId.ToString()),
+            Arg.Any<CancellationToken?>());
+        await _distributionEventHubService.Received(2).SendAsync(Arg.Any<Uri>(), Arg.Any<NotificationScheduleTick>(),
+            Arg.Any<CancellationToken?>());
+    }
+
+    [Test]
+    public async Task DeploySubscriptionAsync_AlwaysOnEngineAdapter_SendsNoWake()
+    {
+        _communicationRepository.GetAdapterByPipelineAsync(TenantId, EnginePipelineId)
+            .Returns(RtEntityCreator.CreateAdapter());
+        var subscriptionRtId = OctoObjectId.GenerateNewId();
+        _notificationRepository.GetDeployedPreferenceSchedulesAsync(TenantId, subscriptionRtId).Returns([Schedule()]);
+
+        await _service.DeploySubscriptionAsync(TenantId, subscriptionRtId);
+
+        await _distributionEventHubService.DidNotReceive().SendAsync(Arg.Any<Uri>(), Arg.Any<LifecycleWakeMessage>(),
+            Arg.Any<CancellationToken?>());
+    }
+
+    [Test]
+    public async Task DeploySubscriptionAsync_OnDemandEngineAdapter_CatchUpOnly_SendsNoWake()
+    {
+        var adapter = RtEntityCreator.CreateAdapter();
+        adapter.LifecycleMode = RtLifecycleModeEnum.OnDemand;
+        _communicationRepository.GetAdapterByPipelineAsync(TenantId, EnginePipelineId).Returns(adapter);
+        var subscriptionRtId = OctoObjectId.GenerateNewId();
+        _notificationRepository.GetDeployedPreferenceSchedulesAsync(TenantId, subscriptionRtId)
+            .Returns([Schedule(takesBaseline: false)]);
+
+        await _service.DeploySubscriptionAsync(TenantId, subscriptionRtId);
+
+        await _distributionEventHubService.DidNotReceive().SendAsync(Arg.Any<Uri>(), Arg.Any<LifecycleWakeMessage>(),
+            Arg.Any<CancellationToken?>());
+    }
+
+    [Test]
     public async Task DeploySubscriptionAsync_PersistsThenSchedulesItsPreferencesThenTheEngineThenTheFirstRun()
     {
         var subscriptionRtId = OctoObjectId.GenerateNewId();
