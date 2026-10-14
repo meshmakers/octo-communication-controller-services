@@ -63,6 +63,10 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
 
     private const string RelabelSourceVersion = "3.40.0";
 
+    // The published System.Bot-3.4.0 (classic, exact System pin; byte-identical to the file of the catalogs): the dependency
+    // every historic 3.x System.Communication of these tests pins exactly.
+    private const string PublishedSystemBot340 = "ck-system.bot-3.4.0.json";
+
     // The blueprint's rtIds (System.Communication.Release / .MainLatest seed) for the seeded site and
     // the Mesh Adapter, plus an operator-created Edge site with its own adapter.
     private static readonly OctoObjectId SeededSiteRtId = new("670000000000000000000001");
@@ -326,17 +330,20 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
 
         var tenantContext = await systemContext.FindTenantContextAsync(tenantId);
 
-        foreach (var dependency in new[] { SystemCkIds.CkModelId, SystemBotCkIds.CkModelId })
-        {
-            if (await tenantContext.IsCkModelExistingAsync(dependency))
-            {
-                continue;
-            }
+        var systemResult = new OperationResult();
+        await tenantContext.ImportCkModelAsync(SystemCkIds.CkModelId, systemResult);
+        systemResult.HasErrors.Should().BeFalse(systemResult.GetMessages());
 
-            var dependencyResult = new OperationResult();
-            await tenantContext.ImportCkModelAsync(dependency, dependencyResult);
-            dependencyResult.HasErrors.Should().BeFalse(dependencyResult.GetMessages());
-        }
+        // The historic 3.x models pin System.Bot EXACTLY to 3.4.0 (`System.Bot-[3.4.0]`). A tenant of that state holds
+        // System.Bot-3.4.0, not the embedded version (3.5.0 since the range-retention re-pin, AB#6691), so the published
+        // 3.4.0 is installed as the dependency - the tests are about historic tenant states and keep their exact pins.
+        var botJson = await ReadResourceAsync(PublishedSystemBot340);
+        var botResult = new OperationResult();
+        var bot = await fixture.GetService<ICkJsonSerializer>()
+            .DeserializeCompiledModelRootAsync(botJson, "ck-system.bot-3.4.0.json", botResult);
+        botResult.HasErrors.Should().BeFalse(botResult.GetMessages());
+        bot.ModelId.Should().Be(new CkModelId("System.Bot", "3.4.0"));
+        await tenantContext.ImportCkModelAsync(bot);
 
         // The published model of this version, or the published 3.40.0 re-labelled to it.
         var json = PublishedModels.TryGetValue(version, out var published)
