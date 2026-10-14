@@ -89,6 +89,10 @@ internal class AdapterPoolHubAuthorizationFilter : IHubFilter
     {
         var options = context.ServiceProvider
             .GetRequiredService<IOptions<AdapterPoolHubAuthorizationOptions>>().Value;
+        var enforcing = options.Mode == AdapterPoolHubAuthorizationMode.Enforce;
+        // A missing or unresolvable metrics registration must cost the counter, never the
+        // connection (AB#6088).
+        var metrics = HubAuthorizationMetrics.TryResolve(context.ServiceProvider);
 
         var user = await HubConnectionPrincipal.ResolveAsync(context);
         var tokenTenantId = user?.FindFirst(HubConnectionPrincipal.TenantIdClaimType)?.Value;
@@ -99,43 +103,59 @@ internal class AdapterPoolHubAuthorizationFilter : IHubFilter
             context.Context.Items[ConnectionTenantIdItemKey] = tokenTenantId;
         }
 
-        var refusal = await RefusalReasonAsync(context, user);
-        if (refusal == null)
+        var verdict = await EvaluateAsync(context, user);
+        if (verdict.Refusal == null)
         {
+            metrics?.Record(HubAuthorizationHub.AdapterPool, enforcing, HubAuthorizationOutcome.Allowed,
+                verdict.Reason);
             await next(context);
             return;
         }
 
+        metrics?.Record(HubAuthorizationHub.AdapterPool, enforcing,
+            HubAuthorizationMetrics.RefusalOutcome(enforcing), verdict.Reason);
+        var refusal = verdict.Refusal;
+        var reasonCode = HubAuthorizationMetrics.ToTagValue(verdict.Reason);
+
         var caller = $"{HubConnectionPrincipal.Describe(user, context.Context.ConnectionId)}, " +
                      $"token tenant '{(string.IsNullOrEmpty(tokenTenantId) ? "<none>" : tokenTenantId)}'";
 
-        if (options.Mode == AdapterPoolHubAuthorizationMode.Enforce)
+        if (enforcing)
         {
-            Logger.Warn("Refused a pool-member connection to /adapterPoolHub: {Reason}: {Caller}",
-                refusal, caller);
+            Logger.Warn(
+                "Refused a pool-member connection to /adapterPoolHub: {Reason}: {Caller} " +
+                "(reason code {HubAuthorizationReason})",
+                refusal, caller, reasonCode);
             throw new HubException($"Adapter pool connection refused: {refusal}.");
         }
 
         // LogOnly — this line IS the consumer inventory. Read it before arming Enforce anywhere.
         Logger.Warn(
             "Pool-member connection to /adapterPoolHub {Reason} and would be refused when " +
-            "AdapterPoolHubAuthorization:Mode is Enforce: {Caller}",
-            refusal, caller);
+            "AdapterPoolHubAuthorization:Mode is Enforce: {Caller} (reason code {HubAuthorizationReason})",
+            refusal, caller, reasonCode);
 
         await next(context);
     }
 
     /// <summary>
-    ///     Why the connection would be refused, or <c>null</c> when it passes both checks. A phrase
-    ///     rather than a boolean, for the same reason as the other two gates: "no token at all" and
-    ///     "token without a tenant" are different pieces of work for whoever reads the inventory.
+    ///     A gate decision: the low-cardinality <see cref="Reason" /> for the decision counter and the
+    ///     <see cref="Refusal" /> phrase for the log line, <c>null</c> when the connection passes.
     /// </summary>
-    private static async Task<string?> RefusalReasonAsync(HubLifetimeContext context, ClaimsPrincipal? user)
+    private readonly record struct Verdict(HubAuthorizationReason Reason, string? Refusal);
+
+    /// <summary>
+    ///     Why the connection would be refused, or a verdict without a refusal when it passes both
+    ///     checks. A phrase rather than a boolean, for the same reason as the other two gates: "no token
+    ///     at all" and "token without a tenant" are different pieces of work for whoever reads the
+    ///     inventory.
+    /// </summary>
+    private static async Task<Verdict> EvaluateAsync(HubLifetimeContext context, ClaimsPrincipal? user)
     {
         if (user?.Identity is not { IsAuthenticated: true })
         {
-            return "does not satisfy '" + Constants.TenantCommunicationApiReadWritePolicy +
-                   "' (unauthenticated)";
+            return new Verdict(HubAuthorizationReason.Unauthenticated,
+                "does not satisfy '" + Constants.TenantCommunicationApiReadWritePolicy + "' (unauthenticated)");
         }
 
         var authorizationService = context.ServiceProvider.GetRequiredService<IAuthorizationService>();
@@ -143,7 +163,8 @@ internal class AdapterPoolHubAuthorizationFilter : IHubFilter
             Constants.TenantCommunicationApiReadWritePolicy);
         if (!authorized.Succeeded)
         {
-            return $"does not satisfy '{Constants.TenantCommunicationApiReadWritePolicy}'";
+            return new Verdict(HubAuthorizationReason.MissingScope,
+                $"does not satisfy '{Constants.TenantCommunicationApiReadWritePolicy}'");
         }
 
         // Fail closed. A token that cannot be attributed to a tenant cannot be attributed to a pool
@@ -152,11 +173,11 @@ internal class AdapterPoolHubAuthorizationFilter : IHubFilter
         var tokenTenantId = user.FindFirst(HubConnectionPrincipal.TenantIdClaimType)?.Value;
         if (string.IsNullOrEmpty(tokenTenantId))
         {
-            return HubConnectionPrincipal.IsServiceToken(user)
+            return new Verdict(HubAuthorizationReason.NoTenantClaim, HubConnectionPrincipal.IsServiceToken(user)
                 ? "presents a service token with no tenant_id claim"
-                : "presents a user token with no tenant_id claim";
+                : "presents a user token with no tenant_id claim");
         }
 
-        return null;
+        return new Verdict(HubAuthorizationReason.Authorized, null);
     }
 }

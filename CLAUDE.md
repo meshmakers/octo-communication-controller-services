@@ -356,18 +356,18 @@ count and types by reflection (`Helper/HubCallbackContract`); a source sweep cou
 taken from an interface (justified exceptions are listed in `NotAHubCallbackSend`). Adding a send means
 nothing to do if it uses `nameof`; a new callback interface must be added to `CallbackInterfaces`.
 
-#### Decision counter of both hub gates (AB#5528 phase 3)
+#### Decision counter of the three hub gates (AB#5528 phase 3, AB#6088)
 
-Both filters count every decision on `octo.communication.hub.authorization.decisions` (counter,
+All three gates (`/{tenantId}/adapterHub`, `/operatorHub`, `/adapterPoolHub`) count every decision on `octo.communication.hub.authorization.decisions` (counter,
 `{decision}`, meter `Meshmakers.Octo.Communication`) — `Hubs/HubAuthorizationMetrics`, registered as
 a singleton in `Program.cs`, resolved eagerly after `Build()` and created through `IMeterFactory`. The
-constructor writes a zero for every hub × mode × outcome × reason series (20), because PromQL's
+constructor writes a zero for every hub × mode × outcome × reason series (30), because PromQL's
 `increase()` does not count the first point of a new cumulative series — without the baseline a single
 anonymous connection after a restart would read as "no increase". Attributes, all closed sets:
 
 | Attribute | Values |
 |---|---|
-| `octo.hub.name` | `adapter`, `operator` |
+| `octo.hub.name` | `adapter`, `operator`, `adapterPoolHub` |
 | `octo.hub.authorization.mode` | `log_only`, `enforce` |
 | `octo.hub.authorization.outcome` | `allowed`, `would_refuse` (LogOnly), `refused` (Enforce) |
 | `octo.hub.authorization.reason` | `authorized`, `cross_tenant_client` (allowed via the allow-list), `unauthenticated`, `missing_scope`, `no_route_tenant`, `no_tenant_claim`, `tenant_mismatch` |
@@ -380,7 +380,7 @@ posture, the operator hub is not tenant-scoped, and the series count stays fixed
 filters resolve the metrics through `HubAuthorizationMetrics.TryResolve` and `Record` swallows listener
 failures, so the metric can cost a measurement, never a connection. Rollout procedure: `docs/runbooks/hub-authorization-enforce-rollout.md`.
 
-Tests: `Hubs/HubAuthorizationMetricsTests` (every reason × outcome through a real `MeterListener`
+Tests: `Hubs/HubAuthorizationMetricsTests` (including the pool hub: allowed, would_refuse, refused, registration tenant mismatch; every reason × outcome through a real `MeterListener`
 scoped to the test's own `IMeterFactory`, exactly four attributes, connection unaffected without the
 registration, registration pinned at the `Program.cs` source).
 

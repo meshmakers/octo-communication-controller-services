@@ -13,7 +13,14 @@ internal enum HubAuthorizationHub
     Adapter,
 
     /// <summary><c>/operatorHub</c>, gated by <see cref="OperatorHubAuthorizationFilter" /> (AB#5059).</summary>
-    Operator
+    Operator,
+
+    /// <summary>
+    ///     <c>/adapterPoolHub</c>, gated by <see cref="AdapterPoolHubAuthorizationFilter" /> at connect
+    ///     and completed by <c>AdapterPoolHub.RegisterPoolMemberAsync</c> at registration (AB#6088).
+    ///     Rendered as <c>adapterPoolHub</c>.
+    /// </summary>
+    AdapterPool
 }
 
 /// <summary>
@@ -62,15 +69,18 @@ internal enum HubAuthorizationReason
     /// <summary>Adapter hub only: the connection's path carries no tenant.</summary>
     NoRouteTenant,
 
-    /// <summary>Adapter hub only: the token carries no <c>tenant_id</c> claim (fail closed).</summary>
+    /// <summary>Adapter and pool hub: the token carries no <c>tenant_id</c> claim (fail closed).</summary>
     NoTenantClaim,
 
-    /// <summary>Adapter hub only: the token's tenant is not the tenant of the hub path.</summary>
+    /// <summary>
+    ///     Adapter hub: the token's tenant is not the tenant of the hub path. Pool hub: the token's
+    ///     tenant is not the tenant of the pool the member declares at registration.
+    /// </summary>
     TenantMismatch
 }
 
 /// <summary>
-///     The decision counter of the two hub gates (AB#5059 / AB#5063 rollout to <c>Enforce</c>,
+///     The decision counter of the three hub gates (AB#5059 / AB#5063 / AB#6088 rollout to <c>Enforce</c>,
 ///     AB#5528 phase 3): <c>octo.communication.hub.authorization.decisions</c>.
 /// </summary>
 /// <remarks>
@@ -126,7 +136,7 @@ internal sealed class HubAuthorizationMetrics
             unit: "{decision}",
             description:
             "Hub connection authorization decisions of the communication controller, by hub " +
-            "(adapter / operator), mode (log_only / enforce), outcome (allowed / would_refuse / refused) " +
+            "(adapter / operator / adapterPoolHub), mode (log_only / enforce), outcome (allowed / would_refuse / refused) " +
             "and reason. would_refuse must be zero before a hub is switched to Enforce");
 
         // Zero baseline for every refusal series (and the allowed ones). A cumulative counter series
@@ -153,7 +163,13 @@ internal sealed class HubAuthorizationMetrics
     [
         (HubAuthorizationHub.Adapter, Enum.GetValues<HubAuthorizationReason>()),
         (HubAuthorizationHub.Operator,
-            [HubAuthorizationReason.Authorized, HubAuthorizationReason.Unauthenticated, HubAuthorizationReason.MissingScope])
+            [HubAuthorizationReason.Authorized, HubAuthorizationReason.Unauthenticated, HubAuthorizationReason.MissingScope]),
+        (HubAuthorizationHub.AdapterPool,
+        [
+            HubAuthorizationReason.Authorized, HubAuthorizationReason.Unauthenticated,
+            HubAuthorizationReason.MissingScope, HubAuthorizationReason.NoTenantClaim,
+            HubAuthorizationReason.TenantMismatch
+        ])
     ];
 
     /// <summary>
@@ -210,6 +226,7 @@ internal sealed class HubAuthorizationMetrics
     {
         HubAuthorizationHub.Adapter => "adapter",
         HubAuthorizationHub.Operator => "operator",
+        HubAuthorizationHub.AdapterPool => "adapterPoolHub",
         _ => throw new ArgumentOutOfRangeException(nameof(hub), hub, null)
     };
 

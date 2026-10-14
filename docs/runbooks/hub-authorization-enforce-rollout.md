@@ -1,4 +1,4 @@
-# Rollout: `Enforce` on the adapter and operator hubs (AB#5063, AB#5059, AB#5528 phase 3)
+# Rollout: `Enforce` on the adapter, operator and adapter-pool hubs (AB#5063, AB#5059, AB#6088, AB#5528 phase 3)
 
 The controller gates both SignalR hubs with a staged check (`CLAUDE.md` § "The SignalR hubs are not
 covered by any of that"). Decision D2: **`Enforce` on every cluster before the communication SECRET
@@ -8,6 +8,7 @@ switch.** `LogOnly` is the review stage and the emergency exit.
 |---|---|---|---|
 | `/operatorHub` (`operatorMode`) | no token, or a token without scope `octo_api` | one central operator per installation (+ the test-2 dev lane), the edge-device operators (they dial into **test-2**) | operator client (`operator.authentication.*`, AB#5062) |
 | `/{tenantId}/adapterHub` (`adapterMode`) | no token, no `octo_api`, no route tenant, no `tenant_id` claim, `tenant_id` ≠ route tenant (unless the client is in `TenantAuthorization:CrossTenantServiceClientIds`) | every adapter pod — central and edge, mesh adapter and the separately built ones (finAPI, EDA, Loxone, SAP, MQTT, …) | the adapter's own pipeline service account (AB#5027), projected at workload deploy (AB#5072) and used by `AdapterAccessTokenService` (octo-communication-sdk r3.4.113+) |
+| `/adapterPoolHub` (`AdapterPoolHubAuthorization:Mode`, counter `octo_hub_name="adapterPoolHub"`) | no token, no `octo_api`, no `tenant_id` claim at connect; at pool-member registration a token tenant ≠ the declared pool tenant | adapter pool members (shared-adapter leasing) | the pool's own service account of the lending tenant |
 
 Schedule: Mon 12.10. release train (chart + operator credentials, everything still `LogOnly`) →
 12.–15.10. log review → 15.–19.10. `Enforce` per cluster, one hub at a time.
@@ -67,13 +68,16 @@ sum by (octo_hub_name, octo_hub_authorization_reason) (
             octo_hub_authorization_outcome="would_refuse"}[72h]))
 ```
 
+On `octo_hub_name="adapterPoolHub"` `allowed` means "passed the connect gate"; a registration into
+another tenant's pool is counted as an additional `tenant_mismatch` decision of the same connection.
+
 Note that long-lived connections are counted once, when they connect: a quiet `increase(allowed[24h])`
 on day three is normal, the raw value is the liveness check.
 
 `reason` tells you what kind of work is left: `unauthenticated` (no token — client not configured,
 image too old, or not redeployed), `missing_scope` (token without `octo_api` — wrong client setup),
 `tenant_mismatch` / `no_tenant_claim` (adapter token of another tenant / minted without
-`acr_values`), `no_route_tenant` (malformed connection). `allowed` with `cross_tenant_client` means
+`acr_values`; on `adapterPoolHub` `tenant_mismatch` is a pool member registering into another tenant's pool), `no_route_tenant` (malformed connection). `allowed` with `cross_tenant_client` means
 the allow-list was used — every entry there must be intentional.
 
 **Logs — whom to fix.** Every `would_refuse` decision has a warning line on the controller:
