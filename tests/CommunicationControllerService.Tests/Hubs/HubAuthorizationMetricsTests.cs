@@ -4,7 +4,9 @@ using System.Security.Claims;
 using Meshmakers.Octo.Backend.CommunicationControllerServices;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Configuration;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -13,6 +15,7 @@ using Microsoft.AspNetCore.Http.Connections.Features;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Hubs;
@@ -93,6 +96,7 @@ internal class HubAuthorizationMetricsTests
     private static ServiceProvider BuildServiceProvider(
         AdapterHubAuthorizationMode adapterMode = AdapterHubAuthorizationMode.LogOnly,
         OperatorHubAuthorizationMode operatorMode = OperatorHubAuthorizationMode.LogOnly,
+        AdapterPoolHubAuthorizationMode poolMode = AdapterPoolHubAuthorizationMode.LogOnly,
         params string[] crossTenantServiceClientIds)
     {
         return new ServiceCollection()
@@ -109,6 +113,7 @@ internal class HubAuthorizationMetricsTests
             })
             .Configure<AdapterHubAuthorizationOptions>(o => o.Mode = adapterMode)
             .Configure<OperatorHubAuthorizationOptions>(o => o.Mode = operatorMode)
+            .Configure<AdapterPoolHubAuthorizationOptions>(o => o.Mode = poolMode)
             .Configure<TenantAuthorizationOptions>(o =>
                 o.CrossTenantServiceClientIds = crossTenantServiceClientIds.ToList())
             .BuildServiceProvider();
@@ -130,6 +135,7 @@ internal class HubAuthorizationMetricsTests
         callerContext.ConnectionId.Returns("conn-1");
         callerContext.User.Returns(user);
         callerContext.Features.Returns(features);
+        callerContext.Items.Returns(new Dictionary<object, object?>());
 
         return new HubLifetimeContext(callerContext, serviceProvider, new TestHub());
     }
@@ -166,6 +172,55 @@ internal class HubAuthorizationMetricsTests
         catch (HubException)
         {
             // See ConnectAdapterAsync.
+        }
+    }
+
+    private static async Task ConnectPoolAsync(HubLifetimeContext context)
+    {
+        try
+        {
+            await new AdapterPoolHubAuthorizationFilter().OnConnectedAsync(context, _ => Task.CompletedTask);
+        }
+        catch (HubException)
+        {
+            // See ConnectAdapterAsync.
+        }
+    }
+
+    private static async Task RegisterPoolMemberAsync(ServiceProvider provider, string? connectionTenantId,
+        string poolTenantId)
+    {
+        var items = new Dictionary<object, object?>();
+        if (connectionTenantId != null)
+        {
+            items[AdapterPoolHubAuthorizationFilter.ConnectionTenantIdItemKey] = connectionTenantId;
+        }
+
+        var callerContext = Substitute.For<HubCallerContext>();
+        callerContext.ConnectionId.Returns("conn-1");
+        callerContext.Items.Returns(items);
+
+        using var hub = new AdapterPoolHub(new AdapterPoolConnectionManager(),
+            Substitute.For<ICommunicationEventService>(), Substitute.For<ILeaseService>(),
+            provider.GetRequiredService<IOptions<AdapterPoolHubAuthorizationOptions>>(),
+            Substitute.For<IShutdownState>(), provider.GetRequiredService<HubAuthorizationMetrics>())
+        {
+            Context = callerContext
+        };
+
+        try
+        {
+            await hub.RegisterPoolMemberAsync(new PoolMemberRegistrationDto
+            {
+                AdapterPoolTenantId = poolTenantId,
+                AdapterPoolRtId = "6ad562f3ff7c40ff80275b84",
+                MemberId = "octo-pool-0",
+                NodeDescriptors = []
+            });
+        }
+        catch (HubException)
+        {
+            // Refusals are asserted through the counter here.
         }
     }
 
@@ -272,12 +327,113 @@ internal class HubAuthorizationMetricsTests
     public async Task Adapter_AllowListedCrossTenantClient_IsCountedAsAllowedWithItsOwnReason()
     {
         await using var provider = BuildServiceProvider(AdapterHubAuthorizationMode.Enforce,
-            OperatorHubAuthorizationMode.LogOnly, "octo-platform-*");
+            OperatorHubAuthorizationMode.LogOnly, AdapterPoolHubAuthorizationMode.LogOnly, "octo-platform-*");
         using var recorder = new Recorder(provider);
 
         await ConnectAdapterAsync(CreateContext(provider, ServiceToken("othertenant", "octo-platform-worker")));
 
         await AssertSingleDecision(recorder, "adapter", "enforce", "allowed", "cross_tenant_client");
+    }
+
+    [Test]
+    public async Task Pool_TenantBoundToken_IsCountedAsAllowed()
+    {
+        await using var provider = BuildServiceProvider(poolMode: AdapterPoolHubAuthorizationMode.Enforce);
+        using var recorder = new Recorder(provider);
+
+        await ConnectPoolAsync(CreateContext(provider, ServiceToken("lender", "octo-pool-sa")));
+
+        await AssertSingleDecision(recorder, "adapterPoolHub", "enforce", "allowed", "authorized");
+    }
+
+    [Test]
+    public async Task Pool_Anonymous_IsCountedAsWouldRefuse_InLogOnly()
+    {
+        await using var provider = BuildServiceProvider();
+        using var recorder = new Recorder(provider);
+
+        await ConnectPoolAsync(CreateContext(provider, Anonymous()));
+
+        await AssertSingleDecision(recorder, "adapterPoolHub", "log_only", "would_refuse", "unauthenticated");
+    }
+
+    [Test]
+    public async Task Pool_Anonymous_IsCountedAsRefused_WhenEnforcing()
+    {
+        await using var provider = BuildServiceProvider(poolMode: AdapterPoolHubAuthorizationMode.Enforce);
+        using var recorder = new Recorder(provider);
+
+        await ConnectPoolAsync(CreateContext(provider, Anonymous()));
+
+        await AssertSingleDecision(recorder, "adapterPoolHub", "enforce", "refused", "unauthenticated");
+    }
+
+    [Test]
+    public async Task Pool_ReadOnlyScope_IsCountedAsMissingScope()
+    {
+        await using var provider = BuildServiceProvider();
+        using var recorder = new Recorder(provider);
+
+        await ConnectPoolAsync(CreateContext(provider,
+            ServiceToken("lender", scope: CommonConstants.OctoApiReadOnly)));
+
+        await AssertSingleDecision(recorder, "adapterPoolHub", "log_only", "would_refuse", "missing_scope");
+    }
+
+    [Test]
+    public async Task Pool_TokenWithoutTenantClaim_IsCountedAsNoTenantClaim()
+    {
+        await using var provider = BuildServiceProvider(poolMode: AdapterPoolHubAuthorizationMode.Enforce);
+        using var recorder = new Recorder(provider);
+
+        await ConnectPoolAsync(CreateContext(provider,
+            Principal(new Claim(InfrastructureCommon.ClaimScope, CommonConstants.OctoApiFullAccess),
+                new Claim("client_id", "legacy"))));
+
+        await AssertSingleDecision(recorder, "adapterPoolHub", "enforce", "refused", "no_tenant_claim");
+    }
+
+    /// <summary>
+    ///     The registration binding is the second half of the pool gate: a token of tenant X declaring
+    ///     a pool of tenant Y is counted as <c>tenant_mismatch</c> under the pool hub's own mode.
+    /// </summary>
+    [Test]
+    public async Task Pool_RegistrationIntoAnotherTenantsPool_IsCountedAsTenantMismatch_InLogOnly()
+    {
+        await using var provider = BuildServiceProvider();
+        using var recorder = new Recorder(provider);
+
+        await RegisterPoolMemberAsync(provider, "someoneelse", "lender");
+
+        await AssertSingleDecision(recorder, "adapterPoolHub", "log_only", "would_refuse", "tenant_mismatch");
+    }
+
+    [Test]
+    public async Task Pool_RegistrationIntoAnotherTenantsPool_IsCountedAsRefused_WhenEnforcing()
+    {
+        await using var provider = BuildServiceProvider(poolMode: AdapterPoolHubAuthorizationMode.Enforce);
+        using var recorder = new Recorder(provider);
+
+        await RegisterPoolMemberAsync(provider, "someoneelse", "lender");
+
+        await AssertSingleDecision(recorder, "adapterPoolHub", "enforce", "refused", "tenant_mismatch");
+    }
+
+    /// <summary>
+    ///     A matching registration adds no decision (the connect gate counted the connection), and a
+    ///     registration without any connection tenant is not counted twice (the connect gate counted it
+    ///     as <c>no_tenant_claim</c>).
+    /// </summary>
+    [Test]
+    public async Task Pool_MatchingOrTenantlessRegistration_AddsNoDecision()
+    {
+        await using var provider = BuildServiceProvider(poolMode: AdapterPoolHubAuthorizationMode.Enforce);
+        using var recorder = new Recorder(provider);
+
+        await RegisterPoolMemberAsync(provider, "lender", "lender");
+        await RegisterPoolMemberAsync(provider, null, "lender");
+
+        await Assert.That(recorder.Decisions.Count).IsEqualTo(0);
     }
 
     [Test]
@@ -347,6 +503,7 @@ internal class HubAuthorizationMetricsTests
             })
             .Configure<AdapterHubAuthorizationOptions>(o => o.Mode = AdapterHubAuthorizationMode.LogOnly)
             .Configure<OperatorHubAuthorizationOptions>(o => o.Mode = OperatorHubAuthorizationMode.LogOnly)
+            .Configure<AdapterPoolHubAuthorizationOptions>(o => o.Mode = AdapterPoolHubAuthorizationMode.LogOnly)
             .Configure<TenantAuthorizationOptions>(_ => { })
             .BuildServiceProvider();
 
@@ -363,8 +520,16 @@ internal class HubAuthorizationMetricsTests
             return Task.CompletedTask;
         });
 
+        var poolConnected = false;
+        await new AdapterPoolHubAuthorizationFilter().OnConnectedAsync(CreateContext(provider, Anonymous()), _ =>
+        {
+            poolConnected = true;
+            return Task.CompletedTask;
+        });
+
         await Assert.That(adapterConnected).IsTrue();
         await Assert.That(operatorConnected).IsTrue();
+        await Assert.That(poolConnected).IsTrue();
     }
 
     /// <summary>
@@ -394,8 +559,11 @@ internal class HubAuthorizationMetricsTests
         await Assert.That(keys).Contains("adapter|enforce|allowed|cross_tenant_client");
         await Assert.That(keys).Contains("operator|log_only|would_refuse|missing_scope");
         await Assert.That(keys).Contains("operator|enforce|refused|unauthenticated");
-        // Operator hub has no tenant reasons; 7 adapter + 3 operator reasons, both modes.
-        await Assert.That(keys.Count).IsEqualTo(20);
+        await Assert.That(keys).Contains("adapterPoolHub|log_only|would_refuse|tenant_mismatch");
+        await Assert.That(keys).Contains("adapterPoolHub|enforce|refused|no_tenant_claim");
+        await Assert.That(keys).Contains("adapterPoolHub|enforce|allowed|authorized");
+        // Operator hub has no tenant reasons; 7 adapter + 3 operator + 5 pool reasons, both modes.
+        await Assert.That(keys.Count).IsEqualTo(30);
     }
 
     [Test]

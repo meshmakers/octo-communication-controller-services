@@ -4,6 +4,7 @@ using Duende.IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
+using Meshmakers.Octo.Runtime.Contracts.Secrets;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -136,14 +137,22 @@ public class CommunicationController : ControllerBase
 
     /// <summary>
     /// Encrypts a plaintext value with the controller's at-rest encryption
-    /// key and returns the sentinel-prefixed ciphertext (<c>enc:v1:…</c>).
+    /// key and returns the sentinel-prefixed legacy ciphertext (<c>enc:v1:…</c>).
     /// Used by the Studio to encrypt Helm value overrides flagged
-    /// <c>IsSecret</c> before storing them via the regular GraphQL mutations.
+    /// <c>IsSecret</c> before storing them in <c>ValueOverride.Value</c> via the
+    /// regular GraphQL mutations.
+    ///
+    /// Deprecated (AB#5537): store secret overrides in <c>ValueOverride.SecretValue</c>
+    /// (a Secret attribute — the engine encrypts plaintext input itself). Never
+    /// write this endpoint's output into a Secret attribute: a Secret value is
+    /// decrypted exactly once, so the ciphertext would be deployed verbatim.
     ///
     /// Plaintext travels only over TLS and is never persisted on the
     /// controller. The same response can be re-supplied as input — the
-    /// service is idempotent and tolerant of already-encrypted values
-    /// (they pass through unchanged).
+    /// service is idempotent and tolerant of already-encrypted <c>enc:v1</c>
+    /// values (they pass through unchanged). Any other <c>enc:</c> envelope
+    /// (e.g. a key-ring <c>enc:v2</c> value) is rejected with 400 — those
+    /// belong in Secret attributes only.
     /// </summary>
     [HttpPost("encrypt-value")]
     [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
@@ -158,6 +167,13 @@ public class CommunicationController : ControllerBase
 
         try
         {
+            if (_encryptionService.IsEncrypted(request.Plaintext) &&
+                !request.Plaintext.StartsWith(SecretEnvelope.PrefixV1, StringComparison.Ordinal))
+            {
+                return BadRequest("Only plaintext or legacy 'enc:v1' values are accepted; store key-ring " +
+                                  "envelopes in a Secret attribute (ValueOverride.SecretValue).");
+            }
+
             var ciphertext = _encryptionService.IsEncrypted(request.Plaintext)
                 ? request.Plaintext
                 : _encryptionService.Encrypt(request.Plaintext);

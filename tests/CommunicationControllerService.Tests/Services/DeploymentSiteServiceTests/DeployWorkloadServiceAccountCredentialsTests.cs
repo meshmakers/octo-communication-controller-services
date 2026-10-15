@@ -60,7 +60,7 @@ internal class DeployWorkloadServiceAccountCredentialsTests : PoolServiceTestsBa
         var configuration = RtEntityCreator.CreateServiceAccountConfiguration(
             PipelineServiceAccountProvisioningService.BuildWellKnownName(adapter.RtId));
         configuration.ClientId = clientId;
-        configuration.ClientSecret = clientSecret;
+        configuration.ClientSecret = SecretTestValues.Stored(clientSecret);
         ServiceAccountResolver.GetAdapterDefaultAsync(TenantId, adapter.RtId).Returns(configuration);
         return configuration;
     }
@@ -235,8 +235,7 @@ internal class DeployWorkloadServiceAccountCredentialsTests : PoolServiceTestsBa
         var deploymentSite = ArrangeCloudPool();
         var adapter = RtEntityCreator.CreateAdapter();
         ArrangeDeployableWorkload(deploymentSite, adapter);
-        ArrangeServiceAccount(adapter, clientSecret: "enc:v1:cipher");
-        EncryptionService.Decrypt("enc:v1:cipher").Returns("plaintext-secret");
+        ArrangeServiceAccount(adapter, clientSecret: SecretEncryption.EncryptV1("plaintext-secret"));
 
         var dto = await DeployAndCaptureAsync(adapter);
 

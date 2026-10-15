@@ -245,6 +245,16 @@ public interface ICommunicationRepository
         OctoObjectId serviceAccountRtId);
 
     /// <summary>
+    /// AB#5537: every <c>ServiceAccountConfiguration</c> of the tenant — the input of the
+    /// impersonation switch (decision 7), which walks all accounts and classifies each.
+    /// <para>
+    /// 🔴 The entities carry their client secret (plaintext, or an <c>RtSecretValue</c> once the
+    /// attribute is Secret). Never log them.
+    /// </para>
+    /// </summary>
+    Task<IReadOnlyCollection<RtServiceAccountConfiguration>> GetServiceAccountsAsync(string tenantId);
+
+    /// <summary>
     /// AB#5111: the reverse of <see cref="GetServiceAccountForAdapterAsync" /> — the adapter whose
     /// <c>PipelineServiceAccount</c> edge points at the given configuration, or <c>null</c> for a
     /// standalone configuration (e.g. a per-pipeline override linked only via <c>Uses</c>). Lets

@@ -11,6 +11,7 @@ types:
         name: AdminUser
       - id: ${this}/AdminPassword
         name: AdminPassword
+        isOptional: true # AB#5528: a Secret is never seeded; "not set" is a valid state
       - id: ${this}/OctoMeshUrl
         name: OctoMeshUrl
       - id: ${this}/IdentityServerUrl

@@ -356,18 +356,18 @@ count and types by reflection (`Helper/HubCallbackContract`); a source sweep cou
 taken from an interface (justified exceptions are listed in `NotAHubCallbackSend`). Adding a send means
 nothing to do if it uses `nameof`; a new callback interface must be added to `CallbackInterfaces`.
 
-#### Decision counter of both hub gates (AB#5528 phase 3)
+#### Decision counter of the three hub gates (AB#5528 phase 3, AB#6088)
 
-Both filters count every decision on `octo.communication.hub.authorization.decisions` (counter,
+All three gates (`/{tenantId}/adapterHub`, `/operatorHub`, `/adapterPoolHub`) count every decision on `octo.communication.hub.authorization.decisions` (counter,
 `{decision}`, meter `Meshmakers.Octo.Communication`) — `Hubs/HubAuthorizationMetrics`, registered as
 a singleton in `Program.cs`, resolved eagerly after `Build()` and created through `IMeterFactory`. The
-constructor writes a zero for every hub × mode × outcome × reason series (20), because PromQL's
+constructor writes a zero for every hub × mode × outcome × reason series (30), because PromQL's
 `increase()` does not count the first point of a new cumulative series — without the baseline a single
 anonymous connection after a restart would read as "no increase". Attributes, all closed sets:
 
 | Attribute | Values |
 |---|---|
-| `octo.hub.name` | `adapter`, `operator` |
+| `octo.hub.name` | `adapter`, `operator`, `adapterPoolHub` |
 | `octo.hub.authorization.mode` | `log_only`, `enforce` |
 | `octo.hub.authorization.outcome` | `allowed`, `would_refuse` (LogOnly), `refused` (Enforce) |
 | `octo.hub.authorization.reason` | `authorized`, `cross_tenant_client` (allowed via the allow-list), `unauthenticated`, `missing_scope`, `no_route_tenant`, `no_tenant_claim`, `tenant_mismatch` |
@@ -380,7 +380,7 @@ posture, the operator hub is not tenant-scoped, and the series count stays fixed
 filters resolve the metrics through `HubAuthorizationMetrics.TryResolve` and `Record` swallows listener
 failures, so the metric can cost a measurement, never a connection. Rollout procedure: `docs/runbooks/hub-authorization-enforce-rollout.md`.
 
-Tests: `Hubs/HubAuthorizationMetricsTests` (every reason × outcome through a real `MeterListener`
+Tests: `Hubs/HubAuthorizationMetricsTests` (including the pool hub: allowed, would_refuse, refused, registration tenant mismatch; every reason × outcome through a real `MeterListener`
 scoped to the test's own `IMeterFactory`, exactly four attributes, connection unaffected without the
 registration, registration pinned at the `Program.cs` source).
 
@@ -2244,10 +2244,27 @@ post-chain bridge is refused across a major, the upgrade fails, and the Migratio
 published 3.41.0 is the status-history release WITHOUT SECRET (AB#5618 `LastSuccessfulStatusAt` /
 `ConsecutiveStatusFailures`, AB#5583 `FoldedBefore`); **4.6.0** carries exactly that content into the
 4.x line, so a 3.41.0 tenant must meet 4.6.0 or later (ChangeCkType keeps the stored values; 4.5.0
-would not declare them). **3.42.0 is deliberately NOT listed:** phase 3 makes it the SECRET switch
-(AB#5537), whose 4.x counterpart is the 4.x minor after 4.7.0 (4.7.0 is the AB#6312 ownership change) — the major-version guard refuses 3.42.0 → 4.6.0/4.7.0 loudly
-instead of renaming encrypted values onto plain-string attributes. Add the 3.42.0 entry together
-with that SECRET release, checked against the then-published 3.42.0.
+would not declare them). **3.42.0 is deliberately NOT listed:** it was the planned 3.x cut of the
+SECRET switch (AB#5537) and was **never released** (the published 3.x line ends at 3.41.0) — the switch
+ships on the 4.x line instead, as the next free 4.x minor after 4.7.0 (4.7.0 is the AB#6312 ownership
+change), so there is no published 3.42.0 to check an entry against. A 3.42.0 that exists on a local tenant is refused by the
+major-version guard and rebuilt.
+
+**4.8.0 (AB#5537 / AB#5528, SECRET phase 3) adds no migration entry either.** The credential
+attributes (`Password`, `PrivateKey`, `PrivateKeyPassphrase`, `ClientSecret`, `ApiKey`, `BotToken`,
+`AdminPassword`) become `valueType: Secret` (String → Secret is a MINOR per `CkSemVerClassifier`), all
+slots optional, and `ValueOverride` gains the optional Secret member `SecretValue` (`recordKey: Path`).
+Stored clear text stays readable (readers accept legacy strings in a Secret slot); legacy placeholders
+and empty strings become "not set" through the engine's post-migration hook
+(`CkModelMigrationService.NormalizeSecretPlaceholdersAsync`, runs after every successful migration incl.
+the schema-only bridge). A 3.41.0 main tenant reaches 4.8.0 through the 3.41.0 entry point plus that
+bridge — pinned by `TenantOn3410_CredentialsStayUsable_AsSecretsOn480`. Every read of such an attribute
+goes through `IWorkloadEncryptionService` (`Reveal` / `RevealOrNull` / `DescribeSecret`), never an
+`as string` cast: on 4.8.0 the raw value is an `RtSecretValue`. The lane-only reader that did cast —
+`LeaseService.ResolveBorrowerCredentialAsync` — now reveals like the deploy path
+(`Services/LeaseServiceTests/LeaseBorrowerSecretRevealTests`). `CallerAccessToken` stays a String
+(`enc:v1`). 4.8.0 keeps 4.7.0's `ownership: Secret` on `Adapter.AdapterConfiguration` (AB#6312) unchanged —
+that attribute stays a `String`. Concept: `docs/concepts/secret-attributes.md`.
 
 Tests: integration `Migrations/SystemCommunication4MigrationTests` — the published 3.40.0 and
 3.41.0 models (embedded resources; other versions are the 3.40.0 re-labelled) plus the blueprint's 3.x seed, upgraded through the real

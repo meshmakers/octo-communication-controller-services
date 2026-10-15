@@ -44,6 +44,7 @@ internal class AdapterPoolHub : Hub, IAdapterPoolHub
     private readonly ILeaseService _leaseService;
     private readonly IOptions<AdapterPoolHubAuthorizationOptions> _authorizationOptions;
     private readonly IShutdownState _shutdownState;
+    private readonly HubAuthorizationMetrics? _metrics;
 
     /// <summary>
     ///     Constructor.
@@ -53,12 +54,15 @@ internal class AdapterPoolHub : Hub, IAdapterPoolHub
     /// <param name="leaseService">Grants and releases leases.</param>
     /// <param name="authorizationOptions">Staged enforcement mode of the pool hub gate.</param>
     /// <param name="shutdownState">Reports whether the controller is mid-shutdown.</param>
+    /// <param name="metrics">Hub authorization decision counter (AB#6088); optional, a missing one costs only the counter.</param>
     public AdapterPoolHub(IAdapterPoolConnectionManager connectionManager,
         ICommunicationEventService eventService,
         ILeaseService leaseService,
         IOptions<AdapterPoolHubAuthorizationOptions> authorizationOptions,
-        IShutdownState shutdownState)
+        IShutdownState shutdownState,
+        HubAuthorizationMetrics? metrics = null)
     {
+        _metrics = metrics;
         _connectionManager = connectionManager;
         _eventService = eventService;
         _leaseService = leaseService;
@@ -166,7 +170,16 @@ internal class AdapterPoolHub : Hub, IAdapterPoolHub
         var refusal = CheckConnectionTenantBinding(registration.AdapterPoolTenantId);
         if (refusal != null)
         {
-            if (_authorizationOptions.Value.Mode == AdapterPoolHubAuthorizationMode.Enforce)
+            var enforcing = _authorizationOptions.Value.Mode == AdapterPoolHubAuthorizationMode.Enforce;
+            // The connect gate already counted a connection without a tenant claim (NoTenantClaim);
+            // only the tenant-vs-pool mismatch is a decision that is new at registration time.
+            if (!string.IsNullOrEmpty(AdapterPoolHubAuthorizationFilter.GetConnectionTenantId(Context)))
+            {
+                _metrics?.Record(HubAuthorizationHub.AdapterPool, enforcing,
+                    HubAuthorizationMetrics.RefusalOutcome(enforcing), HubAuthorizationReason.TenantMismatch);
+            }
+
+            if (enforcing)
             {
                 Logger.Warn(
                     "Refusing a pool-member registration on connection '{ConnectionId}': {Reason}",

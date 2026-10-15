@@ -60,7 +60,8 @@ internal abstract class AdapterServiceTestsBase
         DefaultAdapterServiceAccount.RtId,
         DefaultAdapterServiceAccount.CkTypeId!,
         DefaultAdapterServiceAccount.RtWellKnownName!,
-        DefaultAdapterServiceAccount.Serialize());
+        // AB#5537: the projection reveals the (Secret) client secret.
+        DefaultAdapterServiceAccount.SerializeWithRevealedSecrets(EncryptionService, TenantId));
 
     protected readonly AdapterTenant AdapterTenant;
 
@@ -100,6 +101,14 @@ internal abstract class AdapterServiceTestsBase
     /// without the UserManagement role.
     /// </summary>
     protected readonly IHttpContextAccessor HttpContextAccessor = Substitute.For<IHttpContextAccessor>();
+
+    /// <summary>
+    /// AB#5537: generated key ring + the controller's real reveal point — the configuration
+    /// projection reveals Secret attributes through it.
+    /// </summary>
+    protected readonly TestSecretEncryption SecretEncryption = TestSecretEncryption.Create();
+
+    protected IWorkloadEncryptionService EncryptionService => SecretEncryption.EncryptionService;
 
     protected AdapterServiceTestsBase() : this(null)
     {
@@ -149,6 +158,9 @@ internal abstract class AdapterServiceTestsBase
             // IssuerUri token resolution in the configuration projection runs the real machinery.
             new WorkloadTemplateResolver(optionsMonitor),
             IdentityClientReader, HttpContextAccessor, guardOptions,
+            // AB#5537: the real reveal point over a generated key ring, so the configuration
+            // projection runs ConfigurationSecretSerializer exactly as in production.
+            EncryptionService,
             // AB#5618: status reports are stamped with the controller clock; fixed so tests can assert it.
             Clock);
         AdapterTenant = realAdapterCache?.AddOrUpdateTenant(TenantId) ?? new AdapterTenant(AdapterCachePublish, TenantId);

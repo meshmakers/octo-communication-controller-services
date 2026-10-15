@@ -72,9 +72,9 @@ internal class GrantLeaseAsyncTests : LeaseServiceTestsBase
     {
         ArrangeBorrower();
         ArrangeLendingPool(lends: true);
-        ArrangeBorrowerCredential("enc:v1:cipher");
+        // A pre-4.8.0 String value, encrypted by the controller's own enc:v1 lane.
+        ArrangeBorrowerCredentialRaw(SecretEncryption.EncryptV1("plaintext-secret"));
         ArrangeConnectedMember();
-        EncryptionService.Decrypt("enc:v1:cipher").Returns("plaintext-secret");
 
         await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
 

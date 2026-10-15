@@ -4,6 +4,8 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Runtime.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using Meshmakers.Octo.Runtime.Contracts.Secrets;
 using Xunit;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTests.Repository;
@@ -46,7 +48,8 @@ public class PipelineServiceAccountRepositoryTests(CommunicationControllerFixtur
             CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
             RtWellKnownName = wellKnownName,
             ClientId = "octo-pipeline-sa-test",
-            ClientSecret = secret,
+            // AB#5537: plaintext input — the engine encrypts it on write (Secret since 4.8).
+            ClientSecret = RtSecretValue.Pending(secret),
             IssuerUri = "https://identity.example.com",
             TenantId = tenantId
         };
@@ -68,7 +71,7 @@ public class PipelineServiceAccountRepositoryTests(CommunicationControllerFixtur
         var linked = await repository.GetServiceAccountForAdapterAsync(fixture.TestTenantId, adapter.RtId);
         linked.Should().NotBeNull();
         linked!.RtId.Should().Be(serviceAccount.RtId);
-        linked.ClientSecret.Should().Be("secret-one");
+        Reveal(linked!.ClientSecret).Should().Be("secret-one");
 
         // The read that makes a second provisioning run adopt its own earlier work.
         var byName = await repository.GetServiceAccountByWellKnownNameAsync(fixture.TestTenantId, wellKnownName);
@@ -97,7 +100,7 @@ public class PipelineServiceAccountRepositoryTests(CommunicationControllerFixtur
         var linked = await repository.GetServiceAccountForAdapterAsync(fixture.TestTenantId, adapter.RtId);
         linked.Should().NotBeNull();
         linked!.RtId.Should().Be(serviceAccount.RtId);
-        linked.ClientSecret.Should().Be("secret-two");
+        Reveal(linked!.ClientSecret).Should().Be("secret-two");
     }
 
     [Fact]
@@ -176,7 +179,7 @@ public class PipelineServiceAccountRepositoryTests(CommunicationControllerFixtur
 
         var loaded = await repository.GetServiceAccountByRtIdAsync(fixture.TestTenantId, standalone.RtId);
         loaded.Should().NotBeNull();
-        loaded!.ClientSecret.Should().Be("secret-one");
+        Reveal(loaded!.ClientSecret).Should().Be("secret-one");
 
         // The standalone write path of the AB#5111 reconcile/rotation — entity only, no edge.
         var updated = BuildServiceAccount(standalone.RtWellKnownName!, "secret-two", fixture.TestTenantId,
@@ -185,7 +188,7 @@ public class PipelineServiceAccountRepositoryTests(CommunicationControllerFixtur
 
         var reloaded = await repository.GetServiceAccountByRtIdAsync(fixture.TestTenantId, standalone.RtId);
         reloaded.Should().NotBeNull();
-        reloaded!.ClientSecret.Should().Be("secret-two");
+        Reveal(reloaded!.ClientSecret).Should().Be("secret-two");
     }
 
     [Fact]
@@ -197,6 +200,64 @@ public class PipelineServiceAccountRepositoryTests(CommunicationControllerFixtur
             OctoObjectId.GenerateNewId());
 
         result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetServiceAccountsAsync_ListsEveryServiceAccountConfiguration()
+    {
+        // AB#5537: the input of the impersonation switch.
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var first = BuildServiceAccount($"sa-list-{Guid.NewGuid():N}", "secret-one", fixture.TestTenantId);
+        var second = BuildServiceAccount($"sa-list-{Guid.NewGuid():N}", "secret-two", fixture.TestTenantId);
+        await InsertServiceAccountAsync(first);
+        await InsertServiceAccountAsync(second);
+
+        var all = await repository.GetServiceAccountsAsync(fixture.TestTenantId);
+
+        all.Select(a => a.RtId).Should().Contain([first.RtId, second.RtId]);
+    }
+
+    [Fact]
+    public async Task UpdateServiceAccountAsync_ExplicitNullSecret_ClearsTheStoredSecret()
+    {
+        // AB#5537 / AB#5114: the impersonation switch clears the secret with an explicit null on an
+        // update — an omitted attribute would leave it in place.
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var standalone = BuildServiceAccount($"sa-clear-{Guid.NewGuid():N}", "secret-one", fixture.TestTenantId);
+        await InsertServiceAccountAsync(standalone);
+
+        var cleared = BuildServiceAccount(standalone.RtWellKnownName!, "unused", fixture.TestTenantId,
+            standalone.RtId);
+        cleared.SetAttributeRawValue(nameof(RtServiceAccountConfiguration.ClientSecret), null);
+        await repository.UpdateServiceAccountAsync(fixture.TestTenantId, cleared);
+
+        var reloaded = await repository.GetServiceAccountByRtIdAsync(fixture.TestTenantId, standalone.RtId);
+        reloaded.Should().NotBeNull();
+        reloaded!.GetAttributeValueOrDefault(nameof(RtServiceAccountConfiguration.ClientSecret)).Should().BeNull();
+        reloaded.ClientId.Should().Be("octo-pipeline-sa-test");
+    }
+
+    /// <summary>AB#5537: the stored secret is an enc:v2 envelope; decrypt it with the fixture's key ring.</summary>
+    private string? Reveal(RtSecretValue? stored)
+    {
+        stored.Should().NotBeNull();
+        stored!.IsProtected.Should().BeTrue("the engine encrypts every written secret");
+        return fixture.GetService<ISecretAttributeProtector>().Unprotect(stored);
+    }
+
+    [Fact]
+    public async Task StoredSecret_IsAnEncryptedEnvelope_NeverThePlaintext()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var standalone = BuildServiceAccount($"sa-envelope-{Guid.NewGuid():N}", "envelope-secret",
+            fixture.TestTenantId);
+        await InsertServiceAccountAsync(standalone);
+
+        var loaded = await repository.GetServiceAccountByRtIdAsync(fixture.TestTenantId, standalone.RtId);
+
+        loaded!.ClientSecret!.Envelope.Should().StartWith("enc:v2:k1:");
+        loaded.ClientSecret.Envelope.Should().NotContain("envelope-secret");
+        Reveal(loaded.ClientSecret).Should().Be("envelope-secret");
     }
 
     private async Task InsertServiceAccountAsync(RtServiceAccountConfiguration serviceAccount)

@@ -77,6 +77,12 @@ internal class CommunicationRepositoryException : Exception
             exception);
     }
 
+    internal static Exception CommonFailedGettingServiceAccounts(string tenantId, Exception exception)
+    {
+        return new CommunicationRepositoryException($"[{tenantId}] Failed to get service account configurations",
+            exception);
+    }
+
     internal static Exception CommonFailedGettingSignalChannels(string tenantId, Exception exception)
     {
         return new CommunicationRepositoryException($"[{tenantId}] Failed to get Signal channels", exception);

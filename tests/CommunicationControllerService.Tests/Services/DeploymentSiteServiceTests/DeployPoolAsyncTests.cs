@@ -710,11 +710,10 @@ internal class DeployPoolAsyncTests : PoolServiceTestsBase
             new RtValueOverrideRecord
             {
                 Path = "oauth.clientSecret",
-                Value = "enc:v1:cipher",
+                Value = SecretEncryption.EncryptV1("plain-{{context.tenantId}}"),
                 IsSecret = true,
             },
         };
-        EncryptionService.Decrypt("enc:v1:cipher").Returns("plain-{{context.tenantId}}");
 
         await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
 

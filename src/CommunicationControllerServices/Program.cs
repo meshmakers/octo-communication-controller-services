@@ -105,6 +105,8 @@ try
     builder.Services.AddSingleton<ITenantDatabaseCredentialResolver, TenantDatabaseCredentialResolver>();
     builder.Services
         .AddSingleton<IPipelineServiceAccountProvisioningService, PipelineServiceAccountProvisioningService>();
+    builder.Services
+        .AddSingleton<IServiceAccountImpersonationSwitchService, ServiceAccountImpersonationSwitchService>();
 
     // AB#5271 - keeps each borrowing tenant's LentAdapterPool mirrors in step with what its
     // ancestors and siblings lend it. Singleton and stateless, next to the service-account
@@ -256,6 +258,9 @@ try
     // (OCTO_SERVICEACCOUNTGUARD__CHECKIDENTITYCLIENT=false) without a release.
     builder.Services.Configure<ServiceAccountGuardOptions>(
         builder.Configuration.GetSection(ServiceAccountGuardOptions.SectionName));
+    // AB#5537 / AB#5114: guard of the impersonation switch — clearing secrets is opt-in per environment.
+    builder.Services.Configure<ServiceAccountImpersonationOptions>(
+        builder.Configuration.GetSection(ServiceAccountImpersonationOptions.SectionName));
 
     builder.Services.ConfigureOptions<ConfigureDistributionEventHubOptions>();
     builder.Services.ConfigureOptions<ConfigureJwtBearerOptions>();

@@ -148,7 +148,7 @@ internal class PipelineServiceAccountProjectionTests : AdapterServiceTestsBase
             CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
             RtWellKnownName = "installation-default-account",
             ClientId = "octo-pipeline-sa-empty",
-            ClientSecret = "secret"
+            ClientSecret = SecretTestValues.Stored("secret")
             // IssuerUri / TenantId deliberately absent.
         };
         var (adapter, pipeline) = ArrangeDeployablePipeline(installationDefault);

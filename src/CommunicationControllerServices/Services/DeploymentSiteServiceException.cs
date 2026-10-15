@@ -109,6 +109,19 @@ internal class DeploymentSiteServiceException : Exception
             "set a public hostname (e.g. 'adapter.staging.octo-mesh.com') or disable 'Ingress Enabled' before deploying.");
     }
 
+    /// <summary>
+    /// AB#5537: more than one <c>ValueOverride</c> entry carrying a <c>SecretValue</c> shares a
+    /// <c>Path</c> (the record key) — the secret carry-over and the deployed value are ambiguous.
+    /// </summary>
+    internal static Exception WorkloadDuplicateSecretValuePaths(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName, IReadOnlyList<string> paths)
+    {
+        return new DeploymentSiteServiceException(
+            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': more than one " +
+            $"ValueOverride with a SecretValue uses the Path(s) {string.Join(", ", paths.Select(p => $"'{p}'"))}. " +
+            "Path identifies a secret override; keep exactly one entry per Path.");
+    }
+
     internal static Exception WorkloadTemplateUnknownPlaceholder(string tenantId, OctoObjectId workloadRtId,
         string? workloadName, string fieldName, string template, string unknownPlaceholder)
     {

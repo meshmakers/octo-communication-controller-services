@@ -60,7 +60,9 @@ internal class PipelineServiceAccountProvisioningServiceTests
             {
                 AuthorityUrl = AuthorityUrl,
                 PublicUrl = PublicUrl
-            }));
+            }),
+            // AB#5537: the real reveal point over a generated key ring.
+            TestSecretEncryption.Create().EncryptionService);
     }
 
     private void ArrangeIdentityResponse(CreateIdentityDataResult result)
@@ -83,7 +85,7 @@ internal class PipelineServiceAccountProvisioningServiceTests
             CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
             RtWellKnownName = PipelineServiceAccountProvisioningService.BuildWellKnownName(adapter.RtId),
             ClientId = PipelineServiceAccountProvisioningService.BuildClientId(adapter.RtId),
-            ClientSecret = secret
+            ClientSecret = SecretTestValues.Stored(secret)
             // IssuerUri / TenantId deliberately absent (AB#5115).
         };
 
@@ -199,7 +201,7 @@ internal class PipelineServiceAccountProvisioningServiceTests
         await Assert.That(saved.TenantId).IsNull();
         // The tenant-side entity must hold the PLAINTEXT — the identity side stores only the hash,
         // so the adapter could never authenticate from it.
-        await Assert.That(saved.ClientSecret).IsEqualTo(clientSecret);
+        await Assert.That(SecretTestValues.Plain(saved.ClientSecret)).IsEqualTo(clientSecret);
         // AB#5111: a fresh account is declarative from birth — the declaration defaults are
         // persisted so Studio shows (and an operator can edit) what will be materialised.
         await Assert.That(saved.AssignedRoleNames!.ToArray())
@@ -226,7 +228,7 @@ internal class PipelineServiceAccountProvisioningServiceTests
         // client created before this code) but carries the SAME plaintext, which hashes to the same
         // value identity-side — so nothing rotates and no duplicate client is created.
         await Assert.That(CapturedIdentityRequest().Clients!.Single().ClientSecret)
-            .IsEqualTo(existing.ClientSecret);
+            .IsEqualTo(SecretTestValues.Plain(existing.ClientSecret));
     }
 
     [Test]
@@ -249,7 +251,7 @@ internal class PipelineServiceAccountProvisioningServiceTests
         await Assert.That(outcome).IsEqualTo(PipelineServiceAccountProvisioningOutcome.Repaired);
         // Adopted, not duplicated: same entity id, same secret.
         await Assert.That(saved.RtId).IsEqualTo(orphaned.RtId);
-        await Assert.That(saved.ClientSecret).IsEqualTo(orphaned.ClientSecret);
+        await Assert.That(SecretTestValues.Plain(saved.ClientSecret)).IsEqualTo(SecretTestValues.Plain(orphaned.ClientSecret));
     }
 
     [Test]
@@ -284,8 +286,8 @@ internal class PipelineServiceAccountProvisioningServiceTests
         // Updated in place — a second credential entity next to the first would be worse than useless.
         await Assert.That(isNewEntity).IsFalse();
         await Assert.That(saved.RtId).IsEqualTo(incomplete.RtId);
-        await Assert.That(saved.ClientSecret).IsNotNull();
-        await Assert.That(saved.ClientSecret!.Length).IsEqualTo(64);
+        await Assert.That(SecretTestValues.Plain(saved.ClientSecret)).IsNotNull();
+        await Assert.That(SecretTestValues.Plain(saved.ClientSecret)!.Length).IsEqualTo(64);
         // The repair rides the AB#5115 convergence: the concrete own-authority URL and the current
         // tenant id are the installation spellings and become empty.
         await Assert.That(saved.IssuerUri).IsNull();
@@ -332,7 +334,7 @@ internal class PipelineServiceAccountProvisioningServiceTests
         await Assert.That(saved.IssuerUri).IsNull();
         await Assert.That(saved.TenantId).IsNull();
         // Converging must not invalidate the credential the adapter already holds.
-        await Assert.That(saved.ClientSecret).IsEqualTo(legacy.ClientSecret);
+        await Assert.That(SecretTestValues.Plain(saved.ClientSecret)).IsEqualTo(SecretTestValues.Plain(legacy.ClientSecret));
     }
 
     // ---------------------------------------------------------------- secret hygiene
@@ -360,7 +362,7 @@ internal class PipelineServiceAccountProvisioningServiceTests
                 .Single(c => c.GetMethodInfo().Name ==
                              nameof(ICommunicationRepository.SavePipelineServiceAccountAsync))
                 .GetArguments()[2]!;
-            var secret = saved.ClientSecret!;
+            var secret = SecretTestValues.Plain(saved.ClientSecret)!;
 
             using var _ = Assert.Multiple();
             // Not verbatim, and not truncated either — a prefix is still secret material.

@@ -126,4 +126,41 @@ internal class PipelineDebugServiceTests
         await Assert.That(debugPoint!.Input).IsNull();
         await Assert.That(debugPoint.Output).IsNull();
     }
+
+    [Test]
+    public async Task RedactedPaths_AreForwardedToTheDebugData()
+    {
+        // Arrange / Act — handover section 11 (AB#5537): Studio marks exactly these paths.
+        var withSecrets = DebugPoint("secret", 0, """{"config":{"clientSecret":"***"}}""",
+            """{"smtp":{"password":"***"}}""");
+        withSecrets.RedactedPaths = ["$.input.config.clientSecret", "$.output.smtp.password"];
+        await CacheAsync(withSecrets, DebugPoint("plain", 1, """{"value":1}""", """{"value":2}"""));
+
+        // Assert
+        var secret = await GetAsync("secret");
+        await Assert.That(secret).IsNotNull();
+        await Assert.That(secret!.RedactedPaths).IsNotNull();
+        await Assert.That(secret.RedactedPaths!)
+            .IsEquivalentTo(["$.input.config.clientSecret", "$.output.smtp.password"]);
+
+        var plain = await GetAsync("plain");
+        await Assert.That(plain).IsNotNull();
+        await Assert.That(plain!.RedactedPaths).IsNull();
+    }
+
+    [Test]
+    public async Task RedactedPaths_OutsideInputAndOutput_AreDropped()
+    {
+        // The delivered snapshot has input/output only; a dry-run intent path would point at nothing.
+        var point = DebugPoint("dry", 0, """{"a":"***"}""", null);
+        point.RedactedPaths = ["$.dryRunIntent.refreshToken", "$.input.a", "$.inputs.b", "$.output"];
+        var onlyIntent = DebugPoint("intent", 1, null, null);
+        onlyIntent.RedactedPaths = ["$.dryRunIntent.refreshToken"];
+        await CacheAsync(point, onlyIntent);
+
+        var dry = await GetAsync("dry");
+        await Assert.That(dry!.RedactedPaths!).IsEquivalentTo(["$.input.a", "$.output"]);
+        var intent = await GetAsync("intent");
+        await Assert.That(intent!.RedactedPaths).IsNull();
+    }
 }

@@ -11,6 +11,13 @@ attributes:
   # author default (intervals, trace level, model/token settings) stay false — a blueprint
   # version bump must be able to correct those.
   #
+  # AB#5537 (4.8.0, Minor per AB#5528 decision 2): the credentials of this pool — Password,
+  # PrivateKey, PrivateKeyPassphrase, BotToken, ApiKey — are valueType Secret with ownership
+  # Secret: encrypted at rest by the engine, never projected (GraphQL shows { isSet }), preserved
+  # on re-apply, excluded from ExportRt. Seeds carry placeholders only. Every definition is used
+  # by credential slots only, so none had to be split. The communication controller reveals them
+  # for adapters (ConfigurationSecretSerializer).
+  #
   # Host/Port/Username/Password/IsSslEnabled are marked as ONE unit on purpose: preserving
   # half of a connection tuple while resetting the other half is exactly the failure mode
   # this sweep exists to remove (FinApi kept its ClientSecret but lost its ClientId).
@@ -27,8 +34,8 @@ attributes:
     isRuntimeState: true
     description: 'The username is the name of the user that is used to authenticate with the external system.'
   - id: Password
-    valueType: String
-    isRuntimeState: true
+    valueType: Secret
+    ownership: Secret
     description: 'The password is the secret that is used to authenticate with the external system.'
   - id: IsSslEnabled
     valueType: Boolean
@@ -83,12 +90,12 @@ attributes:
   # AB#5187 — SFTP key material. Secrets in the strictest sense: pasted in by an operator
   # after install, only ever a placeholder in a seed.
   - id: PrivateKey
-    valueType: String
-    isRuntimeState: true
+    valueType: Secret
+    ownership: Secret
     description: 'The private key is a secret key that is used in asymmetric encryption to authenticate with the external system.'
   - id: PrivateKeyPassphrase
-    valueType: String
-    isRuntimeState: true
+    valueType: Secret
+    ownership: Secret
     description: 'The private key passphrase is a secret that is used to protect the private key.'
   # AB#5187 — the tenant's own mailbox folder (EMailReceiverConfiguration). Tenant-specific
   # mailbox configuration an operator fills in, so it must survive a re-apply.
@@ -130,8 +137,8 @@ attributes:
   # AB#5187 — Discord bot credentials/coordinates of the TENANT's own bot and server. The bot
   # token is a bearer credential; the guild id identifies the customer's Discord server.
   - id: BotToken
-    valueType: String
-    isRuntimeState: true
+    valueType: Secret
+    ownership: Secret
     description: 'The bot token used as the `Authorization: Bot {token}` header when calling the Discord REST API.'
   - id: GuildId
     valueType: String
@@ -142,8 +149,8 @@ attributes:
   # external provider and pasted in by an operator; a blueprint can only ever seed a
   # placeholder. Shared with WeClappConfiguration (API token), same reasoning.
   - id: ApiKey
-    valueType: String
-    isRuntimeState: true
+    valueType: Secret
+    ownership: Secret
     description: 'API key for authenticating with an external service (e.g. Anthropic sk-ant-... key, WeClapp API token). Stored as configuration attribute, not exposed in pipeline data context.'
   # NOT runtime state: the model id is author configuration and MUST stay correctable — a
   # pinned dated snapshot gets retired (HTTP 404), and the fix is a blueprint version bump
