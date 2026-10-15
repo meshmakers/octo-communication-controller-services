@@ -31,6 +31,6 @@ description: |
 # Satisfiability floors for the seed below.
 ckModelDependencies:
   - System.Communication-[4.5,5.0)
-  - System.Notification-[2.5.0,3.0)
+  - System.Notification-[2.6.0,3.0)
 
 seedDataPath: seed-data/entities.yaml

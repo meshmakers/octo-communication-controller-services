@@ -754,7 +754,13 @@ be scheduled; the rest are) → 503 plus one error event naming them (the tenant
   `670000000000000000002580`, Pipeline `670000000000000000002581` on the default adapter). It is registered in
   `Program.cs` AFTER Release / MainLatest because its `Executes` edge needs the adapter they seed — the apply
   loop runs in registration order. It ships undeployed; subscription Deploy deploys it
-  (`NotificationScheduleServiceException.EngineMissing` / `EngineDeployFailed` otherwise).
+  (`NotificationScheduleServiceException.EngineMissing` / `EngineDeployFailed` otherwise). The blueprint requires
+  `System.Notification-[2.6.0,3.0)`: the engine writes the delivery state's `ProcessedUntil` and `SentRows`, which 2.6.0 introduced.
+- **Delivery states without a recipient are erased** on every rebuild and every preference sync
+  (`NotificationRepository.DeleteOrphanedDeliveryStatesAsync`: a state whose `DeliveryStatePreference` target is
+  gone). The Studio deletes the state with its preference, but an API delete, an import or a failed second write
+  leaves one behind, the way Kubernetes garbage-collects objects whose owner is gone. A failure is logged and
+  never stops the schedule.
 - SMTP follows the EnergyCommunity pattern: the pipeline names `serverConfiguration: EmailSender`, and an
   operator associates (`Uses`) the tenant's EMailSenderConfiguration of that name, then redeploys the DataFlow.
 - **Not routed through leases (yet).** Ticks go straight to the engine pipeline's queue, the way manual
@@ -763,7 +769,7 @@ be scheduled; the rest are) → 503 plus one error event naming them (the tenant
   triggers of leased adapters through the lease queue, the notification schedule does not.
 
 Tests: `Services/NotificationScheduleServiceTests.cs`, `Controllers/NotificationsControllerTests.cs`,
-integration `Repository/NotificationRepositoryTests.cs`. The integration fixture imports System.Notification
+integration `Repository/NotificationRepositoryTests.cs` (including the orphan sweep). The integration fixture imports System.Notification
 after System.Communication (`InitializeTenantForTestingAsync`).
 
 ### Signal Channel Self-Service (AB#5143)

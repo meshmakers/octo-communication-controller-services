@@ -4,6 +4,8 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Runtime.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
+using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -72,7 +74,7 @@ public class NotificationRepositoryTests(CommunicationControllerFixture fixture)
         return preference.RtId;
     }
 
-    private async Task CreateDeliveryStateAsync(OctoObjectId preferenceRtId, DateTime? lastRunAt)
+    private async Task<OctoObjectId> CreateDeliveryStateAsync(OctoObjectId preferenceRtId, DateTime? lastRunAt)
     {
         var state = new RtNotificationDeliveryState { RtId = OctoObjectId.GenerateNewId(), LastRunAt = lastRunAt };
         await ApplyAsync(
@@ -83,6 +85,7 @@ public class NotificationRepositoryTests(CommunicationControllerFixture fixture)
                     new RtEntityId(SystemNotificationCkIds.RtCkNotificationPreferenceTypeId, preferenceRtId),
                     SystemNotificationCkIds.RtCkDeliveryStatePreferenceRoleId)
             ]);
+        return state.RtId;
     }
 
     private async Task ApplyAsync(List<EntityUpdateInfo<RtEntity>> entities, List<AssociationUpdateInfo> associations)
@@ -181,5 +184,42 @@ public class NotificationRepositoryTests(CommunicationControllerFixture fixture)
         stored.DeployedAt.Should().Be(deployedAt);
         (await CreateRepository().GetDeployedPreferenceSchedulesAsync(fixture.TestTenantId, subscription))
             .Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task DeleteOrphanedDeliveryStatesAsync_ErasesTheStateOfARemovedRecipient_AndKeepsTheOthers()
+    {
+        var subscription = await CreateSubscriptionAsync(true);
+        var kept = await CreatePreferenceAsync(subscription, "0 7 * * *");
+        var keptState = await CreateDeliveryStateAsync(kept, null);
+        var removed = await CreatePreferenceAsync(subscription, "0 7 * * *");
+        var orphanedState = await CreateDeliveryStateAsync(removed, null);
+        await DeleteAsync(SystemNotificationCkIds.RtCkNotificationPreferenceTypeId, removed);
+
+        var erased = await CreateRepository().DeleteOrphanedDeliveryStatesAsync(fixture.TestTenantId);
+
+        erased.Should().BeGreaterThanOrEqualTo(1);
+        (await StateExistsAsync(orphanedState)).Should().BeFalse();
+        (await StateExistsAsync(keptState)).Should().BeTrue();
+        (await CreateRepository().DeleteOrphanedDeliveryStatesAsync(fixture.TestTenantId)).Should().Be(0);
+    }
+
+    private async Task DeleteAsync(RtCkId<CkTypeId> ckTypeId, OctoObjectId rtId)
+    {
+        var tenantRepository = await fixture.GetSystemContext().FindTenantRepositoryAsync(fixture.TestTenantId);
+        using var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+        var result = new OperationResult();
+        await tenantRepository.ApplyChangesAsync(session,
+            [EntityUpdateInfo<RtEntity>.CreateDelete(new RtEntityId(ckTypeId, rtId))], DeleteOptions.Erase, result);
+        result.HasErrors.Should().BeFalse(result.GetMessages());
+        await session.CommitTransactionAsync();
+    }
+
+    private async Task<bool> StateExistsAsync(OctoObjectId stateRtId)
+    {
+        var tenantRepository = await fixture.GetSystemContext().FindTenantRepositoryAsync(fixture.TestTenantId);
+        using var session = await tenantRepository.GetSessionAsync();
+        return await tenantRepository.GetRtEntityByRtIdAsync<RtNotificationDeliveryState>(session, stateRtId) != null;
     }
 }

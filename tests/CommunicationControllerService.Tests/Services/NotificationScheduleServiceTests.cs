@@ -444,4 +444,31 @@ internal class NotificationScheduleServiceTests
         await Assert.That(address)
             .IsEqualTo("queue:octo::com-controller::notification-schedule-ecfinal-670000000000000000002581");
     }
+
+    [Test]
+    public async Task UpdateScheduleAsync_ErasesTheDeliveryStatesOfRemovedRecipients()
+    {
+        await _service.UpdateScheduleAsync(TenantId);
+
+        await _notificationRepository.Received(1).DeleteOrphanedDeliveryStatesAsync(TenantId);
+    }
+
+    [Test]
+    public async Task SyncPreferenceAsync_ErasesTheDeliveryStatesOfRemovedRecipients()
+    {
+        await _service.SyncPreferenceAsync(TenantId, OctoObjectId.GenerateNewId());
+
+        await _notificationRepository.Received(1).DeleteOrphanedDeliveryStatesAsync(TenantId);
+    }
+
+    [Test]
+    public async Task UpdateScheduleAsync_AFailingStateSweep_StillBuildsTheSchedule()
+    {
+        _notificationRepository.DeleteOrphanedDeliveryStatesAsync(TenantId)
+            .Returns(Task.FromException<int>(new InvalidOperationException("mongo is down")));
+
+        await _service.UpdateScheduleAsync(TenantId);
+
+        await _notificationRepository.Received(1).GetDeployedPreferenceSchedulesAsync(TenantId);
+    }
 }

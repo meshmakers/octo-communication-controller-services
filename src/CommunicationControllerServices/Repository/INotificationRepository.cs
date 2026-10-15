@@ -58,4 +58,10 @@ public interface INotificationRepository
     /// <param name="subscriptionRtId">The subscription</param>
     /// <param name="deployedAt">The deployment moment; null undeploys</param>
     Task SetSubscriptionDeployedAsync(string tenantId, OctoObjectId subscriptionRtId, DateTime? deployedAt);
+
+    /// <summary>
+    /// Erases every delivery state whose preference no longer exists and returns how many were erased
+    /// </summary>
+    /// <param name="tenantId">The tenant id</param>
+    Task<int> DeleteOrphanedDeliveryStatesAsync(string tenantId);
 }

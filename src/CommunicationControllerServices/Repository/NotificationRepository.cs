@@ -112,6 +112,47 @@ internal class NotificationRepository(ISystemContext systemContext, ILogger<Noti
         await session.CommitTransactionAsync();
     }
 
+    public async Task<int> DeleteOrphanedDeliveryStatesAsync(string tenantId)
+    {
+        var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
+        using var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var states = await tenantRepository.GetRtEntitiesByTypeAsync<RtNotificationDeliveryState>(session,
+            RtEntityQueryOptions.Create());
+        var stateRtIds = states.Items.Select(state => state.RtId).ToList();
+        if (stateRtIds.Count == 0)
+        {
+            await session.CommitTransactionAsync();
+            return 0;
+        }
+
+        var owners = await tenantRepository.GetRtAssociationTargetsAsync<RtNotificationDeliveryState, RtNotificationPreference>(
+            session, stateRtIds, SystemNotificationCkIds.RtCkDeliveryStatePreferenceRoleId, GraphDirections.Outbound,
+            null, RtEntityQueryOptions.Create());
+        var orphans = stateRtIds
+            .Select(rtId => new RtEntityId(SystemNotificationCkIds.RtCkNotificationDeliveryStateTypeId, rtId))
+            .Where(stateId => !owners.TryGetValue(stateId, out var preferences) || !preferences.Items.Any())
+            .ToList();
+        if (orphans.Count == 0)
+        {
+            await session.CommitTransactionAsync();
+            return 0;
+        }
+
+        var operationResult = new OperationResult();
+        await tenantRepository.ApplyChangesAsync(session,
+            orphans.Select(EntityUpdateInfo<RtNotificationDeliveryState>.CreateDelete).ToList(), DeleteOptions.Erase,
+            operationResult);
+        if (operationResult.HasErrors || operationResult.HasFatalErrors)
+        {
+            throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+        }
+
+        await session.CommitTransactionAsync();
+        return orphans.Count;
+    }
+
     private bool HasSchedule(string tenantId, RtNotificationPreference preference)
     {
         if (string.IsNullOrWhiteSpace(preference.CronExpression))

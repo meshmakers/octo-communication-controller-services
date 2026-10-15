@@ -35,6 +35,7 @@ internal class NotificationScheduleService(
     public async Task UpdateScheduleAsync(string tenantId)
     {
         await RemoveScheduleAsync(tenantId);
+        await DeleteOrphanedDeliveryStatesAsync(tenantId);
 
         var schedules = await notificationRepository.GetDeployedPreferenceSchedulesAsync(tenantId);
         var failures = await ScheduleAsync(tenantId, schedules);
@@ -73,6 +74,7 @@ internal class NotificationScheduleService(
     public async Task SyncPreferenceAsync(string tenantId, OctoObjectId preferenceRtId)
     {
         await CancelPreferenceAsync(tenantId, preferenceRtId);
+        await DeleteOrphanedDeliveryStatesAsync(tenantId);
 
         var schedule = await notificationRepository.GetDeployedPreferenceScheduleAsync(tenantId, preferenceRtId);
         if (schedule == null)
@@ -84,6 +86,23 @@ internal class NotificationScheduleService(
         await SendBaselineTicksAsync(tenantId, new[] { schedule }.Where(candidate => candidate.HasNeverRun));
 
         await ThrowIfIncompleteAsync(tenantId, failures);
+    }
+
+    private async Task DeleteOrphanedDeliveryStatesAsync(string tenantId)
+    {
+        try
+        {
+            var erased = await notificationRepository.DeleteOrphanedDeliveryStatesAsync(tenantId);
+            if (erased > 0)
+            {
+                logger.LogInformation("[{TenantId}] Erased {Count} notification delivery state(s) whose recipient no longer exists",
+                    tenantId, erased);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "[{TenantId}] Notification delivery states without a recipient could not be erased", tenantId);
+        }
     }
 
     private async Task CancelPreferenceAsync(string tenantId, OctoObjectId preferenceRtId)
