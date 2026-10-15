@@ -542,12 +542,15 @@ internal class HubAuthorizationMetricsTests
     ///     counts the first would_refuse after a restart (see the constructor remarks).
     /// </summary>
     [Test]
-    public async Task Construction_WritesAZeroBaselineForEveryRefusalSeries()
+    public async Task EmitBaseline_WritesAZeroBaselineForEveryRefusalSeries()
     {
         await using var provider = BuildServiceProvider();
         using var recorder = new Recorder(provider);
 
-        provider.GetRequiredService<HubAuthorizationMetrics>();
+        // Construction alone emits nothing (AB#6740); the hosted service calls EmitBaseline.
+        var metrics = provider.GetRequiredService<HubAuthorizationMetrics>();
+        await Assert.That(recorder.Baseline.Count).IsEqualTo(0);
+        metrics.EmitBaseline();
 
         string Key(Decision d) => string.Join("|", d.Tags["octo.hub.name"], d.Tags["octo.hub.authorization.mode"],
             d.Tags["octo.hub.authorization.outcome"], d.Tags["octo.hub.authorization.reason"]);
@@ -594,8 +597,10 @@ internal class HubAuthorizationMetricsTests
         var program = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(),
             "src", "CommunicationControllerServices", "Program.cs"));
 
-        await Assert.That(program).Contains("AddSingleton<HubAuthorizationMetrics>()");
-        await Assert.That(program).Contains("app.Services.GetRequiredService<HubAuthorizationMetrics>()");
+        await Assert.That(program).Contains("AddHubAuthorizationMetrics()");
+        // AB#6740: resolving the counter between Build() and the host start is exactly the bug - the zeros
+        // are emitted by HubAuthorizationMetricsBaselineService once the MeterProvider listens.
+        await Assert.That(program).DoesNotContain("GetRequiredService<HubAuthorizationMetrics>()");
     }
 
     private static string RepositoryRoot([CallerFilePath] string sourceFile = "") =>
