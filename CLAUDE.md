@@ -720,7 +720,7 @@ mesh adapter's engine pipeline decides WHAT (see octo-mesh-adapter CLAUDE.md, `P
 |---|---|---|
 | `POST {tenantId}/v1/notifications/subscriptions/{rtId}/deploy` | ReadWrite | `Enabled=true` and `DeployedAt=now` (undeploy → deploy is a new start for Onwards; Catch up reads on from its watermark), only this subscription's preferences rescheduled, engine DataFlow deployed if it is not, then one immediate tick per Onwards preference that needs a first run. On an already deployed subscription (a retry, CLI, MCP) `DeployedAt` is kept, so nothing starts over; the rest still runs, which is what finishes a deploy whose engine step failed. |
 | `POST {tenantId}/v1/notifications/subscriptions/{rtId}/undeploy` | ReadWrite | `Enabled=false`, this subscription's recurring sends cancelled; preferences and delivery states are kept. |
-| `POST {tenantId}/v1/notifications/schedule/sync[?preferenceRtId=]` | ReadWrite | With `preferenceRtId`: schedule that preference again if its subscription is deployed, otherwise cancel its ticks (immediate tick when it needs a first run); Studio calls this after a preference is saved or deleted. Without it: full rebuild, the orphaned-state sweep, plus an immediate tick for every preference that needs a first run — the call to make after a subscription's query changed. |
+| `POST {tenantId}/v1/notifications/schedule/sync[?preferenceRtId=]` | ReadWrite | With `preferenceRtId`: schedule that preference again if its subscription is deployed, otherwise cancel its ticks (immediate tick when it is an Onwards preference that needs a first run; Catch up waits for its schedule); Studio calls this after a preference is saved or deleted. Without it: full rebuild, the orphaned-state sweep, plus an immediate tick for every Onwards preference that needs a first run — the call to make after a subscription's query changed. |
 
 Error codes (`NotificationScheduleServiceException.Kind`): `SubscriptionNotFound` → 404; `EngineUnavailable`
 (pipeline missing or disabled, DataFlow deploy failed) → 409; `ScheduleIncomplete` (some preferences could not
@@ -735,11 +735,11 @@ be scheduled; the rest are) → 503 plus one error event naming them (the tenant
   one that fires more than once a minute (`NotificationCron`: the seconds field of a six- or seven-field cron
   must be a single value), is skipped with a warning; the Studio enforces the same limit, but an API write
   must not get 86 400 ticks a day.
-- **The immediate tick is the Onwards baseline, and only Onwards gets it.** The engine's first Onwards run holds
-  back everything the query returns at that moment, so without it a preference with a daily cron would record its
-  baseline only at the first scheduled time, and every row created between the start and that run would never be
-  mailed. A Catch up preference needs no baseline and loses nothing by waiting, so it gets no immediate
-  tick: otherwise a recipient of a 07:00 digest received the backlog the moment the preference was saved or the
+- **The immediate tick records an Onwards start early, and only Onwards gets it.** The engine anchors an Onwards
+  start at the moment that caused it (the deployment, the preference change, the subscription change;
+  `NotificationDigest.Plan` in octo-mesh-adapter), not at the run, so a late or lost tick loses no row: the next
+  scheduled run mails what changed since. The tick only writes the start at once instead of at the first scheduled
+  time. A Catch up preference gets no immediate tick: otherwise a recipient of a 07:00 digest received the backlog the moment the preference was saved or the
   subscription deployed (`NotificationPreferenceSchedule.TakesBaseline`, from `SkipExistingRows`). The tick
   goes to the same queue as the recurring ones; a failed send only logs a warning, the next scheduled tick
   covers it.
@@ -749,8 +749,7 @@ be scheduled; the rest are) → 503 plus one error event naming them (the tenant
   the pause are mailed and the older ones are not mailed again), a run for another recipient (`SubjectId`), another query
   (`QueryRtId` against the subscription's `SubscriptionQuery` target), another start option
   (`SkipExistingRows`), or an Onwards state without `ProcessedUntil`. "Never ran" alone was not enough: a
-  recipient changed on Tuesday under a Monday cron recorded its new baseline only on Monday, and every row
-  of the week in between counted as existing and was never mailed. Change this together with `Plan`.
+  recipient changed on Tuesday under a Monday cron would get no immediate tick. Change this together with `Plan`.
 - **A per-preference sync never cancels a tick it is about to schedule again.** Cancel and schedule are both
   fire-and-forget messages to the Hangfire scheduler queue, which is consumed concurrently, so a cancel
   processed after the add removed the job for good while the API answered 204. Scheduling under the same
@@ -760,8 +759,8 @@ be scheduled; the rest are) → 503 plus one error event naming them (the tenant
 - **Co-wake.** When the engine adapter's `LifecycleMode` is OnDemand, every preference gets a companion
   recurring `LifecycleWakeMessage` (`{pref}-notification-wake-{tenant}`) on the same cron, as cron triggers do.
   The immediate ticks get one `LifecycleWakeMessage` of their own, sent before them to the same durable wake queue:
-  a hibernated engine would otherwise consume them only at its next scheduled wake, and every row created in
-  between would fall into the baseline and never be mailed. A failed wake only logs a warning.
+  a hibernated engine would otherwise consume them only at its next scheduled wake. A failed wake only logs a
+  warning.
 - Ticks go to `queue:{NotificationScheduleChannelName}-{tenant}-{NotificationEngine.PipelineRtId}`; the adapter
   trigger listens on the same name, so the engine pipeline's rtId is a cross-repo contract.
 - The engine is the service-managed blueprint `System.Communication.Notifications` (DataFlow
