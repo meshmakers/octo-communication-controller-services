@@ -12,15 +12,25 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTes
 public class HealthCheckTests(CustomWebApplicationFactory factory) : IntegrationTestBase(factory)
 {
     [Fact]
-    public async Task HealthEndpoint_ReturnsExpectedStatusCode()
+    public async Task HealthEndpoint_WithoutToken_ReturnsUnauthorized()
     {
         // Act
         var response = await Client.GetAsync("/health", TestContext.Current.CancellationToken);
 
         // Assert
-        // In the test environment, the health check may report unhealthy (503)
-        // because MassTransit health checks fail without RabbitMQ. This is expected.
-        // We verify the endpoint is reachable and returns a valid health check response.
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        response.Headers.WwwAuthenticate.ToString().Should().Be("Bearer");
+    }
+
+    [Theory]
+    [InlineData("/healthz/live")]
+    [InlineData("/healthz/ready")]
+    public async Task ProbeEndpoint_WithoutToken_ReturnsStatus(string path)
+    {
+        // Act
+        var response = await Client.GetAsync(path, TestContext.Current.CancellationToken);
+
+        // Assert
         response.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.ServiceUnavailable);
     }
 
