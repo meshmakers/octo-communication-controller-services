@@ -8,13 +8,13 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 /// <param name="PreferenceRtId">The preference whose schedule fires</param>
 /// <param name="CronExpression">Cron expression of the preference (five or six fields)</param>
 /// <param name="TimeZone">Time zone the cron expression is evaluated in; null when the preference has none</param>
-/// <param name="HasNeverRun">True while the engine has not run the preference yet</param>
+/// <param name="NeedsFirstRun">True when the engine's next run starts the preference over: it never ran, ran before the latest deploy (Onwards only: Catch up reads on from its watermark), or ran for another recipient, query or start option</param>
 /// <param name="TakesBaseline">True for Onwards, which records its start with an immediate first run</param>
 public record NotificationPreferenceSchedule(
     OctoObjectId PreferenceRtId,
     string CronExpression,
     string? TimeZone,
-    bool HasNeverRun,
+    bool NeedsFirstRun,
     bool TakesBaseline);
 
 /// <summary>
@@ -45,11 +45,11 @@ public interface INotificationRepository
     Task<IReadOnlyList<OctoObjectId>> GetPreferenceRtIdsAsync(string tenantId, OctoObjectId subscriptionRtId);
 
     /// <summary>
-    /// Whether a subscription with this rtId exists
+    /// Whether a subscription is deployed; null when it does not exist
     /// </summary>
     /// <param name="tenantId">The tenant id</param>
     /// <param name="subscriptionRtId">The subscription</param>
-    Task<bool> SubscriptionExistsAsync(string tenantId, OctoObjectId subscriptionRtId);
+    Task<bool?> IsSubscriptionDeployedAsync(string tenantId, OctoObjectId subscriptionRtId);
 
     /// <summary>
     /// Marks a subscription as deployed at the given moment, or as undeployed when there is none

@@ -1,4 +1,5 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
@@ -18,29 +19,36 @@ internal class NotificationRepository(ISystemContext systemContext, ILogger<Noti
         var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
         using var session = await tenantRepository.GetSessionAsync();
 
-        List<OctoObjectId> subscriptionRtIds;
+        List<RtNotificationSubscription> subscriptions;
         if (subscriptionRtId == null)
         {
             var deployed = await tenantRepository.GetRtEntitiesByTypeAsync<RtNotificationSubscription>(session,
                 RtEntityQueryOptions.Create().FieldEquals(nameof(RtNotificationSubscription.Enabled), true));
-            subscriptionRtIds = deployed.Items.Select(subscription => subscription.RtId).ToList();
+            subscriptions = deployed.Items.ToList();
         }
         else
         {
             var subscription = await tenantRepository.GetRtEntityByRtIdAsync<RtNotificationSubscription>(session,
                 subscriptionRtId.Value);
-            subscriptionRtIds = subscription is { Enabled: true } ? [subscription.RtId] : [];
+            subscriptions = subscription is { Enabled: true } ? [subscription] : [];
         }
 
-        if (subscriptionRtIds.Count == 0)
+        if (subscriptions.Count == 0)
         {
             return [];
         }
 
-        var preferences = (await GetPreferencesAsync(tenantRepository, session, subscriptionRtIds))
-            .Where(preference => HasSchedule(tenantId, preference))
+        var preferences = await tenantRepository.GetRtAssociationTargetsAsync<RtNotificationSubscription, RtNotificationPreference>(
+            session, subscriptions.Select(subscription => subscription.RtId).ToList(),
+            SystemNotificationCkIds.RtCkPreferenceSubscriptionRoleId, GraphDirections.Inbound, null,
+            RtEntityQueryOptions.Create());
+        var scheduled = subscriptions
+            .SelectMany(subscription => TargetsOf(preferences, SystemNotificationCkIds.RtCkNotificationSubscriptionTypeId,
+                    subscription.RtId)
+                .Where(preference => HasSchedule(tenantId, preference))
+                .Select(preference => (preference, subscription)))
             .ToList();
-        return await ToSchedulesAsync(tenantRepository, session, preferences);
+        return await ToSchedulesAsync(tenantRepository, session, scheduled);
     }
 
     public async Task<NotificationPreferenceSchedule?> GetDeployedPreferenceScheduleAsync(string tenantId,
@@ -58,13 +66,13 @@ internal class NotificationRepository(ISystemContext systemContext, ILogger<Noti
         var subscriptions = await tenantRepository.GetRtAssociationTargetsAsync<RtNotificationPreference, RtNotificationSubscription>(
             session, [preferenceRtId], SystemNotificationCkIds.RtCkPreferenceSubscriptionRoleId,
             GraphDirections.Outbound, null, RtEntityQueryOptions.Create());
-        if (subscriptions.Values.SelectMany(resultSet => resultSet.Items).FirstOrDefault() is not { Enabled: true } ||
+        if (subscriptions.Values.SelectMany(resultSet => resultSet.Items).FirstOrDefault() is not { Enabled: true } subscription ||
             !HasSchedule(tenantId, preference))
         {
             return null;
         }
 
-        return (await ToSchedulesAsync(tenantRepository, session, [preference]))[0];
+        return (await ToSchedulesAsync(tenantRepository, session, [(preference, subscription)]))[0];
     }
 
     public async Task<IReadOnlyList<OctoObjectId>> GetPreferenceRtIdsAsync(string tenantId, OctoObjectId subscriptionRtId)
@@ -77,12 +85,13 @@ internal class NotificationRepository(ISystemContext systemContext, ILogger<Noti
             .ToList();
     }
 
-    public async Task<bool> SubscriptionExistsAsync(string tenantId, OctoObjectId subscriptionRtId)
+    public async Task<bool?> IsSubscriptionDeployedAsync(string tenantId, OctoObjectId subscriptionRtId)
     {
         var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
         using var session = await tenantRepository.GetSessionAsync();
 
-        return await tenantRepository.GetRtEntityByRtIdAsync<RtNotificationSubscription>(session, subscriptionRtId) != null;
+        var subscription = await tenantRepository.GetRtEntityByRtIdAsync<RtNotificationSubscription>(session, subscriptionRtId);
+        return subscription == null ? null : subscription.Enabled == true;
     }
 
     public async Task SetSubscriptionDeployedAsync(string tenantId, OctoObjectId subscriptionRtId, DateTime? deployedAt)
@@ -173,7 +182,8 @@ internal class NotificationRepository(ISystemContext systemContext, ILogger<Noti
     }
 
     private static async Task<IReadOnlyList<NotificationPreferenceSchedule>> ToSchedulesAsync(
-        ITenantRepository tenantRepository, IOctoSession session, IReadOnlyList<RtNotificationPreference> preferences)
+        ITenantRepository tenantRepository, IOctoSession session,
+        IReadOnlyList<(RtNotificationPreference Preference, RtNotificationSubscription Subscription)> preferences)
     {
         if (preferences.Count == 0)
         {
@@ -181,18 +191,30 @@ internal class NotificationRepository(ISystemContext systemContext, ILogger<Noti
         }
 
         var states = await tenantRepository.GetRtAssociationTargetsAsync<RtNotificationPreference, RtNotificationDeliveryState>(
-            session, preferences.Select(preference => preference.RtId).ToList(),
+            session, preferences.Select(item => item.Preference.RtId).ToList(),
             SystemNotificationCkIds.RtCkDeliveryStatePreferenceRoleId, GraphDirections.Inbound, null,
+            RtEntityQueryOptions.Create());
+        var queries = await tenantRepository.GetRtAssociationTargetsAsync<RtNotificationSubscription, RtPersistentQuery>(
+            session, preferences.Select(item => item.Subscription.RtId).Distinct().ToList(),
+            SystemNotificationCkIds.RtCkSubscriptionQueryRoleId, GraphDirections.Outbound, null,
             RtEntityQueryOptions.Create());
 
         return preferences
-            .Select(preference => new NotificationPreferenceSchedule(preference.RtId, preference.CronExpression,
-                string.IsNullOrWhiteSpace(preference.TimeZone) ? null : preference.TimeZone,
-                !states.TryGetValue(new RtEntityId(SystemNotificationCkIds.RtCkNotificationPreferenceTypeId, preference.RtId),
-                    out var state) || state.Items.All(item => item.LastRunAt == null),
-                preference.SkipExistingRows != false))
+            .Select(item => new NotificationPreferenceSchedule(item.Preference.RtId, item.Preference.CronExpression,
+                string.IsNullOrWhiteSpace(item.Preference.TimeZone) ? null : item.Preference.TimeZone,
+                NotificationFirstRun.IsDue(
+                    TargetsOf(states, SystemNotificationCkIds.RtCkNotificationPreferenceTypeId, item.Preference.RtId)
+                        .FirstOrDefault(),
+                    item.Preference, item.Subscription.DeployedAt,
+                    TargetsOf(queries, SystemNotificationCkIds.RtCkNotificationSubscriptionTypeId, item.Subscription.RtId)
+                        .FirstOrDefault()?.RtId),
+                item.Preference.SkipExistingRows != false))
             .ToList();
     }
+
+    private static IEnumerable<TEntity> TargetsOf<TEntity>(IMultipleOriginResultSet<TEntity> resultSets,
+        RtCkId<CkTypeId> originCkTypeId, OctoObjectId originRtId) where TEntity : RtEntity =>
+        resultSets.TryGetValue(new RtEntityId(originCkTypeId, originRtId), out var resultSet) ? resultSet.Items : [];
 
     private static async Task<IReadOnlyList<RtNotificationPreference>> GetPreferencesAsync(ITenantRepository tenantRepository,
         IOctoSession session, List<OctoObjectId> subscriptionRtIds)

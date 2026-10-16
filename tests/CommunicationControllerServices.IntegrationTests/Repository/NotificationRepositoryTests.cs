@@ -19,7 +19,10 @@ public class NotificationRepositoryTests(CommunicationControllerFixture fixture)
     private NotificationRepository CreateRepository() =>
         new(fixture.GetSystemContext(), NullLogger<NotificationRepository>.Instance);
 
-    private async Task<OctoObjectId> CreateSubscriptionAsync(bool deployed)
+    private async Task<OctoObjectId> CreateSubscriptionAsync(bool deployed) =>
+        (await CreateSubscriptionWithQueryAsync(deployed)).RtId;
+
+    private async Task<(OctoObjectId RtId, OctoObjectId QueryRtId)> CreateSubscriptionWithQueryAsync(bool deployed)
     {
         var rtId = OctoObjectId.GenerateNewId();
         var queryRtId = OctoObjectId.GenerateNewId();
@@ -48,7 +51,7 @@ public class NotificationRepositoryTests(CommunicationControllerFixture fixture)
                 new RtEntityId(SystemNotificationCkIds.RtCkNotificationTemplateTypeId, templateRtId),
                 SystemNotificationCkIds.RtCkSubscriptionTemplateRoleId)
         ]);
-        return rtId;
+        return (rtId, queryRtId);
     }
 
     private async Task<OctoObjectId> CreatePreferenceAsync(OctoObjectId subscriptionRtId, string? cron,
@@ -74,9 +77,20 @@ public class NotificationRepositoryTests(CommunicationControllerFixture fixture)
         return preference.RtId;
     }
 
-    private async Task<OctoObjectId> CreateDeliveryStateAsync(OctoObjectId preferenceRtId, DateTime? lastRunAt)
+    private Task<OctoObjectId> CreateDeliveryStateAsync(OctoObjectId preferenceRtId, DateTime? lastRunAt) =>
+        InsertDeliveryStateAsync(preferenceRtId,
+            new RtNotificationDeliveryState { RtId = OctoObjectId.GenerateNewId(), LastRunAt = lastRunAt });
+
+    private Task<OctoObjectId> CreateRanStateAsync(OctoObjectId preferenceRtId, OctoObjectId queryRtId,
+        string subjectId = "user-1") =>
+        InsertDeliveryStateAsync(preferenceRtId, new RtNotificationDeliveryState
+        {
+            RtId = OctoObjectId.GenerateNewId(), LastRunAt = DateTime.UtcNow, ProcessedUntil = DateTime.UtcNow,
+            SubjectId = subjectId, QueryRtId = queryRtId.ToString(), SkipExistingRows = true
+        });
+
+    private async Task<OctoObjectId> InsertDeliveryStateAsync(OctoObjectId preferenceRtId, RtNotificationDeliveryState state)
     {
-        var state = new RtNotificationDeliveryState { RtId = OctoObjectId.GenerateNewId(), LastRunAt = lastRunAt };
         await ApplyAsync(
             [EntityUpdateInfo<RtEntity>.CreateInsert(SystemNotificationCkIds.RtCkNotificationDeliveryStateTypeId, state)],
             [
@@ -119,19 +133,49 @@ public class NotificationRepositoryTests(CommunicationControllerFixture fixture)
     }
 
     [Fact]
-    public async Task GetDeployedPreferenceSchedulesAsync_APreferenceThatRanIsNoLongerNew()
+    public async Task GetDeployedPreferenceSchedulesAsync_APreferenceThatRanUnderItsCurrentSettings_NeedsNoFirstRun()
     {
-        var subscription = await CreateSubscriptionAsync(true);
+        var (subscription, query) = await CreateSubscriptionWithQueryAsync(true);
         var ran = await CreatePreferenceAsync(subscription, "0 7 * * *");
         var stateWithoutRun = await CreatePreferenceAsync(subscription, "0 8 * * *");
-        await CreateDeliveryStateAsync(ran, DateTime.UtcNow);
+        await CreateRanStateAsync(ran, query);
         await CreateDeliveryStateAsync(stateWithoutRun, null);
 
         var schedules = await CreateRepository().GetDeployedPreferenceSchedulesAsync(fixture.TestTenantId, subscription);
 
         schedules.Should().HaveCount(2);
-        schedules.Single(schedule => schedule.PreferenceRtId == ran).HasNeverRun.Should().BeFalse();
-        schedules.Single(schedule => schedule.PreferenceRtId == stateWithoutRun).HasNeverRun.Should().BeTrue();
+        schedules.Single(schedule => schedule.PreferenceRtId == ran).NeedsFirstRun.Should().BeFalse();
+        schedules.Single(schedule => schedule.PreferenceRtId == stateWithoutRun).NeedsFirstRun.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetDeployedPreferenceSchedulesAsync_ARecipientOrQueryChange_NeedsAFirstRun()
+    {
+        var (subscription, query) = await CreateSubscriptionWithQueryAsync(true);
+        var otherRecipient = await CreatePreferenceAsync(subscription, "0 7 * * *");
+        var otherQuery = await CreatePreferenceAsync(subscription, "0 7 * * *");
+        await CreateRanStateAsync(otherRecipient, query, "user-2");
+        await CreateRanStateAsync(otherQuery, OctoObjectId.GenerateNewId());
+
+        var schedules = await CreateRepository().GetDeployedPreferenceSchedulesAsync(fixture.TestTenantId, subscription);
+
+        schedules.Should().OnlyContain(schedule => schedule.NeedsFirstRun);
+        (await CreateRepository().GetDeployedPreferenceScheduleAsync(fixture.TestTenantId, otherRecipient))!
+            .NeedsFirstRun.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetDeployedPreferenceSchedulesAsync_ARunBeforeTheLatestDeploy_NeedsAFirstRun()
+    {
+        var (subscription, query) = await CreateSubscriptionWithQueryAsync(false);
+        var preference = await CreatePreferenceAsync(subscription, "0 7 * * *");
+        await CreateRanStateAsync(preference, query);
+        await CreateRepository().SetSubscriptionDeployedAsync(fixture.TestTenantId, subscription,
+            DateTime.UtcNow.AddMinutes(1));
+
+        var schedule = await CreateRepository().GetDeployedPreferenceScheduleAsync(fixture.TestTenantId, preference);
+
+        schedule!.NeedsFirstRun.Should().BeTrue();
     }
 
     [Fact]
@@ -159,13 +203,15 @@ public class NotificationRepositoryTests(CommunicationControllerFixture fixture)
     }
 
     [Fact]
-    public async Task SubscriptionExistsAsync_TellsAnExistingSubscriptionFromAnUnknownId()
+    public async Task IsSubscriptionDeployedAsync_TellsDeployedUndeployedAndUnknownApart()
     {
-        var subscription = await CreateSubscriptionAsync(false);
+        var deployed = await CreateSubscriptionAsync(true);
+        var undeployed = await CreateSubscriptionAsync(false);
         var repository = CreateRepository();
 
-        (await repository.SubscriptionExistsAsync(fixture.TestTenantId, subscription)).Should().BeTrue();
-        (await repository.SubscriptionExistsAsync(fixture.TestTenantId, OctoObjectId.GenerateNewId())).Should().BeFalse();
+        (await repository.IsSubscriptionDeployedAsync(fixture.TestTenantId, deployed)).Should().BeTrue();
+        (await repository.IsSubscriptionDeployedAsync(fixture.TestTenantId, undeployed)).Should().BeFalse();
+        (await repository.IsSubscriptionDeployedAsync(fixture.TestTenantId, OctoObjectId.GenerateNewId())).Should().BeNull();
     }
 
     [Fact]

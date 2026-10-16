@@ -39,7 +39,7 @@ internal class NotificationScheduleService(
 
         var schedules = await notificationRepository.GetDeployedPreferenceSchedulesAsync(tenantId);
         var failures = await ScheduleAsync(tenantId, schedules);
-        await SendBaselineTicksAsync(tenantId, schedules.Where(schedule => schedule.HasNeverRun));
+        await SendBaselineTicksAsync(tenantId, schedules.Where(schedule => schedule.NeedsFirstRun));
 
         logger.LogInformation("[{TenantId}] Notification schedule rebuilt with {Count} preference(s)", tenantId,
             schedules.Count - failures.Count);
@@ -48,21 +48,23 @@ internal class NotificationScheduleService(
 
     public async Task DeploySubscriptionAsync(string tenantId, OctoObjectId subscriptionRtId)
     {
-        await EnsureSubscriptionExistsAsync(tenantId, subscriptionRtId);
-        await notificationRepository.SetSubscriptionDeployedAsync(tenantId, subscriptionRtId,
-            timeProvider.GetUtcNow().UtcDateTime);
+        if (!await GetSubscriptionDeployedAsync(tenantId, subscriptionRtId))
+        {
+            await notificationRepository.SetSubscriptionDeployedAsync(tenantId, subscriptionRtId,
+                timeProvider.GetUtcNow().UtcDateTime);
+        }
 
         var schedules = await notificationRepository.GetDeployedPreferenceSchedulesAsync(tenantId, subscriptionRtId);
         var failures = await ScheduleAsync(tenantId, schedules);
         await EnsureEngineDeployedAsync(tenantId);
-        await SendBaselineTicksAsync(tenantId, schedules);
+        await SendBaselineTicksAsync(tenantId, schedules.Where(schedule => schedule.NeedsFirstRun));
 
         await ThrowIfIncompleteAsync(tenantId, failures);
     }
 
     public async Task UndeploySubscriptionAsync(string tenantId, OctoObjectId subscriptionRtId)
     {
-        await EnsureSubscriptionExistsAsync(tenantId, subscriptionRtId);
+        await GetSubscriptionDeployedAsync(tenantId, subscriptionRtId);
         await notificationRepository.SetSubscriptionDeployedAsync(tenantId, subscriptionRtId, null);
 
         foreach (var preferenceRtId in await notificationRepository.GetPreferenceRtIdsAsync(tenantId, subscriptionRtId))
@@ -73,17 +75,21 @@ internal class NotificationScheduleService(
 
     public async Task SyncPreferenceAsync(string tenantId, OctoObjectId preferenceRtId)
     {
-        await CancelPreferenceAsync(tenantId, preferenceRtId);
-        await DeleteOrphanedDeliveryStatesAsync(tenantId);
-
         var schedule = await notificationRepository.GetDeployedPreferenceScheduleAsync(tenantId, preferenceRtId);
         if (schedule == null)
         {
+            await CancelPreferenceAsync(tenantId, preferenceRtId);
             return;
         }
 
         var failures = await ScheduleAsync(tenantId, [schedule]);
-        await SendBaselineTicksAsync(tenantId, new[] { schedule }.Where(candidate => candidate.HasNeverRun));
+        if (await GetOnDemandEngineAdapterAsync(tenantId) == null)
+        {
+            await distributionEventHubService.CancelScheduledRecurringSendAsync(
+                CreateWakeScheduleId(tenantId, preferenceRtId), CreateScheduleGroup(tenantId));
+        }
+
+        await SendBaselineTicksAsync(tenantId, new[] { schedule }.Where(candidate => candidate.NeedsFirstRun));
 
         await ThrowIfIncompleteAsync(tenantId, failures);
     }
@@ -114,13 +120,9 @@ internal class NotificationScheduleService(
             CreateWakeScheduleId(tenantId, preferenceRtId), scheduleGroup);
     }
 
-    private async Task EnsureSubscriptionExistsAsync(string tenantId, OctoObjectId subscriptionRtId)
-    {
-        if (!await notificationRepository.SubscriptionExistsAsync(tenantId, subscriptionRtId))
-        {
-            throw NotificationScheduleServiceException.SubscriptionNotFound(tenantId, subscriptionRtId);
-        }
-    }
+    private async Task<bool> GetSubscriptionDeployedAsync(string tenantId, OctoObjectId subscriptionRtId) =>
+        await notificationRepository.IsSubscriptionDeployedAsync(tenantId, subscriptionRtId) ??
+        throw NotificationScheduleServiceException.SubscriptionNotFound(tenantId, subscriptionRtId);
 
     private async Task<IReadOnlyList<(OctoObjectId PreferenceRtId, Exception Error)>> ScheduleAsync(string tenantId,
         IReadOnlyList<NotificationPreferenceSchedule> schedules)

@@ -27,7 +27,7 @@ public interface INotificationScheduleService
     Task RemoveScheduleAsync(string tenantId);
 
     /// <summary>
-    /// Deploys a subscription: records the moment and rebuilds the schedule
+    /// Deploys a subscription: records the moment unless it is deployed already, and rebuilds its schedule
     /// </summary>
     /// <param name="tenantId">The tenant id</param>
     /// <param name="subscriptionRtId">The subscription</param>

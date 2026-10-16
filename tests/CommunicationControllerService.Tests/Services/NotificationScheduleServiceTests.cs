@@ -53,7 +53,7 @@ internal class NotificationScheduleServiceTests
                 Arg.Any<CancellationToken?>())
             .Returns(Task.FromResult(Task.CompletedTask));
         _notificationRepository.GetDeployedPreferenceSchedulesAsync(TenantId, Arg.Any<OctoObjectId?>()).Returns([]);
-        _notificationRepository.SubscriptionExistsAsync(TenantId, Arg.Any<OctoObjectId>()).Returns(true);
+        _notificationRepository.IsSubscriptionDeployedAsync(TenantId, Arg.Any<OctoObjectId>()).Returns(false);
         _communicationRepository.GetPipelineAsync(TenantId, EnginePipelineId)
             .Returns(RtEntityCreator.CreatePipeline(id: NotificationEngine.PipelineRtId.ToString()));
 
@@ -63,8 +63,8 @@ internal class NotificationScheduleServiceTests
     }
 
     private static NotificationPreferenceSchedule Schedule(string cron = "0 7 * * *", string? zone = null,
-        bool hasNeverRun = false, bool takesBaseline = true) =>
-        new(OctoObjectId.GenerateNewId(), cron, zone, hasNeverRun, takesBaseline);
+        bool needsFirstRun = false, bool takesBaseline = true) =>
+        new(OctoObjectId.GenerateNewId(), cron, zone, needsFirstRun, takesBaseline);
 
     [Test]
     public async Task UpdateScheduleAsync_SchedulesOneTickPerPreferenceInItsTimeZone()
@@ -140,7 +140,7 @@ internal class NotificationScheduleServiceTests
     [Test]
     public async Task UpdateScheduleAsync_StartsTheFirstRunOfPreferencesThatNeverRan()
     {
-        var fresh = Schedule(hasNeverRun: true);
+        var fresh = Schedule(needsFirstRun: true);
         var running = Schedule();
         _notificationRepository.GetDeployedPreferenceSchedulesAsync(TenantId).Returns([fresh, running]);
 
@@ -157,7 +157,7 @@ internal class NotificationScheduleServiceTests
     [Test]
     public async Task UpdateScheduleAsync_CatchUpPreferenceThatNeverRan_WaitsForItsOwnSchedule()
     {
-        var catchUp = Schedule(hasNeverRun: true, takesBaseline: false);
+        var catchUp = Schedule(needsFirstRun: true, takesBaseline: false);
         _notificationRepository.GetDeployedPreferenceSchedulesAsync(TenantId).Returns([catchUp]);
 
         await _service.UpdateScheduleAsync(TenantId);
@@ -173,8 +173,8 @@ internal class NotificationScheduleServiceTests
     public async Task DeploySubscriptionAsync_SendsTheFirstRunToOnwardsPreferencesOnly()
     {
         var subscriptionRtId = OctoObjectId.GenerateNewId();
-        var onwards = Schedule();
-        var catchUp = Schedule(takesBaseline: false);
+        var onwards = Schedule(needsFirstRun: true);
+        var catchUp = Schedule(needsFirstRun: true, takesBaseline: false);
         _notificationRepository.GetDeployedPreferenceSchedulesAsync(TenantId, subscriptionRtId)
             .Returns([onwards, catchUp]);
 
@@ -186,6 +186,29 @@ internal class NotificationScheduleServiceTests
         await _distributionEventHubService.DidNotReceive().SendAsync(Arg.Any<Uri>(),
             Arg.Is<NotificationScheduleTick>(t => t.PreferenceRtId == catchUp.PreferenceRtId.ToString()),
             Arg.Any<CancellationToken?>());
+    }
+
+    [Test]
+    public async Task DeploySubscriptionAsync_AlreadyDeployed_KeepsItsStartAndStartsNothingOver()
+    {
+        var subscriptionRtId = OctoObjectId.GenerateNewId();
+        var running = Schedule();
+        _notificationRepository.IsSubscriptionDeployedAsync(TenantId, subscriptionRtId).Returns(true);
+        _notificationRepository.GetDeployedPreferenceSchedulesAsync(TenantId, subscriptionRtId).Returns([running]);
+        var engine = RtEntityCreator.CreatePipeline(id: NotificationEngine.PipelineRtId.ToString());
+        engine.DeploymentState = RtDeploymentStateEnum.Undeployed;
+        _communicationRepository.GetPipelineAsync(TenantId, EnginePipelineId).Returns(engine);
+
+        await _service.DeploySubscriptionAsync(TenantId, subscriptionRtId);
+
+        await _notificationRepository.DidNotReceive().SetSubscriptionDeployedAsync(Arg.Any<string>(),
+            Arg.Any<OctoObjectId>(), Arg.Any<DateTime?>());
+        await _distributionEventHubService.Received(1).ScheduleRecurringSendAsync(
+            Arg.Is<NotificationScheduleTick>(t => t.PreferenceRtId == running.PreferenceRtId.ToString()),
+            Arg.Any<string>(), Arg.Any<RecurringSchedulingOptions>());
+        await _adapterService.Received(1).DeployDataFlowAsync(TenantId, NotificationEngine.DataFlowRtId);
+        await _distributionEventHubService.DidNotReceive().SendAsync(Arg.Any<Uri>(),
+            Arg.Any<NotificationScheduleTick>(), Arg.Any<CancellationToken?>());
     }
 
     [Test]
@@ -218,7 +241,7 @@ internal class NotificationScheduleServiceTests
             .Returns(Task.FromResult(Task.CompletedTask));
         var subscriptionRtId = OctoObjectId.GenerateNewId();
         _notificationRepository.GetDeployedPreferenceSchedulesAsync(TenantId, subscriptionRtId)
-            .Returns([Schedule(), Schedule()]);
+            .Returns([Schedule(needsFirstRun: true), Schedule(needsFirstRun: true)]);
 
         await _service.DeploySubscriptionAsync(TenantId, subscriptionRtId);
 
@@ -264,7 +287,7 @@ internal class NotificationScheduleServiceTests
     public async Task DeploySubscriptionAsync_PersistsThenSchedulesItsPreferencesThenTheEngineThenTheFirstRun()
     {
         var subscriptionRtId = OctoObjectId.GenerateNewId();
-        var schedule = Schedule();
+        var schedule = Schedule(needsFirstRun: true);
         _notificationRepository.GetDeployedPreferenceSchedulesAsync(TenantId, subscriptionRtId).Returns([schedule]);
         var engine = RtEntityCreator.CreatePipeline(id: NotificationEngine.PipelineRtId.ToString());
         engine.DeploymentState = RtDeploymentStateEnum.Undeployed;
@@ -299,7 +322,7 @@ internal class NotificationScheduleServiceTests
     public async Task DeploySubscriptionAsync_UnknownSubscription_IsNotFoundAndChangesNothing()
     {
         var subscriptionRtId = OctoObjectId.GenerateNewId();
-        _notificationRepository.SubscriptionExistsAsync(TenantId, subscriptionRtId).Returns(false);
+        _notificationRepository.IsSubscriptionDeployedAsync(TenantId, subscriptionRtId).Returns((bool?)null);
 
         var exception = await Assert.ThrowsAsync<NotificationScheduleServiceException>(() =>
             _service.DeploySubscriptionAsync(TenantId, subscriptionRtId));
@@ -374,15 +397,13 @@ internal class NotificationScheduleServiceTests
     [Test]
     public async Task SyncPreferenceAsync_ReschedulesOnlyThatPreference()
     {
-        var schedule = Schedule(hasNeverRun: true);
+        var schedule = Schedule(needsFirstRun: true);
         _notificationRepository.GetDeployedPreferenceScheduleAsync(TenantId, schedule.PreferenceRtId).Returns(schedule);
 
         await _service.SyncPreferenceAsync(TenantId, schedule.PreferenceRtId);
 
         Received.InOrder(() =>
         {
-            _distributionEventHubService.CancelScheduledRecurringSendAsync(
-                $"{schedule.PreferenceRtId}-notification-tenant1", Group);
             _distributionEventHubService.ScheduleRecurringSendAsync(
                 Arg.Is<NotificationScheduleTick>(t => t.PreferenceRtId == schedule.PreferenceRtId.ToString()),
                 Arg.Any<string>(), Arg.Any<RecurringSchedulingOptions>());
@@ -393,6 +414,38 @@ internal class NotificationScheduleServiceTests
         await _removeRecurringJobsCommandClient.DidNotReceive().GetResponseWithRetry<GenericCommandResponse>(
             Arg.Any<RemoveRecurringJobsByScheduleGroupRequest>(), Arg.Any<int>(), Arg.Any<TimeSpan?>(),
             Arg.Any<CancellationToken>(), Arg.Any<TimeSpan?>());
+    }
+
+    [Test]
+    public async Task SyncPreferenceAsync_ScheduledPreference_IsReplacedWithoutCancellingItsTick()
+    {
+        var schedule = Schedule();
+        _notificationRepository.GetDeployedPreferenceScheduleAsync(TenantId, schedule.PreferenceRtId).Returns(schedule);
+
+        await _service.SyncPreferenceAsync(TenantId, schedule.PreferenceRtId);
+
+        await _distributionEventHubService.DidNotReceive()
+            .CancelScheduledRecurringSendAsync($"{schedule.PreferenceRtId}-notification-tenant1", Arg.Any<string>());
+        await _distributionEventHubService.Received(1)
+            .CancelScheduledRecurringSendAsync($"{schedule.PreferenceRtId}-notification-wake-tenant1", Group);
+    }
+
+    [Test]
+    public async Task SyncPreferenceAsync_OnDemandEngineAdapter_ReplacesTheCoWakeWithoutCancellingIt()
+    {
+        var adapter = RtEntityCreator.CreateAdapter();
+        adapter.LifecycleMode = RtLifecycleModeEnum.OnDemand;
+        _communicationRepository.GetAdapterByPipelineAsync(TenantId, EnginePipelineId).Returns(adapter);
+        var schedule = Schedule();
+        _notificationRepository.GetDeployedPreferenceScheduleAsync(TenantId, schedule.PreferenceRtId).Returns(schedule);
+
+        await _service.SyncPreferenceAsync(TenantId, schedule.PreferenceRtId);
+
+        await _distributionEventHubService.DidNotReceive()
+            .CancelScheduledRecurringSendAsync(Arg.Any<string>(), Arg.Any<string>());
+        await _distributionEventHubService.Received(1).ScheduleRecurringSendAsync(Arg.Any<LifecycleWakeMessage>(),
+            Arg.Any<string>(),
+            Arg.Is<RecurringSchedulingOptions>(o => o.ScheduleId == $"{schedule.PreferenceRtId}-notification-wake-tenant1"));
     }
 
     [Test]
@@ -428,7 +481,7 @@ internal class NotificationScheduleServiceTests
     public async Task UndeploySubscriptionAsync_UnknownSubscription_IsNotFound()
     {
         var subscriptionRtId = OctoObjectId.GenerateNewId();
-        _notificationRepository.SubscriptionExistsAsync(TenantId, subscriptionRtId).Returns(false);
+        _notificationRepository.IsSubscriptionDeployedAsync(TenantId, subscriptionRtId).Returns((bool?)null);
 
         var exception = await Assert.ThrowsAsync<NotificationScheduleServiceException>(() =>
             _service.UndeploySubscriptionAsync(TenantId, subscriptionRtId));
@@ -454,11 +507,11 @@ internal class NotificationScheduleServiceTests
     }
 
     [Test]
-    public async Task SyncPreferenceAsync_ErasesTheDeliveryStatesOfRemovedRecipients()
+    public async Task SyncPreferenceAsync_LeavesTheStateSweepToTheRebuild()
     {
         await _service.SyncPreferenceAsync(TenantId, OctoObjectId.GenerateNewId());
 
-        await _notificationRepository.Received(1).DeleteOrphanedDeliveryStatesAsync(TenantId);
+        await _notificationRepository.DidNotReceive().DeleteOrphanedDeliveryStatesAsync(Arg.Any<string>());
     }
 
     [Test]

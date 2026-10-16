@@ -718,9 +718,9 @@ mesh adapter's engine pipeline decides WHAT (see octo-mesh-adapter CLAUDE.md, `P
 
 | Route | Policy | Behaviour |
 |---|---|---|
-| `POST {tenantId}/v1/notifications/subscriptions/{rtId}/deploy` | ReadWrite | `Enabled=true`, `DeployedAt=now` (a redeploy is a new start), only this subscription's preferences rescheduled, engine DataFlow deployed if it is not, then one immediate tick per Onwards preference. |
+| `POST {tenantId}/v1/notifications/subscriptions/{rtId}/deploy` | ReadWrite | `Enabled=true` and `DeployedAt=now` (undeploy → deploy is a new start for Onwards; Catch up reads on from its watermark), only this subscription's preferences rescheduled, engine DataFlow deployed if it is not, then one immediate tick per Onwards preference that needs a first run. On an already deployed subscription (a retry, CLI, MCP) `DeployedAt` is kept, so nothing starts over; the rest still runs, which is what finishes a deploy whose engine step failed. |
 | `POST {tenantId}/v1/notifications/subscriptions/{rtId}/undeploy` | ReadWrite | `Enabled=false`, this subscription's recurring sends cancelled; preferences and delivery states are kept. |
-| `POST {tenantId}/v1/notifications/schedule/sync[?preferenceRtId=]` | ReadWrite | With `preferenceRtId`: cancel that preference's ticks and schedule it again if its subscription is deployed (immediate tick when it never ran); Studio calls this after a preference is saved or deleted. Without it: full rebuild, plus an immediate tick for every preference that has never run. |
+| `POST {tenantId}/v1/notifications/schedule/sync[?preferenceRtId=]` | ReadWrite | With `preferenceRtId`: schedule that preference again if its subscription is deployed, otherwise cancel its ticks (immediate tick when it needs a first run); Studio calls this after a preference is saved or deleted. Without it: full rebuild, the orphaned-state sweep, plus an immediate tick for every preference that needs a first run — the call to make after a subscription's query changed. |
 
 Error codes (`NotificationScheduleServiceException.Kind`): `SubscriptionNotFound` → 404; `EngineUnavailable`
 (pipeline missing or disabled, DataFlow deploy failed) → 409; `ScheduleIncomplete` (some preferences could not
@@ -743,6 +743,20 @@ be scheduled; the rest are) → 503 plus one error event naming them (the tenant
   subscription deployed (`NotificationPreferenceSchedule.TakesBaseline`, from `SkipExistingRows`). The tick
   goes to the same queue as the recurring ones; a failed send only logs a warning, the next scheduled tick
   covers it.
+- **"Needs a first run" is the engine's restart rule, mirrored** (`NotificationFirstRun.IsDue`, a copy of
+  `NotificationDigest.Plan` in octo-mesh-adapter): no state or no run yet, for Onwards a run before
+  `max(preference created, DeployedAt)` (Catch up reads on from its watermark after a redeploy, so the rows of
+  the pause are mailed and the older ones are not mailed again), a run for another recipient (`SubjectId`), another query
+  (`QueryRtId` against the subscription's `SubscriptionQuery` target), another start option
+  (`SkipExistingRows`), or an Onwards state without `ProcessedUntil`. "Never ran" alone was not enough: a
+  recipient changed on Tuesday under a Monday cron recorded its new baseline only on Monday, and every row
+  of the week in between counted as existing and was never mailed. Change this together with `Plan`.
+- **A per-preference sync never cancels a tick it is about to schedule again.** Cancel and schedule are both
+  fire-and-forget messages to the Hangfire scheduler queue, which is consumed concurrently, so a cancel
+  processed after the add removed the job for good while the API answered 204. Scheduling under the same
+  schedule id replaces the job (`AddOrUpdate`), so the tick is only cancelled when the preference has no
+  schedule any more, and the co-wake only when the engine adapter is not OnDemand. The full rebuild is
+  unaffected: its group removal is a request/response command, answered before anything is scheduled.
 - **Co-wake.** When the engine adapter's `LifecycleMode` is OnDemand, every preference gets a companion
   recurring `LifecycleWakeMessage` (`{pref}-notification-wake-{tenant}`) on the same cron, as cron triggers do.
   The immediate ticks get one `LifecycleWakeMessage` of their own, sent before them to the same durable wake queue:
@@ -756,11 +770,13 @@ be scheduled; the rest are) → 503 plus one error event naming them (the tenant
   loop runs in registration order. It ships undeployed; subscription Deploy deploys it
   (`NotificationScheduleServiceException.EngineMissing` / `EngineDeployFailed` otherwise). The blueprint requires
   `System.Notification-[2.6.0,3.0)`: the engine writes the delivery state's `ProcessedUntil` and `SentRows`, which 2.6.0 introduced.
-- **Delivery states without a recipient are erased** on every rebuild and every preference sync
+- **Delivery states without a recipient are erased** on every full rebuild — tenant start and a sync
+  without `preferenceRtId` — never on a per-preference sync
   (`NotificationRepository.DeleteOrphanedDeliveryStatesAsync`: a state whose `DeliveryStatePreference` target is
   gone). The Studio deletes the state with its preference, but an API delete, an import or a failed second write
-  leaves one behind, the way Kubernetes garbage-collects objects whose owner is gone. A failure is logged and
-  never stops the schedule.
+  leaves one behind, the way Kubernetes garbage-collects objects whose owner is gone. The sweep reads every
+  state in full, `SentRows` included (the repository API has no projection), which is affordable once per
+  rebuild and was not on every Save click. A failure is logged and never stops the schedule.
 - SMTP follows the EnergyCommunity pattern: the pipeline names `serverConfiguration: EmailSender`, and an
   operator associates (`Uses`) the tenant's EMailSenderConfiguration of that name, then redeploys the DataFlow.
 - **Not routed through leases (yet).** Ticks go straight to the engine pipeline's queue, the way manual
@@ -768,8 +784,9 @@ be scheduled; the rest are) → 503 plus one error event naming them (the tenant
   it has no process of its own and the ticks are not consumed - `TriggerManagementService` routes cron
   triggers of leased adapters through the lease queue, the notification schedule does not.
 
-Tests: `Services/NotificationScheduleServiceTests.cs`, `Controllers/NotificationsControllerTests.cs`,
-integration `Repository/NotificationRepositoryTests.cs` (including the orphan sweep). The integration fixture imports System.Notification
+Tests: `Services/NotificationScheduleServiceTests.cs`, `Repository/NotificationFirstRunTests.cs`,
+`Controllers/NotificationsControllerTests.cs`, integration `Repository/NotificationRepositoryTests.cs` (including
+the orphan sweep and the first-run rule against stored states). The integration fixture imports System.Notification
 after System.Communication (`InitializeTenantForTestingAsync`).
 
 ### Signal Channel Self-Service (AB#5143)
