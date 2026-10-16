@@ -1,6 +1,9 @@
 using System.Diagnostics.Metrics;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using NLog;
+using OpenTelemetry.Metrics;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 
@@ -139,11 +142,22 @@ internal sealed class HubAuthorizationMetrics
             "(adapter / operator / adapterPoolHub), mode (log_only / enforce), outcome (allowed / would_refuse / refused) " +
             "and reason. would_refuse must be zero before a hub is switched to Enforce");
 
-        // Zero baseline for every refusal series (and the allowed ones). A cumulative counter series
-        // only exists from its first measurement on, and PromQL's increase() does not count that
-        // first point - so a single anonymous connection right after a controller restart would
-        // otherwise read as "no increase" and make a cluster look ready for Enforce. Program.cs
-        // resolves this singleton at startup so the zeros are exported before the first connection.
+    }
+
+    /// <summary>
+    ///     Emits the zero baseline for every refusal series (and the allowed ones), 30 series in total.
+    /// </summary>
+    /// <remarks>
+    ///     A cumulative counter series only exists from its first measurement on, and PromQL's
+    ///     <c>increase()</c> does not count that first point - so a single anonymous connection right after
+    ///     a controller restart would otherwise read as "no increase" and make a cluster look ready for
+    ///     Enforce. <b>It must run after the OpenTelemetry <c>MeterProvider</c> listens</b>: a measurement
+    ///     without a listener is dropped, and the provider is only built when the host starts (AB#6740).
+    ///     <see cref="HubAuthorizationMetricsBaselineService" /> does that; never call this from the constructor
+    ///     or from code that runs between <c>builder.Build()</c> and the host start.
+    /// </remarks>
+    public void EmitBaseline()
+    {
         foreach (var (hub, reasons) in BaselineReasons)
         {
             foreach (var enforcing in new[] { false, true })
@@ -249,4 +263,45 @@ internal sealed class HubAuthorizationMetrics
         HubAuthorizationReason.TenantMismatch => "tenant_mismatch",
         _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, null)
     };
+}
+
+
+internal static class HubAuthorizationMetricsServiceCollectionExtensions
+{
+    public static IServiceCollection AddHubAuthorizationMetrics(this IServiceCollection services)
+    {
+        services.AddSingleton<HubAuthorizationMetrics>();
+        services.AddHostedService<HubAuthorizationMetricsBaselineService>();
+        return services;
+    }
+}
+
+/// <summary>
+///     Emits the zero baseline of <see cref="HubAuthorizationMetrics" /> once the OpenTelemetry
+///     <c>MeterProvider</c> exists (AB#6740). Resolving <see cref="MeterProvider" /> builds it - and attaches its
+///     listener - if the OpenTelemetry hosted service did not do so yet, so the result does not depend on the
+///     registration order of hosted services. Without OpenTelemetry (tests, tools) there is nothing to resolve and
+///     the baseline is emitted anyway, which is harmless.
+/// </summary>
+internal sealed class HubAuthorizationMetricsBaselineService(IServiceProvider serviceProvider) : IHostedService
+{
+    private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            _ = serviceProvider.GetService<MeterProvider>();
+            serviceProvider.GetRequiredService<HubAuthorizationMetrics>().EmitBaseline();
+        }
+        catch (Exception e)
+        {
+            // A metric must never keep the controller from starting.
+            Logger.Warn(e, "Could not emit the hub authorization zero baseline");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

@@ -48,9 +48,24 @@ After the last fix on a cluster, roll the controller once (`deploy-octo-mesh-cor
 evaluated within minutes. Count the review window from that restart.
 
 **Metric (Dash0, dataset = cluster)** — the go / no-go signal. The counter is cumulative and restarts
-at 0 with every controller pod; the controller writes a 0 for every series at startup, so both the raw
-value (count since the last restart) and `increase()` work. Use the raw value since the restart from
+at 0 with every controller pod; the controller writes a 0 for every series right after startup (30 series;
+fixed in AB#6740 — controllers older than that build export no zero series and show `adapterPoolHub` only after
+its first real decision), so both the raw value (count since the last restart) and `increase()` work. Use the raw value since the restart from
 the step above, it covers the whole review window:
+
+**Proof that the baseline arrived** (do this first after every controller rollout, before reading any
+zero as "clean"): all three hubs must be present, `adapterPoolHub` included, with the full series set —
+
+```promql
+# Expected: adapter 14, operator 6, adapterPoolHub 10 (per cluster, regardless of the number of pods)
+count by (octo_hub_name) (
+  max by (octo_hub_name, octo_hub_authorization_mode, octo_hub_authorization_outcome, octo_hub_authorization_reason) (
+    {otel_metric_name="octo.communication.hub.authorization.decisions"}))
+```
+
+On a freshly restarted pod the sum of all series is 0 until the first connection decision. If `adapterPoolHub`
+is missing, the cluster still runs a controller without the AB#6740 fix and its `adapterPoolHub` numbers cannot
+be used for the Enforce decision.
 
 ```promql
 # Must be 0 (or empty) on every series for the whole review window (>= 72 h after the restart), per hub

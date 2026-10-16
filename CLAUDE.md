@@ -360,10 +360,18 @@ nothing to do if it uses `nameof`; a new callback interface must be added to `Ca
 
 All three gates (`/{tenantId}/adapterHub`, `/operatorHub`, `/adapterPoolHub`) count every decision on `octo.communication.hub.authorization.decisions` (counter,
 `{decision}`, meter `Meshmakers.Octo.Communication`) — `Hubs/HubAuthorizationMetrics`, registered as
-a singleton in `Program.cs`, resolved eagerly after `Build()` and created through `IMeterFactory`. The
-constructor writes a zero for every hub × mode × outcome × reason series (30), because PromQL's
-`increase()` does not count the first point of a new cumulative series — without the baseline a single
-anonymous connection after a restart would read as "no increase". Attributes, all closed sets:
+a singleton (`AddHubAuthorizationMetrics()` in `Program.cs`) created through `IMeterFactory`. The zero
+baseline for every hub × mode × outcome × reason series (30: adapter 14, operator 6, adapterPoolHub 10) is
+written by `HubAuthorizationMetricsBaselineService` (`IHostedService`), **not** by the constructor and never
+by code between `builder.Build()` and the host start: the OpenTelemetry `MeterProvider` is built at host start
+and an `Add(0)` without a listener is dropped (AB#6740 — on 3.5.23 no zero series, and so no `adapterPoolHub`,
+ever reached Dash0). The service resolves `MeterProvider` first, then calls `EmitBaseline()`. The baseline
+matters because PromQL's `increase()` does not count the first point of a new cumulative series — without it a
+single anonymous connection after a restart would read as "no increase". Proof query for a rollout (must return
+adapter 14, operator 6, adapterPoolHub 10, all with value 0 on a fresh pod):
+`count by (octo_hub_name) (max by (octo_hub_name, octo_hub_authorization_mode, octo_hub_authorization_outcome, octo_hub_authorization_reason) ({otel_metric_name="octo.communication.hub.authorization.decisions"}))`.
+Test: `Hubs/HubAuthorizationMetricsBaselineExportTests` (real `MeterProvider` + capturing exporter in the real
+startup order; fails if the baseline is emitted before the provider listens). Attributes, all closed sets:
 
 | Attribute | Values |
 |---|---|

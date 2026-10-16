@@ -251,7 +251,7 @@ try
         builder.Configuration.GetSection(AdapterPoolHubAuthorizationOptions.SectionName));
     // AB#5528 phase 3: decision counter of both hub gates (octo.communication.hub.authorization.decisions),
     // the go / no-go signal for arming Enforce per cluster. See HubAuthorizationMetrics.
-    builder.Services.AddSingleton<HubAuthorizationMetrics>();
+    builder.Services.AddHubAuthorizationMetrics();
 
     // AB#5112: rollout switch of the hardened deploy guard's identity-client check — bound as
     // configuration for the same reason as the hub gates above: an environment can be loosened
@@ -422,9 +422,8 @@ try
     }).AddVersion();
 
     var app = builder.Build();
-    // AB#5528 phase 3: construct the hub decision counter eagerly so its zero baseline is exported
-    // before the first hub connection (see HubAuthorizationMetrics).
-    app.Services.GetRequiredService<HubAuthorizationMetrics>();
+    // AB#6740: the hub decision counter's zero baseline is emitted by a hosted service after the
+    // MeterProvider exists (AddHubAuthorizationMetrics); resolving the singleton here would be too early.
 
     app.MapObservability();
 
