@@ -4,6 +4,7 @@ using Meshmakers.Octo.ConstructionKit.Models.System.Bot.Generated.System.Bot.v3;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Extensions;
 
@@ -38,6 +39,7 @@ public static class TenantInitializationExtensions
                 await EnsureCkModelAsync(tenantContext, SystemCkIds.CkModelId);
                 await EnsureCkModelAsync(tenantContext, SystemBotCkIds.CkModelId);
                 await EnsureCkModelAsync(tenantContext, SystemCommunicationCkIds.CkModelId);
+                await EnsureCkModelAsync(tenantContext, SystemNotificationCkIds.CkModelId);
 
                 await importSession.CommitTransactionAsync();
             }

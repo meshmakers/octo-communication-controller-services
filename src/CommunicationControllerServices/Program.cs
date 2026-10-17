@@ -152,6 +152,8 @@ try
     builder.Services.TryAddSingleton(TimeProvider.System);
     builder.Services.AddSingleton<IPipelineExecutionService, PipelineExecutionService>();
     builder.Services.AddTransient<ITriggerManagementService, TriggerManagementService>();
+    builder.Services.AddSingleton<INotificationRepository, NotificationRepository>();
+    builder.Services.AddTransient<INotificationScheduleService, NotificationScheduleService>();
 
     builder.Services
         .AddScopedMultipleInterfaces<DefaultConfigurationCreatorService, IDefaultConfigurationCreatorService,
@@ -326,6 +328,7 @@ try
     // the right one per tenant via each blueprint's requires.octo.environment block.
     builder.Services.AddBlueprintSystemCommunicationReleaseV2();
     builder.Services.AddBlueprintSystemCommunicationMainLatestV2();
+    builder.Services.AddBlueprintSystemCommunicationNotificationsV1();
 
     builder.Services.AddOctoNotification();
 
