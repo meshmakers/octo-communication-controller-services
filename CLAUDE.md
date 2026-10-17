@@ -3797,16 +3797,32 @@ changes; every access an enforcing run would refuse is logged with subject, clie
 tenants. Flip an environment with `OCTO_TENANTAUTHORIZATION__USERTOKENENFORCEMENT=Enforce` once that
 log is clean.
 
-Why staged even though a static sweep found no cross-tenant user caller for this service (Studio
-re-mints per tenant and guards the route client-side, octo-cli derives URL tenant and `acr_values`
-from one context value, octo-mcp-service RFC 8693-exchanges before calling): that is an argument, and
-the gate has never produced the evidence here. One release in `LogOnly` costs nothing and produces
-it. Note also what the gate does **not** cover, and never will: `/{tenantId}/adapterHub` short-circuits
-it twice over — no `Authorization: Bearer` header (a SignalR client sends `?access_token=` on the
-WebSocket / SSE transports) and, until AB#5063, no principal at all. That hub's tenant isolation is
-therefore checked by `AdapterHubAuthorizationFilter`, not here; see "The adapter hub, and why its gate
-has a second half" above. `GET {tenantId}/v1/communication/ping` is `[AllowAnonymous]` and is skipped
-by design.
+Why staged: the gate had never produced evidence here, and the inventory of the LogOnly warnings
+(AB#6728) shows real foreign-tenant callers. Do not repeat the older claim that none exist. octo-cli
+sends the context's root-tenant token with `-tid <tenant>` to child tenants (per-tenant
+authentication is AB#6836, and it is the whole communication-controller volume), and Refinery Studio
+can load a page with a stale token of another tenant (AB#6731). `Enforce` therefore waits for both.
+meshmakers-app was not seen in the inventory and gets no exemption; no exemption mechanism exists.
+
+**The flip is configuration only**, no code or image change: `OCTO_TENANTAUTHORIZATION__USERTOKENENFORCEMENT=Enforce`
+(chart value `services.communication.userTokenEnforcement`, AB#6834). The environment provider is added
+with the `OCTO_` prefix in `Program.cs`, which is why the variable has that name. Order, Dash0 checks
+and rollback (set `LogOnly` again): `docs/runbooks/user-token-tenant-gate-enforce-rollout.md`.
+
+Tests (AB#6833), in `tests/CommunicationControllerService.Tests/Configuration/`:
+`TenantGateRestNegativeTests` (a real Kestrel host through the real `UseOctoTenantAuthorization()` and
+the `{tenantId:tenantId}` constraint: a user token of tenant A on a tenant-B route is 403 with the JSON
+body and the action does not run; matching tenant passes; no `tenant_id` is 403; `LogOnly` is the
+rollback), `TenantGateProgramPinTests` (the order in `Program.cs` pinned at the source, `Enforce` wins
+from the key and from the environment variable over the code default, no endpoint carries
+`IAllowParentTenantAdministration`) and `TenantGateHubReferenceTests`.
+
+**What the gate does not cover, and never will:** `/{tenantId}/adapterHub` short-circuits it, because a
+SignalR client sends `?access_token=` and no `Authorization: Bearer` header on the WebSocket / SSE
+transports, so the middleware returns early. The hubs are outside this gate; the tenant isolation of the
+adapter hub is `AdapterHubAuthorizationFilter` (see "The adapter hub, and why its gate has a second
+half" above), and `TenantGateHubReferenceTests` documents both halves for a user token.
+`GET {tenantId}/v1/communication/ping` is `[AllowAnonymous]` and is skipped by design.
 
 ### Tenant authorization for service tokens (AB#5032)
 
