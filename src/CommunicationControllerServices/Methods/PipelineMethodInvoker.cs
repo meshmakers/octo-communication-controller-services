@@ -124,6 +124,15 @@ internal sealed class PipelineMethodInvoker(
 
         // 3. Run it and wait for the outcome until the deadline.
         var remaining = request.DeadlineUtc - timeProvider.GetUtcNow().UtcDateTime;
+        if (remaining <= TimeSpan.Zero)
+        {
+            // the deadline passed during the lookup: nothing is started
+            logger.LogWarning(
+                "CK method {MethodId} invocation {InvocationId} dropped: deadline {DeadlineUtc:O} passed during the lookup",
+                request.MethodId, request.InvocationId, request.DeadlineUtc);
+            return Timeout(request, method);
+        }
+
         using var deadline = new CancellationTokenSource(
             remaining > MaxCancellationDelay ? MaxCancellationDelay : remaining, timeProvider);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token, cancellationToken);

@@ -266,4 +266,18 @@ internal class PipelineMethodHostTests
 
         await Assert.That(_announced.Count).IsEqualTo(2);
     }
+
+    [Test]
+    public async Task ADiscoveryReplyNeverFollowsTheWithdrawalOfAShutdown()
+    {
+        ArrangeCatalog(Method());
+        ArrangePipeline(MethodId);
+        await _host.ReconcileAsync(true);
+        await _host.WithdrawAllAsync(CancellationToken.None);
+        var announcedBefore = _announced.Count;
+
+        await _host.AnnounceNowAsync();
+
+        await Assert.That(_announced.Count).IsEqualTo(announcedBefore);
+    }
 }

@@ -25,7 +25,7 @@ internal class SamplePipelineTests
     [Test]
     public async Task TheSamplePipelineEndsWithTheNodeThatStoresTheResult()
     {
-        var lastTransformation = Yaml.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+        var lastTransformation = Yaml.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
             .Where(l => l.StartsWith("  - type:", StringComparison.Ordinal))
             .Last();
 

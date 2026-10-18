@@ -195,6 +195,24 @@ internal class PipelineMethodInvokerTests
     }
 
     [Test]
+    public async Task ADeadlineThatPassesDuringThePipelineLookupIsAMethodTimeoutAndNothingIsStarted()
+    {
+        // a slow store with a short deadline: the call must neither throw nor start the pipeline
+        _repository.GetPipelineByWellKnownNameAsync(TenantId, MethodId).Returns<Task<RtPipeline?>>(async _ =>
+        {
+            await Task.Delay(400);
+            return _pipeline;
+        });
+        var request = Request() with { DeadlineUtc = DateTime.UtcNow.AddMilliseconds(150) };
+
+        var response = await _invoker.InvokeAsync(request);
+
+        await Assert.That(response.Error!.Code).IsEqualTo(CkMethodErrorCodes.MethodTimeout);
+        await Assert.That(response.Error.Parameters["timeoutSeconds"]).IsEqualTo("5");
+        await _trigger.DidNotReceiveWithAnyArgs().StartExecutePipelineAsync(default!, default!, default);
+    }
+
+    [Test]
     public async Task WithoutADeployedPipelineTheAnswerIsHandlerNotAvailableAtOnce()
     {
         _repository.GetPipelineByWellKnownNameAsync(TenantId, MethodId).Returns((RtPipeline?)null);

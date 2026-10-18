@@ -116,13 +116,23 @@ internal sealed class PipelineMethodHost(
     /// <summary>Publishes the announcement now (reply to a dispatcher's discovery request).</summary>
     public async Task AnnounceNowAsync(CancellationToken cancellationToken = default)
     {
-        var announced = instance.MethodIds;
-        if (instance.Withdrawn || announced.Count == 0)
+        // under the gate: an announcement must never follow the withdrawal of a shutdown
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            return;
-        }
+            var announced = instance.MethodIds;
+            if (instance.Withdrawn || announced.Count == 0)
+            {
+                return;
+            }
 
-        await eventHub.PublishAsync(instance.CreateAnnouncement(announced), cancellationToken).ConfigureAwait(false);
+            await eventHub.PublishAsync(instance.CreateAnnouncement(announced), cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     /// <summary>Publishes the withdrawal and removes all endpoints (graceful shutdown).</summary>
