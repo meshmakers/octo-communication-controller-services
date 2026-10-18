@@ -17,6 +17,13 @@
     </ItemGroup>
 
     <ItemGroup>
+      <!-- AB#6879: sample pipeline of the pipeline method handler guide -->
+      <Content Include="Methods\SamplePipelines\*.yaml">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </Content>
+    </ItemGroup>
+
+    <ItemGroup>
       <ProjectReference Include="..\..\src\CommunicationControllerServices\CommunicationControllerServices.csproj" />
     </ItemGroup>
 

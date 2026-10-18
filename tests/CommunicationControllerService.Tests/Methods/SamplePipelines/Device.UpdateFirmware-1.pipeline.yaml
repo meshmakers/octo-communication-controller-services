@@ -1,0 +1,39 @@
+# Implements the CK method Acme.Assets/Device.UpdateFirmware-1 (execution.handler: pipeline).
+# The pipeline is deployed with the well-known name "Acme.Assets/Device.UpdateFirmware-1".
+#
+# Input (data root, written by the controller):
+#   $.parameters.<name>   the method parameters (camelCase)
+#   $.target.ckTypeId     CK type id of the target entity ($.target.rtId is null for a static method)
+#   $.target.rtId         runtime id of the target entity
+#   $.method.id           qualified method id; $.method.invocationId / $.method.correlationId for logs
+# Output: the document at the path of SetPipelineExecutionResult@1 is
+#   {"value": <result>}                                       success
+#   {"error": {"code": "...", "parameters": {"k": "v"}}}      a business error the method declares
+triggers:
+  # BindingRequired: the pipeline never runs anonymously; without a carried caller the execution is refused
+  - type: FromExecutePipelineCommand@1
+    callerBinding: BindingRequired
+transformations:
+  # success path: the result record {"value": <Integer>}
+  - type: If@1
+    path: $.parameters.version
+    operator: NotEqual
+    value: "0.0.0"
+    valueType: String
+    transformations:
+      - type: SetPrimitiveValue@1
+        targetPath: $.result.value
+        value: 1
+        valueType: Int
+  # business refusal: FIRMWARE_LOCKED is declared in the errors list of the method
+  - type: If@1
+    path: $.parameters.version
+    operator: Equal
+    value: "0.0.0"
+    valueType: String
+    transformations:
+      - type: WriteJson@1
+        targetPath: $.result
+        jsonString: '{"error": {"code": "FIRMWARE_LOCKED", "parameters": {"reason": "maintenance-window"}}}'
+  - type: SetPipelineExecutionResult@1
+    path: $.result

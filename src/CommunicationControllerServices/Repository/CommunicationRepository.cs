@@ -1905,6 +1905,27 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
+    public async Task<RtPipeline?> GetPipelineByWellKnownNameAsync(string tenantId, string wellKnownName)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            var queryOptions = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtPipeline.RtWellKnownName), FieldFilterOperator.Equals, wellKnownName);
+
+            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipeline>(session, queryOptions, take: 1);
+
+            return resultSet.Items.FirstOrDefault();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGettingPipelineByWellKnownName(tenantId,
+                wellKnownName, e);
+        }
+    }
+
     public async Task<RtDataFlow?> GetDataFlowByPipelineAsync(string tenantId, OctoObjectId pipelineRtId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
