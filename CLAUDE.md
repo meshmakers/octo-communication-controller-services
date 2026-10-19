@@ -1501,6 +1501,44 @@ stale-disconnect-keeps-live / reconnect-then-stale-disconnect) and
 Online → Offline, live connection kept, non-Online skipped, missing CkTypeId skipped,
 mixed fleet, and the real Online-write-populates-tracker path).
 
+### Offline-write rule: prove it is gone — and heal a wrong Offline (AB#7056)
+
+**A pod writes Offline only for connections it can prove are gone, never for connections it merely does
+not hold.** "Single replica" is not "single pod": when a node is partitioned (NotReady, no SIGTERM, prod-1
+2026-10-19) the Deployment starts a replacement while the old pod keeps running and sweeping. The adapters
+reconnect to the replacement and write Online there; the old pod's tracker no longer holds them, so its sweep
+(startup grace long over, `IShutdownState` never set) wrote Offline with the newer timestamp, which wins at
+the `AttributeNewerThanGuard` — and nothing ever wrote Online again, because Online is only written once
+per new connection. A tracker / connection-manager miss means "not mine", not "gone".
+
+- **Proof for the Offline sweep** (`AdapterService.ReconcileOrphanedOnlineAdaptersAsync`,
+  `DeploymentSiteService.ReconcileOrphanedOnlineDeploymentSitesAsync`): besides the miss, the persisted
+  `CommunicationStateTimestamp` must be older than this process's start (no timestamp counts as old). An
+  Online written before this process started has a writer that is gone, and every adapter that came back to
+  this pod has since written a newer one (AB#4699 / AB#6418 behaviour, grace and tests unchanged). An Online
+  written while this pod was running belongs to another pod and is left alone (Debug log). No owner field in
+  the model is needed. Limit: an Online written by a previous pod *after* this process started whose
+  adapter then never reconnects anywhere cannot be proven from here and stays Online until it connects again.
+- **Self-heal** (`ReassertOnlineForLiveConnectionsAsync` / `ReassertOnlineForClaimedDeploymentSitesAsync`,
+  called on **every** tick of the two sweep services, also inside the startup grace): the pod that
+  *holds* a live connection (tracker) / claim (operator connection manager) for an entity persisted
+  `Offline` writes Online again, re-checks the connection after the write and falls back to Offline if it
+  closed meanwhile. Only `Offline` is healed (`Unregistered` is deliberate). Holding the connection is the
+  proof, so a late Offline from a healed partition (e.g. the old pod's own disconnect handler) is corrected
+  within one sweep interval. The Offline reset of `ConfigurationState` to `Unconfigured` is not undone.
+- Do not weaken either half: without the proof two pods flap Offline/Online every interval, without the
+  heal one wrong write stays until the adapter reconnects for another reason.
+
+Tests: `Services/AdapterServiceTests/TwoControllerPodsTests` (two services/trackers over one shared store:
+A's sweep keeps B's Online, a wrong Offline is healed, a connection closed while healing ends Offline,
+pre-start Online still goes Offline, heal inside the startup grace), plus the deployment-site cases in
+`ReconcileOrphanedOnlineDeploymentSitesAsyncTests`.
+
+The workload-state metric service (`WorkloadStateMetricsBackgroundService`) no longer waits the whole
+interval after a start: its first snapshot follows once no adapter has connected and no operator
+registered for 30 s (`IsStartupSettled`), at the latest after the interval. Before, the workload-state
+alerts were blind for 5 minutes after every controller restart (they resolved because no data arrived).
+
 ### Deployment Site Offline Reconciliation (AB#6418)
 
 Same problem, same fix as for adapters, for `DeploymentSite` entities. Operator ownership of a site

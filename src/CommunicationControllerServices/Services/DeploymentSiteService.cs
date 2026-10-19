@@ -15,6 +15,12 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 internal class DeploymentSiteService : IDeploymentSiteService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+
+    /// <summary>
+    /// When this process started to serve (AB#7056): only an Online written before this instant is
+    /// provably stale; see <see cref="ReconcileOrphanedOnlineDeploymentSitesAsync"/>.
+    /// </summary>
+    private readonly DateTimeOffset _startedAt;
     private readonly ICommunicationRepository _communicationRepository;
     private readonly IDeploymentSiteCache _deploymentSiteCache;
     private readonly ICommunicationEventService _eventService;
@@ -63,6 +69,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
     /// <param name="workloadLifecycleService">Carries the AB#4917 scale verb to the operator owning the workload's deploymentSite; reused for adapter-pool scaling so the MinReplicas floor is enforced in one place (AB#4924)</param>
     /// <param name="adapterPoolMirrorProvisioningService">Pushes an adapter pool's deploy/undeploy out to the LentAdapterPool mirrors its borrowers hold (AB#5271)</param>
     /// <param name="shutdownState">Lets the offline-reconciliation sweep stop writing once the host is stopping (AB#6418)</param>
+    /// <param name="timeProvider">Clock; its start reading is the proof horizon of the offline-reconciliation sweep (AB#7056)</param>
     public DeploymentSiteService(ICommunicationRepository communicationRepository, IDeploymentSiteCache poolCache,
         ICommunicationEventService eventService,
         IOperatorConnectionManager operatorConnectionManager,
@@ -74,8 +81,10 @@ internal class DeploymentSiteService : IDeploymentSiteService
         ITenantLendingScopeResolver lendingScopeResolver,
         IWorkloadLifecycleService workloadLifecycleService,
         IAdapterPoolMirrorProvisioningService adapterPoolMirrorProvisioningService,
-        IShutdownState shutdownState)
+        IShutdownState shutdownState,
+        TimeProvider? timeProvider = null)
     {
+        _startedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
         _communicationRepository = communicationRepository;
         _deploymentSiteCache = poolCache;
         _eventService = eventService;
@@ -1455,6 +1464,21 @@ internal class DeploymentSiteService : IDeploymentSiteService
                 continue;
             }
 
+            // AB#7056: "no operator on this pod claims it" is not "gone". An Online written after this
+            // process started was written by a pod that took the claim while this one kept running
+            // (e.g. the replacement of a partitioned pod). Only an Online from before this process
+            // started is provably stale. A wrong Offline is healed by the holding pod instead
+            // (ReassertOnlineForClaimedDeploymentSitesAsync).
+            if (deploymentSite.CommunicationStateTimestamp is { } stateTimestamp &&
+                new DateTimeOffset(DateTime.SpecifyKind(stateTimestamp, DateTimeKind.Utc)) > _startedAt)
+            {
+                Logger.Debug(
+                    "[{TenantId}] DeploymentSite '{DeploymentSiteRtId}' is persisted Online since {Timestamp:O} without a claim on this pod; " +
+                    "the Online was written by another pod, not reconciling to Offline (AB#7056)",
+                    tenantId, deploymentSite.RtId, stateTimestamp);
+                continue;
+            }
+
             // The surviving pod is the authoritative state holder once shutdown begins (same rule as
             // the hub): a sweep already in progress must not issue newer Offline writes.
             if (_shutdownState.IsShuttingDown)
@@ -1503,6 +1527,55 @@ internal class DeploymentSiteService : IDeploymentSiteService
         }
 
         return reconciled;
+    }
+
+    /// <inheritdoc />
+    public async Task<int> ReassertOnlineForClaimedDeploymentSitesAsync(string tenantId)
+    {
+        var deploymentSites = await _communicationRepository.GetDeploymentSitesAsync(tenantId);
+
+        var healed = 0;
+        foreach (var deploymentSite in deploymentSites)
+        {
+            // Only a wrong Offline is healed: Unregistered and the other states are deliberate.
+            if (deploymentSite.CommunicationState != RtCommunicationStateEnum.Offline)
+            {
+                continue;
+            }
+
+            if (_shutdownState.IsShuttingDown)
+            {
+                break;
+            }
+
+            if (_operatorConnectionManager
+                    .GetConnectionsForDeploymentSite(tenantId, deploymentSite.RtId.ToString()).Count == 0)
+            {
+                continue;
+            }
+
+            Logger.Warn(
+                "[{TenantId}] DeploymentSite '{DeploymentSiteRtId}' is claimed by an operator connection on this pod but is persisted Offline; " +
+                "writing Online again (AB#7056)",
+                tenantId, deploymentSite.RtId);
+
+            await _communicationRepository.SetDeploymentSiteCommunicationStateAsync(tenantId, deploymentSite.RtId,
+                RtCommunicationStateEnum.Online);
+
+            // The claim can have ended between the check and the write; its disconnect then wrote an
+            // Offline with an older timestamp, which the newer Online above has beaten.
+            if (_operatorConnectionManager
+                    .GetConnectionsForDeploymentSite(tenantId, deploymentSite.RtId.ToString()).Count == 0)
+            {
+                await _communicationRepository.SetDeploymentSiteCommunicationStateAsync(tenantId,
+                    deploymentSite.RtId, RtCommunicationStateEnum.Offline);
+                continue;
+            }
+
+            healed++;
+        }
+
+        return healed;
     }
 
     /// <inheritdoc />

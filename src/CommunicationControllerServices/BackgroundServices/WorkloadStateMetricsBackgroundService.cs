@@ -1,4 +1,5 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -50,10 +51,47 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.BackgroundServ
 internal class WorkloadStateMetricsBackgroundService(
     IAdapterCache adapterCache,
     ICommunicationRepository communicationRepository,
-    IOptions<CommunicationControllerOptions> options)
+    IOptions<CommunicationControllerOptions> options,
+    IAdapterConnectionTracker connectionTracker,
+    IOperatorConnectionManager operatorConnectionManager,
+    TimeProvider timeProvider)
     : BackgroundService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+
+    /// <summary>
+    /// How long no adapter has connected and no operator registered before the first snapshot is
+    /// published (AB#7056). The persisted state is not reset by a controller restart, so waiting for the
+    /// reconnects mostly guards against a half-reconnected fleet; the interval stays the upper bound.
+    /// </summary>
+    internal static readonly TimeSpan QuietPeriod = TimeSpan.FromSeconds(30);
+
+    private static readonly TimeSpan StartupPollInterval = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// <c>true</c> once the first snapshot may be published: the hubs have accepted reconnects and
+    /// nothing has connected for <paramref name="quiet"/>, or <paramref name="maxWait"/> has passed since
+    /// the start (nothing ever reconnects — the persisted state is then what it is).
+    /// </summary>
+    internal static bool IsStartupSettled(DateTimeOffset now, DateTimeOffset startedAt,
+        DateTimeOffset? lastAdapterConnectedAt, DateTimeOffset? lastOperatorRegisteredAt, TimeSpan quiet,
+        TimeSpan maxWait)
+    {
+        if (now - startedAt >= maxWait)
+        {
+            return true;
+        }
+
+        var last = (lastAdapterConnectedAt, lastOperatorRegisteredAt) switch
+        {
+            ({ } a, { } o) => a > o ? a : o,
+            ({ } a, null) => a,
+            (null, { } o) => o,
+            _ => (DateTimeOffset?)null
+        };
+
+        return last is { } l && now - l >= quiet;
+    }
 
     /// <summary>
     /// Tenants the previous sweep published for. Whatever falls out of this set — switched off, or
@@ -107,7 +145,14 @@ internal class WorkloadStateMetricsBackgroundService(
 
             // Startup grace: let adapters reconnect after a controller (re)start before their
             // communication state is published, otherwise every one of them reports as offline once.
-            await Task.Delay(interval, stoppingToken);
+            // AB#7056: not a blind interval — after a restart the alerts must not stay blind for the
+            // whole interval, so the first snapshot follows as soon as the reconnects have settled.
+            var startedAt = timeProvider.GetUtcNow();
+            while (!IsStartupSettled(timeProvider.GetUtcNow(), startedAt, connectionTracker.LastConnectedAt,
+                       operatorConnectionManager.LastOperatorRegisteredAt, QuietPeriod, interval))
+            {
+                await Task.Delay(StartupPollInterval, stoppingToken);
+            }
 
             while (!stoppingToken.IsCancellationRequested)
             {

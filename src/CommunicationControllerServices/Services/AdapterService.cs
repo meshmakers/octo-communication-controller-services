@@ -45,6 +45,13 @@ internal class AdapterService(
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
+    /// <summary>
+    /// When this process started to serve (AB#7056). A persisted <c>Online</c> written before this
+    /// instant was written by a previous process generation, which is gone — the only "Online" this
+    /// pod can prove stale without asking its peers.
+    /// </summary>
+    private readonly DateTimeOffset _startedAt = timeProvider.GetUtcNow();
+
     private static readonly TimeSpan DeploymentTimeout = TimeSpan.FromSeconds(120);
 
     /// <summary>
@@ -723,9 +730,23 @@ internal class AdapterService(
 
             // Re-check liveness immediately before writing so a reconnect that landed after the
             // sweep started is not clobbered. The tracker (unlike the config cache) is not flushed
-            // by tenant updates, so a miss here reliably means "no live SignalR connection".
+            // by tenant updates, so a miss here reliably means "no live SignalR connection on THIS pod".
             if (connectionTracker.HasLiveConnection(tenantId, adapterRtEntityId))
             {
+                continue;
+            }
+
+            // AB#7056: "not held by this pod" is not "gone". An Online written after this process
+            // started was written by a pod that took the connection while this one was running — maybe
+            // the replacement of a partitioned pod, which is exactly the pod that keeps running and
+            // sweeping. Only an Online written before this process started is provably stale (its
+            // writer is gone, and every adapter that came back to this pod has written a newer one).
+            if (!WrittenBeforeThisProcess(adapter.CommunicationStateTimestamp))
+            {
+                Logger.Debug(
+                    "[{TenantId}] Adapter '{AdapterRtId}' is persisted Online since {Timestamp:O} without a connection on this pod; " +
+                    "the Online was written by another pod, not reconciling to Offline (AB#7056)",
+                    tenantId, adapterRtEntityId, adapter.CommunicationStateTimestamp);
                 continue;
             }
 
@@ -762,6 +783,62 @@ internal class AdapterService(
         }
 
         return reconciled;
+    }
+
+    /// <summary>
+    /// <c>true</c> when the state was written before this process started (or carries no timestamp):
+    /// the only Online this pod may judge without knowing what its peers hold (AB#7056).
+    /// </summary>
+    private bool WrittenBeforeThisProcess(DateTime? stateTimestamp)
+    {
+        if (stateTimestamp is not { } timestamp)
+        {
+            return true;
+        }
+
+        return new DateTimeOffset(DateTime.SpecifyKind(timestamp, DateTimeKind.Utc)) <= _startedAt;
+    }
+
+    public async Task<int> ReassertOnlineForLiveConnectionsAsync(string tenantId)
+    {
+        var adapters = await communicationRepository.GetAdaptersAsync(tenantId);
+
+        var healed = 0;
+        foreach (var adapter in adapters)
+        {
+            // Only a wrong Offline is healed: Unregistered and the other states are deliberate.
+            if (adapter.CommunicationState != RtCommunicationStateEnum.Offline || adapter.CkTypeId is null)
+            {
+                continue;
+            }
+
+            var adapterRtEntityId = new RtEntityId(adapter.CkTypeId, adapter.RtId);
+            if (!connectionTracker.HasLiveConnection(tenantId, adapterRtEntityId))
+            {
+                continue;
+            }
+
+            Logger.Warn(
+                "[{TenantId}] Adapter '{AdapterRtId}' holds a live SignalR connection on this pod but is persisted Offline; " +
+                "writing Online again (AB#7056)",
+                tenantId, adapterRtEntityId);
+
+            await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId, RtCommunicationStateEnum.Online);
+
+            // The connection can have closed between the check and the write; its disconnect then
+            // wrote an Offline with an older timestamp, which the newer Online above has beaten.
+            if (!connectionTracker.HasLiveConnection(tenantId, adapterRtEntityId))
+            {
+                await SetAdapterCommunicationStateAsync(tenantId, adapterRtEntityId,
+                    RtCommunicationStateEnum.Offline);
+                continue;
+            }
+
+            WorkloadLifecycleMetrics.RecordOnline(tenantId, adapterRtEntityId.RtId, workloadName: null);
+            healed++;
+        }
+
+        return healed;
     }
 
     public async Task DeployAdapterConfigurationAsync(string tenantId, RtEntityId adapterRtEntityId)
