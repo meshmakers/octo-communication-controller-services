@@ -311,6 +311,13 @@ internal class CommunicationRepositoryException : Exception
             $"'{mirrorRtId}' (AB#5349)", exception);
     }
 
+    public static Exception CommonFailedGettingPipelineByWellKnownName(string tenantId, string wellKnownName,
+        Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to get pipeline '{wellKnownName}'", exception);
+    }
+
     public static Exception CommonFailedGettingServiceAccountByWellKnownName(string tenantId, string wellKnownName,
         Exception exception)
     {

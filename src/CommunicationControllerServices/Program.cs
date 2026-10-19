@@ -7,6 +7,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Configuration;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Extensions;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Methods;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Middleware;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
@@ -152,6 +153,9 @@ try
     builder.Services.TryAddSingleton(TimeProvider.System);
     builder.Services.AddSingleton<IPipelineExecutionService, PipelineExecutionService>();
     builder.Services.AddTransient<ITriggerManagementService, TriggerManagementService>();
+    // AB#6879: the controller is the handler of every CK method declared `execution.handler: pipeline`: it
+    // starts the pipeline whose well-known name equals the method id and maps its result to the method envelope.
+    builder.Services.AddPipelineMethodHandler(builder.Configuration);
     builder.Services.AddSingleton<INotificationRepository, NotificationRepository>();
     builder.Services.AddTransient<INotificationScheduleService, NotificationScheduleService>();
 
@@ -296,6 +300,10 @@ try
             // become queued work items. Durable for the same reason as the co-wake queue above.
             c.AddRoutedEventConsumer<LeaseTriggerConsumer, LeaseTriggerMessage>(
                 PipelineQueueNames.LeaseTriggerQueue);
+
+            // AB#6879: answers the discovery requests of method dispatchers with an immediate announcement of
+            // the pipeline-handled CK methods this controller serves.
+            c.AddPipelineMethodDiscovery();
         });
 
     builder.Services.AddRuntimeEngine()

@@ -315,6 +315,66 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
             .Contain("crosses a major version (3.x -> 4.x)").And.Contain($"add a migration entry for {unlistedVersion}");
     }
 
+    /// <summary>
+    ///     AB#6720 (found with AB#6717 / AB#6691) - the production order of a service start: the embedded System.Bot
+    ///     (3.5.0 since the re-pin) is imported BEFORE the embedded System.Communication. The tenant's historic 3.x
+    ///     System.Communication pins System.Bot exactly to 3.4.0, so it goes <c>ResolveFailed</c> when Bot 3.5.0 replaces
+    ///     3.4.0 - and the import of the current System.Communication (range <c>System.Bot-[3.4,4.0)</c>) must still
+    ///     migrate it, from what is stored in Mongo. Proves that the upgrade path of a real tenant does not depend on
+    ///     the catalog resolving the old exact pin, nor on the order in which the services import their models.
+    /// </summary>
+    [Fact]
+    public async Task TenantOn3x_WhoseBotIsUpgradedFirst_StillReachesCurrent4x()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var tenantId = await CreateTenantOn3xAsync("3.41.0");
+        var tenantContext = await fixture.GetSystemContext().FindTenantContextAsync(tenantId);
+
+        var botResult = new OperationResult();
+        await tenantContext.ImportCkModelAsync(SystemBotCkIds.CkModelId, botResult); // the embedded Bot, as a starting service does
+        botResult.HasErrors.Should().BeFalse(botResult.GetMessages());
+        (await CountLegacyPoolsAsync(tenantId)).Should().Be(2, "the Bot import alone migrates nothing");
+
+        await ImportCurrentModelAsync(tenantId);
+
+        await AssertReachedCurrent4xAsync(tenantId, "3.41.0", ct);
+
+        // Idempotent: a second start migrates nothing and creates no duplicates.
+        await ImportCurrentModelAsync(tenantId);
+        await AssertReachedCurrent4xAsync(tenantId, "3.41.0", ct);
+    }
+
+    /// <summary>AB#6720 - the reverse order (comm-controller first, bot-services after it) gives the identical result.</summary>
+    [Fact]
+    public async Task TenantOn3x_WhoseCommunicationIsUpgradedFirst_ReachesTheSameCurrent4x()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var tenantId = await CreateTenantOn3xAsync("3.41.0");
+
+        await ImportCurrentModelAsync(tenantId);
+        var tenantContext = await fixture.GetSystemContext().FindTenantContextAsync(tenantId);
+        var botResult = new OperationResult();
+        await tenantContext.ImportCkModelAsync(SystemBotCkIds.CkModelId, botResult);
+        botResult.HasErrors.Should().BeFalse(botResult.GetMessages());
+
+        await AssertReachedCurrent4xAsync(tenantId, "3.41.0", ct);
+    }
+
+    private async Task AssertReachedCurrent4xAsync(string tenantId, string replaced3xVersion, CancellationToken ct)
+    {
+        var current = await fixture.GetSystemContext().FindTenantContextAsync(tenantId);
+        (await current.IsCkModelExistingAsync(SystemCommunicationCkIds.CkModelId)).Should().BeTrue();
+        (await current.IsCkModelExistingAsync(new CkModelId(ModelName, replaced3xVersion))).Should()
+            .BeFalse("the 3.x model was replaced - no ResolveFailed leftover");
+        (await current.IsCkModelExistingAsync(SystemBotCkIds.CkModelId)).Should().BeTrue();
+        (await fixture.GetService<ICkModelUpgradeService>().GetInstalledVersionsAsync(tenantId, ct))
+            .Should().ContainKey(ModelName).WhoseValue.Should().Be(SystemCommunicationCkIds.CkModelId.Version.ToString());
+        (await CountLegacyPoolsAsync(tenantId)).Should().Be(0);
+        var sites = await fixture.GetService<ICommunicationRepository>().GetDeploymentSitesAsync(tenantId);
+        sites.Select(site => site.RtId).Should().BeEquivalentTo([SeededSiteRtId, EdgeSiteRtId]);
+        sites.Single(site => site.RtId == SeededSiteRtId).Name.Should().Be("Default Cloud");
+    }
+
     private async Task<string> CreateTenantOn3xAsync(string version, bool withStatusHistory = false,
         bool withCredentials = false)
     {

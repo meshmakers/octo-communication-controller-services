@@ -49,6 +49,89 @@ The service follows a layered architecture:
 - **Consumers** (`src/CommunicationControllerServices/Consumers/`) - Message bus event consumers for tenant lifecycle management
 - **Background Services** (`src/CommunicationControllerServices/BackgroundServices/`) - Periodic maintenance tasks
 
+### CK method pipeline handler (AB#6879)
+
+The controller is the handler of every CK method declared `execution.handler: pipeline` (CK language 2). A call
+arrives as a `CkMethodRequest` on the method queue (wire contract: `octo-common-services/docs/method-wire-contract.md`),
+the controller starts the pipeline that implements the method and answers with a `CkMethodResponse`. Code:
+`src/CommunicationControllerServices/Methods/`. Guide for model authors and pipeline authors:
+`octo-documentation` -> `technologyGuide/constructionKits/ckLanguage2/pipelineMethodHandlers.md`.
+
+**Why the controller.** It is where `DeployPipeline` and the execute command live: `StartExecutePipelineAsync`
+(`TriggerManagementService`) sends the `ExecutePipelineRequest` (with the invoker as `ExecutePipelineCaller` and the raw
+token) to the `FromExecutePipelineCommand` endpoint of the pipeline, and the adapter reports the execution (status,
+`OutputData` from `SetPipelineExecutionResult@1`) into the `PipelineExecution` store of the tenant. The mesh adapter
+runs pipelines but knows no methods, tenants' CK models or bus handler registry; the asset repository is the gateway
+(caller side). No new CK element, no change in the adapter or the SDK.
+
+| Class | Role |
+|---|---|
+| `PipelineMethodCatalog` | Reads the CK caches of the communication-enabled tenants (`IAdapterCache.GetEnabledTenantIds`): methods with `handler: pipeline`, and any method by qualified id. |
+| `PipelineMethodInvoker` | One call: contract version, deadline, tenant/method checks, refusal of sensitive parameters, parameter presence, pipeline lookup (`GetPipelineByWellKnownNameAsync`, must be `Deployed`), start, poll the execution until the deadline, map. Never throws for a failing request. |
+| `PipelineMethodResultMapper` | Pure mapping execution status + `OutputData` to the envelope (see below). |
+| `PipelineMethodBusConsumer` | Bus shell: duplicate guard (possible duplicate delivery or repeated invocation id: `METHOD_OUTCOME_UNKNOWN`, not started again), never throws to the bus. |
+| `PipelineMethodHost` | Reconcile: for each pipeline method a shared command endpoint (`CkMethodQueueNames.For`, faults suppressed), `WaitUntilReadyAsync`, then `CkMethodHandlerAnnounced`; withdraws a method whose pipeline is gone, `CkMethodHandlerWithdrawn` on shutdown. |
+| `PipelineMethodHostInitializer` (order 40) / `PipelineMethodHeartbeatService` / `PipelineMethodDiscoveryConsumer` | First reconcile after the tenants started; re-check and re-announce every `HeartbeatInterval` (15 s, TTL 45 s); announce on `CkMethodHandlerDiscoveryRequested`. |
+
+**Why not `AddCkMethodHandlers` of the SDK.** The SDK registers handler types statically at service configuration
+time and validates them against the system tenant's CK cache. The methods of the controller are declared by tenant CK
+models and become servable when a pipeline is deployed, i.e. at run time. The host therefore uses the same contract,
+queue names, shared endpoints and announcement events, but reconciles dynamically (every heartbeat).
+
+**Binding.** The pipeline implementing a method is the pipeline whose `RtWellKnownName` equals the qualified method id,
+for example `Acme.Assets/Device.UpdateFirmware-1`, in the call's tenant, in deployment state `Deployed`. A method is
+announced when at least one tenant has such a pipeline. If one tenant lacks it, the call to that tenant is answered
+`METHOD_HANDLER_NOT_AVAILABLE` (`reason` `pipeline-not-deployed`, within one database lookup); the dispatcher cannot tell
+tenants apart in the announcement.
+
+**Pipeline input** (JSON, the data root of the pipeline): `{"parameters": {...}, "target": {"ckTypeId", "rtId"},
+"method": {"id", "invocationId", "correlationId"}}`. The caller is not in the data: it is the verified principal of the
+execution (`ExecutePipelineCaller` with `SubjectId`, `TenantId`, `Name`, `Roles`) and the raw token is forwarded for
+delegation, as for the manual execute endpoint. Trust level is `Weak` (1): the gateway authenticated the caller, this
+host does not re-validate the token (a node that demands `Strong` refuses the run). Use `callerBinding:
+BindingRequired` on the trigger so that the pipeline never runs anonymously.
+
+**Pipeline output** (`SetPipelineExecutionResult@1` -> `OutputData`):
+
+| OutputData | Execution status | Response |
+|---|---|---|
+| `{"value": X}`, X fits the result type | Completed | success, `resultJson` = `{"value":X}` |
+| empty, method without result | Completed | success without result |
+| `{"error": {"code": "C", "parameters": {...}}}`, C declared by the method (or `METHOD_VALIDATION_FAILED`, `METHOD_TARGET_NOT_FOUND`, `METHOD_FORBIDDEN`) | Completed | error C with the parameters (values: string, number, boolean) |
+| anything else (no JSON, no `value` for a method with result, wrong type, undeclared code) | Completed | `METHOD_HANDLER_FAILED` with `correlationId`, `field`, `reason=invalid-result` |
+| any | Failed / Interrupted / Cancelled | `METHOD_HANDLER_FAILED` with `correlationId`; the execution's error message is logged (token masked, 500 characters), never returned |
+| not final before the deadline | Running / Queued / not yet written | `METHOD_TIMEOUT`; the pipeline may still finish (not cancelled) |
+| the pipeline cannot be started (adapter offline, caller binding refused) | none | `METHOD_HANDLER_NOT_AVAILABLE`, `reason=pipeline-start-failed` |
+
+**Sensitive parameters are refused.** A method with a parameter `sensitive: true` (or of value type `Secret`) is **not
+served by a pipeline** until the retention of pipeline input and output is decided (open decisions OD-3, OD-4, OD-9,
+`methodConsistency.md`): the execution entity stores `InputData` and `OutputData`. Such a method is not announced, an
+ERROR names method, tenant and parameter names (never values) once per change, and a call is answered
+`METHOD_HANDLER_NOT_AVAILABLE` with `reason=sensitive-parameters-not-supported` without reaching a pipeline. Lifting this
+needs the decisions, not a code switch.
+
+**Startup.** By default a pipeline method that cannot be served (no deployed pipeline of that name, sensitive
+parameters) is logged as ERROR and re-checked on every heartbeat; a misconfigured tenant never takes the controller
+down. `PipelineMethods:FailStartupOnInvalidMethod=true` (`OCTO_PIPELINEMETHODS__FAILSTARTUPONINVALIDMETHOD`) makes the
+startup throw with a message that names every offending method (the check at startup only).
+
+Configuration (section `PipelineMethods`): `Enabled` (true), `HeartbeatInterval` (15 s), `Ttl` (45 s),
+`EndpointReadyTimeout` (30 s), `PollInterval` (100 ms, grows by 50 % up to `MaxPollInterval` 750 ms),
+`FailStartupOnInvalidMethod` (false).
+
+**Limits to know.** The outcome is read from the execution store (works across controller nodes, no in-process signal).
+Asynchronous methods (operation handle, F3.6) are not part of this increment. A method id must have the same
+handler kind in every tenant (the queue is per method id, not per tenant). A pipeline on a Leased adapter is queued by
+`StartExecutePipelineAsync`; the call then waits for the lease like any manual execution and can end in
+`METHOD_TIMEOUT` when the timeout is short - prefer a dedicated adapter for pipeline methods.
+
+Tests: `tests/CommunicationControllerService.Tests/Methods/` (mapper, invoker, host, bus consumer, catalog, sample
+pipeline) and `tests/CommunicationControllerServices.IntegrationTests/Methods/PipelineMethodHandlerTests.cs`
+(real MongoDB tenant, real `TriggerManagementService` and execution store; the adapter is played by a stub of the
+execute command that reports the execution like the adapter hub does - the pipeline runtime itself is not part of
+this repository). The sample pipeline `Methods/SamplePipelines/Device.UpdateFirmware-1.pipeline.yaml` is the one printed
+in the guide and is the pipeline definition of the integration tests.
+
 ### Multi-Tenancy
 
 All operations are tenant-scoped. Routes use a custom `tenantId` constraint. The MongoDB-backed repository supports per-tenant data isolation via `ISystemContext.FindTenantRepositoryAsync(tenantId)`.
@@ -3875,16 +3958,32 @@ changes; every access an enforcing run would refuse is logged with subject, clie
 tenants. Flip an environment with `OCTO_TENANTAUTHORIZATION__USERTOKENENFORCEMENT=Enforce` once that
 log is clean.
 
-Why staged even though a static sweep found no cross-tenant user caller for this service (Studio
-re-mints per tenant and guards the route client-side, octo-cli derives URL tenant and `acr_values`
-from one context value, octo-mcp-service RFC 8693-exchanges before calling): that is an argument, and
-the gate has never produced the evidence here. One release in `LogOnly` costs nothing and produces
-it. Note also what the gate does **not** cover, and never will: `/{tenantId}/adapterHub` short-circuits
-it twice over — no `Authorization: Bearer` header (a SignalR client sends `?access_token=` on the
-WebSocket / SSE transports) and, until AB#5063, no principal at all. That hub's tenant isolation is
-therefore checked by `AdapterHubAuthorizationFilter`, not here; see "The adapter hub, and why its gate
-has a second half" above. `GET {tenantId}/v1/communication/ping` is `[AllowAnonymous]` and is skipped
-by design.
+Why staged: the gate had never produced evidence here, and the inventory of the LogOnly warnings
+(AB#6728) shows real foreign-tenant callers. Do not repeat the older claim that none exist. octo-cli
+sends the context's root-tenant token with `-tid <tenant>` to child tenants (per-tenant
+authentication is AB#6836, and it is the whole communication-controller volume), and Refinery Studio
+can load a page with a stale token of another tenant (AB#6731). `Enforce` therefore waits for both.
+meshmakers-app was not seen in the inventory and gets no exemption; no exemption mechanism exists.
+
+**The flip is configuration only**, no code or image change: `OCTO_TENANTAUTHORIZATION__USERTOKENENFORCEMENT=Enforce`
+(chart value `services.communication.userTokenEnforcement`, AB#6834). The environment provider is added
+with the `OCTO_` prefix in `Program.cs`, which is why the variable has that name. Order, Dash0 checks
+and rollback (set `LogOnly` again): `docs/runbooks/user-token-tenant-gate-enforce-rollout.md`.
+
+Tests (AB#6833), in `tests/CommunicationControllerService.Tests/Configuration/`:
+`TenantGateRestNegativeTests` (a real Kestrel host through the real `UseOctoTenantAuthorization()` and
+the `{tenantId:tenantId}` constraint: a user token of tenant A on a tenant-B route is 403 with the JSON
+body and the action does not run; matching tenant passes; no `tenant_id` is 403; `LogOnly` is the
+rollback), `TenantGateProgramPinTests` (the order in `Program.cs` pinned at the source, `Enforce` wins
+from the key and from the environment variable over the code default, no endpoint carries
+`IAllowParentTenantAdministration`) and `TenantGateHubReferenceTests`.
+
+**What the gate does not cover, and never will:** `/{tenantId}/adapterHub` short-circuits it, because a
+SignalR client sends `?access_token=` and no `Authorization: Bearer` header on the WebSocket / SSE
+transports, so the middleware returns early. The hubs are outside this gate; the tenant isolation of the
+adapter hub is `AdapterHubAuthorizationFilter` (see "The adapter hub, and why its gate has a second
+half" above), and `TenantGateHubReferenceTests` documents both halves for a user token.
+`GET {tenantId}/v1/communication/ping` is `[AllowAnonymous]` and is skipped by design.
 
 ### Tenant authorization for service tokens (AB#5032)
 

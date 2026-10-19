@@ -56,6 +56,11 @@
     </ItemGroup>
 
     <ItemGroup>
+        <!-- AB#6879: the sample pipeline of the pipeline method handler guide, shared with the unit tests. -->
+        <Content Include="..\CommunicationControllerService.Tests\Methods\SamplePipelines\*.yaml"
+                 Link="Methods\SamplePipelines\%(Filename)%(Extension)">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </Content>
         <Content Include="appsettings.test.json">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </Content>

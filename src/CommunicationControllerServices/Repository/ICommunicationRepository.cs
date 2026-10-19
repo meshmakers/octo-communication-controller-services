@@ -558,6 +558,13 @@ public interface ICommunicationRepository
     Task<RtPipeline?> GetPipelineAsync(string tenantId, RtEntityId pipelineRtEntityId);
 
     /// <summary>
+    /// AB#6879: looks a pipeline up by its <c>RtWellKnownName</c>. The pipeline method handler binds a CK method
+    /// declared <c>handler: pipeline</c> to the pipeline whose well-known name equals the qualified method id.
+    /// Returns <c>null</c> when no such pipeline exists.
+    /// </summary>
+    Task<RtPipeline?> GetPipelineByWellKnownNameAsync(string tenantId, string wellKnownName);
+
+    /// <summary>
     /// Get the data flow based on the child pipeline
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
