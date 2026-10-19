@@ -24,6 +24,7 @@ internal class DefaultConfigurationCreatorService(
     IDiagnosticsService diagnosticsService,
     IOptions<CommunicationControllerOptions> options,
     ITriggerManagementService triggerManagementService,
+    INotificationScheduleService notificationScheduleService,
     ICommandClient<CreateIdentityDataCommandRequest> createIdentityDataCommandClient,
     ISystemContext systemContext,
     IDeploymentSiteService poolService,
@@ -136,6 +137,26 @@ internal class DefaultConfigurationCreatorService(
         await poolService.PosUpdateTenantAsync(tenantId);
 
         await triggerManagementService.UpdateScheduleAsync(tenantId);
+        await RunNotificationScheduleStepAsync(tenantId, "rebuilt",
+            () => notificationScheduleService.UpdateScheduleAsync(tenantId));
+    }
+
+    internal async Task RunNotificationScheduleStepAsync(string tenantId, string action, Func<Task> step)
+    {
+        try
+        {
+            await step();
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "[{TenantId}] Notification schedule could not be {Action}; the tenant continues without it",
+                tenantId, action);
+            if (e is not NotificationScheduleServiceException { Kind: NotificationScheduleErrorKind.ScheduleIncomplete })
+            {
+                await communicationEventService.StoreErrorEventAsync(tenantId,
+                    $"Notification schedule could not be {action}: {e.Message}");
+            }
+        }
     }
 
     /// <summary>
@@ -323,6 +344,8 @@ internal class DefaultConfigurationCreatorService(
         logger.LogInformation("Unloading tenant '{TenantId}'", tenantId);
 
         await triggerManagementService.RemoveScheduleAsync(tenantId);
+        await RunNotificationScheduleStepAsync(tenantId, "removed",
+            () => notificationScheduleService.RemoveScheduleAsync(tenantId));
 
         await adapterService.PreUpdateTenantAsync(tenantId);
         await poolService.PreUpdateTenantAsync(tenantId);

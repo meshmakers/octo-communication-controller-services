@@ -156,6 +156,8 @@ try
     // AB#6879: the controller is the handler of every CK method declared `execution.handler: pipeline`: it
     // starts the pipeline whose well-known name equals the method id and maps its result to the method envelope.
     builder.Services.AddPipelineMethodHandler(builder.Configuration);
+    builder.Services.AddSingleton<INotificationRepository, NotificationRepository>();
+    builder.Services.AddTransient<INotificationScheduleService, NotificationScheduleService>();
 
     builder.Services
         .AddScopedMultipleInterfaces<DefaultConfigurationCreatorService, IDefaultConfigurationCreatorService,
@@ -334,6 +336,7 @@ try
     // the right one per tenant via each blueprint's requires.octo.environment block.
     builder.Services.AddBlueprintSystemCommunicationReleaseV2();
     builder.Services.AddBlueprintSystemCommunicationMainLatestV2();
+    builder.Services.AddBlueprintSystemCommunicationNotificationsV1();
 
     builder.Services.AddOctoNotification();
 

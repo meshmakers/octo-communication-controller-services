@@ -167,6 +167,7 @@ internal class HubCallbackContractTests
         [("WorkloadActivatorMiddleware.cs", "forwarded")] = "HttpClient, not SignalR",
         [("IdentityClientReader.cs", "request")] = "HttpClient, not SignalR",
         [("SignalBridgeClient.cs", "request")] = "HttpClient, not SignalR",
+        [("NotificationScheduleService.cs", "address")] = "distribution event hub (message bus), not SignalR",
         [("OperatorConnectionManager.cs", "methodName")] =
             "replay; the name comes from a switch over nameof(IOperatorHubCallbacks.*), " +
             "covered by OperatorConnectionManager_ReplayedNotificationsBindToTheOperatorHandlers",
