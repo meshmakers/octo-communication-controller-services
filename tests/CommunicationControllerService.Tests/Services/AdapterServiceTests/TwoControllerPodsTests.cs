@@ -2,6 +2,9 @@ using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.BackgroundServices;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.Hubs;
+using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using NSubstitute;
@@ -116,12 +119,60 @@ internal class TwoControllerPodsTests : AdapterServiceTestsBase
         await Assert.That(_store.StateOf(adapter)).IsEqualTo(RtCommunicationStateEnum.Online);
     }
 
+    [Test]
+    public async Task Heal_RestoresTheConfigurationStateThisPodSawTheAdapterReport()
+    {
+        var adapter = _store.AddAdapter(RtCommunicationStateEnum.Offline);
+        var id = adapter.ToRtEntityId();
+        _podB.Tenant.AddAdapter(id, "connB", new AdapterConfigurationDto(id, null, []));
+        await _podB.Service.SetAdapterCommunicationStateOnlineAsync(TenantId, id, "connB");
+        await _podB.Service.UpdateConfigurationStateAsync(TenantId, id,
+            new DeploymentResult { IsSuccess = true, ErrorMessages = null });
+        // The partitioned pod's late Offline also reset ConfigurationState to Unconfigured.
+        _store.Write(adapter, RtCommunicationStateEnum.Offline);
+        _podB.Repository.ClearReceivedCalls();
+        _podB.Callbacks.ClearReceivedCalls();
+
+        await _podB.Service.ReassertOnlineForLiveConnectionsAsync(TenantId);
+
+        await _podB.Repository.Received(1)
+            .SetAdapterConfigurationStateAsync(TenantId, id, RtConfigurationStateEnum.Configured, null);
+        await _podB.Callbacks.DidNotReceiveWithAnyArgs().AdapterConfigurationUpdatedAsync(default!, default!);
+    }
+
+    [Test]
+    public async Task Heal_WithoutAKnownReport_AsksTheAdapterOverItsLiveConnectionToApplyItsConfigurationAgain()
+    {
+        // The configuration was acked on the pod that is gone: this pod has no reported state to restore.
+        var adapter = _store.AddAdapter(RtCommunicationStateEnum.Offline);
+        var id = adapter.ToRtEntityId();
+        var pipeline = RtEntityCreator.CreatePipeline();
+        var configuration = new AdapterConfigurationDto(id, null,
+        [
+            new PipelineConfigurationDto(OctoObjectId.GenerateNewId(), pipeline.ToRtEntityId(), false,
+                pipeline.PipelineDefinition, [])
+        ]);
+        _podB.Tenant.AddAdapter(id, "connB", configuration);
+        await _podB.Service.SetAdapterCommunicationStateOnlineAsync(TenantId, id, "connB");
+        _store.Write(adapter, RtCommunicationStateEnum.Offline);
+        _podB.Repository.ClearReceivedCalls();
+        _podB.Callbacks.ClearReceivedCalls();
+
+        await _podB.Service.ReassertOnlineForLiveConnectionsAsync(TenantId);
+
+        await _podB.Callbacks.Received(1).AdapterConfigurationUpdatedAsync(TenantId, configuration);
+        // The configuration state itself is written by the adapter's ack (UpdateConfigurationStateAsync).
+    }
+
     /// <summary>A second controller pod: its own tracker, cache and service over the shared store.</summary>
     private sealed class Pod : AdapterServiceTestsBase
     {
         public AdapterService Service => AdapterService;
         public ICommunicationRepository Repository => CommunicationRepository;
         public AdapterConnectionTracker Tracker => AdapterConnectionTracker;
+        public Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters.AdapterTenant Tenant => AdapterTenant;
+        public IAdapterHubCallbacks Callbacks => AdapterHubCallbacks;
+        public string Connection => ConnectionId;
     }
 
     /// <summary>One persisted adapter collection with newer-wins state writes, shared by both pods.</summary>

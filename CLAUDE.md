@@ -1525,7 +1525,12 @@ per new connection. A tracker / connection-manager miss means "not mine", not "g
   `Offline` writes Online again, re-checks the connection after the write and falls back to Offline if it
   closed meanwhile. Only `Offline` is healed (`Unregistered` is deliberate). Holding the connection is the
   proof, so a late Offline from a healed partition (e.g. the old pod's own disconnect handler) is corrected
-  within one sweep interval. The Offline reset of `ConfigurationState` to `Unconfigured` is not undone.
+  within one sweep interval. The wrong Offline also reset `ConfigurationState` to `Unconfigured` (alert
+  "configuration is unconfigured"), so the heal restores it too: the last Configured/Error (+ message) this pod
+  saw the adapter report (`_lastReportedConfigurationState`, set in `UpdateConfigurationStateAsync`, forgotten
+  when the connection really closes); without one (acked on another pod) it re-sends the deployed
+  configuration over the live connection (`AdapterConfigurationUpdatedAsync`) and the adapter's ack sets
+  the state. Best effort, never stops the sweep.
 - Do not weaken either half: without the proof two pods flap Offline/Online every interval, without the
   heal one wrong write stays until the adapter reconnects for another reason.
 

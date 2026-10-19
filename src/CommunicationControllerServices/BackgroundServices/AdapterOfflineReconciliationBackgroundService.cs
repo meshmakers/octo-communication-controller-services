@@ -21,7 +21,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.BackgroundServ
 ///
 /// The opposite direction heals: the pod that <i>holds</i> a live connection while the entity is persisted
 /// Offline (written by a peer in spite of the rule above, or by a disconnect handler that raced a
-/// reconnect) writes Online again on its next tick. That runs on every tick, also inside the startup grace,
+/// reconnect) writes Online again on its next tick and restores the ConfigurationState the wrong Offline reset. That runs on every tick, also inside the startup grace,
 /// because holding the connection is proof enough; it needs no CK model change.
 ///
 /// The normal disconnect path (<c>AdapterHub.OnDisconnectedAsync</c>) already writes <c>Offline</c>

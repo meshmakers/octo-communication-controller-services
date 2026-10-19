@@ -52,6 +52,15 @@ internal class AdapterService(
     /// </summary>
     private readonly DateTimeOffset _startedAt = timeProvider.GetUtcNow();
 
+    /// <summary>
+    /// The last final configuration state (Configured / Error) this pod wrote after the adapter's deploy
+    /// ack, per adapter (AB#7056). A wrong Offline from another pod resets the persisted ConfigurationState
+    /// to Unconfigured; the pod that holds the live connection restores it from here when it heals the
+    /// communication state. Forgotten when the connection really closes.
+    /// </summary>
+    private readonly ConcurrentDictionary<(string TenantId, RtEntityId AdapterRtEntityId), (RtConfigurationStateEnum State, string? Message)>
+        _lastReportedConfigurationState = new();
+
     private static readonly TimeSpan DeploymentTimeout = TimeSpan.FromSeconds(120);
 
     /// <summary>
@@ -674,6 +683,11 @@ internal class AdapterService(
             // Clear the reconciliation tracker (AB#4699). Compare-and-remove: a stale disconnect
             // whose connection has already been replaced no-ops, keeping the live entry.
             connectionTracker.TrackDisconnected(tenantId, adapterRtEntityId, connectionId);
+            if (!connectionTracker.HasLiveConnection(tenantId, adapterRtEntityId))
+            {
+                // Really gone: the reported state is stale; the next registration acks a fresh one.
+                _lastReportedConfigurationState.TryRemove((tenantId, adapterRtEntityId), out _);
+            }
 
             Logger.Info("[{TenantId}] adapter rt id '{AdapterRtId}' offline (connection '{ConnectionId}')",
                 tenantId, adapterRtEntityId, connectionId);
@@ -835,10 +849,43 @@ internal class AdapterService(
             }
 
             WorkloadLifecycleMetrics.RecordOnline(tenantId, adapterRtEntityId.RtId, workloadName: null);
+            await RestoreConfigurationStateAfterHealAsync(tenantId, adapterRtEntityId);
             healed++;
         }
 
         return healed;
+    }
+
+    /// <summary>
+    /// The wrong Offline also reset the persisted ConfigurationState to Unconfigured (the "configuration is
+    /// unconfigured" alert, AB#7056). Restores what this pod last saw the adapter report; if this pod never
+    /// saw an ack (the configuration was acked on another pod), asks the adapter over its live connection to
+    /// apply its deployed configuration again — its ack goes through <see cref="UpdateConfigurationStateAsync"/>.
+    /// Best effort: the communication state is already repaired and a failure must not stop the sweep.
+    /// </summary>
+    private async Task RestoreConfigurationStateAfterHealAsync(string tenantId, RtEntityId adapterRtEntityId)
+    {
+        try
+        {
+            if (_lastReportedConfigurationState.TryGetValue((tenantId, adapterRtEntityId), out var reported))
+            {
+                await communicationRepository.SetAdapterConfigurationStateAsync(tenantId, adapterRtEntityId,
+                    reported.State, reported.Message);
+                return;
+            }
+
+            if (adapterCache.TryGetTenant(tenantId, out var adapterTenant) &&
+                adapterTenant.AdapterById.TryGetValue(adapterRtEntityId, out var adapter))
+            {
+                await ReconcileAdapterConfigurationAsync(tenantId, adapterRtEntityId, adapter.Configuration);
+            }
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e,
+                "[{TenantId}] Adapter '{AdapterRtId}' was healed to Online but its configuration state could not be restored",
+                tenantId, adapterRtEntityId);
+        }
     }
 
     public async Task DeployAdapterConfigurationAsync(string tenantId, RtEntityId adapterRtEntityId)
@@ -1885,6 +1932,8 @@ internal class AdapterService(
                 {
                     await communicationRepository.SetAdapterConfigurationStateAsync(tenantId, adapterRtEntityId,
                         RtConfigurationStateEnum.Configured, null);
+                    _lastReportedConfigurationState[(tenantId, adapterRtEntityId)] =
+                        (RtConfigurationStateEnum.Configured, null);
 
                     // AB#4918: Configured is the wake readiness signal (AB#4594 — Online is not
                     // enough). Releases wake-gate waiters and moves an OnDemand workload to
@@ -1906,6 +1955,8 @@ internal class AdapterService(
                     var message = GenerateAdapterMessages(deploymentResult);
                     await communicationRepository.SetAdapterConfigurationStateAsync(tenantId, adapterRtEntityId,
                         RtConfigurationStateEnum.Error, message);
+                    _lastReportedConfigurationState[(tenantId, adapterRtEntityId)] =
+                        (RtConfigurationStateEnum.Error, message);
 
                     foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
                     {
