@@ -38,7 +38,39 @@ internal class WorkloadStateMetricsBackgroundServiceTests
         _service = new WorkloadStateMetricsBackgroundService(
             _adapterCache,
             _repository,
-            Microsoft.Extensions.Options.Options.Create(new CommunicationControllerOptions()));
+            Microsoft.Extensions.Options.Options.Create(new CommunicationControllerOptions()),
+            Substitute.For<IAdapterConnectionTracker>(),
+            Substitute.For<Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs.IOperatorConnectionManager>(),
+            TimeProvider.System);
+    }
+
+    private static readonly DateTimeOffset Start = new(2026, 10, 19, 12, 0, 0, TimeSpan.Zero);
+
+    [Test]
+    public async Task Startup_NothingConnectedYet_WaitsUntilTheInterval()
+    {
+        var interval = TimeSpan.FromMinutes(5);
+
+        await Assert.That(WorkloadStateMetricsBackgroundService.IsStartupSettled(Start + TimeSpan.FromMinutes(4), Start,
+            null, null, WorkloadStateMetricsBackgroundService.QuietPeriod, interval)).IsFalse();
+        await Assert.That(WorkloadStateMetricsBackgroundService.IsStartupSettled(Start + interval, Start,
+            null, null, WorkloadStateMetricsBackgroundService.QuietPeriod, interval)).IsTrue();
+    }
+
+    [Test]
+    public async Task Startup_ReconnectsSettled_PublishesLongBeforeTheInterval()
+    {
+        // AB#7056: controller restart, adapters back after 2 s, operator after 40 s -> first snapshot
+        // 30 s after the last one, not after the 5 minute interval.
+        var interval = TimeSpan.FromMinutes(5);
+        var adapter = Start + TimeSpan.FromSeconds(2);
+        var op = Start + TimeSpan.FromSeconds(40);
+        var quiet = WorkloadStateMetricsBackgroundService.QuietPeriod;
+
+        await Assert.That(WorkloadStateMetricsBackgroundService.IsStartupSettled(Start + TimeSpan.FromSeconds(60), Start,
+            adapter, op, quiet, interval)).IsFalse();
+        await Assert.That(WorkloadStateMetricsBackgroundService.IsStartupSettled(Start + TimeSpan.FromSeconds(70), Start,
+            adapter, op, quiet, interval)).IsTrue();
     }
 
     [After(Test)]

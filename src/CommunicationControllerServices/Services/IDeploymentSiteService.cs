@@ -142,6 +142,14 @@ public interface IDeploymentSiteService
     Task<int> ReconcileOrphanedOnlineDeploymentSitesAsync(string tenantId);
 
     /// <summary>
+    /// Self-heal (AB#7056): writes <c>Online</c> for every deployment site that an operator connection on
+    /// this pod claims but that is persisted <c>Offline</c> (e.g. written by a partitioned peer pod).
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <returns>Number of deployment sites set <c>Online</c> again</returns>
+    Task<int> ReassertOnlineForClaimedDeploymentSitesAsync(string tenantId);
+
+    /// <summary>
     /// Sets a deploymentSite online unconditionally.
     /// </summary>
     Task SetCommunicationStateOnlineAsync(string tenantId, OctoObjectId poolRtId);

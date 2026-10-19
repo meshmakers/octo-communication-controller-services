@@ -171,4 +171,61 @@ internal class ReconcileOrphanedOnlineDeploymentSitesAsyncTests : PoolServiceTes
 
         await Assert.That(count).IsEqualTo(2);
     }
+
+    [Test]
+    public async Task OnlineSiteWrittenByAnotherPodWhileThisOneRan_IsLeftAlone()
+    {
+        // AB#7056: this pod is the partitioned old one; the replacement claimed the site and wrote Online
+        // after this process started. A miss in this pod's connection manager is not proof it is gone.
+        var site = Site(RtCommunicationStateEnum.Online);
+        site.CommunicationStateTimestamp = DateTime.UtcNow + TimeSpan.FromMinutes(1);
+        ReturnSites(site);
+
+        var count = await DeploymentSiteService.ReconcileOrphanedOnlineDeploymentSitesAsync(TenantId);
+
+        await Assert.That(count).IsEqualTo(0);
+        await CommunicationRepository.DidNotReceiveWithAnyArgs()
+            .SetDeploymentSiteCommunicationStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
+                Arg.Any<RtCommunicationStateEnum>());
+    }
+
+    [Test]
+    public async Task OnlineSiteFromBeforeThisProcess_IsStillSetOffline()
+    {
+        var site = Site(RtCommunicationStateEnum.Online);
+        site.CommunicationStateTimestamp = DateTime.UtcNow - TimeSpan.FromHours(1);
+        ReturnSites(site);
+
+        var count = await DeploymentSiteService.ReconcileOrphanedOnlineDeploymentSitesAsync(TenantId);
+
+        await Assert.That(count).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task OfflineSiteClaimedOnThisPod_IsHealedToOnline()
+    {
+        var site = Site(RtCommunicationStateEnum.Offline);
+        ReturnSites(site);
+        OperatorConnectionManager.GetConnectionsForDeploymentSite(TenantId, site.RtId.ToString())
+            .Returns(new[] { ConnectionId });
+
+        var healed = await DeploymentSiteService.ReassertOnlineForClaimedDeploymentSitesAsync(TenantId);
+
+        await Assert.That(healed).IsEqualTo(1);
+        await CommunicationRepository.Received(1)
+            .SetDeploymentSiteCommunicationStateAsync(TenantId, site.RtId, RtCommunicationStateEnum.Online);
+    }
+
+    [Test]
+    public async Task OfflineSiteNobodyClaims_IsNotHealed()
+    {
+        ReturnSites(Site(RtCommunicationStateEnum.Offline), Site(RtCommunicationStateEnum.Unregistered));
+
+        var healed = await DeploymentSiteService.ReassertOnlineForClaimedDeploymentSitesAsync(TenantId);
+
+        await Assert.That(healed).IsEqualTo(0);
+        await CommunicationRepository.DidNotReceiveWithAnyArgs()
+            .SetDeploymentSiteCommunicationStateAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(),
+                Arg.Any<RtCommunicationStateEnum>());
+    }
 }

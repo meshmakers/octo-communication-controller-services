@@ -26,6 +26,12 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.BackgroundServ
 /// persisted-state metric published that as a critical alert). Ownership is re-checked right before
 /// every write, and a site claimed later simply turns <c>Online</c> again through the normal
 /// registration path.
+///
+/// Same rule as <see cref="AdapterOfflineReconciliationBackgroundService"/> (AB#7056): a pod writes Offline
+/// only for what it can prove is gone, never for what it merely does not hold. Another controller pod (the
+/// replacement of a partitioned one) may own the site; the sweep therefore only judges an Online that was
+/// written before this process started, and the pod that does hold the claim writes Online again for a wrong
+/// Offline on every tick (self-heal, no grace needed).
 /// </summary>
 internal class DeploymentSiteOfflineReconciliationBackgroundService : BackgroundService
 {
@@ -99,6 +105,9 @@ internal class DeploymentSiteOfflineReconciliationBackgroundService : Background
     /// </summary>
     internal async Task SweepIfSettledAsync()
     {
+        // Healing a wrong Offline needs no grace: this pod holds the claim, which is the proof.
+        await ReassertAllTenantsAsync();
+
         if (!ReconciliationGrace.IsOver(_timeProvider.GetUtcNow(), _startedAt,
                 _operatorConnectionManager.LastOperatorRegisteredAt, Interval))
         {
@@ -111,6 +120,36 @@ internal class DeploymentSiteOfflineReconciliationBackgroundService : Background
         }
 
         await ReconcileAllTenantsAsync();
+    }
+
+    /// <summary>
+    /// Writes Online again for sites an operator connection on this pod claims but that are persisted
+    /// Offline (AB#7056). Internal so tests can drive it without the timer.
+    /// </summary>
+    internal async Task ReassertAllTenantsAsync()
+    {
+        if (_shutdownState.IsShuttingDown)
+        {
+            return;
+        }
+
+        foreach (var tenantId in _adapterCache.GetEnabledTenantIds())
+        {
+            try
+            {
+                var count = await _deploymentSiteService.ReassertOnlineForClaimedDeploymentSitesAsync(tenantId);
+                if (count > 0)
+                {
+                    Logger.Warn(
+                        "Healed {Count} deployment site(s) claimed on this pod but persisted Offline, tenant '{TenantId}' (AB#7056)",
+                        count, tenantId);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Error healing claimed deployment sites for tenant '{TenantId}'", tenantId);
+            }
+        }
     }
 
     /// <summary>

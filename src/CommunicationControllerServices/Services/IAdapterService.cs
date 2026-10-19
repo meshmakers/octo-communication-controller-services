@@ -165,6 +165,15 @@ public interface IAdapterService
     Task<int> ReconcileOrphanedOnlineAdaptersAsync(string tenantId);
 
     /// <summary>
+    /// Self-heal (AB#7056): writes <c>Online</c> for every adapter that holds a live SignalR connection on
+    /// this pod but is persisted <c>Offline</c> — e.g. after a partitioned peer pod wrote Offline for a
+    /// connection it did not hold. Only the pod that holds the connection can prove it is alive.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <returns>The number of adapters set Online again.</returns>
+    Task<int> ReassertOnlineForLiveConnectionsAsync(string tenantId);
+
+    /// <summary>
     /// Deploys the db version  an adapter configuration
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
