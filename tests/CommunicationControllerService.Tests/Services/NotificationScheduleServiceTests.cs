@@ -342,6 +342,8 @@ internal class NotificationScheduleServiceTests
 
         await Assert.That(exception!.Kind).IsEqualTo(NotificationScheduleErrorKind.EngineUnavailable);
         await Assert.That(exception.Message).Contains("System.Communication.Notifications");
+        await _eventService.Received(1).StoreInformationEventAsync(TenantId,
+            Arg.Is<string>(message => message.EndsWith(" deployed.")), Arg.Any<RtEntityId?>());
     }
 
     [Test]
@@ -501,6 +503,21 @@ internal class NotificationScheduleServiceTests
         await _eventService.Received(1).StoreInformationEventAsync(TenantId,
             "Notification subscription 'Failed EDA processes' undeployed.",
             Arg.Is<RtEntityId?>(id => id!.Value.RtId == subscriptionRtId));
+    }
+
+    [Test]
+    public async Task UndeploySubscriptionAsync_ACancelThatFails_StillRecordsTheUndeploy()
+    {
+        var subscriptionRtId = OctoObjectId.GenerateNewId();
+        _notificationRepository.GetPreferenceRtIdsAsync(TenantId, subscriptionRtId).Returns([OctoObjectId.GenerateNewId()]);
+        _distributionEventHubService.CancelScheduledRecurringSendAsync(Arg.Any<string>(), Arg.Any<string>())
+            .Returns(Task.FromException(new InvalidOperationException("scheduler down")));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _service.UndeploySubscriptionAsync(TenantId, subscriptionRtId));
+
+        await _eventService.Received(1).StoreInformationEventAsync(TenantId,
+            Arg.Is<string>(message => message.EndsWith(" undeployed.")), Arg.Any<RtEntityId?>());
     }
 
     [Test]

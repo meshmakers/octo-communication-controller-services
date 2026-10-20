@@ -55,12 +55,12 @@ internal class NotificationScheduleService(
                 timeProvider.GetUtcNow().UtcDateTime);
         }
 
+        await StoreSubscriptionEventAsync(tenantId, subscriptionRtId, "deployed");
         var schedules = await notificationRepository.GetDeployedPreferenceSchedulesAsync(tenantId, subscriptionRtId);
         var failures = await ScheduleAsync(tenantId, schedules);
         await EnsureEngineDeployedAsync(tenantId);
         await SendBaselineTicksAsync(tenantId, schedules.Where(schedule => schedule.NeedsFirstRun));
 
-        await StoreSubscriptionEventAsync(tenantId, subscriptionRtId, "deployed");
         await ThrowIfIncompleteAsync(tenantId, failures);
     }
 
@@ -68,13 +68,12 @@ internal class NotificationScheduleService(
     {
         await GetSubscriptionDeployedAsync(tenantId, subscriptionRtId);
         await notificationRepository.SetSubscriptionDeployedAsync(tenantId, subscriptionRtId, null);
+        await StoreSubscriptionEventAsync(tenantId, subscriptionRtId, "undeployed");
 
         foreach (var preferenceRtId in await notificationRepository.GetPreferenceRtIdsAsync(tenantId, subscriptionRtId))
         {
             await CancelPreferenceAsync(tenantId, preferenceRtId);
         }
-
-        await StoreSubscriptionEventAsync(tenantId, subscriptionRtId, "undeployed");
     }
 
     private async Task StoreSubscriptionEventAsync(string tenantId, OctoObjectId subscriptionRtId, string what)
