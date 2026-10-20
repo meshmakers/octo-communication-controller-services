@@ -2258,6 +2258,13 @@ Request path:
    and surfaces a bare network error ("0 Unknown Error"), which misdirected every diagnosis of
    this path. An error-only response that names workload and tenant the caller addressed leaks
    nothing.
+   **The 503 names its cause (AB#7111).** Header `X-Activator-Reason` and the log line carry the
+   same class, and the plain-English body matches it; status code, `Retry-After` and the hop marker
+   are unchanged. `wake-timeout` = the wake did not finish within the wake budget (or the operator
+   failed to scale up) — the only case whose body talks about waking; `no-ready-endpoint` = the
+   forwarded request came back (loop guard); `connect-failed` = the forward was refused,
+   unreachable or failed unexpectedly. The last two tell the reader to check the pod status (image
+   pull, crash loop, readiness) of an always-on workload instead of blaming the wake mechanism.
 
 The middleware makes **no authorization decision** and rewrites nothing but the loop-guard
 header: the adapter must see what the client sent.

@@ -119,6 +119,15 @@ internal class WorkloadActivatorMiddlewareTests
         await Assert.That(context.Response.StatusCode).IsEqualTo(200);
     }
 
+    private static async Task<string> BodyOf(HttpContext context)
+    {
+        context.Response.Body.Position = 0;
+        return await new StreamReader(context.Response.Body).ReadToEndAsync();
+    }
+
+    private static string Reason(HttpContext context) =>
+        context.Response.Headers[WorkloadActivatorMiddleware.ReasonHeader].ToString();
+
     [Test]
     public async Task WorkloadThatStaysUnreachable_Answers503WithRetryAfter()
     {
@@ -132,6 +141,26 @@ internal class WorkloadActivatorMiddlewareTests
         // Assert
         await Assert.That(context.Response.StatusCode).IsEqualTo(503);
         await Assert.That(context.Response.Headers.RetryAfter.ToString()).IsEqualTo("42");
+        await Assert.That(Reason(context)).IsEqualTo("connect-failed");
+        var body = await BodyOf(context);
+        await Assert.That(body).Contains("Upstream unreachable").And.Contains("refused the connection");
+        await Assert.That(body).DoesNotContain("woken").And.DoesNotContain("awake");
+    }
+
+    [Test]
+    public async Task UnexpectedForwardFailure_Answers503ConnectFailed()
+    {
+        // Arrange
+        var handler = new ScriptedHandler(() => throw new InvalidOperationException("boom"));
+        var (middleware, context, _) = Build(handler);
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        await Assert.That(context.Response.StatusCode).IsEqualTo(503);
+        await Assert.That(context.Response.Headers.RetryAfter.ToString()).IsEqualTo("42");
+        await Assert.That(Reason(context)).IsEqualTo("connect-failed");
     }
 
     [Test]
@@ -149,6 +178,10 @@ internal class WorkloadActivatorMiddlewareTests
         // Assert
         await Assert.That(context.Response.StatusCode).IsEqualTo(503);
         await Assert.That(handler.Calls).IsEqualTo(0);
+        await Assert.That(context.Response.Headers.RetryAfter.ToString()).IsEqualTo("42");
+        await Assert.That(Reason(context)).IsEqualTo("wake-timeout");
+        await Assert.That(await BodyOf(context)).Contains("Upstream not ready")
+            .And.Contains("did not become ready within 42 s of the wake request");
     }
 
     /// <summary>
@@ -170,6 +203,10 @@ internal class WorkloadActivatorMiddlewareTests
         await Assert.That(context.Response.StatusCode).IsEqualTo(503);
         await Assert.That(handler.Calls).IsEqualTo(0);
         await _lifecycle.DidNotReceive().EnsureWorkloadRunningAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>());
+        await Assert.That(context.Response.Headers.RetryAfter.ToString()).IsEqualTo("42");
+        await Assert.That(Reason(context)).IsEqualTo("no-ready-endpoint");
+        var body = await BodyOf(context);
+        await Assert.That(body).Contains("has no ready endpoint").And.Contains("not the wake mechanism");
     }
 
     [Test]
