@@ -478,6 +478,45 @@ internal class NotificationScheduleServiceTests
     }
 
     [Test]
+    public async Task DeploySubscriptionAsync_RecordsTheDeployInTheEventLog()
+    {
+        var subscriptionRtId = OctoObjectId.GenerateNewId();
+        _notificationRepository.GetSubscriptionNameAsync(TenantId, subscriptionRtId).Returns("Failed EDA processes");
+
+        await _service.DeploySubscriptionAsync(TenantId, subscriptionRtId);
+
+        await _eventService.Received(1).StoreInformationEventAsync(TenantId,
+            "Notification subscription 'Failed EDA processes' deployed.",
+            Arg.Is<RtEntityId?>(id => id!.Value.RtId == subscriptionRtId));
+    }
+
+    [Test]
+    public async Task UndeploySubscriptionAsync_RecordsTheUndeployInTheEventLog()
+    {
+        var subscriptionRtId = OctoObjectId.GenerateNewId();
+        _notificationRepository.GetSubscriptionNameAsync(TenantId, subscriptionRtId).Returns("Failed EDA processes");
+
+        await _service.UndeploySubscriptionAsync(TenantId, subscriptionRtId);
+
+        await _eventService.Received(1).StoreInformationEventAsync(TenantId,
+            "Notification subscription 'Failed EDA processes' undeployed.",
+            Arg.Is<RtEntityId?>(id => id!.Value.RtId == subscriptionRtId));
+    }
+
+    [Test]
+    public async Task UndeploySubscriptionAsync_UnknownSubscription_RecordsNothing()
+    {
+        var subscriptionRtId = OctoObjectId.GenerateNewId();
+        _notificationRepository.IsSubscriptionDeployedAsync(TenantId, subscriptionRtId).Returns((bool?)null);
+
+        await Assert.ThrowsAsync<NotificationScheduleServiceException>(() =>
+            _service.UndeploySubscriptionAsync(TenantId, subscriptionRtId));
+
+        await _eventService.DidNotReceive().StoreInformationEventAsync(Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<RtEntityId?>());
+    }
+
+    [Test]
     public async Task UndeploySubscriptionAsync_UnknownSubscription_IsNotFound()
     {
         var subscriptionRtId = OctoObjectId.GenerateNewId();

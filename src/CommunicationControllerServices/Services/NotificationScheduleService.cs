@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Common.DistributionEventHub;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
@@ -59,6 +60,7 @@ internal class NotificationScheduleService(
         await EnsureEngineDeployedAsync(tenantId);
         await SendBaselineTicksAsync(tenantId, schedules.Where(schedule => schedule.NeedsFirstRun));
 
+        await StoreSubscriptionEventAsync(tenantId, subscriptionRtId, "deployed");
         await ThrowIfIncompleteAsync(tenantId, failures);
     }
 
@@ -71,6 +73,16 @@ internal class NotificationScheduleService(
         {
             await CancelPreferenceAsync(tenantId, preferenceRtId);
         }
+
+        await StoreSubscriptionEventAsync(tenantId, subscriptionRtId, "undeployed");
+    }
+
+    private async Task StoreSubscriptionEventAsync(string tenantId, OctoObjectId subscriptionRtId, string what)
+    {
+        var name = await notificationRepository.GetSubscriptionNameAsync(tenantId, subscriptionRtId);
+        await communicationEventService.StoreInformationEventAsync(tenantId,
+            $"Notification subscription '{name ?? subscriptionRtId.ToString()}' {what}.",
+            new RtEntityId(SystemNotificationCkIds.RtCkNotificationSubscriptionTypeId, subscriptionRtId));
     }
 
     public async Task SyncPreferenceAsync(string tenantId, OctoObjectId preferenceRtId)

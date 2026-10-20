@@ -52,6 +52,13 @@ public interface INotificationRepository
     Task<bool?> IsSubscriptionDeployedAsync(string tenantId, OctoObjectId subscriptionRtId);
 
     /// <summary>
+    /// The name of a subscription; null when it does not exist
+    /// </summary>
+    /// <param name="tenantId">The tenant id</param>
+    /// <param name="subscriptionRtId">The subscription</param>
+    Task<string?> GetSubscriptionNameAsync(string tenantId, OctoObjectId subscriptionRtId);
+
+    /// <summary>
     /// Marks a subscription as deployed at the given moment, or as undeployed when there is none
     /// </summary>
     /// <param name="tenantId">The tenant id</param>
