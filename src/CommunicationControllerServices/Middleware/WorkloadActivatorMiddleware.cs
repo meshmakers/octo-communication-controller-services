@@ -42,6 +42,21 @@ internal sealed class WorkloadActivatorMiddleware(
     internal const string HttpClientName = "WorkloadActivator";
 
     /// <summary>
+    ///     Response header (and log field) naming the cause class of an activator 503, so an
+    ///     operator can tell a wake problem from an always-on workload that is simply down (AB#7111).
+    /// </summary>
+    internal const string ReasonHeader = "X-Activator-Reason";
+
+    /// <summary>The wake request did not finish within the wake budget (or the operator failed to scale up).</summary>
+    internal const string ReasonWakeTimeout = "wake-timeout";
+
+    /// <summary>The forwarded request came back to the activator: the Service has no ready endpoint.</summary>
+    internal const string ReasonNoReadyEndpoint = "no-ready-endpoint";
+
+    /// <summary>The forward to the workload address failed (refused, unreachable, unexpected error).</summary>
+    internal const string ReasonConnectFailed = "connect-failed";
+
+    /// <summary>
     ///     Bodies up to this size are buffered so the forward can be RETRIED. Without a replayable
     ///     body a request gets exactly one attempt — and the first request after hibernation is
     ///     precisely the one that wakes the workload and lands in the endpoint gap, so a browser
@@ -107,9 +122,9 @@ internal sealed class WorkloadActivatorMiddleware(
         {
             logger.LogWarning(
                 "[{TenantId}] Activator loop for workload '{WorkloadName}': the forwarded request came back, " +
-                "so the workload still has no ready endpoint", target.TenantId, target.WorkloadName);
-            await WriteUnavailableAsync(context, target,
-                "The workload did not become reachable after waking.");
+                "so the workload still has no ready endpoint (reason {ActivatorReason})",
+                target.TenantId, target.WorkloadName, ReasonNoReadyEndpoint);
+            await WriteUnavailableAsync(context, target, ReasonNoReadyEndpoint);
             return;
         }
 
@@ -121,9 +136,10 @@ internal sealed class WorkloadActivatorMiddleware(
         {
             // Wake failed or exceeded the budget. The workload is left scaled up for diagnosis
             // (see WorkloadLifecycleService), so a retry has a good chance of succeeding.
-            logger.LogWarning(e, "[{TenantId}] Could not wake workload '{WorkloadName}' for an inbound request",
-                target.TenantId, target.WorkloadName);
-            await WriteUnavailableAsync(context, target, "The workload could not be woken in time.");
+            logger.LogWarning(e,
+                "[{TenantId}] Could not wake workload '{WorkloadName}' for an inbound request (reason {ActivatorReason})",
+                target.TenantId, target.WorkloadName, ReasonWakeTimeout);
+            await WriteUnavailableAsync(context, target, ReasonWakeTimeout);
             return;
         }
 
@@ -144,9 +160,10 @@ internal sealed class WorkloadActivatorMiddleware(
             // Anything unexpected here would otherwise surface as a 500 from a service the caller
             // never addressed. 503 is both truthful and actionable — the workload is what is
             // unavailable, and the client's own retry is the right next step.
-            logger.LogError(e, "[{TenantId}] Unexpected failure forwarding to workload '{WorkloadName}'",
-                target.TenantId, target.WorkloadName);
-            await WriteUnavailableAsync(context, target, "The workload could not be reached.");
+            logger.LogError(e,
+                "[{TenantId}] Unexpected failure forwarding to workload '{WorkloadName}' (reason {ActivatorReason})",
+                target.TenantId, target.WorkloadName, ReasonConnectFailed);
+            await WriteUnavailableAsync(context, target, ReasonConnectFailed);
         }
     }
 
@@ -212,9 +229,10 @@ internal sealed class WorkloadActivatorMiddleware(
             }
             catch (HttpRequestException e)
             {
-                logger.LogWarning(e, "[{TenantId}] Forwarding to workload '{WorkloadName}' at '{Address}' failed",
-                    target.TenantId, target.WorkloadName, target.Address);
-                await WriteUnavailableAsync(context, target, "The workload is awake but not reachable.");
+                logger.LogWarning(e,
+                    "[{TenantId}] Forwarding to workload '{WorkloadName}' at '{Address}' failed (reason {ActivatorReason})",
+                    target.TenantId, target.WorkloadName, target.Address, ReasonConnectFailed);
+                await WriteUnavailableAsync(context, target, ReasonConnectFailed);
                 return;
             }
         }
@@ -313,6 +331,7 @@ internal sealed class WorkloadActivatorMiddleware(
         // Marks this response as activator-generated so the forwarding side of a chained activator
         // pass recognises it as "endpoint not ready" and retries instead of copying it through.
         context.Response.Headers[HopHeader] = "1";
+        context.Response.Headers[ReasonHeader] = reason;
         // The routes and their CORS policy live inside the adapter, which is exactly the thing
         // that is unavailable here — so nothing can make the real policy call. Without a reflected
         // origin the browser hides status and body entirely and surfaces a bare network error
@@ -326,8 +345,27 @@ internal sealed class WorkloadActivatorMiddleware(
             context.Response.Headers.Append("Vary", "Origin");
         }
         context.Response.ContentType = "text/plain; charset=utf-8";
-        await context.Response.WriteAsync(
-            $"{reason} Workload '{target.WorkloadName}' of tenant '{target.TenantId}' is not available right now.",
-            context.RequestAborted);
+        await context.Response.WriteAsync(BuildBody(reason, target, options.Value.LifecycleWakeBudgetSeconds), context.RequestAborted);
+    }
+
+    /// <summary>
+    ///     Plain-cause body per reason class. Only the wake-timeout text talks about waking — an
+    ///     always-on workload that is down must not be blamed on the wake mechanism (AB#7111).
+    /// </summary>
+    internal static string BuildBody(string reason, ActivatorTarget target, int wakeBudgetSeconds)
+    {
+        return reason switch
+        {
+            ReasonWakeTimeout =>
+                $"Upstream not ready: workload '{target.WorkloadName}' (tenant '{target.TenantId}') did not become ready " +
+                $"within {wakeBudgetSeconds} s of the wake request.",
+            ReasonNoReadyEndpoint =>
+                $"Upstream unreachable: workload '{target.WorkloadName}' (tenant '{target.TenantId}') has no ready endpoint; " +
+                "if it is always-on, check its pod status (image pull, crash loop, readiness), not the wake mechanism.",
+            _ =>
+                $"Upstream unreachable: workload '{target.WorkloadName}' (tenant '{target.TenantId}') refused the connection " +
+                "or could not be reached; if it is always-on, check its pod status (image pull, crash loop, readiness), " +
+                "not the wake mechanism.",
+        };
     }
 }
