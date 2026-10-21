@@ -49,13 +49,14 @@ internal class NotificationScheduleService(
 
     public async Task DeploySubscriptionAsync(string tenantId, OctoObjectId subscriptionRtId)
     {
-        if (!await GetSubscriptionDeployedAsync(tenantId, subscriptionRtId))
+        var subscription = await GetSubscriptionStateAsync(tenantId, subscriptionRtId);
+        if (!subscription.Deployed)
         {
             await notificationRepository.SetSubscriptionDeployedAsync(tenantId, subscriptionRtId,
                 timeProvider.GetUtcNow().UtcDateTime);
         }
 
-        await StoreSubscriptionEventAsync(tenantId, subscriptionRtId, "deployed");
+        await StoreSubscriptionEventAsync(tenantId, subscriptionRtId, subscription.Name, "deployed");
         var schedules = await notificationRepository.GetDeployedPreferenceSchedulesAsync(tenantId, subscriptionRtId);
         var failures = await ScheduleAsync(tenantId, schedules);
         await EnsureEngineDeployedAsync(tenantId);
@@ -66,9 +67,9 @@ internal class NotificationScheduleService(
 
     public async Task UndeploySubscriptionAsync(string tenantId, OctoObjectId subscriptionRtId)
     {
-        await GetSubscriptionDeployedAsync(tenantId, subscriptionRtId);
+        var subscription = await GetSubscriptionStateAsync(tenantId, subscriptionRtId);
         await notificationRepository.SetSubscriptionDeployedAsync(tenantId, subscriptionRtId, null);
-        await StoreSubscriptionEventAsync(tenantId, subscriptionRtId, "undeployed");
+        await StoreSubscriptionEventAsync(tenantId, subscriptionRtId, subscription.Name, "undeployed");
 
         foreach (var preferenceRtId in await notificationRepository.GetPreferenceRtIdsAsync(tenantId, subscriptionRtId))
         {
@@ -76,13 +77,10 @@ internal class NotificationScheduleService(
         }
     }
 
-    private async Task StoreSubscriptionEventAsync(string tenantId, OctoObjectId subscriptionRtId, string what)
-    {
-        var name = await notificationRepository.GetSubscriptionNameAsync(tenantId, subscriptionRtId);
-        await communicationEventService.StoreInformationEventAsync(tenantId,
-            $"Notification subscription '{name ?? subscriptionRtId.ToString()}' {what}.",
+    private Task StoreSubscriptionEventAsync(string tenantId, OctoObjectId subscriptionRtId, string? name, string what) =>
+        communicationEventService.StoreInformationEventAsync(tenantId,
+            $"Notification subscription '{(string.IsNullOrWhiteSpace(name) ? subscriptionRtId.ToString() : name)}' {what}.",
             new RtEntityId(SystemNotificationCkIds.RtCkNotificationSubscriptionTypeId, subscriptionRtId));
-    }
 
     public async Task SyncPreferenceAsync(string tenantId, OctoObjectId preferenceRtId)
     {
@@ -131,8 +129,8 @@ internal class NotificationScheduleService(
             CreateWakeScheduleId(tenantId, preferenceRtId), scheduleGroup);
     }
 
-    private async Task<bool> GetSubscriptionDeployedAsync(string tenantId, OctoObjectId subscriptionRtId) =>
-        await notificationRepository.IsSubscriptionDeployedAsync(tenantId, subscriptionRtId) ??
+    private async Task<NotificationSubscriptionState> GetSubscriptionStateAsync(string tenantId, OctoObjectId subscriptionRtId) =>
+        await notificationRepository.GetSubscriptionStateAsync(tenantId, subscriptionRtId) ??
         throw NotificationScheduleServiceException.SubscriptionNotFound(tenantId, subscriptionRtId);
 
     private async Task<IReadOnlyList<(OctoObjectId PreferenceRtId, Exception Error)>> ScheduleAsync(string tenantId,

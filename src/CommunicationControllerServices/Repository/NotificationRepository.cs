@@ -85,22 +85,13 @@ internal class NotificationRepository(ISystemContext systemContext, ILogger<Noti
             .ToList();
     }
 
-    public async Task<bool?> IsSubscriptionDeployedAsync(string tenantId, OctoObjectId subscriptionRtId)
+    public async Task<NotificationSubscriptionState?> GetSubscriptionStateAsync(string tenantId, OctoObjectId subscriptionRtId)
     {
         var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
         using var session = await tenantRepository.GetSessionAsync();
 
         var subscription = await tenantRepository.GetRtEntityByRtIdAsync<RtNotificationSubscription>(session, subscriptionRtId);
-        return subscription == null ? null : subscription.Enabled == true;
-    }
-
-    public async Task<string?> GetSubscriptionNameAsync(string tenantId, OctoObjectId subscriptionRtId)
-    {
-        var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
-        using var session = await tenantRepository.GetSessionAsync();
-
-        var subscription = await tenantRepository.GetRtEntityByRtIdAsync<RtNotificationSubscription>(session, subscriptionRtId);
-        return subscription?.Name;
+        return subscription == null ? null : new NotificationSubscriptionState(subscription.Enabled == true, subscription.Name);
     }
 
     public async Task SetSubscriptionDeployedAsync(string tenantId, OctoObjectId subscriptionRtId, DateTime? deployedAt)

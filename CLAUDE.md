@@ -517,6 +517,7 @@ The service uses the Octo Notification system to log important business events f
 | Hubs | Operation failed | Error | Hub operation errors |
 | SignalChannelService | Registration started / verified / adopted / deleted | Information | Signal channel self-service transitions (AB#5143), incl. adopting an account the bridge already holds |
 | SignalChannelService | Registration / verification / deletion failed | Error | Bridge rejected a register or verify call, or the repository delete failed |
+| NotificationScheduleService | Notification subscription deployed / undeployed | Information | `Notification subscription '<name>' deployed.` / `... undeployed.`, linked to the subscription; the rtId stands in for a missing name. Deploy records it right after `Enabled=true` is written, before the schedule and engine steps, so a deploy that fails half-way still shows (AB#2585) |
 
 **Usage in Services:**
 ```csharp
@@ -809,8 +810,8 @@ mesh adapter's engine pipeline decides WHAT (see octo-mesh-adapter CLAUDE.md, `P
 
 | Route | Policy | Behaviour |
 |---|---|---|
-| `POST {tenantId}/v1/notifications/subscriptions/{rtId}/deploy` | ReadWrite | `Enabled=true` and `DeployedAt=now` (undeploy → deploy is a new start for Onwards; Catch up reads on from its watermark), only this subscription's preferences rescheduled, engine DataFlow deployed if it is not, then one immediate tick per Onwards preference that needs a first run. On an already deployed subscription (a retry, CLI, MCP) `DeployedAt` is kept, so nothing starts over; the rest still runs, which is what finishes a deploy whose engine step failed. |
-| `POST {tenantId}/v1/notifications/subscriptions/{rtId}/undeploy` | ReadWrite | `Enabled=false`, this subscription's recurring sends cancelled; preferences and delivery states are kept. |
+| `POST {tenantId}/v1/notifications/subscriptions/{rtId}/deploy` | ReadWrite | `Enabled=true` and `DeployedAt=now` (undeploy → deploy is a new start for Onwards; Catch up reads on from its watermark), only this subscription's preferences rescheduled, engine DataFlow deployed if it is not, then one immediate tick per Onwards preference that needs a first run. On an already deployed subscription (a retry, CLI, MCP) `DeployedAt` is kept, so nothing starts over; the rest still runs, which is what finishes a deploy whose engine step failed. Each call writes a "deployed" event. |
+| `POST {tenantId}/v1/notifications/subscriptions/{rtId}/undeploy` | ReadWrite | `Enabled=false`, this subscription's recurring sends cancelled; preferences and delivery states are kept. Writes an "undeployed" event. |
 | `POST {tenantId}/v1/notifications/schedule/sync[?preferenceRtId=]` | ReadWrite | With `preferenceRtId`: schedule that preference again if its subscription is deployed, otherwise cancel its ticks (immediate tick when it is an Onwards preference that needs a first run; Catch up waits for its schedule); Studio calls this after a preference is saved or deleted. Without it: full rebuild, the orphaned-state sweep, plus an immediate tick for every Onwards preference that needs a first run — the call to make after a subscription's query changed. |
 
 Error codes (`NotificationScheduleServiceException.Kind`): `SubscriptionNotFound` → 404; `EngineUnavailable`
