@@ -33,6 +33,7 @@ internal class DefaultConfigurationCreatorService(
     IPipelineServiceAccountProvisioningService serviceAccountProvisioningService,
     IAdapterPoolMirrorProvisioningService adapterPoolMirrorProvisioningService,
     FailedTenantRegistry failedTenantRegistry,
+    TenantSetupRetryTracker tenantSetupRetryTracker,
     ICommunicationEventService communicationEventService,
     IBlueprintService blueprintService,
     IEnumerable<IBlueprintEmbeddedSource> embeddedBlueprintSources)
@@ -44,6 +45,7 @@ internal class DefaultConfigurationCreatorService(
         null, // runtimeRepositoryProvider - not needed without CK model migrations
         Constants.CommunicationControllerServiceEnabledKey, // the service can be enabled/disabled
         failedTenantRegistry: failedTenantRegistry,
+        setupRetryTracker: tenantSetupRetryTracker,
         blueprintService: blueprintService,
         embeddedBlueprintSources: embeddedBlueprintSources
         )
