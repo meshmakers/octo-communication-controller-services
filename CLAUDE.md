@@ -4860,4 +4860,4 @@ giving up). `DefaultConfigurationCreatorService` takes the DI instance (`tenantS
 `Degraded` when a tenant fails longer than `TenantSetupRetry:DegradedAfter` (default 10 min); metrics
 `octo.tenant_setup.failed` / `octo.tenant_setup.pending_seconds` (tag `octo.tenant.id`) feed the Dash0 alert. Details,
 options and tests: octo-common-services `CLAUDE.md`, section "Tenant Setup - Failure Handling". Test here:
-`tests/CommunicationControllerService.Tests/Services/DefaultConfigurationCreatorServiceTests/TenantSetupRetryWiringTests.cs`. A test that constructs the creator must pass a fresh `new TenantSetupRetryTracker()`.
+`tests/CommunicationControllerService.Tests/Services/DefaultConfigurationCreatorServiceTests/TenantSetupRetryWiringTests.cs`. Tests use one isolated `TenantSetupRetryTracker` per test and share it across the creator instances of that test when exercising a retry.
