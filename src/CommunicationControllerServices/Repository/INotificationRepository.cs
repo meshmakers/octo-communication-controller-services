@@ -18,6 +18,13 @@ public record NotificationPreferenceSchedule(
     bool TakesBaseline);
 
 /// <summary>
+/// Deployment state and name of a notification subscription
+/// </summary>
+/// <param name="Deployed">True when the subscription is deployed</param>
+/// <param name="Name">The subscription's name; null when it has none</param>
+public record NotificationSubscriptionState(bool Deployed, string? Name);
+
+/// <summary>
 /// Reads and writes the notification entities the schedule is built from
 /// </summary>
 public interface INotificationRepository
@@ -45,11 +52,11 @@ public interface INotificationRepository
     Task<IReadOnlyList<OctoObjectId>> GetPreferenceRtIdsAsync(string tenantId, OctoObjectId subscriptionRtId);
 
     /// <summary>
-    /// Whether a subscription is deployed; null when it does not exist
+    /// Whether a subscription is deployed, and its name; null when it does not exist
     /// </summary>
     /// <param name="tenantId">The tenant id</param>
     /// <param name="subscriptionRtId">The subscription</param>
-    Task<bool?> IsSubscriptionDeployedAsync(string tenantId, OctoObjectId subscriptionRtId);
+    Task<NotificationSubscriptionState?> GetSubscriptionStateAsync(string tenantId, OctoObjectId subscriptionRtId);
 
     /// <summary>
     /// Marks a subscription as deployed at the given moment, or as undeployed when there is none

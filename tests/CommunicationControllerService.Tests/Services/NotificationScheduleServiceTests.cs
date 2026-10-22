@@ -53,7 +53,8 @@ internal class NotificationScheduleServiceTests
                 Arg.Any<CancellationToken?>())
             .Returns(Task.FromResult(Task.CompletedTask));
         _notificationRepository.GetDeployedPreferenceSchedulesAsync(TenantId, Arg.Any<OctoObjectId?>()).Returns([]);
-        _notificationRepository.IsSubscriptionDeployedAsync(TenantId, Arg.Any<OctoObjectId>()).Returns(false);
+        _notificationRepository.GetSubscriptionStateAsync(TenantId, Arg.Any<OctoObjectId>())
+            .Returns(new NotificationSubscriptionState(false, "Failed EDA processes"));
         _communicationRepository.GetPipelineAsync(TenantId, EnginePipelineId)
             .Returns(RtEntityCreator.CreatePipeline(id: NotificationEngine.PipelineRtId.ToString()));
 
@@ -193,7 +194,8 @@ internal class NotificationScheduleServiceTests
     {
         var subscriptionRtId = OctoObjectId.GenerateNewId();
         var running = Schedule();
-        _notificationRepository.IsSubscriptionDeployedAsync(TenantId, subscriptionRtId).Returns(true);
+        _notificationRepository.GetSubscriptionStateAsync(TenantId, subscriptionRtId)
+            .Returns(new NotificationSubscriptionState(true, "Failed EDA processes"));
         _notificationRepository.GetDeployedPreferenceSchedulesAsync(TenantId, subscriptionRtId).Returns([running]);
         var engine = RtEntityCreator.CreatePipeline(id: NotificationEngine.PipelineRtId.ToString());
         engine.DeploymentState = RtDeploymentStateEnum.Undeployed;
@@ -322,7 +324,7 @@ internal class NotificationScheduleServiceTests
     public async Task DeploySubscriptionAsync_UnknownSubscription_IsNotFoundAndChangesNothing()
     {
         var subscriptionRtId = OctoObjectId.GenerateNewId();
-        _notificationRepository.IsSubscriptionDeployedAsync(TenantId, subscriptionRtId).Returns((bool?)null);
+        _notificationRepository.GetSubscriptionStateAsync(TenantId, subscriptionRtId).Returns((NotificationSubscriptionState?)null);
 
         var exception = await Assert.ThrowsAsync<NotificationScheduleServiceException>(() =>
             _service.DeploySubscriptionAsync(TenantId, subscriptionRtId));
@@ -342,6 +344,8 @@ internal class NotificationScheduleServiceTests
 
         await Assert.That(exception!.Kind).IsEqualTo(NotificationScheduleErrorKind.EngineUnavailable);
         await Assert.That(exception.Message).Contains("System.Communication.Notifications");
+        await _eventService.Received(1).StoreInformationEventAsync(TenantId,
+            "Notification subscription 'Failed EDA processes' deployed.", Arg.Any<RtEntityId?>());
     }
 
     [Test]
@@ -478,10 +482,77 @@ internal class NotificationScheduleServiceTests
     }
 
     [Test]
+    public async Task DeploySubscriptionAsync_RecordsTheDeployInTheEventLog()
+    {
+        var subscriptionRtId = OctoObjectId.GenerateNewId();
+
+        await _service.DeploySubscriptionAsync(TenantId, subscriptionRtId);
+
+        await _eventService.Received(1).StoreInformationEventAsync(TenantId,
+            "Notification subscription 'Failed EDA processes' deployed.",
+            Arg.Is<RtEntityId?>(id => id!.Value.RtId == subscriptionRtId));
+    }
+
+    [Test]
+    public async Task UndeploySubscriptionAsync_RecordsTheUndeployInTheEventLog()
+    {
+        var subscriptionRtId = OctoObjectId.GenerateNewId();
+
+        await _service.UndeploySubscriptionAsync(TenantId, subscriptionRtId);
+
+        await _eventService.Received(1).StoreInformationEventAsync(TenantId,
+            "Notification subscription 'Failed EDA processes' undeployed.",
+            Arg.Is<RtEntityId?>(id => id!.Value.RtId == subscriptionRtId));
+    }
+
+    [Test]
+    public async Task UndeploySubscriptionAsync_ACancelThatFails_StillRecordsTheUndeploy()
+    {
+        var subscriptionRtId = OctoObjectId.GenerateNewId();
+        _notificationRepository.GetPreferenceRtIdsAsync(TenantId, subscriptionRtId).Returns([OctoObjectId.GenerateNewId()]);
+        _distributionEventHubService.CancelScheduledRecurringSendAsync(Arg.Any<string>(), Arg.Any<string>())
+            .Returns(Task.FromException(new InvalidOperationException("scheduler down")));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _service.UndeploySubscriptionAsync(TenantId, subscriptionRtId));
+
+        await _eventService.Received(1).StoreInformationEventAsync(TenantId,
+            "Notification subscription 'Failed EDA processes' undeployed.", Arg.Any<RtEntityId?>());
+    }
+
+    [Test]
+    [Arguments(null)]
+    [Arguments("  ")]
+    public async Task DeploySubscriptionAsync_WithoutAName_NamesTheSubscriptionByItsRtId(string? name)
+    {
+        var subscriptionRtId = OctoObjectId.GenerateNewId();
+        _notificationRepository.GetSubscriptionStateAsync(TenantId, subscriptionRtId)
+            .Returns(new NotificationSubscriptionState(false, name));
+
+        await _service.DeploySubscriptionAsync(TenantId, subscriptionRtId);
+
+        await _eventService.Received(1).StoreInformationEventAsync(TenantId,
+            $"Notification subscription '{subscriptionRtId}' deployed.", Arg.Any<RtEntityId?>());
+    }
+
+    [Test]
+    public async Task UndeploySubscriptionAsync_UnknownSubscription_RecordsNothing()
+    {
+        var subscriptionRtId = OctoObjectId.GenerateNewId();
+        _notificationRepository.GetSubscriptionStateAsync(TenantId, subscriptionRtId).Returns((NotificationSubscriptionState?)null);
+
+        await Assert.ThrowsAsync<NotificationScheduleServiceException>(() =>
+            _service.UndeploySubscriptionAsync(TenantId, subscriptionRtId));
+
+        await _eventService.DidNotReceive().StoreInformationEventAsync(Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<RtEntityId?>());
+    }
+
+    [Test]
     public async Task UndeploySubscriptionAsync_UnknownSubscription_IsNotFound()
     {
         var subscriptionRtId = OctoObjectId.GenerateNewId();
-        _notificationRepository.IsSubscriptionDeployedAsync(TenantId, subscriptionRtId).Returns((bool?)null);
+        _notificationRepository.GetSubscriptionStateAsync(TenantId, subscriptionRtId).Returns((NotificationSubscriptionState?)null);
 
         var exception = await Assert.ThrowsAsync<NotificationScheduleServiceException>(() =>
             _service.UndeploySubscriptionAsync(TenantId, subscriptionRtId));

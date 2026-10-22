@@ -203,15 +203,17 @@ public class NotificationRepositoryTests(CommunicationControllerFixture fixture)
     }
 
     [Fact]
-    public async Task IsSubscriptionDeployedAsync_TellsDeployedUndeployedAndUnknownApart()
+    public async Task GetSubscriptionStateAsync_TellsDeployedUndeployedAndUnknownApart_AndNamesTheSubscription()
     {
         var deployed = await CreateSubscriptionAsync(true);
         var undeployed = await CreateSubscriptionAsync(false);
         var repository = CreateRepository();
 
-        (await repository.IsSubscriptionDeployedAsync(fixture.TestTenantId, deployed)).Should().BeTrue();
-        (await repository.IsSubscriptionDeployedAsync(fixture.TestTenantId, undeployed)).Should().BeFalse();
-        (await repository.IsSubscriptionDeployedAsync(fixture.TestTenantId, OctoObjectId.GenerateNewId())).Should().BeNull();
+        (await repository.GetSubscriptionStateAsync(fixture.TestTenantId, deployed)).Should()
+            .Be(new NotificationSubscriptionState(true, $"subscription-{deployed}"));
+        (await repository.GetSubscriptionStateAsync(fixture.TestTenantId, undeployed)).Should()
+            .Be(new NotificationSubscriptionState(false, $"subscription-{undeployed}"));
+        (await repository.GetSubscriptionStateAsync(fixture.TestTenantId, OctoObjectId.GenerateNewId())).Should().BeNull();
     }
 
     [Fact]
