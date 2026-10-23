@@ -63,6 +63,9 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
 
     private const string RelabelSourceVersion = "3.40.0";
 
+    // The System the historic models were compiled against.
+    private const string PublishedSystemFullName = "System-2.5.0";
+
     // The published System.Bot-3.4.0 (classic, exact System pin; byte-identical to the file of the catalogs): the dependency
     // every historic 3.x System.Communication of these tests pins exactly.
     private const string PublishedSystemBot340 = "ck-system.bot-3.4.0.json";
@@ -397,7 +400,7 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
         // The historic 3.x models pin System.Bot EXACTLY to 3.4.0 (`System.Bot-[3.4.0]`). A tenant of that state holds
         // System.Bot-3.4.0, not the embedded version (3.5.0 since the range-retention re-pin, AB#6691), so the published
         // 3.4.0 is installed as the dependency - the tests are about historic tenant states and keep their exact pins.
-        var botJson = await ReadResourceAsync(PublishedSystemBot340);
+        var botJson = RepinSystem(await ReadResourceAsync(PublishedSystemBot340));
         var botResult = new OperationResult();
         var bot = await fixture.GetService<ICkJsonSerializer>()
             .DeserializeCompiledModelRootAsync(botJson, "ck-system.bot-3.4.0.json", botResult);
@@ -406,10 +409,10 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
         await tenantContext.ImportCkModelAsync(bot);
 
         // The published model of this version, or the published 3.40.0 re-labelled to it.
-        var json = PublishedModels.TryGetValue(version, out var published)
+        var json = RepinSystem(PublishedModels.TryGetValue(version, out var published)
             ? await ReadResourceAsync(published)
             : (await ReadResourceAsync(PublishedModels[RelabelSourceVersion]))
-                .Replace($"{ModelName}-{RelabelSourceVersion}", $"{ModelName}-{version}", StringComparison.Ordinal);
+                .Replace($"{ModelName}-{RelabelSourceVersion}", $"{ModelName}-{version}", StringComparison.Ordinal));
         var deserializeResult = new OperationResult();
         var model = await fixture.GetService<ICkJsonSerializer>()
             .DeserializeCompiledModelRootAsync(json, $"ck-system.communication-{version}.json", deserializeResult);
@@ -457,6 +460,16 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
         var entity = entities.Single(e => e.RtId == rtId);
         return entity.GetAttributeValueOrDefault(attributeName);
     }
+
+    /// <summary>
+    ///     The historic models were compiled against System 2.5.0 and pin it exactly (<c>System-2.5.0</c>), which the
+    ///     engine no longer sees once it embeds a newer System (AB#6929). The tests are about the System.Communication
+    ///     and System.Bot data migration, not about a particular System version, so the exact System pin and the
+    ///     element references into System are set to the System the tenant actually holds (the embedded one) - the
+    ///     element ids (<c>Entity-1</c>, <c>Name-1</c>, ...) are version-stable.
+    /// </summary>
+    private static string RepinSystem(string json) =>
+        json.Replace(PublishedSystemFullName, SystemCkIds.CkModelId.ToString(), StringComparison.Ordinal);
 
     private static async Task<string> ReadResourceAsync(string suffix)
     {
