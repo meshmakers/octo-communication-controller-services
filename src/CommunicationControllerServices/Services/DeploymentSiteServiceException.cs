@@ -122,6 +122,33 @@ internal class DeploymentSiteServiceException : Exception
             "Path identifies a secret override; keep exactly one entry per Path.");
     }
 
+    internal static Exception WorkloadResourceQuantityInvalid(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName, string attributeName, string value)
+    {
+        return new DeploymentSiteServiceException(
+            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': " +
+            $"{attributeName} '{value.Trim()}' is not a valid Kubernetes quantity. " +
+            "Use a number with an optional suffix, e.g. 500m or 0.5 for CPU, 512Mi or 1Gi for memory.");
+    }
+
+    internal static Exception WorkloadResourceRequestExceedsLimit(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName, string requestName, string requestValue, string limitName, string limitValue)
+    {
+        return new DeploymentSiteServiceException(
+            $"[{tenantId}] Cannot deploy workload '{workloadName ?? workloadRtId.ToString()}': " +
+            $"{requestName} {requestValue} exceeds {limitName} {limitValue}. " +
+            "Kubernetes rejects a pod whose request is above its limit; lower the request or raise the limit.");
+    }
+
+    internal static Exception AdapterPoolInheritedSizingSet(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName, IReadOnlyList<string> attributeNames)
+    {
+        return new DeploymentSiteServiceException(
+            $"[{tenantId}] Cannot deploy AdapterPool '{workloadName ?? workloadRtId.ToString()}': " +
+            $"{string.Join(", ", attributeNames)} must stay empty on a pool. A pool is sized per member; " +
+            "use PoolMemberCpuRequest, PoolMemberCpuLimit, PoolMemberMemoryRequest and PoolMemberMemoryLimit.");
+    }
+
     internal static Exception WorkloadTemplateUnknownPlaceholder(string tenantId, OctoObjectId workloadRtId,
         string? workloadName, string fieldName, string template, string unknownPlaceholder)
     {

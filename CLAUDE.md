@@ -807,6 +807,19 @@ unchanged `ValuesYaml` / `Values` for Adapter and Application) and integration
 `Repository/WorkloadResourceAttributesReapplyTests` (compiled ownership on all three kinds; Upsert with an
 omitted, empty and a different `MemoryRequest` keeps the operator's `512Mi`) against real MongoDB.
 
+**Typed sizing is validated at deploy (AB#7427).** Workload entities have no write hook (they are written
+through the asset repository), so `DeploymentSiteService.EnsureWorkloadIsHelmDeployableAsync` validates
+the four sizing attributes via `WorkloadResourceSettingsValidator` right after the leasing check and before
+any operator call: every non-blank value must be a Kubernetes quantity (`KubernetesQuantity`: `m`/`n`/`u`,
+`k`..`E`, `Ki`..`Ei`, decimal exponent, plain and decimal numbers; negative values and `512 MB` are
+rejected), and a request must not exceed its limit on the parsed values (`1024Mi` equals `1Gi`). An
+`AdapterPool` must leave all four empty and use `PoolMemberCpuRequest` … `PoolMemberMemoryLimit` (one
+sizing path per pool). A rejection throws a `DeploymentSiteServiceException` naming the attribute and the
+value and, best effort, writes `DeploymentState` Error + `LastDeploymentError` (Studio shows it at the
+field). Unit tests: `KubernetesQuantityTests`, `DeploymentSiteServiceTests/DeployWorkloadResourceValidationTests`.
+The AB#5838 memory-limit rule for `ExecuteCSharp` on leased adapters must read the *effective* memory limit
+(typed value, else explicit Helm value, else chart default).
+
 When adding a new attribute on `Adapter` / `Pool` / similar entities,
 decide at creation time: is the value driven by the blueprint author
 (configuration → leave `isRuntimeState` unset), or by services /
