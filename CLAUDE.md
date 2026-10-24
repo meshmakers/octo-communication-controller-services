@@ -800,8 +800,8 @@ overrides a typed setting) and was added now so the Feature needs one CK Minor o
 operators set the sizing on live tenants, so a blueprint re-apply must keep it — also against a seed that
 ships its own non-empty default (omitted / empty seed values are already guarded for seed-owned attributes
 since AB#6313, a *different non-empty* one is not). Additive Minor (ck-semver rule T1), no migration entry,
-existing workloads have all five empty. **This story is schema-only: the controller does not project the
-attributes into the Helm values yet**, so `DeployWorkload` renders exactly what it rendered on 4.9.0.
+existing workloads have all five empty. The attributes reach the Helm release since AB#7428 (see
+"Typed sizing reaches Helm" below); a workload that sets none of them renders exactly what it rendered on 4.9.0.
 Tests: unit `DeploymentSiteServiceTests/DeployWorkloadResourceAttributesTests` (schema on all three kinds,
 unchanged `ValuesYaml` / `Values` for Adapter and Application) and integration
 `Repository/WorkloadResourceAttributesReapplyTests` (compiled ownership on all three kinds; Upsert with an
@@ -819,6 +819,29 @@ value and, best effort, writes `DeploymentState` Error + `LastDeploymentError` (
 field). Unit tests: `KubernetesQuantityTests`, `DeploymentSiteServiceTests/DeployWorkloadResourceValidationTests`.
 The AB#5838 memory-limit rule for `ExecuteCSharp` on leased adapters must read the *effective* memory limit
 (typed value, else explicit Helm value, else chart default).
+
+**Typed sizing reaches Helm, explicit values win (AB#7428).** Precedence: **chart default < typed attributes
+< explicit `ValuesYaml` < explicit `Values[]`** (then the `replicaCount` pin of a pool, unchanged). It is
+built in the controller, in `WorkloadResourceOverrides.Apply`, called from
+`BuildWorkloadDeployedDtoAsync` — *not* in the operator: a new values layer would need a
+`WorkloadDeployedDto` change in `octo-sdk`, and edge clusters run older operators that would silently ignore
+it. Each non-blank typed value becomes one more `Values[]` entry (`CpuRequest` → `resources.requests.cpu`,
+`CpuLimit` → `resources.limits.cpu`, `MemoryRequest` → `resources.requests.memory`, `MemoryLimit` →
+`resources.limits.memory`), added **only if neither `Values[]` (path match case-insensitive, presence counts)
+nor `ValuesYaml` (a non-blank scalar at that key; invalid YAML counts as unset, helm reports it) already
+sets that path**; empty typed attributes add nothing, so the chart default stays. When an explicit value
+overrides a typed one (same quantity written differently, `1024Mi` vs `1Gi`, is not an override) the
+deploy writes `LastDeploymentWarning` — `MemoryRequest 512Mi is overridden by an explicit Helm value
+(ValuesYaml resources.requests.memory)`, several joined by `; ` — logs it as a warning and returns it:
+`IDeploymentSiteService.DeployWorkloadAsync` returns `Task<string?>`, `POST deploymentsite/workloads/deploy`
+answers `204` as before and `200 {"warning": "..."}` only when there is one (the SDK client accepts any
+success status). A conflict-free deploy clears the attribute; it is written only when the value changes
+(`ICommunicationRepository.SetWorkloadDeploymentWarningAsync`, best effort). Every path that builds the
+deploy DTO goes through it — manual deploy, `ReconcilePendingWorkloadsAsync` (`IsReconciliation`), the
+deploymentSite fan-out — so the typed values survive a controller restart and a pool re-registration. An
+`AdapterPool` is untouched: it keeps `PoolMember*` (`AppendAdapterPoolMemberOverrides`); merging both sets
+is a Major for CK v2 (AB#5584). Tests: `DeploymentSiteServiceTests/DeployWorkloadResourcePrecedenceTests`,
+`Controllers/PoolControllerDeployGateTests`.
 
 When adding a new attribute on `Adapter` / `Pool` / similar entities,
 decide at creation time: is the value driven by the blueprint author

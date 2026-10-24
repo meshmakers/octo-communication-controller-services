@@ -286,7 +286,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
     }
 
     /// <inheritdoc />
-    public async Task DeployWorkloadAsync(string tenantId, OctoObjectId workloadRtId,
+    public async Task<string?> DeployWorkloadAsync(string tenantId, OctoObjectId workloadRtId,
         bool isReconciliation = false)
     {
         Logger.Info("[{TenantId}] Deploying workload '{WorkloadRtId}'", tenantId, workloadRtId);
@@ -364,15 +364,19 @@ internal class DeploymentSiteService : IDeploymentSiteService
         }
 
         var deploymentSiteName = deploymentSite.Name ?? string.Empty;
-        var dto = await BuildWorkloadDeployedDtoAsync(tenantId, deploymentSite.RtId, deploymentSiteName, workload, isReconciliation);
-        if (dto == null)
+        var built = await BuildWorkloadDeployedDtoAsync(tenantId, deploymentSite.RtId, deploymentSiteName, workload, isReconciliation);
+        if (built == null)
         {
             // Should be unreachable after EnsureWorkloadIsHelmDeployableAsync, but
             // keep the fallback so the call can never silently no-op.
             throw DeploymentSiteServiceException.WorkloadMissingChartName(tenantId, workloadRtId, workload.Name);
         }
 
-        await _operatorConnectionManager.NotifyWorkloadDeployedAsync(dto);
+        await _operatorConnectionManager.NotifyWorkloadDeployedAsync(built.Dto);
+
+        // AB#7428: an explicit Helm value overrode a typed CPU/memory setting — say so on the entity
+        // (LastDeploymentWarning, cleared again by the next conflict-free deploy), in the log and to the caller.
+        await RecordDeploymentWarningAsync(tenantId, workload, built.Warning);
 
         // Set Pending immediately so a re-deploy is visible in the UI — e.g.
         // the user updates the chart version on a currently-Deployed adapter
@@ -387,6 +391,40 @@ internal class DeploymentSiteService : IDeploymentSiteService
             $"Workload '{workload.Name}' deploy requested.");
 
         await FanOutAdapterPoolMirrorsAsync(tenantId, workload);
+
+        return built.Warning;
+    }
+
+    /// <summary>
+    /// AB#7428: persists <paramref name="warning"/> as <c>LastDeploymentWarning</c> (null clears it) and logs a
+    /// warning. Writes only when the value changes, so a conflict-free deploy of an untouched workload costs
+    /// no extra write. Best effort: a deploy must not fail because the warning could not be stored.
+    /// </summary>
+    private async Task RecordDeploymentWarningAsync(string tenantId, RtDeployableWorkload workload, string? warning)
+    {
+        if (!string.IsNullOrEmpty(warning))
+        {
+            Logger.Warn("[{TenantId}] Workload '{WorkloadName}' ({WorkloadRtId}): {Warning}", tenantId,
+                workload.Name, workload.RtId, warning);
+        }
+
+        var current = string.IsNullOrEmpty(workload.LastDeploymentWarning) ? null : workload.LastDeploymentWarning;
+        var wanted = string.IsNullOrEmpty(warning) ? null : warning;
+        if (string.Equals(current, wanted, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        try
+        {
+            await _communicationRepository.SetWorkloadDeploymentWarningAsync(tenantId, workload, wanted);
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e,
+                "[{TenantId}] Could not store LastDeploymentWarning on workload '{WorkloadName}' ({WorkloadRtId})",
+                tenantId, workload.Name, workload.RtId);
+        }
     }
 
     public async Task ReconcilePendingWorkloadsAsync(string tenantId, OctoObjectId deploymentSiteRtId)
@@ -909,8 +947,8 @@ internal class DeploymentSiteService : IDeploymentSiteService
         {
             try
             {
-                var dto = await BuildWorkloadDeployedDtoAsync(tenantId, deploymentSiteRtId, deploymentSiteName, workload);
-                if (dto == null)
+                var built = await BuildWorkloadDeployedDtoAsync(tenantId, deploymentSiteRtId, deploymentSiteName, workload);
+                if (built == null)
                 {
                     Logger.Warn(
                         "[{TenantId}] Workload '{WorkloadName}' is incomplete — skipping deploy",
@@ -918,7 +956,8 @@ internal class DeploymentSiteService : IDeploymentSiteService
                     continue;
                 }
 
-                await _operatorConnectionManager.NotifyWorkloadDeployedAsync(dto);
+                await _operatorConnectionManager.NotifyWorkloadDeployedAsync(built.Dto);
+                await RecordDeploymentWarningAsync(tenantId, workload, built.Warning);
             }
             catch (Exception ex)
             {
@@ -962,7 +1001,9 @@ internal class DeploymentSiteService : IDeploymentSiteService
         }
     }
 
-    private async Task<WorkloadDeployedDto?> BuildWorkloadDeployedDtoAsync(string tenantId,
+    private sealed record BuiltWorkloadDto(WorkloadDeployedDto Dto, string? Warning);
+
+    private async Task<BuiltWorkloadDto?> BuildWorkloadDeployedDtoAsync(string tenantId,
         OctoObjectId deploymentSiteRtId, string deploymentSiteName, RtDeployableWorkload workload,
         bool isReconciliation = false)
     {
@@ -1001,7 +1042,13 @@ internal class DeploymentSiteService : IDeploymentSiteService
         overrides = await AppendPipelineServiceAccountOverridesAsync(tenantId, workload, overrides);
         overrides = AppendAdapterPoolMemberOverrides(tenantId, workload, overrides);
 
-        return new WorkloadDeployedDto
+        // AB#7428: chart default < typed CPU/memory attributes < explicit ValuesYaml / Values[].
+        // Built here, not in the operator: no new DTO field, so older (edge) operators keep working.
+        var resolvedValuesYaml = ResolveTemplate(workload.ValuesYaml, ctx) ?? string.Empty;
+        var resources = WorkloadResourceOverrides.Apply(workload, overrides, resolvedValuesYaml);
+        overrides = resources.Overrides;
+
+        var dto = new WorkloadDeployedDto
         {
             TenantId = tenantId,
             DeploymentSiteRtId = deploymentSiteRtId.ToString(),
@@ -1030,7 +1077,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
             IsReconciliation = isReconciliation,
             // Same template resolution as for non-secret ValueOverrides — already
             // validated by EnsureWorkloadIsHelmDeployableAsync.
-            ValuesYaml = ResolveTemplate(workload.ValuesYaml, ctx) ?? string.Empty,
+            ValuesYaml = resolvedValuesYaml,
             Values = overrides,
             // Lives on DeployableWorkload so both Adapter and Application can
             // opt in. Applications with a backend (e.g. energy-community,
@@ -1061,6 +1108,8 @@ internal class DeploymentSiteService : IDeploymentSiteService
             Hibernated = workload.LifecycleState is RtLifecycleStateEnum.Hibernated
                 or RtLifecycleStateEnum.Draining,
         };
+
+        return new BuiltWorkloadDto(dto, resources.Warning);
     }
 
     /// <summary>

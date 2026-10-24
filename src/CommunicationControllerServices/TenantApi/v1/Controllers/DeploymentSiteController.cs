@@ -169,6 +169,7 @@ public class DeploymentSiteController : ControllerBase
     [HttpPost("workloads/deploy")]
     [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(DeployWorkloadResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(OperationFailedErrorDto), StatusCodes.Status409Conflict)]
@@ -187,8 +188,11 @@ public class DeploymentSiteController : ControllerBase
 
         try
         {
-            await _deploymentSiteService.DeployWorkloadAsync(tenantId, workloadRtId);
-            return NoContent();
+            var warning = await _deploymentSiteService.DeployWorkloadAsync(tenantId, workloadRtId);
+
+            // AB#7428: 204 as before; 200 with the warning only when an explicit Helm value overrode a typed
+            // CPU/memory setting. Clients that accept any success status keep working.
+            return string.IsNullOrEmpty(warning) ? NoContent() : Ok(new DeployWorkloadResultDto(warning));
         }
         catch (DeploymentSiteServiceException e)
         {
@@ -277,3 +281,11 @@ public class DeploymentSiteController : ControllerBase
 /// </summary>
 /// <param name="Replicas">Effective member count.</param>
 public record AdapterPoolScaleResultDto(int Replicas);
+
+/// <summary>
+/// Result of a workload deploy that carries a warning (AB#7428): an explicit Helm value
+/// (<c>ValuesYaml</c> or <c>Values[]</c>) overrode a typed CPU/memory setting. The same text is stored in
+/// the workload's <c>LastDeploymentWarning</c>.
+/// </summary>
+/// <param name="Warning">The warning text.</param>
+public record DeployWorkloadResultDto(string Warning);
