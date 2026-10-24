@@ -852,7 +852,6 @@ field). Unit tests: `KubernetesQuantityTests`, `DeploymentSiteServiceTests/Deplo
 The AB#5838 memory-limit rule for `ExecuteCSharp` on leased adapters must read the *effective* memory limit
 (typed value, else explicit Helm value, else chart default).
 
-<<<<<<< HEAD
 **Typed sizing reaches Helm, explicit values win (AB#7428).** Precedence: **chart default < typed attributes
 < explicit `ValuesYaml` < explicit `Values[]`** (then the `replicaCount` pin of a pool, unchanged). It is
 built in the controller, in `WorkloadResourceOverrides.Apply`, called from
@@ -876,8 +875,29 @@ deploymentSite fan-out — so the typed values survive a controller restart and 
 is a Major for CK v2 (AB#5584). Tests: `DeploymentSiteServiceTests/DeployWorkloadResourcePrecedenceTests`,
 `Controllers/PoolControllerDeployGateTests`.
 
-=======
->>>>>>> origin/main
+**`DataPoint.ExternalId` is seed-owned again (4.11.0, AB#7446).** `ExternalId` carried `isRuntimeState: true` since
+AB#5187, which was meant for the `MappingTargets` RecordArray (`MappingTarget.ExternalId`). `DataPoint` is the record
+of seed-owned RecordArrays too - `Loxone/Control.States` and `SubControl.States` - and the export evaluates record
+**members** one by one (`RtEntityToTcDtoConverter` re-enters `ConvertAttributes` for each record), so every exported
+data point lost its `ExternalId`: its identity and a required member, the key the "Store Control States" pipeline
+matches States by (`ExportRtByDeepGraph` / `ExportRtByQuery` of a Control exported only `Name`). Now
+`ownership: SeedOwned`; `CurrentValue`, `LastUpdate` (live values) and `SourceIdentifier` stay runtime state, so the
+file still carries no live values. No side effect on `MappingTargets`: it is runtime state as a whole and is skipped
+as one unit by export and by re-apply (preservation inspects top-level type attributes only). MINOR
+(`ck-semver-rules`: "Attribute ownership changed"), `octo-ckc ValidateVersion` VALID against the published 4.10.0, no
+migration entry, no blueprint bump. The model is **not** published by the merge (AB#7432: run the CI pipeline with
+`publishSystemCkModels=true`). Dependents: `Loxone-5.4.0` and `System.Ai-4.6.0` are range-retaining
+(`System.Communication-[4.5,5.0)` / `[4.0,5.0)`; the `usedSurface` is a list of element ids, not content) and keep
+resolving; a *classic* exact-pin dependent would go `ResolveFailed` on any minor and has to be re-pinned. Data written
+by an older export (records without `ExternalId`) is accepted by an import without validation - the engine does not
+check required members of a record - so such a tenant needs a re-discovery. Tests: integration
+`Repository/DataPointExportOwnershipTests` (compiled ownership of the record members, the real converter over the real
+cache with a seed-owned DataPoint RecordArray, `MappingTargets` still dropped as a whole) and
+`Migrations/SystemCommunication411DependentsTests` (published 4.10.0 + Loxone 5.4.0 + System.Ai 4.6.0 + Basic 2.5.0
+byte for byte from the public catalog, then the build's 4.11.0: all stay `Available`; negative control: the same Loxone
+without its persisted ranges goes `ResolveFailed`). The export/import round trip of a record array with this ownership
+layout is `Jobs.IntegrationTests/DataPointRoundTripTests` in octo-bot-services.
+
 When adding a new attribute on `Adapter` / `Pool` / similar entities,
 decide at creation time: is the value driven by the blueprint author
 (configuration → leave `isRuntimeState` unset), or by services /

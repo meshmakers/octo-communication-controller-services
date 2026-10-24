@@ -346,13 +346,21 @@ attributes:
 # node writes back at runtime. Marked to match their already-runtime-state siblings
 # (CurrentValue / LastUpdate) — preservation acts on the enclosing entity attribute, so the
 # whole record must be classified the same way.
+# AB#7446 (4.11.0) — ExternalId is SeedOwned again. DataPoint is also the record of seed-owned
+# RecordArrays (Loxone Control.States / SubControl.States) and the export evaluates record
+# MEMBERS one by one, so a runtime-state ExternalId was dropped from every exported data point
+# although it is the data point's identity and a required member (the "Store Control States"
+# pipeline matches States by it). MappingTargets is runtime state as a whole and is skipped as
+# one unit by export and by re-apply, so this changes nothing there. SourceIdentifier stays
+# runtime state (MappingTarget only); CurrentValue / LastUpdate are live values and stay
+# runtime state, so they are still not exported.
 - id: SourceIdentifier
   valueType: String
   isRuntimeState: true
   description: Identifier of the source entity (e.g. Loxone Control UUID, MQTT device ID)
 - id: ExternalId
   valueType: String
-  isRuntimeState: true
+  ownership: SeedOwned
   description: External identifier of the data point (e.g. Loxone State UUID, MQTT Topic, OPC-UA NodeId, Modbus Register)
 - id: CurrentValue
   valueType: String
