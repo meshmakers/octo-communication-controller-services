@@ -158,6 +158,20 @@ internal class PipelineMethodHostTests
     }
 
     [Test]
+    public async Task AMethodWithASensitiveResultIsNeverAnnounced()
+    {
+        ArrangeCatalog(Method(sensitiveResult: true));
+        ArrangePipeline(MethodId);
+
+        await _host.ReconcileAsync(false);
+
+        await Assert.That(_announced).IsEmpty();
+        await Assert.That(_events).IsEmpty();
+        await Assert.That(_logger.All).Contains("sensitive-result-not-supported");
+        await _repository.DidNotReceiveWithAnyArgs().GetPipelineByWellKnownNameAsync(default!, default!);
+    }
+
+    [Test]
     public async Task StrictModeFailsTheStartupAndNamesEveryOffendingMethod()
     {
         StrictMode();
