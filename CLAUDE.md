@@ -67,7 +67,7 @@ runs pipelines but knows no methods, tenants' CK models or bus handler registry;
 | Class | Role |
 |---|---|
 | `PipelineMethodCatalog` | Reads the CK caches of the communication-enabled tenants (`IAdapterCache.GetEnabledTenantIds`): methods with `handler: pipeline`, and any method by qualified id. |
-| `PipelineMethodInvoker` | One call: contract version, deadline, tenant/method checks, refusal of sensitive parameters, parameter presence, pipeline lookup (`GetPipelineByWellKnownNameAsync`, must be `Deployed`), start, poll the execution until the deadline, map. Never throws for a failing request. |
+| `PipelineMethodInvoker` | One call: contract version, deadline, **caller token validation**, tenant/method checks, refusal of sensitive parameters, parameter presence, pipeline lookup (`GetPipelineByWellKnownNameAsync`, must be `Deployed`), start, poll the execution until the deadline, map. Never throws for a failing request. |
 | `PipelineMethodResultMapper` | Pure mapping execution status + `OutputData` to the envelope (see below). |
 | `PipelineMethodBusConsumer` | Bus shell: duplicate guard (possible duplicate delivery or repeated invocation id: `METHOD_OUTCOME_UNKNOWN`, not started again), never throws to the bus. |
 | `PipelineMethodHost` | Reconcile: for each pipeline method a shared command endpoint (`CkMethodQueueNames.For`, faults suppressed), `WaitUntilReadyAsync`, then `CkMethodHandlerAnnounced`; withdraws a method whose pipeline is gone, `CkMethodHandlerWithdrawn` on shutdown. |
@@ -86,10 +86,39 @@ tenants apart in the announcement.
 
 **Pipeline input** (JSON, the data root of the pipeline): `{"parameters": {...}, "target": {"ckTypeId", "rtId"},
 "method": {"id", "invocationId", "correlationId"}}`. The caller is not in the data: it is the verified principal of the
-execution (`ExecutePipelineCaller` with `SubjectId`, `TenantId`, `Name`, `Roles`) and the raw token is forwarded for
-delegation, as for the manual execute endpoint. Trust level is `Weak` (1): the gateway authenticated the caller, this
-host does not re-validate the token (a node that demands `Strong` refuses the run). Use `callerBinding:
-BindingRequired` on the trigger so that the pipeline never runs anonymously.
+execution (`ExecutePipelineCaller` with `SubjectId`, `TenantId`, `Roles`; no `Name`) and the raw token is forwarded for
+delegation, as for the manual execute endpoint. Use `callerBinding: BindingRequired` on the trigger so that the pipeline
+never runs anonymously.
+
+**The principal comes from the validated token, never from the `Caller` member (token validation).** The method queue is
+not authenticated per message: anyone who can publish a `CkMethodRequest` can put an administrator into its `Caller`
+member. `PipelineMethodInvoker` therefore validates `CallerAccessToken` before it looks at the method, the parameters or
+the pipeline, with the shared `ICkMethodCallerTokenValidator` of octo-common-services (package
+`Meshmakers.Octo.Services.Methods`, section `Methods:Token`): issuer, signature (keys from the identity JWKS), expiry
+(30 s skew), scope `octo_api`, and the tenant rule of `TenantAuthorizationMiddleware` (`tenant_id` equals the request tenant;
+a token without `sub` is a service token, needs `client_id`). Registered by `AddPipelineMethodHandler`
+(`AddCkMethodCallerTokenValidation`); `Methods:Token:Authority` defaults to `CommunicationController:AuthorityUrl`, the
+authority of this service's own HTTP API, so nothing has to be configured. The `ExecutePipelineCaller` is built from the
+validated principal only (`PipelineMethodInvoker.BuildCaller`): `SubjectId` = `sub`, or the `client_id` of a service token
+(client credentials), `Roles` from the token, `TenantId` the validated tenant, `TrustLevel` **`Strong` (2)**, like a bearer
+request of the HTTP API. `request.Caller` is never used for any decision.
+
+| Token | Answer | Pipeline started |
+|---|---|---|
+| none / empty | `METHOD_FORBIDDEN`, `reason=token-missing` | no |
+| expired (otherwise genuine) | `METHOD_FORBIDDEN`, `reason=token-expired` (retry with a fresh token) | no |
+| malformed, `alg: none`, foreign issuer or signature, no `octo_api`, service token without `client_id` | `METHOD_FORBIDDEN`, `reason=token-invalid` | no |
+| token of another tenant | `METHOD_FORBIDDEN`, `reason=tenant-not-allowed` | no |
+| signing keys cannot be loaded (identity unreachable) | `METHOD_HANDLER_FAILED` (the caller did nothing wrong) | no |
+| valid | the pipeline runs as the token subject | yes |
+
+The check runs first so a refused caller learns nothing about the methods of the tenant. Nothing from the token (value,
+claim, key id) or from the forged `Caller` reaches a log line or the answer; the log names method, invocation, tenant and
+the fixed reason. Callers have forwarded their token since AB#5126; jobs use client credentials. The manual execute
+endpoint is unchanged (it authenticates by the bearer scheme). Tests: `Methods/PipelineMethodCallerTokenTests` (real validator over
+a fake identity service and tokens signed with a throw-away key: one test per refusal asserting that
+`StartExecutePipelineAsync` is never called, subject of the token beats the forged `Caller`, service token = `client_id`, log
+capture), `Methods/PipelineMethodWiringTests`, integration `PipelineMethodHandlerTests`.
 
 **Pipeline output** (`SetPipelineExecutionResult@1` -> `OutputData`):
 

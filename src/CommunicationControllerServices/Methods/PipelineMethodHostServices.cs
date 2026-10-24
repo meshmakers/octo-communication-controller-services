@@ -1,7 +1,9 @@
 using Meshmakers.Octo.Common.DistributionEventHub.Consumers;
 using Meshmakers.Octo.Common.DistributionEventHub.Configuration;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Services.Infrastructure.Initialization;
+using Meshmakers.Octo.Services.Methods.Authorization;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
@@ -150,6 +152,18 @@ internal static class PipelineMethodServiceCollectionExtensions
         IConfiguration configuration)
     {
         services.Configure<PipelineMethodOptions>(configuration.GetSection(PipelineMethodOptions.SectionName));
+        // The forwarded caller token is re-validated here with the settings of the HTTP API of this service (shared
+        // helper of octo-common-services). Authority defaults to CommunicationController:AuthorityUrl;
+        // Methods:Token overrides it.
+        services.AddCkMethodCallerTokenValidation();
+        services.AddOptions<CkMethodTokenOptions>()
+            .Configure<IOptions<CommunicationControllerOptions>>((token, controller) =>
+            {
+                if (string.IsNullOrWhiteSpace(token.Authority) && string.IsNullOrWhiteSpace(token.MetadataAddress))
+                {
+                    token.Authority = controller.Value.AuthorityUrl;
+                }
+            });
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IPipelineMethodCatalog, PipelineMethodCatalog>();
         services.AddSingleton<PipelineMethodHandlerInstance>();

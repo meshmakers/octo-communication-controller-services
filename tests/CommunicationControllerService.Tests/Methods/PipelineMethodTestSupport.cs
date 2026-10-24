@@ -12,7 +12,15 @@ internal static class PipelineMethodTestSupport
     public const string TenantId = "tenant1";
     public const string MethodId = "Acme.Assets/Device.UpdateFirmware-1";
     public const string CkTypeId = "Acme.Assets/Device";
-    public const string Token = "eyJhbGciOiJSUzI1NiJ9.SECRET-TOKEN-PAYLOAD.signature";
+
+    /// <summary>The caller token kit all handler tests share: one key, one fake identity service.</summary>
+    public static readonly CallerTokenKit Kit = new();
+
+    /// <summary>A valid user token of <see cref="TenantId" /> (subject <see cref="CallerTokenKit.TokenSubject" />).</summary>
+    public static readonly string Token = Kit.Create();
+
+    /// <summary>Default of <c>Request(token:)</c>: the valid <see cref="Token" />.</summary>
+    public const string ValidToken = "<valid>";
 
     /// <summary>A pipeline-handled method with a boolean... integer result and one declared error.</summary>
     public static PipelineMethodDefinition Method(
@@ -46,7 +54,7 @@ internal static class PipelineMethodTestSupport
     }
 
     public static CkMethodRequest Request(string parametersJson = "{\"version\":\"1.2.3\"}", int deadlineSeconds = 5,
-        string? token = Token, Guid? invocationId = null, string methodId = MethodId) =>
+        string? token = ValidToken, Guid? invocationId = null, string methodId = MethodId) =>
         new(TenantId)
         {
             InvocationId = invocationId ?? Guid.NewGuid(),
@@ -55,7 +63,7 @@ internal static class PipelineMethodTestSupport
             TargetRtId = "65f0c0ffee0000000000dead",
             ParametersJson = parametersJson,
             DeadlineUtc = DateTime.UtcNow.AddSeconds(deadlineSeconds),
-            CallerAccessToken = token,
+            CallerAccessToken = token == ValidToken ? Token : token,
             Caller = new CkMethodCaller
             {
                 SubjectId = "user-42", TenantId = TenantId, Name = "Ada Admin", Roles = ["TenantAdmin"]

@@ -6,6 +6,8 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
+using Meshmakers.Octo.Services.Methods;
+using Meshmakers.Octo.Services.Methods.Authorization;
 using Microsoft.Extensions.Options;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Methods;
@@ -30,14 +32,16 @@ internal sealed class PipelineMethodInvoker(
     PipelineMethodHandlerInstance instance,
     IOptions<PipelineMethodOptions> options,
     TimeProvider timeProvider,
+    ICkMethodCallerTokenValidator tokenValidator,
     ILogger<PipelineMethodInvoker> logger) : IPipelineMethodInvoker
 {
     // CancellationTokenSource rejects delays above int.MaxValue ms (~24.8 days)
     private static readonly TimeSpan MaxCancellationDelay = TimeSpan.FromMilliseconds(int.MaxValue - 1);
 
-    // 1 = weak: the caller was authenticated by the gateway (the bus is internal), but this host does not
-    // re-validate the token. A node that delegates the caller's rights and demands strong trust refuses the run.
-    private const int CarriedCallerTrustLevel = 1;
+    // 2 = strong (CallerTrustLevel.Strong): the caller is built ONLY from the access token this host validated itself
+    // (issuer, signature, expiry, tenant, scope), like a bearer request of the HTTP API. The Caller member of the
+    // request (informational, unauthenticated) is never consulted.
+    private const int ValidatedCallerTrustLevel = 2;
 
     public async Task<CkMethodResponse> InvokeAsync(CkMethodRequest request,
         CancellationToken cancellationToken = default)
@@ -72,6 +76,29 @@ internal sealed class PipelineMethodInvoker(
                 "CK method {MethodId} invocation {InvocationId} tenant {TenantId} dropped: deadline {DeadlineUtc:O} already passed",
                 request.MethodId, request.InvocationId, request.TenantId, request.DeadlineUtc);
             return Timeout(request, null);
+        }
+
+        // 0. Who is calling? The bus is not authenticated per message: a request can be forged by anyone who can
+        // publish to the method queue. The forwarded token is the only proof; request.Caller is never used.
+        // Done before any lookup so a refused caller learns nothing about the methods of the tenant.
+        CkMethodPrincipal principal;
+        try
+        {
+            var validation = await tokenValidator.ValidateAsync(request, cancellationToken).ConfigureAwait(false);
+            if (validation.Principal is not { } validated)
+            {
+                return Forbidden(request, validation.Failure);
+            }
+
+            principal = validated;
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            // the identity keys cannot be loaded: the caller did nothing wrong. Logged without the token.
+            logger.LogError(e,
+                "CK method {MethodId} invocation {InvocationId} tenant {TenantId}: the caller token could not be validated",
+                request.MethodId, request.InvocationId, request.TenantId);
+            return HandlerFailed(request, correlationId);
         }
 
         // 1. The method must be a pipeline method of the tenant, and one the controller may run.
@@ -145,7 +172,7 @@ internal sealed class PipelineMethodInvoker(
             {
                 var trigger = serviceProvider.GetRequiredService<ITriggerManagementService>();
                 var execution = await trigger.StartExecutePipelineAsync(request.TenantId, pipeline.RtId,
-                        BuildPipelineInput(request), false, BuildCaller(request), request.CallerAccessToken)
+                        BuildPipelineInput(request), false, BuildCaller(request, principal), request.CallerAccessToken)
                     .WaitAsync(linked.Token).ConfigureAwait(false);
                 executionId = execution.Id.ToString();
             }
@@ -245,17 +272,30 @@ internal sealed class PipelineMethodInvoker(
         return input.ToJsonString();
     }
 
-    internal static ExecutePipelineCaller? BuildCaller(CkMethodRequest request) =>
-        request.Caller is null
-            ? null
-            : new ExecutePipelineCaller
-            {
-                SubjectId = request.Caller.SubjectId ?? request.Caller.ClientId,
-                TenantId = request.Caller.TenantId ?? request.TenantId,
-                Name = request.Caller.Name,
-                Roles = request.Caller.Roles,
-                TrustLevel = CarriedCallerTrustLevel
-            };
+    /// <summary>
+    ///     The caller of the pipeline, built from the validated token only. A service token (client credentials, no
+    ///     <c>sub</c>) runs as its <c>client_id</c> (<see cref="CkMethodPrincipal.Subject" />).
+    /// </summary>
+    internal static ExecutePipelineCaller BuildCaller(CkMethodRequest request, CkMethodPrincipal principal) =>
+        new()
+        {
+            SubjectId = principal.Subject,
+            TenantId = principal.TenantId ?? request.TenantId,
+            Roles = principal.Roles.ToArray(),
+            TrustLevel = ValidatedCallerTrustLevel
+        };
+
+    private CkMethodResponse Forbidden(CkMethodRequest request, CkMethodFailure? failure)
+    {
+        var reason = failure is not null && failure.Parameters.TryGetValue(CkMethodErrorParameters.Reason, out var r)
+            ? r
+            : CkMethodTokenReasons.TokenInvalid;
+        // reason, tenant and method only: never the token, a claim value or the (forged) Caller
+        logger.LogWarning(
+            "CK method {MethodId} invocation {InvocationId} tenant {TenantId} NOT executed: caller token refused ({Reason})",
+            request.MethodId, request.InvocationId, request.TenantId, reason);
+        return Failed(request, CkMethodErrorCodes.MethodForbidden, (CkMethodErrorParameters.Reason, reason));
+    }
 
     private CkMethodResponse? ValidateParameters(CkMethodRequest request, PipelineMethodDefinition method)
     {
