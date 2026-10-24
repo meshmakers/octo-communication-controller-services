@@ -344,6 +344,7 @@ internal class PipelineMethodInvokerTests
 
         await Assert.That(response.Error!.Code).IsEqualTo(CkMethodErrorCodes.MethodHandlerNotAvailable);
         await Assert.That(response.Error.Parameters["reason"]).IsEqualTo("pipeline-start-failed");
+        await Assert.That(_logger.All).DoesNotContain(Token);
         await Assert.That(_logger.All).DoesNotContain(CallerTokenKit.PayloadMarker);
     }
 
@@ -401,6 +402,7 @@ internal class PipelineMethodInvokerTests
 
         await _invoker.InvokeAsync(request);
 
+        await Assert.That(_logger.All).DoesNotContain(Token);
         await Assert.That(_logger.All).DoesNotContain(CallerTokenKit.PayloadMarker);
         await Assert.That(_logger.All).DoesNotContain("PARAMETER-VALUE-1234");
     }

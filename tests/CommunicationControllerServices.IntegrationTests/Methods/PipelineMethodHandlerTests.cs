@@ -318,7 +318,7 @@ public class PipelineMethodHandlerTests(CommunicationControllerFixture fixture)
             response.Error!.Code.Should().Be(CkMethodErrorCodes.MethodHandlerFailed);
             response.Error.Parameters["correlationId"].Should().Be(request.InvocationId.ToString());
             response.Error.Parameters.Values.Should().NotContain(v => v.Contains("boom"));
-            log.All.Should().Contain("boom").And.NotContain("integration-test-token-0123456789");
+            log.All.Should().Contain("boom").And.NotContain(request.CallerAccessToken!);
         }
         finally
         {
