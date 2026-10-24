@@ -1610,6 +1610,62 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
+    public async Task SetWorkloadDeploymentWarningAsync(string tenantId, RtDeployableWorkload workload,
+        string? warning)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            // Assigning null is an explicit clear on a partial update; an unassigned attribute stays as
+            // persisted (see DeployableStatusTracking). Only this one attribute is assigned.
+            OperationResult operationResult = new();
+            switch (workload)
+            {
+                case RtAdapter:
+                    await tenantRepository.ApplyChangesAsync(session,
+                        [EntityUpdateInfo<RtAdapter>.CreateUpdate(
+                            new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, workload.RtId),
+                            new RtAdapter { LastDeploymentWarning = warning })], operationResult);
+                    break;
+                case RtApplication:
+                    await tenantRepository.ApplyChangesAsync(session,
+                        [EntityUpdateInfo<RtApplication>.CreateUpdate(
+                            new RtEntityId(SystemCommunicationCkIds.RtCkApplicationTypeId, workload.RtId),
+                            new RtApplication { LastDeploymentWarning = warning })], operationResult);
+                    break;
+                case RtAdapterPool:
+                    await tenantRepository.ApplyChangesAsync(session,
+                        [EntityUpdateInfo<RtAdapterPool>.CreateUpdate(
+                            new RtEntityId(SystemCommunicationCkIds.RtCkAdapterPoolTypeId, workload.RtId),
+                            new RtAdapterPool { LastDeploymentWarning = warning })], operationResult);
+                    break;
+                default:
+                    throw new InvalidOperationException(
+                        $"Unsupported workload type '{workload.GetType().Name}' for LastDeploymentWarning");
+            }
+
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedSetWorkloadDeploymentWarning(tenantId, workload.RtId, e);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task SetAdapterPoolDeploymentStateAsync(string tenantId, RtEntityId adapterPoolRtEntityId,
         RtDeploymentStateEnum deploymentState, string? stateMessage = null)
     {

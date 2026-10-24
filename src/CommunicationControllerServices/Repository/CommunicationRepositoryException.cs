@@ -186,6 +186,13 @@ internal class CommunicationRepositoryException : Exception
             exception);
     }
 
+    internal static Exception CommonFailedSetWorkloadDeploymentWarning(string tenantId, OctoObjectId workloadRtId,
+        Exception exception)
+    {
+        return new CommunicationRepositoryException(
+            $"[{tenantId}] Failed to set LastDeploymentWarning of workload '{workloadRtId}'", exception);
+    }
+
     internal static Exception CommonFailedSetAdapterPoolDeploymentState(string tenantId,
         IEnumerable<RtEntityId> adapterPoolRtEntityIds, RtDeploymentStateEnum state, Exception exception)
     {

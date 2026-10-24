@@ -509,6 +509,15 @@ public interface ICommunicationRepository
         RtDeploymentStateEnum deploymentState, string? stateMessage = null);
 
     /// <summary>
+    /// Writes (or, with <c>null</c>, clears) <c>LastDeploymentWarning</c> of a deployable workload
+    /// (Adapter, Application or AdapterPool; AB#7428). Touches nothing else.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <param name="workload">The workload whose warning is written; its concrete type selects the entity type</param>
+    /// <param name="warning">The warning text, or <c>null</c> to clear it</param>
+    Task SetWorkloadDeploymentWarningAsync(string tenantId, RtDeployableWorkload workload, string? warning);
+
+    /// <summary>
     /// Gets the pool of a communication adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>

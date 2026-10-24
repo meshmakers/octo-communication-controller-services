@@ -72,6 +72,32 @@ internal class PoolControllerDeployGateTests
     }
 
     [Test]
+    public async Task DeployWorkload_ReturnsOkWithTheWarning_WhenAnExplicitHelmValueOverridesATypedSetting()
+    {
+        // AB#7428: the caller sees the same text that is stored in LastDeploymentWarning.
+        var (sut, pools, _) = CreateSut(enabled: true);
+        const string warning = "MemoryRequest 512Mi is overridden by an explicit Helm value (ValuesYaml resources.requests.memory)";
+        pools.DeployWorkloadAsync(TenantId, RtId).Returns(warning);
+
+        var result = await sut.DeployWorkloadAsync(RtId);
+
+        var ok = result as OkObjectResult;
+        await Assert.That(ok).IsNotNull();
+        await Assert.That((ok!.Value as DeployWorkloadResultDto)!.Warning).IsEqualTo(warning);
+    }
+
+    [Test]
+    public async Task DeployWorkload_ReturnsNoContent_WhenThereIsNoWarning()
+    {
+        var (sut, pools, _) = CreateSut(enabled: true);
+        pools.DeployWorkloadAsync(TenantId, RtId).Returns((string?)null);
+
+        var result = await sut.DeployWorkloadAsync(RtId);
+
+        await Assert.That(result).IsTypeOf<NoContentResult>();
+    }
+
+    [Test]
     public async Task UndeployPoolAndWorkload_StayOpen_WhenCommunicationIsDisabled()
     {
         var (sut, pools, configuration) = CreateSut(enabled: false);

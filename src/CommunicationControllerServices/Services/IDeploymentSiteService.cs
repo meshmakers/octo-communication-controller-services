@@ -70,7 +70,11 @@ public interface IDeploymentSiteService
     /// operator on the deploy DTO and keeps a workload with an empty ChartVersion on the chart it
     /// already has installed, rather than resolving "newest in the repository" again (AB#4955).
     /// </param>
-    Task DeployWorkloadAsync(string tenantId, OctoObjectId workloadRtId, bool isReconciliation = false);
+    /// <returns>
+    /// The deploy warning (AB#7428) — an explicit Helm value overrode a typed CPU/memory setting — or
+    /// <c>null</c> when nothing was overridden. The same text is stored in <c>LastDeploymentWarning</c>.
+    /// </returns>
+    Task<string?> DeployWorkloadAsync(string tenantId, OctoObjectId workloadRtId, bool isReconciliation = false);
 
     /// <summary>
     /// Undeploys a single workload (Adapter or Application).
