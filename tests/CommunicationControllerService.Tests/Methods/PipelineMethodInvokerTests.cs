@@ -42,7 +42,7 @@ internal class PipelineMethodInvokerTests
         _instance = new PipelineMethodHandlerInstance(options, TimeProvider.System);
         var services = new ServiceCollection().AddSingleton(_trigger).BuildServiceProvider();
         _invoker = new PipelineMethodInvoker(_catalog, _repository, services, _instance, options,
-            TimeProvider.System, _logger);
+            TimeProvider.System, Kit.Validator, _logger);
 
         _catalog.IsTenantEnabled(TenantId).Returns(true);
         ArrangeMethod(Method());
@@ -133,11 +133,14 @@ internal class PipelineMethodInvokerTests
 
         await Assert.That(tenant).IsEqualTo(TenantId);
         await Assert.That(pipelineId).IsEqualTo(_pipeline.RtId);
-        await Assert.That(caller!.SubjectId).IsEqualTo("user-42");
-        await Assert.That(caller.Name).IsEqualTo("Ada Admin");
-        await Assert.That(caller.Roles).Contains("TenantAdmin");
-        // not re-verified here: weak, never the strong trust of a verified bearer
-        await Assert.That(caller.TrustLevel).IsEqualTo(1);
+        // the identity of the validated token, not the forged Caller member of the request (user-42, TenantAdmin)
+        await Assert.That(caller!.SubjectId).IsEqualTo(CallerTokenKit.TokenSubject);
+        await Assert.That(caller.TenantId).IsEqualTo(TenantId);
+        await Assert.That(caller.Name).IsNull();
+        await Assert.That(caller.Roles).Contains("Reporting");
+        await Assert.That(caller.Roles).DoesNotContain("TenantAdmin");
+        // validated here, like a bearer request of the HTTP API: strong
+        await Assert.That(caller.TrustLevel).IsEqualTo(2);
         await Assert.That(token).IsEqualTo(Token);
     }
 
@@ -341,7 +344,7 @@ internal class PipelineMethodInvokerTests
 
         await Assert.That(response.Error!.Code).IsEqualTo(CkMethodErrorCodes.MethodHandlerNotAvailable);
         await Assert.That(response.Error.Parameters["reason"]).IsEqualTo("pipeline-start-failed");
-        await Assert.That(_logger.All).DoesNotContain("SECRET-TOKEN-PAYLOAD");
+        await Assert.That(_logger.All).DoesNotContain(CallerTokenKit.PayloadMarker);
     }
 
     [Test]
@@ -398,7 +401,7 @@ internal class PipelineMethodInvokerTests
 
         await _invoker.InvokeAsync(request);
 
-        await Assert.That(_logger.All).DoesNotContain("SECRET-TOKEN-PAYLOAD");
+        await Assert.That(_logger.All).DoesNotContain(CallerTokenKit.PayloadMarker);
         await Assert.That(_logger.All).DoesNotContain("PARAMETER-VALUE-1234");
     }
 }

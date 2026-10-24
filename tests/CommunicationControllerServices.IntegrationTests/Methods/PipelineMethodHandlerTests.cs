@@ -15,6 +15,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
+using Meshmakers.Octo.Services.Methods.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -85,7 +86,7 @@ public class PipelineMethodHandlerTests(CommunicationControllerFixture fixture)
         var services = new ServiceCollection().AddSingleton<ITriggerManagementService>(trigger).BuildServiceProvider();
         return new PipelineMethodInvoker(catalog, fixture.GetService<ICommunicationRepository>(),
             services, new PipelineMethodHandlerInstance(options, TimeProvider.System), options,
-            TimeProvider.System, log);
+            TimeProvider.System, TokenValidator, log);
     }
 
     private sealed class CapturingLog : ILogger<PipelineMethodInvoker>
@@ -138,6 +139,37 @@ public class PipelineMethodHandlerTests(CommunicationControllerFixture fixture)
             Execution = new CkMethodExecutionDto { TimeoutSeconds = timeoutSeconds, Handler = CkMethodHandlers.Pipeline }
         });
 
+    /// <summary>
+    ///     The real caller token validator in its test configuration (<c>DisableValidation</c>, allowed in Development only):
+    ///     issuer and signature are not checked, scope and tenant rules still apply. The refusal cases with real signatures
+    ///     are in the unit tests (<c>PipelineMethodCallerTokenTests</c>); there is no identity service here.
+    /// </summary>
+    private static readonly ICkMethodCallerTokenValidator TokenValidator = new ServiceCollection()
+        .AddLogging()
+        .AddSingleton(DevelopmentEnvironment())
+        .AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build())
+        .AddCkMethodCallerTokenValidation(o => o.DisableValidation = true)
+        .BuildServiceProvider()
+        .GetRequiredService<ICkMethodCallerTokenValidator>();
+
+    private static Microsoft.Extensions.Hosting.IHostEnvironment DevelopmentEnvironment()
+    {
+        var environment = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        environment.EnvironmentName.Returns(Microsoft.Extensions.Hosting.Environments.Development);
+        return environment;
+    }
+
+    /// <summary>An unsigned token with the claims of a user of <paramref name="tenantId" />.</summary>
+    private static string CallerToken(string tenantId)
+    {
+        static string B64(string json) =>
+            Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(json)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+        return B64("{\"alg\":\"none\"}") + "." +
+               B64($"{{\"sub\":\"token-subject\",\"client_id\":\"studio\",\"tenant_id\":\"{tenantId}\"," +
+                   "\"scope\":\"octo_api\",\"role\":[\"Reporting\"]}") + ".";
+    }
+
     private static CkMethodRequest Request(string methodId, string tenantId, int deadlineSeconds = 10) =>
         new(tenantId)
         {
@@ -147,7 +179,7 @@ public class PipelineMethodHandlerTests(CommunicationControllerFixture fixture)
             TargetRtId = OctoObjectId.GenerateNewId().ToString(),
             ParametersJson = "{\"version\":\"1.2.3\"}",
             DeadlineUtc = DateTime.UtcNow.AddSeconds(deadlineSeconds),
-            CallerAccessToken = "integration-test-token-0123456789",
+            CallerAccessToken = CallerToken(tenantId),
             Caller = new CkMethodCaller { SubjectId = "user-42", TenantId = tenantId, Roles = ["TenantAdmin"] }
         };
 
@@ -212,11 +244,36 @@ public class PipelineMethodHandlerTests(CommunicationControllerFixture fixture)
             // the real controller-to-adapter command carried the invoker and the method input
             var received = scenario.ReceivedRequest!;
             received.TenantId.Should().Be(fixture.TestTenantId);
-            received.Caller!.SubjectId.Should().Be("user-42");
-            received.Caller.Roles.Should().Contain("TenantAdmin");
-            received.CallerAccessToken.Should().Be("integration-test-token-0123456789");
+            // the caller is the validated token's, not the Caller member of the request (user-42, TenantAdmin)
+            received.Caller!.SubjectId.Should().Be("token-subject");
+            received.Caller.Roles.Should().Contain("Reporting").And.NotContain("TenantAdmin");
+            received.Caller.TrustLevel.Should().Be(2);
+            received.CallerAccessToken.Should().Be(request.CallerAccessToken);
             received.IsDryRun.Should().BeFalse();
             received.PipelineInput.Should().Contain("\"version\":\"1.2.3\"").And.Contain(request.TargetRtId!);
+        }
+        finally
+        {
+            await CleanupAsync(scenario);
+        }
+    }
+
+    [Fact]
+    public async Task AForgedCallerWithoutAValidToken_IsForbidden_AndTheAdapterIsNeverAsked()
+    {
+        var scenario = await CreateScenarioAsync();
+        try
+        {
+            ArrangeAdapter(scenario, RtPipelineExecutionStatusEnum.Completed, "{\"value\": 7}");
+            var invoker = CreateInvoker(scenario.Method, out _);
+            var request = Request(scenario.MethodId, fixture.TestTenantId) with { CallerAccessToken = null };
+
+            var response = await invoker.InvokeAsync(request, TestContext.Current.CancellationToken);
+
+            response.Success.Should().BeFalse();
+            response.Error!.Code.Should().Be(CkMethodErrorCodes.MethodForbidden);
+            response.Error.Parameters["reason"].Should().Be(CkMethodTokenReasons.TokenMissing);
+            scenario.StartCount.Should().Be(0);
         }
         finally
         {

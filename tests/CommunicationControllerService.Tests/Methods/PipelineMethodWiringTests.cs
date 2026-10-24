@@ -4,6 +4,7 @@ using Meshmakers.Octo.Services.Infrastructure.Initialization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Methods;
 
@@ -62,6 +63,32 @@ internal class PipelineMethodWiringTests
         await Assert.That(configured.Enabled).IsFalse();
         await Assert.That(configured.FailStartupOnInvalidMethod).IsTrue();
         await Assert.That(configured.HeartbeatInterval).IsEqualTo(TimeSpan.FromSeconds(5));
+    }
+
+    [Test]
+    public async Task TheCallerTokenValidatorUsesTheAuthorityOfTheHttpApi_UnlessMethodsTokenSaysOtherwise()
+    {
+        static ServiceProvider Build(Dictionary<string, string?> settings) => new ServiceCollection()
+            .AddLogging()
+            .AddSingleton(Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>())
+            .Configure<Meshmakers.Octo.Backend.CommunicationControllerServices.Options.CommunicationControllerOptions>(
+                o => o.AuthorityUrl = "https://identity.example/")
+            .AddPipelineMethodHandler(new ConfigurationBuilder().AddInMemoryCollection(settings).Build())
+            .AddSingleton<IConfiguration>(new ConfigurationBuilder().AddInMemoryCollection(settings).Build())
+            .BuildServiceProvider();
+
+        using var byDefault = Build([]);
+        using var overridden = Build(new Dictionary<string, string?>
+        {
+            ["Methods:Token:Authority"] = "https://other-identity.example/"
+        });
+
+        await Assert.That(byDefault.GetRequiredService<IOptions<Meshmakers.Octo.Services.Methods.Authorization.CkMethodTokenOptions>>()
+            .Value.Authority).IsEqualTo("https://identity.example/");
+        await Assert.That(overridden.GetRequiredService<IOptions<Meshmakers.Octo.Services.Methods.Authorization.CkMethodTokenOptions>>()
+            .Value.Authority).IsEqualTo("https://other-identity.example/");
+        await Assert.That(byDefault.GetService<Meshmakers.Octo.Services.Methods.Authorization.ICkMethodCallerTokenValidator>())
+            .IsNotNull();
     }
 
     private static string RepositoryRoot([CallerFilePath] string sourceFile = "")
