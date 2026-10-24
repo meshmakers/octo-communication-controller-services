@@ -38,6 +38,22 @@ types:
     - id: ${this}/OnDemandBlockingReasons
       name: OnDemandBlockingReasons
       isOptional: true
+    # AB#7426: typed sizing + deployment warning. All optional runtime state (attributes/workloadResources.yaml).
+    - id: ${this}/CpuRequest
+      name: CpuRequest
+      isOptional: true
+    - id: ${this}/CpuLimit
+      name: CpuLimit
+      isOptional: true
+    - id: ${this}/MemoryRequest
+      name: MemoryRequest
+      isOptional: true
+    - id: ${this}/MemoryLimit
+      name: MemoryLimit
+      isOptional: true
+    - id: ${this}/LastDeploymentWarning
+      name: LastDeploymentWarning
+      isOptional: true
   associations:
     # Dedicated association role for the workload-to-Helm-repo link.
     # Reusing the generic "Uses" role would override the inverse usedBy view

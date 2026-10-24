@@ -1,0 +1,40 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+# AB#7426 (Feature AB#7417) — typed CPU / memory sizing on every deployable workload.
+#
+# Until now an operator that wanted to size an adapter, application or adapter pool had to write raw
+# Helm paths into ValuesYaml / Values. Those two attributes are runtime state, so they survive a
+# blueprint re-apply, but a path such as `resources.requests.memory` depends on the chart and is
+# invisible to Studio. These attributes make the sizing a typed, discoverable setting on
+# DeployableWorkload (inherited by Adapter, Application and AdapterPool).
+#
+# All five are RUNTIME STATE (isRuntimeState: true), deliberately unlike PoolMemberCpuRequest ...
+# PoolMemberMemoryLimit in adapterPool.yaml: those are the pool author's declaration and a blueprint
+# may correct them; these are set by operators on LIVE tenants after the install, and a blueprint seed
+# can only carry an empty skeleton. A re-apply must therefore keep what the operator chose
+# (same reasoning as AB#4706 for ValuesYaml / Values and AB#6312 for AdapterConfiguration).
+#
+# Values are Kubernetes quantity strings ("250m", "1", "512Mi", "1Gi"). A string rather than a number
+# because the quantity is a notation; re-deriving it from a number is how sizing bugs get introduced.
+# Absent means "the chart default applies", so existing workloads keep rendering exactly the Helm
+# values they rendered before this attribute set existed.
+attributes:
+- id: CpuRequest
+  valueType: String
+  isRuntimeState: true
+  description: 'Kubernetes CPU request of the workload, e.g. "250m" (AB#7426). Optional; absent means the chart default applies. Runtime state: set by operators on live tenants and preserved across blueprint re-apply.'
+- id: CpuLimit
+  valueType: String
+  isRuntimeState: true
+  description: 'Kubernetes CPU limit of the workload, e.g. "1" (AB#7426). Optional; absent means the chart default applies. Runtime state, see CpuRequest.'
+- id: MemoryRequest
+  valueType: String
+  isRuntimeState: true
+  description: 'Kubernetes memory request of the workload, e.g. "512Mi" (AB#7426). Optional; absent means the chart default applies. Runtime state, see CpuRequest.'
+- id: MemoryLimit
+  valueType: String
+  isRuntimeState: true
+  description: 'Kubernetes memory limit of the workload, e.g. "1Gi" (AB#7426). Optional; absent means the chart default applies. Runtime state, see CpuRequest.'
+- id: LastDeploymentWarning
+  valueType: String
+  isRuntimeState: true
+  description: 'Last non-fatal warning of a deployment (AB#7426), e.g. that an explicit Helm value overrides one of the typed resource settings. Written by the Communication Controller, never by an author; cleared when a deployment produces no warning. Unlike LastDeploymentError the deployment still happened.'

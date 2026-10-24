@@ -58,6 +58,12 @@ $schema: https://schemas.meshmakers.cloud/ck-migration-meta.schema.json
 # Adapter.AdapterConfiguration `ownership: Secret` (AB#6312) as it is — that attribute stays a String.
 # (The SECRET switch was first numbered 4.7.0 on its feature branch; main gave 4.7.0 to AB#6312, so the
 # switch took the next free minor.)
+#
+# 4.10.0 (AB#7426, Feature AB#7417) adds NO entry either (additive minor, schema-only bridge): five
+# optional isRuntimeState String attributes on DeployableWorkload (CpuRequest, CpuLimit, MemoryRequest,
+# MemoryLimit, LastDeploymentWarning), inherited by Adapter, Application and AdapterPool. Rule T1 of
+# ck-semver-rules (optional attribute added to a public type). No stored value changes: every existing
+# workload simply has the five attributes empty and renders the same Helm values as before.
 ckModelId: System.Communication-4.0.0
 migrations:
   - fromVersion: "3.0.1"
