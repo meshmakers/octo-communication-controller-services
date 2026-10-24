@@ -28,7 +28,8 @@ internal static class PipelineMethodTestSupport
         bool sensitiveParameter = false,
         string? handler = CkMethodHandlers.Pipeline,
         int timeoutSeconds = 5,
-        string methodId = MethodId)
+        string methodId = MethodId,
+        bool sensitiveResult = false)
     {
         var parameters = new List<CkMethodParameterDto>
         {
@@ -47,7 +48,7 @@ internal static class PipelineMethodTestSupport
         {
             MethodId = methodId[(methodId.LastIndexOf('.') + 1)..],
             Parameters = parameters,
-            Result = resultType is null ? null : new CkMethodResultDto { ValueType = resultType.Value },
+            Result = resultType is null ? null : new CkMethodResultDto { ValueType = resultType.Value, Sensitive = sensitiveResult },
             Errors = [new CkMethodErrorDto { Code = "FIRMWARE_LOCKED" }],
             Execution = new CkMethodExecutionDto { TimeoutSeconds = timeoutSeconds, Handler = handler }
         });
