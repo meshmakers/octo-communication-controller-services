@@ -775,6 +775,23 @@ the attribute, fresh adapter, compiled ownership) against real MongoDB. It drive
 above it (Update/Merge modes, preview) is covered by the engine stories and the test-2 verification.
 The long-term replacement is a dedicated configuration type with real `Secret` fields (AB#5360).
 
+**Typed workload sizing: `CpuRequest`, `CpuLimit`, `MemoryRequest`, `MemoryLimit`, `LastDeploymentWarning`
+(4.10.0, AB#7426, Feature AB#7417).** Five optional `String` attributes on the abstract `DeployableWorkload`
+(`attributes/workloadResources.yaml`), inherited by `Adapter`, `Application` and `AdapterPool`, all
+`isRuntimeState: true`. The four sizing attributes carry Kubernetes quantity strings (`250m`, `512Mi`);
+`LastDeploymentWarning` is written by the controller (a later story of the Feature: an explicit Helm value
+overrides a typed setting) and was added now so the Feature needs one CK Minor only. Runtime state, unlike
+`PoolMemberCpuRequest` … `PoolMemberMemoryLimit` (`isRuntimeState: false`, the pool author's declaration):
+operators set the sizing on live tenants, so a blueprint re-apply must keep it — also against a seed that
+ships its own non-empty default (omitted / empty seed values are already guarded for seed-owned attributes
+since AB#6313, a *different non-empty* one is not). Additive Minor (ck-semver rule T1), no migration entry,
+existing workloads have all five empty. **This story is schema-only: the controller does not project the
+attributes into the Helm values yet**, so `DeployWorkload` renders exactly what it rendered on 4.9.0.
+Tests: unit `DeploymentSiteServiceTests/DeployWorkloadResourceAttributesTests` (schema on all three kinds,
+unchanged `ValuesYaml` / `Values` for Adapter and Application) and integration
+`Repository/WorkloadResourceAttributesReapplyTests` (compiled ownership on all three kinds; Upsert with an
+omitted, empty and a different `MemoryRequest` keeps the operator's `512Mi`) against real MongoDB.
+
 When adding a new attribute on `Adapter` / `Pool` / similar entities,
 decide at creation time: is the value driven by the blueprint author
 (configuration → leave `isRuntimeState` unset), or by services /
