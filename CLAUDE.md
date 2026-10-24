@@ -820,6 +820,7 @@ field). Unit tests: `KubernetesQuantityTests`, `DeploymentSiteServiceTests/Deplo
 The AB#5838 memory-limit rule for `ExecuteCSharp` on leased adapters must read the *effective* memory limit
 (typed value, else explicit Helm value, else chart default).
 
+<<<<<<< HEAD
 **Typed sizing reaches Helm, explicit values win (AB#7428).** Precedence: **chart default < typed attributes
 < explicit `ValuesYaml` < explicit `Values[]`** (then the `replicaCount` pin of a pool, unchanged). It is
 built in the controller, in `WorkloadResourceOverrides.Apply`, called from
@@ -843,6 +844,8 @@ deploymentSite fan-out — so the typed values survive a controller restart and 
 is a Major for CK v2 (AB#5584). Tests: `DeploymentSiteServiceTests/DeployWorkloadResourcePrecedenceTests`,
 `Controllers/PoolControllerDeployGateTests`.
 
+=======
+>>>>>>> origin/main
 When adding a new attribute on `Adapter` / `Pool` / similar entities,
 decide at creation time: is the value driven by the blueprint author
 (configuration → leave `isRuntimeState` unset), or by services /
