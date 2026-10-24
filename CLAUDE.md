@@ -67,7 +67,7 @@ runs pipelines but knows no methods, tenants' CK models or bus handler registry;
 | Class | Role |
 |---|---|
 | `PipelineMethodCatalog` | Reads the CK caches of the communication-enabled tenants (`IAdapterCache.GetEnabledTenantIds`): methods with `handler: pipeline`, and any method by qualified id. |
-| `PipelineMethodInvoker` | One call: contract version, deadline, **caller token validation**, tenant/method checks, refusal of sensitive parameters, parameter presence, pipeline lookup (`GetPipelineByWellKnownNameAsync`, must be `Deployed`), start, poll the execution until the deadline, map. Never throws for a failing request. |
+| `PipelineMethodInvoker` | One call: contract version, deadline, **caller token validation**, tenant/method checks, refusal of sensitive parameters and of a sensitive result, parameter presence, pipeline lookup (`GetPipelineByWellKnownNameAsync`, must be `Deployed`), start, poll the execution until the deadline, map. Never throws for a failing request. |
 | `PipelineMethodResultMapper` | Pure mapping execution status + `OutputData` to the envelope (see below). |
 | `PipelineMethodBusConsumer` | Bus shell: duplicate guard (possible duplicate delivery or repeated invocation id: `METHOD_OUTCOME_UNKNOWN`, not started again), never throws to the bus. |
 | `PipelineMethodHost` | Reconcile: for each pipeline method a shared command endpoint (`CkMethodQueueNames.For`, faults suppressed), `WaitUntilReadyAsync`, then `CkMethodHandlerAnnounced`; withdraws a method whose pipeline is gone, `CkMethodHandlerWithdrawn` on shutdown. |
@@ -132,15 +132,18 @@ capture), `Methods/PipelineMethodWiringTests`, integration `PipelineMethodHandle
 | not final before the deadline | Running / Queued / not yet written | `METHOD_TIMEOUT`; the pipeline may still finish (not cancelled) |
 | the pipeline cannot be started (adapter offline, caller binding refused) | none | `METHOD_HANDLER_NOT_AVAILABLE`, `reason=pipeline-start-failed` |
 
-**Sensitive parameters are refused.** A method with a parameter `sensitive: true` (or of value type `Secret`) is **not
-served by a pipeline** until the retention of pipeline input and output is decided (open decisions OD-3, OD-4, OD-9,
-`methodConsistency.md`): the execution entity stores `InputData` and `OutputData`. Such a method is not announced, an
-ERROR names method, tenant and parameter names (never values) once per change, and a call is answered
-`METHOD_HANDLER_NOT_AVAILABLE` with `reason=sensitive-parameters-not-supported` without reaching a pipeline. Lifting this
-needs the decisions, not a code switch.
+**Sensitive parameters and a sensitive result are refused.** A method with a parameter `sensitive: true` (or of value type
+`Secret`), or with a result marked `sensitive: true`, is **not served by a pipeline** until the retention of pipeline input and
+output is decided (open decisions OD-3, OD-4, OD-9, `methodConsistency.md`): the execution entity stores `InputData` and
+`OutputData`. Such a method is not announced, an ERROR names method, tenant and parameter names (never values; for a result only
+the word "result") once per change, and a call is answered `METHOD_HANDLER_NOT_AVAILABLE` with
+`reason=sensitive-parameters-not-supported` (a sensitive parameter, checked first) or `reason=sensitive-result-not-supported`
+(a sensitive result, additive token, wire contract rule 1) without reaching a pipeline. The compiler already refuses
+`handler: pipeline` together with a sensitive result (rule 134); the refusal in `PipelineMethodDefinition.RefusalReason` is the
+second gate for a hand-crafted or older definition. Lifting this needs the decisions, not a code switch.
 
 **Startup.** By default a pipeline method that cannot be served (no deployed pipeline of that name, sensitive
-parameters) is logged as ERROR and re-checked on every heartbeat; a misconfigured tenant never takes the controller
+parameters or result) is logged as ERROR and re-checked on every heartbeat; a misconfigured tenant never takes the controller
 down. `PipelineMethods:FailStartupOnInvalidMethod=true` (`OCTO_PIPELINEMETHODS__FAILSTARTUPONINVALIDMETHOD`) makes the
 startup throw with a message that names every offending method (the check at startup only).
 

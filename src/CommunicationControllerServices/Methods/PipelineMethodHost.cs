@@ -172,7 +172,9 @@ internal sealed class PipelineMethodHost(
     {
         if (method.RefusalReason is { } refusal)
         {
-            return $"{refusal} (parameters: {string.Join(", ", method.SensitiveParameters)})";
+            return method.SensitiveParameters.Count > 0
+                ? $"{refusal} (parameters: {string.Join(", ", method.SensitiveParameters)})"
+                : $"{refusal} (the result is sensitive)";
         }
 
         try

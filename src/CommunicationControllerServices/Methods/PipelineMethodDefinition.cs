@@ -34,24 +34,45 @@ internal sealed record PipelineMethodDefinition(string TenantId, string MethodId
         .Select(p => p.Name)
         .ToList();
 
+    /// <summary>
+    ///     True when the method's result is marked <c>sensitive</c> (CK v2 Phase 3). The compiler already refuses
+    ///     <c>handler: pipeline</c> together with a sensitive result (message 134); this is the second gate for a
+    ///     hand-crafted or older definition.
+    /// </summary>
+    public bool HasSensitiveResult => Definition.Result?.Sensitive == true;
+
     /// <summary>The error codes the method declares.</summary>
     public IReadOnlySet<string> DeclaredErrorCodes =>
         (Definition.Errors ?? []).Select(e => e.Code).ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
     ///     Why a pipeline must not implement this method yet, or <c>null</c> when it may. Methods with sensitive
-    ///     parameters are refused until the retention of pipeline input and output is decided (OD-3, OD-4, OD-9):
-    ///     the pipeline execution stores its input and output.
+    ///     parameters or a sensitive result are refused until the retention of pipeline input and output is decided
+    ///     (OD-3, OD-4, OD-9): the pipeline execution stores its input and output. Parameters are checked first, so the
+    ///     reason of a method that has both stays <see cref="PipelineMethodReasons.SensitiveParametersNotSupported" />.
     /// </summary>
-    public string? RefusalReason => SensitiveParameters.Count > 0
-        ? PipelineMethodReasons.SensitiveParametersNotSupported
-        : null;
+    public string? RefusalReason =>
+        SensitiveParameters.Count > 0
+            ? PipelineMethodReasons.SensitiveParametersNotSupported
+            : HasSensitiveResult
+                ? PipelineMethodReasons.SensitiveResultNotSupported
+                : null;
+
+    /// <summary>
+    ///     What makes <see cref="RefusalReason" /> apply, for the log and the refusal detail: names of parameters or the
+    ///     word "result", never a value.
+    /// </summary>
+    public string RefusalDetail =>
+        SensitiveParameters.Count > 0
+            ? $"the method has sensitive parameters ({string.Join(", ", SensitiveParameters)})"
+            : "the method has a sensitive result";
 }
 
 /// <summary>Short kebab-case <c>reason</c> tokens of the pipeline handler (wire contract, rule 1: new tokens are additive).</summary>
 internal static class PipelineMethodReasons
 {
     public const string SensitiveParametersNotSupported = "sensitive-parameters-not-supported";
+    public const string SensitiveResultNotSupported = "sensitive-result-not-supported";
     public const string PipelineNotDeployed = "pipeline-not-deployed";
     public const string PipelineStartFailed = "pipeline-start-failed";
     public const string MethodNotPipelineHandled = "method-not-pipeline-handled";

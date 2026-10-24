@@ -116,10 +116,9 @@ internal sealed class PipelineMethodInvoker(
 
         if (method.RefusalReason is { } refusal)
         {
-            // OD-3, OD-4, OD-9: a pipeline execution stores its input and output; sensitive parameters must not
-            // reach a pipeline until the retention is decided. Names of parameters only, never values.
-            return NotAvailable(request, refusal,
-                $"the method has sensitive parameters ({string.Join(", ", method.SensitiveParameters)})");
+            // OD-3, OD-4, OD-9: a pipeline execution stores its input and output; sensitive parameters and a sensitive
+            // result must not reach a pipeline until the retention is decided. Names of parameters only, never values.
+            return NotAvailable(request, refusal, method.RefusalDetail);
         }
 
         if (ValidateParameters(request, method) is { } invalid)

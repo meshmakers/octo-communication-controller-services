@@ -259,6 +259,40 @@ internal class PipelineMethodInvokerTests
     }
 
     [Test]
+    public async Task AMethodWithASensitiveResultIsRefusedAndNeverReachesAPipeline()
+    {
+        // AB#7007: second gate behind compiler rule 134; the pipeline execution stores its output.
+        ArrangeMethod(Method(sensitiveResult: true));
+
+        var response = await _invoker.InvokeAsync(Request());
+
+        await Assert.That(response.Success).IsFalse();
+        await Assert.That(response.Error!.Code).IsEqualTo(CkMethodErrorCodes.MethodHandlerNotAvailable);
+        await Assert.That(response.Error.Parameters["reason"]).IsEqualTo("sensitive-result-not-supported");
+        await _trigger.DidNotReceiveWithAnyArgs().StartExecutePipelineAsync(default!, default!, default);
+        await _repository.DidNotReceiveWithAnyArgs().GetPipelineByWellKnownNameAsync(default!, default!);
+    }
+
+    [Test]
+    public async Task AMethodWithBothKeepsTheExistingSensitiveParameterToken()
+    {
+        ArrangeMethod(Method(sensitiveParameter: true, sensitiveResult: true));
+
+        var response = await _invoker.InvokeAsync(Request("{\"version\":\"1\",\"signingKey\":\"x\"}"));
+
+        await Assert.That(response.Error!.Parameters["reason"]).IsEqualTo("sensitive-parameters-not-supported");
+    }
+
+    [Test]
+    public async Task AResultThatIsNotSensitiveIsStillServed()
+    {
+        var definition = Method(sensitiveResult: false);
+
+        await Assert.That(definition.RefusalReason).IsNull();
+        await Assert.That(definition.HasSensitiveResult).IsFalse();
+    }
+
+    [Test]
     public async Task ASecretTypedParameterIsRefusedLikeASensitiveOne()
     {
         var method = Method();
