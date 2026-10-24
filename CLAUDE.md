@@ -619,6 +619,21 @@ Model definitions are in `src/SystemCommunicationCkModel/ConstructionKit/`:
 - `enums/` - enumeration definitions
 - `attributes/` - attribute definitions
 
+#### Publishing the CK model: explicit release decision (AB#7432)
+
+A merge to `main` does **not** publish `System.Communication` to the CK catalogs. The pipeline parameter
+`publishSystemCkModels` (boolean, **default false**; same name and semantics as AB#7343 in `octo-construction-kit-engine`)
+feeds `publishOnMain` of `validate-and-publish-ck-versions.yml` (`tpl-v1.8.0`). A main build still runs ValidateVersion, the
+schema compile and the cascade check, logs `CK publish on main is OFF (publishOnMain=false)` and publishes nothing. Reason: a new
+System* version breaks exact-pinned dependents on live tenants until they are re-pinned (2026-10-23: System-2.6.0 reached the
+catalog from an engine merge before the re-pin gate).
+
+**To publish explicitly** (needs the release decision of the platform owner): Azure DevOps -> pipeline
+`octo-communication-controller-services-CI` -> *Run pipeline* -> branch `main` -> tick *Publish System CK models to the CK
+catalogs (main)*; CLI: `az pipelines run --name octo-communication-controller-services-CI --branch main --parameters publishSystemCkModels=true`.
+`r*` tags (release train) publish as before; `dev/*`/`test/*` builds never publish to the shared catalogs. A merge that bumps the
+model therefore leaves the version unpublished until that run; repos that need it must wait for it.
+
 ### Service-Managed Blueprints (System.Communication.*)
 
 `SystemCommunicationCkModel` ships two embedded blueprints that seed a tenant with a
