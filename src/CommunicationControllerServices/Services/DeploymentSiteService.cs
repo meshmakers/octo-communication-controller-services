@@ -454,20 +454,20 @@ internal class DeploymentSiteService : IDeploymentSiteService
     }
 
     private async Task SetWorkloadDeploymentStateAsync(string tenantId, RtDeployableWorkload workload,
-        RtDeploymentStateEnum deploymentState)
+        RtDeploymentStateEnum deploymentState, string? stateMessage = null)
     {
         switch (workload)
         {
             case RtAdapter:
                 {
                     var rtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, workload.RtId);
-                    await _communicationRepository.SetAdapterDeploymentStateAsync(tenantId, rtEntityId, deploymentState);
+                    await _communicationRepository.SetAdapterDeploymentStateAsync(tenantId, rtEntityId, deploymentState, stateMessage);
                     break;
                 }
             case RtApplication:
                 {
                     var rtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkApplicationTypeId, workload.RtId);
-                    await _communicationRepository.SetApplicationDeploymentStateAsync(tenantId, rtEntityId, deploymentState);
+                    await _communicationRepository.SetApplicationDeploymentStateAsync(tenantId, rtEntityId, deploymentState, stateMessage);
                     break;
                 }
             // AB#4924: without this arm a deploymentSite's deploy left DeploymentState at its default, so the
@@ -477,7 +477,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
                 {
                     var rtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkAdapterPoolTypeId, workload.RtId);
                     await _communicationRepository.SetAdapterPoolDeploymentStateAsync(tenantId, rtEntityId,
-                        deploymentState);
+                        deploymentState, stateMessage);
                     break;
                 }
             default:
@@ -512,6 +512,9 @@ internal class DeploymentSiteService : IDeploymentSiteService
         // A pipeline whose trigger can never produce a lease could therefore be attached to a leased
         // adapter without a word, and simply never run.
         await EnsureLeasingConfigurationIsValidAsync(tenantId, workload);
+
+        // AB#7427: invalid typed CPU/memory settings fail here, before anything reaches Helm.
+        await EnsureResourceSettingsAreValidAsync(tenantId, workload);
 
         if (string.IsNullOrWhiteSpace(workload.ChartName))
         {
@@ -652,6 +655,36 @@ internal class DeploymentSiteService : IDeploymentSiteService
         //
         // Phase 2 does the opposite on this path: DeployWorkloadAsync PROVISIONS the adapter's
         // service account (best effort, after the deploy notification) rather than gating on it.
+    }
+
+    /// <summary>
+    /// AB#7427: validates the typed sizing attributes and, when they are invalid, records the reason on the
+    /// workload (<c>DeploymentState</c> Error + <c>LastDeploymentError</c>) so the operator sees it at the
+    /// field in Studio, then rethrows. The write is best effort: it must not hide the validation error.
+    /// </summary>
+    private async Task EnsureResourceSettingsAreValidAsync(string tenantId, RtDeployableWorkload workload)
+    {
+        try
+        {
+            WorkloadResourceSettingsValidator.Validate(tenantId, workload);
+        }
+        catch (DeploymentSiteServiceException e)
+        {
+            Logger.Warn("[{TenantId}] Workload '{WorkloadName}' ({WorkloadRtId}) rejected: {Reason}", tenantId,
+                workload.Name, workload.RtId, e.Message);
+            try
+            {
+                await SetWorkloadDeploymentStateAsync(tenantId, workload, RtDeploymentStateEnum.Error, e.Message);
+            }
+            catch (Exception writeFailure)
+            {
+                Logger.Warn(writeFailure,
+                    "[{TenantId}] Could not record the rejection on workload '{WorkloadName}' ({WorkloadRtId})",
+                    tenantId, workload.Name, workload.RtId);
+            }
+
+            throw;
+        }
     }
 
     /// <inheritdoc />
