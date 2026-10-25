@@ -57,6 +57,17 @@ internal interface IExecutionLeaseClaimStore
     Task<bool> HasLeaseClaimAsync(string tenantId, string leaseId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    ///     Marks the claim of a seal as requeued, atomically and only once: succeeds (true) only for the caller that finds
+    ///     the record <c>{tenant}/{claimId}</c> naming exactly this <paramref name="leaseId" /> and this
+    ///     <paramref name="executionRtId" /> and not yet marked, and sets <c>requeuedAtUtc</c> (server time). Only that
+    ///     caller may re-seal and enqueue the retry (AB#7476): it binds a requeue to the execution whose seal is being
+    ///     re-sealed (not to "some claim of this lease") and makes a reaper and a release that race for the same lease
+    ///     produce one retry, not two. Throws when the store cannot be reached (the caller fails closed).
+    /// </summary>
+    Task<bool> TryMarkRequeuedAsync(string tenantId, string claimId, string leaseId, OctoObjectId executionRtId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     ///     Gives a claim back. Only for a claim whose lease was provably NOT delivered or started (the admission gate
     ///     declined or threw while the execution is still queued); never after the execution started running.
     /// </summary>

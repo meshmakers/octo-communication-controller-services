@@ -1313,6 +1313,21 @@ internal class LeaseService : ILeaseService
         return await InterruptAndEnqueueAsync(lease, interruptReason, reason, keepQueuePosition: false);
     }
 
+    /// <summary>Fails closed: an unreachable store means "not marked", so nothing is re-sealed.</summary>
+    private async Task<bool> TryMarkRequeuedAsync(LeaseDto lease, string claimId, OctoObjectId executionRtId)
+    {
+        try
+        {
+            return await _claimStore.TryMarkRequeuedAsync(lease.TenantId, claimId, lease.LeaseId, executionRtId);
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e, "[{TenantId}] Could not mark the single-use claim of lease '{LeaseId}' as requeued",
+                lease.TenantId, lease.LeaseId);
+            return false;
+        }
+    }
+
     /// <summary>
     ///     AB#7476 — whether the lease is the one a single-use claim was taken for. Fails closed: a store that cannot be
     ///     reached means "not bound", so nothing is re-sealed; the stuck-execution reaper then fails the item.
@@ -1373,6 +1388,28 @@ internal class LeaseService : ILeaseService
             if (interrupted is null)
             {
                 return null;
+            }
+
+            // 🔴 AB#7476 — bind the requeue to THIS execution's seal and make it happen once. The lease-bound check
+            // above only proves that the lease took SOME claim; a lease rebuilt from member-supplied ids could name
+            // another execution. So the seal about to be re-sealed is opened, and only the caller that can mark ITS
+            // claim record (naming this lease id and this execution) as requeued, atomically and only once, may re-seal
+            // and enqueue. Everything before this point only interrupted the attempt (terminal); a failed check leaves
+            // it interrupted and creates no retry (fail closed). A value that does not open at all cannot be re-sealed
+            // and yields a retry without provenance, which is refused at its own grant as before.
+            var opened = QueuedCaller.Open(interrupted.SealedCaller, lease.TenantId, interrupted.ExecutionRtId,
+                _envelope);
+            if (opened is not null)
+            {
+                if (string.IsNullOrEmpty(opened.ClaimId) || !await TryMarkRequeuedAsync(lease, opened.ClaimId,
+                        interrupted.ExecutionRtId))
+                {
+                    Logger.Warn(
+                        "[{BorrowerTenantId}] Execution '{ExecutionId}' of lease '{LeaseId}' is not re-queued: its " +
+                        "single-use claim is not bound to this lease and execution, or was already re-queued",
+                        lease.TenantId, lease.ExecutionId, lease.LeaseId);
+                    return null;
+                }
             }
 
             var retryExecutionId = Guid.NewGuid().ToString();

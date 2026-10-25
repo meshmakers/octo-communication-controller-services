@@ -3379,6 +3379,15 @@ with its original marker. The seal therefore needs a single use that no generic 
   requeues anything: otherwise "reset a used execution, lease it by hand, let the lease expire" would launder the claim
   through a re-seal under a fresh identity. `TryInterruptLeasedExecutionAsync` additionally never interrupts a `Queued`
   execution (no lease is behind it). A store that cannot be reached means "not bound" (nothing is re-sealed).
+- **Requeue bound to the execution, once (N1).** "Some claim of this lease exists" is not enough: a lease rebuilt from
+  member-supplied ids (`ResolveUnheldReleaseAsync`, resume) could name another execution. After the interrupt, the seal
+  about to be re-sealed is opened and its `ClaimId` must satisfy
+  `IExecutionLeaseClaimStore.TryMarkRequeuedAsync(tenant, claimId, leaseId, executionRtId)`: an atomic
+  `findOneAndUpdate` on `{tenant}/{claimId}` with the filter `leaseId == lease.LeaseId`, `executionRtId == that
+  execution` and `requeuedAtUtc` absent, which sets `requeuedAtUtc = $$NOW`. Only the caller that sets it may `Reseal` and
+  enqueue; the reaper and a refused/lost release racing for one lease therefore produce exactly one retry. The order fails
+  closed: the attempt is already `Interrupted` (terminal) when the check runs, and a failed check creates no retry. A
+  value that does not open at all yields a retry without provenance, which is refused at its own grant.
 - **Store unreachable.** Fail closed: no lease, refusal `AdmissionGateFailed`, WARN, the execution stays queued.
 - **Re-queue.** `QueuedCaller.Reseal` seals the retry with a NEW `ClaimId` and a new `IssuedAtUtc`; the old identity is
   never copied. The retry is leasable once, and exists only for a lease-bound requeue (below).
@@ -3400,7 +3409,9 @@ Adopting such a value would mean accepting a seal that can never be claimed, whi
 closes. The retry of an interrupted pre-upgrade attempt is sealed anew by `Reseal` and is fine.
 
 **Rollout.** The train already requires the leasing sequence of AB#7473: (1) leasing kill switch off, (2) let queued
-leased items drain or cancel them (any still queued are failed at the first round of the new controller), (3) roll all
+leased items drain or cancel them (any still queued are failed at the first round of the new controller) **and let the
+in-flight leases granted by old controller pods finish or cancel them: they have no claim record, so after the roll they
+are not requeued when they expire or are lost, and the stuck-execution reaper fails them after about 30 minutes**, (3) roll all
 controller instances (an old instance ignores `ClaimId` and would lease a replayed seal), (4) leasing back on. No data
 migration, no new setting needed (`QueuedSealMaxAgeDays` defaults to 30). The controller needs its admin database
 credential (`OctoSystemConfiguration.AdminUser` / `AdminUserPassword`), as the engine's system context already does; it

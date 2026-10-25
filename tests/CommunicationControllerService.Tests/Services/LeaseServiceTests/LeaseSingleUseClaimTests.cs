@@ -30,11 +30,11 @@ internal class LeaseSingleUseClaimTests : LeaseServiceTestsBase
     };
 
     private (RtPipelineExecution Execution, LeaseRequest Request) AQueuedWork(
-        ExecutePipelineMethodInvocation? marker = null, DateTime? sealedAt = null)
+        ExecutePipelineMethodInvocation? marker = null, DateTime? sealedAt = null, string executionId = ExecutionId)
     {
         var execution = new RtPipelineExecution
         {
-            RtId = OctoObjectId.GenerateNewId(), ExecutionId = ExecutionId,
+            RtId = OctoObjectId.GenerateNewId(), ExecutionId = executionId,
             Status = RtPipelineExecutionStatusEnum.Queued
         };
         QueuedCaller.Apply(execution, BorrowerTenantId, PipelineRtId, BorrowerAdapterRtId,
@@ -44,7 +44,7 @@ internal class LeaseSingleUseClaimTests : LeaseServiceTestsBase
     }
 
     private LeaseRequest WorkRequestFor(RtPipelineExecution execution) =>
-        new(BorrowerTenantId, BorrowerAdapterRtId, ExecutionId, null, PipelineRtId, null, execution.RtId,
+        new(BorrowerTenantId, BorrowerAdapterRtId, execution.ExecutionId, null, PipelineRtId, null, execution.RtId,
             execution.SealedCaller);
 
     private int PushedLeases() => MemberProxy.ReceivedCalls()
@@ -371,6 +371,80 @@ internal class LeaseSingleUseClaimTests : LeaseServiceTestsBase
         using var _ = Assert.Multiple();
         await Assert.That(requeued).IsNotNull();
         await Assert.That(retry!.ClaimId).IsNotEqualTo(original!.ClaimId);
+    }
+
+    // ---- N1: the requeue is bound to the execution whose seal is re-sealed, and happens once ----------------------
+
+    /// <summary>
+    ///     A lease rebuilt from member-supplied ids names a claimed lease id of its own AND the id of another execution
+    ///     that is Running: the seal of that other execution belongs to a different claim, so nothing is re-sealed.
+    /// </summary>
+    [Test]
+    public async Task ALeaseIdOfOneClaim_NamingAnotherRunningExecution_RequeuesNothing()
+    {
+        ClaimStore.LenientLeaseBinding = false;
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+        var (_, requestA) = AQueuedWork(executionId: "exec-a");
+        var (other, requestB) = AQueuedWork(executionId: "exec-b");
+        var grantA = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, requestA);
+        var leaseA = CapturePushedLease();
+        ConnectionManager.ReleaseLease(ConnectionId, grantA.LeaseId!);
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, requestB); // claim of B under lease B
+        CommunicationRepository.TryInterruptLeasedExecutionAsync(BorrowerTenantId, "exec-b", Arg.Any<DateTime>(),
+            Arg.Any<string>()).Returns(AnInterrupted(other));
+
+        // what ResolveUnheldReleaseAsync could rebuild: lease A's id, execution B
+        var rebuilt = leaseA with { ExecutionId = "exec-b" };
+        var requeued = await LeaseService.InterruptAndRequeueAsync(rebuilt, LeaseInterruptReason.MemberLost, "lost");
+
+        using var _ = Assert.Multiple();
+        await Assert.That(requeued).IsNull();
+        await CommunicationRepository.DidNotReceiveWithAnyArgs().EnqueueExecutionAsync(default!, default!, default,
+            default, default);
+    }
+
+    /// <summary>The reaper and a refused release both reach the same legitimate lease: one retry, not two.</summary>
+    [Test]
+    public async Task AReapAndARefusedRelease_OfTheSameLease_EnqueueExactlyOneRetry()
+    {
+        ClaimStore.LenientLeaseBinding = false;
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+        var (execution, request) = AQueuedWork();
+        CommunicationRepository.TryInterruptLeasedExecutionAsync(BorrowerTenantId, ExecutionId, Arg.Any<DateTime>(),
+            Arg.Any<string>()).Returns(AnInterrupted(execution));
+        var granted = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, request);
+        var lease = CapturePushedLease();
+
+        var reaped = await LeaseService.InterruptAndRequeueAsync(lease, LeaseInterruptReason.TtlExpiry, "expired");
+        await LeaseService.ReleaseLeaseAsync(ConnectionId, ARefusal(granted.LeaseId!));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(reaped).IsNotNull();
+        await Assert.That(CommunicationRepository.ReceivedCalls().Count(c =>
+            c.GetMethodInfo().Name == nameof(ICommunicationRepository.EnqueueExecutionAsync))).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task TwoParallelRequeuesOfTheSameLease_EnqueueExactlyOneRetry()
+    {
+        ClaimStore.LenientLeaseBinding = false;
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+        var (execution, request) = AQueuedWork();
+        CommunicationRepository.TryInterruptLeasedExecutionAsync(BorrowerTenantId, ExecutionId, Arg.Any<DateTime>(),
+            Arg.Any<string>()).Returns(AnInterrupted(execution));
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, request);
+        var lease = CapturePushedLease();
+
+        var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+            LeaseService.InterruptAndRequeueAsync(lease, LeaseInterruptReason.TtlExpiry, "expired"))));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(results.Count(r => r is not null)).IsEqualTo(1);
+        await Assert.That(CommunicationRepository.ReceivedCalls().Count(c =>
+            c.GetMethodInfo().Name == nameof(ICommunicationRepository.EnqueueExecutionAsync))).IsEqualTo(1);
     }
 
     /// <summary>Without the claim record a seal cannot be proven unused: no lease, the item stays queued.</summary>

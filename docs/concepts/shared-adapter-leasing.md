@@ -269,8 +269,11 @@ the member. A retry after an interrupted lease copies both from the interrupted 
 > (otherwise a reset execution could be laundered through a hand-driven lease that expires). The age of a claim is measured
 > on the MongoDB server clock. Claim records are deleted by a TTL index after `QueuedSealMaxAgeDays` (default 30) plus one day; a seal
 > older than `QueuedSealMaxAgeDays` is refused, so deleting a record never revives an old seal. Items queued before the
-> upgrade carry no identity and are failed (no migration). Rollout: same sequence as AB#7473 (leasing kill switch off,
-> drain or cancel queued leased items, roll **all** controller instances, leasing back on); no setting is required.
+> upgrade carry no identity and are failed (no migration). A requeue is bound to the execution whose seal is re-sealed
+> and happens once (reaper and release racing for one lease yield one retry). Rollout: same sequence as AB#7473 (leasing
+> kill switch off, drain or cancel queued leased items **and in-flight leases granted by old controller pods - they have
+> no claim record, are not requeued after the roll and are failed by the stuck-execution reaper after about 30 minutes**,
+> roll **all** controller instances, leasing back on); no setting is required.
 > See the controller `CLAUDE.md`, section "A sealed execution is leased at most once".
 
 The member applies them through `LeaseCallerCarryThrough`, the lease twin of

@@ -119,4 +119,32 @@ public class ExecutionLeaseClaimStoreTests(CommunicationControllerFixture fixtur
         (await admin.ListCollectionNamesAsync(tenantContext.DatabaseName)).Should()
             .NotContain(ExecutionLeaseClaimStore.CollectionName);
     }
+
+    /// <summary>
+    ///     AB#7476 N1 — the requeue mark is bound to the lease AND the execution of the claim and happens once, also
+    ///     across concurrent callers.
+    /// </summary>
+    [Fact]
+    public async Task TheRequeueMark_NeedsTheRightLeaseAndExecution_AndHappensOnce()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var claimId = NewClaimId();
+        var execution = OctoObjectId.GenerateNewId();
+        await Store.TryClaimAsync(fixture.TestTenantId, claimId, "lease-1", execution, TimeSpan.FromDays(1), ct);
+
+        (await Store.TryMarkRequeuedAsync(fixture.TestTenantId, claimId, "lease-OTHER", execution, ct)).Should().BeFalse();
+        (await Store.TryMarkRequeuedAsync(fixture.TestTenantId, claimId, "lease-1", OctoObjectId.GenerateNewId(), ct))
+            .Should().BeFalse();
+        (await Store.TryMarkRequeuedAsync(fixture.TestTenantId, "no-such-claim", "lease-1", execution, ct)).Should().BeFalse();
+
+        var marks = await Task.WhenAll(Enumerable.Range(0, 16).Select(_ => Task.Run(() =>
+            Store.TryMarkRequeuedAsync(fixture.TestTenantId, claimId, "lease-1", execution, ct))));
+        marks.Count(m => m).Should().Be(1);
+        (await Store.TryMarkRequeuedAsync(fixture.TestTenantId, claimId, "lease-1", execution, ct)).Should().BeFalse();
+
+        var collection = await Store.GetCollectionForTestsAsync();
+        var document = await collection.Find(new BsonDocument("_id", ExecutionLeaseClaimStore.KeyOf(
+            fixture.TestTenantId, claimId))).FirstAsync(ct);
+        document.Contains("requeuedAtUtc").Should().BeTrue();
+    }
 }

@@ -129,6 +129,25 @@ internal sealed class ExecutionLeaseClaimStore : IExecutionLeaseClaimStore, IDis
     private static BsonDocument IfNull(string field, BsonValue value) =>
         new("$ifNull", new BsonArray { "$" + field, value });
 
+    public async Task<bool> TryMarkRequeuedAsync(string tenantId, string claimId, string leaseId,
+        OctoObjectId executionRtId, CancellationToken cancellationToken = default)
+    {
+        var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+        var filter = new BsonDocument
+        {
+            { "_id", KeyOf(tenantId, claimId) },
+            { "leaseId", leaseId },
+            { "executionRtId", executionRtId.ToString() },
+            { "requeuedAtUtc", new BsonDocument("$exists", false) }
+        };
+        var stage = new BsonDocument("$set", new BsonDocument("requeuedAtUtc", "$$NOW"));
+        var matched = await collection.FindOneAndUpdateAsync(filter,
+            Builders<BsonDocument>.Update.Pipeline(new BsonDocumentStagePipelineDefinition<BsonDocument, BsonDocument>(
+                [stage])),
+            new FindOneAndUpdateOptions<BsonDocument> { IsUpsert = false }, cancellationToken).ConfigureAwait(false);
+        return matched is not null;
+    }
+
     public async Task<bool> HasLeaseClaimAsync(string tenantId, string leaseId,
         CancellationToken cancellationToken = default)
     {

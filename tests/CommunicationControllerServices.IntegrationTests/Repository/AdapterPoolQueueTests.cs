@@ -1322,6 +1322,66 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
         }
     }
 
+    /// <summary>
+    ///     🔴 AB#7476 N1 — a lease rebuilt from member-supplied ids (a claimed lease id of its own plus the id of another
+    ///     Running execution) requeues nothing, and the reaper and a release racing for one legitimate lease produce
+    ///     exactly one retry.
+    /// </summary>
+    [Fact]
+    public async Task TheRequeueIsBoundToTheSealOfItsOwnExecution_AndHappensOnce()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var data = new TestData();
+
+        try
+        {
+            var (pipeline, adapter) = await CreateWorkAsync(data);
+            var a = await EnqueueWithSealedCallerAsync(data, pipeline, adapter, token: null);
+            var b = await EnqueueWithSealedCallerAsync(data, pipeline, adapter, subject: "user-43", token: null);
+
+            await WithLeasingEnabledAsync(async () =>
+            {
+                var connectionManager = new AdapterPoolConnectionManager();
+                connectionManager.RegisterMember("conn-a", "member-a", fixture.TestTenantId, PoolRtId);
+                connectionManager.RegisterMember("conn-b", "member-b", fixture.TestTenantId, PoolRtId);
+                var proxy = Substitute.For<ISingleClientProxy>();
+                var service = CreateLeaseServiceForReplay(connectionManager, proxy, adapter);
+                var pool = new OctoObjectId(PoolRtId);
+
+                Func<LeaseDto, PoolMemberConnection, CancellationToken, Task<bool>> GateFor(RtPipelineExecution e) =>
+                    (lease, member, _) => repository.TryClaimQueuedExecutionAsync(fixture.TestTenantId, e.ExecutionId!,
+                        new LeaseClaim(lease.LeaseId, fixture.TestTenantId, PoolRtId, member.MemberId, DateTime.UtcNow,
+                            e.RtId));
+
+                LeaseDto LastLease() => (LeaseDto)((object?[])proxy.ReceivedCalls().Last(c =>
+                    c.GetMethodInfo().Name == nameof(IClientProxy.SendCoreAsync)).GetArguments()[1]!)[0]!;
+
+                (await service.GrantLeaseAsync(fixture.TestTenantId, pool, RequestFor(await QueuedAsync(adapter, a),
+                    adapter), TestContext.Current.CancellationToken, GateFor(a))).Granted.Should().BeTrue();
+                var leaseA = LastLease();
+                (await service.GrantLeaseAsync(fixture.TestTenantId, pool, RequestFor(await QueuedAsync(adapter, b),
+                    adapter), TestContext.Current.CancellationToken, GateFor(b))).Granted.Should().BeTrue();
+
+                // lease A's id, execution B (Running on its own lease): nothing is re-sealed
+                var rebuilt = leaseA with { ExecutionId = b.ExecutionId! };
+                (await service.InterruptAndRequeueAsync(rebuilt, LeaseInterruptReason.MemberLost, "lost")).Should().BeNull();
+                (await CountEntitiesWithExecutionIdAsync(b.ExecutionId!)).Should().Be(1);
+
+                // the legitimate lease A is reached by the reaper and by a release at the same time: one retry
+                var results = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => Task.Run(() =>
+                    service.InterruptAndRequeueAsync(leaseA, LeaseInterruptReason.TtlExpiry, "expired"))));
+                var retries = results.Where(r => r is not null).ToList();
+                retries.Should().HaveCount(1);
+                var retry = await repository.GetPipelineExecutionAsync(fixture.TestTenantId, retries[0]!);
+                data.Executions.Add(new RtEntityId(SystemCommunicationCkIds.RtCkPipelineExecutionTypeId, retry!.RtId));
+            });
+        }
+        finally
+        {
+            await CleanupAsync(data);
+        }
+    }
+
     private sealed class TestData
     {
         public List<RtEntityId> Pipelines { get; } = new();

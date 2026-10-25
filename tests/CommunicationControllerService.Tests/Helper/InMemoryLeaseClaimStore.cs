@@ -10,7 +10,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 /// </summary>
 internal sealed class InMemoryLeaseClaimStore : IExecutionLeaseClaimStore
 {
-    private readonly ConcurrentDictionary<string, (DateTime ClaimedAt, string LeaseId, string TenantId)> _claims =
+    private readonly ConcurrentDictionary<string, (DateTime ClaimedAt, string LeaseId, string TenantId, OctoObjectId ExecutionRtId)> _claims =
         new(StringComparer.Ordinal);
 
     /// <summary>Makes the next <see cref="TryClaimAsync" /> throw (an unreachable store).</summary>
@@ -34,7 +34,7 @@ internal sealed class InMemoryLeaseClaimStore : IExecutionLeaseClaimStore
         }
 
         var key = $"{tenantId}/{claimId}";
-        return Task.FromResult(_claims.TryAdd(key, (DateTime.UtcNow, leaseId, tenantId))
+        return Task.FromResult(_claims.TryAdd(key, (DateTime.UtcNow, leaseId, tenantId, executionRtId))
             ? new LeaseClaimResult(LeaseClaimOutcome.Claimed)
             : new LeaseClaimResult(LeaseClaimOutcome.AlreadyClaimed, DateTime.UtcNow - _claims[key].ClaimedAt));
     }
@@ -50,6 +50,31 @@ internal sealed class InMemoryLeaseClaimStore : IExecutionLeaseClaimStore
                                _claims.Values.Any(c => c.TenantId == tenantId && c.LeaseId == leaseId));
     }
 
+    private readonly ConcurrentDictionary<string, bool> _requeued = new(StringComparer.Ordinal);
+
+    /// <summary>Number of claims marked as requeued.</summary>
+    public int RequeuedCount => _requeued.Count;
+
+    public Task<bool> TryMarkRequeuedAsync(string tenantId, string claimId, string leaseId, OctoObjectId executionRtId,
+        CancellationToken cancellationToken = default)
+    {
+        if (Unavailable)
+        {
+            throw new InvalidOperationException("claim store unavailable");
+        }
+
+        var key = $"{tenantId}/{claimId}";
+        if (_claims.TryGetValue(key, out var claim))
+        {
+            // same rule as the MongoDB filter: this lease, this execution, not yet marked
+            return Task.FromResult(claim.LeaseId == leaseId && claim.ExecutionRtId == executionRtId &&
+                                   _requeued.TryAdd(key, true));
+        }
+
+        // lenient: the many tests that arrange a leased execution by hand have no claim record; still once per seal
+        return Task.FromResult(LenientLeaseBinding && _requeued.TryAdd(key, true));
+    }
+
     public Task ReleaseAsync(string tenantId, string claimId, CancellationToken cancellationToken = default)
     {
         _claims.TryRemove($"{tenantId}/{claimId}", out _);
@@ -62,7 +87,7 @@ internal sealed class InMemoryLeaseClaimStore : IExecutionLeaseClaimStore
         foreach (var key in _claims.Keys)
         {
             var c = _claims[key];
-            _claims[key] = (DateTime.UtcNow - age, c.LeaseId, c.TenantId);
+            _claims[key] = (DateTime.UtcNow - age, c.LeaseId, c.TenantId, c.ExecutionRtId);
         }
     }
 }
