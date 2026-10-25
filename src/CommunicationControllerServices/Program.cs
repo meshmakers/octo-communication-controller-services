@@ -84,6 +84,8 @@ try
     builder.Services.AddSingleton<IInstanceSecretCrypto, InstanceSecretCrypto>();
     builder.Services.AddSingleton<IWorkloadEncryptionService, WorkloadEncryptionService>();
     builder.Services.AddSingleton<IExecutionEnvelope, ExecutionEnvelope>();
+    // AB#7476: the controller-owned single-use lease claims (system database, not a CK entity).
+    builder.Services.AddSingleton<IExecutionLeaseClaimStore, ExecutionLeaseClaimStore>();
     builder.Services.AddSingleton<IWorkloadTemplateResolver, WorkloadTemplateResolver>();
     builder.Services.AddSingleton<IShutdownState, HostApplicationShutdownState>();
     builder.Services.AddSingleton<ILifecycleConfigurationService, LifecycleConfigurationService>();

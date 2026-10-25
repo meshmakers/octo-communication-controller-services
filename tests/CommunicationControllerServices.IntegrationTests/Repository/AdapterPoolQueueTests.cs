@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTests.Fixtures;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
@@ -11,6 +12,9 @@ using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Meshmakers.Octo.Runtime.Contracts.Secrets;
+using Microsoft.AspNetCore.SignalR;
+using NSubstitute;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Xunit;
 
@@ -1076,6 +1080,165 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
         await repository.EnqueueExecutionAsync(fixture.TestTenantId, execution, pipeline, adapter, queuedAt);
         data.Executions.Add(new RtEntityId(SystemCommunicationCkIds.RtCkPipelineExecutionTypeId, execution.RtId));
         return executionId;
+    }
+
+    // ---- AB#7476: a sealed execution is leased at most once -----------------------------------------------------
+
+    /// <summary>
+    ///     A lease service over the REAL repository, envelope, claim store (MongoDB) and connection manager; only the
+    ///     collaborators of the tenant tree and the credentials are substitutes. The repository forwards exactly the
+    ///     calls the grant makes, so the queue, the claim latch and the failure path are the real ones.
+    /// </summary>
+    private LeaseService CreateLeaseServiceForReplay(IAdapterPoolConnectionManager connectionManager,
+        ISingleClientProxy memberProxy, RtEntityId adapter)
+    {
+        var real = fixture.GetService<ICommunicationRepository>();
+        var tenant = fixture.TestTenantId;
+        var repository = Substitute.For<ICommunicationRepository>();
+        repository.GetWorkloadByRtIdAsync(tenant, adapter.RtId).Returns(_ => real.GetWorkloadByRtIdAsync(tenant, adapter.RtId));
+        repository.GetLentAdapterPoolForAdapterAsync(tenant, adapter.RtId).Returns(new RtLentAdapterPool
+        {
+            RtId = OctoObjectId.GenerateNewId(), CkTypeId = SystemCommunicationCkIds.RtCkLentAdapterPoolTypeId,
+            Name = "lent",
+            Lender = new RtLenderReferenceRecord { LenderTenantId = tenant, LenderAdapterPoolRtId = PoolRtId }
+        });
+        repository.TryGetAdapterPoolLendingScopeAsync(tenant, PoolRtId).Returns(new LendingScope(LendingScope.Descendants, null));
+        repository.TryFailQueuedExecutionAsync(tenant, Arg.Any<OctoObjectId>(), Arg.Any<string>())
+            .Returns(c => real.TryFailQueuedExecutionAsync(tenant, c.ArgAt<OctoObjectId>(1), c.ArgAt<string>(2)));
+
+        var clients = Substitute.For<IHubClients>();
+        clients.Client(Arg.Any<string>()).Returns(memberProxy);
+        var hub = Substitute.For<IHubContext<AdapterPoolHub>>();
+        hub.Clients.Returns(clients);
+
+        var lendingScope = Substitute.For<ITenantLendingScopeResolver>();
+        lendingScope.MayLendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<LendingScope>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        var account = new RtServiceAccountConfiguration
+        {
+            RtId = OctoObjectId.GenerateNewId(), CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
+            RtWellKnownName = "sa", ClientId = "client-id"
+        };
+        account.SetAttributeRawValue(nameof(RtServiceAccountConfiguration.ClientSecret), "a-client-secret");
+        var accounts = Substitute.For<IPipelineServiceAccountResolver>();
+        accounts.GetAdapterDefaultAsync(tenant, adapter.RtId).Returns(account);
+
+        var encryption = Substitute.For<IWorkloadEncryptionService>();
+        encryption.RevealOrNull(Arg.Any<object?>(), Arg.Any<SecretAccessContext?>()).Returns("a-client-secret");
+
+        var databaseCredentials = Substitute.For<ITenantDatabaseCredentialResolver>();
+        databaseCredentials.TryResolveAsync(tenant, Arg.Any<CancellationToken>())
+            .Returns(new TenantDatabaseCredential("db", "user", "password"));
+
+        var adapterService = Substitute.For<IAdapterService>();
+        adapterService.GetLeasedPipelineConfigurationAsync(tenant, Arg.Any<RtEntityId>(), Arg.Any<OctoObjectId>())
+            .Returns(c => new PipelineConfigurationDto(OctoObjectId.GenerateNewId(),
+                new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, c.ArgAt<OctoObjectId>(2)), false,
+                "triggers: []\n", []));
+
+        return new LeaseService(connectionManager, repository, fixture.GetService<ICommunicationEventService>(),
+            encryption, fixture.GetService<IExecutionEnvelope>(), hub, lendingScope, accounts, databaseCredentials,
+            adapterService, fixture.GetService<ILifecycleConfigurationService>(),
+            Substitute.For<ILeaseSchedulerWakeSignal>(), fixture.GetService<IExecutionLeaseClaimStore>());
+    }
+
+    /// <summary>
+    ///     🔴 AB#7476 — the reset of a completed execution (normal run and method run). The status and the lease
+    ///     timestamps are ordinary attributes: one generic write puts a finished execution back to <c>Queued</c> with the
+    ///     claim latch open again. The seal still opens, but the controller-owned claim record says it was used, so no
+    ///     second lease is granted; once the in-flight window has passed the execution is failed.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AResetCompletedExecution_IsNotLeasedASecondTime(bool methodRun)
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var data = new TestData();
+
+        try
+        {
+            var (pipeline, adapter) = await CreateWorkAsync(data);
+            var marker = methodRun
+                ? new ExecutePipelineMethodInvocation
+                {
+                    MethodId = "Model-1/Type-1/Create", InvocationId = Guid.NewGuid(), CkTypeId = "Model-1/Type-1",
+                    PipelineRtId = pipeline.RtId.ToString()
+                }
+                : null;
+            var execution = await EnqueueWithSealedCallerAsync(data, pipeline, adapter, token: null,
+                methodInvocation: marker);
+
+            await WithLeasingEnabledAsync(async () =>
+            {
+                var connectionManager = new AdapterPoolConnectionManager();
+                connectionManager.RegisterMember("conn-1", "member-1", fixture.TestTenantId, PoolRtId);
+                var proxy = Substitute.For<ISingleClientProxy>();
+                var service = CreateLeaseServiceForReplay(connectionManager, proxy, adapter);
+                var pool = new OctoObjectId(PoolRtId);
+
+                // the scheduler's gate: the real claim latch of the repository
+                Task<bool> Gate(LeaseDto lease, PoolMemberConnection member, CancellationToken _) =>
+                    repository.TryClaimQueuedExecutionAsync(fixture.TestTenantId, execution.ExecutionId!,
+                        new LeaseClaim(lease.LeaseId, fixture.TestTenantId, PoolRtId, member.MemberId, DateTime.UtcNow,
+                            execution.RtId));
+
+                int Pushed() => proxy.ReceivedCalls().Count(c => c.GetMethodInfo().Name == nameof(IClientProxy.SendCoreAsync));
+
+                // 1. the first grant leases it and the execution runs to completion
+                var first = await service.GrantLeaseAsync(fixture.TestTenantId, pool,
+                    RequestFor(await QueuedAsync(adapter, execution), adapter), TestContext.Current.CancellationToken, Gate);
+                first.Granted.Should().BeTrue();
+                var pushed = (LeaseDto)((object?[])proxy.ReceivedCalls().Single(c =>
+                    c.GetMethodInfo().Name == nameof(IClientProxy.SendCoreAsync)).GetArguments()[1]!)[0]!;
+                pushed.MethodInvocation.Should().Be(marker);
+                await repository.UpdatePipelineExecutionAsync(fixture.TestTenantId, execution.ExecutionId!,
+                    RtPipelineExecutionStatusEnum.Completed, DateTime.UtcNow, 10, null, null);
+                connectionManager.ReleaseLease("conn-1", first.LeaseId!);
+
+                // 2. a generic write puts it back to Queued AND opens the claim latch again
+                await GenericUpdateAsync(execution.RtId, new RtPipelineExecution
+                {
+                    Status = RtPipelineExecutionStatusEnum.Queued, LeaseGrantedAt = DateTime.MinValue
+                });
+                var reset = await QueuedAsync(adapter, execution);
+                QueuedCaller.Open(reset.SealedCaller, fixture.TestTenantId, execution.RtId, Envelope)
+                    .Should().NotBeNull("the seal itself still opens - only the claim record knows it was used");
+
+                // 3. no second lease, while the first claim is young (another instance may be granting) ...
+                var second = await service.GrantLeaseAsync(fixture.TestTenantId, pool, RequestFor(reset, adapter),
+                    TestContext.Current.CancellationToken, Gate);
+                second.Granted.Should().BeFalse();
+                Pushed().Should().Be(1);
+                (await repository.GetPipelineExecutionAsync(fixture.TestTenantId, execution.ExecutionId!))!.Status
+                    .Should().Be(RtPipelineExecutionStatusEnum.Queued);
+
+                // 4. ... and failed for good once the claim is older than that window
+                var claims = await ((ExecutionLeaseClaimStore)fixture.GetService<IExecutionLeaseClaimStore>())
+                    .GetCollectionForTestsAsync();
+                await claims.UpdateOneAsync(
+                    new MongoDB.Bson.BsonDocument("tenantId", fixture.TestTenantId).Add("executionRtId",
+                        execution.RtId.ToString()),
+                    MongoDB.Driver.Builders<MongoDB.Bson.BsonDocument>.Update.Set("claimedAtUtc",
+                        new MongoDB.Bson.BsonDateTime(DateTime.UtcNow.AddMinutes(-10))),
+                    cancellationToken: TestContext.Current.CancellationToken);
+                var third = await service.GrantLeaseAsync(fixture.TestTenantId, pool, RequestFor(reset, adapter),
+                    TestContext.Current.CancellationToken, Gate);
+                third.Granted.Should().BeFalse();
+                third.Reason.Should().Be(LeaseRefusalReason.QueuedProvenanceInvalid);
+                Pushed().Should().Be(1, "a sealed execution is leased at most once");
+
+                var failed = await repository.GetPipelineExecutionAsync(fixture.TestTenantId, execution.ExecutionId!);
+                failed!.Status.Should().Be(RtPipelineExecutionStatusEnum.Failed);
+                failed.ErrorMessage.Should().Contain("already leased once");
+                connectionManager.GetMembers(fixture.TestTenantId, PoolRtId).All(m => m.IsAvailable).Should().BeTrue();
+            });
+        }
+        finally
+        {
+            await CleanupAsync(data);
+        }
     }
 
     private sealed class TestData

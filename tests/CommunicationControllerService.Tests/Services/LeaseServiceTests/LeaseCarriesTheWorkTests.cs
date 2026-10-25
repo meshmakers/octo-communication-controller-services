@@ -357,7 +357,7 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
         ArrangeProjectablePipeline();
         var noKeys = new LeaseService(ConnectionManager, CommunicationRepository, EventService, EncryptionService,
             TestExecutionEnvelope.Create(withKeyRing: false), HubContext, LendingScopeResolver, ServiceAccountResolver,
-            DatabaseCredentialResolver, AdapterService, LifecycleConfiguration, WakeSignal);
+            DatabaseCredentialResolver, AdapterService, LifecycleConfiguration, WakeSignal, ClaimStore);
 
         var result = await noKeys.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequestFrom(Sealed("t")));
 

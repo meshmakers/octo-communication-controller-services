@@ -256,6 +256,20 @@ the member. A retry after an interrupted lease copies both from the interrupted 
 > (AB#7462; an adapter without it ignores `LeaseDto.MethodInvocation`) refuses (fail closed). REST and cron runs carry none. Same rollout as AB#7473. See the controller `CLAUDE.md`,
 > section "Method-invocation marker on the leased path".
 
+> **Since AB#7476** a sealed queued execution is leased **at most once**. Status and lease timestamps of a
+> `PipelineExecution` are writable through the generic runtime surfaces, so a finished execution can be set back to
+> `Queued` and would otherwise be leased again as its original caller (and, for a method run, with its original
+> marker). The sealed payload therefore carries a random single-use identity (`ClaimId`) and its issue time; the
+> lease grant records the identity atomically (insert-if-absent, unique key) in a controller-owned collection
+> `execution_lease_claims` in the system database before anything is handed to a member. That collection is not a CK
+> entity and not in a tenant database, so GraphQL, MCP and the runtime API cannot reach or reset it. A second grant of the
+> same seal is refused and the execution failed (WARN without values); a retry is sealed anew with a new identity and is
+> leasable once. Claim records are deleted by a TTL index after `QueuedSealMaxAgeDays` (default 30) plus one day; a seal
+> older than `QueuedSealMaxAgeDays` is refused, so deleting a record never revives an old seal. Items queued before the
+> upgrade carry no identity and are failed (no migration). Rollout: same sequence as AB#7473 (leasing kill switch off,
+> drain or cancel queued leased items, roll **all** controller instances, leasing back on); no setting is required.
+> See the controller `CLAUDE.md`, section "A sealed execution is leased at most once".
+
 The member applies them through `LeaseCallerCarryThrough`, the lease twin of
 `ExecuteCommandCallerCarryThrough`: same mapping onto `ExecutePipelineOptions`, same three-state
 `CallerBindingMode` read from the pipeline's own execute trigger. **`BindingRequired` with no invoker

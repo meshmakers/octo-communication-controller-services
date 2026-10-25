@@ -3248,10 +3248,9 @@ older controller ignores the unknown payload member, so it drops the marker: fai
   (it would refuse every retry).
 - **Fail closed.** No key ring: nothing is queued (AB#7473). Marker dropped for any reason: the adapter refuses a
   generic create of a type whose method replaces it, so the method call fails (availability only).
-- **Known residual risk.** Like the caller, the marker is only as single-use as the execution: an already completed
-  execution whose writable status is reset to `Queued` is leased again together with its caller and marker. The
-  controller-owned single-use claim of AB#7476 closes this and is extended to cover the marker; it is not part of this
-  change.
+- **Single use (AB#7476).** Like the caller, the marker is covered by the single-use claim of the whole envelope: a
+  completed method run whose writable status is reset to `Queued` is not leased a second time (see "A sealed execution is
+  leased at most once").
 - **Rollout (same as AB#7473).** The marker is read only by an instance that has this change. During a mixed
   rollout a lease granted by an old instance carries no marker and a method run on a leased adapter fails closed until
   the old instance is gone. Roll out like AB#7473: leasing kill switch off (`SetCommunicationLifecycle -le false`),
@@ -3311,9 +3310,9 @@ leases unsealed items, roll out like this: (1) switch the leasing kill switch of
 false`; it holds the queue), (2) let the queued leased items drain or cancel them, (3) roll **all** controller
 instances, (4) switch leasing back on. Retries created by an old pod during the window are covered by step 2.
 
-**Known residual risk.** Provenance proves who queued an execution, not that the entity is still in the state it was
-queued in: a writable status/timestamp can reset an execution that already ran so that it is leased once more. A
-controller-owned single-use claim record is tracked as a follow-up.
+**Known residual risk (closed by AB#7476).** Provenance proves who queued an execution, not that the entity is still in
+the state it was queued in: a writable status/timestamp could reset an execution that already ran so that it was leased
+once more. The controller-owned single-use claim below closes this.
 
 Tests: unit `LeaseServiceTests/LeaseCarriesTheWorkTests` (refusal matrix, key-less and unknown-key controllers stay
 queued, hand-driven endpoint), `ExecutionEnvelopeTests`, `LeaseSchedulerServiceTests/QueuedWorkReachesTheLeaseTests`
@@ -3324,6 +3323,77 @@ adapter failed, two entities with the same `ExecutionId` (forged failed by RtId,
 hand-driven lease gated, retry keeps provenance. The integration fixture resolves the real `LeaseService` (tenant tree
 and credential resolvers substituted); a full member grant needs a connected pool member, which the fixture does not
 run, so the positive case asserts the specific downstream refusal reason.
+
+### A sealed execution is leased at most once (AB#7476)
+
+The status and the lease timestamps of a `PipelineExecution` are ordinary attributes: a writer on a generic surface
+(GraphQL update, MCP) can put a finished execution back to `Queued` and clear the lease latch
+(`leaseGrantedAt`). The sealed envelope still opens (it is bound to tenant, execution, pipeline, adapter and input, none
+of which changed), so the execution would be leased AGAIN, as its original caller and trust level, and a method run
+with its original marker. The seal therefore needs a single use that no generic write can reset.
+
+**Design.**
+
+| Piece | Where |
+|---|---|
+| Single-use identity `ClaimId` (random GUID) and `IssuedAtUtc`, members of the sealed payload (authenticated, so they cannot be edited or copied) | `QueuedCaller.Payload`, written by `Apply` and `Reseal` |
+| Claim record: atomic insert-if-absent, key `"{tenantId}/{claimId}"` | `IExecutionLeaseClaimStore` / `ExecutionLeaseClaimStore`, collection `execution_lease_claims` in the **system database** |
+| Claim taken | `LeaseService.GrantLeaseAsync`, after the seal verified and a member was reserved, before the admission gate (the `Queued -> Running` latch) and before anything is sent |
+| Seal age limit | `CommunicationControllerOptions.QueuedSealMaxAgeDays` (default 30) |
+
+- **Where the identity lives.** Inside the sealed payload, next to the caller and the method-invocation marker, so one
+  claim covers the whole envelope (caller AND marker). `StripToken` (at claim) rewrites the envelope but keeps `ClaimId`
+  and `IssuedAtUtc`; a reset execution therefore presents the same identity.
+- **Where the claim lives.** A controller collection in the system database, written with the controller's own admin
+  client (`AdminMongoRepositoryClient`, same connection rules as the engine). It is not a CK entity and not in a tenant
+  database, so the runtime API, asset-repo GraphQL and the MCP generic tools never see it, and neither does the
+  per-tenant database user that a pool member receives with a lease. No CK change (System.Communication stays 4.12.0).
+- **Replica safety.** `InsertOne` on the primary key. A duplicate key is the answer "already claimed" for every
+  controller instance; there is no read-before-write window. The claim comes after `QueuedCaller.TryOpen` verified the
+  seal (a forged value never reaches the store) and after the member reservation (a refusal such as "no idle member"
+  must not burn the claim).
+- **Outcomes of a duplicate.** The refusal carries a reason code only, never a statement about the claim:
+  - claim younger than `LeaseService.ClaimInFlightWindow` (2 minutes): another instance is granting this very
+    execution (every instance's scheduler reads the same queue): `AdmissionGateDeclined`, the execution is left alone;
+  - older: the seal was used and the execution is queued again: WARN (tenant, execution, pipeline; never the identity or
+    any sealed value), the execution is failed by RtId while `Queued` (`TryFailQueuedExecutionAsync`) so the queue does
+    not retry it every round, refusal `QueuedProvenanceInvalid`.
+- **Claim given back.** If the admission gate declines or throws (lost the latch to another instance, cancelled, a
+  database blip) the execution did not start and the claim is deleted again (best effort), so the seal is still
+  leasable. After the gate admitted the claim stays, whatever happens to the dispatch.
+- **Store unreachable.** Fail closed: no lease, refusal `AdmissionGateFailed`, WARN, the execution stays queued.
+- **Re-queue.** `QueuedCaller.Reseal` seals the retry with a NEW `ClaimId` and a new `IssuedAtUtc`; the old identity is
+  never copied. The retry is leasable once.
+- **Hand-driven lease** (`POST .../lease` with an `ExecutionId`) carries no work and consumes no claim.
+
+**Retention.** Every record has `expireAtUtc = claimedAt + QueuedSealMaxAgeDays + 1 day` and a TTL index
+(`execution_lease_claims_expire_ttl`, `expireAfterSeconds: 0`, created lazily on first use) deletes it; the TTL monitor
+runs about once a minute. The invariant that makes deleting safe: a seal older than `QueuedSealMaxAgeDays` is refused at
+grant (and its execution failed), so an expired record can never make an old seal usable again. A queued item that waits
+longer than the limit is therefore failed instead of leased; a retry is sealed anew and starts a new age. Records of a
+deleted tenant simply expire (the identity is unique per seal). Do not shorten the TTL without shortening the age limit.
+
+**Pre-upgrade items (decision: fail closed, no migration).** A sealed value without `ClaimId`/`IssuedAtUtc` (queued by a
+controller before this change) is refused like a forged one ("queued before the upgrade") and its execution failed.
+Adopting such a value would mean accepting a seal that can never be claimed, which is exactly the hole this change
+closes. The retry of an interrupted pre-upgrade attempt is sealed anew by `Reseal` and is fine.
+
+**Rollout.** The train already requires the leasing sequence of AB#7473: (1) leasing kill switch off, (2) let queued
+leased items drain or cancel them (any still queued are failed at the first round of the new controller), (3) roll all
+controller instances (an old instance ignores `ClaimId` and would lease a replayed seal), (4) leasing back on. No data
+migration, no new setting needed (`QueuedSealMaxAgeDays` defaults to 30). The controller needs its admin database
+credential (`OctoSystemConfiguration.AdminUser` / `AdminUserPassword`), as the engine's system context already does; it
+creates the collection and the TTL index on first use. Operators may inspect the collection read-only; deleting a record
+re-opens the seal of that execution, so do not.
+
+Tests: unit `LeaseServiceTests/LeaseSingleUseClaimTests` (reset after a run, reset method run, token strip keeps the
+identity, requeue gets a new identity, parallel grants, gate declined/threw gives the claim back, unreachable store,
+pre-upgrade seal, expired seal, hand-driven lease; log has a WARN and no identity or sealed value); integration (MongoDB,
+Testcontainers) `Repository/AdapterPoolQueueTests.AResetCompletedExecution_IsNotLeasedASecondTime` (normal run and method
+run through the real repository, claim store and latch: complete, reset via the generic write path including the latch
+timestamp, no second lease, failed once the claim is past the in-flight window) and `Repository/ExecutionLeaseClaimStoreTests`
+(24 concurrent callers, per tenant, release, record shape and TTL index, collection in the system database and not in the
+tenant database).
 
 ### ✅ The lease carries the work (§9.9 / D4)
 

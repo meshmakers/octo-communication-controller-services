@@ -32,6 +32,21 @@ internal class LeaseService : ILeaseService
     private readonly ILifecycleConfigurationService _lifecycleConfiguration;
 
     private readonly ILeaseSchedulerWakeSignal _wakeSignal;
+    private readonly IExecutionLeaseClaimStore _claimStore;
+
+    /// <summary>
+    ///     AB#7476 — a sealed execution older than this is not leased (its claim record may have expired). The claim
+    ///     record is kept for this age plus <see cref="ClaimRetentionMargin" />.
+    /// </summary>
+    private readonly TimeSpan _sealMaxAge;
+
+    internal static readonly TimeSpan ClaimRetentionMargin = TimeSpan.FromDays(1);
+
+    /// <summary>
+    ///     AB#7476 — an existing claim younger than this is another controller instance that is granting the same
+    ///     execution right now; an older one means the seal was used and the execution is queued again.
+    /// </summary>
+    internal static readonly TimeSpan ClaimInFlightWindow = TimeSpan.FromMinutes(2);
 
     /// <summary>
     ///     AB#5864 — how often a work item may be refused by a draining member and returned to the
@@ -70,8 +85,12 @@ internal class LeaseService : ILeaseService
         IAdapterService adapterService,
         ILifecycleConfigurationService lifecycleConfiguration,
         ILeaseSchedulerWakeSignal wakeSignal,
+        IExecutionLeaseClaimStore claimStore,
         IOptions<CommunicationControllerOptions>? options = null)
     {
+        _claimStore = claimStore;
+        _sealMaxAge = TimeSpan.FromDays(Math.Max(1, options?.Value.QueuedSealMaxAgeDays ?? 30));
+
         // AB#5826: without options (a unit-test composition) there is no reconnect grace — the
         // behaviour every test written before it was arranged against. Production always has them.
         _reconnectGrace = TimeSpan.FromSeconds(Math.Max(0, options?.Value.LeaseMemberReconnectGraceSeconds ?? 0));
@@ -283,6 +302,23 @@ internal class LeaseService : ILeaseService
                 "controller instance.");
         }
 
+        // 🔴 AB#7476 — the single-use claim. The seal verified above is leased at most once: its identity is recorded
+        // atomically in a controller-owned record before anything is handed out, so a status reset of a finished
+        // execution through a generic write path cannot make the same seal leasable again.
+        string? claimedId = null;
+        if (provenance?.ClaimId is { } claimId && request.ExecutionRtId is { } claimedExecutionRtId)
+        {
+            var claimRefusal = await ConsumeSealAsync(lenderTenantId, adapterPoolRtId, request, claimedExecutionRtId,
+                claimId, cancellationToken);
+            if (claimRefusal is not null)
+            {
+                _connectionManager.ReleaseLease(member.ConnectionId, lease.LeaseId);
+                return claimRefusal;
+            }
+
+            claimedId = claimId;
+        }
+
         if (admissionGate is not null)
         {
             bool admitted;
@@ -295,6 +331,7 @@ internal class LeaseService : ILeaseService
                 // A gate that threw decided nothing, so the member must go back — otherwise the
                 // pool quietly loses a member per failed round until it has none left.
                 _connectionManager.ReleaseLease(member.ConnectionId, lease.LeaseId);
+                await TryReleaseClaimAsync(request.BorrowerTenantId, claimedId);
                 Logger.Warn(e,
                     "The admission gate for lease '{LeaseId}' of tenant '{BorrowerTenantId}' threw; the member " +
                     "reservation was undone",
@@ -306,6 +343,8 @@ internal class LeaseService : ILeaseService
             if (!admitted)
             {
                 _connectionManager.ReleaseLease(member.ConnectionId, lease.LeaseId);
+                // The execution did not start running (lost to another instance, cancelled): the seal was not used.
+                await TryReleaseClaimAsync(request.BorrowerTenantId, claimedId);
                 return Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.AdmissionGateDeclined,
                     $"The work item '{lease.ExecutionId}' of tenant '{lease.TenantId}' was no longer available " +
                     "when the member was reserved; it was taken by another controller instance or cancelled.");
@@ -1067,6 +1106,73 @@ internal class LeaseService : ILeaseService
     }
 
     /// <summary>
+    ///     AB#7476 — takes the single-use claim of a verified seal. Returns null when this call holds the claim, else the
+    ///     refusal. The refusal carries a reason code and no knowledge about the claim beyond it; the log names tenant,
+    ///     execution and pipeline, never the identity or any payload value.
+    /// </summary>
+    private async Task<LeaseGrantResult?> ConsumeSealAsync(string lenderTenantId, OctoObjectId adapterPoolRtId,
+        LeaseRequest request, OctoObjectId executionRtId, string claimId, CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        LeaseClaimResult claim;
+        try
+        {
+            claim = await _claimStore.TryClaimAsync(request.BorrowerTenantId, claimId, executionRtId, now,
+                _sealMaxAge + ClaimRetentionMargin, cancellationToken);
+        }
+        catch (Exception e)
+        {
+            // Fail closed: without the claim record the seal cannot be proven unused. The item stays queued.
+            Logger.Warn(e,
+                "[{BorrowerTenantId}] The single-use claim of queued execution '{ExecutionId}' ({ExecutionRtId}) could " +
+                "not be recorded; no lease is granted and the execution stays queued",
+                request.BorrowerTenantId, request.ExecutionId, executionRtId);
+            return Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.AdmissionGateFailed,
+                "The lease could not be granted: the claim of the queued execution could not be recorded.");
+        }
+
+        if (claim.Outcome == LeaseClaimOutcome.Claimed)
+        {
+            return null;
+        }
+
+        if (claim.ClaimedAtUtc is { } claimedAt && now - claimedAt < ClaimInFlightWindow)
+        {
+            // Another controller instance is granting this very execution (the scheduler of each instance reads the
+            // same queue). Not a replay; the winner moves the execution out of the queue.
+            return Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.AdmissionGateDeclined,
+                $"The work item '{request.ExecutionId}' of tenant '{request.BorrowerTenantId}' is being granted by " +
+                "another controller instance.");
+        }
+
+        // The seal was used before and the execution is queued again: its state was reset after it ran. It is not
+        // leased a second time and failed (terminal), so the queue does not retry it every round.
+        var message = $"The queued execution '{request.ExecutionId}' was already leased once; a queued execution is " +
+                      "leased at most once, so it is not leased again.";
+        await FailExecutionWithoutProvenanceAsync(request, executionRtId, request.PipelineRtId, message);
+        return Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.QueuedProvenanceInvalid, message);
+    }
+
+    /// <summary>Gives a claim back after a gate that did not start the execution. Best effort, never throws.</summary>
+    private async Task TryReleaseClaimAsync(string tenantId, string? claimId)
+    {
+        if (claimId is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _claimStore.ReleaseAsync(tenantId, claimId);
+        }
+        catch (Exception e)
+        {
+            // The claim stays; the execution is failed instead of leased once the in-flight window has passed.
+            Logger.Warn(e, "[{TenantId}] A single-use claim could not be given back", tenantId);
+        }
+    }
+
+    /// <summary>
     ///     AB#7473 — the provenance gate. Applies to every request that names an execution or a pipeline: the
     ///     scheduler's (the queue entry travels on the request) and the hand-driven endpoint's (only an
     ///     <c>ExecutionId</c>: it must resolve to a <c>Queued</c> execution of the borrower whose provenance opens).
@@ -1124,6 +1230,15 @@ internal class LeaseService : ILeaseService
         var verdict = QueuedCaller.TryOpen(sealedCaller, request.BorrowerTenantId, executionRtId.Value, pipelineRtId,
             request.BorrowerAdapterRtId, inputData, _envelope, out var opened, out var reason);
 
+        string? expiredReason = null;
+        if (verdict == QueuedCaller.Provenance.Valid && !handDriven && opened is not null &&
+            QueuedCaller.IsExpired(opened, _sealMaxAge, DateTime.UtcNow))
+        {
+            // AB#7476: older than the accepted age; its claim record may be gone, so it must not be leased.
+            verdict = QueuedCaller.Provenance.Forged;
+            expiredReason = "the seal is older than the accepted age";
+        }
+
         switch (verdict)
         {
             case QueuedCaller.Provenance.Valid:
@@ -1145,7 +1260,7 @@ internal class LeaseService : ILeaseService
 
             default:
                 var message = $"The queued execution '{request.ExecutionId}' was not queued by the controller " +
-                              $"({reason}); it is not leased.";
+                              $"({expiredReason ?? reason}); it is not leased.";
                 await FailExecutionWithoutProvenanceAsync(request, executionRtId.Value, pipelineRtId, message);
                 return (Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.QueuedProvenanceInvalid,
                     message), null);
@@ -1171,8 +1286,8 @@ internal class LeaseService : ILeaseService
                     message))
             {
                 await _eventService.StoreErrorEventAsync(request.BorrowerTenantId,
-                    $"Execution '{request.ExecutionId}' of pipeline '{pipelineRtId}' was failed: it was not " +
-                    "queued by the controller, so it is not run.");
+                    $"Execution '{request.ExecutionId}' of pipeline '{pipelineRtId}' was failed instead of leased: " +
+                    "it is not a valid queued execution of the controller (not queued by it, expired, or already leased).");
             }
         }
         catch (Exception e)
