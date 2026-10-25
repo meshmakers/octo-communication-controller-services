@@ -73,15 +73,14 @@ internal class QueuedWorkReachesTheLeaseTests : LeaseSchedulerServiceTestsBase
         await Assert.That(Requests[0].PipelineInput).IsNull();
     }
 
-    /// <summary>AB#5279: the invoker rides the request exactly like the input.</summary>
+    /// <summary>AB#5279 / AB#7472: the sealed invoker rides the request exactly like the input, with the execution it is bound to.</summary>
     [Test]
     public async Task TheLeaseRequestCarriesTheQueuedItemsInvoker()
     {
         ArrangeMembers(1);
         var entry = Entry("exec-1", minutesAgo: 5) with
         {
-            Caller = new ExecutePipelineCaller { SubjectId = "user-42", TrustLevel = 2 },
-            CallerAccessToken = "enc:v1:xyz"
+            SealedCaller = "enc:v2:k1:sealed-as-stored"
         };
         ArrangeQueue(TenantA, entry);
 
@@ -89,7 +88,7 @@ internal class QueuedWorkReachesTheLeaseTests : LeaseSchedulerServiceTestsBase
 
         using var _ = Assert.Multiple();
         await Assert.That(Requests).Count().IsEqualTo(1);
-        await Assert.That(Requests[0].Caller!.SubjectId).IsEqualTo("user-42");
-        await Assert.That(Requests[0].CallerAccessToken).IsEqualTo("enc:v1:xyz");
+        await Assert.That(Requests[0].SealedCaller).IsEqualTo("enc:v2:k1:sealed-as-stored");
+        await Assert.That(Requests[0].ExecutionRtId).IsEqualTo(entry.ExecutionRtId);
     }
 }

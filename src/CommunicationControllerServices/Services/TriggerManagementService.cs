@@ -20,7 +20,7 @@ internal class TriggerManagementService(
     IWorkloadLifecycleService workloadLifecycleService,
     ILifecycleConfigurationService lifecycleConfigurationService,
     ILeaseSchedulerWakeSignal leaseSchedulerWakeSignal,
-    IWorkloadEncryptionService encryptionService)
+    IExecutionEnvelope executionEnvelope)
     : ITriggerManagementService
 {
     public async Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId,
@@ -226,13 +226,14 @@ internal class TriggerManagementService(
             InputData = pipelineInput
         };
 
-        // AB#5279: the invoker survives the queue on the entity, exactly like the input. On a
+        // AB#5279 / AB#7472: the invoker survives the queue on the entity, exactly like the input. On a
         // dedicated adapter it rides the execute command and never touches the database; here the
-        // work item waits in another request's lifetime, so the entity is the only carrier. The
-        // token is stored encrypted or not at all — a plaintext bearer at rest is not an option, and
-        // a run without the token is a run as the caller without delegation, which nodes already
-        // cope with.
-        QueuedCaller.Apply(execution, caller, EncryptCallerAccessTokenOrNull(tenantId, pipelineRtId, callerAccessToken));
+        // work item waits in another request's lifetime, so the entity is the only carrier. It is
+        // stored as ONE sealed envelope (principal, trust level, token) bound to the tenant and to this
+        // execution's RtId: the entity's attributes are writable through generic surfaces, so only a
+        // value the controller sealed itself is believed at lease grant. Without a key ring nothing is
+        // stored and the run proceeds without a caller (fail closed).
+        QueuedCaller.Apply(execution, tenantId, caller, callerAccessToken, executionEnvelope);
 
         await communicationRepository.EnqueueExecutionAsync(tenantId, execution,
             new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipelineRtId),
@@ -267,31 +268,6 @@ internal class TriggerManagementService(
         // The DateTime a caller gets back is the QUEUE time, not a start time — the execution has
         // not started and StartedAt is deliberately unset (concept §8, Q5).
         return new PipelineExecutionDataDto { Id = executionId, DateTime = queuedAt };
-    }
-
-    private string? EncryptCallerAccessTokenOrNull(string tenantId, OctoObjectId pipelineRtId, string? callerAccessToken)
-    {
-        if (string.IsNullOrEmpty(callerAccessToken))
-        {
-            return null;
-        }
-
-        try
-        {
-            return encryptionService.Encrypt(callerAccessToken);
-        }
-        catch (InvalidOperationException e)
-        {
-            // No instance key configured. Loud, because the run will visibly lack delegation, but
-            // not fatal: the principal still travels, and the queue must not stop over a missing
-            // key on a cluster that never configured one.
-            logger.LogWarning(e,
-                "[{TenantId}] The invoker's token for queued pipeline '{PipelineRtId}' was NOT kept: the controller " +
-                "has no encryption key (secrets.communicationInstanceSecretKey). The lease will carry the caller " +
-                "without delegation.",
-                tenantId, pipelineRtId);
-            return null;
-        }
     }
 
     public async Task RemoveScheduleAsync(string tenantId)

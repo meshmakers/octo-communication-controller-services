@@ -1,5 +1,18 @@
 # Changelog
 
+## 4.12.0 - 2026-10-25
+
+_Required bump level: minor._
+
+### Added
+
+- Attribute 'SealedCaller' (String, optional, isRuntimeState) on 'PipelineExecution' _(minor — additive optional attribute)_
+
+The invoker of a queued work item (principal, trust level, delegation token) is carried as one sealed envelope bound to
+the tenant and the execution (AB#7472). The seven plain `Caller*` attributes of `PipelineExecution` stay in the model
+but are deprecated: the controller no longer writes or reads them. Existing dependents keep resolving; executions queued
+before the upgrade run without a caller.
+
 ## 4.11.0 - 2026-10-24
 
 _Required bump level: minor._

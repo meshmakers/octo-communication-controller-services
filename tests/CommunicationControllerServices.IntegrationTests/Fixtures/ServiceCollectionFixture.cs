@@ -65,6 +65,7 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         });
         Services.AddSingleton<IInstanceSecretCrypto, InstanceSecretCrypto>();
         Services.AddSingleton<IWorkloadEncryptionService, WorkloadEncryptionService>();
+        Services.AddSingleton<IExecutionEnvelope, ExecutionEnvelope>();
 
         // Add communication controller services
         Services.AddSingleton<ICommunicationRepository, CommunicationRepository>();
