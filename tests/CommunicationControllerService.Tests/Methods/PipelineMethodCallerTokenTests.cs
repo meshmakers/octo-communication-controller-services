@@ -64,7 +64,7 @@ internal class PipelineMethodCallerTokenTests : IDisposable
         });
         _trigger.StartExecutePipelineAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<string?>(),
                 Arg.Any<bool>(), Arg.Do<ExecutePipelineCaller?>(c => _startedWith = c), Arg.Any<string?>(),
-                Arg.Any<RtPipelineTriggerTypeEnum>())
+                Arg.Any<RtPipelineTriggerTypeEnum>(), Arg.Any<ExecutePipelineMethodInvocation?>())
             .Returns(_ => Task.FromResult(new PipelineExecutionDataDto { Id = _executionId, DateTime = DateTime.UtcNow }));
     }
 
@@ -175,7 +175,7 @@ internal class PipelineMethodCallerTokenTests : IDisposable
         string? forwarded = null;
         _trigger.StartExecutePipelineAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<string?>(),
                 Arg.Any<bool>(), Arg.Any<ExecutePipelineCaller?>(), Arg.Do<string?>(t => forwarded = t),
-                Arg.Any<RtPipelineTriggerTypeEnum>())
+                Arg.Any<RtPipelineTriggerTypeEnum>(), Arg.Any<ExecutePipelineMethodInvocation?>())
             .Returns(_ => Task.FromResult(new PipelineExecutionDataDto { Id = _executionId, DateTime = DateTime.UtcNow }));
 
         await _invoker.InvokeAsync(Forged(token));

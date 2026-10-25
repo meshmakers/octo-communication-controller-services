@@ -26,11 +26,15 @@ internal class TriggerManagementService(
     public async Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId,
         OctoObjectId pipelineRtId, string? pipelineInput, bool isDryRun = false,
         ExecutePipelineCaller? caller = null, string? callerAccessToken = null,
-        RtPipelineTriggerTypeEnum triggerType = RtPipelineTriggerTypeEnum.Manual)
+        RtPipelineTriggerTypeEnum triggerType = RtPipelineTriggerTypeEnum.Manual,
+        ExecutePipelineMethodInvocation? methodInvocation = null)
     {
         logger.LogInformation("[{TenantId}] Executing pipeline '{PipelineRtId}' (dry-run={IsDryRun})",
             tenantId, pipelineRtId, isDryRun);
 
+        // AB#7460: methodInvocation is set on the direct path only. The lease path (below) does not persist it on the
+        // queued execution yet (AB#7461), so for a leased adapter the marker is NOT carried: the run starts without it
+        // and a guard that requires the marker refuses the insert (fails closed, availability only).
         // AB#4924 §9.1 — a Leased adapter has no process of its own, so there is nothing to send the
         // execute command to. The work item is ENQUEUED instead and the scheduler starts it when a
         // pool member is leased to this tenant. Everything below this branch is the manual-adapter
@@ -66,7 +70,8 @@ internal class TriggerManagementService(
                 {
                     IsDryRun = isDryRun,
                     Caller = caller,
-                    CallerAccessToken = callerAccessToken
+                    CallerAccessToken = callerAccessToken,
+                    MethodInvocation = methodInvocation
                 });
 
             if (r.IsSuccessStartingExecution)

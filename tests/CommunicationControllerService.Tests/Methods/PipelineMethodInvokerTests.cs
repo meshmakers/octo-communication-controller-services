@@ -49,7 +49,7 @@ internal class PipelineMethodInvokerTests
         _repository.GetPipelineByWellKnownNameAsync(TenantId, MethodId).Returns(_pipeline);
         _trigger.StartExecutePipelineAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<string?>(),
                 Arg.Any<bool>(), Arg.Any<ExecutePipelineCaller?>(), Arg.Any<string?>(),
-                Arg.Any<RtPipelineTriggerTypeEnum>())
+                Arg.Any<RtPipelineTriggerTypeEnum>(), Arg.Any<ExecutePipelineMethodInvocation?>())
             .Returns(_ => Task.FromResult(new PipelineExecutionDataDto { Id = _executionId, DateTime = DateTime.UtcNow }));
     }
 
@@ -101,7 +101,7 @@ internal class PipelineMethodInvokerTests
         string? input = null;
         _trigger.StartExecutePipelineAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Do<string?>(i => input = i),
                 Arg.Any<bool>(), Arg.Any<ExecutePipelineCaller?>(), Arg.Any<string?>(),
-                Arg.Any<RtPipelineTriggerTypeEnum>())
+                Arg.Any<RtPipelineTriggerTypeEnum>(), Arg.Any<ExecutePipelineMethodInvocation?>())
             .Returns(_ => Task.FromResult(new PipelineExecutionDataDto { Id = _executionId, DateTime = DateTime.UtcNow }));
         var request = Request("{\"version\":\"2.0\",\"force\":true}");
 
@@ -116,6 +116,30 @@ internal class PipelineMethodInvokerTests
         await Assert.That(json["method"]!["invocationId"]!.GetValue<string>()).IsEqualTo(request.InvocationId.ToString());
     }
 
+    /// <summary>
+    ///     AB#7460: the invoker is the only producer of the method-invocation marker. It carries the qualified method id,
+    ///     the invocation id and the CK type id of the request it accepted and the RtId of the bound pipeline.
+    /// </summary>
+    [Test]
+    public async Task TheMarkerCarriesMethodInvocationCkTypeAndBoundPipeline()
+    {
+        ArrangeExecution(RtPipelineExecutionStatusEnum.Completed, "{\"value\": 1}");
+        ExecutePipelineMethodInvocation? marker = null;
+        _trigger.StartExecutePipelineAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<string?>(),
+                Arg.Any<bool>(), Arg.Any<ExecutePipelineCaller?>(), Arg.Any<string?>(),
+                Arg.Any<RtPipelineTriggerTypeEnum>(), Arg.Do<ExecutePipelineMethodInvocation?>(m => marker = m))
+            .Returns(_ => Task.FromResult(new PipelineExecutionDataDto { Id = _executionId, DateTime = DateTime.UtcNow }));
+        var request = Request();
+
+        await _invoker.InvokeAsync(request);
+
+        await Assert.That(marker).IsNotNull();
+        await Assert.That(marker!.MethodId).IsEqualTo(MethodId);
+        await Assert.That(marker.InvocationId).IsEqualTo(request.InvocationId);
+        await Assert.That(marker.CkTypeId).IsEqualTo(PipelineMethodTestSupport.CkTypeId);
+        await Assert.That(marker.PipelineRtId).IsEqualTo(_pipeline.RtId.ToString());
+    }
+
     [Test]
     public async Task ThePipelineRunsAsTheCallerAndGetsTheForwardedToken()
     {
@@ -126,7 +150,7 @@ internal class PipelineMethodInvokerTests
         OctoObjectId? pipelineId = null;
         _trigger.StartExecutePipelineAsync(Arg.Do<string>(t => tenant = t), Arg.Do<OctoObjectId>(p => pipelineId = p),
                 Arg.Any<string?>(), Arg.Any<bool>(), Arg.Do<ExecutePipelineCaller?>(c => caller = c),
-                Arg.Do<string?>(t => token = t), Arg.Any<RtPipelineTriggerTypeEnum>())
+                Arg.Do<string?>(t => token = t), Arg.Any<RtPipelineTriggerTypeEnum>(), Arg.Any<ExecutePipelineMethodInvocation?>())
             .Returns(_ => Task.FromResult(new PipelineExecutionDataDto { Id = _executionId, DateTime = DateTime.UtcNow }));
 
         await _invoker.InvokeAsync(Request());
@@ -370,7 +394,7 @@ internal class PipelineMethodInvokerTests
     {
         _trigger.StartExecutePipelineAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<string?>(),
                 Arg.Any<bool>(), Arg.Any<ExecutePipelineCaller?>(), Arg.Any<string?>(),
-                Arg.Any<RtPipelineTriggerTypeEnum>())
+                Arg.Any<RtPipelineTriggerTypeEnum>(), Arg.Any<ExecutePipelineMethodInvocation?>())
             .Returns<Task<PipelineExecutionDataDto>>(_ =>
                 throw new InvalidOperationException($"adapter offline (bearer {Token})"));
 

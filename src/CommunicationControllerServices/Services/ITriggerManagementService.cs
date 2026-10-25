@@ -28,12 +28,17 @@ public interface ITriggerManagementService
     /// work item is queued for a leased adapter. <see cref="RtPipelineTriggerTypeEnum.Scheduled"/> for a
     /// lease cron tick (AB#5863); everything else is a manual execute. Ignored on the dedicated path,
     /// where the adapter reports the execution and its trigger type itself.</param>
+    /// <param name="methodInvocation">Marker that tells the executor the run was started by the invocation of
+    /// a CK method (AB#7460, Feature AB#6884). 🔴 Only <c>PipelineMethodInvoker</c> passes it; REST execute and
+    /// cron pass null, and no public API accepts it. Carried on the direct (non-leased) path only: the lease path
+    /// does not persist it yet (AB#7461), so a run queued for a leased adapter starts without a marker.</param>
     /// <returns>The pipeline execution id, if the start of execution was successful</returns>
     Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId, OctoObjectId pipelineRtId,
         string? pipelineInput, bool isDryRun = false,
         Meshmakers.Octo.Communication.Contracts.MessageObjects.ExecutePipelineCaller? caller = null,
         string? callerAccessToken = null,
-        RtPipelineTriggerTypeEnum triggerType = RtPipelineTriggerTypeEnum.Manual);
+        RtPipelineTriggerTypeEnum triggerType = RtPipelineTriggerTypeEnum.Manual,
+        Meshmakers.Octo.Communication.Contracts.MessageObjects.ExecutePipelineMethodInvocation? methodInvocation = null);
     
     /// <summary>
     /// Remove the schedule for the triggers of the tenant
