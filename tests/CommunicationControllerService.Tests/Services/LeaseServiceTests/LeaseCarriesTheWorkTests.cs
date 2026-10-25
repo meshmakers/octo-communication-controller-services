@@ -564,7 +564,9 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
         ArrangeProjectablePipeline();
         ArrangeQueuedExecution("exec-m", caller: ACaller(), methodInvocation: AMarker());
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-m"));
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId,
+            // built by hand: ARequest(id) would re-arrange the queue entry without the marker
+            new LeaseRequest(BorrowerTenantId, BorrowerAdapterRtId, "exec-m", null));
 
         using var _ = Assert.Multiple();
         await Assert.That(result.Granted).IsTrue();

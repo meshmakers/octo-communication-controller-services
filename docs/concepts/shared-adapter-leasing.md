@@ -253,7 +253,7 @@ the member. A retry after an interrupted lease copies both from the interrupted 
 > method-invocation marker through the queue: it is one more member of the same sealed envelope (no new attribute,
 > System.Communication stays 4.12.0), opened at lease grant, projected into `LeaseDto.MethodInvocation` and sealed
 > again for the retry's execution on requeue. A marker that does not verify is dropped and the adapter-side guard
-> refuses (fail closed). REST and cron runs carry none. Same rollout as AB#7473. See the controller `CLAUDE.md`,
+> (AB#7462; an adapter without it ignores `LeaseDto.MethodInvocation`) refuses (fail closed). REST and cron runs carry none. Same rollout as AB#7473. See the controller `CLAUDE.md`,
 > section "Method-invocation marker on the leased path".
 
 The member applies them through `LeaseCallerCarryThrough`, the lease twin of
