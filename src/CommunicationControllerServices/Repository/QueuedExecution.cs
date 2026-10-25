@@ -38,7 +38,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 /// <param name="SealedCaller">
 ///     The sealed envelope of the invoker the work item was queued for (AB#5279, AB#7472), exactly as stored
 ///     on the entity, or null. Not interpreted here: the lease service opens it at grant time against the
-///     tenant and <paramref name="ExecutionRtId" />, and a value that does not verify is dropped.
+///     tenant and <paramref name="ExecutionRtId" />, and a value that does not verify is refused (AB#7473).
 /// </param>
 public sealed record QueuedExecution(
     string ExecutionId,

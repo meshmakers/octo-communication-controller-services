@@ -220,7 +220,7 @@ internal class LeaseOutcomeAndRequeueTests : LeaseServiceTestsBase
     private string SealedFor(OctoObjectId executionRtId, string tenantId = BorrowerTenantId)
     {
         var execution = new RtPipelineExecution { RtId = executionRtId };
-        QueuedCaller.Apply(execution, tenantId,
+        QueuedCaller.Apply(execution, tenantId, PipelineRtId,
             new Meshmakers.Octo.Communication.Contracts.MessageObjects.ExecutePipelineCaller
                 { SubjectId = "user-42", Roles = ["Admin"], TrustLevel = 2 }, null, Envelope);
         return execution.SealedCaller!;
@@ -252,8 +252,8 @@ internal class LeaseOutcomeAndRequeueTests : LeaseServiceTestsBase
         await Assert.That(retry.SealedCaller).IsNotEqualTo(stored);
         var opened = QueuedCaller.Open(retry.SealedCaller, BorrowerTenantId, retry.RtId, Envelope);
         await Assert.That(opened).IsNotNull();
-        await Assert.That(opened!.Caller.SubjectId).IsEqualTo("user-42");
-        await Assert.That(opened.Caller.TrustLevel).IsEqualTo(2);
+        await Assert.That(opened!.Caller!.SubjectId).IsEqualTo("user-42");
+        await Assert.That(opened.Caller!.TrustLevel).IsEqualTo(2);
         // bound to the retry, not to the interrupted attempt
         await Assert.That(QueuedCaller.Open(retry.SealedCaller, BorrowerTenantId, InterruptedRtId, Envelope)).IsNull();
     }

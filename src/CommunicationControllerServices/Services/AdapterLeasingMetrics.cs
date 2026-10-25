@@ -91,7 +91,13 @@ public enum LeaseRefusalReason
     ///     database credential leaves the member running on whatever credentials its own process
     ///     happens to hold, which is exactly the failure this mechanism exists to prevent.
     /// </remarks>
-    BorrowerDatabaseCredentialUnresolvable
+    BorrowerDatabaseCredentialUnresolvable,
+
+    /// <summary>
+    ///     AB#7473: the queued execution carries no valid provenance, so the controller did not queue it. It is
+    ///     never leased; it is set to <c>Failed</c> with a reason.
+    /// </summary>
+    QueuedProvenanceInvalid
 }
 
 /// <summary>
@@ -787,6 +793,7 @@ internal static class AdapterLeasingMetrics
         LeaseRefusalReason.PoolExhausted => "pool_exhausted",
         LeaseRefusalReason.BorrowerDatabaseCredentialUnresolvable =>
             "borrower_database_credential_unresolvable",
+        LeaseRefusalReason.QueuedProvenanceInvalid => "queued_provenance_invalid",
         _ => "none"
     };
 

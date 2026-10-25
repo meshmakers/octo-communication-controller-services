@@ -902,10 +902,10 @@ layout is `Jobs.IntegrationTests/DataPointRoundTripTests` in octo-bot-services.
 sealed envelope of the queued invoker (see "The queued invoker is sealed"). Additive MINOR; the seven `Caller*`
 attributes stay but are deprecated (neither written nor read). **Rollout:** the embedded-import guard brings 4.12.0 with
 the restarted controller; the controller needs `SecretEncryption` (key ring) to store an invoker. A work item that was
-queued before the upgrade has no `SealedCaller`: when it is leased it runs **without a caller** (a pipeline whose execute
-trigger has `callerBinding: BindingRequired` refuses it), and an execution that is re-queued after the upgrade gets a
-retry without a caller as well. Such items are rare (they wait only for a pool member) and a re-run of the work item
-restores the caller; no migration is possible because nothing proves an old value was written by the controller.
+queued before the upgrade has no valid `SealedCaller`: since AB#7473 it is **failed at lease grant** ("not queued by
+the controller"), not leased (see "Only executions the controller queued are leased"). Such items are rare (they wait
+only for a pool member); a re-run restores them, and no migration is possible because nothing proves an old value was
+written by the controller.
 Dependents keep resolving (minor within the same major).
 
 When adding a new attribute on `Adapter` / `Pool` / similar entities,
@@ -3170,11 +3170,12 @@ logged (`ExecutionEnvelopeRejection`), never the value.
 
 **Rules.**
 
-- **Fail closed.** A value that does not open is dropped: the lease carries no caller and no token, and the member
-  applies the pipeline's `CallerBinding` (a `BindingRequired` trigger refuses the run). No stored trust level is
-  trusted on its own; the trust level comes only out of the verified envelope.
+- **Fail closed.** A value that does not open is never leased (AB#7473, below; AB#7472 alone let the run proceed
+  without a caller). No stored trust level is trusted on its own; the trust level comes only out of the verified
+  envelope.
 - **No key ring, nothing stored.** `SecretEncryption` must be configured (it is on every cluster that uses Secret
-  attributes). Without it `Seal` returns null, the enqueue stores no invoker (WARN), and the queue still works.
+  attributes). Without it `Seal` returns null, the enqueue stores nothing (WARN) and the execution is failed at lease
+  grant (AB#7473): a leased adapter cannot run without the key ring.
   The former behaviour "principal travels, token does not" is gone: an unsealed principal is not a principal.
 - **Token.** Lives only inside the envelope. When the lease is granted (the claim) the attribute is replaced by the
   same envelope without the token, sealed for the same execution, so a re-queue still carries the caller but not the
@@ -3182,8 +3183,8 @@ logged (`ExecutionEnvelopeRejection`), never the value.
 - **Requeue** is a new execution: the old value is opened for the OLD RtId and sealed AGAIN for the retry's RtId, the
   ciphertext is never copied. A value that does not verify for the old execution is not carried.
 - **The seven plain `Caller*` attributes** stay in the CK model (removing an attribute is a major change) but are
-  deprecated: neither written nor read. Executions queued before the upgrade have no `SealedCaller` and therefore
-  run without a caller (see the rollout note in the CK model CHANGELOG, 4.12.0).
+  deprecated: neither written nor read. Executions queued before the upgrade have no valid `SealedCaller` and are
+  failed at lease grant (AB#7473, rollout note below).
 - **Reuse.** Another value that the controller must be able to trust on a queued execution (the method-invocation
   marker of AB#7461) is one more `purpose` plus one more String attribute, written with `Seal` at enqueue and opened
   with `TryOpen` / `Reseal` — not a second mechanism.
@@ -3194,6 +3195,47 @@ text, forged JSON, `enc:v1`, other execution / tenant / key / purpose, flipped b
 `Services/LeaseServiceTests/LeaseOutcomeAndRequeueTests` (requeue seals again, never copies),
 `Services/TriggerManagementServiceTests/LeasedAdapterEnqueueTests`, integration `Repository/AdapterPoolQueueTests`
 (generic update of the plain attributes and of the sealed attribute against real MongoDB, token removal at claim).
+
+### Only executions the controller queued are leased (AB#7473)
+
+The lease queue used to trust any entity with `Status = Queued` and the pipeline/adapter associations, whoever wrote
+it; the generic runtime write path (GraphQL create, MCP) can create one. Now the controller leases only what it
+sealed itself.
+
+**Design (no new attribute, no CK bump).** The `SealedCaller` envelope of AB#7472 is also the provenance of the work
+item. `QueuedCaller.Apply(execution, tenantId, pipelineRtId, caller, token, envelope)` is called for **every**
+execution the controller queues (`TriggerManagementService`: REST execute, method invoker, cron via
+`LeaseTriggerConsumer`; `LeaseService.InterruptAndEnqueueAsync`: retry) and seals it even when there is no caller
+(`SubjectId` null). Payload additions: a provenance marker, the pipeline RtId and a SHA-256 of the input, so an
+execution that is controller-queued but whose pipeline association or input was edited afterwards does not open
+either. The binding to tenant and execution RtId is the one of `IExecutionEnvelope`. No System.Communication change
+(stays 4.12.0), so the version reserved for AB#7461 is untouched.
+
+**Gate.** `LeaseService.GrantLeaseAsync` runs `QueuedCaller.TryOpen` first, before the kill switch, the borrower
+read and any credential decryption, whenever the request names an execution or a pipeline (the scheduler always
+does; a hand-driven lease without work is unaffected). On failure: `UpdatePipelineExecutionAsync(... Failed ...)`
+with a reason ("not queued by the controller (<reason>)"), a borrower event, a WARN naming tenant, execution and
+pipeline (never a value), the refusal reason `QueuedProvenanceInvalid` (`queued_provenance_invalid` label) and no
+member is reserved. The scheduler's next round no longer sees the item.
+
+**Retry** re-seals for the new execution (`QueuedCaller.Reseal` keeps provenance, pipeline and input; the token is
+cleared), so a retried controller-queued execution is leasable and a retried unsealed one stays unsealed.
+
+**Rollout (decision: fail closed, no drain).** Executions that are `Queued` when the new controller starts have no
+provenance marker (queued before 4.12.0/AB#7473, or sealed with the AB#7472 shape without the marker) and are failed
+with the reason above at the next scheduling round. They are rare (they only wait for a pool member), a cron
+trigger queues the next tick by itself, and users re-run an interactive one. A drain would have to keep the old
+trust rule alive, which is what this change removes. Operators who want zero failed items drain the queue (wait for
+or cancel the `Queued` executions of leased adapters) before rolling the controller; nothing else is needed. Every
+controller instance must run this version: an older instance in a rolling update still leases unsealed items.
+
+Tests: unit `LeaseServiceTests/LeaseCarriesTheWorkTests` (refusal matrix incl. no seal, marker-less AB#7472 value,
+swapped pipeline, changed input, no key ring; cron without caller leases), `AdapterLeasingMetricsTests`,
+`TriggerManagementServiceTests/LeasedAdapterEnqueueTests`; integration against MongoDB (Testcontainers)
+`Repository/AdapterPoolQueueTests`: generically created Queued execution is not leased and ends `Failed`;
+controller-queued ones (with and without caller) pass the gate and stay `Queued`; edited input / copied seal is
+failed; a retry opens for its own execution, pipeline and input. The integration fixture resolves the real
+`LeaseService` for this (tenant tree and credential resolvers are substituted).
 
 ### ✅ The lease carries the work (§9.9 / D4)
 

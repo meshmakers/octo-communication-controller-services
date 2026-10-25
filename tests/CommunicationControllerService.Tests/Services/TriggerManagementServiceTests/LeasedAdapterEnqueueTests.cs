@@ -425,9 +425,9 @@ internal class LeasedAdapterEnqueueTests : TriggerManagementServiceTestsBase
 
         var opened = QueuedCaller.Open(execution.SealedCaller, TenantId, execution.RtId, Envelope);
         await Assert.That(opened).IsNotNull();
-        await Assert.That(opened!.Caller.SubjectId).IsEqualTo("user-42");
-        await Assert.That(opened.Caller.TrustLevel).IsEqualTo(2);
-        await Assert.That(opened.Caller.Roles.Count).IsEqualTo(2);
+        await Assert.That(opened!.Caller!.SubjectId).IsEqualTo("user-42");
+        await Assert.That(opened.Caller!.TrustLevel).IsEqualTo(2);
+        await Assert.That(opened.Caller!.Roles.Count).IsEqualTo(2);
         await Assert.That(opened.AccessToken).IsEqualTo("raw-bearer");
     }
 
@@ -462,15 +462,23 @@ internal class LeasedAdapterEnqueueTests : TriggerManagementServiceTestsBase
     }
 
     [Test]
-    public async Task ALeasedAdapter_WithoutAnInvoker_WritesNoCallerAttributes()
+    public async Task ALeasedAdapter_WithoutAnInvoker_StillSealsTheProvenance_AndWritesNoPlainCallerAttributes()
     {
         var pipelineRtId = OctoObjectId.GenerateNewId();
         ArrangeAdapter(RtLifecycleModeEnum.Leased, pipelineRtId);
 
+        RtPipelineExecution? queued = null;
+        await CommunicationRepository.EnqueueExecutionAsync(TenantId, Arg.Do<RtPipelineExecution>(e => queued = e),
+            Arg.Any<RtEntityId>(), Arg.Any<RtEntityId>(), Arg.Any<DateTime>());
+
         await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null);
 
-        await CommunicationRepository.Received(1).EnqueueExecutionAsync(TenantId,
-            Arg.Is<RtPipelineExecution>(e => e.SealedCaller == null && e.CallerSubjectId == null),
-            Arg.Any<RtEntityId>(), Arg.Any<RtEntityId>(), Arg.Any<DateTime>());
+        using var _ = Assert.Multiple();
+        await Assert.That(queued).IsNotNull();
+        await Assert.That(queued!.CallerSubjectId).IsNull();
+        // the controller still seals: this is what lets a cron tick (no caller) be leased at all
+        await Assert.That(QueuedCaller.TryOpen(queued.SealedCaller, TenantId, queued.RtId, pipelineRtId, null,
+            Envelope, out var opened, out var reason)).IsTrue();
+        await Assert.That(opened!.Caller).IsNull();
     }
 }

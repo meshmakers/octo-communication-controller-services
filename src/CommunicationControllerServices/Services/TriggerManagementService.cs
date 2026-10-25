@@ -232,8 +232,17 @@ internal class TriggerManagementService(
         // stored as ONE sealed envelope (principal, trust level, token) bound to the tenant and to this
         // execution's RtId: the entity's attributes are writable through generic surfaces, so only a
         // value the controller sealed itself is believed at lease grant. Without a key ring nothing is
-        // stored and the run proceeds without a caller (fail closed).
-        QueuedCaller.Apply(execution, tenantId, caller, callerAccessToken, executionEnvelope);
+        // stored and the execution is refused at lease grant (fail closed).
+        //
+        // AB#7473: the same envelope is the provenance of the work item. It is written for every execution the
+        // controller queues, also without a caller (cron), and is the only thing that lets the execution be leased.
+        if (!QueuedCaller.Apply(execution, tenantId, pipelineRtId, caller, callerAccessToken, executionEnvelope))
+        {
+            logger.LogWarning(
+                "[{TenantId}] Pipeline '{PipelineRtId}' could not be sealed (no usable key ring); the execution " +
+                "'{ExecutionId}' will be refused at lease grant",
+                tenantId, pipelineRtId, executionId);
+        }
 
         await communicationRepository.EnqueueExecutionAsync(tenantId, execution,
             new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipelineRtId),

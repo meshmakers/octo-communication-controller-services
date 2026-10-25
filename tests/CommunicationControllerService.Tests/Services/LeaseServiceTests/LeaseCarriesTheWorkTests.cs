@@ -190,8 +190,8 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
     private string? Sealed(string? token, OctoObjectId? executionRtId = null, string tenantId = BorrowerTenantId,
         ExecutionEnvelope? envelope = null, ExecutePipelineCaller? caller = null)
     {
-        var execution = new RtPipelineExecution { RtId = executionRtId ?? ExecutionRtId };
-        QueuedCaller.Apply(execution, tenantId, caller ?? ACaller(), token, envelope ?? Envelope);
+        var execution = new RtPipelineExecution { RtId = executionRtId ?? ExecutionRtId, InputData = PipelineInput };
+        QueuedCaller.Apply(execution, tenantId, PipelineRtId, caller ?? ACaller(), token, envelope ?? Envelope);
         return execution.SealedCaller;
     }
 
@@ -231,102 +231,132 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
         await Assert.That(lease.CallerAccessToken).IsNull();
     }
 
-    // ---- AB#7472: what is not provably the controller's own value is not believed ------------
+    // ---- AB#7472 / AB#7473: what is not provably the controller's own value is not leased -------
 
-    private async Task AssertLeaseCarriesNoCallerAsync(string? stored, OctoObjectId? executionRtId = null)
+    private async Task AssertRefusedAndFailedAsync(string? stored, OctoObjectId? executionRtId = null,
+        LeaseService? service = null)
     {
         ArrangeGrantableLease();
         ArrangeProjectablePipeline();
 
-        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId,
+        var result = await (service ?? LeaseService).GrantLeaseAsync(LenderTenantId, AdapterPoolRtId,
             AWorkRequestFrom(stored, executionRtId));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.Granted).IsFalse();
+        await Assert.That(result.Reason).IsEqualTo(LeaseRefusalReason.QueuedProvenanceInvalid);
+        // never handed to a member ...
+        await Assert.That(MemberProxy.ReceivedCalls().Any(c => c.GetMethodInfo().Name ==
+                                                              nameof(IClientProxy.SendCoreAsync))).IsFalse();
+        // ... and set to a terminal failed state with a reason that carries no value
+        await CommunicationRepository.Received(1).UpdatePipelineExecutionAsync(BorrowerTenantId, "exec-1",
+            RtPipelineExecutionStatusEnum.Failed, Arg.Any<DateTime?>(), Arg.Any<int?>(),
+            Arg.Is<string?>(m => m != null && m.Contains("not queued by the controller") && !m.Contains("user-42")),
+            Arg.Any<string?>());
+    }
+
+    [Test]
+    public Task NoSealedValue_IsNotLeased() => AssertRefusedAndFailedAsync(null);
+
+    [Test]
+    public Task APlainTextValue_IsNotLeased() => AssertRefusedAndFailedAsync("user-42");
+
+    [Test]
+    public Task APlainTextJsonValue_IsNotLeased() => AssertRefusedAndFailedAsync(
+        "{\"v\":1,\"p\":\"queued-caller\",\"t\":\"" + BorrowerTenantId + "\",\"e\":\"" + ExecutionRtId +
+        "\",\"d\":{\"SubjectId\":\"admin\",\"TrustLevel\":2}}");
+
+    [Test]
+    public Task ALegacyEncV1Value_IsNotLeased() => AssertRefusedAndFailedAsync("enc:v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==");
+
+    [Test]
+    public Task AValueSealedForAnotherExecution_IsNotLeased() =>
+        AssertRefusedAndFailedAsync(Sealed("t", executionRtId: OctoObjectId.GenerateNewId()));
+
+    [Test]
+    public Task AValueSealedForAnotherTenant_IsNotLeased() =>
+        AssertRefusedAndFailedAsync(Sealed("t", tenantId: "someone-else"));
+
+    [Test]
+    public Task AValueSealedWithAnotherKey_IsNotLeased() =>
+        AssertRefusedAndFailedAsync(Sealed("t", envelope: TestExecutionEnvelope.Create()));
+
+    [Test]
+    public async Task AFlippedBit_IsNotLeased()
+    {
+        var sealedValue = Sealed("t")!;
+        var chars = sealedValue.ToCharArray();
+        var i = chars.Length - 4;
+        chars[i] = chars[i] == 'A' ? 'B' : 'A';
+        await AssertRefusedAndFailedAsync(new string(chars));
+    }
+
+    [Test]
+    public async Task ASecretOfAnotherAttribute_CopiedIntoTheValue_IsNotLeased()
+    {
+        // Any enc:v2 value of the same key ring - for instance a copied client secret - decrypts to something that
+        // is not an envelope of this format.
+        await AssertRefusedAndFailedAsync(
+            TestSecretEncryption.Create().Protector.Protect("a-client-secret").Envelope);
+    }
+
+    [Test]
+    public async Task AnEnvelopeOfAnotherPurpose_IsNotLeased()
+    {
+        var other = Envelope.Seal("another-purpose", new { SubjectId = "admin", TrustLevel = 2 }, BorrowerTenantId,
+            ExecutionRtId);
+        await AssertRefusedAndFailedAsync(other);
+    }
+
+    [Test]
+    public async Task AValueSealedBeforeTheProvenanceMarker_IsNotLeased()
+    {
+        // The AB#7472 shape: caller only, no provenance marker, pipeline or input binding.
+        var legacy = Envelope.Seal(ExecutionEnvelopePurposes.QueuedCaller,
+            new QueuedCaller.Payload { SubjectId = "user-42", TrustLevel = 2 }, BorrowerTenantId, ExecutionRtId);
+        await AssertRefusedAndFailedAsync(legacy);
+    }
+
+    [Test]
+    public async Task AControllerQueuedValue_WhoseExecutionPointsAtAnotherPipelineNow_IsNotLeased()
+    {
+        var execution = new RtPipelineExecution { RtId = ExecutionRtId, InputData = PipelineInput };
+        QueuedCaller.Apply(execution, BorrowerTenantId, OctoObjectId.GenerateNewId(), ACaller(), null, Envelope);
+        await AssertRefusedAndFailedAsync(execution.SealedCaller);
+    }
+
+    [Test]
+    public async Task AControllerQueuedValue_WhoseInputWasChangedAfterwards_IsNotLeased()
+    {
+        var execution = new RtPipelineExecution { RtId = ExecutionRtId, InputData = "{\"other\":1}" };
+        QueuedCaller.Apply(execution, BorrowerTenantId, PipelineRtId, ACaller(), null, Envelope);
+        await AssertRefusedAndFailedAsync(execution.SealedCaller);
+    }
+
+    [Test]
+    public async Task WithoutAKeyRing_NothingOpens_AndTheExecutionIsFailed()
+    {
+        var noKeys = new LeaseService(ConnectionManager, CommunicationRepository, EventService, EncryptionService,
+            TestExecutionEnvelope.Create(withKeyRing: false), HubContext, LendingScopeResolver, ServiceAccountResolver,
+            DatabaseCredentialResolver, AdapterService, LifecycleConfiguration, WakeSignal);
+
+        await AssertRefusedAndFailedAsync(Sealed("t"), service: noKeys);
+    }
+
+    [Test]
+    public async Task AWorkItemQueuedWithoutAnInvoker_IsLeasedWithoutOne_BecauseTheControllerSealedIt()
+    {
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequest());
 
         using var _ = Assert.Multiple();
         await Assert.That(result.Granted).IsTrue();
         var lease = CapturePushedLease();
         await Assert.That(lease.Caller).IsNull();
         await Assert.That(lease.CallerAccessToken).IsNull();
-    }
-
-    [Test]
-    public Task APlainTextValue_YieldsNoCaller() => AssertLeaseCarriesNoCallerAsync("user-42");
-
-    [Test]
-    public Task APlainTextJsonValue_YieldsNoCaller() => AssertLeaseCarriesNoCallerAsync(
-        "{\"v\":1,\"p\":\"queued-caller\",\"t\":\"" + BorrowerTenantId + "\",\"e\":\"" + ExecutionRtId +
-        "\",\"d\":{\"SubjectId\":\"admin\",\"TrustLevel\":2}}");
-
-    [Test]
-    public Task ALegacyEncV1Value_YieldsNoCaller() => AssertLeaseCarriesNoCallerAsync("enc:v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==");
-
-    [Test]
-    public Task AValueSealedForAnotherExecution_YieldsNoCaller() =>
-        AssertLeaseCarriesNoCallerAsync(Sealed("t", executionRtId: OctoObjectId.GenerateNewId()));
-
-    [Test]
-    public Task AValueSealedForAnotherTenant_YieldsNoCaller() =>
-        AssertLeaseCarriesNoCallerAsync(Sealed("t", tenantId: "someone-else"));
-
-    [Test]
-    public Task AValueSealedWithAnotherKey_YieldsNoCaller() =>
-        AssertLeaseCarriesNoCallerAsync(Sealed("t", envelope: TestExecutionEnvelope.Create()));
-
-    [Test]
-    public async Task AFlippedBit_YieldsNoCaller()
-    {
-        var sealedValue = Sealed("t")!;
-        var chars = sealedValue.ToCharArray();
-        var i = chars.Length - 4;
-        chars[i] = chars[i] == 'A' ? 'B' : 'A';
-        await AssertLeaseCarriesNoCallerAsync(new string(chars));
-    }
-
-    [Test]
-    public async Task ASecretOfAnotherAttribute_CopiedIntoTheValue_YieldsNoCaller()
-    {
-        // Any enc:v2 value of the same key ring - for instance a copied client secret - decrypts to something that
-        // is not an envelope of this format.
-        await AssertLeaseCarriesNoCallerAsync(
-            TestSecretEncryption.Create().Protector.Protect("a-client-secret").Envelope);
-    }
-
-    [Test]
-    public async Task AnEnvelopeOfAnotherPurpose_YieldsNoCaller()
-    {
-        var other = Envelope.Seal("another-purpose", new { SubjectId = "admin", TrustLevel = 2 }, BorrowerTenantId,
-            ExecutionRtId);
-        await AssertLeaseCarriesNoCallerAsync(other);
-    }
-
-    [Test]
-    public async Task WithoutAKeyRing_NoSealedValueOpens()
-    {
-        ArrangeGrantableLease();
-        ArrangeProjectablePipeline();
-        var noKeys = new LeaseService(ConnectionManager, CommunicationRepository, EventService, EncryptionService,
-            TestExecutionEnvelope.Create(withKeyRing: false), HubContext, LendingScopeResolver, ServiceAccountResolver,
-            DatabaseCredentialResolver, AdapterService, LifecycleConfiguration, WakeSignal);
-
-        await noKeys.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequestFrom(Sealed("t")));
-
-        var lease = CapturePushedLease();
-        await Assert.That(lease.Caller).IsNull();
-        await Assert.That(lease.CallerAccessToken).IsNull();
-    }
-
-    [Test]
-    public async Task AWorkItemQueuedWithoutAnInvokerLeasesWithoutOne()
-    {
-        ArrangeGrantableLease();
-        ArrangeProjectablePipeline();
-
-        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequest());
-
-        using var _ = Assert.Multiple();
-        var lease = CapturePushedLease();
-        await Assert.That(lease.Caller).IsNull();
-        await Assert.That(lease.CallerAccessToken).IsNull();
-        // (The encryption service is still asked for the borrower's own secret; only the caller
-        // token path must stay silent, which the null above proves.)
+        await CommunicationRepository.DidNotReceiveWithAnyArgs().UpdatePipelineExecutionAsync(default!, default!,
+            default, default, default, default, default);
     }
 }

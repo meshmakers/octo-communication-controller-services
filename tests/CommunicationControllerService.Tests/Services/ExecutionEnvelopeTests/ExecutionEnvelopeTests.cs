@@ -173,7 +173,7 @@ internal class ExecutionEnvelopeTests
     public async Task StripToken_KeepsTheCallerButDropsTheToken_ForTheSameExecution()
     {
         var execution = new RtPipelineExecution { RtId = _execution };
-        QueuedCaller.Apply(execution, Tenant,
+        QueuedCaller.Apply(execution, Tenant, OctoObjectId.GenerateNewId(),
             new ExecutePipelineCaller { SubjectId = "user-42", Roles = ["Admin"], TrustLevel = 2 }, "bearer-xyz", _sut);
 
         var stripped = QueuedCaller.StripToken(execution.SealedCaller, Tenant, _execution, _sut);
@@ -181,8 +181,8 @@ internal class ExecutionEnvelopeTests
 
         using var scope = Assert.Multiple();
         await Assert.That(opened).IsNotNull();
-        await Assert.That(opened!.Caller.SubjectId).IsEqualTo("user-42");
-        await Assert.That(opened.Caller.TrustLevel).IsEqualTo(2);
+        await Assert.That(opened!.Caller!.SubjectId).IsEqualTo("user-42");
+        await Assert.That(opened.Caller!.TrustLevel).IsEqualTo(2);
         await Assert.That(opened.AccessToken).IsNull();
     }
 
@@ -191,7 +191,7 @@ internal class ExecutionEnvelopeTests
     {
         var next = OctoObjectId.GenerateNewId();
         var execution = new RtPipelineExecution { RtId = _execution };
-        QueuedCaller.Apply(execution, Tenant, new ExecutePipelineCaller { SubjectId = "user-42", TrustLevel = 2 },
+        QueuedCaller.Apply(execution, Tenant, OctoObjectId.GenerateNewId(), new ExecutePipelineCaller { SubjectId = "user-42", TrustLevel = 2 },
             "bearer-xyz", _sut);
 
         var resealed = QueuedCaller.Reseal(execution.SealedCaller, Tenant, _execution, next, _sut);
@@ -199,7 +199,7 @@ internal class ExecutionEnvelopeTests
 
         using var scope = Assert.Multiple();
         await Assert.That(opened).IsNotNull();
-        await Assert.That(opened!.Caller.SubjectId).IsEqualTo("user-42");
+        await Assert.That(opened!.Caller!.SubjectId).IsEqualTo("user-42");
         await Assert.That(opened.AccessToken).IsNull();
     }
 

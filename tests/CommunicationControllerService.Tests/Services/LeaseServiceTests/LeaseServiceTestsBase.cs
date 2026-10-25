@@ -236,7 +236,11 @@ internal abstract class LeaseServiceTestsBase
     /// </summary>
     protected LeaseRequest AWorkRequest(string executionId = "exec-1", string? input = PipelineInput)
     {
-        return new LeaseRequest(BorrowerTenantId, Borrower.RtId, executionId, null, PipelineRtId, input);
+        // AB#7473: queued work carries the controller's provenance, exactly as the enqueue writes it.
+        var execution = new RtPipelineExecution { RtId = OctoObjectId.GenerateNewId(), InputData = input };
+        QueuedCaller.Apply(execution, BorrowerTenantId, PipelineRtId, null, null, Envelope);
+        return new LeaseRequest(BorrowerTenantId, Borrower.RtId, executionId, null, PipelineRtId, input,
+            execution.RtId, execution.SealedCaller);
     }
 
     /// <summary>
