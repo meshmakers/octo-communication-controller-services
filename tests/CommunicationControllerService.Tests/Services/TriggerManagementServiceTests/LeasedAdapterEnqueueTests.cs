@@ -512,6 +512,11 @@ internal class LeasedAdapterEnqueueTests : TriggerManagementServiceTestsBase
         await Assert.That(queued).IsNotNull();
         // not readable in the stored value, bound to this execution
         await Assert.That(queued!.SealedCaller!.Contains(marker.MethodId)).IsFalse();
+        // the plain attributes are really unwritten
+        await Assert.That(queued.CallerSubjectId).IsNull();
+        await Assert.That(queued.CallerRoles).IsNull();
+        await Assert.That(queued.CallerTrustLevel).IsNull();
+        await Assert.That(queued.CallerAccessToken).IsNull();
         await Assert.That(QueuedCaller.TryOpen(queued.SealedCaller, TenantId, queued.RtId, pipelineRtId, adapter.RtId,
             null, Envelope, out var opened, out _)).IsEqualTo(QueuedCaller.Provenance.Valid);
         await Assert.That(opened!.MethodInvocation).IsEqualTo(marker);

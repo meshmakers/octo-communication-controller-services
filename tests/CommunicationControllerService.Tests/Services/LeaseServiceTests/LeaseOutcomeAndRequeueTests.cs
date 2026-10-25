@@ -280,7 +280,7 @@ internal class LeaseOutcomeAndRequeueTests : LeaseServiceTestsBase
     }
 
     [Test]
-    public async Task ARequeue_DropsAMarkerCopiedFromAnotherExecution()
+    public async Task ARequeue_DropsTheWholeEnvelope_WhenItWasSealedForAnotherExecution_MarkerIncluded()
     {
         var marker = new Meshmakers.Octo.Communication.Contracts.MessageObjects.ExecutePipelineMethodInvocation
         {

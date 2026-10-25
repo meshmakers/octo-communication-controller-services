@@ -3238,8 +3238,20 @@ older controller ignores the unknown payload member, so it drops the marker: fai
   invocation id and method) and seals it again for the retry's RtId; the ciphertext is never copied. A value that does
   not open for the old execution is not carried (the retry has no provenance and is refused at its grant); an
   inconsistent marker is dropped while the caller is kept. `StripToken` (at claim) keeps the marker.
+- **What the controller binds.** The controller binds the marker to the tenant, the execution RtId (envelope) and the
+  pipeline RtId (`marker.PipelineRtId` must equal the queued pipeline). It does **not** check `MethodId` against the
+  replacing method of the type: that comparison, and the check against the pipeline the adapter actually executes,
+  belong to the adapter guard (AB#7462).
+- **Retry and `InvocationId`.** A retry carries the marker unchanged, so it has the same `InvocationId` as the interrupted
+  attempt. A retried method run may therefore run again the inserts the interrupted attempt already made: method
+  pipelines should be idempotent. The adapter guard does not require `InvocationId` uniqueness and must not start to
+  (it would refuse every retry).
 - **Fail closed.** No key ring: nothing is queued (AB#7473). Marker dropped for any reason: the adapter refuses a
   generic create of a type whose method replaces it, so the method call fails (availability only).
+- **Known residual risk.** Like the caller, the marker is only as single-use as the execution: an already completed
+  execution whose writable status is reset to `Queued` is leased again together with its caller and marker. The
+  controller-owned single-use claim of AB#7476 closes this and is extended to cover the marker; it is not part of this
+  change.
 - **Rollout (same as AB#7473).** The marker is read only by an instance that has this change. During a mixed
   rollout a lease granted by an old instance carries no marker and a method run on a leased adapter fails closed until
   the old instance is gone. Roll out like AB#7473: leasing kill switch off (`SetCommunicationLifecycle -le false`),

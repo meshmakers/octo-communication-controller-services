@@ -542,7 +542,7 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
     }
 
     [Test]
-    public async Task AMarkerCopiedFromAnotherExecution_NeverReachesAMember()
+    public async Task AMarkerCopiedFromAnotherExecution_RefusesTheWholeEnvelope_SoNoMemberGetsIt()
     {
         // the value of ANOTHER execution (marker included) was written onto this one by hand: the envelope is bound to
         // that other RtId, so the whole execution is refused and no lease with a marker exists
@@ -550,11 +550,26 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
     }
 
     [Test]
-    public async Task APlainTextMarker_NeverReachesAMember()
+    public async Task APlainTextMarker_RefusesTheWholeEnvelope_SoNoMemberGetsIt()
     {
         await AssertRefusedAndFailedAsync(
             "{\"MethodInvocation\":{\"MethodId\":\"Model-1/Type-1/Create\",\"PipelineRtId\":\"" +
             PipelineRtId + "\"}}");
+    }
+
+    [Test]
+    public async Task AnEnvelopeWithAnUnknownMember_StillOpens_SoAnOlderControllerJustDropsTheMarker()
+    {
+        // counterpart of the old-controller claim: a member this controller does not know is ignored, not fatal
+        var stored = Envelope.Seal(ExecutionEnvelopePurposes.QueuedCaller,
+            new { SubjectId = "user-42", FutureMember = "x" }, BorrowerTenantId, ExecutionRtId);
+
+        var opened = QueuedCaller.Open(stored, BorrowerTenantId, ExecutionRtId, Envelope);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(opened).IsNotNull();
+        await Assert.That(opened!.Caller!.SubjectId).IsEqualTo("user-42");
+        await Assert.That(opened.MethodInvocation).IsNull();
     }
 
     [Test]
