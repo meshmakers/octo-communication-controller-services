@@ -69,6 +69,56 @@ internal class StartExecutePipelineAsyncTests : TriggerManagementServiceTestsBas
     }
 
     /// <summary>
+    /// AB#7460: the marker given by the method invoker lands on the published request unchanged; every other caller
+    /// leaves the parameter at its default and the request carries none.
+    /// </summary>
+    [Test]
+    public async Task StartExecutePipelineAsync_MethodInvocation_IsSetOnTheDirectRequest()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+        var marker = new ExecutePipelineMethodInvocation
+        {
+            MethodId = "Acme.Assets/Device.UpdateFirmware-1",
+            InvocationId = Guid.NewGuid(),
+            CkTypeId = "Acme.Assets/Device",
+            PipelineRtId = pipelineRtId.ToString()
+        };
+        ExecutePipelineRequest? captured = null;
+        ExecuteMeshPipelineCommandClient
+            .GetResponse<ExecutePipelineResponse>(Arg.Any<string>(), Arg.Any<ExecutePipelineRequest>(),
+                Arg.Any<CancellationToken>(), Arg.Any<TimeSpan?>())
+            .Returns(callInfo =>
+            {
+                captured = callInfo.ArgAt<ExecutePipelineRequest>(1);
+                return new ExecutePipelineResponse(true, null, Guid.NewGuid(), DateTime.UtcNow);
+            });
+
+        await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null,
+            methodInvocation: marker);
+
+        await Assert.That(captured!.MethodInvocation).IsEqualTo(marker);
+    }
+
+    [Test]
+    public async Task StartExecutePipelineAsync_WithoutMethodInvocation_RequestCarriesNone()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+        ExecutePipelineRequest? captured = null;
+        ExecuteMeshPipelineCommandClient
+            .GetResponse<ExecutePipelineResponse>(Arg.Any<string>(), Arg.Any<ExecutePipelineRequest>(),
+                Arg.Any<CancellationToken>(), Arg.Any<TimeSpan?>())
+            .Returns(callInfo =>
+            {
+                captured = callInfo.ArgAt<ExecutePipelineRequest>(1);
+                return new ExecutePipelineResponse(true, null, Guid.NewGuid(), DateTime.UtcNow);
+            });
+
+        await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null);
+
+        await Assert.That(captured!.MethodInvocation).IsNull();
+    }
+
+    /// <summary>
     /// AB#4918 wake gate: the execute-pipeline queue is non-durable, so the gate must have
     /// completed before the command is sent — otherwise the message is silently dropped
     /// while the adapter is scaled to 0.

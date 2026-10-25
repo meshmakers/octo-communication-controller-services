@@ -120,6 +120,22 @@ a fake identity service and tokens signed with a throw-away key: one test per re
 `StartExecutePipelineAsync` is never called, subject of the token beats the forged `Caller`, service token = `client_id`, log
 capture), `Methods/PipelineMethodWiringTests`, integration `PipelineMethodHandlerTests`.
 
+**Method-invocation marker (AB#7460, Feature AB#6884 F3.7, decision note AB#7120).** `PipelineMethodInvoker` is the only
+producer of `ExecutePipelineMethodInvocation` (octo-sdk, `Meshmakers.Octo.Communication.Contracts.MessageObjects`): it
+builds it from the accepted request (`MethodId` qualified, `InvocationId`, `CkTypeId`) plus the `PipelineRtId` of the
+bound pipeline (`PipelineMethodInvoker.BuildMethodInvocation`) and hands it to the new optional parameter
+`methodInvocation` (default null) of `ITriggerManagementService.StartExecutePipelineAsync`, which sets it on the
+`ExecutePipelineRequest` it publishes (the one place that builds that request). The adapter lets a type whose method
+`replacesGenericCreate` be created only in this run (AB#7120). **No public API accepts the marker**: REST
+`POST .../pipeline/execute` binds only the query `pipelineRtId`, `isDryRun` and the raw body as pipeline input (a body
+with a `methodInvocation` member is plain input), and cron (`LeaseTriggerConsumer`) passes nothing; both leave it null.
+No SignalR hub method and no GraphQL field takes the request or the marker. Accepted residual risk: a process with
+RabbitMQ publish rights can forge it on the bus, as it can forge `Caller`. **Direct path only:** the lease path
+(a run queued for a leased adapter) does not persist the marker on the queued execution yet (AB#7461), so such a run
+starts without it and a guard that requires the marker refuses the insert (fails closed). Tests:
+`Methods/PipelineMethodInvokerTests` (all four fields), `Services/TriggerManagementServiceTests/StartExecutePipelineAsyncTests`,
+`Controllers/PipelineControllerExecuteTests` (REST, incl. a body with a `methodInvocation` member), `Consumers/LeaseTriggerConsumerTests` (cron).
+
 **Pipeline output** (`SetPipelineExecutionResult@1` -> `OutputData`):
 
 | OutputData | Execution status | Response |

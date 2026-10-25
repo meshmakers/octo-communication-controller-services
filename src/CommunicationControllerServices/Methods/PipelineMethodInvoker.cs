@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.MessageObjects;
+using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Meshmakers.Octo.Services.Methods;
@@ -171,7 +172,8 @@ internal sealed class PipelineMethodInvoker(
             {
                 var trigger = serviceProvider.GetRequiredService<ITriggerManagementService>();
                 var execution = await trigger.StartExecutePipelineAsync(request.TenantId, pipeline.RtId,
-                        BuildPipelineInput(request), false, BuildCaller(request, principal), request.CallerAccessToken)
+                        BuildPipelineInput(request), false, BuildCaller(request, principal), request.CallerAccessToken,
+                        methodInvocation: BuildMethodInvocation(request, pipeline.RtId))
                     .WaitAsync(linked.Token).ConfigureAwait(false);
                 executionId = execution.Id.ToString();
             }
@@ -275,6 +277,23 @@ internal sealed class PipelineMethodInvoker(
     ///     The caller of the pipeline, built from the validated token only. A service token (client credentials, no
     ///     <c>sub</c>) runs as its <c>client_id</c> (<see cref="CkMethodPrincipal.Subject" />).
     /// </summary>
+    /// <summary>
+    ///     The marker that tells the executing adapter the run is the pipeline of this very method invocation
+    ///     (AB#7460, decision note AB#7120). The qualified method id, the invocation id and the CK type id are those of the
+    ///     request this host accepted (token validated, method and pipeline resolved); <c>PipelineRtId</c> is the
+    ///     bound pipeline. 🔴 This is the only producer of the marker: REST execute and cron leave it null. Direct path
+    ///     only: a run queued for a leased adapter carries no marker yet (AB#7461).
+    /// </summary>
+    internal static ExecutePipelineMethodInvocation BuildMethodInvocation(CkMethodRequest request,
+        OctoObjectId pipelineRtId) =>
+        new()
+        {
+            MethodId = request.MethodId,
+            InvocationId = request.InvocationId,
+            CkTypeId = request.CkTypeId,
+            PipelineRtId = pipelineRtId.ToString()
+        };
+
     internal static ExecutePipelineCaller BuildCaller(CkMethodRequest request, CkMethodPrincipal principal) =>
         new()
         {
