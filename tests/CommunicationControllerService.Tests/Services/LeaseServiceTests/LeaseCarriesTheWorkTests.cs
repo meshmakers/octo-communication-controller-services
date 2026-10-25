@@ -188,10 +188,12 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
 
     /// <summary>The value the enqueue writes: the invoker sealed for the borrower tenant and ONE execution.</summary>
     private string? Sealed(string? token, OctoObjectId? executionRtId = null, string tenantId = BorrowerTenantId,
-        ExecutionEnvelope? envelope = null, ExecutePipelineCaller? caller = null)
+        ExecutionEnvelope? envelope = null, ExecutePipelineCaller? caller = null,
+        ExecutePipelineMethodInvocation? methodInvocation = null)
     {
         var execution = new RtPipelineExecution { RtId = executionRtId ?? ExecutionRtId, InputData = PipelineInput };
-        QueuedCaller.Apply(execution, tenantId, PipelineRtId, BorrowerAdapterRtId, caller ?? ACaller(), token, envelope ?? Envelope);
+        QueuedCaller.Apply(execution, tenantId, PipelineRtId, BorrowerAdapterRtId, caller ?? ACaller(), token,
+            envelope ?? Envelope, methodInvocation);
         return execution.SealedCaller;
     }
 
@@ -474,5 +476,98 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
         await Assert.That(lease.CallerAccessToken).IsNull();
         await CommunicationRepository.DidNotReceiveWithAnyArgs().TryFailQueuedExecutionAsync(default!, default,
             default!);
+    }
+
+    // ---- AB#7461: the lease carries the method-invocation marker ----------------------------
+
+    private static ExecutePipelineMethodInvocation AMarker(string? pipelineRtId = null) => new()
+    {
+        MethodId = "Model-1/Type-1/Create", InvocationId = Guid.NewGuid(), CkTypeId = "Model-1/Type-1",
+        PipelineRtId = pipelineRtId ?? PipelineRtId.ToString()
+    };
+
+    [Test]
+    public async Task AGrantedLease_CarriesTheMethodInvocationMarkerThatWasQueued()
+    {
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+        var marker = AMarker();
+
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId,
+            AWorkRequestFrom(Sealed(null, methodInvocation: marker)));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.Granted).IsTrue();
+        await Assert.That(CapturePushedLease().MethodInvocation).IsEqualTo(marker);
+    }
+
+    [Test]
+    public async Task AGrantedLease_WithoutAMarkerInTheEnvelope_CarriesNone()
+    {
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequestFrom(Sealed(null)));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.Granted).IsTrue();
+        await Assert.That(CapturePushedLease().MethodInvocation).IsNull();
+    }
+
+    [Test]
+    public async Task AMarkerThatNamesAnotherPipeline_IsDropped_AndTheLeaseCarriesNone()
+    {
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId,
+            AWorkRequestFrom(Sealed(null, methodInvocation: AMarker(OctoObjectId.GenerateNewId().ToString()))));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.Granted).IsTrue();
+        await Assert.That(CapturePushedLease().MethodInvocation).IsNull();
+    }
+
+    [Test]
+    public async Task AMarkerWithoutAMethodId_IsDropped()
+    {
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+        var marker = AMarker() with { MethodId = string.Empty };
+
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId,
+            AWorkRequestFrom(Sealed(null, methodInvocation: marker)));
+
+        await Assert.That(CapturePushedLease().MethodInvocation).IsNull();
+    }
+
+    [Test]
+    public async Task AMarkerCopiedFromAnotherExecution_NeverReachesAMember()
+    {
+        // the value of ANOTHER execution (marker included) was written onto this one by hand: the envelope is bound to
+        // that other RtId, so the whole execution is refused and no lease with a marker exists
+        await AssertRefusedAndFailedAsync(Sealed(null, OctoObjectId.GenerateNewId(), methodInvocation: AMarker()));
+    }
+
+    [Test]
+    public async Task APlainTextMarker_NeverReachesAMember()
+    {
+        await AssertRefusedAndFailedAsync(
+            "{\"MethodInvocation\":{\"MethodId\":\"Model-1/Type-1/Create\",\"PipelineRtId\":\"" +
+            PipelineRtId + "\"}}");
+    }
+
+    [Test]
+    public async Task AHandDrivenLease_NeverCarriesTheMarkerOfTheQueuedExecution()
+    {
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+        ArrangeQueuedExecution("exec-m", caller: ACaller(), methodInvocation: AMarker());
+
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-m"));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.Granted).IsTrue();
+        await Assert.That(CapturePushedLease().MethodInvocation).IsNull();
     }
 }

@@ -392,7 +392,8 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
 
     /// <summary>Enqueues an execution whose invoker is sealed exactly as the enqueue path does.</summary>
     private async Task<RtPipelineExecution> EnqueueWithSealedCallerAsync(TestData data, RtEntityId pipeline,
-        RtEntityId adapter, string subject = "user-42", string[]? roles = null, string? token = "a-bearer-token")
+        RtEntityId adapter, string subject = "user-42", string[]? roles = null, string? token = "a-bearer-token",
+        ExecutePipelineMethodInvocation? methodInvocation = null)
     {
         var repository = fixture.GetService<ICommunicationRepository>();
         var execution = new RtPipelineExecution
@@ -406,7 +407,7 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
             {
                 SubjectId = subject, TenantId = fixture.TestTenantId, Email = "u@example.test", Name = "User 42",
                 Roles = roles ?? ["Reader"], TrustLevel = 2
-            }, token, Envelope);
+            }, token, Envelope, methodInvocation);
         await repository.EnqueueExecutionAsync(fixture.TestTenantId, execution, pipeline, adapter,
             DateTime.UtcNow.AddMinutes(-1));
         data.Executions.Add(new RtEntityId(SystemCommunicationCkIds.RtCkPipelineExecutionTypeId, execution.RtId));
@@ -600,6 +601,44 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
             var opened = QueuedCaller.Open(loaded.SealedCaller, fixture.TestTenantId, loaded.RtId, Envelope);
             opened.Should().NotBeNull();
             opened!.Caller!.SubjectId.Should().Be("user-42");
+            opened.AccessToken.Should().BeNull();
+        }
+        finally
+        {
+            await CleanupAsync(data);
+        }
+    }
+
+    /// <summary>
+    ///     AB#7461 — the method-invocation marker survives MongoDB inside the sealed envelope and the claim (which
+    ///     re-seals the value without the token) keeps it.
+    /// </summary>
+    [Fact]
+    public async Task TryClaimQueuedExecutionAsync_KeepsTheMethodInvocationMarkerInTheSealedCaller()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var data = new TestData();
+
+        try
+        {
+            var (pipeline, adapter) = await CreateWorkAsync(data);
+            var marker = new ExecutePipelineMethodInvocation
+            {
+                MethodId = "Model-1/Type-1/Create", InvocationId = Guid.NewGuid(), CkTypeId = "Model-1/Type-1",
+                PipelineRtId = pipeline.RtId.ToString()
+            };
+            var execution = await EnqueueWithSealedCallerAsync(data, pipeline, adapter, methodInvocation: marker);
+
+            var queued = await QueuedAsync(adapter, execution);
+            QueuedCaller.Open(queued.SealedCaller, fixture.TestTenantId, queued.ExecutionRtId, Envelope)!
+                .MethodInvocation.Should().Be(marker);
+
+            (await repository.TryClaimQueuedExecutionAsync(fixture.TestTenantId, execution.ExecutionId!,
+                new LeaseClaim("lease-9", LenderTenantId, PoolRtId, "member-1", DateTime.UtcNow))).Should().BeTrue();
+
+            var loaded = await repository.GetPipelineExecutionAsync(fixture.TestTenantId, execution.ExecutionId!);
+            var opened = QueuedCaller.Open(loaded!.SealedCaller, fixture.TestTenantId, loaded.RtId, Envelope);
+            opened!.MethodInvocation.Should().Be(marker);
             opened.AccessToken.Should().BeNull();
         }
         finally

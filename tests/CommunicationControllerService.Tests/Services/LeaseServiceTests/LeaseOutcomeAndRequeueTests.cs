@@ -217,12 +217,13 @@ internal class LeaseOutcomeAndRequeueTests : LeaseServiceTestsBase
 
     private static readonly OctoObjectId InterruptedRtId = OctoObjectId.GenerateNewId();
 
-    private string SealedFor(OctoObjectId executionRtId, string tenantId = BorrowerTenantId)
+    private string SealedFor(OctoObjectId executionRtId, string tenantId = BorrowerTenantId,
+        Meshmakers.Octo.Communication.Contracts.MessageObjects.ExecutePipelineMethodInvocation? methodInvocation = null)
     {
         var execution = new RtPipelineExecution { RtId = executionRtId };
         QueuedCaller.Apply(execution, tenantId, PipelineRtId, BorrowerAdapterRtId,
             new Meshmakers.Octo.Communication.Contracts.MessageObjects.ExecutePipelineCaller
-                { SubjectId = "user-42", Roles = ["Admin"], TrustLevel = 2 }, null, Envelope);
+                { SubjectId = "user-42", Roles = ["Admin"], TrustLevel = 2 }, null, Envelope, methodInvocation);
         return execution.SealedCaller!;
     }
 
@@ -256,6 +257,56 @@ internal class LeaseOutcomeAndRequeueTests : LeaseServiceTestsBase
         await Assert.That(opened.Caller!.TrustLevel).IsEqualTo(2);
         // bound to the retry, not to the interrupted attempt
         await Assert.That(QueuedCaller.Open(retry.SealedCaller, BorrowerTenantId, InterruptedRtId, Envelope)).IsNull();
+    }
+
+    [Test]
+    public async Task ARequeue_KeepsTheMethodInvocationMarker_SealedAgainForTheRetry()
+    {
+        var marker = new Meshmakers.Octo.Communication.Contracts.MessageObjects.ExecutePipelineMethodInvocation
+        {
+            MethodId = "Model-1/Type-1/Create", InvocationId = Guid.NewGuid(), CkTypeId = "Model-1/Type-1",
+            PipelineRtId = PipelineRtId.ToString()
+        };
+        var stored = SealedFor(InterruptedRtId, methodInvocation: marker);
+
+        var retry = await RequeueWithStoredAsync(stored);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(retry.SealedCaller).IsNotEqualTo(stored);
+        await Assert.That(QueuedCaller.Open(retry.SealedCaller, BorrowerTenantId, retry.RtId, Envelope)!
+            .MethodInvocation).IsEqualTo(marker);
+        // bound to the retry: the marker does not open for the interrupted attempt any more
+        await Assert.That(QueuedCaller.Open(retry.SealedCaller, BorrowerTenantId, InterruptedRtId, Envelope)).IsNull();
+    }
+
+    [Test]
+    public async Task ARequeue_DropsAMarkerCopiedFromAnotherExecution()
+    {
+        var marker = new Meshmakers.Octo.Communication.Contracts.MessageObjects.ExecutePipelineMethodInvocation
+        {
+            MethodId = "Model-1/Type-1/Create", InvocationId = Guid.NewGuid(), PipelineRtId = PipelineRtId.ToString()
+        };
+
+        var retry = await RequeueWithStoredAsync(SealedFor(OctoObjectId.GenerateNewId(), methodInvocation: marker));
+
+        await Assert.That(retry.SealedCaller).IsNull();
+    }
+
+    [Test]
+    public async Task ARequeue_DropsAMarkerThatNamesAnotherPipeline_ButKeepsTheInvoker()
+    {
+        var marker = new Meshmakers.Octo.Communication.Contracts.MessageObjects.ExecutePipelineMethodInvocation
+        {
+            MethodId = "Model-1/Type-1/Create", InvocationId = Guid.NewGuid(),
+            PipelineRtId = OctoObjectId.GenerateNewId().ToString()
+        };
+
+        var retry = await RequeueWithStoredAsync(SealedFor(InterruptedRtId, methodInvocation: marker));
+
+        var opened = QueuedCaller.Open(retry.SealedCaller, BorrowerTenantId, retry.RtId, Envelope);
+        using var _ = Assert.Multiple();
+        await Assert.That(opened!.MethodInvocation).IsNull();
+        await Assert.That(opened.Caller!.SubjectId).IsEqualTo("user-42");
     }
 
     [Test]

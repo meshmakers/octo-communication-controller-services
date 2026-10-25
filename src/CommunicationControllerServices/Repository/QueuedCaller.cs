@@ -31,6 +31,17 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 ///         The trust level inside the envelope is the one the controller wrote; no stored trust level is trusted on
 ///         its own.
 ///     </para>
+///     <para>
+///         🔴 <b>AB#7461 — the method-invocation marker rides in the same envelope.</b> A run started by the
+///         invocation of a CK method (<c>PipelineMethodInvoker</c>) is queued with the marker
+///         (<see cref="ExecutePipelineMethodInvocation" />) as one more member of the sealed payload. It is therefore
+///         bound to the tenant and the execution RtId like the caller, re-sealed for the retry's RtId on requeue and
+///         never writable through a generic surface; no second attribute (and no System.Communication bump) is needed.
+///         It is projected into <c>LeaseDto.MethodInvocation</c> only when the envelope as a whole opens AND the
+///         marker's <c>PipelineRtId</c> equals the pipeline the controller queued; otherwise the marker is dropped
+///         (WARN without values) and the adapter-side guard refuses. REST and cron never pass a marker, so their
+///         payload has none.
+///     </para>
 /// </remarks>
 internal static class QueuedCaller
 {
@@ -58,6 +69,12 @@ internal static class QueuedCaller
 
         /// <summary>Plain bearer token for delegation; protected by the envelope, removed when the lease is granted.</summary>
         public string? AccessToken { get; set; }
+
+        /// <summary>
+        ///     The method-invocation marker (AB#7461). Null for every run that was not started by a CK method
+        ///     invocation, and in a value sealed before the marker existed.
+        /// </summary>
+        public ExecutePipelineMethodInvocation? MethodInvocation { get; set; }
     }
 
     private const int ProvenanceVersion = 1;
@@ -66,7 +83,14 @@ internal static class QueuedCaller
     ///     The verified content of a sealed provenance value. <see cref="Caller" /> is null for an execution that was
     ///     queued by the controller without an invoker (cron, internal).
     /// </summary>
-    internal sealed record Opened(ExecutePipelineCaller? Caller, string? AccessToken);
+    /// <remarks>
+    ///     <see cref="MethodInvocation" /> (AB#7461) is the marker as it was queued, only when it is consistent with the
+    ///     pipeline the controller queued; otherwise null.
+    /// </remarks>
+    internal sealed record Opened(
+        ExecutePipelineCaller? Caller,
+        string? AccessToken,
+        ExecutePipelineMethodInvocation? MethodInvocation = null);
 
     /// <summary>
     ///     Seals the provenance of the execution (and the invoker, when there is one) onto the entity. Always writes,
@@ -74,9 +98,11 @@ internal static class QueuedCaller
     ///     is later refused at lease grant (fail closed); the returned flag says so.
     /// </summary>
     public static bool Apply(RtPipelineExecution execution, string tenantId, OctoObjectId pipelineRtId,
-        OctoObjectId adapterRtId, ExecutePipelineCaller? caller, string? accessToken, IExecutionEnvelope envelope)
+        OctoObjectId adapterRtId, ExecutePipelineCaller? caller, string? accessToken, IExecutionEnvelope envelope,
+        ExecutePipelineMethodInvocation? methodInvocation = null)
     {
         var payload = ToPayload(caller, accessToken);
+        payload.MethodInvocation = methodInvocation;
         payload.Provenance = ProvenanceVersion;
         payload.PipelineRtId = pipelineRtId.ToString();
         payload.AdapterRtId = adapterRtId.ToString();
@@ -162,7 +188,8 @@ internal static class QueuedCaller
                 TrustLevel = payload.TrustLevel
             };
 
-        opened = new Opened(caller, string.IsNullOrEmpty(payload.AccessToken) ? null : payload.AccessToken);
+        opened = new Opened(caller, string.IsNullOrEmpty(payload.AccessToken) ? null : payload.AccessToken,
+            ConsistentMethodInvocation(payload, tenantId, executionRtId));
         reason = string.Empty;
         return Provenance.Valid;
     }
@@ -190,7 +217,36 @@ internal static class QueuedCaller
                 Name = payload.Name,
                 Roles = payload.Roles.ToArray(),
                 TrustLevel = payload.TrustLevel
-            }, string.IsNullOrEmpty(payload.AccessToken) ? null : payload.AccessToken);
+            }, string.IsNullOrEmpty(payload.AccessToken) ? null : payload.AccessToken,
+            ConsistentMethodInvocation(payload, tenantId, executionRtId));
+    }
+
+    /// <summary>
+    ///     AB#7461 — the marker of an opened payload, or null. A marker is only believed while it names the pipeline the
+    ///     controller queued (the same pipeline the lease runs): the adapter additionally checks it against the pipeline
+    ///     it executes. A marker without a method id, or one that names another pipeline, is dropped (fail closed: the
+    ///     adapter-side guard then refuses the insert). Logs execution and tenant only, never the marker.
+    /// </summary>
+    private static ExecutePipelineMethodInvocation? ConsistentMethodInvocation(Payload payload, string tenantId,
+        OctoObjectId executionRtId)
+    {
+        var marker = payload.MethodInvocation;
+        if (marker is null)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrEmpty(marker.MethodId) || string.IsNullOrEmpty(marker.PipelineRtId) ||
+            !string.Equals(marker.PipelineRtId, payload.PipelineRtId, StringComparison.Ordinal))
+        {
+            NLog.LogManager.GetCurrentClassLogger().Warn(
+                "[{TenantId}] The method-invocation marker of execution '{ExecutionRtId}' is inconsistent with the " +
+                "queued pipeline and is dropped; the run starts without it",
+                tenantId, executionRtId);
+            return null;
+        }
+
+        return marker;
     }
 
     private static string HashInput(string? input) =>
@@ -220,6 +276,10 @@ internal static class QueuedCaller
 
         // A retry never carries delegation, whatever value is stored (the pre-claim value could be written back).
         payload.AccessToken = null;
+
+        // AB#7461: the marker is carried (same work item, same invocation) but sealed again for the retry's RtId;
+        // an inconsistent one is dropped here already.
+        payload.MethodInvocation = ConsistentMethodInvocation(payload, tenantId, fromExecutionRtId);
         return envelope.Seal(ExecutionEnvelopePurposes.QueuedCaller, payload, tenantId, toExecutionRtId);
     }
 

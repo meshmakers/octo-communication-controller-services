@@ -30,8 +30,9 @@ public interface ITriggerManagementService
     /// where the adapter reports the execution and its trigger type itself.</param>
     /// <param name="methodInvocation">Marker that tells the executor the run was started by the invocation of
     /// a CK method (AB#7460, Feature AB#6884). 🔴 Only <c>PipelineMethodInvoker</c> passes it; REST execute and
-    /// cron pass null, and no public API accepts it. Carried on the direct (non-leased) path only: the lease path
-    /// does not persist it yet (AB#7461), so a run queued for a leased adapter starts without a marker.</param>
+    /// cron pass null, and no public API accepts it. Direct path: sent on the execute command. Leased path
+    /// (AB#7461): sealed into the queued execution's envelope and projected into <c>LeaseDto.MethodInvocation</c> at
+    /// lease grant, if it still verifies there.</param>
     /// <returns>The pipeline execution id, if the start of execution was successful</returns>
     Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId, OctoObjectId pipelineRtId,
         string? pipelineInput, bool isDryRun = false,

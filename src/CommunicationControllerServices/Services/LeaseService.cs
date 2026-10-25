@@ -259,6 +259,9 @@ internal class LeaseService : ILeaseService
             // projection above - a lease is built once and pushed as-is.
             Caller = caller,
             CallerAccessToken = callerToken,
+            // AB#7461: the method-invocation marker the envelope proves, independent of the caller. Null for REST,
+            // cron and hand-driven leases, and whenever it did not verify (the adapter then refuses).
+            MethodInvocation = provenance?.MethodInvocation,
             ClientId = credential.Value.ClientId,
             ClientSecret = credential.Value.ClientSecret,
             // Three fields, filled here and nowhere else. The member formats no user name and knows

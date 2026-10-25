@@ -244,7 +244,8 @@ internal abstract class LeaseServiceTestsBase
 
     /// <summary>The repository answers for a Queued execution of the borrower that carries valid provenance.</summary>
     protected RtPipelineExecution ArrangeQueuedExecution(string executionId, string? sealedCaller = null,
-        bool sealIt = true, Meshmakers.Octo.Communication.Contracts.MessageObjects.ExecutePipelineCaller? caller = null, string? token = null)
+        bool sealIt = true, Meshmakers.Octo.Communication.Contracts.MessageObjects.ExecutePipelineCaller? caller = null, string? token = null,
+        Meshmakers.Octo.Communication.Contracts.MessageObjects.ExecutePipelineMethodInvocation? methodInvocation = null)
     {
         var execution = new RtPipelineExecution
         {
@@ -253,7 +254,8 @@ internal abstract class LeaseServiceTestsBase
         };
         if (sealIt)
         {
-            QueuedCaller.Apply(execution, BorrowerTenantId, PipelineRtId, BorrowerAdapterRtId, caller, token, Envelope);
+            QueuedCaller.Apply(execution, BorrowerTenantId, PipelineRtId, BorrowerAdapterRtId, caller, token, Envelope,
+                methodInvocation);
         }
 
         if (sealedCaller is not null)

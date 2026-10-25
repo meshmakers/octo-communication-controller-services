@@ -130,9 +130,9 @@ bound pipeline (`PipelineMethodInvoker.BuildMethodInvocation`) and hands it to t
 `POST .../pipeline/execute` binds only the query `pipelineRtId`, `isDryRun` and the raw body as pipeline input (a body
 with a `methodInvocation` member is plain input), and cron (`LeaseTriggerConsumer`) passes nothing; both leave it null.
 No SignalR hub method and no GraphQL field takes the request or the marker. Accepted residual risk: a process with
-RabbitMQ publish rights can forge it on the bus, as it can forge `Caller`. **Direct path only:** the lease path
-(a run queued for a leased adapter) does not persist the marker on the queued execution yet (AB#7461), so such a run
-starts without it and a guard that requires the marker refuses the insert (fails closed). Tests:
+RabbitMQ publish rights can forge it on the bus, as it can forge `Caller`. **Leased path (AB#7461):** a run queued for a
+leased adapter carries the marker sealed inside the queued execution's `SealedCaller` envelope and hands it to the pool
+member in `LeaseDto.MethodInvocation` (see "Method-invocation marker on the leased path (AB#7461)" below). Tests:
 `Methods/PipelineMethodInvokerTests` (all four fields), `Services/TriggerManagementServiceTests/StartExecutePipelineAsyncTests`,
 `Controllers/PipelineControllerExecuteTests` (REST, incl. a body with a `methodInvocation` member), `Consumers/LeaseTriggerConsumerTests` (cron).
 
@@ -3201,9 +3201,10 @@ logged (`ExecutionEnvelopeRejection`), never the value.
 - **The seven plain `Caller*` attributes** stay in the CK model (removing an attribute is a major change) but are
   deprecated: neither written nor read. Executions queued before the upgrade have no valid `SealedCaller` and are
   failed at lease grant (AB#7473, rollout note below).
-- **Reuse.** Another value that the controller must be able to trust on a queued execution (the method-invocation
-  marker of AB#7461) is one more `purpose` plus one more String attribute, written with `Seal` at enqueue and opened
-  with `TryOpen` / `Reseal` — not a second mechanism.
+- **Reuse.** Another value that the controller must be able to trust on a queued execution is one more member of the
+  sealed payload (the method-invocation marker of AB#7461 does exactly that, see below) or, if it must be readable
+  and replaceable on its own, one more `purpose` plus one more String attribute, written with `Seal` at enqueue and
+  opened with `TryOpen` / `Reseal` — not a second mechanism.
 
 Tests: `Services/ExecutionEnvelopeTests` (round trip, binding, tampering, copied secrets, no key ring, reseal,
 `StripToken`), `Services/LeaseServiceTests/LeaseCarriesTheWorkTests` (the lease carries only what verifies: plain
@@ -3211,6 +3212,44 @@ text, forged JSON, `enc:v1`, other execution / tenant / key / purpose, flipped b
 `Services/LeaseServiceTests/LeaseOutcomeAndRequeueTests` (requeue seals again, never copies),
 `Services/TriggerManagementServiceTests/LeasedAdapterEnqueueTests`, integration `Repository/AdapterPoolQueueTests`
 (generic update of the plain attributes and of the sealed attribute against real MongoDB, token removal at claim).
+
+### Method-invocation marker on the leased path (AB#7461)
+
+**Design decision: the marker is one more member of the existing `SealedCaller` payload, not a second attribute.**
+A separate `MethodInvocation` attribute (decision note AB#7120, first draft) would have needed System.Communication
+4.13.0, a second `Seal`/`Open`/`Reseal` pair and a second place that can drift. The envelope already provides what the
+marker needs: AES-GCM with the instance key ring (`enc:v2`), binding to tenant and execution RtId inside the
+authenticated plaintext, no plain-text acceptance, re-seal on requeue, and the provenance gate of AB#7473 (pipeline,
+adapter, input). System.Communication therefore stays **4.12.0**; the old-instance behaviour is also the safe one (an
+older controller ignores the unknown payload member, so it drops the marker: fail closed).
+
+- **Enqueue.** `PipelineMethodInvoker` -> `StartExecutePipelineAsync(..., methodInvocation)` -> `QueuedCaller.Apply(...,
+  methodInvocation)` seals the marker with the caller and the provenance. REST execute and `LeaseTriggerConsumer` (cron)
+  pass null, so their payload has no marker. No public API accepts a marker.
+- **Grant.** `QueuedCaller.TryOpen` returns the marker in `Opened.MethodInvocation` only when the whole envelope opens
+  (tenant, execution RtId, pipeline, adapter, input) AND the marker is consistent: it has a `MethodId` and its
+  `PipelineRtId` equals the pipeline the controller queued (and therefore the pipeline the lease runs). An inconsistent
+  marker is dropped with a WARN (tenant and execution only, never the marker) and the lease is granted without it; an
+  envelope that does not open at all refuses the whole execution (AB#7473), so a copied, edited or plain-text marker
+  never reaches a member. `LeaseService` projects it into `LeaseDto.MethodInvocation`, independent of the caller. A
+  hand-driven lease carries no work and no marker. The mesh adapter's guard additionally compares it with the pipeline
+  it actually executes (AB#7462).
+- **Requeue.** `QueuedCaller.Reseal` opens the value for the OLD execution RtId, keeps the marker (same work item, same
+  invocation id and method) and seals it again for the retry's RtId; the ciphertext is never copied. A value that does
+  not open for the old execution is not carried (the retry has no provenance and is refused at its grant); an
+  inconsistent marker is dropped while the caller is kept. `StripToken` (at claim) keeps the marker.
+- **Fail closed.** No key ring: nothing is queued (AB#7473). Marker dropped for any reason: the adapter refuses a
+  generic create of a type whose method replaces it, so the method call fails (availability only).
+- **Rollout (same as AB#7473).** The marker is read only by an instance that has this change. During a mixed
+  rollout a lease granted by an old instance carries no marker and a method run on a leased adapter fails closed until
+  the old instance is gone. Roll out like AB#7473: leasing kill switch off (`SetCommunicationLifecycle -le false`),
+  drain or cancel queued leased items, roll **all** controller instances, switch leasing back on. Adapters need the
+  guard of AB#7462 to enforce anything; an adapter without it ignores `LeaseDto.MethodInvocation`.
+
+Tests: `LeaseServiceTests/LeaseCarriesTheWorkTests` (marker in the `LeaseDto`, none without, other pipeline / no method
+id dropped, copied and plain-text refused, hand-driven lease), `LeaseServiceTests/LeaseOutcomeAndRequeueTests` (retry
+keeps the marker sealed for the new RtId, copied marker dropped), `TriggerManagementServiceTests/
+LeasedAdapterEnqueueTests` (method run seals the marker, REST and cron carry none).
 
 ### Only executions the controller queued are leased (AB#7473)
 
@@ -3225,7 +3264,7 @@ item. `QueuedCaller.Apply(execution, tenantId, pipelineRtId, adapterRtId, caller
 (`SubjectId` null). Payload additions: a provenance marker, the pipeline RtId, the adapter RtId and a SHA-256 of the
 input, so an execution that is controller-queued but whose pipeline or adapter association or input was edited
 afterwards does not open either. The binding to tenant and execution RtId is the one of `IExecutionEnvelope`.
-System.Communication stays 4.12.0, so the version reserved for AB#7461 is untouched. (A queued item whose pipeline is
+System.Communication stays 4.12.0 (AB#7461 needs no bump either, it rides in the same envelope). (A queued item whose pipeline is
 moved to another adapter while it waits fails the adapter binding; re-run it.)
 
 **Gate.** `LeaseService.GrantLeaseAsync` runs `CheckProvenanceAsync` after the leasing kill switch and the borrower
