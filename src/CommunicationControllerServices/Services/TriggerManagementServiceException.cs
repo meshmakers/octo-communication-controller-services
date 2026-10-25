@@ -63,6 +63,19 @@ public class TriggerManagementServiceException : Exception
     }
 
     /// <summary>
+    ///     AB#7473 — the controller has no usable key ring, so it cannot seal the work item and would only queue an
+    ///     item that must fail at lease grant.
+    /// </summary>
+    internal static Exception CannotSealQueuedExecution(string tenantId, OctoObjectId pipelineRtId,
+        string adapterName)
+    {
+        return new TriggerManagementServiceException(
+            $"Pipeline {pipelineRtId} of tenant {tenantId} is executed by the leased adapter '{adapterName}', but " +
+            "the controller has no usable secret key ring (SecretEncryption) to seal the work item. Nothing was " +
+            "queued. Configure SecretEncryption on the communication controller.");
+    }
+
+    /// <summary>
     ///     AB#5329 — the pipeline runs on a <c>Leased</c> adapter that names no lending pool.
     /// </summary>
     /// <remarks>

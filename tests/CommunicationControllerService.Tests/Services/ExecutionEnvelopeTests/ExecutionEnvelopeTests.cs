@@ -135,11 +135,26 @@ internal class ExecutionEnvelopeTests
         var noKeys = TestExecutionEnvelope.Create(withKeyRing: false);
 
         var stored = noKeys.Seal(Purpose, new Data("x", 1), Tenant, _execution);
-        var ok = noKeys.TryOpen<Data>(Purpose, sealed1, Tenant, _execution, out _, out _);
+        var ok = noKeys.TryOpen<Data>(Purpose, sealed1, Tenant, _execution, out _, out var why);
 
         using var scope = Assert.Multiple();
         await Assert.That(stored).IsNull();
         await Assert.That(ok).IsFalse();
+        // not proof of a forgery: the reader cannot tell
+        await Assert.That(why).IsEqualTo(ExecutionEnvelopeRejection.NoKey);
+    }
+
+    [Test]
+    public async Task AKeyIdThisControllerDoesNotHold_IsUnknownKey_NotAForgery()
+    {
+        var other = new ExecutionEnvelope(TestSecretEncryption.Create(keyId: "k-other").Protector);
+        var stored = other.Seal(Purpose, new Data("x", 1), Tenant, _execution);
+
+        var ok = _sut.TryOpen<Data>(Purpose, stored, Tenant, _execution, out _, out var why);
+
+        using var scope = Assert.Multiple();
+        await Assert.That(ok).IsFalse();
+        await Assert.That(why).IsEqualTo(ExecutionEnvelopeRejection.UnknownKey);
     }
 
     [Test]
@@ -173,7 +188,7 @@ internal class ExecutionEnvelopeTests
     public async Task StripToken_KeepsTheCallerButDropsTheToken_ForTheSameExecution()
     {
         var execution = new RtPipelineExecution { RtId = _execution };
-        QueuedCaller.Apply(execution, Tenant,
+        QueuedCaller.Apply(execution, Tenant, OctoObjectId.GenerateNewId(), OctoObjectId.GenerateNewId(),
             new ExecutePipelineCaller { SubjectId = "user-42", Roles = ["Admin"], TrustLevel = 2 }, "bearer-xyz", _sut);
 
         var stripped = QueuedCaller.StripToken(execution.SealedCaller, Tenant, _execution, _sut);
@@ -181,8 +196,8 @@ internal class ExecutionEnvelopeTests
 
         using var scope = Assert.Multiple();
         await Assert.That(opened).IsNotNull();
-        await Assert.That(opened!.Caller.SubjectId).IsEqualTo("user-42");
-        await Assert.That(opened.Caller.TrustLevel).IsEqualTo(2);
+        await Assert.That(opened!.Caller!.SubjectId).IsEqualTo("user-42");
+        await Assert.That(opened.Caller!.TrustLevel).IsEqualTo(2);
         await Assert.That(opened.AccessToken).IsNull();
     }
 
@@ -191,7 +206,7 @@ internal class ExecutionEnvelopeTests
     {
         var next = OctoObjectId.GenerateNewId();
         var execution = new RtPipelineExecution { RtId = _execution };
-        QueuedCaller.Apply(execution, Tenant, new ExecutePipelineCaller { SubjectId = "user-42", TrustLevel = 2 },
+        QueuedCaller.Apply(execution, Tenant, OctoObjectId.GenerateNewId(), OctoObjectId.GenerateNewId(), new ExecutePipelineCaller { SubjectId = "user-42", TrustLevel = 2 },
             "bearer-xyz", _sut);
 
         var resealed = QueuedCaller.Reseal(execution.SealedCaller, Tenant, _execution, next, _sut);
@@ -199,7 +214,7 @@ internal class ExecutionEnvelopeTests
 
         using var scope = Assert.Multiple();
         await Assert.That(opened).IsNotNull();
-        await Assert.That(opened!.Caller.SubjectId).IsEqualTo("user-42");
+        await Assert.That(opened!.Caller!.SubjectId).IsEqualTo("user-42");
         await Assert.That(opened.AccessToken).IsNull();
     }
 

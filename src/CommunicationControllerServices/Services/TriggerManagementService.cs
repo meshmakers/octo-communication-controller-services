@@ -232,8 +232,27 @@ internal class TriggerManagementService(
         // stored as ONE sealed envelope (principal, trust level, token) bound to the tenant and to this
         // execution's RtId: the entity's attributes are writable through generic surfaces, so only a
         // value the controller sealed itself is believed at lease grant. Without a key ring nothing is
-        // stored and the run proceeds without a caller (fail closed).
-        QueuedCaller.Apply(execution, tenantId, caller, callerAccessToken, executionEnvelope);
+        // stored and the execution is refused at lease grant (fail closed).
+        //
+        // AB#7473: the same envelope is the provenance of the work item. It is written for every execution the
+        // controller queues, also without a caller (cron), and is the only thing that lets the execution be leased.
+        if (!QueuedCaller.Apply(execution, tenantId, pipelineRtId, adapter.RtId, caller, callerAccessToken,
+                executionEnvelope))
+        {
+            // S6: an item that could never be leased is not queued at all; the caller learns at once. Nothing is
+            // written, like the kill switch and the missing pool above.
+            AdapterLeasingMetrics.RecordRefused(tenantId, lentFrom.LenderTenantId, lentFrom.AdapterPoolRtId,
+                LeaseStage.Enqueue, LeaseRefusalReason.QueuedProvenanceUnverifiable);
+            logger.LogWarning(
+                "[{TenantId}] Pipeline '{PipelineRtId}' is executed by leased adapter '{AdapterName}', but the " +
+                "controller has no usable secret key ring to seal the work item; nothing was queued",
+                tenantId, pipelineRtId, adapter.Name);
+            await eventService.StoreErrorEventAsync(tenantId,
+                $"Pipeline '{pipelineRtId}' was NOT queued: the controller has no usable secret key ring " +
+                "(SecretEncryption) to seal the work item.");
+            throw TriggerManagementServiceException.CannotSealQueuedExecution(tenantId, pipelineRtId,
+                adapter.Name ?? adapter.RtId.ToString());
+        }
 
         await communicationRepository.EnqueueExecutionAsync(tenantId, execution,
             new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipelineRtId),

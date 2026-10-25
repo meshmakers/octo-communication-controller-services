@@ -156,6 +156,9 @@ internal abstract class LeaseSchedulerServiceTestsBase
             $"pipeline-{executionId}", executionClass, inputData);
     }
 
+    /// <summary>Execution ids the stubbed lease service refuses for lack of provenance (and fails).</summary>
+    protected readonly HashSet<string> ForgedExecutions = [];
+
     /// <summary>Every <see cref="LeaseRequest" /> the scheduler handed to the lease service, in order.</summary>
     protected readonly List<LeaseRequest> Requests = [];
 
@@ -232,6 +235,17 @@ internal abstract class LeaseSchedulerServiceTestsBase
                 var poolRtId = call.ArgAt<OctoObjectId>(1);
                 var request = call.ArgAt<LeaseRequest>(2);
                 Requests.Add(request);
+                if (request.ExecutionId is { } forgedId && ForgedExecutions.Contains(forgedId))
+                {
+                    // The real lease service fails it (Queued -> Failed), which takes it out of the queue.
+                    if (_queues.TryGetValue(request.BorrowerTenantId, out var forgedQueue))
+                    {
+                        forgedQueue.RemoveAll(e => e.ExecutionId == forgedId);
+                    }
+
+                    return LeaseGrantResult.Refused(LeaseRefusalReason.QueuedProvenanceInvalid, "not queued by us");
+                }
+
                 var gate = call.ArgAt<Func<LeaseDto, PoolMemberConnection, CancellationToken, Task<bool>>?>(4);
 
                 var lease = new LeaseDto

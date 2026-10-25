@@ -425,9 +425,9 @@ internal class LeasedAdapterEnqueueTests : TriggerManagementServiceTestsBase
 
         var opened = QueuedCaller.Open(execution.SealedCaller, TenantId, execution.RtId, Envelope);
         await Assert.That(opened).IsNotNull();
-        await Assert.That(opened!.Caller.SubjectId).IsEqualTo("user-42");
-        await Assert.That(opened.Caller.TrustLevel).IsEqualTo(2);
-        await Assert.That(opened.Caller.Roles.Count).IsEqualTo(2);
+        await Assert.That(opened!.Caller!.SubjectId).IsEqualTo("user-42");
+        await Assert.That(opened.Caller!.TrustLevel).IsEqualTo(2);
+        await Assert.That(opened.Caller!.Roles.Count).IsEqualTo(2);
         await Assert.That(opened.AccessToken).IsEqualTo("raw-bearer");
     }
 
@@ -444,33 +444,45 @@ internal class LeasedAdapterEnqueueTests : TriggerManagementServiceTestsBase
     }
 
     /// <summary>
-    ///     Without a key ring the controller cannot seal: nothing is stored and the run proceeds without a caller
-    ///     (fail closed). The queue itself must not stop.
+    ///     Without a key ring the controller cannot seal, and an item it cannot seal could never be leased. It is
+    ///     refused at enqueue (AB#7473), like a missing pool or the kill switch: nothing is written.
     /// </summary>
     [Test]
-    public async Task ALeasedAdapter_WithoutAKeyRing_StoresNoInvokerAtAll()
+    public async Task ALeasedAdapter_WithoutAKeyRing_RefusesToQueue_AndWritesNothing()
     {
         Envelope = TestExecutionEnvelope.Create(withKeyRing: false);
         TriggerManagementService = BuildTriggerManagementService();
-
-        var execution = await QueueWithCallerAsync();
-
-        using var _ = Assert.Multiple();
-        await Assert.That(execution.SealedCaller).IsNull();
-        await Assert.That(execution.CallerSubjectId).IsNull();
-        await Assert.That(execution.CallerAccessToken).IsNull();
-    }
-
-    [Test]
-    public async Task ALeasedAdapter_WithoutAnInvoker_WritesNoCallerAttributes()
-    {
         var pipelineRtId = OctoObjectId.GenerateNewId();
         ArrangeAdapter(RtLifecycleModeEnum.Leased, pipelineRtId);
 
+        var thrown = await Assert.That(async () =>
+            await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null))
+            .Throws<TriggerManagementServiceException>();
+
+        using var _ = Assert.Multiple();
+        await Assert.That(thrown!.Message).Contains("secret key ring");
+        await CommunicationRepository.DidNotReceiveWithAnyArgs().EnqueueExecutionAsync(default!, default!, default,
+            default, default);
+    }
+
+    [Test]
+    public async Task ALeasedAdapter_WithoutAnInvoker_StillSealsTheProvenance_AndWritesNoPlainCallerAttributes()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+        var adapter = ArrangeAdapter(RtLifecycleModeEnum.Leased, pipelineRtId);
+
+        RtPipelineExecution? queued = null;
+        await CommunicationRepository.EnqueueExecutionAsync(TenantId, Arg.Do<RtPipelineExecution>(e => queued = e),
+            Arg.Any<RtEntityId>(), Arg.Any<RtEntityId>(), Arg.Any<DateTime>());
+
         await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null);
 
-        await CommunicationRepository.Received(1).EnqueueExecutionAsync(TenantId,
-            Arg.Is<RtPipelineExecution>(e => e.SealedCaller == null && e.CallerSubjectId == null),
-            Arg.Any<RtEntityId>(), Arg.Any<RtEntityId>(), Arg.Any<DateTime>());
+        using var _ = Assert.Multiple();
+        await Assert.That(queued).IsNotNull();
+        await Assert.That(queued!.CallerSubjectId).IsNull();
+        // the controller still seals: this is what lets a cron tick (no caller) be leased at all
+        await Assert.That(QueuedCaller.TryOpen(queued.SealedCaller, TenantId, queued.RtId, pipelineRtId,
+            adapter.RtId, null, Envelope, out var opened, out var reason)).IsEqualTo(QueuedCaller.Provenance.Valid);
+        await Assert.That(opened!.Caller).IsNull();
     }
 }

@@ -126,6 +126,15 @@ internal class LeaseService : ILeaseService
                 $"Tenant '{request.BorrowerTenantId}' has no adapter with rtId {request.BorrowerAdapterRtId}.");
         }
 
+        // 🔴 AB#7473 — the provenance of queued work, checked after the borrowing relationship is known and before
+        // anything is decrypted. An execution the controller did not queue itself (written through a generic surface)
+        // is never leased, and neither is a lease that names an execution without one (the hand-driven endpoint).
+        var (provenanceRefusal, provenance) = await CheckProvenanceAsync(lenderTenantId, adapterPoolRtId, request);
+        if (provenanceRefusal is not null)
+        {
+            return provenanceRefusal;
+        }
+
         // AB#5271: what the borrower declares now hangs off its LentFrom edge to a borrower-local
         // mirror, so reading it is a repository round trip rather than two attribute reads. Still on
         // the pre-credential side of the order above: it is resolved here, before anything decrypts.
@@ -226,7 +235,7 @@ internal class LeaseService : ILeaseService
         }
 
         // AB#7472: the invoker is whatever the sealed envelope proves, nothing else.
-        var (caller, callerToken) = ResolveCaller(request);
+        var (caller, callerToken) = ResolveCaller(request, provenance);
 
         var grantedAt = DateTime.UtcNow;
         var lease = new LeaseDto
@@ -1027,20 +1036,16 @@ internal class LeaseService : ILeaseService
     ///     AB#5279 / AB#7472 — the invoker for the lease and its token, or none. Both come out of the sealed
     ///     envelope of the queued execution, which is opened against the borrower tenant and the execution's RtId:
     ///     an envelope that was edited, copied from another execution or written in plain text does not open, and
-    ///     the lease then carries no caller (the member applies the pipeline's CallerBinding, fail closed). The
+    ///     the grant has already been refused by the provenance gate (AB#7473); an envelope without a subject is a controller-queued
+    ///     item without an invoker (cron). The
     ///     trust level inside is the one the controller wrote. The token is handed over only while it is still
     ///     valid — an expired token would make every delegated call inside the run fail with 401, so it is
     ///     dropped up front and the run proceeds as the caller without delegation.
     /// </summary>
-    private (ExecutePipelineCaller? Caller, string? Token) ResolveCaller(LeaseRequest request)
+    private (ExecutePipelineCaller? Caller, string? Token) ResolveCaller(LeaseRequest request,
+        QueuedCaller.Opened? opened)
     {
-        if (string.IsNullOrEmpty(request.SealedCaller) || request.ExecutionRtId is not { } executionRtId)
-        {
-            return (null, null);
-        }
-
-        var opened = QueuedCaller.Open(request.SealedCaller, request.BorrowerTenantId, executionRtId, _envelope);
-        if (opened is null)
+        if (opened?.Caller is null)
         {
             return (null, null);
         }
@@ -1056,6 +1061,123 @@ internal class LeaseService : ILeaseService
         }
 
         return (opened.Caller, token);
+    }
+
+    /// <summary>
+    ///     AB#7473 — the provenance gate. Applies to every request that names an execution or a pipeline: the
+    ///     scheduler's (the queue entry travels on the request) and the hand-driven endpoint's (only an
+    ///     <c>ExecutionId</c>: it must resolve to a <c>Queued</c> execution of the borrower whose provenance opens).
+    ///     A request that names no work is not affected.
+    /// </summary>
+    /// <returns>The refusal, or the verified content (null content for a request without work).</returns>
+    private async Task<(LeaseGrantResult? Refusal, QueuedCaller.Opened? Opened)> CheckProvenanceAsync(
+        string lenderTenantId, OctoObjectId adapterPoolRtId, LeaseRequest request)
+    {
+        if (string.IsNullOrEmpty(request.ExecutionId) && request.ExecutionRtId is null &&
+            request.PipelineRtId is null)
+        {
+            return (null, null);
+        }
+
+        var executionRtId = request.ExecutionRtId;
+        var handDriven = executionRtId is null;
+        var pipelineRtId = request.PipelineRtId;
+        var inputData = request.PipelineInput;
+        var sealedCaller = request.SealedCaller;
+
+        if (executionRtId is null)
+        {
+            // Hand-driven: only the business id is named. Resolve the Queued entity it denotes.
+            QueuedExecution? entry = null;
+            if (!string.IsNullOrEmpty(request.ExecutionId))
+            {
+                try
+                {
+                    entry = await _communicationRepository.TryGetQueuedExecutionAsync(request.BorrowerTenantId,
+                        request.ExecutionId);
+                }
+                catch (Exception e)
+                {
+                    Logger.Warn(e, "[{BorrowerTenantId}] Could not resolve queued execution '{ExecutionId}'",
+                        request.BorrowerTenantId, request.ExecutionId);
+                }
+            }
+
+            if (entry is null)
+            {
+                var notQueued = $"The execution '{request.ExecutionId}' is not a queued execution of tenant " +
+                                $"'{request.BorrowerTenantId}'; it is not leased.";
+                Logger.Warn("[{BorrowerTenantId}] Lease refused: {Reason}", request.BorrowerTenantId, notQueued);
+                return (Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.QueuedProvenanceInvalid,
+                    notQueued), null);
+            }
+
+            executionRtId = entry.ExecutionRtId;
+            pipelineRtId = entry.PipelineRtId;
+            inputData = entry.InputData;
+            sealedCaller = entry.SealedCaller;
+        }
+
+        var verdict = QueuedCaller.TryOpen(sealedCaller, request.BorrowerTenantId, executionRtId.Value, pipelineRtId,
+            request.BorrowerAdapterRtId, inputData, _envelope, out var opened, out var reason);
+
+        switch (verdict)
+        {
+            case QueuedCaller.Provenance.Valid:
+                // A hand-driven lease does not claim the execution and carries no work, so it must not carry the
+                // invoker or the delegation token of the queued execution either; the scheduler will lease it later.
+                return (null, handDriven ? null : opened);
+
+            case QueuedCaller.Provenance.Unverifiable:
+                // Not proof of a forgery (no key ring, or a key this pod does not hold): the item stays queued and
+                // is retried by the next round, by a pod that holds the key.
+                Logger.Warn(
+                    "[{BorrowerTenantId}] Queued execution '{ExecutionId}' of pipeline '{PipelineRtId}' cannot be " +
+                    "verified by this controller ({Reason}); it stays queued",
+                    request.BorrowerTenantId, request.ExecutionId, pipelineRtId, reason);
+                return (Refuse(lenderTenantId, adapterPoolRtId, request,
+                    LeaseRefusalReason.QueuedProvenanceUnverifiable,
+                    $"The provenance of queued execution '{request.ExecutionId}' cannot be verified ({reason}); it " +
+                    "stays queued."), null);
+
+            default:
+                var message = $"The queued execution '{request.ExecutionId}' was not queued by the controller " +
+                              $"({reason}); it is not leased.";
+                await FailExecutionWithoutProvenanceAsync(request, executionRtId.Value, pipelineRtId, message);
+                return (Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.QueuedProvenanceInvalid,
+                    message), null);
+        }
+    }
+
+    /// <summary>
+    ///     AB#7473 — terminal failure of ONE execution without provenance, addressed by its RtId and only while it is
+    ///     still queued. Names execution and pipeline, never a value. The write is best effort: when it fails the
+    ///     execution stays queued and is refused again next round.
+    /// </summary>
+    private async Task FailExecutionWithoutProvenanceAsync(LeaseRequest request, OctoObjectId executionRtId,
+        OctoObjectId? pipelineRtId, string message)
+    {
+        Logger.Warn(
+            "[{BorrowerTenantId}] Queued execution '{ExecutionId}' ({ExecutionRtId}) of pipeline '{PipelineRtId}' " +
+            "carries no valid provenance and is failed instead of leased: {Reason}",
+            request.BorrowerTenantId, request.ExecutionId, executionRtId, pipelineRtId, message);
+
+        try
+        {
+            if (await _communicationRepository.TryFailQueuedExecutionAsync(request.BorrowerTenantId, executionRtId,
+                    message))
+            {
+                await _eventService.StoreErrorEventAsync(request.BorrowerTenantId,
+                    $"Execution '{request.ExecutionId}' of pipeline '{pipelineRtId}' was failed: it was not " +
+                    "queued by the controller, so it is not run.");
+            }
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e,
+                "[{BorrowerTenantId}] Could not record the refusal of execution '{ExecutionId}'",
+                request.BorrowerTenantId, request.ExecutionId);
+        }
     }
 
     public async Task<string?> InterruptAndRequeueAsync(LeaseDto lease, LeaseInterruptReason interruptReason,
@@ -1110,10 +1232,17 @@ internal class LeaseService : ILeaseService
             };
             // AB#5279 / AB#7472: the retry is the same work item - same input, same invoker. The sealed
             // value is bound to the interrupted execution, so it is opened for that RtId and sealed AGAIN
-            // for the retry's RtId (never copied). One that does not verify is dropped: the retry then runs
-            // without a caller, exactly as a grant would.
+            // for the retry's RtId (never copied). One that does not verify is not carried: the retry then has
+            // no provenance and is refused at its grant (AB#7473).
             retry.SealedCaller = QueuedCaller.Reseal(interrupted.SealedCaller, lease.TenantId,
                 interrupted.ExecutionRtId, retry.RtId, _envelope);
+            if (retry.SealedCaller is null)
+            {
+                Logger.Warn(
+                    "[{BorrowerTenantId}] The provenance of interrupted execution '{ExecutionId}' did not carry onto " +
+                    "its retry '{RetryExecutionId}'; the retry will be refused at its grant",
+                    lease.TenantId, lease.ExecutionId, retryExecutionId);
+            }
 
             var queuedAt = keepQueuePosition && interrupted.QueuedAt is { } originalQueuedAt
                 ? originalQueuedAt

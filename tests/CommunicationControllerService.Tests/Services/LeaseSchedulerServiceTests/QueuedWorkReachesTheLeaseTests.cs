@@ -59,6 +59,28 @@ internal class QueuedWorkReachesTheLeaseTests : LeaseSchedulerServiceTestsBase
     }
 
     /// <summary>
+    ///     AB#7473 — an item that was not queued by the controller is failed by the lease service. It must neither
+    ///     block its tenant nor be retried: the tenant's next item is served in the same round.
+    /// </summary>
+    [Test]
+    public async Task AForgedHeadItem_IsDropped_AndTheTenantsNextItemIsServedInTheSameRound()
+    {
+        ArrangeMembers(2);
+        ForgedExecutions.Add("exec-forged");
+        ArrangeQueue(TenantA,
+            Entry("exec-forged", minutesAgo: 9),
+            Entry("exec-real", minutesAgo: 8));
+
+        var granted = await Scheduler.RunSchedulingRoundAsync();
+
+        using var _ = Assert.Multiple();
+        await Assert.That(granted).IsEqualTo(1);
+        await Assert.That(Claimed).Count().IsEqualTo(1);
+        await Assert.That(Claimed[0].ExecutionId).IsEqualTo("exec-real");
+        await Assert.That(Requests.Count(r => r.ExecutionId == "exec-forged")).IsEqualTo(1);
+    }
+
+    /// <summary>
     ///     A queued item with no input carries none — an empty string would be a different pipeline
     ///     input than "no input at all", and a node that branches on presence would see the wrong one.
     /// </summary>

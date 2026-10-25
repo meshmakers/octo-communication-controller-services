@@ -174,6 +174,11 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         // gap has already shipped four red integration tests on this branch once.
         Services.AddSingleton(Substitute.For<IHubContext<AdapterPoolHub>>());
         Services.AddSingleton<IAdapterPoolConnectionManager, AdapterPoolConnectionManager>();
+        // AB#7473: the provenance gate of GrantLeaseAsync is exercised against real MongoDB, so the lease service
+        // is resolvable here. The tenant-tree and credential collaborators sit behind the gate and are substituted.
+        Services.AddSingleton(Substitute.For<ITenantLendingScopeResolver>());
+        Services.AddSingleton(Substitute.For<ITenantDatabaseCredentialResolver>());
+        Services.AddSingleton<ILeaseSchedulerWakeSignal, LeaseSchedulerWakeSignal>();
         Services.AddSingleton<ILeaseService, LeaseService>();
 
         // AB#4924 increment 7: the queue and its scheduler. Same rule as the line above — the host

@@ -524,7 +524,16 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
                 }
 
                 var candidate = items[0];
-                var result = await TryGrantAsync(key, adapterPoolRtId, candidate, ttl, cancellationToken);
+                var (result, dropped) = await TryGrantAsync(key, adapterPoolRtId, candidate, ttl, cancellationToken);
+                if (dropped)
+                {
+                    // AB#7473: the head item was not queued by the controller and has just been failed. It is out of
+                    // the queue; the tenant is NOT blocked, so a forged item cannot starve the tenant's real work.
+                    items.RemoveAt(0);
+                    madeProgress = true;
+                    continue;
+                }
+
                 if (result is null)
                 {
                     // Nothing was granted for this tenant. The item stays where it is — both in the
@@ -799,7 +808,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
     ///     Grants one lease and takes the work item out of the queue in the same step. Returns the
     ///     member that took it, or null when nothing was granted.
     /// </summary>
-    private async Task<string?> TryGrantAsync(AdapterPoolKey key, OctoObjectId adapterPoolRtId, QueueCandidate candidate,
+    private async Task<(string? MemberId, bool Dropped)> TryGrantAsync(AdapterPoolKey key, OctoObjectId adapterPoolRtId, QueueCandidate candidate,
         TimeSpan ttl, CancellationToken cancellationToken)
     {
         // 🔴 AB#4924 §9.9 / D4 — the lease carries the work. The scheduler decided WHICH queued item
@@ -823,7 +832,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
                 return await _communicationRepository.TryClaimQueuedExecutionAsync(candidate.Borrower.TenantId,
                     candidate.Queued.ExecutionId,
                     new LeaseClaim(lease.LeaseId, key.LenderTenantId, adapterPoolRtId.ToString(), member.MemberId,
-                        DateTime.UtcNow));
+                        DateTime.UtcNow, candidate.Queued.ExecutionRtId));
             });
 
         if (result.Granted)
@@ -834,7 +843,14 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
             // release, because a member that is holding a lease is not idle either and a long-running
             // work item must not age the pool towards a shrink while it runs.
             _lastLeaseActivityUtc[key] = DateTime.UtcNow;
-            return result.MemberId;
+            return (result.MemberId, false);
+        }
+
+        if (result.Reason == LeaseRefusalReason.QueuedProvenanceInvalid)
+        {
+            // Failed by the lease service (a terminal state with a reason); never retried.
+            _refusedExecutions.TryRemove(candidate.Queued.ExecutionId, out _);
+            return (null, true);
         }
 
         // Announced on the TRANSITION — the first refusal of this execution, or a refusal for a
@@ -862,7 +878,7 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
                 candidate.Queued.ExecutionId, candidate.Borrower.TenantId, key.AdapterPoolRtId, result.StatusMessage);
         }
 
-        return null;
+        return (null, false);
     }
 
     /// <summary>

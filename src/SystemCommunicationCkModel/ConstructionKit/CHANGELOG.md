@@ -10,8 +10,10 @@ _Required bump level: minor._
 
 The invoker of a queued work item (principal, trust level, delegation token) is carried as one sealed envelope bound to
 the tenant and the execution (AB#7472). The seven plain `Caller*` attributes of `PipelineExecution` stay in the model
-but are deprecated: the controller no longer writes or reads them. Existing dependents keep resolving; executions queued
-before the upgrade run without a caller.
+but are deprecated: the controller no longer writes or reads them. Existing dependents keep resolving. The same
+envelope is the provenance of the work item (AB#7473): the controller seals every execution it queues, also without a
+caller, and an execution queued before the upgrade (or written through a generic surface) is failed at lease grant
+instead of leased.
 
 ## 4.11.0 - 2026-10-24
 

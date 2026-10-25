@@ -37,7 +37,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 /// <param name="SealedCaller">
 ///     The sealed invoker of the queued execution exactly as stored (AB#5279, AB#7472). The lease service
 ///     opens it against the borrower tenant and <paramref name="ExecutionRtId" />; a value that does not verify
-///     is dropped and the lease carries no caller. The delegation token inside it is handed to the member only
+///     is refused and the execution is failed (AB#7473). The delegation token inside it is handed to the member only
 ///     while it has not expired.
 /// </param>
 public record LeaseRequest(

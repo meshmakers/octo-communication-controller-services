@@ -3415,7 +3415,11 @@ internal class CommunicationRepository : ICommunicationRepository
             RtPipelineExecution? execution;
             using (var readSession = await tenantRepository.GetSessionAsync())
             {
-                execution = await FindExecutionAsync(tenantRepository, readSession, executionId);
+                // AB#7473: the scheduler names the exact entity it verified. The business ExecutionId is a writable
+                // attribute and may exist twice; claiming "the first" could latch an entity nobody verified.
+                execution = claim.ExecutionRtId is { } claimRtId
+                    ? await tenantRepository.GetRtEntityByRtIdAsync<RtPipelineExecution>(readSession, claimRtId)
+                    : await FindExecutionAsync(tenantRepository, readSession, executionId);
             }
 
             if (execution is null || execution.Status != RtPipelineExecutionStatusEnum.Queued)
@@ -3479,7 +3483,8 @@ internal class CommunicationRepository : ICommunicationRepository
             // work somebody else is already running.
             using (var verifySession = await tenantRepository.GetSessionAsync())
             {
-                var reloaded = await FindExecutionAsync(tenantRepository, verifySession, executionId);
+                var reloaded = await tenantRepository.GetRtEntityByRtIdAsync<RtPipelineExecution>(verifySession,
+                    execution.RtId);
                 return reloaded is not null
                        && reloaded.Status == RtPipelineExecutionStatusEnum.Running
                        && string.Equals(reloaded.LeasedOnMemberId, claim.MemberId, StringComparison.Ordinal);
@@ -3550,6 +3555,57 @@ internal class CommunicationRepository : ICommunicationRepository
         catch (Exception e)
         {
             throw CommunicationRepositoryException.CommonFailedUpdatePipelineExecution(tenantId, executionId, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> TryFailQueuedExecutionAsync(string tenantId, OctoObjectId executionRtId, string reason)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            session.StartTransaction();
+
+            var execution = await tenantRepository.GetRtEntityByRtIdAsync<RtPipelineExecution>(session, executionRtId);
+            if (execution is null || execution.Status != RtPipelineExecutionStatusEnum.Queued)
+            {
+                await session.CommitTransactionAsync();
+                return false;
+            }
+
+            var failed = new RtPipelineExecution
+            {
+                Status = RtPipelineExecutionStatusEnum.Failed,
+                CompletedAt = DateTime.UtcNow,
+                DurationMs = 0,
+                ErrorMessage = reason
+            };
+
+            OperationResult operationResult = new();
+            await tenantRepository.ApplyChangesAsync(session,
+                new List<EntityUpdateInfo<RtPipelineExecution>>
+                {
+                    EntityUpdateInfo<RtPipelineExecution>.CreateUpdate(execution.ToRtEntityId(), failed)
+                },
+                operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw CommunicationRepositoryException.CommonOperationFailed(operationResult);
+            }
+
+            await session.CommitTransactionAsync();
+            return true;
+        }
+        catch (CommunicationRepositoryException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedUpdatePipelineExecution(tenantId,
+                executionRtId.ToString(), e);
         }
     }
 
@@ -3674,6 +3730,32 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
+    public async Task<QueuedExecution?> TryGetQueuedExecutionAsync(string tenantId, string executionId)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        try
+        {
+            var queryOptions = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtPipelineExecution.ExecutionId), FieldFilterOperator.Equals, executionId)
+                .FieldFilter(nameof(RtPipelineExecution.Status), FieldFilterOperator.Equals,
+                    (int)RtPipelineExecutionStatusEnum.Queued);
+            var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtPipelineExecution>(session, queryOptions);
+            var execution = resultSet.Items.FirstOrDefault();
+            if (execution is null)
+            {
+                return null;
+            }
+
+            return (await ProjectQueuedExecutionsAsync(tenantRepository, session, [execution])).FirstOrDefault();
+        }
+        catch (Exception e)
+        {
+            throw CommunicationRepositoryException.CommonFailedGetPipelineExecution(tenantId, executionId, e);
+        }
+    }
+
     public async Task<QueuedExecution?> GetExecutionQueueEntryAsync(string tenantId, string executionId)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);

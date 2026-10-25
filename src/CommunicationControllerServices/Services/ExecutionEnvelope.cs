@@ -23,8 +23,14 @@ public enum ExecutionEnvelopeRejection
     /// <summary>The controller has no usable key ring.</summary>
     NoKey,
 
-    /// <summary>The key id is unknown or the authentication tag does not verify (edited, wrong key).</summary>
+    /// <summary>The authentication tag does not verify (edited, wrong key).</summary>
     Unreadable,
+
+    /// <summary>
+    ///     The key id of the value is not in this controller's key ring (typically a key rotation in progress or a
+    ///     pod with an older key set). Not proof of a forgery: the value may be perfectly valid for another key set.
+    /// </summary>
+    UnknownKey,
 
     /// <summary>The decrypted content is not a well-formed envelope of this format.</summary>
     Malformed,
@@ -183,9 +189,12 @@ public sealed class ExecutionEnvelope(ISecretAttributeProtector protector) : IEx
                                       or LegacyPlaintextSecretRejectedException
                                       or SecretEnvelopeNotAllowedException)
         {
-            rejection = e is SecretEncryptionNotConfiguredException
-                ? ExecutionEnvelopeRejection.NoKey
-                : ExecutionEnvelopeRejection.Unreadable;
+            rejection = e switch
+            {
+                SecretEncryptionNotConfiguredException => ExecutionEnvelopeRejection.NoKey,
+                UnknownSecretKeyIdException => ExecutionEnvelopeRejection.UnknownKey,
+                _ => ExecutionEnvelopeRejection.Unreadable
+            };
             return false;
         }
 
