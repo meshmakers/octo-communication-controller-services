@@ -101,6 +101,9 @@ internal abstract class LeaseServiceTestsBase
     protected readonly ISingleClientProxy MemberProxy = Substitute.For<ISingleClientProxy>();
     protected readonly ILeaseService LeaseService;
 
+    /// <summary>Fixed, so a value can be sealed for the borrower before the borrower is arranged.</summary>
+    protected static readonly OctoObjectId BorrowerAdapterRtId = OctoObjectId.GenerateNewId();
+
     protected RtAdapter Borrower = null!;
 
     /// <summary>
@@ -154,6 +157,7 @@ internal abstract class LeaseServiceTestsBase
         string? lentFromTenantId = LenderTenantId, string? lentFromAdapterPoolRtId = null)
     {
         Borrower = RtEntityCreator.CreateAdapter();
+        Borrower.RtId = BorrowerAdapterRtId;
         Borrower.Name = "borrowing-adapter";
         Borrower.LifecycleMode = lifecycleMode;
         // AB#5271: the borrower half is the adapter's LentFrom mirror, so it is arranged on the
@@ -228,7 +232,39 @@ internal abstract class LeaseServiceTestsBase
 
     protected LeaseRequest ARequest(string? executionId = null, TimeSpan? ttl = null)
     {
-        return new LeaseRequest(BorrowerTenantId, Borrower.RtId, executionId, ttl);
+        // AB#7473: a lease that names an execution must resolve to a Queued one that the controller sealed - the
+        // same shape the hand-driven endpoint relies on.
+        if (executionId is not null)
+        {
+            ArrangeQueuedExecution(executionId);
+        }
+
+        return new LeaseRequest(BorrowerTenantId, BorrowerAdapterRtId, executionId, ttl);
+    }
+
+    /// <summary>The repository answers for a Queued execution of the borrower that carries valid provenance.</summary>
+    protected RtPipelineExecution ArrangeQueuedExecution(string executionId, string? sealedCaller = null,
+        bool sealIt = true)
+    {
+        var execution = new RtPipelineExecution
+        {
+            RtId = OctoObjectId.GenerateNewId(), ExecutionId = executionId,
+            Status = RtPipelineExecutionStatusEnum.Queued
+        };
+        if (sealIt)
+        {
+            QueuedCaller.Apply(execution, BorrowerTenantId, PipelineRtId, BorrowerAdapterRtId, null, null, Envelope);
+        }
+
+        if (sealedCaller is not null)
+        {
+            execution.SealedCaller = sealedCaller;
+        }
+
+        CommunicationRepository.TryGetQueuedExecutionAsync(BorrowerTenantId, executionId).Returns(
+            new QueuedExecution(executionId, execution.RtId, DateTime.UtcNow, PipelineRtId, "a-pipeline", 1, null,
+                execution.SealedCaller));
+        return execution;
     }
 
     /// <summary>
@@ -238,7 +274,7 @@ internal abstract class LeaseServiceTestsBase
     {
         // AB#7473: queued work carries the controller's provenance, exactly as the enqueue writes it.
         var execution = new RtPipelineExecution { RtId = OctoObjectId.GenerateNewId(), InputData = input };
-        QueuedCaller.Apply(execution, BorrowerTenantId, PipelineRtId, null, null, Envelope);
+        QueuedCaller.Apply(execution, BorrowerTenantId, PipelineRtId, BorrowerAdapterRtId, null, null, Envelope);
         return new LeaseRequest(BorrowerTenantId, Borrower.RtId, executionId, null, PipelineRtId, input,
             execution.RtId, execution.SealedCaller);
     }

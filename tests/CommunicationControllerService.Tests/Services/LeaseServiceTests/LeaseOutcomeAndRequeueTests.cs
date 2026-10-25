@@ -220,7 +220,7 @@ internal class LeaseOutcomeAndRequeueTests : LeaseServiceTestsBase
     private string SealedFor(OctoObjectId executionRtId, string tenantId = BorrowerTenantId)
     {
         var execution = new RtPipelineExecution { RtId = executionRtId };
-        QueuedCaller.Apply(execution, tenantId, PipelineRtId,
+        QueuedCaller.Apply(execution, tenantId, PipelineRtId, BorrowerAdapterRtId,
             new Meshmakers.Octo.Communication.Contracts.MessageObjects.ExecutePipelineCaller
                 { SubjectId = "user-42", Roles = ["Admin"], TrustLevel = 2 }, null, Envelope);
         return execution.SealedCaller!;

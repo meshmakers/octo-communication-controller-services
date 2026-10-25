@@ -97,7 +97,13 @@ public enum LeaseRefusalReason
     ///     AB#7473: the queued execution carries no valid provenance, so the controller did not queue it. It is
     ///     never leased; it is set to <c>Failed</c> with a reason.
     /// </summary>
-    QueuedProvenanceInvalid
+    QueuedProvenanceInvalid,
+
+    /// <summary>
+    ///     AB#7473: the provenance of the queued execution cannot be checked by this controller (no key ring, or a key
+    ///     id it does not hold). Not a verdict on the execution: it stays queued.
+    /// </summary>
+    QueuedProvenanceUnverifiable
 }
 
 /// <summary>
@@ -794,6 +800,7 @@ internal static class AdapterLeasingMetrics
         LeaseRefusalReason.BorrowerDatabaseCredentialUnresolvable =>
             "borrower_database_credential_unresolvable",
         LeaseRefusalReason.QueuedProvenanceInvalid => "queued_provenance_invalid",
+        LeaseRefusalReason.QueuedProvenanceUnverifiable => "queued_provenance_unverifiable",
         _ => "none"
     };
 

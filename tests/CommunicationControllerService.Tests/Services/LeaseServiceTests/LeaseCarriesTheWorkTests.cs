@@ -183,7 +183,7 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
     private static readonly OctoObjectId ExecutionRtId = OctoObjectId.GenerateNewId();
 
     private LeaseRequest AWorkRequestFrom(string? sealedCaller, OctoObjectId? executionRtId = null) =>
-        new(BorrowerTenantId, Borrower.RtId, "exec-1", null, PipelineRtId, PipelineInput,
+        new(BorrowerTenantId, BorrowerAdapterRtId, "exec-1", null, PipelineRtId, PipelineInput,
             executionRtId ?? ExecutionRtId, sealedCaller);
 
     /// <summary>The value the enqueue writes: the invoker sealed for the borrower tenant and ONE execution.</summary>
@@ -191,7 +191,7 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
         ExecutionEnvelope? envelope = null, ExecutePipelineCaller? caller = null)
     {
         var execution = new RtPipelineExecution { RtId = executionRtId ?? ExecutionRtId, InputData = PipelineInput };
-        QueuedCaller.Apply(execution, tenantId, PipelineRtId, caller ?? ACaller(), token, envelope ?? Envelope);
+        QueuedCaller.Apply(execution, tenantId, PipelineRtId, BorrowerAdapterRtId, caller ?? ACaller(), token, envelope ?? Envelope);
         return execution.SealedCaller;
     }
 
@@ -238,6 +238,7 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
     {
         ArrangeGrantableLease();
         ArrangeProjectablePipeline();
+        CommunicationRepository.TryFailQueuedExecutionAsync(default!, default, default!).ReturnsForAnyArgs(true);
 
         var result = await (service ?? LeaseService).GrantLeaseAsync(LenderTenantId, AdapterPoolRtId,
             AWorkRequestFrom(stored, executionRtId));
@@ -248,11 +249,12 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
         // never handed to a member ...
         await Assert.That(MemberProxy.ReceivedCalls().Any(c => c.GetMethodInfo().Name ==
                                                               nameof(IClientProxy.SendCoreAsync))).IsFalse();
-        // ... and set to a terminal failed state with a reason that carries no value
-        await CommunicationRepository.Received(1).UpdatePipelineExecutionAsync(BorrowerTenantId, "exec-1",
-            RtPipelineExecutionStatusEnum.Failed, Arg.Any<DateTime?>(), Arg.Any<int?>(),
-            Arg.Is<string?>(m => m != null && m.Contains("not queued by the controller") && !m.Contains("user-42")),
-            Arg.Any<string?>());
+        // ... and failed by RtId (never by the writable business id), with a reason that carries no value
+        await CommunicationRepository.Received(1).TryFailQueuedExecutionAsync(BorrowerTenantId,
+            executionRtId ?? ExecutionRtId,
+            Arg.Is<string>(m => m.Contains("not queued by the controller") && !m.Contains("user-42")));
+        await CommunicationRepository.DidNotReceiveWithAnyArgs().UpdatePipelineExecutionAsync(default!, default!,
+            default, default, default, default, default);
     }
 
     [Test]
@@ -321,7 +323,7 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
     public async Task AControllerQueuedValue_WhoseExecutionPointsAtAnotherPipelineNow_IsNotLeased()
     {
         var execution = new RtPipelineExecution { RtId = ExecutionRtId, InputData = PipelineInput };
-        QueuedCaller.Apply(execution, BorrowerTenantId, OctoObjectId.GenerateNewId(), ACaller(), null, Envelope);
+        QueuedCaller.Apply(execution, BorrowerTenantId, OctoObjectId.GenerateNewId(), BorrowerAdapterRtId, ACaller(), null, Envelope);
         await AssertRefusedAndFailedAsync(execution.SealedCaller);
     }
 
@@ -329,18 +331,114 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
     public async Task AControllerQueuedValue_WhoseInputWasChangedAfterwards_IsNotLeased()
     {
         var execution = new RtPipelineExecution { RtId = ExecutionRtId, InputData = "{\"other\":1}" };
-        QueuedCaller.Apply(execution, BorrowerTenantId, PipelineRtId, ACaller(), null, Envelope);
+        QueuedCaller.Apply(execution, BorrowerTenantId, PipelineRtId, BorrowerAdapterRtId, ACaller(), null, Envelope);
         await AssertRefusedAndFailedAsync(execution.SealedCaller);
     }
 
     [Test]
-    public async Task WithoutAKeyRing_NothingOpens_AndTheExecutionIsFailed()
+    public async Task AControllerQueuedValue_WhoseAdapterIsAnotherNow_IsNotLeased()
     {
+        var execution = new RtPipelineExecution { RtId = ExecutionRtId, InputData = PipelineInput };
+        QueuedCaller.Apply(execution, BorrowerTenantId, PipelineRtId, OctoObjectId.GenerateNewId(), ACaller(), null,
+            Envelope);
+        await AssertRefusedAndFailedAsync(execution.SealedCaller);
+    }
+
+    /// <summary>
+    ///     A controller that holds no key (ring) cannot tell a genuine value from a forged one. The item is neither
+    ///     leased nor failed: it stays queued for a pod that holds the key.
+    /// </summary>
+    [Test]
+    public async Task WithoutAKeyRing_TheExecutionStaysQueued_ForAPodThatHoldsTheKey()
+    {
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
         var noKeys = new LeaseService(ConnectionManager, CommunicationRepository, EventService, EncryptionService,
             TestExecutionEnvelope.Create(withKeyRing: false), HubContext, LendingScopeResolver, ServiceAccountResolver,
             DatabaseCredentialResolver, AdapterService, LifecycleConfiguration, WakeSignal);
 
-        await AssertRefusedAndFailedAsync(Sealed("t"), service: noKeys);
+        var result = await noKeys.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequestFrom(Sealed("t")));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.Granted).IsFalse();
+        await Assert.That(result.Reason).IsEqualTo(LeaseRefusalReason.QueuedProvenanceUnverifiable);
+        await CommunicationRepository.DidNotReceiveWithAnyArgs().TryFailQueuedExecutionAsync(default!, default,
+            default!);
+    }
+
+    [Test]
+    public async Task AValueSealedWithAKeyIdThisControllerDoesNotHold_StaysQueued_NotFailed()
+    {
+        // A key rotation in progress, or a pod with an older key set: not proof of a forgery.
+        var foreign = Sealed("t", envelope: new ExecutionEnvelope(TestSecretEncryption.Create(keyId: "k-other").Protector));
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequestFrom(foreign));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.Granted).IsFalse();
+        await Assert.That(result.Reason).IsEqualTo(LeaseRefusalReason.QueuedProvenanceUnverifiable);
+        await CommunicationRepository.DidNotReceiveWithAnyArgs().TryFailQueuedExecutionAsync(default!, default,
+            default!);
+    }
+
+    // ---- B1: the hand-driven endpoint goes through the same gate ------------------------------------------------
+
+    [Test]
+    public async Task AHandDrivenLease_NamingAnExecutionTheControllerDidNotQueue_IsRefused()
+    {
+        ArrangeGrantableLease();
+        var forged = ArrangeQueuedExecution("exec-forged", sealIt: false);
+        CommunicationRepository.TryFailQueuedExecutionAsync(default!, default, default!).ReturnsForAnyArgs(true);
+
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId,
+            new LeaseRequest(BorrowerTenantId, BorrowerAdapterRtId, "exec-forged"));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.Granted).IsFalse();
+        await Assert.That(result.Reason).IsEqualTo(LeaseRefusalReason.QueuedProvenanceInvalid);
+        await CommunicationRepository.Received(1).TryFailQueuedExecutionAsync(BorrowerTenantId, forged.RtId,
+            Arg.Any<string>());
+    }
+
+    [Test]
+    public async Task AHandDrivenLease_NamingAnExecutionThatIsNotQueued_IsRefused_AndWritesNothing()
+    {
+        ArrangeGrantableLease();
+        // the repository answers null for anything that is not Queued
+        CommunicationRepository.TryGetQueuedExecutionAsync(BorrowerTenantId, "exec-running")
+            .Returns((QueuedExecution?)null);
+
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId,
+            new LeaseRequest(BorrowerTenantId, BorrowerAdapterRtId, "exec-running"));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.Granted).IsFalse();
+        await Assert.That(result.Reason).IsEqualTo(LeaseRefusalReason.QueuedProvenanceInvalid);
+        await CommunicationRepository.DidNotReceiveWithAnyArgs().TryFailQueuedExecutionAsync(default!, default,
+            default!);
+    }
+
+    [Test]
+    public async Task AHandDrivenLease_NamingAControllerQueuedExecution_IsGranted()
+    {
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-1"));
+
+        await Assert.That(result.Granted).IsTrue();
+    }
+
+    [Test]
+    public async Task AHandDrivenLease_NamingNoExecution_StaysAllowed()
+    {
+        ArrangeGrantableLease();
+
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest());
+
+        await Assert.That(result.Granted).IsTrue();
     }
 
     [Test]
@@ -356,7 +454,7 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
         var lease = CapturePushedLease();
         await Assert.That(lease.Caller).IsNull();
         await Assert.That(lease.CallerAccessToken).IsNull();
-        await CommunicationRepository.DidNotReceiveWithAnyArgs().UpdatePipelineExecutionAsync(default!, default!,
-            default, default, default, default, default);
+        await CommunicationRepository.DidNotReceiveWithAnyArgs().TryFailQueuedExecutionAsync(default!, default,
+            default!);
     }
 }

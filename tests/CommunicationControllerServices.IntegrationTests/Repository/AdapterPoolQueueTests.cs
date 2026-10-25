@@ -401,7 +401,7 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
             ExecutionId = Guid.NewGuid().ToString(),
             TriggerType = RtPipelineTriggerTypeEnum.Manual
         };
-        QueuedCaller.Apply(execution, fixture.TestTenantId, pipeline.RtId,
+        QueuedCaller.Apply(execution, fixture.TestTenantId, pipeline.RtId, adapter.RtId,
             new ExecutePipelineCaller
             {
                 SubjectId = subject, TenantId = fixture.TestTenantId, Email = "u@example.test", Name = "User 42",
@@ -689,21 +689,47 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
         new(fixture.TestTenantId, adapter.RtId, queued.ExecutionId, null, queued.PipelineRtId, queued.InputData,
             queued.ExecutionRtId, queued.SealedCaller);
 
+    /// <summary>
+    ///     The grant reads the per-tenant leasing switch first, so the gate is only reached with leasing on (both ends
+    ///     are the fixture tenant). The switch is restored afterwards: other tests rely on the default.
+    /// </summary>
+    private async Task WithLeasingEnabledAsync(Func<Task> body)
+    {
+        var configuration = fixture.GetService<ILifecycleConfigurationService>();
+        await configuration.SetConfigurationAsync(fixture.TestTenantId,
+            new CommunicationLifecycleConfiguration { LeasingEnabled = true });
+        try
+        {
+            await body();
+        }
+        finally
+        {
+            await configuration.SetConfigurationAsync(fixture.TestTenantId,
+                new CommunicationLifecycleConfiguration { LeasingEnabled = false });
+        }
+    }
+
+    private Task<LeaseGrantResult> GrantAsync(LeaseRequest request) =>
+        fixture.GetService<ILeaseService>().GrantLeaseAsync(fixture.TestTenantId, new OctoObjectId(PoolRtId), request,
+            TestContext.Current.CancellationToken);
+
     /// <summary>An execution exactly as the controller queues it (cron: no invoker).</summary>
     private async Task<RtPipelineExecution> EnqueueAsTheControllerAsync(TestData data, RtEntityId pipeline,
-        RtEntityId adapter, string? input = null, bool withCaller = false)
+        RtEntityId adapter, string? input = null, bool withCaller = false, string? executionId = null,
+        RtEntityId? edgePipeline = null, RtEntityId? edgeAdapter = null)
     {
         var execution = new RtPipelineExecution
         {
             RtId = OctoObjectId.GenerateNewId(),
-            ExecutionId = Guid.NewGuid().ToString(),
+            ExecutionId = executionId ?? Guid.NewGuid().ToString(),
             TriggerType = RtPipelineTriggerTypeEnum.Scheduled,
             InputData = input
         };
-        QueuedCaller.Apply(execution, fixture.TestTenantId, pipeline.RtId,
+        QueuedCaller.Apply(execution, fixture.TestTenantId, pipeline.RtId, adapter.RtId,
             withCaller ? new ExecutePipelineCaller { SubjectId = "user-42", TrustLevel = 2 } : null, null, Envelope);
+        // edgePipeline / edgeAdapter simulate an association that points elsewhere than at queue time.
         await fixture.GetService<ICommunicationRepository>().EnqueueExecutionAsync(fixture.TestTenantId, execution,
-            pipeline, adapter, DateTime.UtcNow.AddMinutes(-1));
+            edgePipeline ?? pipeline, edgeAdapter ?? adapter, DateTime.UtcNow.AddMinutes(-1));
         data.Executions.Add(new RtEntityId(SystemCommunicationCkIds.RtCkPipelineExecutionTypeId, execution.RtId));
         return execution;
     }
@@ -721,13 +747,15 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
             var executionId = await EnqueueAsync(data, pipeline, adapter, DateTime.UtcNow.AddMinutes(-1),
                 inputData: "{\"x\":1}");
             var queued = await repository.GetExecutionQueueEntryAsync(fixture.TestTenantId, executionId);
-            queued.Should().NotBeNull();
 
-            var result = await fixture.GetService<ILeaseService>().GrantLeaseAsync(LenderTenantId,
-                new OctoObjectId(PoolRtId), RequestFor(queued!, adapter), TestContext.Current.CancellationToken);
+            await WithLeasingEnabledAsync(async () =>
+            {
+                var result = await GrantAsync(RequestFor(queued!, adapter));
 
-            result.Granted.Should().BeFalse();
-            result.Reason.Should().Be(LeaseRefusalReason.QueuedProvenanceInvalid);
+                result.Granted.Should().BeFalse();
+                result.Reason.Should().Be(LeaseRefusalReason.QueuedProvenanceInvalid);
+            });
+
             var loaded = await repository.GetPipelineExecutionAsync(fixture.TestTenantId, executionId);
             loaded!.Status.Should().Be(RtPipelineExecutionStatusEnum.Failed);
             loaded.ErrorMessage.Should().Contain("not queued by the controller");
@@ -740,6 +768,11 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
         }
     }
 
+    /// <summary>
+    ///     The controller's own executions (a cron tick has no invoker) pass the provenance gate: the grant goes on and
+    ///     is refused for the NEXT reason in the chain (the fixture adapter names no lender), and the
+    ///     entity is untouched. A full member grant needs a connected pool member, which this fixture does not run.
+    /// </summary>
     [Fact]
     public async Task AControllerQueuedExecution_PassesTheProvenanceGate_AndStaysQueued()
     {
@@ -749,23 +782,22 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
         try
         {
             var (pipeline, adapter) = await CreateWorkAsync(data);
-            // The controller's own enqueue; a cron tick has no invoker and is sealed all the same.
             var cron = await EnqueueAsTheControllerAsync(data, pipeline, adapter, "{\"x\":1}");
             var invoked = await EnqueueAsTheControllerAsync(data, pipeline, adapter, withCaller: true);
 
-            foreach (var execution in new[] { cron, invoked })
+            await WithLeasingEnabledAsync(async () =>
             {
-                var queued = await repository.GetExecutionQueueEntryAsync(fixture.TestTenantId,
-                    execution.ExecutionId!);
-                var result = await fixture.GetService<ILeaseService>().GrantLeaseAsync(fixture.TestTenantId,
-                    new OctoObjectId(PoolRtId), RequestFor(queued!, adapter), TestContext.Current.CancellationToken);
+                foreach (var execution in new[] { cron, invoked })
+                {
+                    var queued = await repository.TryGetQueuedExecutionAsync(fixture.TestTenantId,
+                        execution.ExecutionId!);
+                    var result = await GrantAsync(RequestFor(queued!, adapter));
 
-                // Not granted here (leasing is off for the fixture tenant, no member) - but NOT for lack of provenance,
-                // and the entity is untouched.
-                result.Reason.Should().NotBe(LeaseRefusalReason.QueuedProvenanceInvalid);
-                var loaded = await repository.GetPipelineExecutionAsync(fixture.TestTenantId, execution.ExecutionId!);
-                loaded!.Status.Should().Be(RtPipelineExecutionStatusEnum.Queued);
-            }
+                    result.Reason.Should().Be(LeaseRefusalReason.BorrowerNamesAnotherLender);
+                    (await repository.GetPipelineExecutionAsync(fixture.TestTenantId, execution.ExecutionId!))!
+                        .Status.Should().Be(RtPipelineExecutionStatusEnum.Queued);
+                }
+            });
         }
         finally
         {
@@ -774,7 +806,7 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
     }
 
     [Fact]
-    public async Task AControllerQueuedExecution_WhoseInputOrSealWasEditedAfterwards_IsNotLeased()
+    public async Task AControllerQueuedExecution_ChangedAfterwards_IsNotLeased()
     {
         var repository = fixture.GetService<ICommunicationRepository>();
         var data = new TestData();
@@ -782,24 +814,151 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
         try
         {
             var (pipeline, adapter) = await CreateWorkAsync(data);
+            var otherPipeline = await CreatePipelineWithAdapterAsync(data, await CreateDataFlowAsync(data), adapter);
+            var otherAdapter = await CreateAdapterAsync(data);
+
             var edited = await EnqueueAsTheControllerAsync(data, pipeline, adapter, "{\"x\":1}");
             var copied = await EnqueueAsTheControllerAsync(data, pipeline, adapter, "{\"x\":1}");
             var donor = await EnqueueAsTheControllerAsync(data, pipeline, adapter, "{\"x\":1}", withCaller: true);
+            // the association points at another pipeline / another adapter than the one the seal was made for
+            var repointedPipeline = await EnqueueAsTheControllerAsync(data, pipeline, adapter, "{\"x\":1}",
+                edgePipeline: otherPipeline);
+            var repointedAdapter = await EnqueueAsTheControllerAsync(data, pipeline, adapter, "{\"x\":1}",
+                edgeAdapter: otherAdapter);
 
             await GenericUpdateAsync(edited.RtId, new RtPipelineExecution { InputData = "{\"x\":2}" });
             await GenericUpdateAsync(copied.RtId, new RtPipelineExecution { SealedCaller = donor.SealedCaller });
 
-            foreach (var execution in new[] { edited, copied })
+            await WithLeasingEnabledAsync(async () =>
             {
-                var queued = await repository.GetExecutionQueueEntryAsync(fixture.TestTenantId,
-                    execution.ExecutionId!);
-                var result = await fixture.GetService<ILeaseService>().GrantLeaseAsync(LenderTenantId,
-                    new OctoObjectId(PoolRtId), RequestFor(queued!, adapter), TestContext.Current.CancellationToken);
+                foreach (var (execution, onAdapter) in new[]
+                         {
+                             (edited, adapter), (copied, adapter), (repointedPipeline, adapter),
+                             (repointedAdapter, otherAdapter)
+                         })
+                {
+                    var queue = await repository.GetQueuedExecutionsForAdapterAsync(fixture.TestTenantId, onAdapter,
+                        100);
+                    var queued = queue.Single(q => q.ExecutionRtId == execution.RtId);
+                    var result = await GrantAsync(RequestFor(queued, onAdapter));
 
-                result.Reason.Should().Be(LeaseRefusalReason.QueuedProvenanceInvalid);
-                (await repository.GetPipelineExecutionAsync(fixture.TestTenantId, execution.ExecutionId!))!.Status
+                    result.Reason.Should().Be(LeaseRefusalReason.QueuedProvenanceInvalid, execution.ExecutionId);
+                    (await repository.GetPipelineExecutionAsync(fixture.TestTenantId, execution.ExecutionId!))!
+                        .Status.Should().Be(RtPipelineExecutionStatusEnum.Failed);
+                }
+            });
+        }
+        finally
+        {
+            await CleanupAsync(data);
+        }
+    }
+
+    /// <summary>
+    ///     The business ExecutionId is a writable attribute and need not be unique. A forged execution that copies the
+    ///     id of a real one is failed BY ITS RtId; the real one is untouched, and the claim latches the entity that
+    ///     was verified, not "the first with that id". The forged head item does not hold back the real one.
+    /// </summary>
+    [Fact]
+    public async Task AForgedExecutionWithTheSameExecutionId_IsFailedByRtId_AndTheRealOneIsUntouched()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var data = new TestData();
+
+        try
+        {
+            var (pipeline, adapter) = await CreateWorkAsync(data);
+            var sharedId = Guid.NewGuid().ToString();
+
+            // forged first (the head of the queue), copying the id of the real one that follows
+            var forged = new RtPipelineExecution
+            {
+                RtId = OctoObjectId.GenerateNewId(), ExecutionId = sharedId,
+                TriggerType = RtPipelineTriggerTypeEnum.Manual
+            };
+            await repository.EnqueueExecutionAsync(fixture.TestTenantId, forged, pipeline, adapter,
+                DateTime.UtcNow.AddMinutes(-5));
+            data.Executions.Add(new RtEntityId(SystemCommunicationCkIds.RtCkPipelineExecutionTypeId, forged.RtId));
+            var real = await EnqueueAsTheControllerAsync(data, pipeline, adapter, executionId: sharedId);
+
+            var queue = await repository.GetQueuedExecutionsForAdapterAsync(fixture.TestTenantId, adapter, 100);
+            var forgedEntry = queue.Single(q => q.ExecutionRtId == forged.RtId);
+            var realEntry = queue.Single(q => q.ExecutionRtId == real.RtId);
+
+            await WithLeasingEnabledAsync(async () =>
+            {
+                (await GrantAsync(RequestFor(forgedEntry, adapter))).Reason.Should()
+                    .Be(LeaseRefusalReason.QueuedProvenanceInvalid);
+                // the next item of the tenant is evaluated and passes the gate
+                (await GrantAsync(RequestFor(realEntry, adapter))).Reason.Should()
+                    .Be(LeaseRefusalReason.BorrowerNamesAnotherLender);
+            });
+
+            var tenantRepository = await fixture.GetSystemContext().FindTenantRepositoryAsync(fixture.TestTenantId);
+            using (var session = await tenantRepository.GetSessionAsync())
+            {
+                (await tenantRepository.GetRtEntityByRtIdAsync<RtPipelineExecution>(session, forged.RtId))!.Status
+                    .Should().Be(RtPipelineExecutionStatusEnum.Failed);
+                (await tenantRepository.GetRtEntityByRtIdAsync<RtPipelineExecution>(session, real.RtId))!.Status
+                    .Should().Be(RtPipelineExecutionStatusEnum.Queued);
+            }
+
+            // a second failure attempt does nothing (guarded: only while Queued)
+            (await repository.TryFailQueuedExecutionAsync(fixture.TestTenantId, forged.RtId, "again")).Should()
+                .BeFalse();
+
+            // the claim addresses the verified entity by RtId
+            (await repository.TryClaimQueuedExecutionAsync(fixture.TestTenantId, sharedId,
+                new LeaseClaim("lease-d", LenderTenantId, PoolRtId, "member-1", DateTime.UtcNow, real.RtId)))
+                .Should().BeTrue();
+            using (var session = await tenantRepository.GetSessionAsync())
+            {
+                (await tenantRepository.GetRtEntityByRtIdAsync<RtPipelineExecution>(session, real.RtId))!.Status
+                    .Should().Be(RtPipelineExecutionStatusEnum.Running);
+                (await tenantRepository.GetRtEntityByRtIdAsync<RtPipelineExecution>(session, forged.RtId))!.Status
                     .Should().Be(RtPipelineExecutionStatusEnum.Failed);
             }
+        }
+        finally
+        {
+            await CleanupAsync(data);
+        }
+    }
+
+    /// <summary>B1: the hand-driven lease names nothing but an ExecutionId and goes through the same gate.</summary>
+    [Fact]
+    public async Task AHandDrivenLease_IsGatedOnTheExecutionItNames()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var data = new TestData();
+
+        try
+        {
+            var (pipeline, adapter) = await CreateWorkAsync(data);
+            var forgedId = await EnqueueAsync(data, pipeline, adapter, DateTime.UtcNow.AddMinutes(-1));
+            var real = await EnqueueAsTheControllerAsync(data, pipeline, adapter);
+
+            await WithLeasingEnabledAsync(async () =>
+            {
+                var forged = await GrantAsync(new LeaseRequest(fixture.TestTenantId, adapter.RtId, forgedId));
+                forged.Reason.Should().Be(LeaseRefusalReason.QueuedProvenanceInvalid);
+
+                var unknown = await GrantAsync(new LeaseRequest(fixture.TestTenantId, adapter.RtId, "no-such-id"));
+                unknown.Reason.Should().Be(LeaseRefusalReason.QueuedProvenanceInvalid);
+
+                // a controller-queued execution passes (and is then refused by the next check of the fixture)
+                var ok = await GrantAsync(new LeaseRequest(fixture.TestTenantId, adapter.RtId, real.ExecutionId));
+                ok.Reason.Should().Be(LeaseRefusalReason.BorrowerNamesAnotherLender);
+
+                // a lease that names no work is not gated
+                var none = await GrantAsync(new LeaseRequest(fixture.TestTenantId, adapter.RtId));
+                none.Reason.Should().Be(LeaseRefusalReason.BorrowerNamesAnotherLender);
+            });
+
+            (await repository.GetPipelineExecutionAsync(fixture.TestTenantId, forgedId))!.Status.Should()
+                .Be(RtPipelineExecutionStatusEnum.Failed);
+            (await repository.GetPipelineExecutionAsync(fixture.TestTenantId, real.ExecutionId!))!.Status.Should()
+                .Be(RtPipelineExecutionStatusEnum.Queued);
         }
         finally
         {
@@ -836,12 +995,14 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
                 retry.SealedCaller.Should().NotBe(original.SealedCaller);
 
                 // the retry opens for ITS execution, pipeline and input - and leases through the same gate
-                QueuedCaller.TryOpen(retry.SealedCaller, fixture.TestTenantId, retry.RtId, pipeline.RtId,
-                    retry.InputData, Envelope, out var opened, out var reason).Should().BeTrue(reason);
+                QueuedCaller.TryOpen(retry.SealedCaller, fixture.TestTenantId, retry.RtId, pipeline.RtId, adapter.RtId,
+                    retry.InputData, Envelope, out var opened, out var reason).Should()
+                    .Be(QueuedCaller.Provenance.Valid, reason);
                 (opened!.Caller is not null).Should().Be(withCaller);
                 // and not for the interrupted one
                 QueuedCaller.TryOpen(retry.SealedCaller, fixture.TestTenantId, original.RtId, pipeline.RtId,
-                    retry.InputData, Envelope, out _, out _).Should().BeFalse();
+                    adapter.RtId, retry.InputData, Envelope, out _, out _).Should()
+                    .Be(QueuedCaller.Provenance.Forged);
             }
         }
         finally

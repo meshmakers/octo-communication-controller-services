@@ -236,12 +236,22 @@ internal class TriggerManagementService(
         //
         // AB#7473: the same envelope is the provenance of the work item. It is written for every execution the
         // controller queues, also without a caller (cron), and is the only thing that lets the execution be leased.
-        if (!QueuedCaller.Apply(execution, tenantId, pipelineRtId, caller, callerAccessToken, executionEnvelope))
+        if (!QueuedCaller.Apply(execution, tenantId, pipelineRtId, adapter.RtId, caller, callerAccessToken,
+                executionEnvelope))
         {
+            // S6: an item that could never be leased is not queued at all; the caller learns at once. Nothing is
+            // written, like the kill switch and the missing pool above.
+            AdapterLeasingMetrics.RecordRefused(tenantId, lentFrom.LenderTenantId, lentFrom.AdapterPoolRtId,
+                LeaseStage.Enqueue, LeaseRefusalReason.QueuedProvenanceUnverifiable);
             logger.LogWarning(
-                "[{TenantId}] Pipeline '{PipelineRtId}' could not be sealed (no usable key ring); the execution " +
-                "'{ExecutionId}' will be refused at lease grant",
-                tenantId, pipelineRtId, executionId);
+                "[{TenantId}] Pipeline '{PipelineRtId}' is executed by leased adapter '{AdapterName}', but the " +
+                "controller has no usable secret key ring to seal the work item; nothing was queued",
+                tenantId, pipelineRtId, adapter.Name);
+            await eventService.StoreErrorEventAsync(tenantId,
+                $"Pipeline '{pipelineRtId}' was NOT queued: the controller has no usable secret key ring " +
+                "(SecretEncryption) to seal the work item.");
+            throw TriggerManagementServiceException.CannotSealQueuedExecution(tenantId, pipelineRtId,
+                adapter.Name ?? adapter.RtId.ToString());
         }
 
         await communicationRepository.EnqueueExecutionAsync(tenantId, execution,

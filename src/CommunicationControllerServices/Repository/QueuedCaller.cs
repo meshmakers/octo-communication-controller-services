@@ -50,6 +50,9 @@ internal static class QueuedCaller
         /// <summary>The pipeline the controller queued the execution for (AB#7473).</summary>
         public string? PipelineRtId { get; set; }
 
+        /// <summary>The adapter the controller queued the execution for (AB#7473).</summary>
+        public string? AdapterRtId { get; set; }
+
         /// <summary>SHA-256 of the input the controller queued (AB#7473), so the input cannot be swapped afterwards.</summary>
         public string? InputDataHash { get; set; }
 
@@ -71,11 +74,12 @@ internal static class QueuedCaller
     ///     is later refused at lease grant (fail closed); the returned flag says so.
     /// </summary>
     public static bool Apply(RtPipelineExecution execution, string tenantId, OctoObjectId pipelineRtId,
-        ExecutePipelineCaller? caller, string? accessToken, IExecutionEnvelope envelope)
+        OctoObjectId adapterRtId, ExecutePipelineCaller? caller, string? accessToken, IExecutionEnvelope envelope)
     {
         var payload = ToPayload(caller, accessToken);
         payload.Provenance = ProvenanceVersion;
         payload.PipelineRtId = pipelineRtId.ToString();
+        payload.AdapterRtId = adapterRtId.ToString();
         payload.InputDataHash = HashInput(execution.InputData);
 
         execution.SealedCaller = envelope.Seal(ExecutionEnvelopePurposes.QueuedCaller, payload, tenantId,
@@ -83,13 +87,28 @@ internal static class QueuedCaller
         return execution.SealedCaller is not null;
     }
 
+    /// <summary>The verdict on the provenance of a queued execution.</summary>
+    internal enum Provenance
+    {
+        /// <summary>The controller queued this execution for this tenant, pipeline, adapter and input.</summary>
+        Valid,
+
+        /// <summary>
+        ///     Not provable HERE: the controller has no key (ring) for the value. The execution may well be genuine, so it
+        ///     is neither leased nor failed; it stays queued.
+        /// </summary>
+        Unverifiable,
+
+        /// <summary>Missing, edited, copied or otherwise not the controller's own value. Terminal.</summary>
+        Forged
+    }
+
     /// <summary>
-    ///     Opens the provenance of a queued execution. <c>false</c> (with a reason that carries no value) means the
-    ///     execution was not queued by this controller for this tenant, execution, pipeline and input.
+    ///     Opens the provenance of a queued execution. The reason carries no value.
     /// </summary>
-    public static bool TryOpen(string? sealedCaller, string tenantId, OctoObjectId executionRtId,
-        OctoObjectId? pipelineRtId, string? inputData, IExecutionEnvelope envelope, out Opened? opened,
-        out string reason)
+    public static Provenance TryOpen(string? sealedCaller, string tenantId, OctoObjectId executionRtId,
+        OctoObjectId? pipelineRtId, OctoObjectId? adapterRtId, string? inputData, IExecutionEnvelope envelope,
+        out Opened? opened, out string reason)
     {
         opened = null;
         if (!envelope.TryOpen<Payload>(ExecutionEnvelopePurposes.QueuedCaller, sealedCaller, tenantId, executionRtId,
@@ -100,26 +119,34 @@ internal static class QueuedCaller
                 ExecutionEnvelopeRejection.Missing => "no provenance",
                 _ => $"provenance rejected ({rejection})"
             };
-            return false;
+            return rejection is ExecutionEnvelopeRejection.NoKey or ExecutionEnvelopeRejection.UnknownKey
+                ? Provenance.Unverifiable
+                : Provenance.Forged;
         }
 
         if (payload.Provenance != ProvenanceVersion)
         {
             reason = "provenance marker missing (queued before the upgrade)";
-            return false;
+            return Provenance.Forged;
         }
 
         if (pipelineRtId is null || !string.Equals(payload.PipelineRtId, pipelineRtId.ToString(),
                 StringComparison.Ordinal))
         {
             reason = "pipeline differs from the one that was queued";
-            return false;
+            return Provenance.Forged;
+        }
+
+        if (adapterRtId is null || !string.Equals(payload.AdapterRtId, adapterRtId.ToString(), StringComparison.Ordinal))
+        {
+            reason = "adapter differs from the one that was queued";
+            return Provenance.Forged;
         }
 
         if (!string.Equals(payload.InputDataHash, HashInput(inputData), StringComparison.Ordinal))
         {
             reason = "input differs from the one that was queued";
-            return false;
+            return Provenance.Forged;
         }
 
         // The subject is the one field without which a caller is not a caller.
@@ -137,7 +164,7 @@ internal static class QueuedCaller
 
         opened = new Opened(caller, string.IsNullOrEmpty(payload.AccessToken) ? null : payload.AccessToken);
         reason = string.Empty;
-        return true;
+        return Provenance.Valid;
     }
 
     /// <summary>

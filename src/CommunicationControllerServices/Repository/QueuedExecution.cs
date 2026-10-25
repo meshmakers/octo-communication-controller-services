@@ -92,6 +92,10 @@ public sealed record QueuedExecution(
 ///     The member that holds the lease — becomes <c>LeasedOnMemberId</c>. Not an RtId: members are
 ///     replicas of one pool workload rather than entities (implementation plan §13.1).
 /// </param>
+/// <param name="ExecutionRtId">
+///     AB#7473: the exact entity the scheduler verified and is claiming. When set, the claim addresses it by RtId
+///     instead of by the business <c>ExecutionId</c>, which is writable and need not be unique.
+/// </param>
 /// <param name="GrantedAtUtc">
 ///     When the lease was granted. Becomes both <c>LeaseGrantedAt</c> and <c>StartedAt</c>, and with
 ///     <c>QueuedAt</c> it yields <c>LeaseWaitMs</c>.
@@ -101,7 +105,8 @@ public readonly record struct LeaseClaim(
     string LenderTenantId,
     string AdapterPoolRtId,
     string MemberId,
-    DateTime GrantedAtUtc);
+    DateTime GrantedAtUtc,
+    OctoObjectId? ExecutionRtId = null);
 
 /// <summary>
 ///     What an interrupted leased attempt was for, so a fresh attempt can be enqueued in its place

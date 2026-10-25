@@ -244,7 +244,9 @@ the member. A retry after an interrupted lease copies both from the interrupted 
 > **Since AB#7473** the same envelope is the provenance of a queued work item: the controller seals every
 > execution it queues, also without an invoker, and the lease grant never leases an execution whose envelope
 > does not open. It is failed instead, with a reason. Items that were queued before the upgrade fail the same
-> way; drain the queue before rolling the controller if that matters. See "Only executions the controller
+> way. Roll out with the leasing kill switch off (it holds the queue), let queued leased items drain or cancel
+> them, roll all controller instances, then switch leasing back on. The hand-driven lease endpoint is gated the same
+> way. See "Only executions the controller
 > queued are leased".
 
 The member applies them through `LeaseCallerCarryThrough`, the lease twin of

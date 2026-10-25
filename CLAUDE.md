@@ -3171,11 +3171,11 @@ logged (`ExecutionEnvelopeRejection`), never the value.
 **Rules.**
 
 - **Fail closed.** A value that does not open is never leased (AB#7473, below; AB#7472 alone let the run proceed
-  without a caller). No stored trust level is trusted on its own; the trust level comes only out of the verified
+  without a caller). A controller that merely cannot read it (no key / unknown key id) leaves it queued. No stored trust level is trusted on its own; the trust level comes only out of the verified
   envelope.
 - **No key ring, nothing stored.** `SecretEncryption` must be configured (it is on every cluster that uses Secret
-  attributes). Without it `Seal` returns null, the enqueue stores nothing (WARN) and the execution is failed at lease
-  grant (AB#7473): a leased adapter cannot run without the key ring.
+  attributes). Without it `Seal` returns null and the enqueue is refused (AB#7473): a leased adapter cannot run
+  without the key ring.
   The former behaviour "principal travels, token does not" is gone: an unsealed principal is not a principal.
 - **Token.** Lives only inside the envelope. When the lease is granted (the claim) the attribute is replaced by the
   same envelope without the token, sealed for the same execution, so a re-queue still carries the caller but not the
@@ -3203,39 +3203,60 @@ it; the generic runtime write path (GraphQL create, MCP) can create one. Now the
 sealed itself.
 
 **Design (no new attribute, no CK bump).** The `SealedCaller` envelope of AB#7472 is also the provenance of the work
-item. `QueuedCaller.Apply(execution, tenantId, pipelineRtId, caller, token, envelope)` is called for **every**
-execution the controller queues (`TriggerManagementService`: REST execute, method invoker, cron via
+item. `QueuedCaller.Apply(execution, tenantId, pipelineRtId, adapterRtId, caller, token, envelope)` is called for
+**every** execution the controller queues (`TriggerManagementService`: REST execute, method invoker, cron via
 `LeaseTriggerConsumer`; `LeaseService.InterruptAndEnqueueAsync`: retry) and seals it even when there is no caller
-(`SubjectId` null). Payload additions: a provenance marker, the pipeline RtId and a SHA-256 of the input, so an
-execution that is controller-queued but whose pipeline association or input was edited afterwards does not open
-either. The binding to tenant and execution RtId is the one of `IExecutionEnvelope`. No System.Communication change
-(stays 4.12.0), so the version reserved for AB#7461 is untouched.
+(`SubjectId` null). Payload additions: a provenance marker, the pipeline RtId, the adapter RtId and a SHA-256 of the
+input, so an execution that is controller-queued but whose pipeline or adapter association or input was edited
+afterwards does not open either. The binding to tenant and execution RtId is the one of `IExecutionEnvelope`.
+System.Communication stays 4.12.0, so the version reserved for AB#7461 is untouched. (A queued item whose pipeline is
+moved to another adapter while it waits fails the adapter binding; re-run it.)
 
-**Gate.** `LeaseService.GrantLeaseAsync` runs `QueuedCaller.TryOpen` first, before the kill switch, the borrower
-read and any credential decryption, whenever the request names an execution or a pipeline (the scheduler always
-does; a hand-driven lease without work is unaffected). On failure: `UpdatePipelineExecutionAsync(... Failed ...)`
-with a reason ("not queued by the controller (<reason>)"), a borrower event, a WARN naming tenant, execution and
-pipeline (never a value), the refusal reason `QueuedProvenanceInvalid` (`queued_provenance_invalid` label) and no
-member is reserved. The scheduler's next round no longer sees the item.
+**Gate.** `LeaseService.GrantLeaseAsync` runs `CheckProvenanceAsync` after the leasing kill switch and the borrower
+lookup and before any credential is decrypted, for every request that names an `ExecutionId`, an execution RtId or a
+pipeline: the scheduler's (the queue entry travels on the request) and the **hand-driven**
+`POST {tenantId}/v1/adapterPool/{id}/lease`, whose `ExecutionId` must resolve (`TryGetQueuedExecutionAsync`) to a
+`Queued` execution of the borrower whose provenance opens. A lease that names no work is not gated. Verdicts
+(`QueuedCaller.TryOpen` returns `Provenance`):
 
-**Retry** re-seals for the new execution (`QueuedCaller.Reseal` keeps provenance, pipeline and input; the token is
-cleared), so a retried controller-queued execution is leasable and a retried unsealed one stays unsealed.
+| Verdict | Cause | Effect |
+|---|---|---|
+| `Valid` | opens for tenant, execution, pipeline, adapter and input | the grant continues |
+| `Forged` | no seal, plain text, edited, copied, other purpose/tenant/execution, no provenance marker, changed pipeline/adapter/input | the execution is failed **by RtId**, only while `Queued` (`TryFailQueuedExecutionAsync`: reason, borrower event, WARN naming tenant/execution/pipeline, never a value); refusal `QueuedProvenanceInvalid` |
+| `Unverifiable` | this controller has no key ring (`NoKey`) or not the key id (`UnknownKey`, e.g. key rotation) | **not** failed: WARN, refusal `QueuedProvenanceUnverifiable`, the item stays `Queued` for a pod that holds the key |
 
-**Rollout (decision: fail closed, no drain).** Executions that are `Queued` when the new controller starts have no
-provenance marker (queued before 4.12.0/AB#7473, or sealed with the AB#7472 shape without the marker) and are failed
-with the reason above at the next scheduling round. They are rare (they only wait for a pool member), a cron
-trigger queues the next tick by itself, and users re-run an interactive one. A drain would have to keep the old
-trust rule alive, which is what this change removes. Operators who want zero failed items drain the queue (wait for
-or cancel the `Queued` executions of leased adapters) before rolling the controller; nothing else is needed. Every
-controller instance must run this version: an older instance in a rolling update still leases unsealed items.
+The failure is keyed by RtId because the business `ExecutionId` is a writable attribute and need not be unique; the
+claim (`LeaseClaim.ExecutionRtId`) latches the verified entity by RtId for the same reason. The scheduler drops a
+forged head item (`QueuedProvenanceInvalid` removes it from the round's list) **without blocking the tenant**, so the
+tenant's next item is served in the same round.
 
-Tests: unit `LeaseServiceTests/LeaseCarriesTheWorkTests` (refusal matrix incl. no seal, marker-less AB#7472 value,
-swapped pipeline, changed input, no key ring; cron without caller leases), `AdapterLeasingMetricsTests`,
-`TriggerManagementServiceTests/LeasedAdapterEnqueueTests`; integration against MongoDB (Testcontainers)
-`Repository/AdapterPoolQueueTests`: generically created Queued execution is not leased and ends `Failed`;
-controller-queued ones (with and without caller) pass the gate and stay `Queued`; edited input / copied seal is
-failed; a retry opens for its own execution, pipeline and input. The integration fixture resolves the real
-`LeaseService` for this (tenant tree and credential resolvers are substituted).
+**Enqueue.** Without a key ring the controller cannot seal, so `TriggerManagementService` refuses to queue
+(`TriggerManagementServiceException.CannotSealQueuedExecution`, nothing written), like the kill switch and a missing
+pool.
+
+**Retry** re-seals for the new execution (`QueuedCaller.Reseal` keeps provenance, pipeline, adapter and input; the
+token is cleared). When the old value does not carry, the retry site logs a WARN and the retry is refused at its own
+grant.
+
+**Rollout (decision: fail closed, no code grace window).** Executions that are `Queued` when the new controller runs
+have no provenance marker and are failed at the next scheduling round. Because an older controller instance still
+leases unsealed items, roll out like this: (1) switch the leasing kill switch off (`SetCommunicationLifecycle -le
+false`; it holds the queue), (2) let the queued leased items drain or cancel them, (3) roll **all** controller
+instances, (4) switch leasing back on. Retries created by an old pod during the window are covered by step 2.
+
+**Known residual risk.** Provenance proves who queued an execution, not that the entity is still in the state it was
+queued in: a writable status/timestamp can reset an execution that already ran so that it is leased once more. A
+controller-owned single-use claim record is tracked as a follow-up.
+
+Tests: unit `LeaseServiceTests/LeaseCarriesTheWorkTests` (refusal matrix, key-less and unknown-key controllers stay
+queued, hand-driven endpoint), `ExecutionEnvelopeTests`, `LeaseSchedulerServiceTests/QueuedWorkReachesTheLeaseTests`
+(forged head item does not starve the tenant), `AdapterLeasingMetricsTests`, `TriggerManagementServiceTests/
+LeasedAdapterEnqueueTests`; integration against MongoDB (Testcontainers) `Repository/AdapterPoolQueueTests`: generic
+`Queued` execution failed, controller-queued ones pass the gate, edited input / copied seal / re-pointed pipeline or
+adapter failed, two entities with the same `ExecutionId` (forged failed by RtId, real untouched and claimed), the
+hand-driven lease gated, retry keeps provenance. The integration fixture resolves the real `LeaseService` (tenant tree
+and credential resolvers substituted); a full member grant needs a connected pool member, which the fixture does not
+run, so the positive case asserts the specific downstream refusal reason.
 
 ### ✅ The lease carries the work (§9.9 / D4)
 

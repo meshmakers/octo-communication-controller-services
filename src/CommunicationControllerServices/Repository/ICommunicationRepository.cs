@@ -913,6 +913,20 @@ public interface ICommunicationRepository
     Task<bool> TryCancelQueuedExecutionAsync(string tenantId, string executionId, string? reason);
 
     /// <summary>
+    /// AB#7473 — the queue entry of the execution with this business id, but only while it is <c>Queued</c>; null
+    /// otherwise. Used by the hand-driven lease, which names nothing but the id.
+    /// </summary>
+    Task<QueuedExecution?> TryGetQueuedExecutionAsync(string tenantId, string executionId);
+
+    /// <summary>
+    /// AB#7473 — fails ONE queued execution, addressed by its RtId, and only while it is still <c>Queued</c>
+    /// (<c>Queued → Failed</c>). The RtId, not the business <c>ExecutionId</c>: that id is an ordinary writable
+    /// attribute, so two entities can carry the same one and a write keyed by it could hit the wrong entity.
+    /// Returns <c>false</c> when the execution is gone or has left the queue.
+    /// </summary>
+    Task<bool> TryFailQueuedExecutionAsync(string tenantId, OctoObjectId executionRtId, string reason);
+
+    /// <summary>
     /// Stamps <c>LeaseReleasedAt</c> on a leased execution (AB#4924 §9.1).
     /// </summary>
     /// <remarks>
