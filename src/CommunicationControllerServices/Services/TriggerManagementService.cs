@@ -32,16 +32,15 @@ internal class TriggerManagementService(
         logger.LogInformation("[{TenantId}] Executing pipeline '{PipelineRtId}' (dry-run={IsDryRun})",
             tenantId, pipelineRtId, isDryRun);
 
-        // AB#7460: methodInvocation is set on the direct path only. The lease path (below) does not persist it on the
-        // queued execution yet (AB#7461), so for a leased adapter the marker is NOT carried: the run starts without it
-        // and a guard that requires the marker refuses the insert (fails closed, availability only).
+        // AB#7460 / AB#7461: methodInvocation rides the execute command on the direct path. On the lease path (below)
+        // it is sealed into the queued execution's envelope and handed to the member in LeaseDto.MethodInvocation.
         // AB#4924 §9.1 — a Leased adapter has no process of its own, so there is nothing to send the
         // execute command to. The work item is ENQUEUED instead and the scheduler starts it when a
         // pool member is leased to this tenant. Everything below this branch is the manual-adapter
         // path and is unchanged: a manual adapter has no queue and executes immediately, and that
         // asymmetry is intended (concept §5, "One queue per pool").
         var queued = await TryEnqueueForLeasedAdapterAsync(tenantId, pipelineRtId, pipelineInput, isDryRun,
-            caller, callerAccessToken, triggerType);
+            caller, callerAccessToken, triggerType, methodInvocation);
         if (queued is not null)
         {
             return queued;
@@ -130,7 +129,8 @@ internal class TriggerManagementService(
     /// </remarks>
     private async Task<PipelineExecutionDataDto?> TryEnqueueForLeasedAdapterAsync(string tenantId,
         OctoObjectId pipelineRtId, string? pipelineInput, bool isDryRun, ExecutePipelineCaller? caller,
-        string? callerAccessToken, RtPipelineTriggerTypeEnum triggerType)
+        string? callerAccessToken, RtPipelineTriggerTypeEnum triggerType,
+        ExecutePipelineMethodInvocation? methodInvocation)
     {
         if (isDryRun)
         {
@@ -242,7 +242,7 @@ internal class TriggerManagementService(
         // AB#7473: the same envelope is the provenance of the work item. It is written for every execution the
         // controller queues, also without a caller (cron), and is the only thing that lets the execution be leased.
         if (!QueuedCaller.Apply(execution, tenantId, pipelineRtId, adapter.RtId, caller, callerAccessToken,
-                executionEnvelope))
+                executionEnvelope, methodInvocation))
         {
             // S6: an item that could never be leased is not queued at all; the caller learns at once. Nothing is
             // written, like the kill switch and the missing pool above.

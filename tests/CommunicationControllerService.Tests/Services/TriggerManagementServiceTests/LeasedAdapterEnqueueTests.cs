@@ -485,4 +485,72 @@ internal class LeasedAdapterEnqueueTests : TriggerManagementServiceTestsBase
             adapter.RtId, null, Envelope, out var opened, out var reason)).IsEqualTo(QueuedCaller.Provenance.Valid);
         await Assert.That(opened!.Caller).IsNull();
     }
+
+    // ---- AB#7461: the method-invocation marker survives the queue ---------------------------
+
+    private static ExecutePipelineMethodInvocation AMarker(OctoObjectId pipelineRtId) => new()
+    {
+        MethodId = "Model-1/Type-1/Create", InvocationId = Guid.NewGuid(), CkTypeId = "Model-1/Type-1",
+        PipelineRtId = pipelineRtId.ToString()
+    };
+
+    [Test]
+    public async Task ALeasedMethodRun_SealsTheMarkerIntoTheQueuedEnvelope_AndWritesNoPlainAttribute()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+        var adapter = ArrangeAdapter(RtLifecycleModeEnum.Leased, pipelineRtId);
+        var marker = AMarker(pipelineRtId);
+
+        RtPipelineExecution? queued = null;
+        await CommunicationRepository.EnqueueExecutionAsync(TenantId, Arg.Do<RtPipelineExecution>(e => queued = e),
+            Arg.Any<RtEntityId>(), Arg.Any<RtEntityId>(), Arg.Any<DateTime>());
+
+        await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null,
+            caller: ACaller(), callerAccessToken: null, methodInvocation: marker);
+
+        using var multiple = Assert.Multiple();
+        await Assert.That(queued).IsNotNull();
+        // not readable in the stored value, bound to this execution
+        await Assert.That(queued!.SealedCaller!.Contains(marker.MethodId)).IsFalse();
+        // the plain attributes are really unwritten
+        await Assert.That(queued.CallerSubjectId).IsNull();
+        await Assert.That(queued.CallerRoles).IsNull();
+        await Assert.That(queued.CallerTrustLevel).IsNull();
+        await Assert.That(queued.CallerAccessToken).IsNull();
+        await Assert.That(QueuedCaller.TryOpen(queued.SealedCaller, TenantId, queued.RtId, pipelineRtId, adapter.RtId,
+            null, Envelope, out var opened, out _)).IsEqualTo(QueuedCaller.Provenance.Valid);
+        await Assert.That(opened!.MethodInvocation).IsEqualTo(marker);
+        await Assert.That(opened.Caller!.SubjectId).IsEqualTo("user-42");
+        // copied onto another execution by hand: the whole value is refused
+        await Assert.That(QueuedCaller.TryOpen(queued.SealedCaller, TenantId, OctoObjectId.GenerateNewId(),
+            pipelineRtId, adapter.RtId, null, Envelope, out var copied, out _)).IsEqualTo(QueuedCaller.Provenance.Forged);
+        await Assert.That(copied).IsNull();
+    }
+
+    [Test]
+    public async Task ALeasedRestOrCronRun_CarriesNoMarker()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+        var adapter = ArrangeAdapter(RtLifecycleModeEnum.Leased, pipelineRtId);
+
+        RtPipelineExecution? queued = null;
+        await CommunicationRepository.EnqueueExecutionAsync(TenantId, Arg.Do<RtPipelineExecution>(e => queued = e),
+            Arg.Any<RtEntityId>(), Arg.Any<RtEntityId>(), Arg.Any<DateTime>());
+
+        // REST execute and the lease cron tick never pass a marker
+        await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null,
+            caller: ACaller(), callerAccessToken: null);
+        var rest = queued;
+        await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null,
+            triggerType: RtPipelineTriggerTypeEnum.Scheduled);
+        var cron = queued;
+
+        using var multiple = Assert.Multiple();
+        foreach (var execution in new[] { rest, cron })
+        {
+            await Assert.That(QueuedCaller.TryOpen(execution!.SealedCaller, TenantId, execution.RtId, pipelineRtId,
+                adapter.RtId, null, Envelope, out var opened, out _)).IsEqualTo(QueuedCaller.Provenance.Valid);
+            await Assert.That(opened!.MethodInvocation).IsNull();
+        }
+    }
 }

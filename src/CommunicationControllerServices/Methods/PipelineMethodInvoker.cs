@@ -281,8 +281,8 @@ internal sealed class PipelineMethodInvoker(
     ///     The marker that tells the executing adapter the run is the pipeline of this very method invocation
     ///     (AB#7460, decision note AB#7120). The qualified method id, the invocation id and the CK type id are those of the
     ///     request this host accepted (token validated, method and pipeline resolved); <c>PipelineRtId</c> is the
-    ///     bound pipeline. 🔴 This is the only producer of the marker: REST execute and cron leave it null. Direct path
-    ///     only: a run queued for a leased adapter carries no marker yet (AB#7461).
+    ///     bound pipeline. 🔴 This is the only producer of the marker: REST execute and cron leave it null. A run queued
+    ///     for a leased adapter carries it sealed in the queued execution's envelope (AB#7461).
     /// </summary>
     internal static ExecutePipelineMethodInvocation BuildMethodInvocation(CkMethodRequest request,
         OctoObjectId pipelineRtId) =>
