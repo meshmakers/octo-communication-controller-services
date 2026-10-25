@@ -159,6 +159,9 @@ internal abstract class LeaseSchedulerServiceTestsBase
     /// <summary>Execution ids the stubbed lease service refuses for lack of provenance (and fails).</summary>
     protected readonly HashSet<string> ForgedExecutions = [];
 
+    /// <summary>AB#7476: execution ids another controller instance is granting right now (the claim is held there).</summary>
+    protected readonly HashSet<string> InFlightExecutions = [];
+
     /// <summary>Every <see cref="LeaseRequest" /> the scheduler handed to the lease service, in order.</summary>
     protected readonly List<LeaseRequest> Requests = [];
 
@@ -244,6 +247,11 @@ internal abstract class LeaseSchedulerServiceTestsBase
                     }
 
                     return LeaseGrantResult.Refused(LeaseRefusalReason.QueuedProvenanceInvalid, "not queued by us");
+                }
+
+                if (request.ExecutionId is { } inFlightId && InFlightExecutions.Contains(inFlightId))
+                {
+                    return LeaseGrantResult.Refused(LeaseRefusalReason.AdmissionGateDeclined, "granted elsewhere");
                 }
 
                 var gate = call.ArgAt<Func<LeaseDto, PoolMemberConnection, CancellationToken, Task<bool>>?>(4);
