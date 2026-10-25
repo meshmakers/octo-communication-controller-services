@@ -38,7 +38,7 @@ internal class LeaseSurvivesControllerRestartTests : LeaseServiceTestsBase
     private ILeaseService WithGrace(int seconds = 90)
     {
         return new LeaseService(ConnectionManager, CommunicationRepository, EventService, EncryptionService,
-            HubContext, LendingScopeResolver, ServiceAccountResolver, DatabaseCredentialResolver, AdapterService,
+            Envelope, HubContext, LendingScopeResolver, ServiceAccountResolver, DatabaseCredentialResolver, AdapterService,
             LifecycleConfiguration, WakeSignal,
             new OptionsWrapper<CommunicationControllerOptions>(new CommunicationControllerOptions
             {

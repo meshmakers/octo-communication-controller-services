@@ -898,6 +898,16 @@ byte for byte from the public catalog, then the build's 4.11.0: all stay `Availa
 without its persisted ranges goes `ResolveFailed`). The export/import round trip of a record array with this ownership
 layout is `Jobs.IntegrationTests/DataPointRoundTripTests` in octo-bot-services.
 
+**`PipelineExecution.SealedCaller` (4.12.0, AB#7472).** One optional `String` attribute, `isRuntimeState: true`, holding the
+sealed envelope of the queued invoker (see "The queued invoker is sealed"). Additive MINOR; the seven `Caller*`
+attributes stay but are deprecated (neither written nor read). **Rollout:** the embedded-import guard brings 4.12.0 with
+the restarted controller; the controller needs `SecretEncryption` (key ring) to store an invoker. A work item that was
+queued before the upgrade has no `SealedCaller`: when it is leased it runs **without a caller** (a pipeline whose execute
+trigger has `callerBinding: BindingRequired` refuses it), and an execution that is re-queued after the upgrade gets a
+retry without a caller as well. Such items are rare (they wait only for a pool member) and a re-run of the work item
+restores the caller; no migration is possible because nothing proves an old value was written by the controller.
+Dependents keep resolving (minor within the same major).
+
 When adding a new attribute on `Adapter` / `Pool` / similar entities,
 decide at creation time: is the value driven by the blueprint author
 (configuration → leave `isRuntimeState` unset), or by services /
@@ -2550,7 +2560,7 @@ goes through `IWorkloadEncryptionService` (`Reveal` / `RevealOrNull` / `Describe
 `as string` cast: on 4.8.0 the raw value is an `RtSecretValue`. The lane-only reader that did cast —
 `LeaseService.ResolveBorrowerCredentialAsync` — now reveals like the deploy path
 (`Services/LeaseServiceTests/LeaseBorrowerSecretRevealTests`). `CallerAccessToken` stays a String
-(`enc:v1`). 4.8.0 keeps 4.7.0's `ownership: Secret` on `Adapter.AdapterConfiguration` (AB#6312) unchanged —
+(`enc:v1`; since 4.12.0 it is no longer written, see "The queued invoker is sealed"). 4.8.0 keeps 4.7.0's `ownership: Secret` on `Adapter.AdapterConfiguration` (AB#6312) unchanged —
 that attribute stays a `String`. Concept: `docs/concepts/secret-attributes.md`.
 
 Tests: integration `Migrations/SystemCommunication4MigrationTests` — the published 3.40.0 and
@@ -3134,6 +3144,56 @@ never been read for a pool: it proves against real MongoDB that the attribute su
 on an `RtAdapterPool` and that a pool which never declared it reads back as the model's **30**, not
 `0`. A zero would collapse onto the one-minute floor and make every seeded pool in the estate give up a
 member a minute after its last lease — and that is not a reading a mock can be wrong about visibly.
+
+### The queued invoker is sealed (AB#7472, System.Communication 4.12.0)
+
+What the controller reads back from a queued `PipelineExecution` and acts on has to be provably its own
+value: the entity's attributes are ordinary, writable attributes, so a value that has been edited, copied
+from another execution or written in plain text must not decide who a leased run executes as.
+
+| Piece | Where |
+|---|---|
+| Generic envelope: `Seal(purpose, payload, tenantId, executionRtId)` / `TryOpen` / `Reseal` | `Services/ExecutionEnvelope.cs` (`IExecutionEnvelope`, singleton, over `ISecretAttributeProtector`) |
+| The queued invoker (principal + trust level + token) | `Repository/QueuedCaller` (`Apply`, `Open`, `Reseal`, `StripToken`), stored in `PipelineExecution.SealedCaller` |
+| Written at enqueue | `TriggerManagementService` (leased path) |
+| Verified at lease grant | `LeaseService.ResolveCaller`, fed by `QueuedExecution.SealedCaller` / `LeaseRequest.SealedCaller` + `ExecutionRtId` |
+| Re-sealed on requeue | `LeaseService.InterruptAndEnqueueAsync` (`InterruptedLeasedExecution.SealedCaller` + `ExecutionRtId`) |
+| Token removed at grant | `CommunicationRepository.TryClaimQueuedExecutionAsync` (`QueuedCaller.StripToken`) |
+
+**Format.** The payload is wrapped as `{v, p, t, e, d}` (format version, purpose, tenant id, execution RtId, data)
+and encrypted with the engine key ring (`enc:v2:<kid>`, AES-256-GCM, key rotation as for every `enc:v2` value). The
+key ring authenticates only its own header as associated data, so the binding is part of the authenticated plaintext
+and compared after decryption: another purpose, tenant or execution does not open, nor does a flipped bit, another
+key, plain text, `enc:v1`, or a different `enc:v2` secret copied into the attribute (it decrypts to something that is
+not an envelope; the decrypted content is only compared, never returned or logged). The reason of a refusal is
+logged (`ExecutionEnvelopeRejection`), never the value.
+
+**Rules.**
+
+- **Fail closed.** A value that does not open is dropped: the lease carries no caller and no token, and the member
+  applies the pipeline's `CallerBinding` (a `BindingRequired` trigger refuses the run). No stored trust level is
+  trusted on its own; the trust level comes only out of the verified envelope.
+- **No key ring, nothing stored.** `SecretEncryption` must be configured (it is on every cluster that uses Secret
+  attributes). Without it `Seal` returns null, the enqueue stores no invoker (WARN), and the queue still works.
+  The former behaviour "principal travels, token does not" is gone: an unsealed principal is not a principal.
+- **Token.** Lives only inside the envelope. When the lease is granted (the claim) the attribute is replaced by the
+  same envelope without the token, sealed for the same execution, so a re-queue still carries the caller but not the
+  token (a retry runs as the caller without delegation).
+- **Requeue** is a new execution: the old value is opened for the OLD RtId and sealed AGAIN for the retry's RtId, the
+  ciphertext is never copied. A value that does not verify for the old execution is not carried.
+- **The seven plain `Caller*` attributes** stay in the CK model (removing an attribute is a major change) but are
+  deprecated: neither written nor read. Executions queued before the upgrade have no `SealedCaller` and therefore
+  run without a caller (see the rollout note in the CK model CHANGELOG, 4.12.0).
+- **Reuse.** Another value that the controller must be able to trust on a queued execution (the method-invocation
+  marker of AB#7461) is one more `purpose` plus one more String attribute, written with `Seal` at enqueue and opened
+  with `TryOpen` / `Reseal` — not a second mechanism.
+
+Tests: `Services/ExecutionEnvelopeTests` (round trip, binding, tampering, copied secrets, no key ring, reseal,
+`StripToken`), `Services/LeaseServiceTests/LeaseCarriesTheWorkTests` (the lease carries only what verifies: plain
+text, forged JSON, `enc:v1`, other execution / tenant / key / purpose, flipped bit, copied secret, no key ring),
+`Services/LeaseServiceTests/LeaseOutcomeAndRequeueTests` (requeue seals again, never copies),
+`Services/TriggerManagementServiceTests/LeasedAdapterEnqueueTests`, integration `Repository/AdapterPoolQueueTests`
+(generic update of the plain attributes and of the sealed attribute against real MongoDB, token removal at claim).
 
 ### ✅ The lease carries the work (§9.9 / D4)
 

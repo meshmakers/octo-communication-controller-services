@@ -1,6 +1,8 @@
 using FluentAssertions;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
@@ -385,13 +387,71 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
         }
     }
 
+    private ExecutionEnvelope Envelope => (ExecutionEnvelope)fixture.GetService<IExecutionEnvelope>();
+
+    /// <summary>Enqueues an execution whose invoker is sealed exactly as the enqueue path does.</summary>
+    private async Task<RtPipelineExecution> EnqueueWithSealedCallerAsync(TestData data, RtEntityId pipeline,
+        RtEntityId adapter, string subject = "user-42", string[]? roles = null, string? token = "a-bearer-token")
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var execution = new RtPipelineExecution
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            ExecutionId = Guid.NewGuid().ToString(),
+            TriggerType = RtPipelineTriggerTypeEnum.Manual
+        };
+        QueuedCaller.Apply(execution, fixture.TestTenantId,
+            new ExecutePipelineCaller
+            {
+                SubjectId = subject, TenantId = fixture.TestTenantId, Email = "u@example.test", Name = "User 42",
+                Roles = roles ?? ["Reader"], TrustLevel = 2
+            }, token, Envelope);
+        await repository.EnqueueExecutionAsync(fixture.TestTenantId, execution, pipeline, adapter,
+            DateTime.UtcNow.AddMinutes(-1));
+        data.Executions.Add(new RtEntityId(SystemCommunicationCkIds.RtCkPipelineExecutionTypeId, execution.RtId));
+        return execution;
+    }
+
     /// <summary>
-    ///     AB#5279 — the invoker the work item was queued for survives the round trip through
-    ///     MongoDB and comes back on the projection, token still encrypted. Pinned here because the
-    ///     seven attributes are new in 4.2.0 and a mocked repository cannot prove they persist.
+    ///     What a generic runtime write does (GraphQL update mutation, MCP update_entity): replaces attributes of an
+    ///     entity, with no knowledge of the controller's invariants.
+    /// </summary>
+    private async Task GenericUpdateAsync(OctoObjectId executionRtId, RtPipelineExecution patch)
+    {
+        var tenantRepository = await fixture.GetSystemContext().FindTenantRepositoryAsync(fixture.TestTenantId);
+        using var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+        var operationResult = new OperationResult();
+        await tenantRepository.ApplyChangesAsync(session,
+            new List<EntityUpdateInfo<RtPipelineExecution>>
+            {
+                EntityUpdateInfo<RtPipelineExecution>.CreateUpdate(
+                    new RtEntityId(SystemCommunicationCkIds.RtCkPipelineExecutionTypeId, executionRtId), patch)
+            },
+            operationResult);
+        if (operationResult.HasErrors || operationResult.HasFatalErrors)
+        {
+            await session.AbortTransactionAsync();
+            throw new InvalidOperationException($"Generic update failed: {operationResult.GetMessages()}");
+        }
+
+        await session.CommitTransactionAsync();
+    }
+
+    private async Task<QueuedExecution> QueuedAsync(RtEntityId adapter, RtPipelineExecution execution)
+    {
+        var queue = await fixture.GetService<ICommunicationRepository>()
+            .GetQueuedExecutionsForAdapterAsync(fixture.TestTenantId, adapter, 100);
+        return queue.Single(q => q.ExecutionId == execution.ExecutionId);
+    }
+
+    /// <summary>
+    ///     AB#5279 / AB#7472 — the sealed invoker survives the round trip through MongoDB and comes back on the
+    ///     projection exactly as stored; it opens only for this tenant and this execution; the plain Caller*
+    ///     attributes are not written.
     /// </summary>
     [Fact]
-    public async Task GetQueuedExecutionsForAdapterAsync_CarriesTheInvokerTheItemWasQueuedFor()
+    public async Task GetQueuedExecutionsForAdapterAsync_CarriesTheSealedInvokerTheItemWasQueuedFor()
     {
         var repository = fixture.GetService<ICommunicationRepository>();
         var data = new TestData();
@@ -399,40 +459,147 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
         try
         {
             var (pipeline, adapter) = await CreateWorkAsync(data);
-            var execution = new RtPipelineExecution
-            {
-                RtId = OctoObjectId.GenerateNewId(),
-                ExecutionId = Guid.NewGuid().ToString(),
-                TriggerType = RtPipelineTriggerTypeEnum.Manual,
-                CallerSubjectId = "user-42",
-                CallerTenantId = fixture.TestTenantId,
-                CallerEmail = "u@example.test",
-                CallerName = "User 42",
-                CallerRoles = new AttributeStringValueList(["Admin", "Reader"]),
-                CallerTrustLevel = 2,
-                CallerAccessToken = "enc:v1:ciphertext"
-            };
-            await repository.EnqueueExecutionAsync(fixture.TestTenantId, execution, pipeline, adapter,
-                DateTime.UtcNow.AddMinutes(-1));
-            data.Executions.Add(new RtEntityId(SystemCommunicationCkIds.RtCkPipelineExecutionTypeId, execution.RtId));
+            var execution = await EnqueueWithSealedCallerAsync(data, pipeline, adapter);
             var anonymous = await EnqueueAsync(data, pipeline, adapter, DateTime.UtcNow);
 
             var queue = await repository.GetQueuedExecutionsForAdapterAsync(fixture.TestTenantId, adapter, 100);
 
             var withCaller = queue.Single(q => q.ExecutionId == execution.ExecutionId);
-            withCaller.Caller.Should().NotBeNull();
-            withCaller.Caller!.SubjectId.Should().Be("user-42");
-            withCaller.Caller.TenantId.Should().Be(fixture.TestTenantId);
-            withCaller.Caller.Email.Should().Be("u@example.test");
-            withCaller.Caller.Name.Should().Be("User 42");
-            withCaller.Caller.Roles.Should().Equal("Admin", "Reader");
-            withCaller.Caller.TrustLevel.Should().Be(2);
-            // As stored: the repository never decrypts, the lease service does.
-            withCaller.CallerAccessToken.Should().Be("enc:v1:ciphertext");
+            withCaller.ExecutionRtId.Should().Be(execution.RtId);
+            withCaller.SealedCaller.Should().Be(execution.SealedCaller).And.StartWith("enc:v2:");
+            var opened = QueuedCaller.Open(withCaller.SealedCaller, fixture.TestTenantId, withCaller.ExecutionRtId,
+                Envelope);
+            opened.Should().NotBeNull();
+            opened!.Caller.SubjectId.Should().Be("user-42");
+            opened.Caller.TenantId.Should().Be(fixture.TestTenantId);
+            opened.Caller.Email.Should().Be("u@example.test");
+            opened.Caller.Name.Should().Be("User 42");
+            opened.Caller.Roles.Should().Equal("Reader");
+            opened.Caller.TrustLevel.Should().Be(2);
+            opened.AccessToken.Should().Be("a-bearer-token");
+            QueuedCaller.Open(withCaller.SealedCaller, fixture.TestTenantId, OctoObjectId.GenerateNewId(), Envelope)
+                .Should().BeNull();
+
+            var stored = await repository.GetPipelineExecutionAsync(fixture.TestTenantId, execution.ExecutionId!);
+            stored!.CallerSubjectId.Should().BeNull();
+            stored.CallerAccessToken.Should().BeNull();
 
             var withoutCaller = queue.Single(q => q.ExecutionId == anonymous);
-            withoutCaller.Caller.Should().BeNull();
-            withoutCaller.CallerAccessToken.Should().BeNull();
+            withoutCaller.SealedCaller.Should().BeNull();
+        }
+        finally
+        {
+            await CleanupAsync(data);
+        }
+    }
+
+    /// <summary>
+    ///     AB#7472, the acceptance test: a tenant user who can write the entity through a generic update changes
+    ///     CallerRoles / CallerSubjectId / CallerTrustLevel / CallerAccessToken of a Queued execution. The lease must
+    ///     still carry the original caller (and the plain attributes are not read at all).
+    /// </summary>
+    [Fact]
+    public async Task AGenericUpdateOfTheCallerAttributes_DoesNotChangeTheInvokerTheLeaseCarries()
+    {
+        var data = new TestData();
+
+        try
+        {
+            var (pipeline, adapter) = await CreateWorkAsync(data);
+            var execution = await EnqueueWithSealedCallerAsync(data, pipeline, adapter);
+
+            await GenericUpdateAsync(execution.RtId, new RtPipelineExecution
+            {
+                CallerSubjectId = "administrator",
+                CallerRoles = new AttributeStringValueList(["Admin", "TenantManagement"]),
+                CallerTrustLevel = 2,
+                CallerAccessToken = "a-forged-token"
+            });
+
+            var queued = await QueuedAsync(adapter, execution);
+            var opened = QueuedCaller.Open(queued.SealedCaller, fixture.TestTenantId, queued.ExecutionRtId, Envelope);
+
+            opened.Should().NotBeNull();
+            opened!.Caller.SubjectId.Should().Be("user-42");
+            opened.Caller.Roles.Should().Equal("Reader");
+            opened.AccessToken.Should().Be("a-bearer-token");
+        }
+        finally
+        {
+            await CleanupAsync(data);
+        }
+    }
+
+    /// <summary>
+    ///     The same user writes the sealed attribute itself: plain text, a forged JSON envelope, and the sealed value
+    ///     of ANOTHER execution (a more privileged caller's). None of them opens: the lease carries no caller.
+    /// </summary>
+    [Fact]
+    public async Task AGenericUpdateOfTheSealedAttribute_YieldsNoCaller()
+    {
+        var data = new TestData();
+
+        try
+        {
+            var (pipeline, adapter) = await CreateWorkAsync(data);
+            var victim = await EnqueueWithSealedCallerAsync(data, pipeline, adapter);
+            var privileged = await EnqueueWithSealedCallerAsync(data, pipeline, adapter, "administrator",
+                ["Admin"], "admins-token");
+
+            var forgedValues = new[]
+            {
+                "administrator",
+                "{\"v\":1,\"p\":\"queued-caller\",\"t\":\"" + fixture.TestTenantId + "\",\"e\":\"" + victim.RtId +
+                "\",\"d\":{\"SubjectId\":\"administrator\",\"Roles\":[\"Admin\"],\"TrustLevel\":2}}",
+                privileged.SealedCaller!
+            };
+
+            foreach (var forged in forgedValues)
+            {
+                await GenericUpdateAsync(victim.RtId, new RtPipelineExecution { SealedCaller = forged });
+
+                var queued = await QueuedAsync(adapter, victim);
+                queued.SealedCaller.Should().Be(forged);
+                QueuedCaller.Open(queued.SealedCaller, fixture.TestTenantId, queued.ExecutionRtId, Envelope)
+                    .Should().BeNull();
+            }
+
+            // the privileged execution itself is untouched
+            var untouched = await QueuedAsync(adapter, privileged);
+            QueuedCaller.Open(untouched.SealedCaller, fixture.TestTenantId, untouched.ExecutionRtId, Envelope)!
+                .Caller.SubjectId.Should().Be("administrator");
+        }
+        finally
+        {
+            await CleanupAsync(data);
+        }
+    }
+
+    /// <summary>
+    ///     AB#7472 — the delegation token is gone from the entity once the lease is granted (the claim), while the
+    ///     caller stays so that a re-queue can still carry it.
+    /// </summary>
+    [Fact]
+    public async Task TryClaimQueuedExecutionAsync_RemovesTheTokenButKeepsTheSealedCaller()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var data = new TestData();
+
+        try
+        {
+            var (pipeline, adapter) = await CreateWorkAsync(data);
+            var execution = await EnqueueWithSealedCallerAsync(data, pipeline, adapter);
+
+            var claimed = await repository.TryClaimQueuedExecutionAsync(fixture.TestTenantId, execution.ExecutionId!,
+                new LeaseClaim("lease-9", LenderTenantId, PoolRtId, "member-1", DateTime.UtcNow));
+
+            claimed.Should().BeTrue();
+            var loaded = await repository.GetPipelineExecutionAsync(fixture.TestTenantId, execution.ExecutionId!);
+            loaded!.SealedCaller.Should().NotBe(execution.SealedCaller);
+            var opened = QueuedCaller.Open(loaded.SealedCaller, fixture.TestTenantId, loaded.RtId, Envelope);
+            opened.Should().NotBeNull();
+            opened!.Caller.SubjectId.Should().Be("user-42");
+            opened.AccessToken.Should().BeNull();
         }
         finally
         {

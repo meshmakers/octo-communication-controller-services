@@ -110,6 +110,11 @@ types:
     - id: ${this}/CallerAccessToken
       name: CallerAccessToken
       isOptional: true
+    # AB#7472 — the authenticated carrier of the invoker: one sealed envelope (see attribute
+    # description). Replaces the seven plain Caller* attributes above, which are deprecated.
+    - id: ${this}/SealedCaller
+      name: SealedCaller
+      isOptional: true
     - id: ${this}/ErrorMessage
       name: ErrorMessage
       isOptional: true

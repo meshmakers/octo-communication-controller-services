@@ -213,8 +213,71 @@ internal class LeaseOutcomeAndRequeueTests : LeaseServiceTestsBase
         await Assert.That(ConnectionManager.TryGetMember(ConnectionId)!.IsAvailable).IsFalse();
     }
 
+    // ---- AB#7472: a re-queue seals the invoker again for the NEW execution ------------------
+
+    private static readonly OctoObjectId InterruptedRtId = OctoObjectId.GenerateNewId();
+
+    private string SealedFor(OctoObjectId executionRtId, string tenantId = BorrowerTenantId)
+    {
+        var execution = new RtPipelineExecution { RtId = executionRtId };
+        QueuedCaller.Apply(execution, tenantId,
+            new Meshmakers.Octo.Communication.Contracts.MessageObjects.ExecutePipelineCaller
+                { SubjectId = "user-42", Roles = ["Admin"], TrustLevel = 2 }, null, Envelope);
+        return execution.SealedCaller!;
+    }
+
+    private async Task<RtPipelineExecution> RequeueWithStoredAsync(string? storedSealed)
+    {
+        await GrantWithWorkItemAsync();
+        ArrangeInterruptible(sealedCaller: storedSealed, executionRtId: InterruptedRtId);
+
+        var lease = ConnectionManager.TryGetMember(ConnectionId)!.ActiveLease!;
+        await LeaseService.InterruptAndRequeueAsync(lease, LeaseInterruptReason.TtlExpiry, "the lease expired");
+
+        return CommunicationRepository.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == nameof(ICommunicationRepository.EnqueueExecutionAsync))
+            .Select(c => (RtPipelineExecution)c.GetArguments()[1]!)
+            .Single();
+    }
+
+    [Test]
+    public async Task ARequeue_SealsTheInvokerAgainForTheRetry_NeverCopyingTheCiphertext()
+    {
+        var stored = SealedFor(InterruptedRtId);
+
+        var retry = await RequeueWithStoredAsync(stored);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(retry.SealedCaller).IsNotNull();
+        await Assert.That(retry.SealedCaller).IsNotEqualTo(stored);
+        var opened = QueuedCaller.Open(retry.SealedCaller, BorrowerTenantId, retry.RtId, Envelope);
+        await Assert.That(opened).IsNotNull();
+        await Assert.That(opened!.Caller.SubjectId).IsEqualTo("user-42");
+        await Assert.That(opened.Caller.TrustLevel).IsEqualTo(2);
+        // bound to the retry, not to the interrupted attempt
+        await Assert.That(QueuedCaller.Open(retry.SealedCaller, BorrowerTenantId, InterruptedRtId, Envelope)).IsNull();
+    }
+
+    [Test]
+    public async Task ARequeue_DropsAnInvokerThatDoesNotVerifyForTheInterruptedExecution()
+    {
+        // sealed for some OTHER execution, i.e. copied onto this one by hand
+        var retry = await RequeueWithStoredAsync(SealedFor(OctoObjectId.GenerateNewId()));
+
+        await Assert.That(retry.SealedCaller).IsNull();
+    }
+
+    [Test]
+    public async Task ARequeue_DropsAPlainTextInvoker()
+    {
+        var retry = await RequeueWithStoredAsync("user-42");
+
+        await Assert.That(retry.SealedCaller).IsNull();
+    }
+
     private void ArrangeInterruptible(
-        RtPipelineTriggerTypeEnum triggerType = RtPipelineTriggerTypeEnum.Manual, string? inputData = null)
+        RtPipelineTriggerTypeEnum triggerType = RtPipelineTriggerTypeEnum.Manual, string? inputData = null,
+        string? sealedCaller = null, OctoObjectId executionRtId = default)
     {
         var pipeline = RtEntityCreator.CreatePipeline();
         CommunicationRepository.TryInterruptLeasedExecutionAsync(BorrowerTenantId, ExecutionId,
@@ -223,6 +286,8 @@ internal class LeaseOutcomeAndRequeueTests : LeaseServiceTestsBase
                 new RtEntityId(pipeline.CkTypeId!, pipeline.RtId),
                 new RtEntityId(Borrower.CkTypeId!, Borrower.RtId),
                 triggerType,
-                inputData));
+                inputData,
+                executionRtId,
+                sealedCaller));
     }
 }

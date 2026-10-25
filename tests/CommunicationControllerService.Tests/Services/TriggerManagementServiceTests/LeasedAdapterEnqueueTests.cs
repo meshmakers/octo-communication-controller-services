@@ -1,4 +1,5 @@
 using System.Diagnostics.Metrics;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Communication.Contracts.MessageObjects;
@@ -389,40 +390,75 @@ internal class LeasedAdapterEnqueueTests : TriggerManagementServiceTestsBase
         Roles = ["Admin", "Reader"], TrustLevel = 2
     };
 
-    [Test]
-    public async Task ALeasedAdapter_PersistsTheInvokerOnTheQueuedExecution()
+    private async Task<RtPipelineExecution> QueueWithCallerAsync(string? token = "raw-bearer")
     {
         var pipelineRtId = OctoObjectId.GenerateNewId();
         ArrangeAdapter(RtLifecycleModeEnum.Leased, pipelineRtId);
-        EncryptionService.Encrypt("raw-bearer").Returns("enc:v1:xyz");
 
         await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null,
-            caller: ACaller(), callerAccessToken: "raw-bearer");
+            caller: ACaller(), callerAccessToken: token);
 
-        // 🔴 The token is never written in plaintext: what reaches the entity is the ciphertext.
-        await CommunicationRepository.Received(1).EnqueueExecutionAsync(TenantId,
-            Arg.Is<RtPipelineExecution>(e =>
-                e.CallerSubjectId == "user-42" && e.CallerTenantId == TenantId && e.CallerEmail == "u@example.test"
-                && e.CallerName == "User 42" && e.CallerRoles != null && e.CallerRoles.Count == 2
-                && e.CallerTrustLevel == 2 && e.CallerAccessToken == "enc:v1:xyz"),
-            Arg.Any<RtEntityId>(), Arg.Any<RtEntityId>(), Arg.Any<DateTime>());
+        return CommunicationRepository.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == nameof(ICommunicationRepository.EnqueueExecutionAsync))
+            .Select(c => (RtPipelineExecution)c.GetArguments()[1]!)
+            .Single();
+    }
+
+    /// <summary>
+    ///     AB#7472 — the invoker is stored as ONE sealed envelope bound to this execution; the plain Caller*
+    ///     attributes (writable through generic surfaces, never trusted) are no longer written, and the token is
+    ///     nowhere in plain text.
+    /// </summary>
+    [Test]
+    public async Task ALeasedAdapter_SealsTheInvokerOnTheQueuedExecution()
+    {
+        var execution = await QueueWithCallerAsync();
+
+        using var _ = Assert.Multiple();
+        await Assert.That(execution.SealedCaller).IsNotNull();
+        await Assert.That(execution.SealedCaller!).StartsWith("enc:v2:");
+        await Assert.That(execution.SealedCaller!.Contains("raw-bearer")).IsFalse();
+        await Assert.That(execution.CallerSubjectId).IsNull();
+        await Assert.That(execution.CallerRoles).IsNull();
+        await Assert.That(execution.CallerTrustLevel).IsNull();
+        await Assert.That(execution.CallerAccessToken).IsNull();
+
+        var opened = QueuedCaller.Open(execution.SealedCaller, TenantId, execution.RtId, Envelope);
+        await Assert.That(opened).IsNotNull();
+        await Assert.That(opened!.Caller.SubjectId).IsEqualTo("user-42");
+        await Assert.That(opened.Caller.TrustLevel).IsEqualTo(2);
+        await Assert.That(opened.Caller.Roles.Count).IsEqualTo(2);
+        await Assert.That(opened.AccessToken).IsEqualTo("raw-bearer");
     }
 
     [Test]
-    public async Task ALeasedAdapter_WithoutAnEncryptionKey_KeepsTheCallerButNotTheToken()
+    public async Task ASealedInvoker_DoesNotOpenForAnotherExecutionOrTenant()
     {
-        var pipelineRtId = OctoObjectId.GenerateNewId();
-        ArrangeAdapter(RtLifecycleModeEnum.Leased, pipelineRtId);
-        EncryptionService.Encrypt(Arg.Any<string>()).Returns(_ => throw new InvalidOperationException("no key"));
+        var execution = await QueueWithCallerAsync();
 
-        await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null,
-            caller: ACaller(), callerAccessToken: "raw-bearer");
+        using var _ = Assert.Multiple();
+        await Assert.That(QueuedCaller.Open(execution.SealedCaller, TenantId, OctoObjectId.GenerateNewId(), Envelope))
+            .IsNull();
+        await Assert.That(QueuedCaller.Open(execution.SealedCaller, "another-tenant", execution.RtId, Envelope))
+            .IsNull();
+    }
 
-        // A missing key must neither stop the queue nor leak the token: the principal travels, the
-        // token does not, and the run is a run as the caller without delegation.
-        await CommunicationRepository.Received(1).EnqueueExecutionAsync(TenantId,
-            Arg.Is<RtPipelineExecution>(e => e.CallerSubjectId == "user-42" && e.CallerAccessToken == null),
-            Arg.Any<RtEntityId>(), Arg.Any<RtEntityId>(), Arg.Any<DateTime>());
+    /// <summary>
+    ///     Without a key ring the controller cannot seal: nothing is stored and the run proceeds without a caller
+    ///     (fail closed). The queue itself must not stop.
+    /// </summary>
+    [Test]
+    public async Task ALeasedAdapter_WithoutAKeyRing_StoresNoInvokerAtAll()
+    {
+        Envelope = TestExecutionEnvelope.Create(withKeyRing: false);
+        TriggerManagementService = BuildTriggerManagementService();
+
+        var execution = await QueueWithCallerAsync();
+
+        using var _ = Assert.Multiple();
+        await Assert.That(execution.SealedCaller).IsNull();
+        await Assert.That(execution.CallerSubjectId).IsNull();
+        await Assert.That(execution.CallerAccessToken).IsNull();
     }
 
     [Test]
@@ -434,8 +470,7 @@ internal class LeasedAdapterEnqueueTests : TriggerManagementServiceTestsBase
         await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null);
 
         await CommunicationRepository.Received(1).EnqueueExecutionAsync(TenantId,
-            Arg.Is<RtPipelineExecution>(e => e.CallerSubjectId == null && e.CallerAccessToken == null),
+            Arg.Is<RtPipelineExecution>(e => e.SealedCaller == null && e.CallerSubjectId == null),
             Arg.Any<RtEntityId>(), Arg.Any<RtEntityId>(), Arg.Any<DateTime>());
-        EncryptionService.DidNotReceiveWithAnyArgs().Encrypt(default!);
     }
 }

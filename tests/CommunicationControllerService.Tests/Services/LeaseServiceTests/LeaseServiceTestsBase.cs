@@ -60,6 +60,9 @@ internal abstract class LeaseServiceTestsBase
     protected readonly IWorkloadEncryptionService EncryptionService =
         Substitute.For<IWorkloadEncryptionService>();
 
+    /// <summary>AB#7472: the real envelope over a real, freshly generated key ring.</summary>
+    protected readonly ExecutionEnvelope Envelope = TestExecutionEnvelope.Create();
+
     /// <summary>
     ///     AB#5537 (System.Communication 4.8.0): a real key ring behind the reveal of the borrower's
     ///     <c>ClientSecret</c>, a Secret attribute. The substitute above stays for <c>Decrypt</c>
@@ -131,7 +134,7 @@ internal abstract class LeaseServiceTestsBase
             .Returns(new TenantDatabaseCredential("lenderdb", LenderDatabaseUser, "lenderPwd-not-the-borrowers"));
 
         LeaseService = new LeaseService(ConnectionManager, CommunicationRepository, EventService,
-            EncryptionService, HubContext, LendingScopeResolver, ServiceAccountResolver,
+            EncryptionService, Envelope, HubContext, LendingScopeResolver, ServiceAccountResolver,
             DatabaseCredentialResolver, AdapterService, LifecycleConfiguration, WakeSignal);
     }
 

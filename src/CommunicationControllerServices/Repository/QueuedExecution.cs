@@ -35,13 +35,10 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 ///     execution id had nothing to run. Read from the entity rather than re-derived, so the retry of
 ///     an interrupted attempt and its original run the same input.
 /// </param>
-/// <param name="Caller">
-///     The invoker the work item was queued for (AB#5279) — token-free principal, read from the
-///     entity like the input. Null when queued without one (a cron tick, an internal caller).
-/// </param>
-/// <param name="CallerAccessToken">
-///     The invoker's token exactly as stored on the entity — encrypted, or null. Decrypting and
-///     judging its expiry is the lease service's job at grant time.
+/// <param name="SealedCaller">
+///     The sealed envelope of the invoker the work item was queued for (AB#5279, AB#7472), exactly as stored
+///     on the entity, or null. Not interpreted here: the lease service opens it at grant time against the
+///     tenant and <paramref name="ExecutionRtId" />, and a value that does not verify is dropped.
 /// </param>
 public sealed record QueuedExecution(
     string ExecutionId,
@@ -51,8 +48,7 @@ public sealed record QueuedExecution(
     string? PipelineName,
     int ExecutionClass,
     string? InputData = null,
-    ExecutePipelineCaller? Caller = null,
-    string? CallerAccessToken = null)
+    string? SealedCaller = null)
 {
     /// <summary><c>PipelineExecutionClass.Interactive</c>: work a human is waiting for.</summary>
     public const int InteractiveClass = 0;
@@ -124,8 +120,11 @@ public readonly record struct LeaseClaim(
 /// <param name="AdapterRtEntityId">The borrower's Leased adapter that owns the work.</param>
 /// <param name="TriggerType">Trigger type of the original attempt, carried onto the retry.</param>
 /// <param name="InputData">Pipeline input of the original attempt, carried onto the retry.</param>
-/// <param name="Caller">Invoker of the original attempt, carried onto the retry (AB#5279).</param>
-/// <param name="CallerAccessToken">The invoker's token as stored (encrypted), carried onto the retry as-is.</param>
+/// <param name="ExecutionRtId">RtId of the interrupted attempt; the sealed caller is bound to it.</param>
+/// <param name="SealedCaller">
+///     Sealed invoker of the original attempt (AB#5279, AB#7472). The retry gets it sealed again for its own
+///     RtId; the ciphertext is never copied.
+/// </param>
 /// <param name="QueuedAt">
 ///     When the original attempt was enqueued. AB#5864: a lease the member refused without running it
 ///     re-queues its retry at this instant, so the refusal does not cost the work item its place in
@@ -136,6 +135,6 @@ public sealed record InterruptedLeasedExecution(
     RtEntityId AdapterRtEntityId,
     RtPipelineTriggerTypeEnum TriggerType,
     string? InputData,
-    ExecutePipelineCaller? Caller = null,
-    string? CallerAccessToken = null,
+    OctoObjectId ExecutionRtId = default,
+    string? SealedCaller = null,
     DateTime? QueuedAt = null);

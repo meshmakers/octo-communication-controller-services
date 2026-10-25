@@ -27,16 +27,20 @@ internal class CommunicationRepository : ICommunicationRepository
 
     private readonly ISystemContext _systemContext;
     private readonly ILogger<CommunicationRepository> _logger;
+    private readonly IExecutionEnvelope _envelope;
 
     /// <summary>
     /// Constructor
     /// </summary>
     /// <param name="systemContext">The root object of the persistence layer</param>
     /// <param name="logger">Logger instance</param>
-    public CommunicationRepository(ISystemContext systemContext, ILogger<CommunicationRepository> logger)
+    /// <param name="envelope">Seals what the controller later trusts on a queued execution (AB#7472)</param>
+    public CommunicationRepository(ISystemContext systemContext, ILogger<CommunicationRepository> logger,
+        IExecutionEnvelope envelope)
     {
         _systemContext = systemContext;
         _logger = logger;
+        _envelope = envelope;
     }
 
     /// <inheritdoc />
@@ -3434,7 +3438,12 @@ internal class CommunicationRepository : ICommunicationRepository
                 LeaseWaitMs = waitMs,
                 LeasedFromTenantId = claim.LenderTenantId,
                 LeasedFromAdapterPoolRtId = claim.AdapterPoolRtId,
-                LeasedOnMemberId = claim.MemberId
+                LeasedOnMemberId = claim.MemberId,
+                // AB#7472: the delegation token is only needed until the lease is granted. The caller stays
+                // (sealed, same execution) so that a re-queue can still carry it; the token does not.
+                SealedCaller = string.IsNullOrEmpty(execution.SealedCaller)
+                    ? null
+                    : QueuedCaller.StripToken(execution.SealedCaller, tenantId, execution.RtId, _envelope)
             };
 
             // 🔴 The claim latch. The guard applies the write only while the persisted
@@ -3648,9 +3657,10 @@ internal class CommunicationRepository : ICommunicationRepository
                 new RtEntityId(adapter.CkTypeId ?? SystemCommunicationCkIds.RtCkAdapterTypeId, adapter.RtId),
                 execution.TriggerType,
                 execution.InputData,
-                // AB#5279: the retry runs as the same invoker as the interrupted attempt.
-                QueuedCaller.Read(execution),
-                QueuedCaller.ReadEncryptedAccessToken(execution),
+                // AB#5279 / AB#7472: the retry runs as the same invoker; the sealed value is handed on and
+                // re-sealed for the retry by the lease service (never copied).
+                execution.RtId,
+                execution.SealedCaller,
                 execution.QueuedAt);
         }
         catch (CommunicationRepositoryException)
@@ -3769,8 +3779,7 @@ internal class CommunicationRepository : ICommunicationRepository
                 // entity, never re-derived - a retry and its original attempt must run the same input.
                 execution.InputData,
                 // AB#5279: and so does the invoker, for the same reason.
-                QueuedCaller.Read(execution),
-                QueuedCaller.ReadEncryptedAccessToken(execution)));
+                execution.SealedCaller));
         }
 
         return projected;

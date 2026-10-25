@@ -1,3 +1,6 @@
+using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -177,19 +180,30 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
         return $"eyJhbGciOiJub25lIn0.{payload}.sig";
     }
 
-    private LeaseRequest AWorkRequestFrom(ExecutePipelineCaller? caller, string? encryptedToken) =>
-        new(BorrowerTenantId, Borrower.RtId, "exec-1", null, PipelineRtId, PipelineInput, caller, encryptedToken);
+    private static readonly OctoObjectId ExecutionRtId = OctoObjectId.GenerateNewId();
+
+    private LeaseRequest AWorkRequestFrom(string? sealedCaller, OctoObjectId? executionRtId = null) =>
+        new(BorrowerTenantId, Borrower.RtId, "exec-1", null, PipelineRtId, PipelineInput,
+            executionRtId ?? ExecutionRtId, sealedCaller);
+
+    /// <summary>The value the enqueue writes: the invoker sealed for the borrower tenant and ONE execution.</summary>
+    private string? Sealed(string? token, OctoObjectId? executionRtId = null, string tenantId = BorrowerTenantId,
+        ExecutionEnvelope? envelope = null, ExecutePipelineCaller? caller = null)
+    {
+        var execution = new RtPipelineExecution { RtId = executionRtId ?? ExecutionRtId };
+        QueuedCaller.Apply(execution, tenantId, caller ?? ACaller(), token, envelope ?? Envelope);
+        return execution.SealedCaller;
+    }
 
     [Test]
-    public async Task AGrantedLeaseCarriesTheInvokerAndItsDecryptedToken()
+    public async Task AGrantedLeaseCarriesTheVerifiedInvokerAndItsToken()
     {
         ArrangeGrantableLease();
         ArrangeProjectablePipeline();
         var token = AJwtExpiringAt(DateTimeOffset.UtcNow.AddMinutes(30));
-        EncryptionService.Decrypt("enc:v1:xyz").Returns(token);
 
         var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId,
-            AWorkRequestFrom(ACaller(), "enc:v1:xyz"));
+            AWorkRequestFrom(Sealed(token)));
 
         using var _ = Assert.Multiple();
         await Assert.That(result.Granted).IsTrue();
@@ -205,9 +219,9 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
     {
         ArrangeGrantableLease();
         ArrangeProjectablePipeline();
-        EncryptionService.Decrypt("enc:v1:old").Returns(AJwtExpiringAt(DateTimeOffset.UtcNow.AddMinutes(-5)));
 
-        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequestFrom(ACaller(), "enc:v1:old"));
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId,
+            AWorkRequestFrom(Sealed(AJwtExpiringAt(DateTimeOffset.UtcNow.AddMinutes(-5)))));
 
         using var _ = Assert.Multiple();
         var lease = CapturePushedLease();
@@ -217,20 +231,86 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
         await Assert.That(lease.CallerAccessToken).IsNull();
     }
 
-    [Test]
-    public async Task AnUndecryptableTokenIsDroppedButTheInvokerStillTravels()
+    // ---- AB#7472: what is not provably the controller's own value is not believed ------------
+
+    private async Task AssertLeaseCarriesNoCallerAsync(string? stored, OctoObjectId? executionRtId = null)
     {
         ArrangeGrantableLease();
         ArrangeProjectablePipeline();
-        EncryptionService.Decrypt("enc:v1:bad").Returns(_ => throw new InvalidOperationException("tag mismatch"));
 
         var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId,
-            AWorkRequestFrom(ACaller(), "enc:v1:bad"));
+            AWorkRequestFrom(stored, executionRtId));
 
         using var _ = Assert.Multiple();
         await Assert.That(result.Granted).IsTrue();
         var lease = CapturePushedLease();
-        await Assert.That(lease.Caller!.SubjectId).IsEqualTo("user-42");
+        await Assert.That(lease.Caller).IsNull();
+        await Assert.That(lease.CallerAccessToken).IsNull();
+    }
+
+    [Test]
+    public Task APlainTextValue_YieldsNoCaller() => AssertLeaseCarriesNoCallerAsync("user-42");
+
+    [Test]
+    public Task APlainTextJsonValue_YieldsNoCaller() => AssertLeaseCarriesNoCallerAsync(
+        "{\"v\":1,\"p\":\"queued-caller\",\"t\":\"" + BorrowerTenantId + "\",\"e\":\"" + ExecutionRtId +
+        "\",\"d\":{\"SubjectId\":\"admin\",\"TrustLevel\":2}}");
+
+    [Test]
+    public Task ALegacyEncV1Value_YieldsNoCaller() => AssertLeaseCarriesNoCallerAsync("enc:v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==");
+
+    [Test]
+    public Task AValueSealedForAnotherExecution_YieldsNoCaller() =>
+        AssertLeaseCarriesNoCallerAsync(Sealed("t", executionRtId: OctoObjectId.GenerateNewId()));
+
+    [Test]
+    public Task AValueSealedForAnotherTenant_YieldsNoCaller() =>
+        AssertLeaseCarriesNoCallerAsync(Sealed("t", tenantId: "someone-else"));
+
+    [Test]
+    public Task AValueSealedWithAnotherKey_YieldsNoCaller() =>
+        AssertLeaseCarriesNoCallerAsync(Sealed("t", envelope: TestExecutionEnvelope.Create()));
+
+    [Test]
+    public async Task AFlippedBit_YieldsNoCaller()
+    {
+        var sealedValue = Sealed("t")!;
+        var chars = sealedValue.ToCharArray();
+        var i = chars.Length - 4;
+        chars[i] = chars[i] == 'A' ? 'B' : 'A';
+        await AssertLeaseCarriesNoCallerAsync(new string(chars));
+    }
+
+    [Test]
+    public async Task ASecretOfAnotherAttribute_CopiedIntoTheValue_YieldsNoCaller()
+    {
+        // Any enc:v2 value of the same key ring - for instance a copied client secret - decrypts to something that
+        // is not an envelope of this format.
+        await AssertLeaseCarriesNoCallerAsync(
+            TestSecretEncryption.Create().Protector.Protect("a-client-secret").Envelope);
+    }
+
+    [Test]
+    public async Task AnEnvelopeOfAnotherPurpose_YieldsNoCaller()
+    {
+        var other = Envelope.Seal("another-purpose", new { SubjectId = "admin", TrustLevel = 2 }, BorrowerTenantId,
+            ExecutionRtId);
+        await AssertLeaseCarriesNoCallerAsync(other);
+    }
+
+    [Test]
+    public async Task WithoutAKeyRing_NoSealedValueOpens()
+    {
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+        var noKeys = new LeaseService(ConnectionManager, CommunicationRepository, EventService, EncryptionService,
+            TestExecutionEnvelope.Create(withKeyRing: false), HubContext, LendingScopeResolver, ServiceAccountResolver,
+            DatabaseCredentialResolver, AdapterService, LifecycleConfiguration, WakeSignal);
+
+        await noKeys.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, AWorkRequestFrom(Sealed("t")));
+
+        var lease = CapturePushedLease();
+        await Assert.That(lease.Caller).IsNull();
         await Assert.That(lease.CallerAccessToken).IsNull();
     }
 

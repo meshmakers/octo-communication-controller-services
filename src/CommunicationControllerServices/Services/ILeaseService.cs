@@ -31,13 +31,14 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 ///     The queued work item's input, carried onto the lease verbatim. Null when the trigger supplied
 ///     none.
 /// </param>
-/// <param name="Caller">
-///     The invoker the work item was queued for (AB#5279), carried onto the lease so the member runs
-///     the pipeline as that principal. Null when the item was queued without one.
+/// <param name="ExecutionRtId">
+///     RtId of the queued execution (AB#7472). The sealed caller is bound to it; null on a hand-driven lease.
 /// </param>
-/// <param name="CallerAccessToken">
-///     The invoker's token as stored on the queued execution — encrypted at rest. The lease service
-///     decrypts it and drops it when it has expired before it reaches the lease.
+/// <param name="SealedCaller">
+///     The sealed invoker of the queued execution exactly as stored (AB#5279, AB#7472). The lease service
+///     opens it against the borrower tenant and <paramref name="ExecutionRtId" />; a value that does not verify
+///     is dropped and the lease carries no caller. The delegation token inside it is handed to the member only
+///     while it has not expired.
 /// </param>
 public record LeaseRequest(
     string BorrowerTenantId,
@@ -46,8 +47,8 @@ public record LeaseRequest(
     TimeSpan? Ttl = null,
     OctoObjectId? PipelineRtId = null,
     string? PipelineInput = null,
-    ExecutePipelineCaller? Caller = null,
-    string? CallerAccessToken = null);
+    OctoObjectId? ExecutionRtId = null,
+    string? SealedCaller = null);
 
 /// <summary>
 ///     Outcome of a lease attempt (AB#4924).

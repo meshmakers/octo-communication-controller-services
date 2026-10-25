@@ -33,7 +33,8 @@ internal class CommunicationStateWriteRetryTests
         var systemContext = Substitute.For<ISystemContext>();
         systemContext.FindTenantRepositoryAsync(TenantId).Returns(_tenantRepository);
         _tenantRepository.GetSessionAsync().Returns(_ => Task.FromResult(Substitute.For<IOctoSession>()));
-        _sut = new CommunicationRepository(systemContext, NullLogger<CommunicationRepository>.Instance);
+        _sut = new CommunicationRepository(systemContext, NullLogger<CommunicationRepository>.Instance,
+            Substitute.For<Meshmakers.Octo.Backend.CommunicationControllerServices.Services.IExecutionEnvelope>());
     }
 
     private static MongoCommandException WriteConflict() =>

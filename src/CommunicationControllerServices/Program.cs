@@ -83,6 +83,7 @@ try
     builder.Services.AddSingleton<ICommunicationEventService, CommunicationEventService>();
     builder.Services.AddSingleton<IInstanceSecretCrypto, InstanceSecretCrypto>();
     builder.Services.AddSingleton<IWorkloadEncryptionService, WorkloadEncryptionService>();
+    builder.Services.AddSingleton<IExecutionEnvelope, ExecutionEnvelope>();
     builder.Services.AddSingleton<IWorkloadTemplateResolver, WorkloadTemplateResolver>();
     builder.Services.AddSingleton<IShutdownState, HostApplicationShutdownState>();
     builder.Services.AddSingleton<ILifecycleConfigurationService, LifecycleConfigurationService>();

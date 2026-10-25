@@ -235,6 +235,12 @@ token and drops it when its `exp` has passed (a dead token would not fail the ru
 would fail every delegated call inside it), and hands `LeaseDto.Caller` / `CallerAccessToken` to
 the member. A retry after an interrupted lease copies both from the interrupted attempt.
 
+> **Since System.Communication 4.12.0 (AB#7472)** the invoker is no longer stored in the seven plain
+> `Caller*` attributes (they stay in the model, deprecated, neither written nor read). Principal, trust
+> level and token are written as one sealed envelope in `PipelineExecution.SealedCaller`, bound to the
+> tenant and the execution; the lease grant opens it and carries only what verifies. See the controller
+> `CLAUDE.md`, section "The queued invoker is sealed".
+
 The member applies them through `LeaseCallerCarryThrough`, the lease twin of
 `ExecuteCommandCallerCarryThrough`: same mapping onto `ExecutePipelineOptions`, same three-state
 `CallerBindingMode` read from the pipeline's own execute trigger. **`BindingRequired` with no invoker

@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using System.Diagnostics.CodeAnalysis;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -13,7 +14,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 internal abstract class TriggerManagementServiceTestsBase
 {
     protected const string TenantId = "tenantId";
-    protected readonly TriggerManagementService TriggerManagementService;
+    protected TriggerManagementService TriggerManagementService;
     protected readonly ICommunicationRepository CommunicationRepository;
     protected readonly ICommandClient<RemoveRecurringJobsByScheduleGroupRequest> RemoveRecurringJobsCommandClient;
     protected readonly IRoutedCommandClient<ExecutePipelineRequest> ExecuteMeshPipelineCommandClient;
@@ -41,6 +42,9 @@ internal abstract class TriggerManagementServiceTestsBase
     /// </summary>
     protected readonly IWorkloadEncryptionService EncryptionService = Substitute.For<IWorkloadEncryptionService>();
 
+    /// <summary>AB#7472: the real envelope over a real, freshly generated key ring.</summary>
+    protected ExecutionEnvelope Envelope = TestExecutionEnvelope.Create();
+
     [SuppressMessage("Substitute creation", "NS2002:Constructor parameters count mismatch.")]
     protected TriggerManagementServiceTestsBase()
     {
@@ -52,19 +56,7 @@ internal abstract class TriggerManagementServiceTestsBase
         DistributionEventHubService = Substitute.For<IDistributionEventHubService>();
         CommunicationEventService = Substitute.For<ICommunicationEventService>();
 
-        var logger = Substitute.For<ILogger<TriggerManagementService>>();
-
-        TriggerManagementService = new TriggerManagementService(
-            logger,
-            CommunicationRepository,
-            RemoveRecurringJobsCommandClient,
-            ExecuteMeshPipelineCommandClient,
-            DistributionEventHubService,
-            CommunicationEventService,
-            WorkloadLifecycleService,
-            LifecycleConfigurationService,
-            WakeSignal,
-            EncryptionService);
+        TriggerManagementService = BuildTriggerManagementService();
 
         LifecycleConfigurationService.IsLeasingEnabledAsync(Arg.Any<string>()).Returns(true);
 
@@ -76,4 +68,17 @@ internal abstract class TriggerManagementServiceTestsBase
                 Arg.Any<CancellationToken>(), Arg.Any<TimeSpan?>())
             .Returns(new GenericCommandResponse());
     }
+
+    /// <summary>The service under test over the current substitutes and <see cref="Envelope" />.</summary>
+    protected TriggerManagementService BuildTriggerManagementService() => new(
+        Substitute.For<ILogger<TriggerManagementService>>(),
+        CommunicationRepository,
+        RemoveRecurringJobsCommandClient,
+        ExecuteMeshPipelineCommandClient,
+        DistributionEventHubService,
+        CommunicationEventService,
+        WorkloadLifecycleService,
+        LifecycleConfigurationService,
+        WakeSignal,
+        Envelope);
 }

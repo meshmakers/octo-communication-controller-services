@@ -90,6 +90,9 @@ attributes:
   valueType: String
   isRuntimeState: true
   description: 'Identity of the individual pool member (the process) that held the lease for this execution (AB#4924). This is what concept §5 calls "an association from the execution to the assigned member" — it can NOT be an association, because the member belongs to the lending tenant''s database and this execution to the borrower''s (see the file header). It is also not an RtId: members are replicas of one pool workload, not separate entities, so the value is the member''s stable runtime identity (its pool-hub registration id). It exists so the per-adapter queue view — "what is this member holding, what waits behind it" — can be projected out of the pool queue.'
+# AB#7472 — Caller* below are DEPRECATED: since System.Communication 4.12.0 the controller neither writes nor
+# reads them (the stored values are plain, writable attributes and not trustworthy); the invoker travels in
+# SealedCaller. They stay in the model because removing an attribute is a major change.
 # AB#5279 — the invoker of a queued work item. On a dedicated adapter the invoker of
 # POST /pipeline/execute travels on the execute command (AB#5126) and never touches the
 # database; on a leased adapter the work item waits in the queue, in ANOTHER request's
@@ -126,3 +129,13 @@ attributes:
   valueType: String
   isRuntimeState: true
   description: 'The invoker''s bearer token for delegation, ENCRYPTED with the controller''s instance key (enc:v1: sentinel) — never plaintext (AB#5279). Written only when the controller has an encryption key; read back and decrypted at lease grant, dropped there when expired. Unset when no token was carried or no key was configured.'
+# AB#7472 — the authenticated carrier of the queued invoker. The Caller* attributes above are plain
+# attributes that a tenant user with write access to the entity can edit, so the controller does not
+# trust them. SealedCaller holds the principal, its trust level and the delegation token as ONE
+# authenticated-encrypted envelope (enc:v2, engine key ring) that is bound to the tenant and to the
+# RtId of this execution. The lease grant opens it; a value that was edited, copied from another
+# execution or written in plain text does not open and the run proceeds without a caller.
+- id: SealedCaller
+  valueType: String
+  isRuntimeState: true
+  description: 'Sealed (authenticated-encrypted) envelope of the invoker this queued work item was created for: principal, trust level and delegation token, bound to the tenant and to this execution (AB#7472). Written only by the controller at enqueue and re-sealed when the work item is re-queued; the controller drops it at lease grant when it does not verify. Never edit; an edited, copied or plain-text value is ignored. The token part is removed when the lease is granted.'

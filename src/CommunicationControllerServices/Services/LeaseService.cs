@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using System.Collections.Concurrent;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
@@ -22,6 +23,7 @@ internal class LeaseService : ILeaseService
     private readonly ICommunicationRepository _communicationRepository;
     private readonly ICommunicationEventService _eventService;
     private readonly IWorkloadEncryptionService _encryptionService;
+    private readonly IExecutionEnvelope _envelope;
     private readonly IHubContext<AdapterPoolHub> _hubContext;
     private readonly ITenantLendingScopeResolver _lendingScopeResolver;
     private readonly IPipelineServiceAccountResolver _serviceAccountResolver;
@@ -60,6 +62,7 @@ internal class LeaseService : ILeaseService
         ICommunicationRepository communicationRepository,
         ICommunicationEventService eventService,
         IWorkloadEncryptionService encryptionService,
+        IExecutionEnvelope envelope,
         IHubContext<AdapterPoolHub> hubContext,
         ITenantLendingScopeResolver lendingScopeResolver,
         IPipelineServiceAccountResolver serviceAccountResolver,
@@ -80,6 +83,7 @@ internal class LeaseService : ILeaseService
         _communicationRepository = communicationRepository;
         _eventService = eventService;
         _encryptionService = encryptionService;
+        _envelope = envelope;
         _hubContext = hubContext;
         _lendingScopeResolver = lendingScopeResolver;
         _serviceAccountResolver = serviceAccountResolver;
@@ -221,6 +225,9 @@ internal class LeaseService : ILeaseService
             }
         }
 
+        // AB#7472: the invoker is whatever the sealed envelope proves, nothing else.
+        var (caller, callerToken) = ResolveCaller(request);
+
         var grantedAt = DateTime.UtcNow;
         var lease = new LeaseDto
         {
@@ -241,8 +248,8 @@ internal class LeaseService : ILeaseService
             // AB#5279: the invoker the item was queued for, and its token when the controller could
             // keep it and it is still usable. Resolved before the member is reserved, like the
             // projection above - a lease is built once and pushed as-is.
-            Caller = request.Caller,
-            CallerAccessToken = ResolveCallerAccessToken(request),
+            Caller = caller,
+            CallerAccessToken = callerToken,
             ClientId = credential.Value.ClientId,
             ClientSecret = credential.Value.ClientSecret,
             // Three fields, filled here and nowhere else. The member formats no user name and knows
@@ -1016,45 +1023,39 @@ internal class LeaseService : ILeaseService
         }
     }
 
-    /// <inheritdoc />
     /// <summary>
-    ///     AB#5279 — the invoker's token for the lease, or null. Stored encrypted on the queued
-    ///     execution; decrypted here and handed to the member only while it is still valid. An
-    ///     expired token would not make the run fail loudly at once — it would make every delegated
-    ///     call inside it fail with 401 — so it is dropped up front and the run proceeds as the
-    ///     caller without delegation, which is the documented shape of a lease without a token.
+    ///     AB#5279 / AB#7472 — the invoker for the lease and its token, or none. Both come out of the sealed
+    ///     envelope of the queued execution, which is opened against the borrower tenant and the execution's RtId:
+    ///     an envelope that was edited, copied from another execution or written in plain text does not open, and
+    ///     the lease then carries no caller (the member applies the pipeline's CallerBinding, fail closed). The
+    ///     trust level inside is the one the controller wrote. The token is handed over only while it is still
+    ///     valid — an expired token would make every delegated call inside the run fail with 401, so it is
+    ///     dropped up front and the run proceeds as the caller without delegation.
     /// </summary>
-    private string? ResolveCallerAccessToken(LeaseRequest request)
+    private (ExecutePipelineCaller? Caller, string? Token) ResolveCaller(LeaseRequest request)
     {
-        if (string.IsNullOrEmpty(request.CallerAccessToken))
+        if (string.IsNullOrEmpty(request.SealedCaller) || request.ExecutionRtId is not { } executionRtId)
         {
-            return null;
+            return (null, null);
         }
 
-        string token;
-        try
+        var opened = QueuedCaller.Open(request.SealedCaller, request.BorrowerTenantId, executionRtId, _envelope);
+        if (opened is null)
         {
-            token = _encryptionService.Decrypt(request.CallerAccessToken);
-        }
-        catch (Exception e)
-        {
-            Logger.Warn(e,
-                "[{BorrowerTenantId}] The invoker's token of queued execution '{ExecutionId}' could not be decrypted; " +
-                "the lease carries the caller without delegation",
-                request.BorrowerTenantId, request.ExecutionId);
-            return null;
+            return (null, null);
         }
 
-        if (JwtExpiry.IsExpired(token, DateTime.UtcNow))
+        var token = opened.AccessToken;
+        if (token is not null && JwtExpiry.IsExpired(token, DateTime.UtcNow))
         {
             Logger.Info(
                 "[{BorrowerTenantId}] The invoker's token of queued execution '{ExecutionId}' expired while the item " +
                 "was waiting for a lease; the lease carries the caller without delegation",
                 request.BorrowerTenantId, request.ExecutionId);
-            return null;
+            token = null;
         }
 
-        return token;
+        return (opened.Caller, token);
     }
 
     public async Task<string?> InterruptAndRequeueAsync(LeaseDto lease, LeaseInterruptReason interruptReason,
@@ -1107,9 +1108,12 @@ internal class LeaseService : ILeaseService
                 TriggerType = interrupted.TriggerType,
                 InputData = interrupted.InputData
             };
-            // AB#5279: the retry is the same work item - same input, same invoker. The token is
-            // copied as stored (still encrypted); the grant decides whether it is still usable.
-            QueuedCaller.Apply(retry, interrupted.Caller, interrupted.CallerAccessToken);
+            // AB#5279 / AB#7472: the retry is the same work item - same input, same invoker. The sealed
+            // value is bound to the interrupted execution, so it is opened for that RtId and sealed AGAIN
+            // for the retry's RtId (never copied). One that does not verify is dropped: the retry then runs
+            // without a caller, exactly as a grant would.
+            retry.SealedCaller = QueuedCaller.Reseal(interrupted.SealedCaller, lease.TenantId,
+                interrupted.ExecutionRtId, retry.RtId, _envelope);
 
             var queuedAt = keepQueuePosition && interrupted.QueuedAt is { } originalQueuedAt
                 ? originalQueuedAt
