@@ -263,8 +263,11 @@ the member. A retry after an interrupted lease copies both from the interrupted 
 > lease grant records the identity atomically (insert-if-absent, unique key) in a controller-owned collection
 > `execution_lease_claims` in the system database before anything is handed to a member. That collection is not a CK
 > entity and not in a tenant database, so GraphQL, MCP and the runtime API cannot reach or reset it. A second grant of the
-> same seal is refused and the execution failed (WARN without values); a retry is sealed anew with a new identity and is
-> leasable once. Claim records are deleted by a TTL index after `QueuedSealMaxAgeDays` (default 30) plus one day; a seal
+> same seal is refused and the execution failed (WARN without values; a controller that dies between recording the claim
+> and starting the execution also fails that job, the fail-closed price); a retry is sealed anew with a new identity and
+> is leasable once, but only a lease that took a claim may requeue: a hand-driven lease takes none and never requeues
+> (otherwise a reset execution could be laundered through a hand-driven lease that expires). The age of a claim is measured
+> on the MongoDB server clock. Claim records are deleted by a TTL index after `QueuedSealMaxAgeDays` (default 30) plus one day; a seal
 > older than `QueuedSealMaxAgeDays` is refused, so deleting a record never revives an old seal. Items queued before the
 > upgrade carry no identity and are failed (no migration). Rollout: same sequence as AB#7473 (leasing kill switch off,
 > drain or cancel queued leased items, roll **all** controller instances, leasing back on); no setting is required.

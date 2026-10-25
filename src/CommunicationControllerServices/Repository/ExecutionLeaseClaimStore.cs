@@ -22,8 +22,9 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 ///         has no access to the system database.
 ///     </para>
 ///     <para>
-///         <b>Atomic.</b> <c>_id = "{tenantId}/{claimId}"</c>; the claim is a plain <c>InsertOne</c>. A duplicate key
-///         error is the answer "already claimed" (any instance, any time); no read-before-write.
+///         <b>Atomic.</b> <c>_id = "{tenantId}/{claimId}"</c>; the claim is one upsert whose fields all keep an existing
+///         value (insert-if-absent). The first caller inserts (<c>UpsertedId</c>), every other one finds the record;
+///         times are the server's <c>$$NOW</c>, so replicas' clocks play no role.
 ///     </para>
 ///     <para>
 ///         <b>Retention.</b> Every record carries <c>expireAtUtc</c> and a TTL index (<c>expireAfterSeconds: 0</c>)
@@ -37,6 +38,8 @@ internal sealed class ExecutionLeaseClaimStore : IExecutionLeaseClaimStore, IDis
     internal const string CollectionName = "execution_lease_claims";
 
     private const string TtlIndexName = "execution_lease_claims_expire_ttl";
+    private const string LeaseIndexName = "execution_lease_claims_lease";
+    private static readonly TimeSpan IndexRetryBackOff = TimeSpan.FromMinutes(1);
 
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
@@ -47,6 +50,7 @@ internal sealed class ExecutionLeaseClaimStore : IExecutionLeaseClaimStore, IDis
     private readonly SemaphoreSlim _gate = new(1, 1);
     private volatile IMongoCollection<BsonDocument>? _collection;
     private volatile bool _indexEnsured;
+    private DateTime _nextIndexAttemptUtc = DateTime.MinValue;
     private AdminMongoRepositoryClient? _client;
 
     public ExecutionLeaseClaimStore(ISystemContext systemContext, IOptions<OctoSystemConfiguration> systemConfiguration,
@@ -60,41 +64,77 @@ internal sealed class ExecutionLeaseClaimStore : IExecutionLeaseClaimStore, IDis
 
     internal static string KeyOf(string tenantId, string claimId) => $"{tenantId}/{claimId}";
 
-    public async Task<LeaseClaimResult> TryClaimAsync(string tenantId, string claimId, OctoObjectId executionRtId,
-        DateTime nowUtc, TimeSpan retention, CancellationToken cancellationToken = default)
+    public async Task<LeaseClaimResult> TryClaimAsync(string tenantId, string claimId, string leaseId,
+        OctoObjectId executionRtId, TimeSpan retention, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(claimId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(leaseId);
 
         var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
         var key = KeyOf(tenantId, claimId);
-        var document = new BsonDocument
-        {
-            { "_id", key },
-            { "tenantId", tenantId },
-            { "executionRtId", executionRtId.ToString() },
-            { "claimedAtUtc", new BsonDateTime(nowUtc) },
-            { "expireAtUtc", new BsonDateTime(nowUtc + retention) }
-        };
 
+        // 🔴 All times are the MongoDB server's ($$NOW), so controller replicas with different clocks agree on the age
+        // of a claim. An upsert whose every field is "keep what is there, else set": the first caller inserts the
+        // record (insert-if-absent), every later caller leaves it untouched except for `probedAtUtc`, the server time of
+        // its own probe, which is what the age is measured against. The upsert on _id is atomic; a concurrent first
+        // insert that loses the race surfaces as a duplicate key and is treated as "already claimed".
+        var stage = new BsonDocument("$set", new BsonDocument
+        {
+            { "tenantId", IfNull("tenantId", tenantId) },
+            { "leaseId", IfNull("leaseId", leaseId) },
+            { "executionRtId", IfNull("executionRtId", executionRtId.ToString()) },
+            { "claimedAtUtc", IfNull("claimedAtUtc", "$$NOW") },
+            {
+                "expireAtUtc", new BsonDocument("$ifNull", new BsonArray
+                {
+                    "$expireAtUtc",
+                    new BsonDocument("$add", new BsonArray { "$$NOW", (long)retention.TotalMilliseconds })
+                })
+            },
+            { "probedAtUtc", "$$NOW" }
+        });
+
+        bool inserted;
         try
         {
-            await collection.InsertOneAsync(document, cancellationToken: cancellationToken).ConfigureAwait(false);
-            return new LeaseClaimResult(LeaseClaimOutcome.Claimed);
+            var result = await collection.UpdateOneAsync(new BsonDocument("_id", key),
+                Builders<BsonDocument>.Update.Pipeline(new BsonDocumentStagePipelineDefinition<BsonDocument, BsonDocument>(
+                    [stage])),
+                new UpdateOptions { IsUpsert = true }, cancellationToken).ConfigureAwait(false);
+            inserted = result.UpsertedId is not null;
         }
         catch (MongoWriteException e) when (e.WriteError.Category == ServerErrorCategory.DuplicateKey)
         {
-            var existing = await collection.Find(new BsonDocument("_id", key))
-                .Project(new BsonDocument { { "claimedAtUtc", 1 } })
-                .FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
-            // The record can expire between the insert and the read: then the claim is gone, which for the TTL rule
-            // means the seal is older than the accepted age anyway; report "claimed long ago".
-            var claimedAt = existing is not null && existing.TryGetValue("claimedAtUtc", out var value) &&
-                            value.IsBsonDateTime
-                ? value.ToUniversalTime()
-                : DateTime.MinValue;
-            return new LeaseClaimResult(LeaseClaimOutcome.AlreadyClaimed, claimedAt);
+            inserted = false;
         }
+
+        if (inserted)
+        {
+            return new LeaseClaimResult(LeaseClaimOutcome.Claimed);
+        }
+
+        var existing = await collection.Find(new BsonDocument("_id", key))
+            .Project(new BsonDocument { { "claimedAtUtc", 1 }, { "probedAtUtc", 1 } })
+            .FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
+        // The record can expire between the upsert and the read: it is then older than any accepted seal.
+        var age = existing is not null && existing.TryGetValue("claimedAtUtc", out var claimedAt) &&
+                  claimedAt.IsBsonDateTime && existing.TryGetValue("probedAtUtc", out var probedAt) &&
+                  probedAt.IsBsonDateTime
+            ? probedAt.ToUniversalTime() - claimedAt.ToUniversalTime()
+            : TimeSpan.MaxValue;
+        return new LeaseClaimResult(LeaseClaimOutcome.AlreadyClaimed, age);
+    }
+
+    private static BsonDocument IfNull(string field, BsonValue value) =>
+        new("$ifNull", new BsonArray { "$" + field, value });
+
+    public async Task<bool> HasLeaseClaimAsync(string tenantId, string leaseId,
+        CancellationToken cancellationToken = default)
+    {
+        var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+        return await collection.Find(new BsonDocument { { "tenantId", tenantId }, { "leaseId", leaseId } })
+            .Limit(1).AnyAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async Task ReleaseAsync(string tenantId, string claimId, CancellationToken cancellationToken = default)
@@ -109,7 +149,7 @@ internal sealed class ExecutionLeaseClaimStore : IExecutionLeaseClaimStore, IDis
 
     private async Task<IMongoCollection<BsonDocument>> GetCollectionAsync(CancellationToken cancellationToken)
     {
-        if (_collection is { } ready && _indexEnsured)
+        if (_collection is { } ready && (_indexEnsured || DateTime.UtcNow < _nextIndexAttemptUtc))
         {
             return ready;
         }
@@ -126,23 +166,29 @@ internal sealed class ExecutionLeaseClaimStore : IExecutionLeaseClaimStore, IDis
                 _collection = repository.Database.GetCollection<BsonDocument>(CollectionName);
             }
 
-            if (!_indexEnsured)
+            if (!_indexEnsured && DateTime.UtcNow >= _nextIndexAttemptUtc)
             {
-                // The TTL index is retention hygiene, not correctness: the unique key is the primary key. A failure
-                // to create it must not stop leases; it is retried on the next call.
+                // The indexes are retention hygiene and a lookup aid, not correctness: the unique key is the primary
+                // key. A failure to create them must not stop leases; it is retried with a back-off, not on every call.
                 try
                 {
-                    await _collection.Indexes.CreateOneAsync(
+                    await _collection.Indexes.CreateManyAsync(
+                    [
                         new CreateIndexModel<BsonDocument>(Builders<BsonDocument>.IndexKeys.Ascending("expireAtUtc"),
                             new CreateIndexOptions { Name = TtlIndexName, ExpireAfter = TimeSpan.Zero }),
-                        cancellationToken: cancellationToken).ConfigureAwait(false);
+                        new CreateIndexModel<BsonDocument>(
+                            Builders<BsonDocument>.IndexKeys.Ascending("tenantId").Ascending("leaseId"),
+                            new CreateIndexOptions { Name = LeaseIndexName })
+                    ], cancellationToken).ConfigureAwait(false);
                     _indexEnsured = true;
                 }
                 catch (Exception e) when (e is not OperationCanceledException)
                 {
+                    _nextIndexAttemptUtc = DateTime.UtcNow + IndexRetryBackOff;
                     Logger.Warn(e,
-                        "Could not ensure the TTL index of '{Collection}'; claim records are not cleaned up until it exists",
-                        CollectionName);
+                        "Could not ensure the indexes of '{Collection}'; claim records are not cleaned up until they " +
+                        "exist. Next attempt after {BackOff}",
+                        CollectionName, IndexRetryBackOff);
                 }
             }
 

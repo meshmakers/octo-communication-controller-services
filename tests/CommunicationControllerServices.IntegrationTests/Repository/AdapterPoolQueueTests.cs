@@ -1023,6 +1023,10 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
                 var original = await EnqueueAsTheControllerAsync(data, pipeline, adapter, "{\"x\":1}", withCaller);
                 (await repository.TryClaimQueuedExecutionAsync(fixture.TestTenantId, original.ExecutionId!,
                     new LeaseClaim("lease-p", LenderTenantId, PoolRtId, "member-1", DateTime.UtcNow))).Should().BeTrue();
+                // AB#7476: only a lease that took the single-use claim may requeue; the grant records it like this
+                (await fixture.GetService<IExecutionLeaseClaimStore>().TryClaimAsync(fixture.TestTenantId,
+                    QueuedCaller.Open(original.SealedCaller, fixture.TestTenantId, original.RtId, Envelope)!.ClaimId!,
+                    "lease-p", original.RtId, TimeSpan.FromDays(1), TestContext.Current.CancellationToken)).Outcome.Should().Be(LeaseClaimOutcome.Claimed);
 
                 var retryExecutionId = await fixture.GetService<ILeaseService>().InterruptAndRequeueAsync(
                     new LeaseDto
@@ -1103,6 +1107,15 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
             Lender = new RtLenderReferenceRecord { LenderTenantId = tenant, LenderAdapterPoolRtId = PoolRtId }
         });
         repository.TryGetAdapterPoolLendingScopeAsync(tenant, PoolRtId).Returns(new LendingScope(LendingScope.Descendants, null));
+        repository.TryGetQueuedExecutionAsync(tenant, Arg.Any<string>())
+            .Returns(c => real.TryGetQueuedExecutionAsync(tenant, c.ArgAt<string>(1)));
+        repository.TryInterruptLeasedExecutionAsync(tenant, Arg.Any<string>(), Arg.Any<DateTime>(), Arg.Any<string>())
+            .Returns(c => real.TryInterruptLeasedExecutionAsync(tenant, c.ArgAt<string>(1), c.ArgAt<DateTime>(2),
+                c.ArgAt<string>(3)));
+        repository.EnqueueExecutionAsync(tenant, Arg.Any<RtPipelineExecution>(), Arg.Any<RtEntityId>(),
+                Arg.Any<RtEntityId>(), Arg.Any<DateTime>())
+            .Returns(c => real.EnqueueExecutionAsync(tenant, c.ArgAt<RtPipelineExecution>(1), c.ArgAt<RtEntityId>(2),
+                c.ArgAt<RtEntityId>(3), c.ArgAt<DateTime>(4)));
         repository.TryFailQueuedExecutionAsync(tenant, Arg.Any<OctoObjectId>(), Arg.Any<string>())
             .Returns(c => real.TryFailQueuedExecutionAsync(tenant, c.ArgAt<OctoObjectId>(1), c.ArgAt<string>(2)));
 
@@ -1231,8 +1244,76 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
 
                 var failed = await repository.GetPipelineExecutionAsync(fixture.TestTenantId, execution.ExecutionId!);
                 failed!.Status.Should().Be(RtPipelineExecutionStatusEnum.Failed);
-                failed.ErrorMessage.Should().Contain("already leased once");
+                failed.ErrorMessage.Should().Contain("claim already recorded");
                 connectionManager.GetMembers(fixture.TestTenantId, PoolRtId).All(m => m.IsAvailable).Should().BeTrue();
+            });
+        }
+        finally
+        {
+            await CleanupAsync(data);
+        }
+    }
+
+    /// <summary>
+    ///     🔴 AB#7476 — claim laundering. A used execution is reset to Queued, a HAND-DRIVEN lease names it (no claim is
+    ///     taken for it), and the lease expires. The requeue of that lease must not interrupt the execution nor seal it
+    ///     again under a fresh identity: only a lease that took a claim may requeue.
+    /// </summary>
+    [Fact]
+    public async Task AHandDrivenLeaseOnAResetExecution_CannotLaunderTheClaimThroughARequeue()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var data = new TestData();
+
+        try
+        {
+            var (pipeline, adapter) = await CreateWorkAsync(data);
+            var execution = await EnqueueWithSealedCallerAsync(data, pipeline, adapter, token: null);
+
+            await WithLeasingEnabledAsync(async () =>
+            {
+                var connectionManager = new AdapterPoolConnectionManager();
+                connectionManager.RegisterMember("conn-1", "member-1", fixture.TestTenantId, PoolRtId);
+                var proxy = Substitute.For<ISingleClientProxy>();
+                var service = CreateLeaseServiceForReplay(connectionManager, proxy, adapter);
+                var pool = new OctoObjectId(PoolRtId);
+
+                Task<bool> Gate(LeaseDto lease, PoolMemberConnection member, CancellationToken _) =>
+                    repository.TryClaimQueuedExecutionAsync(fixture.TestTenantId, execution.ExecutionId!,
+                        new LeaseClaim(lease.LeaseId, fixture.TestTenantId, PoolRtId, member.MemberId, DateTime.UtcNow,
+                            execution.RtId));
+
+                LeaseDto LastLease() => (LeaseDto)((object?[])proxy.ReceivedCalls().Last(c =>
+                    c.GetMethodInfo().Name == nameof(IClientProxy.SendCoreAsync)).GetArguments()[1]!)[0]!;
+
+                // the legitimate run, then the reset through the generic write path
+                var first = await service.GrantLeaseAsync(fixture.TestTenantId, pool,
+                    RequestFor(await QueuedAsync(adapter, execution), adapter), TestContext.Current.CancellationToken, Gate);
+                first.Granted.Should().BeTrue();
+                await repository.UpdatePipelineExecutionAsync(fixture.TestTenantId, execution.ExecutionId!,
+                    RtPipelineExecutionStatusEnum.Completed, DateTime.UtcNow, 10, null, null);
+                connectionManager.ReleaseLease("conn-1", first.LeaseId!);
+                await GenericUpdateAsync(execution.RtId, new RtPipelineExecution
+                {
+                    Status = RtPipelineExecutionStatusEnum.Queued, LeaseGrantedAt = DateTime.MinValue
+                });
+
+                // a hand-driven lease that names the reset execution (no work is carried, no claim is taken)
+                var byHand = await service.GrantLeaseAsync(fixture.TestTenantId, pool,
+                    new LeaseRequest(fixture.TestTenantId, adapter.RtId, execution.ExecutionId),
+                    TestContext.Current.CancellationToken);
+                byHand.Granted.Should().BeTrue();
+                var handLease = LastLease();
+
+                // the lease expires: what ReapExpiredLeasesAsync does
+                var requeued = await service.InterruptAndRequeueAsync(handLease, LeaseInterruptReason.TtlExpiry,
+                    "expired");
+
+                requeued.Should().BeNull();
+                (await CountEntitiesWithExecutionIdAsync(execution.ExecutionId!)).Should().Be(1,
+                    "no sealed retry was created");
+                (await repository.GetPipelineExecutionAsync(fixture.TestTenantId, execution.ExecutionId!))!.Status
+                    .Should().Be(RtPipelineExecutionStatusEnum.Queued, "a queued execution is not interrupted");
             });
         }
         finally

@@ -17,7 +17,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 /// </summary>
 /// <remarks>
 ///     The claim store is an in-memory stand-in with the same insert-if-absent rule as the MongoDB primary key; the
-///     real collection is covered by the integration tests (<c>ExecutionLeaseClaimTests</c>).
+///     real collection is covered by the integration tests (<c>ExecutionLeaseClaimStoreTests</c>, <c>AdapterPoolQueueTests</c>).
 /// </remarks>
 internal class LeaseSingleUseClaimTests : LeaseServiceTestsBase
 {
@@ -235,7 +235,7 @@ internal class LeaseSingleUseClaimTests : LeaseServiceTestsBase
         await Assert.That(results.Count(r => r.Granted)).IsEqualTo(1);
     }
 
-    /// <summary>A gate that did not start the execution gives the claim back; the seal was not used.</summary>
+    /// <summary>A gate that CLEANLY declined gives the claim back; the seal was not used.</summary>
     [Test]
     public async Task ADeclinedAdmissionGate_GivesTheClaimBack_SoTheSealIsStillLeasable()
     {
@@ -252,20 +252,125 @@ internal class LeaseSingleUseClaimTests : LeaseServiceTestsBase
         await Assert.That(retried.Granted).IsTrue();
     }
 
+    /// <summary>
+    ///     A gate that THROWS may have applied its write already (the execution may be running): the claim stays, the
+    ///     member is free, and the same seal is not leased by the next round. Only a clean "not admitted" gives it back.
+    /// </summary>
     [Test]
-    public async Task AThrowingAdmissionGate_GivesTheClaimBack_TooAndTheMemberIsFree()
+    public async Task AThrowingAdmissionGate_KeepsTheClaim_AndTheSealIsNotLeasedByTheNextRound()
     {
         ArrangeGrantableLease();
         ArrangeProjectablePipeline();
-        var (_, request) = AQueuedWork();
+        var (execution, request) = AQueuedWork();
 
         var failed = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, request,
-            admissionGate: (_, _, _) => throw new InvalidOperationException("boom"));
+            admissionGate: (_, _, _) => throw new InvalidOperationException("boom after the write"));
         var retried = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, request);
+        ClaimStore.AgeAll(TimeSpan.FromMinutes(10));
+        var later = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, request);
 
         using var _ = Assert.Multiple();
         await Assert.That(failed.Granted).IsFalse();
-        await Assert.That(retried.Granted).IsTrue();
+        await Assert.That(ClaimStore.Count).IsEqualTo(1);
+        await Assert.That(retried.Granted).IsFalse();
+        await Assert.That(retried.Reason).IsEqualTo(LeaseRefusalReason.AdmissionGateDeclined);
+        // after the in-flight window it is failed, with text that names the fact only
+        await Assert.That(later.Granted).IsFalse();
+        await Assert.That(later.Reason).IsEqualTo(LeaseRefusalReason.QueuedProvenanceInvalid);
+        await Assert.That(later.StatusMessage).Contains("claim already recorded");
+        await Assert.That(PushedLeases()).IsEqualTo(0);
+        await CommunicationRepository.Received(1).TryFailQueuedExecutionAsync(BorrowerTenantId, execution.RtId,
+            Arg.Is<string>(m => m.Contains("claim already recorded")));
+        await Assert.That(ConnectionManager.GetMembers(LenderTenantId, AdapterPoolRtId.ToString())
+            .All(m => m.IsAvailable)).IsTrue();
+    }
+
+    // ---- B1: lease-bound requeue ---------------------------------------------------------------------------------
+
+    private InterruptedLeasedExecution AnInterrupted(RtPipelineExecution execution) =>
+        new(new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, PipelineRtId),
+            new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, BorrowerAdapterRtId),
+            RtPipelineTriggerTypeEnum.Manual, null, execution.RtId, execution.SealedCaller,
+            DateTime.UtcNow.AddMinutes(-5));
+
+    private static LeaseResultDto ARefusal(string leaseId) => new()
+    {
+        LeaseId = leaseId, Reason = LeaseReleaseReasonDto.Drained, Success = false,
+        StatusMessage = "The member is draining and did not take the lease."
+    };
+
+    private async Task AssertNothingWasRequeued()
+    {
+        await CommunicationRepository.DidNotReceiveWithAnyArgs().TryInterruptLeasedExecutionAsync(default!, default!,
+            default, default!);
+        await CommunicationRepository.DidNotReceiveWithAnyArgs().EnqueueExecutionAsync(default!, default!, default,
+            default, default);
+    }
+
+    /// <summary>
+    ///     The laundering path: a used execution is reset to Queued, a hand-driven lease names it, the lease expires.
+    ///     The hand-driven lease took no claim, so nothing is interrupted or re-sealed.
+    /// </summary>
+    [Test]
+    public async Task AHandDrivenLeaseOnAResetExecution_WhenItExpires_RequeuesNothing()
+    {
+        ClaimStore.LenientLeaseBinding = false;
+        ArrangeGrantableLease();
+        var (execution, _) = AQueuedWork();
+        CommunicationRepository.TryInterruptLeasedExecutionAsync(BorrowerTenantId, "exec-hand", Arg.Any<DateTime>(),
+            Arg.Any<string>()).Returns(AnInterrupted(execution));
+        var granted = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId,
+            ARequest("exec-hand", TimeSpan.FromSeconds(1)));
+        var lease = CapturePushedLease();
+
+        // what ReapExpiredLeasesAsync calls for a lease past its TTL
+        var requeued = await LeaseService.InterruptAndRequeueAsync(lease, LeaseInterruptReason.TtlExpiry, "expired");
+
+        using var _ = Assert.Multiple();
+        await Assert.That(granted.Granted).IsTrue();
+        await Assert.That(requeued).IsNull();
+        await AssertNothingWasRequeued();
+    }
+
+    [Test]
+    public async Task AHandDrivenLeaseOnAResetExecution_WhenTheMemberRefusesIt_RequeuesNothing()
+    {
+        ClaimStore.LenientLeaseBinding = false;
+        ArrangeGrantableLease();
+        var (execution, _) = AQueuedWork();
+        CommunicationRepository.TryInterruptLeasedExecutionAsync(BorrowerTenantId, "exec-hand", Arg.Any<DateTime>(),
+            Arg.Any<string>()).Returns(AnInterrupted(execution));
+        var granted = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, ARequest("exec-hand"));
+
+        await LeaseService.ReleaseLeaseAsync(ConnectionId, ARefusal(granted.LeaseId!));
+
+        await AssertNothingWasRequeued();
+    }
+
+    /// <summary>The counterpart: the lease that took the claim may requeue, under a new identity.</summary>
+    [Test]
+    public async Task ALeaseThatTookTheClaim_Requeues_UnderANewSingleUseIdentity()
+    {
+        ClaimStore.LenientLeaseBinding = false;
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+        var (execution, request) = AQueuedWork();
+        CommunicationRepository.TryInterruptLeasedExecutionAsync(BorrowerTenantId, ExecutionId, Arg.Any<DateTime>(),
+            Arg.Any<string>()).Returns(AnInterrupted(execution));
+        await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId, request);
+        var lease = CapturePushedLease();
+
+        var requeued = await LeaseService.InterruptAndRequeueAsync(lease, LeaseInterruptReason.TtlExpiry, "expired");
+
+        var retryExecution = CommunicationRepository.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == nameof(ICommunicationRepository.EnqueueExecutionAsync))
+            .Select(c => (RtPipelineExecution)c.GetArguments()[1]!).Single();
+        var retry = QueuedCaller.Open(retryExecution.SealedCaller, BorrowerTenantId, retryExecution.RtId, Envelope);
+        var original = QueuedCaller.Open(execution.SealedCaller, BorrowerTenantId, execution.RtId, Envelope);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(requeued).IsNotNull();
+        await Assert.That(retry!.ClaimId).IsNotEqualTo(original!.ClaimId);
     }
 
     /// <summary>Without the claim record a seal cannot be proven unused: no lease, the item stays queued.</summary>

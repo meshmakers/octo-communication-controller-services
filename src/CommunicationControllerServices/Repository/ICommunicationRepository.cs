@@ -943,7 +943,8 @@ public interface ICommunicationRepository
     /// </summary>
     /// <returns>
     /// The pipeline and adapter the attempt belonged to, so the caller can enqueue a fresh attempt,
-    /// or <c>null</c> when the execution could not be read or had already reached a terminal state.
+    /// or <c>null</c> when the execution could not be read, had already reached a terminal state, or is still
+    /// <c>Queued</c> (no lease is behind a queued execution, AB#7476).
     /// </returns>
     Task<InterruptedLeasedExecution?> TryInterruptLeasedExecutionAsync(string tenantId, string executionId,
         DateTime releasedAtUtc, string reason);

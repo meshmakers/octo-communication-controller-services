@@ -27,14 +27,21 @@ public class ExecutionLeaseClaimStoreTests(CommunicationControllerFixture fixtur
     public async Task TheSameClaimIsTakenOnce_ByAnyNumberOfConcurrentCallers()
     {
         var claimId = NewClaimId();
+        var leasePrefix = NewClaimId();
         var execution = OctoObjectId.GenerateNewId();
 
-        var results = await Task.WhenAll(Enumerable.Range(0, 24).Select(_ => Task.Run(() =>
-            Store.TryClaimAsync(fixture.TestTenantId, claimId, execution, DateTime.UtcNow, TimeSpan.FromDays(31),
+        var results = await Task.WhenAll(Enumerable.Range(0, 24).Select(i => Task.Run(() =>
+            Store.TryClaimAsync(fixture.TestTenantId, claimId, $"{leasePrefix}-{i}", execution, TimeSpan.FromDays(31),
                 TestContext.Current.CancellationToken))));
 
         results.Count(r => r.Outcome == LeaseClaimOutcome.Claimed).Should().Be(1);
-        results.Where(r => r.Outcome == LeaseClaimOutcome.AlreadyClaimed).Should().OnlyContain(r => r.ClaimedAtUtc != null);
+        results.Where(r => r.Outcome == LeaseClaimOutcome.AlreadyClaimed).Should().OnlyContain(r => r.Age != null);
+        // the lease that won is the one recorded; the others are not
+        var winner = Array.FindIndex(results, r => r.Outcome == LeaseClaimOutcome.Claimed);
+        (await Store.HasLeaseClaimAsync(fixture.TestTenantId, $"{leasePrefix}-{winner}", TestContext.Current.CancellationToken))
+            .Should().BeTrue();
+        (await Store.HasLeaseClaimAsync(fixture.TestTenantId, $"{leasePrefix}-{(winner + 1) % 24}", TestContext.Current.CancellationToken))
+            .Should().BeFalse();
     }
 
     [Fact]
@@ -44,35 +51,49 @@ public class ExecutionLeaseClaimStoreTests(CommunicationControllerFixture fixtur
         var execution = OctoObjectId.GenerateNewId();
         var ct = TestContext.Current.CancellationToken;
 
-        (await Store.TryClaimAsync("tenant-a", claimId, execution, DateTime.UtcNow, TimeSpan.FromDays(1), ct))
+        (await Store.TryClaimAsync("tenant-a", claimId, "lease-a", execution, TimeSpan.FromDays(1), ct))
             .Outcome.Should().Be(LeaseClaimOutcome.Claimed);
-        (await Store.TryClaimAsync("tenant-b", claimId, execution, DateTime.UtcNow, TimeSpan.FromDays(1), ct))
+        (await Store.TryClaimAsync("tenant-b", claimId, "lease-b", execution, TimeSpan.FromDays(1), ct))
             .Outcome.Should().Be(LeaseClaimOutcome.Claimed);
-        (await Store.TryClaimAsync("tenant-a", claimId, execution, DateTime.UtcNow, TimeSpan.FromDays(1), ct))
+        (await Store.TryClaimAsync("tenant-a", claimId, "lease-a", execution, TimeSpan.FromDays(1), ct))
             .Outcome.Should().Be(LeaseClaimOutcome.AlreadyClaimed);
 
         await Store.ReleaseAsync("tenant-a", claimId, ct);
-        (await Store.TryClaimAsync("tenant-a", claimId, execution, DateTime.UtcNow, TimeSpan.FromDays(1), ct))
+        (await Store.TryClaimAsync("tenant-a", claimId, "lease-a", execution, TimeSpan.FromDays(1), ct))
             .Outcome.Should().Be(LeaseClaimOutcome.Claimed);
     }
 
     [Fact]
-    public async Task TheRecordCarriesItsRetention_AndATtlIndexDeletesIt()
+    public async Task TheRecordCarriesItsRetention_OnTheServerClock_AndATtlIndexDeletesIt()
     {
         var claimId = NewClaimId();
-        var now = DateTime.UtcNow;
-        await Store.TryClaimAsync(fixture.TestTenantId, claimId, OctoObjectId.GenerateNewId(), now,
+        await Store.TryClaimAsync(fixture.TestTenantId, claimId, "lease-1", OctoObjectId.GenerateNewId(),
             TimeSpan.FromDays(31), TestContext.Current.CancellationToken);
 
         var collection = await Store.GetCollectionForTestsAsync();
         var document = await collection.Find(new BsonDocument("_id", ExecutionLeaseClaimStore.KeyOf(
             fixture.TestTenantId, claimId))).FirstAsync(TestContext.Current.CancellationToken);
-        document["expireAtUtc"].ToUniversalTime().Should().BeCloseTo(now.AddDays(31), TimeSpan.FromSeconds(1));
-        // the identity is not stored as a field of its own besides the key; only audit data is
-        document.Names.Should().BeEquivalentTo("_id", "tenantId", "executionRtId", "claimedAtUtc", "expireAtUtc");
+        // times come from the server ($$NOW): claimed == probed on the first claim, expiry = claimed + retention
+        document["expireAtUtc"].ToUniversalTime().Should().BeCloseTo(
+            document["claimedAtUtc"].ToUniversalTime().AddDays(31), TimeSpan.FromSeconds(1));
+        document["probedAtUtc"].ToUniversalTime().Should().Be(document["claimedAtUtc"].ToUniversalTime());
+        document.Names.Should().BeEquivalentTo("_id", "tenantId", "leaseId", "executionRtId", "claimedAtUtc",
+            "expireAtUtc", "probedAtUtc");
+
+        // a later probe keeps claimedAt/expireAt and moves probedAt; the age is the server-side difference
+        var again = await Store.TryClaimAsync(fixture.TestTenantId, claimId, "lease-2", OctoObjectId.GenerateNewId(),
+            TimeSpan.FromDays(31), TestContext.Current.CancellationToken);
+        again.Outcome.Should().Be(LeaseClaimOutcome.AlreadyClaimed);
+        again.Age.Should().BeLessThan(TimeSpan.FromMinutes(1));
+        var after = await collection.Find(new BsonDocument("_id", ExecutionLeaseClaimStore.KeyOf(
+            fixture.TestTenantId, claimId))).FirstAsync(TestContext.Current.CancellationToken);
+        after["claimedAtUtc"].Should().Be(document["claimedAtUtc"]);
+        after["expireAtUtc"].Should().Be(document["expireAtUtc"]);
+        after["leaseId"].AsString.Should().Be("lease-1", "the first claim's lease stays recorded");
 
         var indexCursor = await collection.Indexes.ListAsync(TestContext.Current.CancellationToken);
         var indexes = await indexCursor.ToListAsync(TestContext.Current.CancellationToken);
+        indexes.Should().Contain(i => i["name"].AsString == "execution_lease_claims_lease");
         var ttl = indexes.Single(i => i["name"].AsString == "execution_lease_claims_expire_ttl");
         ttl["key"].AsBsonDocument.Names.Should().Equal("expireAtUtc");
         ttl["expireAfterSeconds"].ToInt32().Should().Be(0);
@@ -85,7 +106,7 @@ public class ExecutionLeaseClaimStoreTests(CommunicationControllerFixture fixtur
     [Fact]
     public async Task TheCollectionLivesInTheSystemDatabase_AndNotInTheTenantDatabase()
     {
-        await Store.TryClaimAsync(fixture.TestTenantId, NewClaimId(), OctoObjectId.GenerateNewId(), DateTime.UtcNow,
+        await Store.TryClaimAsync(fixture.TestTenantId, NewClaimId(), "lease-x", OctoObjectId.GenerateNewId(),
             TimeSpan.FromDays(1), TestContext.Current.CancellationToken);
         var systemContext = fixture.GetSystemContext();
         var tenantContext = await systemContext.FindTenantContextAsync(fixture.TestTenantId);

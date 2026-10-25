@@ -309,7 +309,7 @@ internal class LeaseService : ILeaseService
         if (provenance?.ClaimId is { } claimId && request.ExecutionRtId is { } claimedExecutionRtId)
         {
             var claimRefusal = await ConsumeSealAsync(lenderTenantId, adapterPoolRtId, request, claimedExecutionRtId,
-                claimId, cancellationToken);
+                claimId, lease.LeaseId, cancellationToken);
             if (claimRefusal is not null)
             {
                 _connectionManager.ReleaseLease(member.ConnectionId, lease.LeaseId);
@@ -331,7 +331,9 @@ internal class LeaseService : ILeaseService
                 // A gate that threw decided nothing, so the member must go back — otherwise the
                 // pool quietly loses a member per failed round until it has none left.
                 _connectionManager.ReleaseLease(member.ConnectionId, lease.LeaseId);
-                await TryReleaseClaimAsync(request.BorrowerTenantId, claimedId);
+                // The claim is NOT given back: the gate may have applied its write before it threw, and then the
+                // execution is already running. A seal whose gate failed unclearly stays claimed (the execution is
+                // failed after the in-flight window if it is still queued).
                 Logger.Warn(e,
                     "The admission gate for lease '{LeaseId}' of tenant '{BorrowerTenantId}' threw; the member " +
                     "reservation was undone",
@@ -1111,13 +1113,13 @@ internal class LeaseService : ILeaseService
     ///     execution and pipeline, never the identity or any payload value.
     /// </summary>
     private async Task<LeaseGrantResult?> ConsumeSealAsync(string lenderTenantId, OctoObjectId adapterPoolRtId,
-        LeaseRequest request, OctoObjectId executionRtId, string claimId, CancellationToken cancellationToken)
+        LeaseRequest request, OctoObjectId executionRtId, string claimId, string leaseId,
+        CancellationToken cancellationToken)
     {
-        var now = DateTime.UtcNow;
         LeaseClaimResult claim;
         try
         {
-            claim = await _claimStore.TryClaimAsync(request.BorrowerTenantId, claimId, executionRtId, now,
+            claim = await _claimStore.TryClaimAsync(request.BorrowerTenantId, claimId, leaseId, executionRtId,
                 _sealMaxAge + ClaimRetentionMargin, cancellationToken);
         }
         catch (Exception e)
@@ -1136,7 +1138,7 @@ internal class LeaseService : ILeaseService
             return null;
         }
 
-        if (claim.ClaimedAtUtc is { } claimedAt && now - claimedAt < ClaimInFlightWindow)
+        if (claim.Age is { } age && age < ClaimInFlightWindow)
         {
             // Another controller instance is granting this very execution (the scheduler of each instance reads the
             // same queue). Not a replay; the winner moves the execution out of the queue.
@@ -1145,10 +1147,11 @@ internal class LeaseService : ILeaseService
                 "another controller instance.");
         }
 
-        // The seal was used before and the execution is queued again: its state was reset after it ran. It is not
-        // leased a second time and failed (terminal), so the queue does not retry it every round.
-        var message = $"The queued execution '{request.ExecutionId}' was already leased once; a queued execution is " +
-                      "leased at most once, so it is not leased again.";
+        // A claim for this seal was recorded a while ago and the execution is queued again: either its state was reset
+        // after it ran, or the instance that recorded the claim died before it started the execution. In both cases it
+        // is not leased (a seal is leased at most once) and failed (terminal), so the queue does not retry it every
+        // round. The text names the fact, not who or when.
+        var message = $"The queued execution '{request.ExecutionId}' is not leased: claim already recorded.";
         await FailExecutionWithoutProvenanceAsync(request, executionRtId, request.PipelineRtId, message);
         return Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.QueuedProvenanceInvalid, message);
     }
@@ -1311,6 +1314,24 @@ internal class LeaseService : ILeaseService
     }
 
     /// <summary>
+    ///     AB#7476 — whether the lease is the one a single-use claim was taken for. Fails closed: a store that cannot be
+    ///     reached means "not bound", so nothing is re-sealed; the stuck-execution reaper then fails the item.
+    /// </summary>
+    private async Task<bool> IsLeaseBoundToClaimAsync(LeaseDto lease)
+    {
+        try
+        {
+            return await _claimStore.HasLeaseClaimAsync(lease.TenantId, lease.LeaseId);
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e, "[{TenantId}] Could not check whether lease '{LeaseId}' took a single-use claim",
+                lease.TenantId, lease.LeaseId);
+            return false;
+        }
+    }
+
+    /// <summary>
     ///     Marks the attempt <c>Interrupted</c> and enqueues a fresh one in its place.
     /// </summary>
     /// <param name="lease">The lease whose work item is re-queued.</param>
@@ -1328,6 +1349,20 @@ internal class LeaseService : ILeaseService
     {
         if (string.IsNullOrWhiteSpace(lease.ExecutionId))
         {
+            return null;
+        }
+
+        // 🔴 AB#7476 — lease-bound requeue. Only a lease that took a single-use claim may put its work item back into the
+        // queue under a NEW seal. A hand-driven lease (POST .../lease with an ExecutionId) takes no claim, so letting it
+        // requeue would launder the claim: reset a used execution to Queued, lease it by hand, let the lease expire,
+        // and the requeue would seal the same work again with a fresh identity. The proof is the controller's own claim
+        // record (it names the lease id the controller generated), not anything the member or the entity says.
+        if (!await IsLeaseBoundToClaimAsync(lease))
+        {
+            Logger.Warn(
+                "[{BorrowerTenantId}] Lease '{LeaseId}' took no single-use claim; its execution '{ExecutionId}' is not " +
+                "interrupted or re-queued",
+                lease.TenantId, lease.LeaseId, lease.ExecutionId);
             return null;
         }
 
