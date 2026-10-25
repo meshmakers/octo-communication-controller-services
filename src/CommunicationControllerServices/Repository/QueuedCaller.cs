@@ -103,9 +103,26 @@ internal static class QueuedCaller
     ///     OLD execution; the ciphertext is never copied.
     /// </summary>
     public static string? Reseal(string? sealedCaller, string tenantId, OctoObjectId fromExecutionRtId,
-        OctoObjectId toExecutionRtId, IExecutionEnvelope envelope) =>
-        envelope.Reseal<Payload>(ExecutionEnvelopePurposes.QueuedCaller, sealedCaller, tenantId, fromExecutionRtId,
-            toExecutionRtId);
+        OctoObjectId toExecutionRtId, IExecutionEnvelope envelope)
+    {
+        if (!envelope.TryOpen<Payload>(ExecutionEnvelopePurposes.QueuedCaller, sealedCaller, tenantId,
+                fromExecutionRtId, out var payload, out var rejection) || payload is null)
+        {
+            if (rejection != ExecutionEnvelopeRejection.Missing)
+            {
+                NLog.LogManager.GetCurrentClassLogger().Warn(
+                    "[{TenantId}] The queued caller of execution '{ExecutionRtId}' did not verify ({Reason}) and is " +
+                    "not carried onto the re-queued execution",
+                    tenantId, fromExecutionRtId, rejection);
+            }
+
+            return null;
+        }
+
+        // A retry never carries delegation, whatever value is stored (the pre-claim value could be written back).
+        payload.AccessToken = null;
+        return envelope.Seal(ExecutionEnvelopePurposes.QueuedCaller, payload, tenantId, toExecutionRtId);
+    }
 
     /// <summary>
     ///     The same envelope without the delegation token, sealed for the same execution. Written when the lease is

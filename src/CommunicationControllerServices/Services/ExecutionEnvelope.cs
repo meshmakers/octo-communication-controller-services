@@ -231,7 +231,7 @@ public sealed class ExecutionEnvelope(ISecretAttributeProtector protector) : IEx
         {
             payload = wrapper.Data.Deserialize<T>(JsonOptions);
         }
-        catch (JsonException)
+        catch (Exception e) when (e is JsonException or InvalidOperationException or NotSupportedException)
         {
             rejection = ExecutionEnvelopeRejection.Malformed;
             return false;

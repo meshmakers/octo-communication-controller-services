@@ -187,6 +187,40 @@ internal class ExecutionEnvelopeTests
     }
 
     [Test]
+    public async Task QueuedCallerReseal_NeverCarriesTheToken_EvenFromAPreClaimValue()
+    {
+        var next = OctoObjectId.GenerateNewId();
+        var execution = new RtPipelineExecution { RtId = _execution };
+        QueuedCaller.Apply(execution, Tenant, new ExecutePipelineCaller { SubjectId = "user-42", TrustLevel = 2 },
+            "bearer-xyz", _sut);
+
+        var resealed = QueuedCaller.Reseal(execution.SealedCaller, Tenant, _execution, next, _sut);
+        var opened = QueuedCaller.Open(resealed, Tenant, next, _sut);
+
+        using var scope = Assert.Multiple();
+        await Assert.That(opened).IsNotNull();
+        await Assert.That(opened!.Caller.SubjectId).IsEqualTo("user-42");
+        await Assert.That(opened.AccessToken).IsNull();
+    }
+
+    [Test]
+    public async Task AnEnvelopeWithoutData_IsMalformed_AndDoesNotThrow()
+    {
+        // Same key ring, correct binding, but no "d" member: only a holder of the key could produce it, still it
+        // must be refused rather than throw.
+        var keys = TestSecretEncryption.Create();
+        var sut = new ExecutionEnvelope(keys.Protector);
+        var json = "{\"v\":1,\"p\":\"" + Purpose + "\",\"t\":\"" + Tenant + "\",\"e\":\"" + _execution + "\"}";
+        var stored = keys.Protector.Protect(json).Envelope;
+
+        var ok = sut.TryOpen<Data>(Purpose, stored, Tenant, _execution, out _, out var why);
+
+        using var scope = Assert.Multiple();
+        await Assert.That(ok).IsFalse();
+        await Assert.That(why).IsEqualTo(ExecutionEnvelopeRejection.Malformed);
+    }
+
+    [Test]
     public async Task StripToken_OfAValueThatDoesNotVerify_ClearsTheAttribute()
     {
         await Assert.That(QueuedCaller.StripToken("user-42", Tenant, _execution, _sut)).IsEqualTo(string.Empty);
