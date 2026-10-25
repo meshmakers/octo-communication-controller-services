@@ -1080,6 +1080,7 @@ internal class LeaseService : ILeaseService
         }
 
         var executionRtId = request.ExecutionRtId;
+        var handDriven = executionRtId is null;
         var pipelineRtId = request.PipelineRtId;
         var inputData = request.PipelineInput;
         var sealedCaller = request.SealedCaller;
@@ -1123,7 +1124,9 @@ internal class LeaseService : ILeaseService
         switch (verdict)
         {
             case QueuedCaller.Provenance.Valid:
-                return (null, opened);
+                // A hand-driven lease does not claim the execution and carries no work, so it must not carry the
+                // invoker or the delegation token of the queued execution either; the scheduler will lease it later.
+                return (null, handDriven ? null : opened);
 
             case QueuedCaller.Provenance.Unverifiable:
                 // Not proof of a forgery (no key ring, or a key this pod does not hold): the item stays queued and

@@ -432,6 +432,24 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
     }
 
     [Test]
+    public async Task AHandDrivenLease_NeverCarriesTheInvokerOrTokenOfTheQueuedExecution()
+    {
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+        // the lease claims nothing and runs nothing: the scheduler leases the execution later, with the token
+        ArrangeQueuedExecution("exec-invoked", caller: ACaller(), token: AJwtExpiringAt(DateTimeOffset.UtcNow.AddHours(1)));
+
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId,
+            new LeaseRequest(BorrowerTenantId, BorrowerAdapterRtId, "exec-invoked"));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.Granted).IsTrue();
+        var lease = CapturePushedLease();
+        await Assert.That(lease.Caller).IsNull();
+        await Assert.That(lease.CallerAccessToken).IsNull();
+    }
+
+    [Test]
     public async Task AHandDrivenLease_NamingNoExecution_StaysAllowed()
     {
         ArrangeGrantableLease();

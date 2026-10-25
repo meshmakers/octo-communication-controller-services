@@ -59,10 +59,6 @@ internal class QueuedWorkReachesTheLeaseTests : LeaseSchedulerServiceTestsBase
     }
 
     /// <summary>
-    ///     A queued item with no input carries none — an empty string would be a different pipeline
-    ///     input than "no input at all", and a node that branches on presence would see the wrong one.
-    /// </summary>
-    /// <summary>
     ///     AB#7473 — an item that was not queued by the controller is failed by the lease service. It must neither
     ///     block its tenant nor be retried: the tenant's next item is served in the same round.
     /// </summary>
@@ -84,6 +80,10 @@ internal class QueuedWorkReachesTheLeaseTests : LeaseSchedulerServiceTestsBase
         await Assert.That(Requests.Count(r => r.ExecutionId == "exec-forged")).IsEqualTo(1);
     }
 
+    /// <summary>
+    ///     A queued item with no input carries none — an empty string would be a different pipeline
+    ///     input than "no input at all", and a node that branches on presence would see the wrong one.
+    /// </summary>
     [Test]
     public async Task AnItemQueuedWithoutInputCarriesNull()
     {
