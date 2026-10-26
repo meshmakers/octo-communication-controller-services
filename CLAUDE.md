@@ -120,6 +120,8 @@ a fake identity service and tokens signed with a throw-away key: one test per re
 `StartExecutePipelineAsync` is never called, subject of the token beats the forged `Caller`, service token = `client_id`, log
 capture), `Methods/PipelineMethodWiringTests`, integration `PipelineMethodHandlerTests`.
 
+Concept page (marker, who sets it, lease sealing, fail-closed cases, residual risks, rollout order): `docs/concepts/pipeline-method-invocation-marker.md`.
+
 **Method-invocation marker (AB#7460, Feature AB#6884 F3.7, decision note AB#7120).** `PipelineMethodInvoker` is the only
 producer of `ExecutePipelineMethodInvocation` (octo-sdk, `Meshmakers.Octo.Communication.Contracts.MessageObjects`): it
 builds it from the accepted request (`MethodId` qualified, `InvocationId`, `CkTypeId`) plus the `PipelineRtId` of the
