@@ -3663,8 +3663,11 @@ internal class CommunicationRepository : ICommunicationRepository
             session.StartTransaction();
 
             var execution = await FindExecutionAsync(tenantRepository, session, executionId);
+            // AB#7476: a lease is held by a RUNNING execution (the claim moved it Queued -> Running). A Queued one has no
+            // lease behind it - it was reset, or a hand-driven lease names it - and is never "interrupted" into a retry.
             if (execution is null || execution.Status is RtPipelineExecutionStatusEnum.Completed
-                    or RtPipelineExecutionStatusEnum.Failed or RtPipelineExecutionStatusEnum.Cancelled)
+                    or RtPipelineExecutionStatusEnum.Failed or RtPipelineExecutionStatusEnum.Cancelled
+                    or RtPipelineExecutionStatusEnum.Queued)
             {
                 await session.CommitTransactionAsync();
                 return null;

@@ -98,6 +98,9 @@ internal abstract class LeaseServiceTestsBase
     protected readonly ILifecycleConfigurationService LifecycleConfiguration =
         Substitute.For<ILifecycleConfigurationService>();
 
+    /// <summary>AB#7476: the single-use claim records (an in-memory stand-in with the same insert-if-absent rule).</summary>
+    protected readonly InMemoryLeaseClaimStore ClaimStore = new();
+
     protected readonly ISingleClientProxy MemberProxy = Substitute.For<ISingleClientProxy>();
     protected readonly ILeaseService LeaseService;
 
@@ -138,7 +141,7 @@ internal abstract class LeaseServiceTestsBase
 
         LeaseService = new LeaseService(ConnectionManager, CommunicationRepository, EventService,
             EncryptionService, Envelope, HubContext, LendingScopeResolver, ServiceAccountResolver,
-            DatabaseCredentialResolver, AdapterService, LifecycleConfiguration, WakeSignal);
+            DatabaseCredentialResolver, AdapterService, LifecycleConfiguration, WakeSignal, ClaimStore);
     }
 
     /// <summary>

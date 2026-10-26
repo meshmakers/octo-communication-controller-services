@@ -32,6 +32,21 @@ internal class LeaseService : ILeaseService
     private readonly ILifecycleConfigurationService _lifecycleConfiguration;
 
     private readonly ILeaseSchedulerWakeSignal _wakeSignal;
+    private readonly IExecutionLeaseClaimStore _claimStore;
+
+    /// <summary>
+    ///     AB#7476 — a sealed execution older than this is not leased (its claim record may have expired). The claim
+    ///     record is kept for this age plus <see cref="ClaimRetentionMargin" />.
+    /// </summary>
+    private readonly TimeSpan _sealMaxAge;
+
+    internal static readonly TimeSpan ClaimRetentionMargin = TimeSpan.FromDays(1);
+
+    /// <summary>
+    ///     AB#7476 — an existing claim younger than this is another controller instance that is granting the same
+    ///     execution right now; an older one means the seal was used and the execution is queued again.
+    /// </summary>
+    internal static readonly TimeSpan ClaimInFlightWindow = TimeSpan.FromMinutes(2);
 
     /// <summary>
     ///     AB#5864 — how often a work item may be refused by a draining member and returned to the
@@ -70,8 +85,12 @@ internal class LeaseService : ILeaseService
         IAdapterService adapterService,
         ILifecycleConfigurationService lifecycleConfiguration,
         ILeaseSchedulerWakeSignal wakeSignal,
+        IExecutionLeaseClaimStore claimStore,
         IOptions<CommunicationControllerOptions>? options = null)
     {
+        _claimStore = claimStore;
+        _sealMaxAge = TimeSpan.FromDays(Math.Max(1, options?.Value.QueuedSealMaxAgeDays ?? 30));
+
         // AB#5826: without options (a unit-test composition) there is no reconnect grace — the
         // behaviour every test written before it was arranged against. Production always has them.
         _reconnectGrace = TimeSpan.FromSeconds(Math.Max(0, options?.Value.LeaseMemberReconnectGraceSeconds ?? 0));
@@ -283,6 +302,23 @@ internal class LeaseService : ILeaseService
                 "controller instance.");
         }
 
+        // 🔴 AB#7476 — the single-use claim. The seal verified above is leased at most once: its identity is recorded
+        // atomically in a controller-owned record before anything is handed out, so a status reset of a finished
+        // execution through a generic write path cannot make the same seal leasable again.
+        string? claimedId = null;
+        if (provenance?.ClaimId is { } claimId && request.ExecutionRtId is { } claimedExecutionRtId)
+        {
+            var claimRefusal = await ConsumeSealAsync(lenderTenantId, adapterPoolRtId, request, claimedExecutionRtId,
+                claimId, lease.LeaseId, cancellationToken);
+            if (claimRefusal is not null)
+            {
+                _connectionManager.ReleaseLease(member.ConnectionId, lease.LeaseId);
+                return claimRefusal;
+            }
+
+            claimedId = claimId;
+        }
+
         if (admissionGate is not null)
         {
             bool admitted;
@@ -295,6 +331,9 @@ internal class LeaseService : ILeaseService
                 // A gate that threw decided nothing, so the member must go back — otherwise the
                 // pool quietly loses a member per failed round until it has none left.
                 _connectionManager.ReleaseLease(member.ConnectionId, lease.LeaseId);
+                // The claim is NOT given back: the gate may have applied its write before it threw, and then the
+                // execution is already running. A seal whose gate failed unclearly stays claimed (the execution is
+                // failed after the in-flight window if it is still queued).
                 Logger.Warn(e,
                     "The admission gate for lease '{LeaseId}' of tenant '{BorrowerTenantId}' threw; the member " +
                     "reservation was undone",
@@ -306,6 +345,8 @@ internal class LeaseService : ILeaseService
             if (!admitted)
             {
                 _connectionManager.ReleaseLease(member.ConnectionId, lease.LeaseId);
+                // The execution did not start running (lost to another instance, cancelled): the seal was not used.
+                await TryReleaseClaimAsync(request.BorrowerTenantId, claimedId);
                 return Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.AdmissionGateDeclined,
                     $"The work item '{lease.ExecutionId}' of tenant '{lease.TenantId}' was no longer available " +
                     "when the member was reserved; it was taken by another controller instance or cancelled.");
@@ -1067,6 +1108,74 @@ internal class LeaseService : ILeaseService
     }
 
     /// <summary>
+    ///     AB#7476 — takes the single-use claim of a verified seal. Returns null when this call holds the claim, else the
+    ///     refusal. The refusal carries a reason code and no knowledge about the claim beyond it; the log names tenant,
+    ///     execution and pipeline, never the identity or any payload value.
+    /// </summary>
+    private async Task<LeaseGrantResult?> ConsumeSealAsync(string lenderTenantId, OctoObjectId adapterPoolRtId,
+        LeaseRequest request, OctoObjectId executionRtId, string claimId, string leaseId,
+        CancellationToken cancellationToken)
+    {
+        LeaseClaimResult claim;
+        try
+        {
+            claim = await _claimStore.TryClaimAsync(request.BorrowerTenantId, claimId, leaseId, executionRtId,
+                _sealMaxAge + ClaimRetentionMargin, cancellationToken);
+        }
+        catch (Exception e)
+        {
+            // Fail closed: without the claim record the seal cannot be proven unused. The item stays queued.
+            Logger.Warn(e,
+                "[{BorrowerTenantId}] The single-use claim of queued execution '{ExecutionId}' ({ExecutionRtId}) could " +
+                "not be recorded; no lease is granted and the execution stays queued",
+                request.BorrowerTenantId, request.ExecutionId, executionRtId);
+            return Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.AdmissionGateFailed,
+                "The lease could not be granted: the claim of the queued execution could not be recorded.");
+        }
+
+        if (claim.Outcome == LeaseClaimOutcome.Claimed)
+        {
+            return null;
+        }
+
+        if (claim.Age is { } age && age < ClaimInFlightWindow)
+        {
+            // Another controller instance is granting this very execution (the scheduler of each instance reads the
+            // same queue). Not a replay; the winner moves the execution out of the queue.
+            return Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.AdmissionGateDeclined,
+                $"The work item '{request.ExecutionId}' of tenant '{request.BorrowerTenantId}' is being granted by " +
+                "another controller instance.");
+        }
+
+        // A claim for this seal was recorded a while ago and the execution is queued again: either its state was reset
+        // after it ran, or the instance that recorded the claim died before it started the execution. In both cases it
+        // is not leased (a seal is leased at most once) and failed (terminal), so the queue does not retry it every
+        // round. The text names the fact, not who or when.
+        var message = $"The queued execution '{request.ExecutionId}' is not leased: claim already recorded.";
+        await FailExecutionWithoutProvenanceAsync(request, executionRtId, request.PipelineRtId, message);
+        return Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.QueuedProvenanceInvalid, message);
+    }
+
+    /// <summary>Gives a claim back after a gate that did not start the execution. Best effort, never throws.</summary>
+    private async Task TryReleaseClaimAsync(string tenantId, string? claimId)
+    {
+        if (claimId is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _claimStore.ReleaseAsync(tenantId, claimId);
+        }
+        catch (Exception e)
+        {
+            // The claim stays; the execution is failed instead of leased once the in-flight window has passed.
+            Logger.Warn(e, "[{TenantId}] A single-use claim could not be given back", tenantId);
+        }
+    }
+
+    /// <summary>
     ///     AB#7473 — the provenance gate. Applies to every request that names an execution or a pipeline: the
     ///     scheduler's (the queue entry travels on the request) and the hand-driven endpoint's (only an
     ///     <c>ExecutionId</c>: it must resolve to a <c>Queued</c> execution of the borrower whose provenance opens).
@@ -1124,6 +1233,15 @@ internal class LeaseService : ILeaseService
         var verdict = QueuedCaller.TryOpen(sealedCaller, request.BorrowerTenantId, executionRtId.Value, pipelineRtId,
             request.BorrowerAdapterRtId, inputData, _envelope, out var opened, out var reason);
 
+        string? expiredReason = null;
+        if (verdict == QueuedCaller.Provenance.Valid && !handDriven && opened is not null &&
+            QueuedCaller.IsExpired(opened, _sealMaxAge, DateTime.UtcNow))
+        {
+            // AB#7476: older than the accepted age; its claim record may be gone, so it must not be leased.
+            verdict = QueuedCaller.Provenance.Forged;
+            expiredReason = "the seal is older than the accepted age";
+        }
+
         switch (verdict)
         {
             case QueuedCaller.Provenance.Valid:
@@ -1145,7 +1263,7 @@ internal class LeaseService : ILeaseService
 
             default:
                 var message = $"The queued execution '{request.ExecutionId}' was not queued by the controller " +
-                              $"({reason}); it is not leased.";
+                              $"({expiredReason ?? reason}); it is not leased.";
                 await FailExecutionWithoutProvenanceAsync(request, executionRtId.Value, pipelineRtId, message);
                 return (Refuse(lenderTenantId, adapterPoolRtId, request, LeaseRefusalReason.QueuedProvenanceInvalid,
                     message), null);
@@ -1171,8 +1289,8 @@ internal class LeaseService : ILeaseService
                     message))
             {
                 await _eventService.StoreErrorEventAsync(request.BorrowerTenantId,
-                    $"Execution '{request.ExecutionId}' of pipeline '{pipelineRtId}' was failed: it was not " +
-                    "queued by the controller, so it is not run.");
+                    $"Execution '{request.ExecutionId}' of pipeline '{pipelineRtId}' was failed instead of leased: " +
+                    "it is not a valid queued execution of the controller (not queued by it, expired, or already leased).");
             }
         }
         catch (Exception e)
@@ -1193,6 +1311,39 @@ internal class LeaseService : ILeaseService
             interruptReason, DateTime.UtcNow - lease.GrantedAtUtc);
 
         return await InterruptAndEnqueueAsync(lease, interruptReason, reason, keepQueuePosition: false);
+    }
+
+    /// <summary>Fails closed: an unreachable store means "not marked", so nothing is re-sealed.</summary>
+    private async Task<bool> TryMarkRequeuedAsync(LeaseDto lease, string claimId, OctoObjectId executionRtId)
+    {
+        try
+        {
+            return await _claimStore.TryMarkRequeuedAsync(lease.TenantId, claimId, lease.LeaseId, executionRtId);
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e, "[{TenantId}] Could not mark the single-use claim of lease '{LeaseId}' as requeued",
+                lease.TenantId, lease.LeaseId);
+            return false;
+        }
+    }
+
+    /// <summary>
+    ///     AB#7476 — whether the lease is the one a single-use claim was taken for. Fails closed: a store that cannot be
+    ///     reached means "not bound", so nothing is re-sealed; the stuck-execution reaper then fails the item.
+    /// </summary>
+    private async Task<bool> IsLeaseBoundToClaimAsync(LeaseDto lease)
+    {
+        try
+        {
+            return await _claimStore.HasLeaseClaimAsync(lease.TenantId, lease.LeaseId);
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e, "[{TenantId}] Could not check whether lease '{LeaseId}' took a single-use claim",
+                lease.TenantId, lease.LeaseId);
+            return false;
+        }
     }
 
     /// <summary>
@@ -1216,6 +1367,20 @@ internal class LeaseService : ILeaseService
             return null;
         }
 
+        // 🔴 AB#7476 — lease-bound requeue. Only a lease that took a single-use claim may put its work item back into the
+        // queue under a NEW seal. A hand-driven lease (POST .../lease with an ExecutionId) takes no claim, so letting it
+        // requeue would launder the claim: reset a used execution to Queued, lease it by hand, let the lease expire,
+        // and the requeue would seal the same work again with a fresh identity. The proof is the controller's own claim
+        // record (it names the lease id the controller generated), not anything the member or the entity says.
+        if (!await IsLeaseBoundToClaimAsync(lease))
+        {
+            Logger.Warn(
+                "[{BorrowerTenantId}] Lease '{LeaseId}' took no single-use claim; its execution '{ExecutionId}' is not " +
+                "interrupted or re-queued",
+                lease.TenantId, lease.LeaseId, lease.ExecutionId);
+            return null;
+        }
+
         try
         {
             var interrupted = await _communicationRepository.TryInterruptLeasedExecutionAsync(lease.TenantId,
@@ -1223,6 +1388,28 @@ internal class LeaseService : ILeaseService
             if (interrupted is null)
             {
                 return null;
+            }
+
+            // 🔴 AB#7476 — bind the requeue to THIS execution's seal and make it happen once. The lease-bound check
+            // above only proves that the lease took SOME claim; a lease rebuilt from member-supplied ids could name
+            // another execution. So the seal about to be re-sealed is opened, and only the caller that can mark ITS
+            // claim record (naming this lease id and this execution) as requeued, atomically and only once, may re-seal
+            // and enqueue. Everything before this point only interrupted the attempt (terminal); a failed check leaves
+            // it interrupted and creates no retry (fail closed). A value that does not open at all cannot be re-sealed
+            // and yields a retry without provenance, which is refused at its own grant as before.
+            var opened = QueuedCaller.Open(interrupted.SealedCaller, lease.TenantId, interrupted.ExecutionRtId,
+                _envelope);
+            if (opened is not null)
+            {
+                if (string.IsNullOrEmpty(opened.ClaimId) || !await TryMarkRequeuedAsync(lease, opened.ClaimId,
+                        interrupted.ExecutionRtId))
+                {
+                    Logger.Warn(
+                        "[{BorrowerTenantId}] Execution '{ExecutionId}' of lease '{LeaseId}' is not re-queued: its " +
+                        "single-use claim is not bound to this lease and execution, or was already re-queued",
+                        lease.TenantId, lease.ExecutionId, lease.LeaseId);
+                    return null;
+                }
             }
 
             var retryExecutionId = Guid.NewGuid().ToString();

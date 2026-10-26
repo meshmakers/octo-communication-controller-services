@@ -179,6 +179,8 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         Services.AddSingleton(Substitute.For<ITenantLendingScopeResolver>());
         Services.AddSingleton(Substitute.For<ITenantDatabaseCredentialResolver>());
         Services.AddSingleton<ILeaseSchedulerWakeSignal, LeaseSchedulerWakeSignal>();
+        // AB#7476: the controller-owned single-use claim records (system database).
+        Services.AddSingleton<IExecutionLeaseClaimStore, ExecutionLeaseClaimStore>();
         Services.AddSingleton<ILeaseService, LeaseService>();
 
         // AB#4924 increment 7: the queue and its scheduler. Same rule as the line above — the host

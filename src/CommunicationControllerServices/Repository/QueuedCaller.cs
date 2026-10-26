@@ -42,6 +42,14 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 ///         (WARN without values) and the adapter-side guard refuses. REST and cron never pass a marker, so their
 ///         payload has none.
 ///     </para>
+///     <para>
+///         🔴 <b>AB#7476 — the envelope is single use.</b> A seal is leased at most once. Its single-use identity
+///         (<see cref="Payload.ClaimId" />, a random value) and the time it was sealed
+///         (<see cref="Payload.IssuedAtUtc" />) are part of the authenticated payload; the lease service records the
+///         identity in a controller-owned claim record (<see cref="IExecutionLeaseClaimStore" />) before the lease is
+///         handed out. A re-queue seals AGAIN with a new identity. A value without an identity (queued before the
+///         upgrade) is refused (fail closed, no migration: accepting it would be an unclaimable seal).
+///     </para>
 /// </remarks>
 internal static class QueuedCaller
 {
@@ -75,6 +83,18 @@ internal static class QueuedCaller
         ///     invocation, and in a value sealed before the marker existed.
         /// </summary>
         public ExecutePipelineMethodInvocation? MethodInvocation { get; set; }
+
+        /// <summary>
+        ///     The single-use identity of this seal (AB#7476): random, fresh for every seal (enqueue and re-queue).
+        ///     Absent in a value sealed before the identity existed, which is refused.
+        /// </summary>
+        public string? ClaimId { get; set; }
+
+        /// <summary>
+        ///     When the controller sealed the value (AB#7476). Kept across the token strip, renewed by a re-seal. A seal
+        ///     older than the accepted age is refused, which is what lets the claim records expire.
+        /// </summary>
+        public DateTime? IssuedAtUtc { get; set; }
     }
 
     private const int ProvenanceVersion = 1;
@@ -90,7 +110,9 @@ internal static class QueuedCaller
     internal sealed record Opened(
         ExecutePipelineCaller? Caller,
         string? AccessToken,
-        ExecutePipelineMethodInvocation? MethodInvocation = null);
+        ExecutePipelineMethodInvocation? MethodInvocation = null,
+        string? ClaimId = null,
+        DateTime? IssuedAtUtc = null);
 
     /// <summary>
     ///     Seals the provenance of the execution (and the invoker, when there is one) onto the entity. Always writes,
@@ -99,9 +121,11 @@ internal static class QueuedCaller
     /// </summary>
     public static bool Apply(RtPipelineExecution execution, string tenantId, OctoObjectId pipelineRtId,
         OctoObjectId adapterRtId, ExecutePipelineCaller? caller, string? accessToken, IExecutionEnvelope envelope,
-        ExecutePipelineMethodInvocation? methodInvocation = null)
+        ExecutePipelineMethodInvocation? methodInvocation = null, DateTime? nowUtc = null)
     {
         var payload = ToPayload(caller, accessToken);
+        payload.ClaimId = NewClaimId();
+        payload.IssuedAtUtc = nowUtc ?? DateTime.UtcNow;
         payload.MethodInvocation = methodInvocation;
         payload.Provenance = ProvenanceVersion;
         payload.PipelineRtId = pipelineRtId.ToString();
@@ -175,6 +199,13 @@ internal static class QueuedCaller
             return Provenance.Forged;
         }
 
+        // AB#7476: a seal without a single-use identity cannot be claimed, so it is never leased (no migration).
+        if (string.IsNullOrEmpty(payload.ClaimId) || payload.IssuedAtUtc is null)
+        {
+            reason = "no single-use identity (queued before the upgrade)";
+            return Provenance.Forged;
+        }
+
         // The subject is the one field without which a caller is not a caller.
         var caller = string.IsNullOrEmpty(payload.SubjectId)
             ? null
@@ -189,7 +220,7 @@ internal static class QueuedCaller
             };
 
         opened = new Opened(caller, string.IsNullOrEmpty(payload.AccessToken) ? null : payload.AccessToken,
-            ConsistentMethodInvocation(payload, tenantId, executionRtId));
+            ConsistentMethodInvocation(payload, tenantId, executionRtId), payload.ClaimId, payload.IssuedAtUtc);
         reason = string.Empty;
         return Provenance.Valid;
     }
@@ -218,8 +249,18 @@ internal static class QueuedCaller
                 Roles = payload.Roles.ToArray(),
                 TrustLevel = payload.TrustLevel
             }, string.IsNullOrEmpty(payload.AccessToken) ? null : payload.AccessToken,
-            ConsistentMethodInvocation(payload, tenantId, executionRtId));
+            ConsistentMethodInvocation(payload, tenantId, executionRtId), payload.ClaimId, payload.IssuedAtUtc);
     }
+
+    /// <summary>
+    ///     Whether the seal is older than <paramref name="maxAge" /> (AB#7476). A seal older than that is refused at
+    ///     lease grant, which is the invariant that allows the claim records to be deleted after
+    ///     <paramref name="maxAge" /> plus a margin.
+    /// </summary>
+    public static bool IsExpired(Opened opened, TimeSpan maxAge, DateTime nowUtc) =>
+        opened.IssuedAtUtc is not { } issuedAt || nowUtc - issuedAt > maxAge;
+
+    private static string NewClaimId() => Guid.NewGuid().ToString("N");
 
     /// <summary>
     ///     AB#7461 — the marker of an opened payload, or null. A marker is only believed while it names the pipeline the
@@ -258,7 +299,7 @@ internal static class QueuedCaller
     ///     OLD execution; the ciphertext is never copied.
     /// </summary>
     public static string? Reseal(string? sealedCaller, string tenantId, OctoObjectId fromExecutionRtId,
-        OctoObjectId toExecutionRtId, IExecutionEnvelope envelope)
+        OctoObjectId toExecutionRtId, IExecutionEnvelope envelope, DateTime? nowUtc = null)
     {
         if (!envelope.TryOpen<Payload>(ExecutionEnvelopePurposes.QueuedCaller, sealedCaller, tenantId,
                 fromExecutionRtId, out var payload, out var rejection) || payload is null)
@@ -280,6 +321,11 @@ internal static class QueuedCaller
         // AB#7461: the marker is carried (same work item, same invocation) but sealed again for the retry's RtId;
         // an inconsistent one is dropped here already.
         payload.MethodInvocation = ConsistentMethodInvocation(payload, tenantId, fromExecutionRtId);
+
+        // AB#7476: the retry is a new work item with a NEW single-use identity; the old one was (or will be) claimed
+        // by the attempt that was interrupted and must not travel on.
+        payload.ClaimId = NewClaimId();
+        payload.IssuedAtUtc = nowUtc ?? DateTime.UtcNow;
         return envelope.Seal(ExecutionEnvelopePurposes.QueuedCaller, payload, tenantId, toExecutionRtId);
     }
 

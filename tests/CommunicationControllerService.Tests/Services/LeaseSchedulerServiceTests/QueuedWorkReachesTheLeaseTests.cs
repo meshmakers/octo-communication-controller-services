@@ -81,6 +81,27 @@ internal class QueuedWorkReachesTheLeaseTests : LeaseSchedulerServiceTestsBase
     }
 
     /// <summary>
+    ///     AB#7476 — an item another controller instance is granting right now (it holds the single-use claim) is
+    ///     skipped for this round; it must not block the tenant's next item.
+    /// </summary>
+    [Test]
+    public async Task AnItemGrantedByAnotherInstance_IsSkipped_AndTheTenantsNextItemIsServed()
+    {
+        ArrangeMembers(2);
+        InFlightExecutions.Add("exec-elsewhere");
+        ArrangeQueue(TenantA,
+            Entry("exec-elsewhere", minutesAgo: 9),
+            Entry("exec-next", minutesAgo: 8));
+
+        var granted = await Scheduler.RunSchedulingRoundAsync();
+
+        using var _ = Assert.Multiple();
+        await Assert.That(granted).IsEqualTo(1);
+        await Assert.That(Claimed).Count().IsEqualTo(1);
+        await Assert.That(Claimed[0].ExecutionId).IsEqualTo("exec-next");
+    }
+
+    /// <summary>
     ///     A queued item with no input carries none — an empty string would be a different pipeline
     ///     input than "no input at all", and a node that branches on presence would see the wrong one.
     /// </summary>

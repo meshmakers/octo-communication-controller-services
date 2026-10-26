@@ -355,6 +355,16 @@ public class CommunicationControllerOptions
     public int LeaseMemberReconnectGraceSeconds { get; set; } = 90;
 
     /// <summary>
+    /// AB#7476 — the maximum age (DAYS) of the seal of a queued leased execution. A seal is leased at most
+    /// once (single-use claim record in the system database, <c>execution_lease_claims</c>); the claim records
+    /// are deleted by a TTL index after this age plus one day. A seal older than this is refused at lease grant
+    /// (the execution is failed), because its claim record may already be gone — that is what makes the retention
+    /// of the claim records safe. A queued item that waits longer than this is failed instead of leased; the
+    /// retry of an interrupted run is sealed anew and starts a new age. Minimum 1.
+    /// </summary>
+    public int QueuedSealMaxAgeDays { get; set; } = 30;
+
+    /// <summary>
     /// Maximum queue entries read per borrowing adapter per scheduling round. A bound, not a
     /// policy: a queue deeper than this is already saturated and the scale-up signal and the queue
     /// surfaces are both reporting it, so reading further would only make the round slower without

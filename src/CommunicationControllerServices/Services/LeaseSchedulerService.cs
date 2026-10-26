@@ -853,6 +853,14 @@ internal class LeaseSchedulerService : ILeaseSchedulerService
             return (null, true);
         }
 
+        if (result.Reason == LeaseRefusalReason.AdmissionGateDeclined)
+        {
+            // AB#7476: another controller instance is granting this very item (it holds the single-use claim, or won the
+            // queue latch). It stays queued in the database, but it must not hold up the tenant's next item in this
+            // round: skipped, not blocked.
+            return (null, true);
+        }
+
         // Announced on the TRANSITION — the first refusal of this execution, or a refusal for a
         // different reason than last time — and left at DEBUG for as long as nothing changes. Both
         // halves matter: at five seconds a round the repeat is the flood the exhaustion line above was
