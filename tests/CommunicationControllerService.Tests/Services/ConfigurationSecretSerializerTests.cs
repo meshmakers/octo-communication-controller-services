@@ -71,6 +71,42 @@ internal class ConfigurationSecretSerializerTests
     }
 
     /// <summary>
+    /// AB#7506 — an <c>MqttConfiguration</c> ships like every other connection configuration: the
+    /// broker password arrives revealed, the rest of the tuple is untouched.
+    /// </summary>
+    [Test]
+    public async Task MqttConfiguration_ShipsBrokerPasswordRevealed()
+    {
+        var configuration = new RtConfiguration
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            CkTypeId = SystemCommunicationCkIds.RtCkMqttConfigurationTypeId,
+            RtWellKnownName = "mqtt"
+        };
+        configuration.SetAttributeValue(nameof(RtMqttConfiguration.Host), AttributeValueTypesDto.String,
+            "broker.example.com");
+        configuration.SetAttributeValue(nameof(RtMqttConfiguration.Port), AttributeValueTypesDto.Int, 8883);
+        configuration.SetAttributeValue(nameof(RtMqttConfiguration.Username), AttributeValueTypesDto.String,
+            "edge");
+        configuration.SetAttributeValue(nameof(RtMqttConfiguration.IsSslEnabled), AttributeValueTypesDto.Boolean,
+            true);
+        configuration.SetAttributeRawValue(nameof(RtMqttConfiguration.Password),
+            _secrets.Protector.Protect(Password));
+
+        var json = configuration.SerializeWithRevealedSecrets(_secrets.EncryptionService, TenantId);
+
+        var attributes = Parse(json)["attributes"]!.AsObject();
+        using var _ = Assert.Multiple();
+        await Assert.That(attributes[nameof(RtMqttConfiguration.Password)]!.GetValue<string>()).IsEqualTo(Password);
+        await Assert.That(attributes[nameof(RtMqttConfiguration.Host)]!.GetValue<string>())
+            .IsEqualTo("broker.example.com");
+        await Assert.That(attributes[nameof(RtMqttConfiguration.Port)]!.GetValue<int>()).IsEqualTo(8883);
+        await Assert.That(attributes[nameof(RtMqttConfiguration.IsSslEnabled)]!.GetValue<bool>()).IsTrue();
+        await Assert.That(json.Contains("isSet", StringComparison.Ordinal)).IsFalse();
+        await Assert.That(json.Contains("enc:v2", StringComparison.Ordinal)).IsFalse();
+    }
+
+    /// <summary>
     /// The shape an adapter node deserialises a configuration into (cf. the mesh adapter's
     /// <c>FromEmailNode.EmailServerConfiguration</c>): plain top-level properties.
     /// </summary>
