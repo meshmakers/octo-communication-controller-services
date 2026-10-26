@@ -1,0 +1,18 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+  - typeId: MqttConfiguration
+    derivedFromCkTypeId: ${System}/Configuration
+    description: "Configuration for connecting to an MQTT broker"
+    isFinal: true
+    attributes:
+      - id: ${this}/Host
+        name: Host
+      - id: ${this}/Port
+        name: Port
+      - id: ${this}/Username
+        name: Username
+      - id: ${this}/Password
+        name: Password
+        isOptional: true # AB#5528: a Secret is never seeded; "not set" is a valid state
+      - id: ${this}/IsSslEnabled
+        name: IsSslEnabled

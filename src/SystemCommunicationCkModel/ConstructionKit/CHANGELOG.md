@@ -1,5 +1,20 @@
 # Changelog
 
+## 4.13.0 - 2026-10-26
+
+_Required bump level: minor._
+
+### Added
+
+- Type 'MqttConfiguration' (final, derived from `${System}/Configuration`) _(minor — additive new type)_
+
+Connection to an MQTT broker (AB#7506): `Host`, `Port`, `Username`, `Password` (Secret, optional - a Secret is never
+seeded) and `IsSslEnabled`, reusing the shared attribute definitions, exactly like `LoxoneConfiguration`. A pipeline
+attaches it via `System.Communication/Uses`, and the controller ships it with the password revealed to the adapter, so
+the broker password no longer sits in the pipeline YAML. Compatibility: additive only, no existing type or attribute
+changes; adapters and blueprints that do not use the type are unaffected. After the rollout run ClearCache per tenant;
+externally built adapters are re-released if their pinned range moves.
+
 ## 4.12.0 - 2026-10-25
 
 _Required bump level: minor._

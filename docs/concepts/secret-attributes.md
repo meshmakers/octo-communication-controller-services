@@ -159,7 +159,7 @@ on local tenants only) — the SECRET switch ships on the 4.x line as the next f
 
 | Attribute definition | Used by | Change |
 |---|---|---|
-| `Password` | Sap, Sftp, EMailSender, EMailReceiver, Loxone, HelmRepository, FinApi | `valueType: Secret`, `ownership: Secret` |
+| `Password` | Sap, Sftp, EMailSender, EMailReceiver, Loxone, Mqtt, HelmRepository, FinApi | `valueType: Secret`, `ownership: Secret` |
 | `PrivateKey`, `PrivateKeyPassphrase` | Sftp | same |
 | `ClientSecret` | FinApi, MicrosoftGraph, ServiceAccount | same |
 | `ApiKey` | Ai, WeClapp | same |
