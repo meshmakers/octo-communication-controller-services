@@ -60,7 +60,7 @@ public class CommunicationController : ControllerBase
     /// </summary>
     /// <returns></returns>
     [HttpPost("enable")]
-    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [Authorize(Constants.TenantCommunicationCapabilityTogglePolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Enable()
@@ -91,7 +91,7 @@ public class CommunicationController : ControllerBase
     /// names them and the commands that undeploy them. Every other configuration error stays a 400.
     /// </remarks>
     [HttpPost("disable")]
-    [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
+    [Authorize(Constants.TenantCommunicationCapabilityTogglePolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(OperationFailedErrorDto), StatusCodes.Status409Conflict)]

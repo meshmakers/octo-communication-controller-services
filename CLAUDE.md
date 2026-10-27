@@ -5282,3 +5282,12 @@ giving up). `DefaultConfigurationCreatorService` takes the DI instance (`tenantS
 `octo.tenant_setup.failed` / `octo.tenant_setup.pending_seconds` (tag `octo.tenant.id`) feed the Dash0 alert. Details,
 options and tests: octo-common-services `CLAUDE.md`, section "Tenant Setup - Failure Handling". Test here:
 `tests/CommunicationControllerService.Tests/Services/DefaultConfigurationCreatorServiceTests/TenantSetupRetryWiringTests.cs`. Tests use one isolated `TenantSetupRetryTracker` per test and share it across the creator instances of that test when exercising a retry.
+
+## Enable and disable need TenantManagement (AB#7319)
+
+`POST {tenantId}/v1/communication/enable|disable` carry `Constants.TenantCommunicationCapabilityTogglePolicy`
+(`CommunicationCapabilityToggleAuthorization`): scope `octo_api` plus the tenant role `TenantManagement`, defined by the
+central `AddTenantRolePolicy` of octo-common-services (`AddOctoTenantRoleAuthorization()` in `Program.cs` registers the
+handler). A token without the role gets 403 with a `{"message"}` body naming the role (AB#5227 shape). All other endpoints keep
+their scope-only policies. Callers that need the role: octo-cli `EnableCommunication` / `DisableCommunication`, the MCP tools,
+Studio's Tenant Features panel (tenant administrators). Test: `CommunicationControllerToggleAuthorizationTests`.
