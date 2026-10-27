@@ -26,6 +26,7 @@ using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Meshmakers.Octo.Services.Infrastructure;
+using Meshmakers.Octo.Services.Infrastructure.Authorization;
 using Meshmakers.Octo.Services.Infrastructure.Configuration;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
@@ -376,6 +377,8 @@ try
 
     builder.Services.AddAuthorization(options =>
     {
+        options.AddCapabilityTogglePolicy();
+
         options.AddPolicy(Constants.SystemCommunicationApiPolicy, authorizationPolicyBuilder =>
         {
             authorizationPolicyBuilder.RequireClaim(InfrastructureCommon.ClaimScope,
@@ -396,6 +399,8 @@ try
                     CommonConstants.OctoApiReadOnly);
             });
     });
+    // AB#7319: handler and 403 reason writer of the central tenant role policy.
+    builder.Services.AddOctoTenantRoleAuthorization();
 
     builder.Services.AddOctoApiVersioningAndDocumentation(options =>
     {
@@ -413,6 +418,7 @@ try
 
         options.PolicyScopeMapping = new Dictionary<string, IEnumerable<string>>
         {
+            { Constants.TenantCommunicationCapabilityTogglePolicy, [CommonConstants.OctoApiFullAccess] },
             { Constants.SystemCommunicationApiPolicy, [CommonConstants.OctoApiFullAccess] },
             {
                 Constants.TenantCommunicationApiReadWritePolicy,

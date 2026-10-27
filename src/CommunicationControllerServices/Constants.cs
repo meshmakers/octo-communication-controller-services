@@ -70,6 +70,12 @@ internal static class Constants
     /// </summary>
     public const string TenantCommunicationApiReadWritePolicy = "SystemCommunicationApiReadWritePolicy";
 
+    /// <summary>
+    ///     Policy for enabling and disabling the communication capability of a tenant: full-access scope plus the tenant role
+    ///     <c>TenantManagement</c> (AB#7319)
+    /// </summary>
+    public const string TenantCommunicationCapabilityTogglePolicy = "TenantCommunicationCapabilityTogglePolicy";
+
     public static string? GetTenantId(this HttpContext httpContext)
     {
         return (string?)httpContext.GetRouteValue(TenantId);
