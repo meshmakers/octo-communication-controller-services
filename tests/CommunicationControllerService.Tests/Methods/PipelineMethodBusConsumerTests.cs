@@ -74,6 +74,21 @@ internal class PipelineMethodBusConsumerTests
     }
 
     [Test]
+    public async Task AFarFutureDeadlineWithABrokerDeliveryIsExecutedOnlyOnce()
+    {
+        // the production handler always passes the bus delivery info
+        var request = Request() with { DeadlineUtc = DateTime.MaxValue };
+        var delivery = new CommandDeliveryInfo(false, 0, 0, null);
+
+        var first = await _consumer.HandleAsync(request, delivery);
+        var second = await _consumer.HandleAsync(request, delivery);
+
+        await Assert.That(first.Success).IsTrue();
+        await Assert.That(second.Error!.Code).IsEqualTo(CkMethodErrorCodes.MethodOutcomeUnknown);
+        await _invoker.Received(1).InvokeAsync(Arg.Any<CkMethodRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
     public async Task AnInvokerThatThrowsNeverReachesTheBus()
     {
         // a thrown consumer makes the bus retry, i.e. start the pipeline again
