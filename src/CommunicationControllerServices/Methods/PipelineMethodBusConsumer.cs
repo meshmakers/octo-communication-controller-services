@@ -1,6 +1,6 @@
-using System.Collections.Concurrent;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
+using Meshmakers.Octo.Services.Methods.Handlers;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Methods;
 
@@ -8,8 +8,9 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Methods;
 ///     The bus transport of the pipeline method handler: consumes <see cref="CkMethodRequest" /> from the method
 ///     queue, guards against a possible duplicate delivery and answers with the response of
 ///     <see cref="IPipelineMethodInvoker" />. It never throws: a thrown consumer would make the bus retry and start
-///     the pipeline repeatedly. Same duplicate rules as the handler SDK (a redelivered request is not executed, the
-///     caller gets <c>METHOD_OUTCOME_UNKNOWN</c>; no method is known to be idempotent here).
+///     the pipeline repeatedly. The duplicate rules come from the shared <see cref="CkMethodSeenInvocations" /> helper of
+///     the handler SDK (a redelivered request is not executed, the caller gets <c>METHOD_OUTCOME_UNKNOWN</c>; no
+///     method is known to be idempotent here).
 /// </summary>
 internal sealed class PipelineMethodBusConsumer(
     IPipelineMethodInvoker invoker,
@@ -17,10 +18,8 @@ internal sealed class PipelineMethodBusConsumer(
     TimeProvider timeProvider,
     ILogger<PipelineMethodBusConsumer> logger)
 {
-    private static readonly TimeSpan SeenRetentionAfterDeadline = TimeSpan.FromMinutes(5);
-    private static readonly TimeSpan MaxSeenRetention = TimeSpan.FromHours(1);
-    private readonly ConcurrentDictionary<Guid, DateTime> _seenInvocations = new();
-    private long _seenAdds;
+    // One instance per host: this consumer is a singleton.
+    private readonly CkMethodSeenInvocations _seenInvocations = new(timeProvider);
 
     internal int SeenInvocationCount => _seenInvocations.Count;
 
@@ -45,18 +44,18 @@ internal sealed class PipelineMethodBusConsumer(
 
     internal async Task<CkMethodResponse> HandleAsync(CkMethodRequest request, CommandDeliveryInfo? delivery = null)
     {
-        var firstSight = TryMarkSeen(request);
-        if (delivery is { IsPossibleDuplicate: true })
+        var decision = _seenInvocations.Decide(request, delivery);
+        if (decision == CkMethodDeliveryDecision.PossibleDuplicate)
         {
             logger.LogWarning(
                 "CK method {MethodId} invocation {InvocationId} tenant {TenantId} NOT executed: possible duplicate delivery " +
                 "(redelivered {Redelivered}, retry attempt {RetryAttempt}, redelivery count {RedeliveryCount}, message {MessageId})",
-                request.MethodId, request.InvocationId, request.TenantId, delivery.Redelivered, delivery.RetryAttempt,
-                delivery.RedeliveryCount, delivery.MessageId);
+                request.MethodId, request.InvocationId, request.TenantId, delivery?.Redelivered, delivery?.RetryAttempt,
+                delivery?.RedeliveryCount, delivery?.MessageId);
             return OutcomeUnknown(request);
         }
 
-        if (!firstSight)
+        if (decision == CkMethodDeliveryDecision.AlreadySeen)
         {
             logger.LogWarning(
                 "CK method {MethodId} invocation {InvocationId} tenant {TenantId} NOT executed: invocation id already seen",
@@ -82,29 +81,4 @@ internal sealed class PipelineMethodBusConsumer(
         CkMethodResponse.Failed(request.InvocationId, instance.InstanceId,
             CkMethodError.Create(CkMethodErrorCodes.MethodOutcomeUnknown,
                 (CkMethodErrorParameters.MethodId, request.MethodId)));
-
-    private bool TryMarkSeen(CkMethodRequest request)
-    {
-        var now = timeProvider.GetUtcNow().UtcDateTime;
-        var keepUntil = request.DeadlineUtc + SeenRetentionAfterDeadline;
-        if (keepUntil > now + MaxSeenRetention)
-        {
-            keepUntil = now + MaxSeenRetention;
-        }
-
-        if (!_seenInvocations.TryAdd(request.InvocationId, keepUntil))
-        {
-            return false;
-        }
-
-        if (Interlocked.Increment(ref _seenAdds) % 256 == 0)
-        {
-            foreach (var entry in _seenInvocations.Where(e => e.Value < now))
-            {
-                _seenInvocations.TryRemove(entry.Key, out _);
-            }
-        }
-
-        return true;
-    }
 }
