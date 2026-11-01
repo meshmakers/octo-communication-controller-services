@@ -2638,7 +2638,7 @@ internal class CommunicationRepository : ICommunicationRepository
                 ErrorMessage = errorMessage,
                 OutputData = outputData,
                 // AB#8037: structured failure kind (OutcomeUnknown = a write was not acknowledged)
-                FailureKind = failureKind
+                FailureKind = KeepFailureKind(status, failureKind, execution)
             };
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtPipelineExecution>>
@@ -2663,6 +2663,23 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             throw CommunicationRepositoryException.CommonFailedUpdatePipelineExecution(tenantId, executionId, e);
         }
+    }
+
+    /// <summary>
+    ///     AB#8037: the failure kind to write. A later Failed report without a kind (e.g. from an adapter that predates
+    ///     the field) must not erase a stored one, because the pipeline method maps <c>OutcomeUnknown</c> to
+    ///     <c>METHOD_OUTCOME_UNKNOWN</c>. The stored kind is kept only while the execution stays Failed; any other status
+    ///     carries none.
+    /// </summary>
+    internal static RtPipelineExecutionFailureKindEnum? KeepFailureKind(RtPipelineExecutionStatusEnum status,
+        RtPipelineExecutionFailureKindEnum? reported, RtPipelineExecution stored)
+    {
+        if (status != RtPipelineExecutionStatusEnum.Failed)
+        {
+            return null;
+        }
+
+        return reported ?? (stored.Status == RtPipelineExecutionStatusEnum.Failed ? stored.FailureKind : null);
     }
 
     public async Task<int> BulkUpdatePipelineExecutionsAsync(string tenantId,
@@ -2706,7 +2723,7 @@ internal class CommunicationRepository : ICommunicationRepository
                     DurationMs = update.DurationMs,
                     ErrorMessage = update.ErrorMessage,
                     OutputData = update.OutputData,
-                    FailureKind = update.FailureKind
+                    FailureKind = KeepFailureKind(update.Status, update.FailureKind, execution)
                 };
 
                 entityUpdateInfoList.Add(

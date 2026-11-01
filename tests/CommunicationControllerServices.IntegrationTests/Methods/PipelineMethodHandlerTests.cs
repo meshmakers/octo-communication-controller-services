@@ -188,7 +188,7 @@ public class PipelineMethodHandlerTests(CommunicationControllerFixture fixture)
     ///     means the pipeline never ends.
     /// </summary>
     private void ArrangeAdapter(Scenario scenario, RtPipelineExecutionStatusEnum? finalStatus, string? output,
-        string? error = null)
+        string? error = null, RtPipelineExecutionFailureKindEnum? failureKind = null)
     {
         var client = fixture.GetService<IRoutedCommandClient<ExecutePipelineRequest>>();
         var repository = fixture.GetService<ICommunicationRepository>();
@@ -218,7 +218,7 @@ public class PipelineMethodHandlerTests(CommunicationControllerFixture fixture)
                     {
                         await Task.Delay(150);
                         await repository.UpdatePipelineExecutionAsync(fixture.TestTenantId, executionId.ToString(),
-                            status, DateTime.UtcNow, 150, error, output);
+                            status, DateTime.UtcNow, 150, error, output, failureKind);
                     }
                 });
                 return Task.FromResult(new ExecutePipelineResponse(true, null, executionId, DateTime.UtcNow));
@@ -251,6 +251,73 @@ public class PipelineMethodHandlerTests(CommunicationControllerFixture fixture)
             received.CallerAccessToken.Should().Be(request.CallerAccessToken);
             received.IsDryRun.Should().BeFalse();
             received.PipelineInput.Should().Contain("\"version\":\"1.2.3\"").And.Contain(request.TargetRtId!);
+        }
+        finally
+        {
+            await CleanupAsync(scenario);
+        }
+    }
+
+    /// <summary>
+    ///     AB#8037, rule R3, end to end through MongoDB: the adapter reports a failed execution whose write was not
+    ///     acknowledged; the stored PipelineExecution.FailureKind makes the method answer METHOD_OUTCOME_UNKNOWN.
+    /// </summary>
+    [Fact]
+    public async Task APipelineThatFailedOnAnUnacknowledgedWrite_IsOutcomeUnknown()
+    {
+        var scenario = await CreateScenarioAsync();
+        try
+        {
+            ArrangeAdapter(scenario, RtPipelineExecutionStatusEnum.Failed, null,
+                "Node ApplyChanges failed: waiting for replication timed out",
+                RtPipelineExecutionFailureKindEnum.OutcomeUnknown);
+            var invoker = CreateInvoker(scenario.Method, out var log);
+            var request = Request(scenario.MethodId, fixture.TestTenantId);
+
+            var response = await invoker.InvokeAsync(request, TestContext.Current.CancellationToken);
+
+            response.Success.Should().BeFalse();
+            response.Error!.Code.Should().Be(CkMethodErrorCodes.MethodOutcomeUnknown, "the log says: {0}", log.All);
+            response.Error.Parameters.Should().ContainKey("correlationId");
+        }
+        finally
+        {
+            await CleanupAsync(scenario);
+        }
+    }
+
+    /// <summary>
+    ///     AB#8037 review: a later Failed report without a kind keeps the stored OutcomeUnknown; a Completed report clears it.
+    /// </summary>
+    [Fact]
+    public async Task AFailedReportWithoutAKind_KeepsAStoredOutcomeUnknown()
+    {
+        var scenario = await CreateScenarioAsync();
+        try
+        {
+            var repository = fixture.GetService<ICommunicationRepository>();
+            var executionId = Guid.NewGuid().ToString();
+            await repository.CreatePipelineExecutionAsync(fixture.TestTenantId,
+                new RtPipelineExecution
+                {
+                    RtId = OctoObjectId.GenerateNewId(),
+                    CkTypeId = SystemCommunicationCkIds.RtCkPipelineExecutionTypeId,
+                    ExecutionId = executionId,
+                    Status = RtPipelineExecutionStatusEnum.Running,
+                    TriggerType = RtPipelineTriggerTypeEnum.Manual,
+                    StartedAt = DateTime.UtcNow
+                }, scenario.PipelineEntityId, scenario.AdapterEntityId);
+
+            await repository.UpdatePipelineExecutionAsync(fixture.TestTenantId, executionId,
+                RtPipelineExecutionStatusEnum.Failed, DateTime.UtcNow, 10, "first", null,
+                RtPipelineExecutionFailureKindEnum.OutcomeUnknown);
+            (await repository.GetPipelineExecutionAsync(fixture.TestTenantId, executionId))!.FailureKind
+                .Should().Be(RtPipelineExecutionFailureKindEnum.OutcomeUnknown);
+
+            await repository.UpdatePipelineExecutionAsync(fixture.TestTenantId, executionId,
+                RtPipelineExecutionStatusEnum.Failed, DateTime.UtcNow, 12, "second, from an older reporter");
+            (await repository.GetPipelineExecutionAsync(fixture.TestTenantId, executionId))!.FailureKind
+                .Should().Be(RtPipelineExecutionFailureKindEnum.OutcomeUnknown);
         }
         finally
         {
