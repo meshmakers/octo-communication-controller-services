@@ -133,14 +133,20 @@ internal class PipelineExecutionService(
                 throw PipelineExecutionServiceException.TenantNotEnabled(tenantId);
             }
 
-            var updates = dtos.Select(dto => new PipelineExecutionUpdate
+            var updates = dtos.Select(dto =>
             {
-                ExecutionId = dto.ExecutionId,
-                Status = ConvertExecutionStatus(dto.Status),
-                CompletedAt = dto.CompletedAt,
-                DurationMs = dto.DurationMs,
-                ErrorMessage = dto.ErrorMessage,
-                OutputData = dto.OutputData
+                var status = ConvertExecutionStatus(dto.Status);
+                return new PipelineExecutionUpdate
+                {
+                    ExecutionId = dto.ExecutionId,
+                    Status = status,
+                    CompletedAt = dto.CompletedAt,
+                    DurationMs = dto.DurationMs,
+                    ErrorMessage = dto.ErrorMessage,
+                    OutputData = dto.OutputData,
+                    // AB#8037: what a failed execution says about its writes
+                    FailureKind = PipelineExecutionFailureKindMapping.ToCk(status, dto.FailureKind)
+                };
             }).ToList();
 
             var updatedCount = await communicationRepository.BulkUpdatePipelineExecutionsAsync(tenantId, updates);
@@ -213,7 +219,8 @@ internal class PipelineExecutionService(
 
             // Update the execution record
             await communicationRepository.UpdatePipelineExecutionAsync(tenantId, dto.ExecutionId,
-                ckStatus, dto.CompletedAt, dto.DurationMs, dto.ErrorMessage, dto.OutputData);
+                ckStatus, dto.CompletedAt, dto.DurationMs, dto.ErrorMessage, dto.OutputData,
+                PipelineExecutionFailureKindMapping.ToCk(ckStatus, dto.FailureKind));
 
             // Get the pipeline from the execution's association to clear current execution
             // Note: The CkTypeId should never be null for a valid execution
@@ -348,7 +355,8 @@ internal class PipelineExecutionService(
             var ckStatus = ConvertExecutionStatus(dto.Status);
 
             await communicationRepository.UpdatePipelineExecutionAsync(tenantId, dto.ExecutionId,
-                ckStatus, dto.CompletedAt, dto.DurationMs, dto.ErrorMessage, dto.OutputData);
+                ckStatus, dto.CompletedAt, dto.DurationMs, dto.ErrorMessage, dto.OutputData,
+                PipelineExecutionFailureKindMapping.ToCk(ckStatus, dto.FailureKind));
 
             await eventService.StoreInformationEventAsync(tenantId,
                 $"Interrupted execution '{dto.ExecutionId}' final result reported: {ckStatus}.");

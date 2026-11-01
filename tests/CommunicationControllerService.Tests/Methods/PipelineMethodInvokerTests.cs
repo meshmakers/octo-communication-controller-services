@@ -57,7 +57,7 @@ internal class PipelineMethodInvokerTests
 
     /// <summary>The adapter reports the execution: first nothing (not yet written), then Running, then the end.</summary>
     private void ArrangeExecution(RtPipelineExecutionStatusEnum finalStatus, string? output, string? error = null,
-        int runningPolls = 2)
+        int runningPolls = 2, RtPipelineExecutionFailureKindEnum? failureKind = null)
     {
         var polls = 0;
         _repository.GetPipelineExecutionAsync(TenantId, _executionId.ToString()).Returns(_ =>
@@ -74,6 +74,7 @@ internal class PipelineMethodInvokerTests
             {
                 execution.OutputData = output;
                 execution.ErrorMessage = error;
+                execution.FailureKind = failureKind;
             }
 
             return Task.FromResult<RtPipelineExecution?>(execution);
@@ -194,6 +195,40 @@ internal class PipelineMethodInvokerTests
         await Assert.That(response.Error.Parameters.Values.Any(v => v.Contains("duplicate key"))).IsFalse();
         await Assert.That(_logger.All).Contains("duplicate key 'abc'");
         await Assert.That(_logger.All).Contains(request.InvocationId.ToString());
+    }
+
+    /// <summary>
+    ///     AB#8037, rule R3: the adapter reported that the pipeline failed on a write the database did not acknowledge; the
+    ///     caller gets METHOD_OUTCOME_UNKNOWN with the correlation id, and the error text stays in the log.
+    /// </summary>
+    [Test]
+    public async Task APipelineThatFailedOnAnUnacknowledgedWriteIsOutcomeUnknownWithACorrelationId()
+    {
+        ArrangeExecution(RtPipelineExecutionStatusEnum.Failed, null,
+            "Node ApplyChanges failed: waiting for replication timed out",
+            failureKind: RtPipelineExecutionFailureKindEnum.OutcomeUnknown);
+        var request = Request();
+
+        var response = await _invoker.InvokeAsync(request);
+
+        await Assert.That(response.Error!.Code).IsEqualTo(CkMethodErrorCodes.MethodOutcomeUnknown);
+        await Assert.That(response.Error.Parameters["correlationId"]).IsEqualTo(request.InvocationId.ToString());
+        await Assert.That(response.Error.Parameters.Values.Any(v => v.Contains("replication"))).IsFalse();
+        await Assert.That(_logger.All).Contains("waiting for replication timed out");
+    }
+
+    /// <summary>
+    ///     AB#8037: no free-text markers - the same error text without the structured kind stays METHOD_HANDLER_FAILED.
+    /// </summary>
+    [Test]
+    public async Task AWriteConcernErrorTextWithoutTheStructuredKindStaysHandlerFailed()
+    {
+        ArrangeExecution(RtPipelineExecutionStatusEnum.Failed, null,
+            "Node ApplyChanges failed: waiting for replication timed out");
+
+        var response = await _invoker.InvokeAsync(Request());
+
+        await Assert.That(response.Error!.Code).IsEqualTo(CkMethodErrorCodes.MethodHandlerFailed);
     }
 
     [Test]

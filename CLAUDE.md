@@ -146,9 +146,25 @@ member in `LeaseDto.MethodInvocation` (see "Method-invocation marker on the leas
 | empty, method without result | Completed | success without result |
 | `{"error": {"code": "C", "parameters": {...}}}`, C declared by the method (or `METHOD_VALIDATION_FAILED`, `METHOD_TARGET_NOT_FOUND`, `METHOD_FORBIDDEN`) | Completed | error C with the parameters (values: string, number, boolean) |
 | anything else (no JSON, no `value` for a method with result, wrong type, undeclared code) | Completed | `METHOD_HANDLER_FAILED` with `correlationId`, `field`, `reason=invalid-result` |
-| any | Failed / Interrupted / Cancelled | `METHOD_HANDLER_FAILED` with `correlationId`; the execution's error message is logged (token masked, 500 characters), never returned |
+| any | Failed with `FailureKind = OutcomeUnknown` (AB#8037) | `METHOD_OUTCOME_UNKNOWN` with `methodId` + `correlationId` (rule R3: a write was not acknowledged and may have taken effect); the error message is logged, never returned |
+| any | Failed (other or no `FailureKind`) / Interrupted / Cancelled | `METHOD_HANDLER_FAILED` with `correlationId`; the execution's error message is logged (token masked, 500 characters), never returned |
 | not final before the deadline | Running / Queued / not yet written | `METHOD_TIMEOUT`; the pipeline may still finish (not cancelled) |
 | the pipeline cannot be started (adapter offline, caller binding refused) | none | `METHOD_HANDLER_NOT_AVAILABLE`, `reason=pipeline-start-failed` |
+
+**Unacknowledged writes in a pipeline method (AB#8037, System.Communication 4.14.0).** The pipeline runs in the adapter, so only
+the adapter sees the exception of an ApplyChanges write that MongoDB did not acknowledge (write-concern error,
+`UnknownTransactionCommitResult`). It classifies it with the engine's `UnacknowledgedWriteClassifier` (via octo-sdk
+`PipelineExecutionFailureKinds.Of`, the same classifier the CK method host of common-services uses for service handlers) and
+reports `PipelineExecutionEndDto.FailureKind` / `LeaseResultDto.FailureKind`. The controller stores it on the new optional
+runtime-state attribute `PipelineExecution.FailureKind` (enum `PipelineExecutionFailureKind`: `Failed` = 0, `OutcomeUnknown` = 1)
+on every completion path - `CompleteExecutionAsync`, `BatchCompleteExecutionsAsync`, the interrupted-result report and the lease
+release (`ApplyLeaseOutcomeAsync`) - only for `Failed` (`PipelineExecutionFailureKindMapping.ToCk`; an unknown future value is
+stored as `Failed`). `PipelineMethodResultMapper.Map` answers `METHOD_OUTCOME_UNKNOWN` + `correlationId` for `Failed` +
+`OutcomeUnknown`; everything else is unchanged. The decision reads only the structured field, never `ErrorMessage` (no free-text
+markers). An execution reported by an adapter built before AB#8037 has no kind and stays `METHOD_HANDLER_FAILED`. Tests:
+`PipelineMethodResultMapperTests` (`*OutcomeUnknown*`), `PipelineMethodInvokerTests` (`*UnacknowledgedWrite*`,
+`*WithoutTheStructuredKind*`), `CompleteExecutionAsyncTests` / `BatchCompleteExecutionAsyncTests` (`*FailureKind*`),
+`LeaseOutcomeAndRequeueTests` (`*UnacknowledgedWrite*`).
 
 **Sensitive parameters and a sensitive result are refused.** A method with a parameter `sensitive: true` (or of value type
 `Secret`), or with a result marked `sensitive: true`, is **not served by a pipeline** until the retention of pipeline input and

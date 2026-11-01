@@ -64,6 +64,10 @@ $schema: https://schemas.meshmakers.cloud/ck-migration-meta.schema.json
 # MemoryLimit, LastDeploymentWarning), inherited by Adapter, Application and AdapterPool. Rule T1 of
 # ck-semver-rules (optional attribute added to a public type). No stored value changes: every existing
 # workload simply has the five attributes empty and renders the same Helm values as before.
+#
+# 4.14.0 (AB#8037) adds NO entry either (additive minor, schema-only bridge): the enum
+# PipelineExecutionFailureKind and the optional isRuntimeState attribute PipelineExecution.FailureKind.
+# Existing executions keep no value, which every reader treats as Failed.
 ckModelId: System.Communication-4.0.0
 migrations:
   - fromVersion: "3.0.1"

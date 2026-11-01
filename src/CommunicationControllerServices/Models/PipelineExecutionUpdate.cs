@@ -36,4 +36,9 @@ public record PipelineExecutionUpdate
     /// Optional output data (JSON string) from pipeline execution result
     /// </summary>
     public string? OutputData { get; init; }
+
+    /// <summary>
+    /// What a failed execution says about its writes (AB#8037); null when not failed or not reported
+    /// </summary>
+    public RtPipelineExecutionFailureKindEnum? FailureKind { get; init; }
 }

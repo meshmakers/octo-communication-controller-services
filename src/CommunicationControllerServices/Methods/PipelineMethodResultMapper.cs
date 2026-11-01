@@ -23,7 +23,11 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Methods;
 ///     </list>
 ///     <para>
 ///         A pipeline that fails (execution status Failed, Interrupted, Cancelled) is answered
-///         <c>METHOD_HANDLER_FAILED</c> with a correlation id; its error message is logged, never returned. Anything
+///         <c>METHOD_HANDLER_FAILED</c> with a correlation id; its error message is logged, never returned. A Failed
+///         execution whose adapter reported the failure kind <c>OutcomeUnknown</c> (a write was not acknowledged and may
+///         have taken effect, AB#8037) is answered <c>METHOD_OUTCOME_UNKNOWN</c> with a correlation id instead - the same
+///         rule R3 the CK method host applies to a service handler. The decision reads only the structured
+///         <c>PipelineExecution.FailureKind</c>, never the error message. Anything
 ///         else a pipeline writes as output is a contract violation and answered <c>METHOD_HANDLER_FAILED</c> with
 ///         the <c>field</c> and <c>reason</c> parameters instead of a malformed success.
 ///     </para>
@@ -43,16 +47,25 @@ internal static class PipelineMethodResultMapper
             or RtPipelineExecutionStatusEnum.Interrupted or RtPipelineExecutionStatusEnum.Cancelled;
 
     /// <summary>
-    ///     Maps a terminal execution. <paramref name="detail" /> is a log text for a pipeline contract violation (no
-    ///     data of the output), <c>null</c> otherwise.
+    ///     Maps a terminal execution. <paramref name="detail" /> is a log text for a failed execution or a pipeline
+    ///     contract violation (no data of the output), <c>null</c> otherwise. <paramref name="failureKind" /> is the
+    ///     stored <c>PipelineExecution.FailureKind</c> (AB#8037); null = not reported, treated as an ordinary failure.
     /// </summary>
     public static CkMethodResponse Map(CkMethodRequest request, PipelineMethodDefinition method,
-        string handlerInstanceId, RtPipelineExecutionStatusEnum status, string? outputData, Guid correlationId,
-        out string? detail)
+        string handlerInstanceId, RtPipelineExecutionStatusEnum status,
+        RtPipelineExecutionFailureKindEnum? failureKind, string? outputData, Guid correlationId, out string? detail)
     {
         detail = null;
         if (status != RtPipelineExecutionStatusEnum.Completed)
         {
+            if (status == RtPipelineExecutionStatusEnum.Failed &&
+                failureKind == RtPipelineExecutionFailureKindEnum.OutcomeUnknown)
+            {
+                // AB#8037, rule R3: the write may be on the primary - "nothing happened" would be a lie
+                detail = "pipeline execution failed on a write that was not acknowledged; the outcome is unknown";
+                return OutcomeUnknown(request, handlerInstanceId, correlationId);
+            }
+
             detail = $"pipeline execution ended with status {status}";
             return HandlerFailed(request, handlerInstanceId, correlationId);
         }
@@ -116,6 +129,18 @@ internal static class PipelineMethodResultMapper
     public static CkMethodResponse HandlerFailed(CkMethodRequest request, string handlerInstanceId, Guid correlationId) =>
         CkMethodResponse.Failed(request.InvocationId, handlerInstanceId,
             CkMethodError.Create(CkMethodErrorCodes.MethodHandlerFailed,
+                (CkMethodErrorParameters.MethodId, request.MethodId),
+                (CkMethodErrorParameters.CorrelationId, correlationId.ToString())));
+
+    /// <summary>
+    ///     The <c>METHOD_OUTCOME_UNKNOWN</c> envelope with the correlation id (AB#8037): the pipeline failed on a write the
+    ///     database did not acknowledge, so its effect may or may not have happened. Same shape as the CK method host's
+    ///     answer for a service handler (AB#8020).
+    /// </summary>
+    public static CkMethodResponse OutcomeUnknown(CkMethodRequest request, string handlerInstanceId,
+        Guid correlationId) =>
+        CkMethodResponse.Failed(request.InvocationId, handlerInstanceId,
+            CkMethodError.Create(CkMethodErrorCodes.MethodOutcomeUnknown,
                 (CkMethodErrorParameters.MethodId, request.MethodId),
                 (CkMethodErrorParameters.CorrelationId, correlationId.ToString())));
 

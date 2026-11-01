@@ -206,7 +206,7 @@ internal sealed class PipelineMethodInvoker(
                 if (execution is not null && PipelineMethodResultMapper.IsTerminal(execution.Status))
                 {
                     var response = PipelineMethodResultMapper.Map(request, method, instance.InstanceId,
-                        execution.Status, execution.OutputData, correlationId, out var detail);
+                        execution.Status, execution.FailureKind, execution.OutputData, correlationId, out var detail);
                     if (detail is not null)
                     {
                         logger.LogError(

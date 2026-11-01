@@ -182,6 +182,12 @@ attributes:
   valueType: String
   isRuntimeState: true
   description: Error message if execution failed
+# AB#8037 - written by the controller from the adapter's end report / the pool member's release.
+- id: FailureKind
+  valueType: Enum
+  valueCkEnumId: ${this}/PipelineExecutionFailureKind
+  isRuntimeState: true
+  description: 'What a failed execution says about its writes (AB#8037): Failed (ordinary failure) or OutcomeUnknown (a write was not acknowledged and may have taken effect; a pipeline method answers METHOD_OUTCOME_UNKNOWN). Unset unless the execution failed and the adapter reported a kind.'
 - id: InputData
   valueType: String
   isRuntimeState: true

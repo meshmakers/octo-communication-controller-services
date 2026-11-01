@@ -118,6 +118,10 @@ types:
     - id: ${this}/ErrorMessage
       name: ErrorMessage
       isOptional: true
+    # AB#8037 — structured failure kind next to the free-text ErrorMessage (see the enum).
+    - id: ${this}/FailureKind
+      name: FailureKind
+      isOptional: true
     - id: ${this}/InputData
       name: InputData
       isOptional: true

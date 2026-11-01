@@ -2609,7 +2609,7 @@ internal class CommunicationRepository : ICommunicationRepository
 
     public async Task UpdatePipelineExecutionAsync(string tenantId, string executionId,
         RtPipelineExecutionStatusEnum status, DateTime? completedAt, int? durationMs, string? errorMessage,
-        string? outputData = null)
+        string? outputData = null, RtPipelineExecutionFailureKindEnum? failureKind = null)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -2636,7 +2636,9 @@ internal class CommunicationRepository : ICommunicationRepository
                 CompletedAt = completedAt,
                 DurationMs = durationMs,
                 ErrorMessage = errorMessage,
-                OutputData = outputData
+                OutputData = outputData,
+                // AB#8037: structured failure kind (OutcomeUnknown = a write was not acknowledged)
+                FailureKind = failureKind
             };
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtPipelineExecution>>
@@ -2703,7 +2705,8 @@ internal class CommunicationRepository : ICommunicationRepository
                     CompletedAt = update.CompletedAt,
                     DurationMs = update.DurationMs,
                     ErrorMessage = update.ErrorMessage,
-                    OutputData = update.OutputData
+                    OutputData = update.OutputData,
+                    FailureKind = update.FailureKind
                 };
 
                 entityUpdateInfoList.Add(
