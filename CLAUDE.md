@@ -3806,6 +3806,17 @@ per-test `IMeterFactory`.
 
 ## Pipeline Service Account — mandatory execution identity (Epic AB#4979; AB#5027 phases 1 + 2)
 
+**Background retry of failed provisioning (AB#8145).** The startup sweep (`EnsureTenantProvisionedAsync`) stays
+single-shot: one `CreateIdentityDataCommandRequest` per adapter with a 30 s timeout. When identity restarts at the
+same time as the controller (a release) that request times out or has no route, and there is no further tenant load
+to repair it. `PipelineServiceAccountProvisioningService` (singleton) therefore remembers adapters that failed with
+`IdentityUnavailableException` (identity did not answer) and `PipelineServiceAccountProvisioningRetryBackgroundService`
+ticks it every 10 s (`RetryPendingAsync`). Backoff doubles from `PipelineServiceAccountRetryInitialDelaySeconds` (30)
+up to `PipelineServiceAccountRetryMaxDelayMinutes` (5), at most `PipelineServiceAccountRetryMaxAttempts` (60) retries.
+An entry is dropped on success (one Information log + one tenant information event), when the adapter or tenant is
+gone, on a permanent refusal (identity answered with an error result: not retried, tenant error event as before) and
+when the budget is spent. Each failed attempt logs one Warning with the next retry time. State is process-local.
+
 Pipeline execution runs under a real identity instead of anonymously. Granularity:
 **one service account per adapter as the default, optionally overridden per pipeline**;
 a pipeline without a resolvable account is refused at deploy time.
