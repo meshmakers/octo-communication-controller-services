@@ -175,6 +175,21 @@ public interface IPipelineServiceAccountProvisioningService
     Task<PipelineServiceAccountProvisioningOutcome> EnsureAdapterProvisionedAsync(string tenantId, RtAdapter adapter);
 
     /// <summary>
+    /// AB#8145 — number of adapters whose provisioning failed transiently (identity unreachable)
+    /// and is waiting for a background retry.
+    /// </summary>
+    int PendingRetryCount { get; }
+
+    /// <summary>
+    /// AB#8145 — retries every adapter whose backoff has elapsed. Driven by
+    /// <c>PipelineServiceAccountProvisioningRetryBackgroundService</c>; never throws. An entry is
+    /// dropped when provisioning succeeds, when the adapter (or tenant) no longer exists, on a
+    /// permanent refusal and when the attempt budget is spent.
+    /// </summary>
+    /// <returns>The number of adapters that were retried in this call.</returns>
+    Task<int> RetryPendingAsync(CancellationToken cancellationToken);
+
+    /// <summary>
     /// AB#5111 — materialises the declaration of the adapter's pipeline service account: ensures
     /// the configuration entity exists (creating it with the declaration defaults —
     /// <c>AssignedRoleNames</c> = the platform's default role, <c>AllowDelegation</c> = true),
