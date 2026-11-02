@@ -2609,7 +2609,7 @@ internal class CommunicationRepository : ICommunicationRepository
 
     public async Task UpdatePipelineExecutionAsync(string tenantId, string executionId,
         RtPipelineExecutionStatusEnum status, DateTime? completedAt, int? durationMs, string? errorMessage,
-        string? outputData = null)
+        string? outputData = null, RtPipelineExecutionFailureKindEnum? failureKind = null)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -2636,7 +2636,9 @@ internal class CommunicationRepository : ICommunicationRepository
                 CompletedAt = completedAt,
                 DurationMs = durationMs,
                 ErrorMessage = errorMessage,
-                OutputData = outputData
+                OutputData = outputData,
+                // AB#8037: structured failure kind (OutcomeUnknown = a write was not acknowledged)
+                FailureKind = KeepFailureKind(status, failureKind, execution)
             };
 
             var entityUpdateInfoList = new List<EntityUpdateInfo<RtPipelineExecution>>
@@ -2661,6 +2663,29 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             throw CommunicationRepositoryException.CommonFailedUpdatePipelineExecution(tenantId, executionId, e);
         }
+    }
+
+    /// <summary>
+    ///     AB#8037: the failure kind to write. A later Failed report without a kind (e.g. from an adapter that predates
+    ///     the field) or with the plain Failed kind must not erase a stored OutcomeUnknown, because the pipeline method maps <c>OutcomeUnknown</c> to
+    ///     <c>METHOD_OUTCOME_UNKNOWN</c>. The stored kind is kept only while the execution stays Failed; any other status
+    ///     carries none.
+    /// </summary>
+    internal static RtPipelineExecutionFailureKindEnum? KeepFailureKind(RtPipelineExecutionStatusEnum status,
+        RtPipelineExecutionFailureKindEnum? reported, RtPipelineExecution stored)
+    {
+        if (status != RtPipelineExecutionStatusEnum.Failed)
+        {
+            return null;
+        }
+
+        var storedKind = stored.Status == RtPipelineExecutionStatusEnum.Failed ? stored.FailureKind : null;
+
+        // OutcomeUnknown is never downgraded by a later report of the same failed execution (an explicit Failed kind
+        // included): the invoker may not have polled the first state yet, and "nothing happened" would be a lie
+        return storedKind == RtPipelineExecutionFailureKindEnum.OutcomeUnknown
+            ? storedKind
+            : reported ?? storedKind;
     }
 
     public async Task<int> BulkUpdatePipelineExecutionsAsync(string tenantId,
@@ -2703,7 +2728,8 @@ internal class CommunicationRepository : ICommunicationRepository
                     CompletedAt = update.CompletedAt,
                     DurationMs = update.DurationMs,
                     ErrorMessage = update.ErrorMessage,
-                    OutputData = update.OutputData
+                    OutputData = update.OutputData,
+                    FailureKind = KeepFailureKind(update.Status, update.FailureKind, execution)
                 };
 
                 entityUpdateInfoList.Add(

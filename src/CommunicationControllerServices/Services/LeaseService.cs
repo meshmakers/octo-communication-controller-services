@@ -463,7 +463,8 @@ internal class LeaseService : ILeaseService
         }
         else
         {
-            await ApplyLeaseOutcomeAsync(released, result.Success, result.StatusMessage, result.OutputData);
+            await ApplyLeaseOutcomeAsync(released, result.Success, result.StatusMessage, result.OutputData,
+                result.FailureKind);
 
             // A Drained release that DID run the work item reports that work item's own outcome
             // (AB#5864, member side), so a failure here is the pipeline's and belongs in the
@@ -1016,7 +1017,7 @@ internal class LeaseService : ILeaseService
 
     /// <inheritdoc />
     public async Task ApplyLeaseOutcomeAsync(LeaseDto lease, bool success, string? statusMessage,
-        string? outputData = null)
+        string? outputData = null, PipelineExecutionFailureKind? failureKind = null)
     {
         if (string.IsNullOrWhiteSpace(lease.ExecutionId))
         {
@@ -1058,7 +1059,9 @@ internal class LeaseService : ILeaseService
                 // reports it on IAdapterHub.ReportExecutionEndAsync, whose tenant and adapter come from
                 // the connection - a pool member holds a tenant-free management channel and has no such
                 // connection to report on (AB#4924 §9.9 / D4).
-                outputData);
+                outputData,
+                // AB#8037: the release is also the only route of a leased execution's failure kind
+                PipelineExecutionFailureKindMapping.ToCk(outcome, failureKind));
 
             // AB#5425 on the 0.2 lane: a dedicated adapter's outcome is counted where it reports it
             // (PipelineExecutionService). A leased execution never takes that path — the release is its

@@ -1,5 +1,21 @@
 # Changelog
 
+## 4.14.0 - 2026-11-01
+
+_Required bump level: minor._
+
+### Added
+
+- Enum 'PipelineExecutionFailureKind' (`Failed` = 0, `OutcomeUnknown` = 1) _(minor — additive new enum)_
+- Attribute 'FailureKind' (Enum, optional, isRuntimeState) on 'PipelineExecution' _(minor — additive optional attribute)_
+
+A failed pipeline execution says what it means for its writes (AB#8037, rule R3): the adapter reports
+`OutcomeUnknown` when a write was not acknowledged (MongoDB write-concern error, `UnknownTransactionCommitResult`)
+and may have taken effect, and a pipeline method then answers `METHOD_OUTCOME_UNKNOWN` + `correlationId` instead of
+`METHOD_HANDLER_FAILED`, like a service method. Compatibility: additive only; existing executions and executions
+reported by older adapters have no value (treated as `Failed`). Dependents with range-retained dependencies keep
+resolving; no migration (schema-only bridge).
+
 ## 4.13.0 - 2026-10-26
 
 _Required bump level: minor._

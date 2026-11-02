@@ -1,0 +1,15 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+# AB#8037 (rule R3 of the method consistency model): what a FAILED execution says about its writes.
+# The adapter classifies the exception that ended the run (engine UnacknowledgedWriteClassifier) and
+# reports it next to Status=Failed; the controller stores it and a pipeline method answers
+# METHOD_OUTCOME_UNKNOWN on OutcomeUnknown instead of METHOD_HANDLER_FAILED. A structured field on
+# purpose - never a marker in ErrorMessage. Keys are persisted: append, never insert.
+- enumId: PipelineExecutionFailureKind
+  description: 'What a failed pipeline execution says about its writes (AB#8037). Failed is an ordinary failure (the database refused the write, or the pipeline failed for another reason). OutcomeUnknown means a write was neither acknowledged nor refused (MongoDB write-concern error, UnknownTransactionCommitResult) and may have taken effect; a pipeline method then answers METHOD_OUTCOME_UNKNOWN with a correlation id instead of METHOD_HANDLER_FAILED. Unset on a successful execution and on executions reported by an adapter that predates the field (treated as Failed).'
+  useFlags: false
+  values:
+  - key: 0
+    name: Failed
+  - key: 1
+    name: OutcomeUnknown

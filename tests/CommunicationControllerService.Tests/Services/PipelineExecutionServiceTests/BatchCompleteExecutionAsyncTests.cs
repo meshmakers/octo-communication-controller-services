@@ -148,4 +148,42 @@ internal class BatchCompleteExecutionAsyncTests : PipelineExecutionServiceTestsB
             TenantId,
             Arg.Is<string>(msg => msg.Contains("Test error")));
     }
+
+    /// <summary>
+    ///     AB#8037: the batch path stores the structured failure kind of every failed execution, and none for a success.
+    /// </summary>
+    [Test]
+    public async Task BatchCompleteExecutionsAsync_CarriesTheFailureKindOfFailedExecutions()
+    {
+        var dtos = new List<PipelineExecutionEndDto>
+        {
+            new()
+            {
+                ExecutionId = "failed-unknown", Status = PipelineExecutionStatus.Failed, CompletedAt = DateTime.UtcNow,
+                DurationMs = 1, ErrorMessage = "x", FailureKind = PipelineExecutionFailureKind.OutcomeUnknown
+            },
+            new()
+            {
+                ExecutionId = "failed-old-adapter", Status = PipelineExecutionStatus.Failed,
+                CompletedAt = DateTime.UtcNow, DurationMs = 1, ErrorMessage = "y"
+            },
+            new()
+            {
+                ExecutionId = "completed", Status = PipelineExecutionStatus.Completed, CompletedAt = DateTime.UtcNow,
+                DurationMs = 1, FailureKind = PipelineExecutionFailureKind.OutcomeUnknown
+            }
+        };
+        CommunicationRepository.BulkUpdatePipelineExecutionsAsync(TenantId, Arg.Any<IReadOnlyList<PipelineExecutionUpdate>>())
+            .Returns(3);
+
+        await PipelineExecutionService.BatchCompleteExecutionsAsync(TenantId, dtos);
+
+        await CommunicationRepository.Received(1).BulkUpdatePipelineExecutionsAsync(
+            TenantId,
+            Arg.Is<IReadOnlyList<PipelineExecutionUpdate>>(list =>
+                list.Single(u => u.ExecutionId == "failed-unknown").FailureKind ==
+                RtPipelineExecutionFailureKindEnum.OutcomeUnknown &&
+                list.Single(u => u.ExecutionId == "failed-old-adapter").FailureKind == null &&
+                list.Single(u => u.ExecutionId == "completed").FailureKind == null));
+    }
 }

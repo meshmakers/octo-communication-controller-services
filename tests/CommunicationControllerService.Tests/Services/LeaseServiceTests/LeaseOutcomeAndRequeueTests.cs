@@ -84,6 +84,31 @@ internal class LeaseOutcomeAndRequeueTests : LeaseServiceTestsBase
     }
 
     /// <summary>
+    ///     AB#8037: the release is the only route of a leased execution's failure kind; a failed work item whose write
+    ///     was not acknowledged completes its execution with <c>FailureKind = OutcomeUnknown</c>.
+    /// </summary>
+    [Test]
+    public async Task AFailedReleaseWithAnUnacknowledgedWrite_StoresOutcomeUnknownOnTheExecution()
+    {
+        var leaseId = await GrantWithWorkItemAsync();
+        CommunicationRepository.GetPipelineExecutionAsync(BorrowerTenantId, ExecutionId)
+            .Returns(ARunningExecution());
+
+        await LeaseService.ReleaseLeaseAsync(ConnectionId, new LeaseResultDto
+        {
+            LeaseId = leaseId,
+            Reason = LeaseReleaseReasonDto.Failed,
+            Success = false,
+            StatusMessage = "write not acknowledged",
+            FailureKind = PipelineExecutionFailureKind.OutcomeUnknown
+        });
+
+        await CommunicationRepository.Received(1).UpdatePipelineExecutionAsync(BorrowerTenantId, ExecutionId,
+            RtPipelineExecutionStatusEnum.Failed, Arg.Any<DateTime?>(), Arg.Any<int?>(), Arg.Any<string?>(),
+            Arg.Any<string?>(), RtPipelineExecutionFailureKindEnum.OutcomeUnknown);
+    }
+
+    /// <summary>
     ///     An execution that already reached a terminal state through the normal adapter path is left
     ///     exactly as it is. The lease release must never overwrite a result somebody else reported.
     /// </summary>
