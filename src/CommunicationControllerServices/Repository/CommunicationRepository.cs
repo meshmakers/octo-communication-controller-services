@@ -2667,7 +2667,7 @@ internal class CommunicationRepository : ICommunicationRepository
 
     /// <summary>
     ///     AB#8037: the failure kind to write. A later Failed report without a kind (e.g. from an adapter that predates
-    ///     the field) must not erase a stored one, because the pipeline method maps <c>OutcomeUnknown</c> to
+    ///     the field) or with the plain Failed kind must not erase a stored OutcomeUnknown, because the pipeline method maps <c>OutcomeUnknown</c> to
     ///     <c>METHOD_OUTCOME_UNKNOWN</c>. The stored kind is kept only while the execution stays Failed; any other status
     ///     carries none.
     /// </summary>
@@ -2679,7 +2679,13 @@ internal class CommunicationRepository : ICommunicationRepository
             return null;
         }
 
-        return reported ?? (stored.Status == RtPipelineExecutionStatusEnum.Failed ? stored.FailureKind : null);
+        var storedKind = stored.Status == RtPipelineExecutionStatusEnum.Failed ? stored.FailureKind : null;
+
+        // OutcomeUnknown is never downgraded by a later report of the same failed execution (an explicit Failed kind
+        // included): the invoker may not have polled the first state yet, and "nothing happened" would be a lie
+        return storedKind == RtPipelineExecutionFailureKindEnum.OutcomeUnknown
+            ? storedKind
+            : reported ?? storedKind;
     }
 
     public async Task<int> BulkUpdatePipelineExecutionsAsync(string tenantId,
