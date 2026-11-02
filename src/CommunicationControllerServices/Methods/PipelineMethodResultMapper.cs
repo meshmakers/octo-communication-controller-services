@@ -16,7 +16,8 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Methods;
 ///     </para>
 ///     <list type="bullet">
 ///         <item><c>{"value": ...}</c> success; <c>value</c> has the type of the method result (required when the
-///             method declares a result, ignored otherwise).</item>
+///             method declares a result, ignored otherwise). The response carries the bare <c>value</c> as
+///             <c>resultJson</c> (AB#8079), not the wrapper.</item>
 ///         <item><c>{"error": {"code": "SOME_CODE", "parameters": {"name": "text"}}}</c> a business error; the code
 ///             must be declared by the method (or be one of <c>METHOD_VALIDATION_FAILED</c>,
 ///             <c>METHOD_TARGET_NOT_FOUND</c>, <c>METHOD_FORBIDDEN</c>).</item>
@@ -119,9 +120,10 @@ internal static class PipelineMethodResultMapper
                 return InvalidResult(request, handlerInstanceId, correlationId, "value", "type-mismatch", out detail);
             }
 
-            // the envelope keeps exactly the result record {"value": ...}; other members are dropped
-            return CkMethodResponse.Succeeded(request.InvocationId, handlerInstanceId,
-                "{\"value\":" + value.GetRawText() + "}");
+            // AB#8079 wire contract: resultJson is the bare JSON of the value (42, "abc", {"name": ...}), the same form
+            // a service handler answers (CkMethodResultShape); the {"value": ...} wrapper is the pipeline output
+            // shape only, and other members of the output are dropped
+            return CkMethodResponse.Succeeded(request.InvocationId, handlerInstanceId, value.GetRawText());
         }
     }
 

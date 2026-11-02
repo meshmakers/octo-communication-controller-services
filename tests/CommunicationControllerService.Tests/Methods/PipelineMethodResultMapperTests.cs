@@ -21,13 +21,27 @@ internal class PipelineMethodResultMapperTests
         PipelineMethodResultMapper.Map(Request(), method, Instance, status, failureKind, output, Correlation, out _);
 
     [Test]
-    public async Task ASuccessKeepsExactlyTheResultRecord()
+    public async Task ASuccessCarriesTheBareValueAndDropsOtherMembers()
     {
         var response = Map(Method(), "{\"value\": 42, \"debug\": \"dropped\"}");
 
         await Assert.That(response.Success).IsTrue();
-        await Assert.That(response.ResultJson).IsEqualTo("{\"value\":42}");
+        await Assert.That(response.ResultJson).IsEqualTo("42");
         await Assert.That(response.HandlerInstanceId).IsEqualTo(Instance);
+    }
+
+    [Test]
+    [Arguments(AttributeValueTypesDto.String, "{\"value\": \"abc\"}", "\"abc\"")]
+    [Arguments(AttributeValueTypesDto.Boolean, "{\"value\": true}", "true")]
+    [Arguments(AttributeValueTypesDto.Record, "{\"value\": {\"name\": \"x\", \"n\": 1}}", "{\"name\": \"x\", \"n\": 1}")]
+    public async Task TheResultJsonIsTheBareValueNeverTheValueWrapper(AttributeValueTypesDto type, string output,
+        string expected)
+    {
+        var response = Map(Method(resultType: type), output);
+
+        await Assert.That(response.Success).IsTrue();
+        await Assert.That(response.ResultJson).IsEqualTo(expected);
+        await Assert.That(response.ResultJson!.Contains("\"value\"")).IsFalse();
     }
 
     [Test]

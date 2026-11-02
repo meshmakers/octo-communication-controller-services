@@ -82,7 +82,7 @@ internal class PipelineMethodInvokerTests
     }
 
     [Test]
-    public async Task ThePipelineResultIsReturnedInTheSuccessEnvelope()
+    public async Task ThePipelineResultIsReturnedAsTheBareValue()
     {
         ArrangeExecution(RtPipelineExecutionStatusEnum.Completed, "{\"value\": 7}");
         var request = Request();
@@ -90,7 +90,7 @@ internal class PipelineMethodInvokerTests
         var response = await _invoker.InvokeAsync(request);
 
         await Assert.That(response.Success).IsTrue();
-        await Assert.That(response.ResultJson).IsEqualTo("{\"value\":7}");
+        await Assert.That(response.ResultJson).IsEqualTo("7");
         await Assert.That(response.InvocationId).IsEqualTo(request.InvocationId);
         await Assert.That(response.HandlerInstanceId).IsEqualTo(_instance.InstanceId);
     }
@@ -462,7 +462,7 @@ internal class PipelineMethodInvokerTests
         var response = await _invoker.InvokeAsync(Request());
 
         await Assert.That(response.Success).IsTrue();
-        await Assert.That(response.ResultJson).IsEqualTo("{\"value\":3}");
+        await Assert.That(response.ResultJson).IsEqualTo("3");
     }
 
     [Test]

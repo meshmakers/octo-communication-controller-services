@@ -226,7 +226,7 @@ public class PipelineMethodHandlerTests(CommunicationControllerFixture fixture)
     }
 
     [Fact]
-    public async Task ThePipelineResultComesBackInTheSuccessEnvelopeAndThePipelineRanAsTheCaller()
+    public async Task ThePipelineResultComesBackAsTheBareValueAndThePipelineRanAsTheCaller()
     {
         var scenario = await CreateScenarioAsync();
         try
@@ -238,7 +238,7 @@ public class PipelineMethodHandlerTests(CommunicationControllerFixture fixture)
             var response = await invoker.InvokeAsync(request, TestContext.Current.CancellationToken);
 
             response.Success.Should().BeTrue("the log says: {0}", log0.All);
-            response.ResultJson.Should().Be("{\"value\":7}");
+            response.ResultJson.Should().Be("7");
             scenario.StartCount.Should().Be(1);
 
             // the real controller-to-adapter command carried the invoker and the method input
