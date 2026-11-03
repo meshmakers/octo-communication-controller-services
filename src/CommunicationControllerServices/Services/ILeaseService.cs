@@ -137,7 +137,7 @@ public interface ILeaseService
     ///     (AB#4924 §9.1).
     /// </summary>
     Task ApplyLeaseOutcomeAsync(LeaseDto lease, bool success, string? statusMessage,
-        string? outputData = null);
+        string? outputData = null, PipelineExecutionFailureKind? failureKind = null);
 
     /// <summary>
     ///     Marks the attempt a lease was serving <c>Interrupted</c>, stamps <c>LeaseReleasedAt</c>

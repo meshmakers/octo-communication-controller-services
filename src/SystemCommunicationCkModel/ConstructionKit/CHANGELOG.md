@@ -1,6 +1,6 @@
 # Changelog
 
-## 4.14.0 - 2026-11-03
+## 4.15.0 - 2026-11-03
 
 _Required bump level: minor._
 
@@ -26,15 +26,31 @@ the controller, never author-set, `Value` platform-only (no tenant pipeline, use
 except `Value` is runtime state. `SecretDefaults` is not a ValueOverride and never reaches Helm values or the pod. This
 release only changes the model; the controller logic follows in later stories.
 
-Compatibility: additive only (new record, new type, new optional attribute on `Application`), a minor bump. Dependents with a
-range `System.Communication-[4.x,5.0)` are unaffected, an Application without `SecretDefaults` imports unchanged, and no
-migration file is needed. Exact-pinned (v1) models and externally built adapters may need a rebuild after the catalog
-publish; the maintainer who releases checks this. No CK engine change.
+Compatibility: additive only (new record, new type, new optional attribute on `Application`), a minor bump over 4.14.0.
+Dependents with a range `System.Communication-[4.x,5.0)` are unaffected, an Application without `SecretDefaults` imports
+unchanged, and no migration file is needed. Exact-pinned (v1) models and externally built adapters may need a rebuild after
+the catalog publish; the maintainer who releases checks this. No CK engine change.
 
 ### Changed
 
 - Dependency 'System': version changed '2.7.0' → '2.8.0' _(none — resolved dependency System moved 2.7.0 -> 2.8.0 inside its declared range [2.5,3.0) of a range-retaining model; the closure is compiler-set metadata and the model itself is unchanged, no bump needed (row D8))_
 - Type 'Application-1': description changed 'A tenant-specific web application deployed by the Communication Operator via Helm. Examples: energy-community, voest-app, maco-app. Most configuration (URIs, env vars, secrets) lives in ValuesYaml / Values inherited from DeployableWorkload; only operator-relevant fields are exposed as typed attributes. Ingress (IngressEnabled + Hostname) is inherited from DeployableWorkload.' → 'A tenant-specific web application deployed by the Communication Operator via Helm. Examples: energy-community, voest-app, maco-app. Most configuration (URIs, env vars, secrets) lives in ValuesYaml / Values inherited from DeployableWorkload; only operator-relevant fields are exposed as typed attributes. Ingress (IngressEnabled + Hostname) is inherited from DeployableWorkload. Optional SecretDefaults (AB#7243) declare secrets the platform provides to every tenant the application serves, never through Helm values.' _(patch — purely documentational change)_
+
+## 4.14.0 - 2026-11-01
+
+_Required bump level: minor._
+
+### Added
+
+- Enum 'PipelineExecutionFailureKind' (`Failed` = 0, `OutcomeUnknown` = 1) _(minor — additive new enum)_
+- Attribute 'FailureKind' (Enum, optional, isRuntimeState) on 'PipelineExecution' _(minor — additive optional attribute)_
+
+A failed pipeline execution says what it means for its writes (AB#8037, rule R3): the adapter reports
+`OutcomeUnknown` when a write was not acknowledged (MongoDB write-concern error, `UnknownTransactionCommitResult`)
+and may have taken effect, and a pipeline method then answers `METHOD_OUTCOME_UNKNOWN` + `correlationId` instead of
+`METHOD_HANDLER_FAILED`, like a service method. Compatibility: additive only; existing executions and executions
+reported by older adapters have no value (treated as `Failed`). Dependents with range-retained dependencies keep
+resolving; no migration (schema-only bridge).
 
 ## 4.13.0 - 2026-10-26
 

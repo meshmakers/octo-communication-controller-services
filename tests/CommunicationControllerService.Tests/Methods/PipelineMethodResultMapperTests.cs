@@ -16,17 +16,32 @@ internal class PipelineMethodResultMapperTests
     private static readonly Guid Correlation = Guid.Parse("11111111-2222-3333-4444-555555555555");
 
     private static CkMethodResponse Map(PipelineMethodDefinition method, string? output,
-        RtPipelineExecutionStatusEnum status = RtPipelineExecutionStatusEnum.Completed) =>
-        PipelineMethodResultMapper.Map(Request(), method, Instance, status, output, Correlation, out _);
+        RtPipelineExecutionStatusEnum status = RtPipelineExecutionStatusEnum.Completed,
+        RtPipelineExecutionFailureKindEnum? failureKind = null) =>
+        PipelineMethodResultMapper.Map(Request(), method, Instance, status, failureKind, output, Correlation, out _);
 
     [Test]
-    public async Task ASuccessKeepsExactlyTheResultRecord()
+    public async Task ASuccessCarriesTheBareValueAndDropsOtherMembers()
     {
         var response = Map(Method(), "{\"value\": 42, \"debug\": \"dropped\"}");
 
         await Assert.That(response.Success).IsTrue();
-        await Assert.That(response.ResultJson).IsEqualTo("{\"value\":42}");
+        await Assert.That(response.ResultJson).IsEqualTo("42");
         await Assert.That(response.HandlerInstanceId).IsEqualTo(Instance);
+    }
+
+    [Test]
+    [Arguments(AttributeValueTypesDto.String, "{\"value\": \"abc\"}", "\"abc\"")]
+    [Arguments(AttributeValueTypesDto.Boolean, "{\"value\": true}", "true")]
+    [Arguments(AttributeValueTypesDto.Record, "{\"value\": {\"name\": \"x\", \"n\": 1}}", "{\"name\": \"x\", \"n\": 1}")]
+    public async Task TheResultJsonIsTheBareValueNeverTheValueWrapper(AttributeValueTypesDto type, string output,
+        string expected)
+    {
+        var response = Map(Method(resultType: type), output);
+
+        await Assert.That(response.Success).IsTrue();
+        await Assert.That(response.ResultJson).IsEqualTo(expected);
+        await Assert.That(response.ResultJson!.Contains("\"value\"")).IsFalse();
     }
 
     [Test]
@@ -122,6 +137,53 @@ internal class PipelineMethodResultMapperTests
         await Assert.That(response.Error!.Code).IsEqualTo(CkMethodErrorCodes.MethodHandlerFailed);
         await Assert.That(response.Error.Parameters["correlationId"]).IsEqualTo(Correlation.ToString());
         await Assert.That(response.ResultJson).IsNull();
+    }
+
+    /// <summary>
+    ///     AB#8037, rule R3: a pipeline that failed on a write the database did not acknowledge may have written; the
+    ///     caller gets METHOD_OUTCOME_UNKNOWN with the correlation id, exactly like a service handler (AB#8020).
+    /// </summary>
+    [Test]
+    public async Task AFailedExecutionWithAnUnacknowledgedWriteIsOutcomeUnknownWithTheCorrelationId()
+    {
+        var response = PipelineMethodResultMapper.Map(Request(), Method(), Instance,
+            RtPipelineExecutionStatusEnum.Failed, RtPipelineExecutionFailureKindEnum.OutcomeUnknown,
+            "{\"value\": 1}", Correlation, out var detail);
+
+        await Assert.That(response.Success).IsFalse();
+        await Assert.That(response.Error!.Code).IsEqualTo(CkMethodErrorCodes.MethodOutcomeUnknown);
+        await Assert.That(response.Error.Parameters[CkMethodErrorParameters.CorrelationId])
+            .IsEqualTo(Correlation.ToString());
+        await Assert.That(response.Error.Parameters[CkMethodErrorParameters.MethodId]).IsEqualTo(Request().MethodId);
+        await Assert.That(response.ResultJson).IsNull();
+        await Assert.That(detail).IsNotNull();
+    }
+
+    /// <summary>
+    ///     AB#8037: only the structured kind decides. An ordinary failure, a failure from an adapter that reported no kind,
+    ///     and an Interrupted or Cancelled execution stay METHOD_HANDLER_FAILED - also when the error text looks like a
+    ///     write-concern error (no free-text markers).
+    /// </summary>
+    [Test]
+    [Arguments(RtPipelineExecutionStatusEnum.Failed, RtPipelineExecutionFailureKindEnum.Failed)]
+    [Arguments(RtPipelineExecutionStatusEnum.Failed, null)]
+    [Arguments(RtPipelineExecutionStatusEnum.Interrupted, RtPipelineExecutionFailureKindEnum.OutcomeUnknown)]
+    [Arguments(RtPipelineExecutionStatusEnum.Cancelled, RtPipelineExecutionFailureKindEnum.OutcomeUnknown)]
+    public async Task OnlyAFailedExecutionWithTheOutcomeUnknownKindIsOutcomeUnknown(
+        RtPipelineExecutionStatusEnum status, RtPipelineExecutionFailureKindEnum? failureKind)
+    {
+        var response = Map(Method(), "{\"value\": 1}", status, failureKind);
+
+        await Assert.That(response.Error!.Code).IsEqualTo(CkMethodErrorCodes.MethodHandlerFailed);
+    }
+
+    [Test]
+    public async Task ACompletedExecutionIgnoresAStrayFailureKind()
+    {
+        var response = Map(Method(), "{\"value\": 1}", RtPipelineExecutionStatusEnum.Completed,
+            RtPipelineExecutionFailureKindEnum.OutcomeUnknown);
+
+        await Assert.That(response.Success).IsTrue();
     }
 
     [Test]

@@ -128,6 +128,62 @@ internal class CompleteExecutionAsyncTests : PipelineExecutionServiceTestsBase
             Arg.Is<string>(s => s.Contains("failed") && s.Contains(errorMessage)));
     }
 
+    /// <summary>
+    ///     AB#8037: the adapter's structured failure kind is stored on the execution, where a pipeline method reads it.
+    /// </summary>
+    [Test]
+    [Arguments(PipelineExecutionFailureKind.OutcomeUnknown, RtPipelineExecutionFailureKindEnum.OutcomeUnknown)]
+    [Arguments(PipelineExecutionFailureKind.Failed, RtPipelineExecutionFailureKindEnum.Failed)]
+    public async Task CompleteExecutionAsync_FailedWithAFailureKind_StoresTheKind(PipelineExecutionFailureKind reported,
+        RtPipelineExecutionFailureKindEnum stored)
+    {
+        var rtAdapter = RtEntityCreator.CreateAdapter();
+        var executionId = Guid.NewGuid().ToString();
+        CommunicationRepository.GetPipelineExecutionAsync(TenantId, executionId)
+            .Returns(RtEntityCreator.CreatePipelineExecution(executionId));
+        var endDto = new PipelineExecutionEndDto
+        {
+            ExecutionId = executionId,
+            Status = PipelineExecutionStatus.Failed,
+            CompletedAt = DateTime.UtcNow,
+            DurationMs = 5000,
+            ErrorMessage = "write not acknowledged",
+            FailureKind = reported
+        };
+
+        await PipelineExecutionService.CompleteExecutionAsync(TenantId, rtAdapter.ToRtEntityId(), endDto);
+
+        await CommunicationRepository.Received(1).UpdatePipelineExecutionAsync(TenantId, executionId,
+            RtPipelineExecutionStatusEnum.Failed, Arg.Any<DateTime?>(), Arg.Any<int?>(), Arg.Any<string?>(),
+            Arg.Any<string?>(), stored);
+    }
+
+    /// <summary>
+    ///     AB#8037: a kind only belongs to a failure; a completed execution never stores one.
+    /// </summary>
+    [Test]
+    public async Task CompleteExecutionAsync_CompletedWithAStrayFailureKind_StoresNoKind()
+    {
+        var rtAdapter = RtEntityCreator.CreateAdapter();
+        var executionId = Guid.NewGuid().ToString();
+        CommunicationRepository.GetPipelineExecutionAsync(TenantId, executionId)
+            .Returns(RtEntityCreator.CreatePipelineExecution(executionId));
+        var endDto = new PipelineExecutionEndDto
+        {
+            ExecutionId = executionId,
+            Status = PipelineExecutionStatus.Completed,
+            CompletedAt = DateTime.UtcNow,
+            DurationMs = 10,
+            FailureKind = PipelineExecutionFailureKind.OutcomeUnknown
+        };
+
+        await PipelineExecutionService.CompleteExecutionAsync(TenantId, rtAdapter.ToRtEntityId(), endDto);
+
+        await CommunicationRepository.Received(1).UpdatePipelineExecutionAsync(TenantId, executionId,
+            RtPipelineExecutionStatusEnum.Completed, Arg.Any<DateTime?>(), Arg.Any<int?>(), Arg.Any<string?>(),
+            Arg.Any<string?>(), (RtPipelineExecutionFailureKindEnum?)null);
+    }
+
     [Test]
     public async Task CompleteExecutionAsync_Cancelled_StoresInformationEvent()
     {

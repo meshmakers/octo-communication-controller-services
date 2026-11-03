@@ -154,6 +154,27 @@ public class CommunicationControllerOptions
     public int AdapterOfflineReconciliationIntervalMinutes { get; set; } = 5;
 
     /// <summary>
+    /// Gets or sets the delay in seconds before the first background retry of an adapter whose
+    /// pipeline service account could not be provisioned because the identity service did not
+    /// answer (AB#8145). Each further attempt doubles the delay up to
+    /// <see cref="PipelineServiceAccountRetryMaxDelayMinutes" />. Default 30.
+    /// </summary>
+    public int PipelineServiceAccountRetryInitialDelaySeconds { get; set; } = 30;
+
+    /// <summary>
+    /// Gets or sets the upper bound in minutes of the backoff between two provisioning retries
+    /// (AB#8145). Default 5.
+    /// </summary>
+    public int PipelineServiceAccountRetryMaxDelayMinutes { get; set; } = 5;
+
+    /// <summary>
+    /// Gets or sets how many background retries one adapter gets before the controller gives up
+    /// and leaves it to the next tenant load (AB#8145). With the defaults 60 attempts span about
+    /// five hours. Default 60.
+    /// </summary>
+    public int PipelineServiceAccountRetryMaxAttempts { get; set; } = 60;
+
+    /// <summary>
     /// Gets or sets the interval in minutes at which the deployment-site offline-reconciliation
     /// sweep runs (AB#6418). The sweep marks any deployment site persisted as <c>Online</c> that
     /// no live operator connection on this pod owns as <c>Offline</c>, catching the case where the

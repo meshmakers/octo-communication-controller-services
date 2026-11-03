@@ -719,9 +719,10 @@ public interface ICommunicationRepository
     /// <param name="durationMs">Duration in milliseconds</param>
     /// <param name="errorMessage">Error message if failed</param>
     /// <param name="outputData">Optional output data (JSON) from pipeline result</param>
+    /// <param name="failureKind">What a failed execution says about its writes (AB#8037); null when not reported</param>
     Task UpdatePipelineExecutionAsync(string tenantId, string executionId,
         RtPipelineExecutionStatusEnum status, DateTime? completedAt, int? durationMs, string? errorMessage,
-        string? outputData = null);
+        string? outputData = null, RtPipelineExecutionFailureKindEnum? failureKind = null);
 
     /// <summary>
     /// Gets a pipeline execution by its execution ID

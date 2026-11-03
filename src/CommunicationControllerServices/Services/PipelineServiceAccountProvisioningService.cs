@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using Duende.IdentityModel;
@@ -31,7 +32,8 @@ internal class PipelineServiceAccountProvisioningService(
     IServiceProvider serviceProvider,
     ICommunicationEventService eventService,
     IOptions<CommunicationControllerOptions> options,
-    IWorkloadEncryptionService encryptionService)
+    IWorkloadEncryptionService encryptionService,
+    TimeProvider? timeProvider = null)
     : IPipelineServiceAccountProvisioningService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
@@ -74,10 +76,140 @@ internal class PipelineServiceAccountProvisioningService(
     /// Bounds how long one adapter's identity round trip may take. Deliberately a plain
     /// <c>GetResponse</c> with a timeout instead of <c>GetResponseWithRetry</c> (5 × 30 s): this runs
     /// on the tenant-start path, and a retry storm against an identity service that is still coming
-    /// up would serialise into the cold start. The sweep is idempotent and re-runs on every tenant
-    /// load, so a missed pass costs nothing but a delay.
+    /// up would serialise into the cold start. The startup sweep therefore stays single-shot.
+    /// AB#8145: a failure because identity does not answer (timeout, no route) is no longer left to
+    /// "the next tenant load" — after a release there is none. The adapter is remembered and
+    /// retried in the background (<see cref="RetryPendingAsync" />, driven by
+    /// <c>PipelineServiceAccountProvisioningRetryBackgroundService</c>) with a doubling backoff
+    /// (<see cref="CommunicationControllerOptions.PipelineServiceAccountRetryInitialDelaySeconds" /> up to
+    /// <see cref="CommunicationControllerOptions.PipelineServiceAccountRetryMaxDelayMinutes" />) until it
+    /// succeeds, the adapter is gone, identity refuses, or the attempt budget is spent.
     /// </summary>
     private static readonly TimeSpan IdentityCommandTimeout = TimeSpan.FromSeconds(30);
+
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
+    /// <summary>
+    /// AB#8145: adapters whose provisioning failed because identity was unreachable. Process-local
+    /// on purpose — a restarted controller runs the startup sweep again.
+    /// </summary>
+    private readonly ConcurrentDictionary<(string TenantId, OctoObjectId AdapterRtId), PendingRetry> _pendingRetries =
+        new();
+
+    private sealed record PendingRetry(RtAdapter Adapter, int Attempts, DateTimeOffset NextAttemptAt);
+
+    /// <inheritdoc />
+    public int PendingRetryCount => _pendingRetries.Count;
+
+    /// <summary>
+    /// Delay before attempt number <paramref name="attempt" /> (1-based): initial delay doubled per
+    /// attempt, capped at the configured maximum.
+    /// </summary>
+    internal TimeSpan GetRetryDelay(int attempt)
+    {
+        var initial = TimeSpan.FromSeconds(Math.Max(1, options.Value.PipelineServiceAccountRetryInitialDelaySeconds));
+        var max = TimeSpan.FromMinutes(Math.Max(1, options.Value.PipelineServiceAccountRetryMaxDelayMinutes));
+        var factor = Math.Pow(2, Math.Min(Math.Max(attempt - 1, 0), 20));
+        var delay = TimeSpan.FromTicks((long)Math.Min(initial.Ticks * factor, max.Ticks));
+        return delay > max ? max : delay;
+    }
+
+    /// <inheritdoc />
+    public async Task<int> RetryPendingAsync(CancellationToken cancellationToken)
+    {
+        var retried = 0;
+        foreach (var (key, pending) in _pendingRetries.ToArray())
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+
+            if (pending.NextAttemptAt > _timeProvider.GetUtcNow())
+            {
+                continue;
+            }
+
+            retried++;
+            try
+            {
+                var current = await FindAdapterAsync(key.TenantId, key.AdapterRtId);
+                if (current == null)
+                {
+                    _pendingRetries.TryRemove(key, out _);
+                    Logger.Info(
+                        "[{TenantId}] Stopped retrying the pipeline service account of adapter '{AdapterName}' ({AdapterRtId}): the adapter or tenant no longer exists",
+                        key.TenantId, pending.Adapter.Name, key.AdapterRtId);
+                    continue;
+                }
+
+                // Provisions, reschedules on another transient failure and clears the entry on success
+                // or permanent refusal — the same path the startup sweep takes.
+                await EnsureAdapterProvisionedAsync(key.TenantId, current);
+            }
+            catch (Exception e)
+            {
+                // Adapter lookup failed (tenant being unloaded): count it as a failed attempt.
+                Logger.Warn(e,
+                    "[{TenantId}] Retry of the pipeline service account of adapter '{AdapterName}' ({AdapterRtId}) could not look up the adapter",
+                    key.TenantId, pending.Adapter.Name, key.AdapterRtId);
+                ScheduleRetry(key.TenantId, pending.Adapter, e.Message);
+            }
+        }
+
+        return retried;
+    }
+
+    private async Task<RtAdapter?> FindAdapterAsync(string tenantId, OctoObjectId adapterRtId)
+    {
+        var adapters = await communicationRepository.GetAdaptersAsync(tenantId);
+        return adapters.FirstOrDefault(a => a.RtId == adapterRtId);
+    }
+
+    private void ScheduleRetry(string tenantId, RtAdapter adapter, string reason)
+    {
+        var key = (tenantId, adapter.RtId);
+        var attempts = _pendingRetries.TryGetValue(key, out var existing) ? existing.Attempts + 1 : 1;
+        var name = adapter.Name ?? adapter.RtId.ToString();
+
+        if (attempts > Math.Max(1, options.Value.PipelineServiceAccountRetryMaxAttempts))
+        {
+            _pendingRetries.TryRemove(key, out _);
+            Logger.Warn(
+                "[{TenantId}] Giving up background provisioning of the pipeline service account of adapter '{AdapterName}' ({AdapterRtId}) after {Attempts} attempts; the next tenant load (clearCache) retries",
+                tenantId, name, adapter.RtId, attempts - 1);
+            return;
+        }
+
+        var nextAttemptAt = _timeProvider.GetUtcNow() + GetRetryDelay(attempts);
+        _pendingRetries[key] = new PendingRetry(adapter, attempts, nextAttemptAt);
+        Logger.Warn(
+            "[{TenantId}] Pipeline service account of adapter '{AdapterName}' ({AdapterRtId}) is not provisioned yet (attempt {Attempts}): {Reason}. Next retry at {NextAttemptAt:O}",
+            tenantId, name, adapter.RtId, attempts, reason, nextAttemptAt);
+    }
+
+    private async Task NoteRecoveredAsync(string tenantId, RtAdapter adapter)
+    {
+        if (!_pendingRetries.TryRemove((tenantId, adapter.RtId), out var pending))
+        {
+            return;
+        }
+
+        var name = adapter.Name ?? adapter.RtId.ToString();
+        Logger.Info(
+            "[{TenantId}] Pipeline service account of adapter '{AdapterName}' ({AdapterRtId}) was provisioned by a background retry after {Attempts} failed attempt(s)",
+            tenantId, name, adapter.RtId, pending.Attempts);
+        try
+        {
+            await eventService.StoreInformationEventAsync(tenantId,
+                $"The pipeline service account of adapter '{name}' was provisioned by a background retry after {pending.Attempts} failed attempt(s); deploying its pipelines is possible again.",
+                adapter.ToRtEntityId());
+        }
+        catch (Exception eventException)
+        {
+            Logger.Warn(eventException, "[{TenantId}] Could not store the service-account recovery event", tenantId);
+        }
+    }
 
     /// <inheritdoc />
     public async Task<PipelineServiceAccountProvisioningReport> EnsureTenantProvisionedAsync(string tenantId)
@@ -139,10 +271,22 @@ internal class PipelineServiceAccountProvisioningService(
         try
         {
             var result = await ReconcileAdapterAsync(tenantId, adapter, ServiceAccountReconcileContext.System);
+            await NoteRecoveredAsync(tenantId, adapter);
             return result.Outcome;
         }
         catch (Exception e)
         {
+            var transient = e is IdentityUnavailableException;
+            if (transient)
+            {
+                ScheduleRetry(tenantId, adapter, e.Message);
+            }
+            else
+            {
+                // A permanent refusal (or any non-transport error) is not retried in a loop.
+                _pendingRetries.TryRemove((tenantId, adapter.RtId), out _);
+            }
+
             // Never throws: the caller is a startup path, and the deploy guard already refuses the
             // pipelines of an unprovisioned adapter with an actionable message. Loud (Error log +
             // persistent tenant event) rather than fatal — an operator must be able to see WHY a
@@ -155,7 +299,10 @@ internal class PipelineServiceAccountProvisioningService(
             {
                 await eventService.StoreErrorEventAsync(tenantId,
                     $"Could not provision the pipeline service account of adapter '{adapter.Name ?? adapter.RtId.ToString()}' (AB#5027): {e.Message}. " +
-                    "Until it exists, deploying any pipeline of this adapter is refused. The next tenant load retries automatically; " +
+                    "Until it exists, deploying any pipeline of this adapter is refused. " +
+                    (transient
+                        ? "The controller retries in the background with backoff (AB#8145) and records an event once it succeeds; "
+                        : "The next tenant load retries automatically; ") +
                     "to retry now, re-run the tenant setup (PUT {systemTenant}/v1/tenants/clearCache?childTenantId=<tenant> on the asset repository).");
             }
             catch (Exception eventException)
@@ -1044,9 +1191,21 @@ internal class PipelineServiceAccountProvisioningService(
         var commandClient = scope.ServiceProvider
             .GetRequiredService<ICommandClient<CreateIdentityDataCommandRequest>>();
 
-        var response = await commandClient
-            .GetResponse<EnumCommandResponse<CreateIdentityDataResult>>(request, CancellationToken.None,
-                IdentityCommandTimeout);
+        EnumCommandResponse<CreateIdentityDataResult> response;
+        try
+        {
+            response = await commandClient
+                .GetResponse<EnumCommandResponse<CreateIdentityDataResult>>(request, CancellationToken.None,
+                    IdentityCommandTimeout);
+        }
+        catch (Exception e)
+        {
+            // AB#8145: the identity service did not answer (timeout, no route / exchange missing while
+            // it restarts). Distinct from a refusal: identity can answer later, so this is retried.
+            throw new IdentityUnavailableException(
+                $"[{tenantId}] The identity service did not answer the request to create the pipeline service account client '{clientId}': {e.GetType().Name}: {e.Message}",
+                e);
+        }
 
         switch (response.Response)
         {
@@ -1306,3 +1465,10 @@ internal class PipelineServiceAccountProvisioningService(
             .TrimEnd('=');
     }
 }
+
+/// <summary>
+/// AB#8145: the identity service did not answer a <c>CreateIdentityDataCommandRequest</c> (timeout,
+/// no route). Transient — the only failure the provisioning service retries in the background.
+/// </summary>
+internal sealed class IdentityUnavailableException(string message, Exception inner)
+    : InvalidOperationException(message, inner);
