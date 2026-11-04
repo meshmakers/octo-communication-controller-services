@@ -935,6 +935,15 @@ internal class AdapterService(
                     .Select(running => persistedById.GetValueOrDefault(running.PipelineRtEntityId) ?? running)
                     .ToList();
 
+                // AB#6632: and a pipeline the repository holds as Deployed/Pending that the adapter does not
+                // run yet is added. A blueprint seeds pipelines with DeploymentState Deployed behind the
+                // controller's back, after the adapter has registered (registration only hands out what is
+                // persisted at that moment); nothing pushed them, so their routes answered 404 until someone ran
+                // DeployDataFlow by hand. Registration already treats Deployed/Pending as "the adapter runs
+                // this"; the refresh makes the live adapter converge to the same set.
+                var runningIds = adapter.Configuration.Pipelines.Select(p => p.PipelineRtEntityId).ToHashSet();
+                merged.AddRange(persisted.Pipelines.Where(p => !runningIds.Contains(p.PipelineRtEntityId)));
+
                 var candidate = new AdapterConfigurationDto(adapter.AdapterRtEntityId,
                     adapter.Configuration.AdapterConfiguration, merged);
                 if (candidate.Equals(adapter.Configuration))
@@ -943,7 +952,7 @@ internal class AdapterService(
                 }
 
                 Logger.Info(
-                    "[{TenantId}] Adapter '{AdapterRtId}' runs {ChangedCount} pipeline(s) whose persisted definition changed; pushing the refreshed configuration",
+                    "[{TenantId}] Adapter '{AdapterRtId}': {ChangedCount} pipeline(s) changed, were removed or are persisted as deployed but not yet running; pushing the refreshed configuration",
                     tenantId, adapter.AdapterRtEntityId,
                     merged.Count(m => !adapter.Configuration.Pipelines.Contains(m)) +
                     adapter.Configuration.Pipelines.Count(r => !existing.Contains(r.PipelineRtEntityId)));

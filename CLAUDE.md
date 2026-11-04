@@ -1587,7 +1587,8 @@ the adapter **already runs** from the repository and, if any differs from what w
 through `UpdateAdapterConfigurationAsync` (same path as `DeployDataFlow`; the adapter's selective update re-registers
 only the pipelines whose definition changed). Deliberate limits:
 
-- only pipelines already in the adapter's cached configuration are refreshed - nothing is deployed that was not;
+- a changed definition replaces the running one (AB#6631); what the repository holds as Deployed/Pending but the
+  adapter does not run yet is added (AB#6632, see below);
 - the adapter's own configuration string is kept: an update resets it to the seed (EDA credentials) and the operator
   restores it afterwards, a push in between would hand the live adapter the reset values;
 - a pipeline the adapter runs that the repository no longer lists for it (deleted, disabled, no definition, moved to
@@ -1596,6 +1597,18 @@ only the pipelines whose definition changed). Deliberate limits:
 - adapters without a connection (offline, leased) are skipped; they get the persisted state on registration or lease.
 
 Tests: `Services/AdapterServiceTests/RefreshDeployedPipelinesAsyncTests`, `Consumers/BlueprintAppliedConsumerTests`.
+
+### Blueprint-seeded pipelines are pushed (AB#6632)
+
+A blueprint seeds `Pipeline` entities with `DeploymentState: Deployed` (the install path writes entities, it never
+deploys). `RegisterAdapterAsync` hands an adapter the pipelines persisted as Deployed/Pending *at registration*; the
+Mesh Adapter registers when the tenant's communication is enabled, i.e. BEFORE the blueprint installs. The seeded
+pipelines were therefore Deployed on paper and unknown to the adapter: their `FromHttpRequest` routes answered 404
+until `DeployDataFlow` was run by hand (energy-community `register-metering-point`, `meter-readings`,
+`community-balance`, ...). The same refresh as AB#6631 closes it: after `BlueprintApplied`/`BlueprintUpdated`
+`RefreshDeployedPipelinesAsync` makes each connected adapter converge to the persisted Deployed/Pending set (add,
+replace, drop). An adapter that (re)connects later still gets that set from registration. Pipelines in other states
+(Undeployed, Error) are never added.
 
 ### Registration vs. tenant pre/post-update — the deaf adapter (AB#5827)
 

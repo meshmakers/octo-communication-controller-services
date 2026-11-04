@@ -13,7 +13,8 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 /// <c>FromHttpRequest</c> trigger (with its <c>requiredRoles</c> / <c>allowAnonymous</c>) when the pipeline is
 /// pushed, so the live route kept the authorization of the OLD definition until the data flow was redeployed
 /// by hand. <see cref="AdapterService.RefreshDeployedPipelinesAsync" /> pushes the changed definitions of the
-/// pipelines an adapter already runs.
+/// pipelines an adapter already runs (AB#6631), drops the ones that are gone and adds the ones a blueprint seeded as
+/// Deployed that the adapter does not run yet (AB#6632).
 /// </summary>
 internal class RefreshDeployedPipelinesAsyncTests : AdapterServiceTestsBase
 {
@@ -96,22 +97,67 @@ internal class RefreshDeployedPipelinesAsyncTests : AdapterServiceTestsBase
 
     [Test]
     [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]
-    public async Task PipelineThePersistedStateCallsDeployedButTheAdapterDoesNotRun_IsNotDeployed()
+    public async Task PipelinePersistedAsDeployedButNotRunning_IsPushedToTheAdapter()
     {
-        // Refreshing is not deploying: a pipeline the adapter has never been given stays where it is.
+        // AB#6632: a blueprint seeds pipelines as Deployed after the adapter registered; the adapter never
+        // received them, so their routes answered 404 until DeployDataFlow was run by hand.
         var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var running = RtEntityCreator.CreatePipeline(OldDefinition);
-        var notRunning = RtEntityCreator.CreatePipeline("triggers: [{type: FromHttpRequest@2}]");
+        var seeded = RtEntityCreator.CreatePipeline("triggers: [{type: FromHttpRequest@2}]");
         var rtAdapter = await ArrangeAdapterRunningAsync(ConnectionId, rtDataFlow, running, "adapter-json",
-            RtEntityCreator.CreatePipelineFrom(running, NewDefinition), notRunning);
+            RtEntityCreator.CreatePipelineFrom(running), seeded);
 
-        await AdapterService.RefreshDeployedPipelinesAsync(TenantId);
+        var refreshed = await AdapterService.RefreshDeployedPipelinesAsync(TenantId);
 
+        await Assert.That(refreshed).IsEqualTo(1);
         await AdapterHubCallbacks.Received(1).AdapterConfigurationUpdatedAsync(TenantId,
             Arg.Is<AdapterConfigurationDto>(c =>
-                c.Pipelines.Count == 1 && c.Pipelines.Single().PipelineRtEntityId == running.ToRtEntityId()));
+                c.Pipelines.Count == 2 &&
+                c.Pipelines.Any(p => p.PipelineRtEntityId == running.ToRtEntityId()) &&
+                c.Pipelines.Any(p => p.PipelineRtEntityId == seeded.ToRtEntityId())));
         await Assert.That(AdapterTenant.AdapterById[rtAdapter.ToRtEntityId()].Configuration.Pipelines.Count)
-            .IsEqualTo(1);
+            .IsEqualTo(2);
+    }
+
+    [Test]
+    [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]
+    public async Task AdapterRunningNothing_GetsTheSeededPipelines()
+    {
+        // The fresh-install case: the adapter registered with an empty configuration, then the blueprint
+        // seeded its pipelines.
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
+        var rtAdapter = RtEntityCreator.CreateAdapter();
+        rtAdapter.Configuration = "adapter-json";
+        InitAdapterConfiguration(rtAdapter, rtDataFlow, []);
+        var pushed = await AdapterService.GetAdapterConfigurationAsync(TenantId, rtAdapter.ToRtEntityId(), true, true);
+        AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, pushed);
+        var seeded = RtEntityCreator.CreatePipeline(NewDefinition);
+        InitAdapterConfiguration(rtAdapter, rtDataFlow, [seeded]);
+
+        var refreshed = await AdapterService.RefreshDeployedPipelinesAsync(TenantId);
+
+        await Assert.That(refreshed).IsEqualTo(1);
+        await AdapterHubCallbacks.Received(1).AdapterConfigurationUpdatedAsync(TenantId,
+            Arg.Is<AdapterConfigurationDto>(c =>
+                c.Pipelines.Count == 1 && c.Pipelines.Single().PipelineRtEntityId == seeded.ToRtEntityId()));
+    }
+
+    [Test]
+    [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]
+    public async Task PipelinePersistedAsUndeployed_IsNotPushed()
+    {
+        // Only Deployed/Pending pipelines belong on the adapter; an explicitly undeployed one stays off.
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
+        var running = RtEntityCreator.CreatePipeline(OldDefinition);
+        var undeployed = RtEntityCreator.CreatePipeline("triggers: [{type: FromHttpRequest@2}]");
+        undeployed.DeploymentState = RtDeploymentStateEnum.Undeployed;
+        await ArrangeAdapterRunningAsync(ConnectionId, rtDataFlow, running, "adapter-json",
+            RtEntityCreator.CreatePipelineFrom(running), undeployed);
+
+        var refreshed = await AdapterService.RefreshDeployedPipelinesAsync(TenantId);
+
+        await Assert.That(refreshed).IsEqualTo(0);
+        await AdapterHubCallbacks.DidNotReceiveWithAnyArgs().AdapterConfigurationUpdatedAsync(default!, default!);
     }
 
     [Test]

@@ -186,8 +186,9 @@ public interface IAdapterService
     /// differs from what the controller last pushed (e.g. a blueprint update rewrote the entity in place).
     /// </summary>
     /// <remarks>
-    /// Only pipelines that are already part of the adapter's cached configuration are refreshed; nothing is
-    /// deployed that was not deployed, and the adapter's own configuration string is left as it is. Adapters
+    /// The adapter converges to the pipelines the repository holds as Deployed/Pending: a changed definition is
+    /// replaced (AB#6631), a pipeline that is gone is dropped, and one that a blueprint seeded as Deployed but the
+    /// adapter does not run yet is added (AB#6632). The adapter's own configuration string is left as it is. Adapters
     /// without a live connection (offline, leased) are skipped — they receive the current state when they
     /// register or when the lease is granted.
     /// </remarks>
