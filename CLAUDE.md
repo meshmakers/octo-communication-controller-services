@@ -697,7 +697,7 @@ Model only so far; the controller does not project anything yet.
 | `SecretDefault` | type (final), derived from `System/Entity`, not from a Configuration type | `RtSecretDefault`: `Name`, `Value` (Secret), `SourceTenantId`, `SourceWorkloadRtId`, `LastProjectedAt` | Provisioned by the controller, never author-set; `Value` is platform-only (no tenant pipeline, user or role may reveal it); all attributes except `Value` are `RuntimeState`. Because it is not a Configuration type the controller never ships it to adapters as pipeline configuration |
 
 A Secret attribute takes ownership `Secret` and nothing else (`SecretAttributeValidator` in the engine). Model tests:
-`tests/CommunicationControllerService.Tests/ConstructionKit/SecretDefaultModelTests.cs`.
+`tests/CommunicationControllerService.Tests/Services/SecretDefaultModelTests.cs`.
 
 #### Publishing the CK model: explicit release decision (AB#7432)
 

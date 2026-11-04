@@ -3,7 +3,7 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 
-namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.ConstructionKit;
+namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services;
 
 /// <summary>
 ///     Pins the AB#7243 shape of the System.Communication model: Applications declare SecretDefaults,
