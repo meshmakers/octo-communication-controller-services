@@ -27,4 +27,22 @@ internal static class PipelineExecutionFailureKindMapping
             ? RtPipelineExecutionFailureKindEnum.OutcomeUnknown
             : RtPipelineExecutionFailureKindEnum.Failed;
     }
+
+    /// <summary>
+    ///     The kind to show on the REST pipeline execution (AB#8156): the stored kind of a
+    ///     <see cref="RtPipelineExecutionStatusEnum.Failed" /> execution, null otherwise. Executions that were interrupted
+    ///     or buffered offline never get a kind, so they stay null here.
+    /// </summary>
+    public static PipelineExecutionFailureKind? FromCk(RtPipelineExecutionStatusEnum status,
+        RtPipelineExecutionFailureKindEnum? failureKind)
+    {
+        if (status != RtPipelineExecutionStatusEnum.Failed || failureKind is null)
+        {
+            return null;
+        }
+
+        return failureKind == RtPipelineExecutionFailureKindEnum.OutcomeUnknown
+            ? PipelineExecutionFailureKind.OutcomeUnknown
+            : PipelineExecutionFailureKind.Failed;
+    }
 }

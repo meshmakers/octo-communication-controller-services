@@ -166,6 +166,17 @@ markers). An execution reported by an adapter built before AB#8037 has no kind a
 `*WithoutTheStructuredKind*`), `CompleteExecutionAsyncTests` / `BatchCompleteExecutionAsyncTests` (`*FailureKind*`),
 `LeaseOutcomeAndRequeueTests` (`*UnacknowledgedWrite*`).
 
+**Failure kind on the REST pipeline execution (AB#8156).** An operator without a method call sees the kind too: `PipelineDebugController`
+(`GET .../PipelineDebug/{pipelineRtId}` history and `.../latest`, read by octo-cli `GetPipelineExecutions` /
+`GetLatestPipelineExecution`) returns `PipelineExecutionDataDto.FailureKind` (octo-sdk, `PipelineExecutionFailureKind?`, JSON
+`"failureKind": "OutcomeUnknown" | "Failed"`). `PipelineDebugController.ToExecutionData` maps the persisted execution through
+`PipelineExecutionFailureKindMapping.FromCk`: the kind of a `Failed` execution, `null` for every other status. An execution
+from the in-memory debug cache has no status, so the controller takes the kind of its persisted twin (list: same execution id;
+latest: one `GetPipelineExecutionAsync` lookup, a failed lookup only logs). The field is additive; `PipelineExecutionDto`
+(the controller's own model) carries the same kind. **Known limitation:** executions that were interrupted (controller restart,
+adapter lost) or buffered offline carry no kind - `FailureKind` is `null` and a method caller gets `METHOD_HANDLER_FAILED`.
+Tests: `PipelineDebugControllerFailureKindTests`.
+
 **Sensitive parameters and a sensitive result are refused.** A method with a parameter `sensitive: true` (or of value type
 `Secret`), or with a result marked `sensitive: true`, is **not served by a pipeline** until the retention of pipeline input and
 output is decided (open decisions OD-3, OD-4, OD-9, `methodConsistency.md`): the execution entity stores `InputData` and

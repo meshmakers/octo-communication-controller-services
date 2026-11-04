@@ -56,6 +56,13 @@ public record PipelineExecutionDto
     public string? ErrorMessage { get; init; }
 
     /// <summary>
+    /// What a failed execution says about its writes (AB#8156): <c>OutcomeUnknown</c> when a write was not
+    /// acknowledged and may have taken effect, <c>Failed</c> for an ordinary failure. Null for an execution that
+    /// did not fail, for an adapter that reported no kind, and for interrupted or offline-buffered executions.
+    /// </summary>
+    public RtPipelineExecutionFailureKindEnum? FailureKind { get; init; }
+
+    /// <summary>
     /// Creates a DTO from the entity
     /// </summary>
     public static PipelineExecutionDto FromEntity(RtPipelineExecution entity, RtEntityId pipelineRtEntityId, RtEntityId adapterRtEntityId)
@@ -70,7 +77,8 @@ public record PipelineExecutionDto
             StartedAt = entity.StartedAt,
             CompletedAt = entity.CompletedAt,
             DurationMs = (int?)entity.DurationMs,
-            ErrorMessage = entity.ErrorMessage
+            ErrorMessage = entity.ErrorMessage,
+            FailureKind = entity.Status == RtPipelineExecutionStatusEnum.Failed ? entity.FailureKind : null
         };
     }
 }

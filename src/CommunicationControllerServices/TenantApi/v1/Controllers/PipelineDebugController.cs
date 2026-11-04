@@ -5,6 +5,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -75,17 +76,7 @@ public class PipelineDebugController : ControllerBase
             {
                 var dbExecutions = await _communicationRepository.GetPipelineExecutionsAsync(
                     tenantId, pipelineRtEntityId, null, null, 0, 20);
-                persistedExecutions = dbExecutions.Select(e => new PipelineExecutionDataDto
-                {
-                    Id = Guid.TryParse(e.ExecutionId, out var id) ? id : Guid.Empty,
-                    // AB#4924: a Queued execution has no StartedAt; its QueuedAt is the moment it
-                    // became visible, which is what the history should order it by.
-                    DateTime = e.StartedAt ?? e.QueuedAt ?? DateTime.MinValue,
-                    Status = (PipelineExecutionStatus)(int)e.Status,
-                    DurationMs = e.DurationMs,
-                    ErrorMessage = e.ErrorMessage,
-                    HasDebugData = false
-                });
+                persistedExecutions = dbExecutions.Select(ToExecutionData).ToList();
             }
             catch (Exception ex)
             {
@@ -94,6 +85,16 @@ public class PipelineDebugController : ControllerBase
             }
 
             // Merge: debug executions take priority over persisted ones (by ID)
+            // The debug cache knows no status; keep the failure kind (AB#8156) of the persisted twin.
+            var persistedKinds = persistedExecutions
+                .Where(p => p.FailureKind is not null)
+                .GroupBy(p => p.Id)
+                .ToDictionary(g => g.Key, g => g.First().FailureKind);
+            debugExecutions = debugExecutions.Select(d =>
+                d.FailureKind is null && persistedKinds.TryGetValue(d.Id, out var kind)
+                    ? d with { FailureKind = kind }
+                    : d).ToList();
+
             var debugIds = new HashSet<Guid>(debugExecutions.Select(d => d.Id));
             var merged = debugExecutions
                 .Concat(persistedExecutions.Where(p => !debugIds.Contains(p.Id)))
@@ -130,7 +131,7 @@ public class PipelineDebugController : ControllerBase
         try
         {
             var execution = await _pipelineDebugService.GetLatestPipelineExecutionAsync(tenantId, pipelineRtEntityId);
-            return Ok(execution);
+            return Ok(await WithPersistedFailureKindAsync(tenantId, execution));
         }
         catch (PipelineDebugInformationNotFoundException)
         {
@@ -142,16 +143,7 @@ public class PipelineDebugController : ControllerBase
                 var latest = persistedExecutions.FirstOrDefault();
                 if (latest != null)
                 {
-                    return Ok(new PipelineExecutionDataDto
-                    {
-                        Id = Guid.TryParse(latest.ExecutionId, out var id) ? id : Guid.Empty,
-                        // AB#4924: see above — fall back to the queue time for a not-yet-started entry.
-                        DateTime = latest.StartedAt ?? latest.QueuedAt ?? DateTime.MinValue,
-                        Status = (PipelineExecutionStatus)(int)latest.Status,
-                        DurationMs = latest.DurationMs,
-                        ErrorMessage = latest.ErrorMessage,
-                        HasDebugData = false
-                    });
+                    return Ok(ToExecutionData(latest));
                 }
                 return NotFound(new ErrorResponse { ErrorMessage = "No executions found" });
             }
@@ -246,6 +238,50 @@ public class PipelineDebugController : ControllerBase
         {
             _logger.LogError(e, "Error while getting pipeline executions");
             return StatusCode(500, new ErrorResponse { ErrorMessage = e.Message});
+        }
+    }
+
+    /// <summary>
+    /// Maps a persisted execution onto the REST shape. <c>FailureKind</c> (AB#8156) is set only for a failed
+    /// execution that stored one.
+    /// </summary>
+    internal static PipelineExecutionDataDto ToExecutionData(RtPipelineExecution e)
+    {
+        return new PipelineExecutionDataDto
+        {
+            Id = Guid.TryParse(e.ExecutionId, out var id) ? id : Guid.Empty,
+            // AB#4924: a Queued execution has no StartedAt; its QueuedAt is the moment it
+            // became visible, which is what the history should order it by.
+            DateTime = e.StartedAt ?? e.QueuedAt ?? DateTime.MinValue,
+            Status = (PipelineExecutionStatus)(int)e.Status,
+            DurationMs = e.DurationMs,
+            ErrorMessage = e.ErrorMessage,
+            FailureKind = PipelineExecutionFailureKindMapping.FromCk(e.Status, e.FailureKind),
+            HasDebugData = false
+        };
+    }
+
+    // The debug cache carries no status and no failure kind; look the kind up on the persisted execution.
+    private async Task<PipelineExecutionDataDto> WithPersistedFailureKindAsync(string tenantId,
+        PipelineExecutionDataDto execution)
+    {
+        if (execution.FailureKind is not null)
+        {
+            return execution;
+        }
+
+        try
+        {
+            var persisted = await _communicationRepository.GetPipelineExecutionAsync(tenantId, execution.Id.ToString());
+            var kind = persisted is null
+                ? null
+                : PipelineExecutionFailureKindMapping.FromCk(persisted.Status, persisted.FailureKind);
+            return kind is null ? execution : execution with { FailureKind = kind };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load the failure kind of execution {ExecutionId}", execution.Id);
+            return execution;
         }
     }
 }
