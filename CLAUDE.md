@@ -688,7 +688,7 @@ Model definitions are in `src/SystemCommunicationCkModel/ConstructionKit/`:
 
 #### Platform secret defaults (System.Communication 4.15.0, AB#7243)
 
-Model only so far; the controller does not project anything yet.
+System.Communication 4.15.0 defines the model contract (record, attribute, type). The projection into tenants is the controller's job (AB#7244, AB#7245) and is not part of this model version.
 
 | Element | Kind | Generated class / member | Rule |
 |---------|------|--------------------------|------|

@@ -24,7 +24,7 @@ always the Application's own tenant plus its whole subtree). The new final type 
 `${System}/Entity`, deliberately not from a Configuration type) is the platform-owned place in a served tenant: provisioned by
 the controller, never author-set, `Value` platform-only (no tenant pipeline, user or role may reveal it); every attribute
 except `Value` is runtime state. `SecretDefaults` is not a ValueOverride and never reaches Helm values or the pod. This
-release only changes the model; the controller logic follows in later stories.
+version defines the model contract (record, attribute, type); the projection into tenants is the controller's job (AB#7244, AB#7245) and is not part of this model version.
 
 Compatibility: additive only (new record, new type, new optional attribute on `Application`), a minor bump over 4.14.0.
 Dependents with a range `System.Communication-[4.x,5.0)` are unaffected, an Application without `SecretDefaults` imports
