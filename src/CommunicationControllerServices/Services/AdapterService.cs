@@ -969,12 +969,17 @@ internal class AdapterService(
 
         if (refreshed.Count > 0)
         {
-            await UpdateAdapterConfigurationAsync(tenantId, refreshed);
-            await eventService.StoreInformationEventAsync(tenantId,
-                $"Pipeline definitions changed in the repository; refreshed configuration pushed to {refreshed.Count} adapter(s).");
+            var pushed = await UpdateAdapterConfigurationAsync(tenantId, refreshed, isolateFailures: true);
+            if (pushed > 0)
+            {
+                await eventService.StoreInformationEventAsync(tenantId,
+                    $"Pipeline definitions changed in the repository; refreshed configuration pushed to {pushed} adapter(s).");
+            }
+
+            return pushed;
         }
 
-        return refreshed.Count;
+        return 0;
     }
 
     public async Task DeployAdapterConfigurationAsync(string tenantId, RtEntityId adapterRtEntityId)
@@ -2351,29 +2356,56 @@ internal class AdapterService(
             tenantId, serviceAccount.RtWellKnownName, unknownPlaceholder);
     }
 
-    private async Task UpdateAdapterConfigurationAsync(string tenantId,
-        List<AdapterConfigurationDto> adapterConfigurations)
+    /// <summary>
+    /// Pushes the configurations to the adapters. The cache takes the new configuration only after the push
+    /// succeeded (AB#6631): an adapter whose push failed keeps the configuration it really runs, so the next
+    /// refresh sees the difference and retries it.
+    /// </summary>
+    /// <param name="tenantId">The tenant.</param>
+    /// <param name="adapterConfigurations">The configurations to push.</param>
+    /// <param name="isolateFailures">
+    /// When true a failing push is logged and the remaining adapters are still served (refresh path);
+    /// when false the exception propagates to the caller (deploy/undeploy paths keep failing loudly).
+    /// </param>
+    /// <returns>The number of adapters the configuration was pushed to.</returns>
+    private async Task<int> UpdateAdapterConfigurationAsync(string tenantId,
+        List<AdapterConfigurationDto> adapterConfigurations, bool isolateFailures = false)
     {
+        var pushed = 0;
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
             foreach (var adapterConfigurationDto in adapterConfigurations)
             {
-                if (adapterTenant.AdapterById.TryGetValue(adapterConfigurationDto.AdapterRtEntityId, out var adapter))
+                if (!adapterTenant.AdapterById.TryGetValue(adapterConfigurationDto.AdapterRtEntityId, out var adapter))
                 {
-                    adapter.UpdateConfiguration(tenantId, adapterConfigurationDto);
+                    continue;
+                }
 
+                try
+                {
                     await communicationRepository.SetAdapterConfigurationStateAsync(tenantId,
                         adapter.AdapterRtEntityId, RtConfigurationStateEnum.Pending, null);
-                    foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
+                    foreach (var pipelineConfigurationDto in adapterConfigurationDto.Pipelines)
                     {
                         await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
                             pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending, null);
                     }
 
                     await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, adapterConfigurationDto);
+
+                    adapter.UpdateConfiguration(tenantId, adapterConfigurationDto);
+                    pushed++;
+                }
+                catch (Exception e) when (isolateFailures)
+                {
+                    Logger.Warn(e,
+                        "[{TenantId}] Adapter '{AdapterRtId}': pushing the refreshed configuration failed; the next refresh retries",
+                        tenantId, adapter.AdapterRtEntityId);
                 }
             }
         }
+
+        return pushed;
     }
 
     private static string? GeneratePipelineMessages(DeploymentResult deploymentResult,

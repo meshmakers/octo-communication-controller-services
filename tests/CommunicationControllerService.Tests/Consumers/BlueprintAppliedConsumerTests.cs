@@ -59,8 +59,8 @@ internal class BlueprintAppliedConsumerTests
     [Test]
     public async Task BlueprintThatOnlyDeleted_DoesNotSweep()
     {
-        // A delete cannot have created an adapter or a service account — skipping keeps the bus
-        // consumer cheap for uninstalls.
+        // A delete cannot have created an adapter or a service account — skipping the sweep keeps the bus
+        // consumer cheap for uninstalls (the pipeline refresh still runs, AB#6631).
         await CreateSut().ConsumeAsync(Context(added: 0, updated: 0, deleted: 5));
 
         await _provisioning.DidNotReceiveWithAnyArgs().EnsureTenantProvisionedAsync(default!);
@@ -105,11 +105,31 @@ internal class BlueprintAppliedConsumerTests
     }
 
     [Test]
-    public async Task BlueprintUpdateThatOnlyDeleted_DoesNotRefresh()
+    public async Task BlueprintUpdateThatOnlyDeleted_RefreshesSoRemovedRoutesStopAnswering()
     {
+        // A removed pipeline must be dropped from the adapter; the service account sweep is not needed.
         await CreateSut().ConsumeAsync(UpdatedContext(added: 0, updated: 0, deleted: 2));
 
+        await _adapterService.Received(1).RefreshDeployedPipelinesAsync(TenantId);
+        await _provisioning.DidNotReceiveWithAnyArgs().EnsureTenantProvisionedAsync(default!);
+    }
+
+    [Test]
+    public async Task BlueprintApplyThatOnlyDeleted_Refreshes()
+    {
+        await CreateSut().ConsumeAsync(Context(added: 0, updated: 0, deleted: 1));
+
+        await _adapterService.Received(1).RefreshDeployedPipelinesAsync(TenantId);
+    }
+
+    [Test]
+    public async Task BlueprintThatTouchedNothing_SkipsEverything()
+    {
+        await CreateSut().ConsumeAsync(UpdatedContext(added: 0, updated: 0, deleted: 0));
+        await CreateSut().ConsumeAsync(Context(added: 0, updated: 0, deleted: 0));
+
         await _adapterService.DidNotReceiveWithAnyArgs().RefreshDeployedPipelinesAsync(default!);
+        await _provisioning.DidNotReceiveWithAnyArgs().EnsureTenantProvisionedAsync(default!);
     }
 
     [Test]

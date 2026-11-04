@@ -284,4 +284,52 @@ internal class RefreshDeployedPipelinesAsyncTests : AdapterServiceTestsBase
         await AdapterHubCallbacks.Received(1).AdapterConfigurationUpdatedAsync(TenantId,
             Arg.Is<AdapterConfigurationDto>(c => c.AdapterRtEntityId == adapterB.ToRtEntityId()));
     }
+
+    [Test]
+    [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]
+    public async Task PushThrowing_DoesNotStopTheOthers_AndIsNotCounted()
+    {
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
+        var runningA = RtEntityCreator.CreatePipeline(OldDefinition);
+        var runningB = RtEntityCreator.CreatePipeline(OldDefinition);
+        var adapterA = await ArrangeAdapterRunningAsync("connA", rtDataFlow, runningA, "a",
+            RtEntityCreator.CreatePipelineFrom(runningA, NewDefinition));
+        var adapterB = await ArrangeAdapterRunningAsync("connB", rtDataFlow, runningB, "b",
+            RtEntityCreator.CreatePipelineFrom(runningB, NewDefinition));
+        AdapterHubCallbacks.AdapterConfigurationUpdatedAsync(TenantId,
+                Arg.Is<AdapterConfigurationDto>(c => c.AdapterRtEntityId == adapterA.ToRtEntityId()))
+            .Returns(Task.FromException(new InvalidOperationException("hub send failed")));
+
+        var refreshed = await AdapterService.RefreshDeployedPipelinesAsync(TenantId);
+
+        await Assert.That(refreshed).IsEqualTo(1);
+        await AdapterHubCallbacks.Received(1).AdapterConfigurationUpdatedAsync(TenantId,
+            Arg.Is<AdapterConfigurationDto>(c => c.AdapterRtEntityId == adapterB.ToRtEntityId()));
+        await Assert.That(AdapterTenant.AdapterById[adapterB.ToRtEntityId()].Configuration.Pipelines.Single()
+            .NodeConfiguration).IsEqualTo(NewDefinition);
+        // The failed adapter still holds what it really runs.
+        await Assert.That(AdapterTenant.AdapterById[adapterA.ToRtEntityId()].Configuration.Pipelines.Single()
+            .NodeConfiguration).IsEqualTo(OldDefinition);
+    }
+
+    [Test]
+    [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]
+    public async Task AdapterWhosePushFailed_IsRetriedByTheNextRefresh()
+    {
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
+        var running = RtEntityCreator.CreatePipeline(OldDefinition);
+        var rtAdapter = await ArrangeAdapterRunningAsync(ConnectionId, rtDataFlow, running, "adapter-json",
+            RtEntityCreator.CreatePipelineFrom(running, NewDefinition));
+        AdapterHubCallbacks.AdapterConfigurationUpdatedAsync(TenantId, Arg.Any<AdapterConfigurationDto>())
+            .Returns(Task.FromException(new InvalidOperationException("hub send failed")),
+                Task.CompletedTask);
+
+        var first = await AdapterService.RefreshDeployedPipelinesAsync(TenantId);
+        var second = await AdapterService.RefreshDeployedPipelinesAsync(TenantId);
+
+        await Assert.That(first).IsEqualTo(0);
+        await Assert.That(second).IsEqualTo(1);
+        await Assert.That(AdapterTenant.AdapterById[rtAdapter.ToRtEntityId()].Configuration.Pipelines.Single()
+            .NodeConfiguration).IsEqualTo(NewDefinition);
+    }
 }

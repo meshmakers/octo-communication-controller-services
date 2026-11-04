@@ -55,50 +55,56 @@ internal class BlueprintAppliedConsumer(
     {
         var message = context.Message;
         return ReconcileAsync(message.TenantId, message.BlueprintId, message.EntitiesAdded,
-            message.EntitiesUpdated);
+            message.EntitiesUpdated, message.EntitiesDeleted);
     }
 
     public Task ConsumeAsync(IDistributedContext<BlueprintUpdated> context)
     {
         var message = context.Message;
         return ReconcileAsync(message.TenantId, message.BlueprintId, message.EntitiesAdded,
-            message.EntitiesUpdated);
+            message.EntitiesUpdated, message.EntitiesDeleted);
     }
 
-    private async Task ReconcileAsync(string tenantId, string blueprintId, int entitiesAdded, int entitiesUpdated)
+    private async Task ReconcileAsync(string tenantId, string blueprintId, int entitiesAdded, int entitiesUpdated,
+        int entitiesDeleted)
     {
         // A blueprint that touched nothing cannot have created an adapter or a service account, nor
-        // changed a pipeline definition.
-        if (entitiesAdded == 0 && entitiesUpdated == 0)
+        // changed or removed a pipeline definition. A delete-only update still matters: a removed
+        // pipeline must stop answering on the adapter (AB#6631).
+        if (entitiesAdded == 0 && entitiesUpdated == 0 && entitiesDeleted == 0)
         {
             return;
         }
 
         logger.LogDebug(
-            "Blueprint '{BlueprintId}' applied to tenant '{TenantId}' ({EntitiesAdded} added, {EntitiesUpdated} updated) — reconciling pipeline service accounts and deployed pipelines",
-            blueprintId, tenantId, entitiesAdded, entitiesUpdated);
+            "Blueprint '{BlueprintId}' applied to tenant '{TenantId}' ({EntitiesAdded} added, {EntitiesUpdated} updated, {EntitiesDeleted} deleted) — reconciling pipeline service accounts and deployed pipelines",
+            blueprintId, tenantId, entitiesAdded, entitiesUpdated, entitiesDeleted);
 
-        try
+        // A delete cannot have created an adapter or a service account; skip the sweep then.
+        if (entitiesAdded > 0 || entitiesUpdated > 0)
         {
-            // EnsureTenantProvisionedAsync is contractually non-throwing and per-adapter isolated;
-            // it also tolerates tenants where Communication is not enabled (the adapter lookup
-            // fails and is reported, not thrown). The belt-and-braces catch mirrors
-            // DefaultConfigurationCreatorService.EnsurePipelineServiceAccountsAsync — a broadcast
-            // consumer must never fault the bus over one tenant.
-            var report = await serviceAccountProvisioningService.EnsureTenantProvisionedAsync(tenantId);
-
-            if (report.HasChanges)
+            try
             {
-                logger.LogInformation(
-                    "Pipeline service accounts reconciled after blueprint '{BlueprintId}' on tenant '{TenantId}': {Provisioned} provisioned, {Repaired} repaired",
-                    blueprintId, tenantId, report.Provisioned, report.Repaired);
+                // EnsureTenantProvisionedAsync is contractually non-throwing and per-adapter isolated;
+                // it also tolerates tenants where Communication is not enabled (the adapter lookup
+                // fails and is reported, not thrown). The belt-and-braces catch mirrors
+                // DefaultConfigurationCreatorService.EnsurePipelineServiceAccountsAsync — a broadcast
+                // consumer must never fault the bus over one tenant.
+                var report = await serviceAccountProvisioningService.EnsureTenantProvisionedAsync(tenantId);
+
+                if (report.HasChanges)
+                {
+                    logger.LogInformation(
+                        "Pipeline service accounts reconciled after blueprint '{BlueprintId}' on tenant '{TenantId}': {Provisioned} provisioned, {Repaired} repaired",
+                        blueprintId, tenantId, report.Provisioned, report.Repaired);
+                }
             }
-        }
-        catch (Exception e)
-        {
-            logger.LogError(e,
-                "Pipeline service account reconcile after blueprint '{BlueprintId}' on tenant '{TenantId}' failed; the next tenant load retries",
-                blueprintId, tenantId);
+            catch (Exception e)
+            {
+                logger.LogError(e,
+                    "Pipeline service account reconcile after blueprint '{BlueprintId}' on tenant '{TenantId}' failed; the next tenant load retries",
+                    blueprintId, tenantId);
+            }
         }
 
         // Separate try: a failed service-account sweep must not keep a changed route authorization from
