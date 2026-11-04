@@ -1571,6 +1571,30 @@ with the deployed pipeline set; `RegisterAdapter_NoPipelines_DoesNotRePush` pins
 the empty-config no-op). The `AdapterServiceTestsBase` mock already simulates the
 adapter's deploy ack, so the existing register tests exercise the ack path too.
 
+### Blueprint update vs. the routes a live adapter serves (AB#6631)
+
+A blueprint update (`UpdateBlueprint`) or a force re-apply replaces `Pipeline` entities **in place**; `DeploymentState`
+stays `Deployed`. The adapter builds the route of a `FromHttpRequest@2` trigger — path, `allowAnonymous`,
+`requiredRoles` — when the controller pushes the pipeline, and keeps it until the next push. Nothing pushed after an
+update, so the live route kept the authorization of the OLD definition: `EnergyCommunity.Base` 2.11.4 -> 2.12.0 left
+`/manualMeteringEntry` open to any valid token of the tenant although the pipeline said
+`requiredRoles: [EnergyCommunityManagement]`. An undeploy and deploy of the data flow fixed it by hand.
+
+`BlueprintAppliedConsumer` (broadcast consumer, registered for `BlueprintApplied` **and** `BlueprintUpdated`) therefore
+calls `IAdapterService.RefreshDeployedPipelinesAsync(tenantId)` after the service-account sweep (own `try`, a failed
+sweep does not hold it back). For every adapter with a live connection it rebuilds the configuration of the pipelines
+the adapter **already runs** from the repository and, if any differs from what was last pushed, pushes the result
+through `UpdateAdapterConfigurationAsync` (same path as `DeployDataFlow`; the adapter's selective update re-registers
+only the pipelines whose definition changed). Deliberate limits:
+
+- only pipelines already in the adapter's cached configuration are refreshed - nothing is deployed that was not;
+- the adapter's own configuration string is kept: an update resets it to the seed (EDA credentials) and the operator
+  restores it afterwards, a push in between would hand the live adapter the reset values;
+- a pipeline that is disabled or deleted by the update is not removed from the adapter (still a manual undeploy);
+- adapters without a connection (offline, leased) are skipped; they get the persisted state on registration or lease.
+
+Tests: `Services/AdapterServiceTests/RefreshDeployedPipelinesAsyncTests`, `Consumers/BlueprintAppliedConsumerTests`.
+
 ### Registration vs. tenant pre/post-update — the deaf adapter (AB#5827)
 
 Reproduced on test-2-dev: two `ClearCache` 8.6 s apart left a dedicated adapter connected, "registered"

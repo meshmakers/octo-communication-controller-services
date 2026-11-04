@@ -21,9 +21,20 @@ internal class BlueprintAppliedConsumerTests
     private readonly IPipelineServiceAccountProvisioningService _provisioning =
         Substitute.For<IPipelineServiceAccountProvisioningService>();
 
+    private readonly IAdapterService _adapterService = Substitute.For<IAdapterService>();
+
     private BlueprintAppliedConsumer CreateSut()
     {
-        return new BlueprintAppliedConsumer(NullLogger<BlueprintAppliedConsumer>.Instance, _provisioning);
+        return new BlueprintAppliedConsumer(NullLogger<BlueprintAppliedConsumer>.Instance, _provisioning,
+            _adapterService);
+    }
+
+    private static IDistributedContext<BlueprintUpdated> UpdatedContext(int added, int updated, int deleted = 0)
+    {
+        var context = Substitute.For<IDistributedContext<BlueprintUpdated>>();
+        context.Message.Returns(new BlueprintUpdated(TenantId, "Acme.App-2.0.0", "Acme.App-1.0.0", "Merge",
+            added, updated, deleted, Guid.NewGuid(), DateTime.UtcNow));
+        return context;
     }
 
     private static IDistributedContext<BlueprintApplied> Context(int added, int updated, int deleted = 0)
@@ -64,6 +75,64 @@ internal class BlueprintAppliedConsumerTests
             .ThrowsAsync(new InvalidOperationException("tenant unloading"));
 
         await Assert.That(async () => await CreateSut().ConsumeAsync(Context(added: 1, updated: 0)))
+            .ThrowsNothing();
+    }
+
+    // AB#6631 - an update rewrites pipeline entities in place; the adapters that run them must be told.
+
+    [Test]
+    public async Task BlueprintUpdate_PushesTheChangedPipelinesToTheAdapters()
+    {
+        _provisioning.EnsureTenantProvisionedAsync(TenantId)
+            .Returns(new PipelineServiceAccountProvisioningReport(0, 0, 2, []));
+        _adapterService.RefreshDeployedPipelinesAsync(TenantId).Returns(1);
+
+        await CreateSut().ConsumeAsync(UpdatedContext(added: 0, updated: 4));
+
+        await _adapterService.Received(1).RefreshDeployedPipelinesAsync(TenantId);
+    }
+
+    [Test]
+    public async Task BlueprintApply_AlsoRefreshesTheDeployedPipelines()
+    {
+        // A force re-apply replaces the entities in place as well.
+        _provisioning.EnsureTenantProvisionedAsync(TenantId)
+            .Returns(new PipelineServiceAccountProvisioningReport(0, 0, 2, []));
+
+        await CreateSut().ConsumeAsync(Context(added: 0, updated: 3));
+
+        await _adapterService.Received(1).RefreshDeployedPipelinesAsync(TenantId);
+    }
+
+    [Test]
+    public async Task BlueprintUpdateThatOnlyDeleted_DoesNotRefresh()
+    {
+        await CreateSut().ConsumeAsync(UpdatedContext(added: 0, updated: 0, deleted: 2));
+
+        await _adapterService.DidNotReceiveWithAnyArgs().RefreshDeployedPipelinesAsync(default!);
+    }
+
+    [Test]
+    public async Task FailedServiceAccountSweep_DoesNotKeepTheRouteChangeFromReachingTheAdapter()
+    {
+        // The authorization of a route is the more urgent of the two.
+        _provisioning.EnsureTenantProvisionedAsync(TenantId)
+            .ThrowsAsync(new InvalidOperationException("identity down"));
+
+        await CreateSut().ConsumeAsync(UpdatedContext(added: 0, updated: 1));
+
+        await _adapterService.Received(1).RefreshDeployedPipelinesAsync(TenantId);
+    }
+
+    [Test]
+    public async Task FailedRefresh_IsSwallowed()
+    {
+        _provisioning.EnsureTenantProvisionedAsync(TenantId)
+            .Returns(new PipelineServiceAccountProvisioningReport(0, 0, 0, []));
+        _adapterService.RefreshDeployedPipelinesAsync(TenantId)
+            .ThrowsAsync(new InvalidOperationException("adapter hub down"));
+
+        await Assert.That(async () => await CreateSut().ConsumeAsync(UpdatedContext(added: 0, updated: 1)))
             .ThrowsNothing();
     }
 }

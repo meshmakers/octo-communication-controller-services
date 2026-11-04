@@ -80,6 +80,16 @@ internal static class RtEntityCreator
         };
     }
 
+    /// <summary>
+    /// AB#6631: the same pipeline entity after an in-place update of its definition (a blueprint update).
+    /// </summary>
+    public static RtPipeline CreatePipelineFrom(RtPipeline source, string pipelineDefinition)
+    {
+        var copy = CreatePipelineFrom(source);
+        copy.PipelineDefinition = pipelineDefinition;
+        return copy;
+    }
+
     public static RtAdapter CreateAdapter(string? id = null)
     {
         id = id ?? OctoObjectId.GenerateNewId().ToString();

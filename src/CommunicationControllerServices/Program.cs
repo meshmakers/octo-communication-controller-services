@@ -296,6 +296,11 @@ try
             // for why there is no finer-grained entity-change subscription).
             c.AddBroadcastEventConsumer<BlueprintAppliedConsumer, BlueprintApplied>();
 
+            // AB#6631: an update rewrites pipeline entities in place; the same consumer pushes the
+            // changed definitions to the adapters that run them, so a changed route authorization
+            // takes effect without an undeploy/deploy of the data flow.
+            c.AddBroadcastEventConsumer<BlueprintAppliedConsumer, BlueprintUpdated>();
+
             // AB#4918: durable co-wake queue. Cron companion schedules of pipelines on OnDemand
             // workloads land here; a wake tick fired while the controller restarts must survive,
             // so this is a routed (durable, named) endpoint — not a temporary command queue.
