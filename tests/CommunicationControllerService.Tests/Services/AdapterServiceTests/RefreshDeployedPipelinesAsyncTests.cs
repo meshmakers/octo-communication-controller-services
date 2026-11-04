@@ -332,4 +332,50 @@ internal class RefreshDeployedPipelinesAsyncTests : AdapterServiceTestsBase
         await Assert.That(AdapterTenant.AdapterById[rtAdapter.ToRtEntityId()].Configuration.Pipelines.Single()
             .NodeConfiguration).IsEqualTo(NewDefinition);
     }
+
+    [Test]
+    [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]
+    public async Task CacheAlreadyHoldsTheNewConfiguration_WhenTheSendReturns_SoAnImmediateAckSeesIt()
+    {
+        // The send does not wait for the adapter: a fast ack can arrive before the send call returns.
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
+        var running = RtEntityCreator.CreatePipeline(OldDefinition);
+        var rtAdapter = await ArrangeAdapterRunningAsync(ConnectionId, rtDataFlow, running, "adapter-json",
+            RtEntityCreator.CreatePipelineFrom(running, NewDefinition));
+        string? seenDuringSend = null;
+        AdapterHubCallbacks.AdapterConfigurationUpdatedAsync(TenantId, Arg.Any<AdapterConfigurationDto>())
+            .Returns(_ =>
+            {
+                seenDuringSend = AdapterTenant.AdapterById[rtAdapter.ToRtEntityId()].Configuration.Pipelines
+                    .Single().NodeConfiguration;
+                return Task.CompletedTask;
+            });
+
+        await AdapterService.RefreshDeployedPipelinesAsync(TenantId);
+
+        await Assert.That(seenDuringSend).IsEqualTo(NewDefinition);
+    }
+
+    [Test]
+    [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]
+    public async Task FailedSend_DoesNotClobberAConcurrentNewerConfiguration()
+    {
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
+        var running = RtEntityCreator.CreatePipeline(OldDefinition);
+        var rtAdapter = await ArrangeAdapterRunningAsync(ConnectionId, rtDataFlow, running, "adapter-json",
+            RtEntityCreator.CreatePipelineFrom(running, NewDefinition));
+        var newer = new AdapterConfigurationDto(rtAdapter.ToRtEntityId(), "newer-json", []);
+        AdapterHubCallbacks.AdapterConfigurationUpdatedAsync(TenantId, Arg.Any<AdapterConfigurationDto>())
+            .Returns(_ =>
+            {
+                AdapterTenant.AdapterById[rtAdapter.ToRtEntityId()].UpdateConfiguration(TenantId, newer);
+                return Task.FromException(new InvalidOperationException("hub send failed"));
+            });
+
+        var refreshed = await AdapterService.RefreshDeployedPipelinesAsync(TenantId);
+
+        await Assert.That(refreshed).IsEqualTo(0);
+        await Assert.That(AdapterTenant.AdapterById[rtAdapter.ToRtEntityId()].Configuration)
+            .IsSameReferenceAs(newer);
+    }
 }

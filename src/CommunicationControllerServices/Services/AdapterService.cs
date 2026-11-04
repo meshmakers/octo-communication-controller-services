@@ -1015,12 +1015,10 @@ internal class AdapterService(
                         pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending, null);
                 }
 
-                await SendConfigurationAndWaitForResultAsync(tenantId, adapterRtEntityId, configuration);
-
-                // Update the cache only after the SignalR push succeeded so
-                // the cached config tracks the pod's actual state. A failed
-                // push throws above and leaves the cache untouched.
-                adapter.UpdateConfiguration(tenantId, configuration);
+                // The cache takes the configuration before the send so an ack that arrives right away
+                // sees the pipelines that were sent; a failed push restores the previous entry.
+                await PushConfigurationAsync(tenantId, adapter, configuration,
+                    () => SendConfigurationAndWaitForResultAsync(tenantId, adapterRtEntityId, configuration));
 
                 await eventService.StoreInformationEventAsync(tenantId,
                     $"Configuration deployed to adapter '{adapterRtEntityId}' with {configuration.Pipelines.Count} pipeline(s).",
@@ -1163,11 +1161,11 @@ internal class AdapterService(
                             pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending, null);
                     }
 
-                    await SendConfigurationAndWaitForResultAsync(tenantId, adapterRtEntityId, adapterConfiguration);
-
-                    // Update the cached configuration so UpdateConfigurationStateAsync
-                    // sees the correct pipelines for deployment state updates
-                    adapter.UpdateConfiguration(tenantId, adapterConfiguration);
+                    // The cache takes the configuration before the send so UpdateConfigurationStateAsync
+                    // sees the correct pipelines for an immediate ack; a failed push restores it.
+                    await PushConfigurationAsync(tenantId, adapter, adapterConfiguration,
+                        () => SendConfigurationAndWaitForResultAsync(tenantId, adapterRtEntityId,
+                            adapterConfiguration));
                 }
 
                 // AB#4984: the deployed pipeline set changed — refresh the persisted capability
@@ -2357,9 +2355,34 @@ internal class AdapterService(
     }
 
     /// <summary>
-    /// Pushes the configurations to the adapters. The cache takes the new configuration only after the push
-    /// succeeded (AB#6631): an adapter whose push failed keeps the configuration it really runs, so the next
-    /// refresh sees the difference and retries it.
+    /// Caches <paramref name="configuration"/>, runs <paramref name="send"/> and restores the previous cache
+    /// entry when the send throws — only if the cache still holds this configuration, so a concurrent newer
+    /// update is not clobbered. The exception propagates.
+    /// </summary>
+    /// <param name="tenantId">The tenant.</param>
+    /// <param name="adapter">The cached adapter.</param>
+    /// <param name="configuration">The configuration to cache and send.</param>
+    /// <param name="send">The send (and optional wait for the ack).</param>
+    private static async Task PushConfigurationAsync(string tenantId, Adapter adapter,
+        AdapterConfigurationDto configuration, Func<Task> send)
+    {
+        var previous = adapter.Configuration;
+        adapter.UpdateConfiguration(tenantId, configuration);
+        try
+        {
+            await send();
+        }
+        catch
+        {
+            adapter.RestoreConfiguration(tenantId, configuration, previous);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Pushes the configurations to the adapters. The cache takes the new configuration before the send, so an
+    /// ack that arrives immediately is applied to the pipelines that were sent; when the send fails the previous
+    /// entry is restored (AB#6631), so the next refresh sees the difference and retries it.
     /// </summary>
     /// <param name="tenantId">The tenant.</param>
     /// <param name="adapterConfigurations">The configurations to push.</param>
@@ -2391,9 +2414,9 @@ internal class AdapterService(
                             pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending, null);
                     }
 
-                    await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, adapterConfigurationDto);
-
-                    adapter.UpdateConfiguration(tenantId, adapterConfigurationDto);
+                    await PushConfigurationAsync(tenantId, adapter, adapterConfigurationDto,
+                        () => adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId,
+                            adapterConfigurationDto));
                     pushed++;
                 }
                 catch (Exception e) when (isolateFailures)

@@ -26,7 +26,9 @@ internal class Adapter(
 
     public string? ConnectionId { get; private set; } = connectionId;
 
-    public AdapterConfigurationDto Configuration { get; private set; } = configuration;
+    private AdapterConfigurationDto _configuration = configuration;
+
+    public AdapterConfigurationDto Configuration => Volatile.Read(ref _configuration);
 
     /// <summary>
     /// Node descriptors reported by this adapter during registration.
@@ -42,8 +44,25 @@ internal class Adapter(
 
     public void UpdateConfiguration(string tenantId, AdapterConfigurationDto adapterConfigurationDto)
     {
-        Configuration = adapterConfigurationDto;
+        Volatile.Write(ref _configuration, adapterConfigurationDto);
         adapterCachePublish.PublishConfiguration(tenantId);
+    }
+
+    /// <summary>
+    /// Puts <paramref name="previous"/> back, but only while the cache still holds
+    /// <paramref name="candidate"/> (compare-and-restore). A newer configuration set concurrently is kept.
+    /// </summary>
+    /// <returns>True when the previous configuration was restored.</returns>
+    public bool RestoreConfiguration(string tenantId, AdapterConfigurationDto candidate,
+        AdapterConfigurationDto previous)
+    {
+        if (!ReferenceEquals(Interlocked.CompareExchange(ref _configuration, previous, candidate), candidate))
+        {
+            return false;
+        }
+
+        adapterCachePublish.PublishConfiguration(tenantId);
+        return true;
     }
 
     public void SetNodeDescriptors(IReadOnlyList<NodeDescriptorDto>? nodeDescriptors)
