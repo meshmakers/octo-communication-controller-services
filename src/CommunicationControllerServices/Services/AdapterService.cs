@@ -478,6 +478,14 @@ internal class AdapterService(
 
     public async Task<AdapterConfigurationDto> GetAdapterConfigurationAsync(string tenantId,
         RtEntityId adapterRtEntityId, bool onlyDeployedPipelines, bool revealSecrets = false)
+        => await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId, onlyDeployedPipelines, revealSecrets,
+            null);
+
+    // existingPipelineIds: optional sink for the ids of every pipeline that exists for the adapter, is enabled and
+    // has a definition and a data flow - whatever its deployment state (AB#6631: tells "not deployed" from "gone").
+    private async Task<AdapterConfigurationDto> GetAdapterConfigurationAsync(string tenantId,
+        RtEntityId adapterRtEntityId, bool onlyDeployedPipelines, bool revealSecrets,
+        ICollection<RtEntityId>? existingPipelineIds)
     {
         try
         {
@@ -512,6 +520,8 @@ internal class AdapterService(
                         tenantId, rtPipeline.ToRtEntityId());
                     continue;
                 }
+
+                existingPipelineIds?.Add(rtPipeline.ToRtEntityId());
 
                 if (!onlyDeployedPipelines || rtPipeline.DeploymentState == RtDeploymentStateEnum.Pending ||
                     rtPipeline.DeploymentState == RtDeploymentStateEnum.Deployed)
@@ -888,6 +898,90 @@ internal class AdapterService(
         }
     }
 
+    /// <inheritdoc />
+    public async Task<int> RefreshDeployedPipelinesAsync(string tenantId)
+    {
+        if (!adapterCache.TryGetTenant(tenantId, out var adapterTenant))
+        {
+            return 0;
+        }
+
+        var refreshed = new List<AdapterConfigurationDto>();
+        foreach (var adapter in adapterTenant.AdapterById.Values.ToList())
+        {
+            // No live connection: nothing to push to. The adapter gets the persisted state when it
+            // registers (RegisterAdapterAsync), a leased adapter with its lease.
+            if (string.IsNullOrWhiteSpace(adapter.ConnectionId))
+            {
+                continue;
+            }
+
+            try
+            {
+                var existing = new HashSet<RtEntityId>();
+                var persisted = await GetAdapterConfigurationAsync(tenantId, adapter.AdapterRtEntityId, true,
+                    revealSecrets: true, existing);
+                var persistedById = persisted.Pipelines.ToDictionary(p => p.PipelineRtEntityId);
+
+                // Only the pipeline definitions are refreshed; the adapter's own configuration stays — an
+                // update resets that to the seed, the operator restores it afterwards, and a push in between
+                // would hand the adapter the reset values.
+                // A pipeline the adapter runs follows the repository: a changed definition is replaced, and a
+                // pipeline that is gone (deleted, disabled, without definition, moved to another adapter) is
+                // dropped, so its route stops answering. One that merely is not Deployed/Pending any more
+                // (Undeployed, Error) is left alone - the deploy/undeploy path owns those states.
+                var merged = adapter.Configuration.Pipelines
+                    .Where(running => existing.Contains(running.PipelineRtEntityId))
+                    .Select(running => persistedById.GetValueOrDefault(running.PipelineRtEntityId) ?? running)
+                    .ToList();
+
+                // AB#6632: and a pipeline the repository holds as Deployed/Pending that the adapter does not
+                // run yet is added. A blueprint seeds pipelines with DeploymentState Deployed behind the
+                // controller's back, after the adapter has registered (registration only hands out what is
+                // persisted at that moment); nothing pushed them, so their routes answered 404 until someone ran
+                // DeployDataFlow by hand. Registration already treats Deployed/Pending as "the adapter runs
+                // this"; the refresh makes the live adapter converge to the same set.
+                var runningIds = adapter.Configuration.Pipelines.Select(p => p.PipelineRtEntityId).ToHashSet();
+                merged.AddRange(persisted.Pipelines.Where(p => !runningIds.Contains(p.PipelineRtEntityId)));
+
+                var candidate = new AdapterConfigurationDto(adapter.AdapterRtEntityId,
+                    adapter.Configuration.AdapterConfiguration, merged);
+                if (candidate.Equals(adapter.Configuration))
+                {
+                    continue;
+                }
+
+                Logger.Info(
+                    "[{TenantId}] Adapter '{AdapterRtId}': {ChangedCount} pipeline(s) changed, were removed or are persisted as deployed but not yet running; pushing the refreshed configuration",
+                    tenantId, adapter.AdapterRtEntityId,
+                    merged.Count(m => !adapter.Configuration.Pipelines.Contains(m)) +
+                    adapter.Configuration.Pipelines.Count(r => !existing.Contains(r.PipelineRtEntityId)));
+                refreshed.Add(candidate);
+            }
+            catch (Exception e)
+            {
+                // One adapter must not stop the others; the next deploy or registration retries.
+                Logger.Warn(e,
+                    "[{TenantId}] Adapter '{AdapterRtId}': refreshing its deployed pipelines failed",
+                    tenantId, adapter.AdapterRtEntityId);
+            }
+        }
+
+        if (refreshed.Count > 0)
+        {
+            var pushed = await UpdateAdapterConfigurationAsync(tenantId, refreshed, isolateFailures: true);
+            if (pushed > 0)
+            {
+                await eventService.StoreInformationEventAsync(tenantId,
+                    $"Pipeline definitions changed in the repository; refreshed configuration pushed to {pushed} adapter(s).");
+            }
+
+            return pushed;
+        }
+
+        return 0;
+    }
+
     public async Task DeployAdapterConfigurationAsync(string tenantId, RtEntityId adapterRtEntityId)
     {
         Logger.Info("[{TenantId}] AdapterRtId='{AdapterRtId}' deploy configuration",
@@ -921,12 +1015,10 @@ internal class AdapterService(
                         pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending, null);
                 }
 
-                await SendConfigurationAndWaitForResultAsync(tenantId, adapterRtEntityId, configuration);
-
-                // Update the cache only after the SignalR push succeeded so
-                // the cached config tracks the pod's actual state. A failed
-                // push throws above and leaves the cache untouched.
-                adapter.UpdateConfiguration(tenantId, configuration);
+                // The cache takes the configuration before the send so an ack that arrives right away
+                // sees the pipelines that were sent; a failed push restores the previous entry.
+                await PushConfigurationAsync(tenantId, adapter, configuration,
+                    () => SendConfigurationAndWaitForResultAsync(tenantId, adapterRtEntityId, configuration));
 
                 await eventService.StoreInformationEventAsync(tenantId,
                     $"Configuration deployed to adapter '{adapterRtEntityId}' with {configuration.Pipelines.Count} pipeline(s).",
@@ -1069,11 +1161,11 @@ internal class AdapterService(
                             pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending, null);
                     }
 
-                    await SendConfigurationAndWaitForResultAsync(tenantId, adapterRtEntityId, adapterConfiguration);
-
-                    // Update the cached configuration so UpdateConfigurationStateAsync
-                    // sees the correct pipelines for deployment state updates
-                    adapter.UpdateConfiguration(tenantId, adapterConfiguration);
+                    // The cache takes the configuration before the send so UpdateConfigurationStateAsync
+                    // sees the correct pipelines for an immediate ack; a failed push restores it.
+                    await PushConfigurationAsync(tenantId, adapter, adapterConfiguration,
+                        () => SendConfigurationAndWaitForResultAsync(tenantId, adapterRtEntityId,
+                            adapterConfiguration));
                 }
 
                 // AB#4984: the deployed pipeline set changed — refresh the persisted capability
@@ -2262,29 +2354,81 @@ internal class AdapterService(
             tenantId, serviceAccount.RtWellKnownName, unknownPlaceholder);
     }
 
-    private async Task UpdateAdapterConfigurationAsync(string tenantId,
-        List<AdapterConfigurationDto> adapterConfigurations)
+    /// <summary>
+    /// Caches <paramref name="configuration"/>, runs <paramref name="send"/> and restores the previous cache
+    /// entry when the send throws — only if the cache still holds this configuration, so a concurrent newer
+    /// update is not clobbered. The exception propagates.
+    /// </summary>
+    /// <param name="tenantId">The tenant.</param>
+    /// <param name="adapter">The cached adapter.</param>
+    /// <param name="configuration">The configuration to cache and send.</param>
+    /// <param name="send">The send (and optional wait for the ack).</param>
+    private static async Task PushConfigurationAsync(string tenantId, Adapter adapter,
+        AdapterConfigurationDto configuration, Func<Task> send)
     {
+        var previous = adapter.Configuration;
+        adapter.UpdateConfiguration(tenantId, configuration);
+        try
+        {
+            await send();
+        }
+        catch
+        {
+            adapter.RestoreConfiguration(tenantId, configuration, previous);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Pushes the configurations to the adapters. The cache takes the new configuration before the send, so an
+    /// ack that arrives immediately is applied to the pipelines that were sent; when the send fails the previous
+    /// entry is restored (AB#6631), so the next refresh sees the difference and retries it.
+    /// </summary>
+    /// <param name="tenantId">The tenant.</param>
+    /// <param name="adapterConfigurations">The configurations to push.</param>
+    /// <param name="isolateFailures">
+    /// When true a failing push is logged and the remaining adapters are still served (refresh path);
+    /// when false the exception propagates to the caller (deploy/undeploy paths keep failing loudly).
+    /// </param>
+    /// <returns>The number of adapters the configuration was pushed to.</returns>
+    private async Task<int> UpdateAdapterConfigurationAsync(string tenantId,
+        List<AdapterConfigurationDto> adapterConfigurations, bool isolateFailures = false)
+    {
+        var pushed = 0;
         if (adapterCache.TryGetTenant(tenantId, out var adapterTenant))
         {
             foreach (var adapterConfigurationDto in adapterConfigurations)
             {
-                if (adapterTenant.AdapterById.TryGetValue(adapterConfigurationDto.AdapterRtEntityId, out var adapter))
+                if (!adapterTenant.AdapterById.TryGetValue(adapterConfigurationDto.AdapterRtEntityId, out var adapter))
                 {
-                    adapter.UpdateConfiguration(tenantId, adapterConfigurationDto);
+                    continue;
+                }
 
+                try
+                {
                     await communicationRepository.SetAdapterConfigurationStateAsync(tenantId,
                         adapter.AdapterRtEntityId, RtConfigurationStateEnum.Pending, null);
-                    foreach (var pipelineConfigurationDto in adapter.Configuration.Pipelines)
+                    foreach (var pipelineConfigurationDto in adapterConfigurationDto.Pipelines)
                     {
                         await communicationRepository.SetPipelineDeploymentStateAsync(tenantId,
                             pipelineConfigurationDto.PipelineRtEntityId, RtDeploymentStateEnum.Pending, null);
                     }
 
-                    await adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId, adapterConfigurationDto);
+                    await PushConfigurationAsync(tenantId, adapter, adapterConfigurationDto,
+                        () => adapterHubCallbacks.AdapterConfigurationUpdatedAsync(tenantId,
+                            adapterConfigurationDto));
+                    pushed++;
+                }
+                catch (Exception e) when (isolateFailures)
+                {
+                    Logger.Warn(e,
+                        "[{TenantId}] Adapter '{AdapterRtId}': pushing the refreshed configuration failed; the next refresh retries",
+                        tenantId, adapter.AdapterRtEntityId);
                 }
             }
         }
+
+        return pushed;
     }
 
     private static string? GeneratePipelineMessages(DeploymentResult deploymentResult,

@@ -182,6 +182,21 @@ public interface IAdapterService
     Task DeployAdapterConfigurationAsync(string tenantId, RtEntityId adapterRtEntityId);
 
     /// <summary>
+    /// AB#6631: re-pushes the pipelines an adapter already runs when their definition in the repository
+    /// differs from what the controller last pushed (e.g. a blueprint update rewrote the entity in place).
+    /// </summary>
+    /// <remarks>
+    /// The adapter converges to the pipelines the repository holds as Deployed/Pending: a changed definition is
+    /// replaced (AB#6631), a pipeline that is gone is dropped, and one that a blueprint seeded as Deployed but the
+    /// adapter does not run yet is added (AB#6632). The adapter's own configuration string is left as it is. Adapters
+    /// without a live connection (offline, leased) are skipped — they receive the current state when they
+    /// register or when the lease is granted.
+    /// </remarks>
+    /// <param name="tenantId">Tenant identifier</param>
+    /// <returns>The number of adapters a refreshed configuration was pushed to.</returns>
+    Task<int> RefreshDeployedPipelinesAsync(string tenantId);
+
+    /// <summary>
     /// Deploys a pipeline to the given adapter
     /// </summary>
     /// <param name="tenantId">Tenant identifier</param>
