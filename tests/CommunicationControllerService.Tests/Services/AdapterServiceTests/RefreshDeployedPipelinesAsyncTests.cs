@@ -116,6 +116,81 @@ internal class RefreshDeployedPipelinesAsyncTests : AdapterServiceTestsBase
 
     [Test]
     [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]
+    public async Task PipelineDisabledByTheUpdate_IsRemovedFromTheAdapter()
+    {
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
+        var kept = RtEntityCreator.CreatePipeline(OldDefinition);
+        var disabled = RtEntityCreator.CreatePipeline("triggers: [{type: FromHttpRequest@2}]");
+        var rtAdapter = RtEntityCreator.CreateAdapter();
+        rtAdapter.Configuration = "adapter-json";
+        InitAdapterConfiguration(rtAdapter, rtDataFlow, [kept, disabled]);
+        var pushed = await AdapterService.GetAdapterConfigurationAsync(TenantId, rtAdapter.ToRtEntityId(), true, true);
+        AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, pushed);
+
+        var nowDisabled = RtEntityCreator.CreatePipelineFrom(disabled);
+        nowDisabled.Enabled = false;
+        InitAdapterConfiguration(rtAdapter, rtDataFlow, [RtEntityCreator.CreatePipelineFrom(kept), nowDisabled]);
+
+        var refreshed = await AdapterService.RefreshDeployedPipelinesAsync(TenantId);
+
+        await Assert.That(refreshed).IsEqualTo(1);
+        await AdapterHubCallbacks.Received(1).AdapterConfigurationUpdatedAsync(TenantId,
+            Arg.Is<AdapterConfigurationDto>(c =>
+                c.Pipelines.Count == 1 && c.Pipelines.Single().PipelineRtEntityId == kept.ToRtEntityId()));
+        await Assert.That(AdapterTenant.AdapterById[rtAdapter.ToRtEntityId()].Configuration.Pipelines.Count)
+            .IsEqualTo(1);
+    }
+
+    [Test]
+    [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]
+    public async Task PipelineDeletedOrMovedOffTheAdapter_IsRemovedFromTheAdapter()
+    {
+        // Deleted and "moved to another adapter" look the same from this adapter's side: the repository no
+        // longer lists the pipeline for it.
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
+        var gone = RtEntityCreator.CreatePipeline(OldDefinition);
+        var rtAdapter = RtEntityCreator.CreateAdapter();
+        rtAdapter.Configuration = "adapter-json";
+        InitAdapterConfiguration(rtAdapter, rtDataFlow, [gone]);
+        var pushed = await AdapterService.GetAdapterConfigurationAsync(TenantId, rtAdapter.ToRtEntityId(), true, true);
+        AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, pushed);
+
+        InitAdapterConfiguration(rtAdapter, rtDataFlow, []);
+
+        var refreshed = await AdapterService.RefreshDeployedPipelinesAsync(TenantId);
+
+        await Assert.That(refreshed).IsEqualTo(1);
+        await AdapterHubCallbacks.Received(1).AdapterConfigurationUpdatedAsync(TenantId,
+            Arg.Is<AdapterConfigurationDto>(c => c.Pipelines.Count == 0 && c.AdapterConfiguration == "adapter-json"));
+        await Assert.That(AdapterTenant.AdapterById[rtAdapter.ToRtEntityId()].Configuration.Pipelines.Count)
+            .IsEqualTo(0);
+    }
+
+    [Test]
+    [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]
+    public async Task PipelineThatIsOnlyNoLongerDeployed_StaysWithTheDeployPath()
+    {
+        // Undeployed/Error states belong to the deploy and undeploy paths; the refresh only removes what is gone.
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
+        var running = RtEntityCreator.CreatePipeline(OldDefinition);
+        await ArrangeAdapterRunningAsync(ConnectionId, rtDataFlow, running, "adapter-json",
+            ToState(running, RtDeploymentStateEnum.Undeployed));
+
+        var refreshed = await AdapterService.RefreshDeployedPipelinesAsync(TenantId);
+
+        await Assert.That(refreshed).IsEqualTo(0);
+        await AdapterHubCallbacks.DidNotReceiveWithAnyArgs().AdapterConfigurationUpdatedAsync(default!, default!);
+    }
+
+    private static RtPipeline ToState(RtPipeline source, RtDeploymentStateEnum state)
+    {
+        var copy = RtEntityCreator.CreatePipelineFrom(source);
+        copy.DeploymentState = state;
+        return copy;
+    }
+
+    [Test]
+    [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]
     public async Task AdapterWithoutLiveConnection_IsSkipped()
     {
         // It gets the persisted state when it registers; nothing to push to.

@@ -1590,7 +1590,9 @@ only the pipelines whose definition changed). Deliberate limits:
 - only pipelines already in the adapter's cached configuration are refreshed - nothing is deployed that was not;
 - the adapter's own configuration string is kept: an update resets it to the seed (EDA credentials) and the operator
   restores it afterwards, a push in between would hand the live adapter the reset values;
-- a pipeline that is disabled or deleted by the update is not removed from the adapter (still a manual undeploy);
+- a pipeline the adapter runs that the repository no longer lists for it (deleted, disabled, no definition, moved to
+  another adapter) is dropped from the pushed configuration, so its route stops answering; a pipeline that is only
+  no longer Deployed/Pending (Undeployed, Error) is left to the deploy/undeploy paths;
 - adapters without a connection (offline, leased) are skipped; they get the persisted state on registration or lease.
 
 Tests: `Services/AdapterServiceTests/RefreshDeployedPipelinesAsyncTests`, `Consumers/BlueprintAppliedConsumerTests`.

@@ -478,6 +478,14 @@ internal class AdapterService(
 
     public async Task<AdapterConfigurationDto> GetAdapterConfigurationAsync(string tenantId,
         RtEntityId adapterRtEntityId, bool onlyDeployedPipelines, bool revealSecrets = false)
+        => await GetAdapterConfigurationAsync(tenantId, adapterRtEntityId, onlyDeployedPipelines, revealSecrets,
+            null);
+
+    // existingPipelineIds: optional sink for the ids of every pipeline that exists for the adapter, is enabled and
+    // has a definition and a data flow - whatever its deployment state (AB#6631: tells "not deployed" from "gone").
+    private async Task<AdapterConfigurationDto> GetAdapterConfigurationAsync(string tenantId,
+        RtEntityId adapterRtEntityId, bool onlyDeployedPipelines, bool revealSecrets,
+        ICollection<RtEntityId>? existingPipelineIds)
     {
         try
         {
@@ -512,6 +520,8 @@ internal class AdapterService(
                         tenantId, rtPipeline.ToRtEntityId());
                     continue;
                 }
+
+                existingPipelineIds?.Add(rtPipeline.ToRtEntityId());
 
                 if (!onlyDeployedPipelines || rtPipeline.DeploymentState == RtDeploymentStateEnum.Pending ||
                     rtPipeline.DeploymentState == RtDeploymentStateEnum.Deployed)
@@ -908,15 +918,20 @@ internal class AdapterService(
 
             try
             {
+                var existing = new HashSet<RtEntityId>();
                 var persisted = await GetAdapterConfigurationAsync(tenantId, adapter.AdapterRtEntityId, true,
-                    revealSecrets: true);
+                    revealSecrets: true, existing);
                 var persistedById = persisted.Pipelines.ToDictionary(p => p.PipelineRtEntityId);
 
-                // Only what the adapter runs is refreshed, and only the pipeline definitions: a pipeline
-                // missing from the repository view (disabled, no definition) stays as it is, and so does
-                // the adapter's own configuration — an update resets that to the seed, the operator
-                // restores it afterwards, and a push in between would hand the adapter the reset values.
+                // Only the pipeline definitions are refreshed; the adapter's own configuration stays — an
+                // update resets that to the seed, the operator restores it afterwards, and a push in between
+                // would hand the adapter the reset values.
+                // A pipeline the adapter runs follows the repository: a changed definition is replaced, and a
+                // pipeline that is gone (deleted, disabled, without definition, moved to another adapter) is
+                // dropped, so its route stops answering. One that merely is not Deployed/Pending any more
+                // (Undeployed, Error) is left alone - the deploy/undeploy path owns those states.
                 var merged = adapter.Configuration.Pipelines
+                    .Where(running => existing.Contains(running.PipelineRtEntityId))
                     .Select(running => persistedById.GetValueOrDefault(running.PipelineRtEntityId) ?? running)
                     .ToList();
 
@@ -930,7 +945,8 @@ internal class AdapterService(
                 Logger.Info(
                     "[{TenantId}] Adapter '{AdapterRtId}' runs {ChangedCount} pipeline(s) whose persisted definition changed; pushing the refreshed configuration",
                     tenantId, adapter.AdapterRtEntityId,
-                    merged.Count(m => !adapter.Configuration.Pipelines.Contains(m)));
+                    merged.Count(m => !adapter.Configuration.Pipelines.Contains(m)) +
+                    adapter.Configuration.Pipelines.Count(r => !existing.Contains(r.PipelineRtEntityId)));
                 refreshed.Add(candidate);
             }
             catch (Exception e)
