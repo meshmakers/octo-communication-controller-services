@@ -5291,3 +5291,28 @@ central `AddTenantRolePolicy` of octo-common-services (`AddOctoTenantRoleAuthori
 handler). A token without the role gets 403 with a `{"message"}` body naming the role (AB#5227 shape). All other endpoints keep
 their scope-only policies. Callers that need the role: octo-cli `EnableCommunication` / `DisableCommunication`, the MCP tools,
 Studio's Tenant Features panel (tenant administrators). Test: `CommunicationControllerToggleAuthorizationTests`.
+
+## Platform-only secrets: a SecretDefault never reaches an adapter (AB#7246, Feature AB#7219)
+
+A secret default an Application declares (`SecretDefaults`, System.Communication 4.15.0, AB#7243) and the controller
+projects into every served tenant as `System.Communication/SecretDefault` is **platform-only**: it may be used only inside
+platform building blocks that return a result and never the value. No tenant pipeline, user or role, tenant admins
+included, may obtain it. The rule is enforced **by type, in code**, in two repositories; there is no CK or engine change.
+
+- **Here, the configuration list of an adapter.** The controller ships the configuration entities of a pipeline to its
+  adapter with their Secret values revealed (`ConfigurationSecretSerializer`), and `GetPipelineConfigByCkTypeId@1` puts
+  them into the pipeline's data. `AdapterService.CreatePipelineConfigurationAsync` is the single place that builds that
+  list (deploy, register, leased pipeline, `GetAdapterConfigurationAsync` with and without `revealSecrets`). It removes
+  every entity whose type `PlatformOnlyConfigurationTypes.IsPlatformOnly` names (today `System.Communication/SecretDefault`)
+  and logs a warning naming tenant, pipeline, entity and type, never a value. `SecretDefault` is also not a Configuration
+  type (it derives from `System/Entity`), so no `Uses` association can bring it in by itself; the exclusion makes that a
+  rule instead of a property of the model. Test: `SecretDefaultExclusionTests`. A new platform-only type is one line in
+  `PlatformOnlyConfigurationTypes` plus a case in that test.
+- **In the mesh adapter** (octo-mesh-adapter, AB#7246): `RevealSecret@1` and `GetPipelineConfigByCkTypeId@1` refuse the
+  type (and the `SecretDefaults` record array of the Application) before they read, for every identity, and an
+  architecture test lists every `Unprotect` call site against an allow-list. `PlatformOnlySecrets` there is the shared
+  predicate. `GetPipelineConfigByCkTypeId@1` lives in the mesh adapter, not in this repository, so its test is there.
+  The SDK node `GetPipelineConfigByWellKnownName@1` (octo-communication-sdk) reads the same list and needs no rule of
+  its own: the list never contains a SecretDefault.
+- The projection (AB#7244, AB#7245) writes `SecretDefault` entities only through the child tenant context and must never
+  add one to a configuration list. The platform's own consumer (the CAPTCHA verify node, AB#7251) is the only reader.

@@ -2074,6 +2074,18 @@ internal class AdapterService(
             }
         }
 
+        // AB#7246: a platform-only type (System.Communication/SecretDefault) is never shipped to an adapter, whatever
+        // brought it into the list. The list reaches the pipeline with Secret values revealed. The log names the
+        // entity, never a value.
+        foreach (var platformOnly in pipelineConfigurations
+                     .Where(c => PlatformOnlyConfigurationTypes.IsPlatformOnly(c.CkTypeId)).ToList())
+        {
+            Logger.Warn(
+                "[{TenantId}] Pipeline '{PipelineRtId}': entity '{ConfigurationRtId}' of platform-only type '{CkTypeId}' is not shipped to the adapter",
+                tenantId, rtPipeline.RtId, platformOnly.RtId, platformOnly.CkTypeId);
+            pipelineConfigurations.Remove(platformOnly);
+        }
+
         // AB#5145: the tenant's SignalChannel singleton is always projected — no Uses edge needed.
         await AddSignalChannelConfigurationAsync(tenantId, pipelineConfigurations);
 
