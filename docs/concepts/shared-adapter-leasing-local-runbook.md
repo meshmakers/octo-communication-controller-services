@@ -153,7 +153,11 @@ A stored `local_<tenant>` context whose refresh token has expired cannot be repa
 octo-cli -c AddContext -n ab4924_salzburgdev \
   -isu https://localhost:5003/ -asu https://localhost:5001/ -csu https://localhost:5015/ \
   -bsu https://localhost:5009/ -aisu https://localhost:5019/ -tid salzburgdev
-octo-cli --context ab4924_salzburgdev -c LogInClientCredentials -id claude-agent -s "$SECRET"
+# Never pass the secret with -s (deprecated): a value on the command line ends up in the shell
+# history and the process list. Either pipe it in with --secret-stdin ...
+: "${SECRET:?SECRET is not set}" && printf '%s' "$SECRET" | octo-cli --context ab4924_salzburgdev -c LogInClientCredentials -id claude-agent --secret-stdin
+# ... or export OCTO_CLI_CLIENT_SECRET and leave --secret-stdin out (it reads only standard input):
+# octo-cli --context ab4924_salzburgdev -c LogInClientCredentials -id claude-agent
 # ... and afterwards
 octo-cli -c RemoveContext -n ab4924_salzburgdev
 ```
