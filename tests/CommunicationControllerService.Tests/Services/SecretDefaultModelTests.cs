@@ -37,6 +37,18 @@ internal class SecretDefaultModelTests
     }
 
     [Test]
+    public async Task SecretDefault_CanExistWithoutValueSourceTenantAndSourceWorkload()
+    {
+        var secretDefault = new RtSecretDefault { Name = "ec-captcha-secret" };
+
+        using var _ = Assert.Multiple();
+        await Assert.That(secretDefault.Name).IsEqualTo("ec-captcha-secret");
+        await Assert.That(secretDefault.Value).IsNull();
+        await Assert.That(secretDefault.SourceTenantId).IsNull();
+        await Assert.That(secretDefault.SourceWorkloadRtId).IsNull();
+    }
+
+    [Test]
     public async Task Application_SecretDefaultsIsOptionalAndHoldsProjectionRecords()
     {
         var application = new RtApplication();
