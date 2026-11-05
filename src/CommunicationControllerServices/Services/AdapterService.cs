@@ -2074,9 +2074,8 @@ internal class AdapterService(
             }
         }
 
-        // AB#7246: a platform-only type (System.Communication/SecretDefault) is never shipped to an adapter, whatever
-        // brought it into the list. The list reaches the pipeline with Secret values revealed. The log names the
-        // entity, never a value.
+        // The platform-only type is never shipped to an adapter, whatever brought it into the list.
+        // The list reaches the pipeline with Secret values revealed. The log names the entity, never a value.
         foreach (var platformOnly in pipelineConfigurations
                      .Where(c => PlatformOnlyConfigurationTypes.IsPlatformOnly(c.CkTypeId)).ToList())
         {

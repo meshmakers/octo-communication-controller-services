@@ -9,11 +9,6 @@ using NSubstitute;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.AdapterServiceTests;
 
-/// <summary>
-/// AB#7246: the configuration list shipped to an adapter never contains a System.Communication/SecretDefault.
-/// The list reaches the pipeline with Secret values revealed, so the platform-only type is excluded by type,
-/// whatever brought it into the list. The value is a sentinel and must not appear anywhere in the shipped data.
-/// </summary>
 internal class SecretDefaultExclusionTests : AdapterServiceTestsBase
 {
     private const string SentinelValue = "sentinel-secret-default-value-7246";
