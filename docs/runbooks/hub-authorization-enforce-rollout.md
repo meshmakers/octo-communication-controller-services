@@ -153,9 +153,9 @@ Rotate by client, not by secret: octo-cli has client secret verbs (`CreateApiSec
 `UpdateApiSecretClient`), but whether a client can hold two valid secrets at once after the OpenIddict
 migration (AB#4989) is not verified, and a second client works regardless. Create a second client
 (`AddClientCredentialsClient -id octo-communication-operator-<n>`, same shape), put its id and secret
-into Vault (`printf '%s' "${SECRET:?SECRET is not set}" | vault kv patch secret/meshmakers/<cluster>/octomesh operator_client_id=<id> operator_client_secret=-`
+into Vault (`: "${SECRET:?SECRET is not set}" && printf '%s' "$SECRET" | vault kv patch secret/meshmakers/<cluster>/octomesh operator_client_id=<id> operator_client_secret=-`
 — `-` makes Vault read the secret from standard input, so it stays out of the shell history and the
-process list; `${SECRET:?}` stops before Vault stores an empty secret — or `setup-vault-octomesh-secrets.yml`, which preserves the other keys), redeploy the operator (the
+process list; the `:` check runs before the pipe starts, so an unset or empty `SECRET` never reaches Vault as an empty secret — or `setup-vault-octomesh-secrets.yml`, which preserves the other keys), redeploy the operator (the
 chart's checksum annotation restarts the pod), check `Operator access token acquired for client
 octo-communication-operator-<n>`, then `DeleteClient` the old one. Deleting the old client before the
 new pod is up refuses the operator at its next reconnect once the hub enforces.
