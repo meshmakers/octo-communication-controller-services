@@ -684,6 +684,20 @@ Model definitions are in `src/SystemCommunicationCkModel/ConstructionKit/`:
 - `associations/` - relationship definitions
 - `enums/` - enumeration definitions
 - `attributes/` - attribute definitions
+- `records/` - record definitions
+
+#### Platform secret defaults (System.Communication 4.15.0, AB#7243)
+
+System.Communication 4.15.0 defines the model contract (record, attribute, type). The projection into tenants is the controller's job (AB#7244, AB#7245) and is not part of this model version.
+
+| Element | Kind | Generated class / member | Rule |
+|---------|------|--------------------------|------|
+| `SecretDefaultProjection` | record (final, key `Key`) | `RtSecretDefaultProjectionRecord`: `Key`, `SecretValue` (Secret), `AllowedTenantIds` (optional), `Description` (optional) | No scope field: the target set is the Application's own tenant plus its whole subtree; `AllowedTenantIds` only narrows |
+| `SecretDefaults` | optional attribute (RecordArray) on `Application` only | `RtApplication.SecretDefaults` | Not a `ValueOverride`: never reaches Helm values, the pod or the app's Kubernetes Secret |
+| `SecretDefault` | type (final), derived from `System/Entity`, not from a Configuration type | `RtSecretDefault`: `Name`, `Value` (Secret), `SourceTenantId`, `SourceWorkloadRtId`, `LastProjectedAt` | Provisioned by the controller, never author-set; `Value` is platform-only (no tenant pipeline, user or role may reveal it); all attributes except `Value` are `RuntimeState`; `Value`, `SourceTenantId` and `SourceWorkloadRtId` are optional (the controller always sets them, but export drops Secret and RuntimeState values, so a required one would make an exported entity unimportable). Because it is not a Configuration type the controller never ships it to adapters as pipeline configuration |
+
+A Secret attribute takes ownership `Secret` and nothing else (`SecretAttributeValidator` in the engine). Model tests:
+`tests/CommunicationControllerService.Tests/Services/SecretDefaultModelTests.cs`.
 
 #### Publishing the CK model: explicit release decision (AB#7432)
 
