@@ -187,7 +187,7 @@ internal sealed class ProvisionForSourceAsyncTests : SecretDefaultProvisioningSe
     }
 
     [Test]
-    public async Task AnApplicationWithoutSecretDefaults_WritesNothingAndDoesNotWalkTheTree()
+    public async Task AnApplicationWithoutSecretDefaults_WritesNothing()
     {
         var application = ArrangeApplication();
         application.SecretDefaults = null;
@@ -196,8 +196,7 @@ internal sealed class ProvisionForSourceAsyncTests : SecretDefaultProvisioningSe
 
         using var assertionScope = Assert.Multiple();
         await Assert.That(result).IsEqualTo(SecretDefaultProvisioningResult.Nothing);
-        await TenantScopeResolver.DidNotReceive().ResolveLendableTenantsAsync(Arg.Any<string>(),
-            Arg.Any<LendingScope>(), Arg.Any<CancellationToken>());
+        await Assert.That(Writes).IsEmpty();
     }
 
     [Test]
@@ -232,7 +231,11 @@ internal sealed class ProvisionForSourceAsyncTests : SecretDefaultProvisioningSe
             .OrderBy(name => name, StringComparer.Ordinal)
             .ToList();
         await Assert.That(repositoryCallNames).IsEquivalentTo(new[]
-            { nameof(ICommunicationRepository.GetWorkloadByRtIdAsync), nameof(ICommunicationRepository.UpsertSecretDefaultAsync) });
+        {
+            nameof(ICommunicationRepository.GetSecretDefaultsAsync),
+            nameof(ICommunicationRepository.GetWorkloadByRtIdAsync),
+            nameof(ICommunicationRepository.UpsertSecretDefaultAsync)
+        });
     }
 
     [Test]

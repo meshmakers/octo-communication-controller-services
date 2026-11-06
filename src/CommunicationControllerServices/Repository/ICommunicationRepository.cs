@@ -182,6 +182,31 @@ public interface ICommunicationRepository
     Task<SecretDefaultWriteResult> UpsertSecretDefaultAsync(string targetTenantId, SecretDefaultWrite write);
 
     /// <summary>
+    ///     The SecretDefaults stored in a tenant, without their values.
+    /// </summary>
+    /// <param name="tenantId">Tenant to read.</param>
+    /// <returns>The defaults; an unresolvable tenant or a tenant without the type is reported, not thrown.</returns>
+    Task<SecretDefaultInventory> GetSecretDefaultsAsync(string tenantId);
+
+    /// <summary>
+    ///     Erases one SecretDefault of a tenant. A default is derived state the reconcile rebuilds, so no tombstone
+    ///     is kept.
+    /// </summary>
+    /// <param name="tenantId">Tenant that holds the default.</param>
+    /// <param name="secretDefaultRtId">RtId of the SecretDefault entity.</param>
+    Task DeleteSecretDefaultAsync(string tenantId, OctoObjectId secretDefaultRtId);
+
+    /// <summary>
+    ///     The Applications of a tenant, read as possible sources of SecretDefaults.
+    /// </summary>
+    /// <param name="tenantId">Tenant to read.</param>
+    /// <returns>
+    ///     The Applications; empty when the tenant lacks the System.Communication version that defines
+    ///     SecretDefaults, null when the tenant cannot be resolved. A failed read throws.
+    /// </returns>
+    Task<IReadOnlyCollection<RtApplication>?> GetSecretDefaultSourceApplicationsAsync(string tenantId);
+
+    /// <summary>
     ///     Points one leased adapter's <c>LentFrom</c> edge at an existing mirror, and reports whether
     ///     the edge was written (AB#5349).
     /// </summary>

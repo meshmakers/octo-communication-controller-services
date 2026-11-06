@@ -151,17 +151,21 @@ internal sealed class ProvisionPrecedenceAndValidationTests : SecretDefaultProvi
     }
 
     [Test]
-    public async Task OnlyInvalidEntries_WriteNothingAndDoNotWalkTheTree()
+    public async Task OnlyInvalidEntries_WriteNothingAndRemoveNothing()
     {
-        var application = ArrangeApplication(ProtectedEntry(" ", SentinelSecret));
+        var application = ArrangeApplication(ProtectedEntry(CaptchaKey, SentinelSecret));
+        await Service.ProvisionForSourceAsync(SourceTenantId, application.RtId);
+        application.SecretDefaults = new AttributeRecordValueList<RtSecretDefaultProjectionRecord>
+            { ProtectedEntry(CaptchaKey, SentinelSecret), ProtectedEntry(CaptchaKey, "zq7245-duplicate") };
+        var writesBefore = Writes.Count;
 
         var result = await Service.ProvisionForSourceAsync(SourceTenantId, application.RtId);
 
         using var assertionScope = Assert.Multiple();
-        await Assert.That(Writes).IsEmpty();
-        await Assert.That(result.TargetsFailed).IsEqualTo(1);
-        await TenantScopeResolver.DidNotReceive().ResolveLendableTenantsAsync(Arg.Any<string>(),
-            Arg.Any<LendingScope>(), Arg.Any<CancellationToken>());
+        await Assert.That(Writes.Count).IsEqualTo(writesBefore);
+        await Assert.That(result.TargetsFailed).IsEqualTo(2);
+        await Assert.That(result.DefaultsRemoved).IsEqualTo(0);
+        await Assert.That(StoredDefault(GrandchildTenantId, CaptchaKey)).IsNotNull();
     }
 
     [Test]

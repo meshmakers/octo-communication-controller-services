@@ -136,6 +136,7 @@ internal class EnsurePipelineServiceAccountsAsyncTests
         Substitute.For<IAdapterService>(),
         provisioningService,
         Substitute.For<IAdapterPoolMirrorProvisioningService>(),
+        Substitute.For<ISecretDefaultProvisioningService>(),
         new FailedTenantRegistry(),
         new TenantSetupRetryTracker(),
         eventService,
