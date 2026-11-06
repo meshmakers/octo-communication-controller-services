@@ -699,7 +699,7 @@ Model definitions are in `src/SystemCommunicationCkModel/ConstructionKit/`:
 
 #### Platform secret defaults (System.Communication 4.15.0, AB#7243)
 
-System.Communication 4.15.0 defines the model contract (record, attribute, type). The projection into tenants is the controller's job (AB#7244, AB#7245) and is not part of this model version.
+System.Communication 4.15.0 defines the model contract (record, attribute, type). The projection into tenants is the controller's job (AB#7244, AB#7245) and is not part of this model version; see "Secret defaults (AB#7219)" below.
 
 | Element | Kind | Generated class / member | Rule |
 |---------|------|--------------------------|------|
@@ -5407,3 +5407,54 @@ included, may obtain it. The rule is enforced **by type, in code**, in two repos
   its own: the list never contains a SecretDefault.
 - The projection (AB#7244, AB#7245) writes `SecretDefault` entities only through the child tenant context and must never
   add one to a configuration list. The platform's own consumer (the CAPTCHA verify node, AB#7251) is the only reader.
+
+## Secret defaults (AB#7219)
+
+An Application's `SecretDefaults` (System.Communication 4.15.0) are projected by the controller into the platform-owned
+`System.Communication/SecretDefault` of every tenant the Application serves (AB#7244). Nothing else is written, so a
+tenant's own secret of the same purpose (e.g. `RegistrationCaptchaSecret`) is never touched; the platform node that
+consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tenant's value and falls back to it.
+
+- **Authority.** Only the deploy of the Application writes SecretDefaults. `DeploymentSiteService.DeployWorkloadAsync`
+  calls `ISecretDefaultProvisioningService.ProvisionForSourceAsync(tenantId, applicationRtId)` after the Helm
+  notification, for an `RtApplication` with at least one entry. Best effort like the adapter-pool mirror fan-out: a
+  failure of the whole projection is an Error event on the Application, the deploy succeeds, the next deploy retries.
+- **Target set.** The Application's own tenant plus its whole subtree, read through
+  `ITenantLendingScopeResolver.ResolveLendableTenantsAsync(source, LendingScope.Descendants)` (the descendant walk with
+  the ancestor guard). Never siblings. A non-empty `AllowedTenantIds` intersects that set; a listed tenant outside it is
+  ignored, never granted.
+- **Value.** Each `SecretValue` is revealed once in the source tenant (`IWorkloadEncryptionService.RevealOrNull`,
+  attribute path `SecretDefaults.SecretValue`) and handed to the write as `RtSecretValue.Pending`; the engine encrypts it
+  in the target. A redeploy overwrites (rotation). An unreadable value writes nothing for that key and is an Error event.
+- **Write.** `ICommunicationRepository.UpsertSecretDefaultAsync(targetTenantId, SecretDefaultWrite)` matches on
+  `RtWellKnownName` = key (the name the consumer reads), sets `Name`, `Value`, `SourceTenantId`, `SourceWorkloadRtId` and
+  `LastProjectedAt`, and erases further SecretDefaults with the same well-known name so the consumer finds exactly one. A
+  tenant that cannot be resolved (`TenantUnavailable`) or lacks System.Communication 4.15.0 (`ModelMissing`) is
+  skipped with a Warning event in the source tenant naming tenant and key; the other tenants are written.
+  `SecretDefaultWrite` is a class, not a record, so no generated `ToString` renders the value.
+- **Precedence: the source closer to the root wins.** Each write carries the ancestors of its source tenant
+  (`ITenantLendingScopeResolver.ResolveAncestorTenantsAsync`, the resolver's own parent map) as
+  `ProtectedSourceTenantIds`. That call throws when the tenant tree could not be read completely (a partial parent map
+  would drop ancestors), which stops the projection before any write; lending keeps using the partial map. An existing SecretDefault whose `SourceTenantId` is one of them is kept
+  (`KeptAncestorSource`), and a Warning event in the deploying tenant names the target tenant, the key, the kept source and
+  the refused source. The same source (redeploy, rotation) or a descendant source overwrites; so does an unrelated source
+  (last deploy wins). Example: P projects `k`, then C1 deploys `k` -> C1 and its subtree keep P's value; C1 projects first,
+  then P deploys -> P overwrites.
+- **Deploy guard.** `SecretDefaultDeclarationValidator` runs in `EnsureWorkloadIsHelmDeployableAsync`, before anything
+  reaches the operator, and records the rejection on the workload: empty or null key, key not matching
+  `^[A-Za-z0-9][A-Za-z0-9._-]*$` (at most 128 characters), a key declared twice, or an entry without `SecretValue` (an
+  export/import drops it). Each message names the Application and the key, never the value.
+- **The service validates on its own.** `ProvisionForSourceAsync` runs the same checks (`SecretDefaultDeclarationValidator.Check`)
+  on the entries it reads, because it is also called outside the deploy (AB#7245). It skips every invalid entry, all entries of
+  a duplicated key included, with an Error event, and writes the valid ones. The key is read raw
+  (`GetAttributeValueOrDefault`): the generated `Key` getter throws on a null value.
+- **Platform-only.** SecretDefaults never reach the `WorkloadDeployedDto`: no Helm value, no `ValuesYaml`, no
+  `{release}-octo-secrets`. The plaintext appears in no log line, event, exception message or workload status
+  (`ProvisionForSourceAsyncTests.ThePlaintext_ReachesNoLogLineAndNoEvent`, `DeployWorkloadSecretDefaultsTests`). See
+  also "Platform-only secrets" above (AB#7246): a SecretDefault is never part of an adapter's configuration list.
+- **Not yet here** (AB#7245): tenants created or loaded after the deploy, removal of a default from all targets, per-tenant
+  status and a reconcile endpoint.
+- Tests: `tests/CommunicationControllerService.Tests/Services/SecretDefaultProvisioningServiceTests/`,
+  `DeploymentSiteServiceTests/DeployWorkloadSecretDefaultsTests.cs`, integration
+  `Repository/SecretDefaultRepositoryTests.cs` (encryption, rotation in place, another secret of the tenant unchanged,
+  duplicate erase, a protected source kept).

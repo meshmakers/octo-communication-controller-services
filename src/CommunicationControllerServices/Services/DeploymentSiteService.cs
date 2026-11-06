@@ -33,6 +33,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
     private readonly ITenantLendingScopeResolver _lendingScopeResolver;
     private readonly IWorkloadLifecycleService _workloadLifecycleService;
     private readonly IAdapterPoolMirrorProvisioningService _adapterPoolMirrorProvisioningService;
+    private readonly ISecretDefaultProvisioningService _secretDefaultProvisioningService;
     private readonly IShutdownState _shutdownState;
 
     /// <summary>
@@ -68,6 +69,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
     /// <param name="lendingScopeResolver">Resolves which tenants an adapter deploymentSite may lend to, so a Leased workload naming an out-of-scope lender is refused at deploy time (AB#4924)</param>
     /// <param name="workloadLifecycleService">Carries the AB#4917 scale verb to the operator owning the workload's deploymentSite; reused for adapter-pool scaling so the MinReplicas floor is enforced in one place (AB#4924)</param>
     /// <param name="adapterPoolMirrorProvisioningService">Pushes an adapter pool's deploy/undeploy out to the LentAdapterPool mirrors its borrowers hold (AB#5271)</param>
+    /// <param name="secretDefaultProvisioningService">Projects an Application's SecretDefaults into the tenants it serves</param>
     /// <param name="shutdownState">Lets the offline-reconciliation sweep stop writing once the host is stopping (AB#6418)</param>
     /// <param name="timeProvider">Clock; its start reading is the proof horizon of the offline-reconciliation sweep (AB#7056)</param>
     public DeploymentSiteService(ICommunicationRepository communicationRepository, IDeploymentSiteCache poolCache,
@@ -81,6 +83,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
         ITenantLendingScopeResolver lendingScopeResolver,
         IWorkloadLifecycleService workloadLifecycleService,
         IAdapterPoolMirrorProvisioningService adapterPoolMirrorProvisioningService,
+        ISecretDefaultProvisioningService secretDefaultProvisioningService,
         IShutdownState shutdownState,
         TimeProvider? timeProvider = null)
     {
@@ -97,6 +100,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
         _lendingScopeResolver = lendingScopeResolver;
         _workloadLifecycleService = workloadLifecycleService;
         _adapterPoolMirrorProvisioningService = adapterPoolMirrorProvisioningService;
+        _secretDefaultProvisioningService = secretDefaultProvisioningService;
         _shutdownState = shutdownState;
     }
     
@@ -392,6 +396,8 @@ internal class DeploymentSiteService : IDeploymentSiteService
 
         await FanOutAdapterPoolMirrorsAsync(tenantId, workload);
 
+        await ProjectSecretDefaultsAsync(tenantId, workload);
+
         return built.Warning;
     }
 
@@ -554,6 +560,9 @@ internal class DeploymentSiteService : IDeploymentSiteService
         // AB#7427: invalid typed CPU/memory settings fail here, before anything reaches Helm.
         await EnsureResourceSettingsAreValidAsync(tenantId, workload);
 
+        await EnsureValidOrRecordRejectionAsync(tenantId, workload,
+            () => SecretDefaultDeclarationValidator.Validate(tenantId, workload));
+
         if (string.IsNullOrWhiteSpace(workload.ChartName))
         {
             // Same AB#5327: once leasing itself is sound, a leased workload with no chart is not a
@@ -700,19 +709,31 @@ internal class DeploymentSiteService : IDeploymentSiteService
     /// workload (<c>DeploymentState</c> Error + <c>LastDeploymentError</c>) so the operator sees it at the
     /// field in Studio, then rethrows. The write is best effort: it must not hide the validation error.
     /// </summary>
-    private async Task EnsureResourceSettingsAreValidAsync(string tenantId, RtDeployableWorkload workload)
+    private Task EnsureResourceSettingsAreValidAsync(string tenantId, RtDeployableWorkload workload)
+    {
+        return EnsureValidOrRecordRejectionAsync(tenantId, workload,
+            () => WorkloadResourceSettingsValidator.Validate(tenantId, workload));
+    }
+
+    /// <summary>
+    /// Runs <paramref name="validate"/>; a <see cref="DeploymentSiteServiceException"/> it throws is recorded on the
+    /// workload (<c>DeploymentState</c> Error + <c>LastDeploymentError</c>) and rethrown.
+    /// </summary>
+    private async Task EnsureValidOrRecordRejectionAsync(string tenantId, RtDeployableWorkload workload,
+        Action validate)
     {
         try
         {
-            WorkloadResourceSettingsValidator.Validate(tenantId, workload);
+            validate();
         }
-        catch (DeploymentSiteServiceException e)
+        catch (DeploymentSiteServiceException rejection)
         {
             Logger.Warn("[{TenantId}] Workload '{WorkloadName}' ({WorkloadRtId}) rejected: {Reason}", tenantId,
-                workload.Name, workload.RtId, e.Message);
+                workload.Name, workload.RtId, rejection.Message);
             try
             {
-                await SetWorkloadDeploymentStateAsync(tenantId, workload, RtDeploymentStateEnum.Error, e.Message);
+                await SetWorkloadDeploymentStateAsync(tenantId, workload, RtDeploymentStateEnum.Error,
+                    rejection.Message);
             }
             catch (Exception writeFailure)
             {
@@ -782,6 +803,42 @@ internal class DeploymentSiteService : IDeploymentSiteService
             $"Workload '{workload.Name}' undeploy requested (resting state: {restingState}).");
 
         await FanOutAdapterPoolMirrorsAsync(tenantId, workload);
+    }
+
+    /// <summary>
+    ///     Projects the SecretDefaults of an Application into the tenants it serves. Best effort: the Helm deploy
+    ///     has already been sent, so a failure is stored as an Error event and the next deploy retries it.
+    /// </summary>
+    private async Task ProjectSecretDefaultsAsync(string tenantId, RtDeployableWorkload workload)
+    {
+        if (workload is not RtApplication { SecretDefaults.Count: > 0 } application)
+        {
+            return;
+        }
+
+        try
+        {
+            await _secretDefaultProvisioningService.ProvisionForSourceAsync(tenantId, application.RtId);
+        }
+        catch (Exception projectionFailure)
+        {
+            Logger.Error(projectionFailure,
+                "[{TenantId}] Could not project the secret defaults of application '{WorkloadName}' ({WorkloadRtId})",
+                tenantId, application.Name, application.RtId);
+            try
+            {
+                await _eventService.StoreErrorEventAsync(tenantId,
+                    $"Secret defaults of application '{application.Name}' could not be projected into the tenants " +
+                    "it serves. The deploy continues; deploy the application again to retry.",
+                    new RtEntityId(SystemCommunicationCkIds.RtCkApplicationTypeId, application.RtId));
+            }
+            catch (Exception eventFailure)
+            {
+                Logger.Warn(eventFailure, "[{TenantId}] Could not store the projection failure event of application " +
+                                          "'{WorkloadName}' ({WorkloadRtId})", tenantId, application.Name,
+                    application.RtId);
+            }
+        }
     }
 
     /// <summary>

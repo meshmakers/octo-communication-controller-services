@@ -122,6 +122,39 @@ internal class DeploymentSiteServiceException : Exception
             "Path identifies a secret override; keep exactly one entry per Path.");
     }
 
+    internal static Exception WorkloadSecretDefaultKeyEmpty(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName)
+    {
+        return new DeploymentSiteServiceException(
+            $"[{tenantId}] Cannot deploy application '{workloadName ?? workloadRtId.ToString()}': a SecretDefaults " +
+            "entry has an empty Key. Give every secret default a key.");
+    }
+
+    internal static Exception WorkloadSecretDefaultKeyInvalid(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName, string key, int maximumLength)
+    {
+        return new DeploymentSiteServiceException(
+            $"[{tenantId}] Cannot deploy application '{workloadName ?? workloadRtId.ToString()}': the SecretDefaults " +
+            $"key '{key}' is invalid. Use at most {maximumLength} letters, digits, '.', '_' or '-', starting with a " +
+            "letter or digit.");
+    }
+
+    internal static Exception WorkloadSecretDefaultKeyDuplicate(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName, string key)
+    {
+        return new DeploymentSiteServiceException(
+            $"[{tenantId}] Cannot deploy application '{workloadName ?? workloadRtId.ToString()}': the SecretDefaults " +
+            $"key '{key}' is declared more than once. Keep exactly one entry per key.");
+    }
+
+    internal static Exception WorkloadSecretDefaultValueMissing(string tenantId, OctoObjectId workloadRtId,
+        string? workloadName, string key)
+    {
+        return new DeploymentSiteServiceException(
+            $"[{tenantId}] Cannot deploy application '{workloadName ?? workloadRtId.ToString()}': the SecretDefaults " +
+            $"entry '{key}' has no SecretValue. Set the value (an import drops it) and deploy again.");
+    }
+
     internal static Exception WorkloadResourceQuantityInvalid(string tenantId, OctoObjectId workloadRtId,
         string? workloadName, string attributeName, string value)
     {

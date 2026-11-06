@@ -123,6 +123,7 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         // registers TimeProvider.System the same way).
         Services.AddSingleton(TimeProvider.System);
         Services.AddSingleton<IAdapterService, AdapterService>();
+        Services.AddSingleton<ISecretDefaultProvisioningService, SecretDefaultProvisioningService>();
         Services.AddSingleton<IDeploymentSiteService, DeploymentSiteService>();
         Services.AddSingleton<IPipelineDebugService, PipelineDebugService>();
         Services.AddTransient<ITriggerManagementService, TriggerManagementService>();

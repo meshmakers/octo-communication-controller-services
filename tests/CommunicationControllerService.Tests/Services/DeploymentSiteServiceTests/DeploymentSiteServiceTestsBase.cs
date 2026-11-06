@@ -40,6 +40,10 @@ internal abstract class PoolServiceTestsBase
     ///     triggers it and an adapter deploy does not.</summary>
     protected readonly IAdapterPoolMirrorProvisioningService AdapterPoolMirrorProvisioningService =
         Substitute.For<IAdapterPoolMirrorProvisioningService>();
+
+    /// <summary>Substituted; the projection itself is covered by SecretDefaultProvisioningServiceTests.</summary>
+    protected readonly ISecretDefaultProvisioningService SecretDefaultProvisioningService =
+        Substitute.For<ISecretDefaultProvisioningService>();
     /// <summary>AB#6418 — not shutting down by default.</summary>
     protected readonly IShutdownState ShutdownState = Substitute.For<IShutdownState>();
     protected readonly IDeploymentSiteCachePublish PoolCachePublish;
@@ -125,6 +129,7 @@ internal abstract class PoolServiceTestsBase
             LendingScopeResolver,
             WorkloadLifecycleService,
             AdapterPoolMirrorProvisioningService,
+            SecretDefaultProvisioningService,
             ShutdownState);
     }
 

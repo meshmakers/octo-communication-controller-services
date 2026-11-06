@@ -25,6 +25,9 @@ internal class CommunicationRepository : ICommunicationRepository
     /// </summary>
     private const string PublishWorkloadObservabilityAttributeName = "PublishWorkloadObservability";
 
+    /// <summary>The first System.Communication version that defines <c>SecretDefault</c>.</summary>
+    private static readonly CkModelId SecretDefaultMinimumModelId = new("System.Communication-4.15.0");
+
     private readonly ISystemContext _systemContext;
     private readonly ILogger<CommunicationRepository> _logger;
     private readonly IExecutionEnvelope _envelope;
@@ -666,6 +669,84 @@ internal class CommunicationRepository : ICommunicationRepository
             await tenantRepository.DeleteOneRtEntityByRtIdAsync<RtLentAdapterPool>(
                 session, mirrorRtId, DeleteOptions.Erase);
             await session.CommitTransactionAsync();
+        }
+        catch
+        {
+            await session.AbortTransactionAsync();
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<SecretDefaultWriteResult> UpsertSecretDefaultAsync(string targetTenantId,
+        SecretDefaultWrite write)
+    {
+        var tenantContext = await _systemContext.TryFindTenantContextAsync(targetTenantId);
+        var tenantRepository = await _systemContext.TryFindTenantRepositoryAsync(targetTenantId);
+        if (tenantContext is null || tenantRepository is null)
+        {
+            return new SecretDefaultWriteResult(SecretDefaultWriteOutcome.TenantUnavailable);
+        }
+
+        if (!await tenantContext.IsCkModelSatisfiedAsync(SecretDefaultMinimumModelId))
+        {
+            return new SecretDefaultWriteResult(SecretDefaultWriteOutcome.ModelMissing);
+        }
+
+        using var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+        try
+        {
+            var sameKey = (await tenantRepository.GetRtEntitiesByTypeAsync<RtSecretDefault>(session,
+                    RtEntityQueryOptions.Create().FieldEquals(nameof(RtEntity.RtWellKnownName), write.Key)))
+                .Items
+                .Where(secretDefault => string.Equals(secretDefault.RtWellKnownName, write.Key, StringComparison.Ordinal))
+                .OrderBy(secretDefault => secretDefault.RtId.ToString(), StringComparer.Ordinal)
+                .ToList();
+
+            var protectedSources = new HashSet<string>(write.ProtectedSourceTenantIds, StringComparer.OrdinalIgnoreCase);
+            var keptDefault = sameKey.FirstOrDefault(secretDefault =>
+                secretDefault.SourceTenantId is { } existingSource && protectedSources.Contains(existingSource));
+            if (keptDefault is not null)
+            {
+                await session.CommitTransactionAsync();
+                return new SecretDefaultWriteResult(SecretDefaultWriteOutcome.KeptAncestorSource,
+                    keptDefault.SourceTenantId);
+            }
+
+            var existing = sameKey.FirstOrDefault();
+            foreach (var duplicate in sameKey.Skip(1))
+            {
+                await tenantRepository.DeleteOneRtEntityByRtIdAsync<RtSecretDefault>(session, duplicate.RtId,
+                    DeleteOptions.Erase);
+            }
+
+            var secretDefault = existing ?? await tenantRepository.CreateTransientRtEntityAsync<RtSecretDefault>();
+            if (existing is null)
+            {
+                secretDefault.RtId = OctoObjectId.GenerateNewId();
+                secretDefault.RtWellKnownName = write.Key;
+            }
+
+            secretDefault.Name = write.Key;
+            secretDefault.Value = write.Value;
+            secretDefault.SourceTenantId = write.SourceTenantId;
+            secretDefault.SourceWorkloadRtId = write.SourceWorkloadRtId;
+            secretDefault.LastProjectedAt = write.ProjectedAt;
+
+            if (existing is null)
+            {
+                await tenantRepository.InsertOneRtEntityAsync(session, secretDefault);
+            }
+            else
+            {
+                await tenantRepository.UpdateOneRtEntityByIdAsync(session, secretDefault.RtId, secretDefault);
+            }
+
+            await session.CommitTransactionAsync();
+            return new SecretDefaultWriteResult(existing is null
+                ? SecretDefaultWriteOutcome.Created
+                : SecretDefaultWriteOutcome.Updated);
         }
         catch
         {

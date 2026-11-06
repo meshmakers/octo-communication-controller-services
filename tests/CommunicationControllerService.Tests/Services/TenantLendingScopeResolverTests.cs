@@ -3,6 +3,7 @@ using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services;
 
@@ -103,6 +104,53 @@ internal class TenantLendingScopeResolverTests
 
     private static LendingScope DescendantsAndSiblings(params string[] allowed) =>
         new(LendingScope.DescendantsAndSiblings, allowed.Length == 0 ? null : allowed);
+
+    [Test]
+    public async Task AncestorTenantsOfAGrandchild_AreItsParentAndGrandparentOnly()
+    {
+        GivenTree((Lender, null), ("childA", Lender), ("childB", Lender), ("grandchildA1", "childA"));
+
+        var ancestors = await _resolver.ResolveAncestorTenantsAsync("grandchildA1");
+
+        await Assert.That(ancestors).IsEquivalentTo(new[] { "childA", Lender });
+    }
+
+    [Test]
+    public async Task AncestorTenants_WhenTheTreeCannotBeRead_Throw()
+    {
+        GivenTree((Lender, null), ("childA", Lender));
+        _systemContext.GetAllTenantsAsync(Arg.Any<IOctoAdminSession>(), Arg.Any<int?>(), Arg.Any<int?>())
+            .ThrowsAsync(new InvalidOperationException("registry unavailable"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await _resolver.ResolveAncestorTenantsAsync("childA"));
+    }
+
+    [Test]
+    public async Task AncestorTenants_AfterAFailedRead_AreReadAgainInsteadOfFromThePartialCache()
+    {
+        GivenTree((Lender, null), ("childA", Lender));
+        _systemContext.GetAllTenantsAsync(Arg.Any<IOctoAdminSession>(), Arg.Any<int?>(), Arg.Any<int?>())
+            .ThrowsAsync(new InvalidOperationException("registry unavailable"));
+        var partialCandidates = await _resolver.ResolveCandidateLenderTenantsAsync("childA");
+        GivenTree((Lender, null), ("childA", Lender));
+
+        var ancestors = await _resolver.ResolveAncestorTenantsAsync("childA");
+
+        using var assertionScope = Assert.Multiple();
+        await Assert.That(partialCandidates).IsEmpty();
+        await Assert.That(ancestors).IsEquivalentTo(new[] { Lender });
+    }
+
+    [Test]
+    public async Task AncestorTenantsOfARoot_AreEmpty()
+    {
+        GivenTree((Lender, null), ("childA", Lender));
+
+        var ancestors = await _resolver.ResolveAncestorTenantsAsync(Lender);
+
+        await Assert.That(ancestors).IsEmpty();
+    }
 
     [Test]
     public async Task NotSharedLendsToNobody()

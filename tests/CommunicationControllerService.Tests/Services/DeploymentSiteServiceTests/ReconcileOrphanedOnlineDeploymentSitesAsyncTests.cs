@@ -101,7 +101,8 @@ internal class ReconcileOrphanedOnlineDeploymentSitesAsyncTests : PoolServiceTes
         var service = new DeploymentSiteService(CommunicationRepository, DeploymentSiteCache,
             CommunicationEventService, manager, EncryptionService, TemplateResolver, OnDemandCapabilityService,
             ServiceAccountProvisioningService, ServiceAccountResolver, LendingScopeResolver,
-            WorkloadLifecycleService, AdapterPoolMirrorProvisioningService, ShutdownState);
+            WorkloadLifecycleService, AdapterPoolMirrorProvisioningService, SecretDefaultProvisioningService,
+            ShutdownState);
 
         var reclaimed = Site(RtCommunicationStateEnum.Online);
         var orphan = Site(RtCommunicationStateEnum.Online);
