@@ -39,8 +39,8 @@ blueprints again when the run is over.
 
 ## 2. Tenant tree, install, data flows
 
-Create the tree **before** the Application is deployed: a tenant created or loaded later receives the
-default only from a redeploy until the controller's tenant-load hook (AB#7245) is released.
+Create the tree **before** the Application is deployed, so the deploy in step 4 projects into every
+tenant of it.
 
 ```bash
 octo-cli --context "local_$parent_tenant" -c Create -tid "$child_tenant" -db "$child_tenant"
