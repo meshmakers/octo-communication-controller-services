@@ -769,6 +769,10 @@ The `System.` name prefix tells Refinery Studio (`BlueprintIdExtensions.IsServic
 
 The optional `HelloCommunication-1.0.0` demo blueprint lives in `samples/Blueprints/` (not embedded). It's admin-installable: drop the folder into a `LocalFileSystemBlueprintCatalog` root or publish it via a GitHub catalog. Its `blueprintDependencies` reference `System.Communication-[1.0,2.0)` so it can be applied on top of the service-managed baseline.
 
+`samples/Blueprints/SecretDefaultDemo/` is the secret-default sample (AB#7252): two blueprints (`SecretDefaultDemo` with
+the Application and its `SecretDefaults`, `SecretDefaultDemoCaptcha` with a tenant override and a `VerifyCaptcha@1`
+route), a small CK model and the `verify/` commands. See "Secret defaults (AB#7219)".
+
 #### Runtime-State Attributes (do NOT reset on blueprint re-apply)
 
 `System.Communication-3.22.0` (paired with blueprints
@@ -5426,6 +5430,14 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
 - **Value.** Each `SecretValue` is revealed once in the source tenant (`IWorkloadEncryptionService.RevealOrNull`,
   attribute path `SecretDefaults.SecretValue`) and handed to the write as `RtSecretValue.Pending`; the engine encrypts it
   in the target. A redeploy overwrites (rotation). An unreadable value writes nothing for that key and is an Error event.
+- **Supplying the value (AB#7252).** A blueprint seeds an entry with `Key` (and `Description`) and **no** `SecretValue`:
+  the engine's secret seed lint allows only an empty or omitted Secret in a seed (a value, a `<...>` / `TODO_SET_*`
+  placeholder and a `${...}` variable are all refused), and blueprints have no install-time parameters. An operator
+  writes the value after the install through the asset repository (Studio, or `systemCommunicationApplications.update`
+  with the whole `secretDefaults` list and the value as `secretValue`); until then the deploy guard below refuses the
+  Application. A re-apply or blueprint update keeps it (`SecretDefaults` is TenantOwned, a Secret record member is
+  carried over by record key). Never as a `ValueOverride`, `ValuesYaml` or Helm value. Worked sample with a
+  tenant override and `VerifyCaptcha@1`: `samples/Blueprints/SecretDefaultDemo/` (README + `verify/`).
 - **Write.** `ICommunicationRepository.UpsertSecretDefaultAsync(targetTenantId, SecretDefaultWrite)` matches on
   `RtWellKnownName` = key (the name the consumer reads), sets `Name`, `Value`, `SourceTenantId`, `SourceWorkloadRtId` and
   `LastProjectedAt`, and erases further SecretDefaults with the same well-known name so the consumer finds exactly one. A

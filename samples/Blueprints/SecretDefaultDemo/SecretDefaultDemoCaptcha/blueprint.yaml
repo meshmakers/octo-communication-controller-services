@@ -1,0 +1,27 @@
+$schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
+blueprintId: SecretDefaultDemoCaptcha-1.0.0
+description: |
+  The USING half of the secret-default sample. Install it on every tenant served by the
+  `SecretDefaultDemo-1.0.0` Application (its own tenant, children, grandchildren).
+
+  It seeds:
+  - a `SecretDefaultDemo/CaptchaConfiguration` named `CaptchaConfiguration` whose
+    `CaptchaSecret` is empty: the tenant's own override, written by the tenant admin
+    when the tenant wants its own Turnstile widget;
+  - one pipeline, POST /secret-default-demo/verify-captcha, that runs
+    `VerifyCaptcha@1` with that override, else the platform's secret default
+    `demo-captcha-secret`, and answers `{ valid, source }`, plus `reason` when
+    `valid` is false.
+
+  The pipeline never reads a secret into its data context. `RevealSecret@1` on the
+  `SecretDefault` is refused for every tenant identity; only `VerifyCaptcha@1` uses it.
+
+  Deploy the data flow after the install (`DeployDataFlow`). The CK model
+  `SecretDefaultDemo` comes from `../ConstructionKit` and must be in a CK catalog the
+  asset repository reads (local: `octo-ckc -c Publish`).
+
+ckModelDependencies:
+  - System.Communication-[4.15,5.0)
+  - SecretDefaultDemo-[1.0,2.0)
+
+seedDataPath: seed-data/entities.yaml
