@@ -95,7 +95,14 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var ancestors = await ResolveAncestorsAsync(tenantId).ConfigureAwait(false);
+        var parentMap = await ResolveParentMapEntryAsync(requireComplete: true).ConfigureAwait(false);
+        if (!parentMap.IsComplete)
+        {
+            throw new InvalidOperationException(
+                $"The ancestors of tenant '{tenantId}' cannot be resolved: the tenant tree could not be read completely.");
+        }
+
+        var ancestors = WalkAncestors(parentMap.Parents, tenantId);
         ancestors.Remove(tenantId);
         return ancestors;
     }
@@ -246,12 +253,18 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
     /// </remarks>
     private async Task<HashSet<string>> ResolveAncestorsAsync(string tenantId)
     {
+        var parents = await ResolveParentMapAsync().ConfigureAwait(false);
+        return WalkAncestors(parents, tenantId);
+    }
+
+    private static HashSet<string> WalkAncestors(IReadOnlyDictionary<string, string> parents, string tenantId)
+    {
         var ancestors = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var current = tenantId;
 
         while (true)
         {
-            var parentId = await ResolveParentAsync(current).ConfigureAwait(false);
+            var parentId = parents.GetValueOrDefault(current);
             if (string.IsNullOrWhiteSpace(parentId) || !ancestors.Add(parentId))
             {
                 return ancestors;
@@ -300,13 +313,23 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
     /// </remarks>
     private async Task<IReadOnlyDictionary<string, string>> ResolveParentMapAsync()
     {
-        if (_parentMap is { IsExpired: false } cached)
+        return (await ResolveParentMapEntryAsync(requireComplete: false).ConfigureAwait(false)).Parents;
+    }
+
+    /// <summary>
+    ///     The cached parent map entry, rebuilt when expired, or when <paramref name="requireComplete" /> is set and
+    ///     the cached entry was built after a failed read.
+    /// </summary>
+    private async Task<ParentMapEntry> ResolveParentMapEntryAsync(bool requireComplete)
+    {
+        if (_parentMap is { IsExpired: false } cached && (cached.IsComplete || !requireComplete))
         {
-            return cached.Parents;
+            return cached;
         }
 
         var parents = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var isComplete = true;
 
         try
         {
@@ -352,16 +375,19 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
                 }
             }
         }
-        catch (Exception e)
+        catch (Exception readFailure)
         {
-            // A partial map is still better than none: the caller degrades to "no ancestors", which
-            // is the conservative direction for every consumer — a narrower lending scope and a
-            // borrower shown fewer pools, never more.
-            Logger.Warn(e, "Could not build the tenant parent map; ancestor and sibling resolution will be partial");
+            // A partial map is still better than none for lending: the caller degrades to "no ancestors", which
+            // is the conservative direction there — a narrower lending scope and a borrower shown fewer pools,
+            // never more. ResolveAncestorTenantsAsync refuses such a map instead.
+            isComplete = false;
+            Logger.Warn(readFailure,
+                "Could not build the tenant parent map; ancestor and sibling resolution will be partial");
         }
 
-        _parentMap = new ParentMapEntry(parents, DateTimeOffset.UtcNow.Add(CacheDuration));
-        return parents;
+        var entry = new ParentMapEntry(parents, DateTimeOffset.UtcNow.Add(CacheDuration), isComplete);
+        _parentMap = entry;
+        return entry;
     }
 
     private static IReadOnlyCollection<string> Intersect(IReadOnlyCollection<string> resolved,
@@ -387,7 +413,8 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
     ///     A class rather than a struct: the field holding it is <c>volatile</c>, which C# does not
     ///     allow for a value type, and a reference swap is what makes the refresh atomic.
     /// </summary>
-    private sealed record ParentMapEntry(IReadOnlyDictionary<string, string> Parents, DateTimeOffset ExpiresAt)
+    private sealed record ParentMapEntry(IReadOnlyDictionary<string, string> Parents, DateTimeOffset ExpiresAt,
+        bool IsComplete)
     {
         public bool IsExpired => DateTimeOffset.UtcNow >= ExpiresAt;
     }

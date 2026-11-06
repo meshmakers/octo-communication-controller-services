@@ -58,7 +58,9 @@ public interface ITenantLendingScopeResolver
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    ///     Every ancestor of the tenant (parent, grandparent, ...), without the tenant itself.
+    ///     Every ancestor of the tenant (parent, grandparent, ...), without the tenant itself. Throws
+    ///     <see cref="InvalidOperationException" /> when the tenant tree cannot be read completely, because a partial
+    ///     answer would silently drop ancestors.
     /// </summary>
     Task<IReadOnlyCollection<string>> ResolveAncestorTenantsAsync(string tenantId,
         CancellationToken cancellationToken = default);

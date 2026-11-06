@@ -5434,7 +5434,8 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   `SecretDefaultWrite` is a class, not a record, so no generated `ToString` renders the value.
 - **Precedence: the source closer to the root wins.** Each write carries the ancestors of its source tenant
   (`ITenantLendingScopeResolver.ResolveAncestorTenantsAsync`, the resolver's own parent map) as
-  `ProtectedSourceTenantIds`. An existing SecretDefault whose `SourceTenantId` is one of them is kept
+  `ProtectedSourceTenantIds`. That call throws when the tenant tree could not be read completely (a partial parent map
+  would drop ancestors), which stops the projection before any write; lending keeps using the partial map. An existing SecretDefault whose `SourceTenantId` is one of them is kept
   (`KeptAncestorSource`), and a Warning event in the deploying tenant names the target tenant, the key, the kept source and
   the refused source. The same source (redeploy, rotation) or a descendant source overwrites; so does an unrelated source
   (last deploy wins). Example: P projects `k`, then C1 deploys `k` -> C1 and its subtree keep P's value; C1 projects first,

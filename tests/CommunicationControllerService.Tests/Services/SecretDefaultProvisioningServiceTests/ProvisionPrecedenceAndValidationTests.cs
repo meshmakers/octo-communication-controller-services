@@ -3,6 +3,7 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.SecretDefaultProvisioningServiceTests;
 
@@ -68,6 +69,19 @@ internal sealed class ProvisionPrecedenceAndValidationTests : SecretDefaultProvi
         await Assert.That(result.TargetsSkipped).IsEqualTo(0);
         await Assert.That(StoredDefault(GrandchildTenantId, CaptchaKey)!.RevealedValue)
             .IsEqualTo("zq7244-parent-rotated");
+    }
+
+    [Test]
+    public async Task UnresolvableAncestors_StopTheProjectionBeforeAnyWrite()
+    {
+        TenantScopeResolver.ResolveAncestorTenantsAsync(FirstChildTenantId, Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("tenant tree unreadable"));
+        var childApplication = ArrangeApplicationIn(FirstChildTenantId, ProtectedEntry(CaptchaKey, ChildValue));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await Service.ProvisionForSourceAsync(FirstChildTenantId, childApplication.RtId));
+
+        await Assert.That(Writes).IsEmpty();
     }
 
     [Test]
