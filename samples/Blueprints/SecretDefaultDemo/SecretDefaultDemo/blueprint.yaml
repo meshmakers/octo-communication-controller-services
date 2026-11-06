@@ -1,0 +1,33 @@
+$schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
+blueprintId: SecretDefaultDemo-1.0.0
+description: |
+  The DECLARING half of the secret-default sample: an Application that declares one
+  secret default, `demo-captcha-secret`, for every tenant it serves. Install it on the
+  tenant that hosts the Application (the parent of the tree). Install
+  `SecretDefaultDemoCaptcha-1.0.0` on every served tenant that verifies CAPTCHAs.
+
+  THE SEED CARRIES NO SECRET VALUE
+
+  The `SecretDefaults` entry has a Key and a Description and no `SecretValue`. A
+  blueprint seed may leave a Secret attribute empty or omit it, nothing else (the seed
+  lint refuses a value, a placeholder included), and a blueprint has no install-time
+  parameters. The operator writes the value after the install, through the asset
+  repository (Studio or the GraphQL mutation in `verify/`). Until then the deploy
+  refuses the Application ("the SecretDefaults entry ... has no SecretValue") and the projection writes
+  nothing. A blueprint re-apply or update keeps the written value: `SecretDefaults` is
+  TenantOwned and a Secret member is carried over by record key.
+
+  WHAT THE DEPLOY DOES WITH IT
+
+  DeployWorkload projects the entry into a platform-owned
+  `System.Communication/SecretDefault` named `demo-captcha-secret` in this tenant and its
+  whole subtree. The value never becomes a Helm value, a pod environment variable or the
+  app's Kubernetes Secret. Only the non-secret site key is a Helm value.
+
+  No tenant pipeline, user or role can read the projected value; `VerifyCaptcha@1` uses
+  it and returns only a verdict.
+
+ckModelDependencies:
+  - System.Communication-[4.15,5.0)
+
+seedDataPath: seed-data/entities.yaml

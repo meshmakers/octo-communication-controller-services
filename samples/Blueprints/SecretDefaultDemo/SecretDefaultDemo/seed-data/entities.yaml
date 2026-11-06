@@ -1,0 +1,54 @@
+$schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+
+dependencies:
+  - System.Communication-[4.15,5.0)
+
+entities:
+  - rtId: '5ecdef0000000000000000a1'
+    ckTypeId: System.Communication/Application
+    rtWellKnownName: SecretDefaultDemoApplication
+    associations:
+      - roleId: System.Communication/Hosts
+        targetRtId: '670000000000000000000001'
+        targetCkTypeId: System.Communication/DeploymentSite
+      - roleId: System.Communication/HelmRepository
+        targetRtId: '670000000000000000000003'
+        targetCkTypeId: System.Communication/HelmRepositoryConfiguration
+    attributes:
+      - id: System/Name
+        value: secret-default-demo
+      - id: System/Description
+        value: >-
+          Sample Application that declares the secret default demo-captcha-secret for
+          its own tenant and every tenant below it.
+      - id: System.Communication/DeploymentState
+        value: 0
+      - id: System.Communication/ChartName
+        value: octo-mesh-demo-app
+      - id: System.Communication/ChartVersion
+        value: ''
+      - id: System.Communication/ReceivesClusterSecrets
+        value: false
+      - id: System.Communication/IngressEnabled
+        value: false
+      # The site key is public: it goes to the browser, so it is an ordinary Helm value.
+      # Cloudflare's always-pass test site key; replace it together with the secret.
+      - id: System.Communication/Values
+        value:
+          - ckRecordId: System.Communication/ValueOverride
+            attributes:
+              - id: System.Communication/Path
+                value: turnstileSiteKey
+              - id: System.Communication/Value
+                value: 1x00000000000000000000AA
+              - id: System.Communication/IsSecret
+                value: false
+      # No SecretValue: the operator writes it after the install (see verify/README.md).
+      - id: System.Communication/SecretDefaults
+        value:
+          - ckRecordId: System.Communication/SecretDefaultProjection
+            attributes:
+              - id: System.Communication/SecretDefaultKey
+                value: demo-captcha-secret
+              - id: System.Communication/SecretDefaultDescription
+                value: Turnstile secret every served tenant verifies CAPTCHAs with unless it sets its own.
