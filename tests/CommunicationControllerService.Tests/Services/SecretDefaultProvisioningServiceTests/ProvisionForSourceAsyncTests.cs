@@ -20,7 +20,7 @@ internal sealed class ProvisionForSourceAsyncTests : SecretDefaultProvisioningSe
 
         var result = await Service.ProvisionForSourceAsync(SourceTenantId, application.RtId);
 
-        using var _ = Assert.Multiple();
+        using var assertionScope = Assert.Multiple();
         await Assert.That(TenantsWritten(CaptchaKey)).IsEquivalentTo(new[]
             { FirstChildTenantId, SecondChildTenantId, GrandchildTenantId, SourceTenantId });
         await Assert.That(TenantsWritten(CaptchaKey)).DoesNotContain(SiblingTenantId);
@@ -49,7 +49,7 @@ internal sealed class ProvisionForSourceAsyncTests : SecretDefaultProvisioningSe
 
         foreach (var write in Writes)
         {
-            using var _ = Assert.Multiple();
+            using var assertionScope = Assert.Multiple();
             await Assert.That(write.RevealedValue).IsEqualTo(SentinelSecret);
             await Assert.That(write.SourceTenantId).IsEqualTo(SourceTenantId);
             await Assert.That(write.SourceWorkloadRtId).IsEqualTo(application.RtId.ToString());
@@ -99,7 +99,7 @@ internal sealed class ProvisionForSourceAsyncTests : SecretDefaultProvisioningSe
         Writes.Clear();
         await Service.ProvisionForSourceAsync(SourceTenantId, application.RtId);
 
-        using var _ = Assert.Multiple();
+        using var assertionScope = Assert.Multiple();
         await Assert.That(Writes.Count).IsEqualTo(4);
         await Assert.That(Writes.All(write => write.RevealedValue == "sentinel-7244-rotated-value")).IsTrue();
     }
@@ -113,7 +113,7 @@ internal sealed class ProvisionForSourceAsyncTests : SecretDefaultProvisioningSe
 
         await Service.ProvisionForSourceAsync(SourceTenantId, application.RtId);
 
-        using var _ = Assert.Multiple();
+        using var assertionScope = Assert.Multiple();
         await Assert.That(TenantsWritten(CaptchaKey).Count).IsEqualTo(4);
         await Assert.That(TenantsWritten("ec-maps-key")).IsEquivalentTo(new[] { GrandchildTenantId });
     }
@@ -126,7 +126,7 @@ internal sealed class ProvisionForSourceAsyncTests : SecretDefaultProvisioningSe
 
         var result = await Service.ProvisionForSourceAsync(SourceTenantId, application.RtId);
 
-        using var _ = Assert.Multiple();
+        using var assertionScope = Assert.Multiple();
         await Assert.That(TenantsWritten(CaptchaKey)).DoesNotContain(SecondChildTenantId);
         await Assert.That(TenantsWritten(CaptchaKey).Count).IsEqualTo(3);
         await Assert.That(result.TargetsSkipped).IsEqualTo(1);
@@ -143,7 +143,7 @@ internal sealed class ProvisionForSourceAsyncTests : SecretDefaultProvisioningSe
 
         var result = await Service.ProvisionForSourceAsync(SourceTenantId, application.RtId);
 
-        using var _ = Assert.Multiple();
+        using var assertionScope = Assert.Multiple();
         await Assert.That(TenantsWritten(CaptchaKey).Count).IsEqualTo(3);
         await Assert.That(result.TargetsSkipped).IsEqualTo(1);
         await CommunicationEventService.Received(1).StoreWarningEventAsync(SourceTenantId,
@@ -159,7 +159,7 @@ internal sealed class ProvisionForSourceAsyncTests : SecretDefaultProvisioningSe
 
         var result = await Service.ProvisionForSourceAsync(SourceTenantId, application.RtId);
 
-        using var _ = Assert.Multiple();
+        using var assertionScope = Assert.Multiple();
         await Assert.That(TenantsWritten(CaptchaKey).Count).IsEqualTo(3);
         await Assert.That(result.TargetsFailed).IsEqualTo(1);
         await CommunicationEventService.Received(1).StoreErrorEventAsync(SourceTenantId,
@@ -179,7 +179,7 @@ internal sealed class ProvisionForSourceAsyncTests : SecretDefaultProvisioningSe
 
         var result = await Service.ProvisionForSourceAsync(SourceTenantId, application.RtId);
 
-        using var _ = Assert.Multiple();
+        using var assertionScope = Assert.Multiple();
         await Assert.That(Writes).IsEmpty();
         await Assert.That(result.DefaultsWritten).IsEqualTo(0);
         await CommunicationEventService.Received(1).StoreErrorEventAsync(SourceTenantId,
@@ -194,7 +194,7 @@ internal sealed class ProvisionForSourceAsyncTests : SecretDefaultProvisioningSe
 
         var result = await Service.ProvisionForSourceAsync(SourceTenantId, application.RtId);
 
-        using var _ = Assert.Multiple();
+        using var assertionScope = Assert.Multiple();
         await Assert.That(result).IsEqualTo(SecretDefaultProvisioningResult.Nothing);
         await TenantScopeResolver.DidNotReceive().ResolveLendableTenantsAsync(Arg.Any<string>(),
             Arg.Any<LendingScope>(), Arg.Any<CancellationToken>());
@@ -255,7 +255,7 @@ internal sealed class ProvisionForSourceAsyncTests : SecretDefaultProvisioningSe
         {
             await Service.ProvisionForSourceAsync(SourceTenantId, application.RtId);
 
-            using var _ = Assert.Multiple();
+            using var assertionScope = Assert.Multiple();
             await Assert.That(Writes.Any(write => write.RevealedValue == SentinelSecret)).IsTrue();
             await Assert.That(memoryTarget.Logs).IsNotEmpty();
             await Assert.That(memoryTarget.Logs.Any(line => line.Contains(SentinelSecret[..12], StringComparison.Ordinal)))

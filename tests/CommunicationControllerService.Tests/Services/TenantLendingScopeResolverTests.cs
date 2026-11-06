@@ -105,6 +105,26 @@ internal class TenantLendingScopeResolverTests
         new(LendingScope.DescendantsAndSiblings, allowed.Length == 0 ? null : allowed);
 
     [Test]
+    public async Task AncestorTenantsOfAGrandchild_AreItsParentAndGrandparentOnly()
+    {
+        GivenTree((Lender, null), ("childA", Lender), ("childB", Lender), ("grandchildA1", "childA"));
+
+        var ancestors = await _resolver.ResolveAncestorTenantsAsync("grandchildA1");
+
+        await Assert.That(ancestors).IsEquivalentTo(new[] { "childA", Lender });
+    }
+
+    [Test]
+    public async Task AncestorTenantsOfARoot_AreEmpty()
+    {
+        GivenTree((Lender, null), ("childA", Lender));
+
+        var ancestors = await _resolver.ResolveAncestorTenantsAsync(Lender);
+
+        await Assert.That(ancestors).IsEmpty();
+    }
+
+    [Test]
     public async Task NotSharedLendsToNobody()
     {
         GivenTree((Lender, null), ("childA", Lender));

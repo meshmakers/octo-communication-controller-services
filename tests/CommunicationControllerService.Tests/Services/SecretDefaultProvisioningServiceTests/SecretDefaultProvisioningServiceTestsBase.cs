@@ -43,12 +43,17 @@ internal abstract class SecretDefaultProvisioningServiceTestsBase
 
     private readonly Dictionary<string, Exception> _failureByTenant = new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly Dictionary<(string TargetTenantId, string Key), RecordedSecretDefaultWrite> _storedDefaults = [];
+
     protected SecretDefaultProvisioningServiceTestsBase()
     {
         Service = new SecretDefaultProvisioningService(CommunicationRepository, TenantScopeResolver,
             SecretEncryption.EncryptionService, CommunicationEventService, Clock);
 
-        ArrangeSubtree(FirstChildTenantId, SecondChildTenantId, GrandchildTenantId);
+        ArrangeTenant(SourceTenantId, ancestorTenantIds: [],
+            descendantTenantIds: [FirstChildTenantId, SecondChildTenantId, GrandchildTenantId]);
+        ArrangeTenant(FirstChildTenantId, ancestorTenantIds: [SourceTenantId],
+            descendantTenantIds: [GrandchildTenantId]);
 
         CommunicationRepository
             .UpsertSecretDefaultAsync(Arg.Any<string>(), Arg.Any<SecretDefaultWrite>())
@@ -62,24 +67,46 @@ internal abstract class SecretDefaultProvisioningServiceTestsBase
                 }
 
                 var outcome = _outcomeByTenant.GetValueOrDefault(targetTenantId, SecretDefaultWriteOutcome.Created);
-                if (outcome is SecretDefaultWriteOutcome.Created or SecretDefaultWriteOutcome.Updated)
+                if (outcome is not (SecretDefaultWriteOutcome.Created or SecretDefaultWriteOutcome.Updated))
                 {
-                    Writes.Add(new RecordedSecretDefaultWrite(targetTenantId, write.Key,
-                        SecretEncryption.Protector.Unprotect(write.Value), write.SourceTenantId,
-                        write.SourceWorkloadRtId, write.ProjectedAt));
+                    return Task.FromResult(new SecretDefaultWriteResult(outcome));
                 }
 
-                return Task.FromResult(outcome);
+                var storageKey = (targetTenantId, write.Key);
+                if (_storedDefaults.TryGetValue(storageKey, out var stored) &&
+                    write.ProtectedSourceTenantIds.Contains(stored.SourceTenantId, StringComparer.OrdinalIgnoreCase))
+                {
+                    return Task.FromResult(new SecretDefaultWriteResult(SecretDefaultWriteOutcome.KeptAncestorSource,
+                        stored.SourceTenantId));
+                }
+
+                var recorded = new RecordedSecretDefaultWrite(targetTenantId, write.Key,
+                    SecretEncryption.Protector.Unprotect(write.Value), write.SourceTenantId,
+                    write.SourceWorkloadRtId, write.ProjectedAt);
+                Writes.Add(recorded);
+                var isUpdate = _storedDefaults.ContainsKey(storageKey);
+                _storedDefaults[storageKey] = recorded;
+                return Task.FromResult(new SecretDefaultWriteResult(isUpdate
+                    ? SecretDefaultWriteOutcome.Updated
+                    : SecretDefaultWriteOutcome.Created));
             });
     }
 
-    protected void ArrangeSubtree(params string[] descendantTenantIds)
+    protected void ArrangeTenant(string tenantId, string[] ancestorTenantIds, string[] descendantTenantIds)
     {
         TenantScopeResolver
-            .ResolveLendableTenantsAsync(SourceTenantId,
+            .ResolveLendableTenantsAsync(tenantId,
                 Arg.Is<LendingScope>(scope => scope.Mode == LendingScope.Descendants && scope.AllowedTenantIds == null),
                 Arg.Any<CancellationToken>())
             .Returns((IReadOnlyCollection<string>)descendantTenantIds.ToList());
+        TenantScopeResolver
+            .ResolveAncestorTenantsAsync(tenantId, Arg.Any<CancellationToken>())
+            .Returns((IReadOnlyCollection<string>)ancestorTenantIds.ToList());
+    }
+
+    protected RecordedSecretDefaultWrite? StoredDefault(string targetTenantId, string key)
+    {
+        return _storedDefaults.GetValueOrDefault((targetTenantId, key));
     }
 
     protected void ArrangeOutcome(string targetTenantId, SecretDefaultWriteOutcome outcome)
@@ -94,6 +121,12 @@ internal abstract class SecretDefaultProvisioningServiceTestsBase
 
     protected RtApplication ArrangeApplication(params RtSecretDefaultProjectionRecord[] secretDefaults)
     {
+        return ArrangeApplicationIn(SourceTenantId, secretDefaults);
+    }
+
+    protected RtApplication ArrangeApplicationIn(string tenantId,
+        params RtSecretDefaultProjectionRecord[] secretDefaults)
+    {
         var application = RtEntityCreator.CreateApplication("energy-community-app");
         application.SecretDefaults = new AttributeRecordValueList<RtSecretDefaultProjectionRecord>();
         foreach (var secretDefault in secretDefaults)
@@ -101,7 +134,7 @@ internal abstract class SecretDefaultProvisioningServiceTestsBase
             application.SecretDefaults.Add(secretDefault);
         }
 
-        CommunicationRepository.GetWorkloadByRtIdAsync(SourceTenantId, application.RtId).Returns(application);
+        CommunicationRepository.GetWorkloadByRtIdAsync(tenantId, application.RtId).Returns(application);
         return application;
     }
 

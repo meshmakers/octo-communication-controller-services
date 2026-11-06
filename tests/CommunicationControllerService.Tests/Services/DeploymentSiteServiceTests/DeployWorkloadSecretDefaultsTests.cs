@@ -68,7 +68,7 @@ internal class DeployWorkloadSecretDefaultsTests : PoolServiceTestsBase
         var rejection = await Assert.ThrowsAsync<Exception>(
             async () => await DeploymentSiteService.DeployWorkloadAsync(TenantId, application.RtId));
 
-        using var _ = Assert.Multiple();
+        using var assertionScope = Assert.Multiple();
         foreach (var fragment in expectedFragments)
         {
             await Assert.That(rejection!.Message).Contains(fragment);
@@ -105,6 +105,14 @@ internal class DeployWorkloadSecretDefaultsTests : PoolServiceTestsBase
     }
 
     [Test]
+    public async Task ANullKey_IsRejectedAsAnEmptyKey()
+    {
+        var application = GivenApplication(Entry(null, SentinelSecret));
+
+        await AssertRejectedAsync(application, "energy-community-app", "empty Key");
+    }
+
+    [Test]
     public async Task AKeyWithInvalidCharacters_IsRejectedNamingTheKey()
     {
         var application = GivenApplication(Entry("ec captcha/secret", SentinelSecret));
@@ -129,7 +137,7 @@ internal class DeployWorkloadSecretDefaultsTests : PoolServiceTestsBase
             async () => await DeploymentSiteService.DeployWorkloadAsync(TenantId, application.RtId));
 
         await CommunicationRepository.Received(1).SetApplicationDeploymentStateAsync(TenantId,
-            Arg.Is<RtEntityId>(id => id.RtId == application.RtId), RtDeploymentStateEnum.Error,
+            Arg.Is<RtEntityId>(entityId => entityId.RtId == application.RtId), RtDeploymentStateEnum.Error,
             Arg.Is<string?>(message => message != null && message.Contains(CaptchaKey)));
     }
 
@@ -151,7 +159,7 @@ internal class DeployWorkloadSecretDefaultsTests : PoolServiceTestsBase
         await DeploymentSiteService.DeployWorkloadAsync(TenantId, application.RtId);
 
         var dto = CapturedDto();
-        using var _ = Assert.Multiple();
+        using var assertionScope = Assert.Multiple();
         await Assert.That(dto.Values.Any(value => value.Path.Contains(CaptchaKey, StringComparison.OrdinalIgnoreCase)))
             .IsFalse();
         await Assert.That(dto.Values.Any(value => (value.Value ?? string.Empty).Contains(SentinelSecret[..12],
@@ -193,7 +201,7 @@ internal class DeployWorkloadSecretDefaultsTests : PoolServiceTestsBase
 
         await DeploymentSiteService.DeployWorkloadAsync(TenantId, application.RtId);
 
-        using var _ = Assert.Multiple();
+        using var assertionScope = Assert.Multiple();
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
         await CommunicationEventService.Received(1).StoreErrorEventAsync(TenantId,
             Arg.Is<string>(message => message.Contains("energy-community-app")), Arg.Any<RtEntityId?>());

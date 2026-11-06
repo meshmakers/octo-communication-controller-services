@@ -678,19 +678,19 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
-    public async Task<SecretDefaultWriteOutcome> UpsertSecretDefaultAsync(string targetTenantId,
+    public async Task<SecretDefaultWriteResult> UpsertSecretDefaultAsync(string targetTenantId,
         SecretDefaultWrite write)
     {
         var tenantContext = await _systemContext.TryFindTenantContextAsync(targetTenantId);
         var tenantRepository = await _systemContext.TryFindTenantRepositoryAsync(targetTenantId);
         if (tenantContext is null || tenantRepository is null)
         {
-            return SecretDefaultWriteOutcome.TenantUnavailable;
+            return new SecretDefaultWriteResult(SecretDefaultWriteOutcome.TenantUnavailable);
         }
 
         if (!await tenantContext.IsCkModelSatisfiedAsync(SecretDefaultMinimumModelId))
         {
-            return SecretDefaultWriteOutcome.ModelMissing;
+            return new SecretDefaultWriteResult(SecretDefaultWriteOutcome.ModelMissing);
         }
 
         using var session = await tenantRepository.GetSessionAsync();
@@ -703,6 +703,16 @@ internal class CommunicationRepository : ICommunicationRepository
                 .Where(secretDefault => string.Equals(secretDefault.RtWellKnownName, write.Key, StringComparison.Ordinal))
                 .OrderBy(secretDefault => secretDefault.RtId.ToString(), StringComparer.Ordinal)
                 .ToList();
+
+            var protectedSources = new HashSet<string>(write.ProtectedSourceTenantIds, StringComparer.OrdinalIgnoreCase);
+            var keptDefault = sameKey.FirstOrDefault(secretDefault =>
+                secretDefault.SourceTenantId is { } existingSource && protectedSources.Contains(existingSource));
+            if (keptDefault is not null)
+            {
+                await session.CommitTransactionAsync();
+                return new SecretDefaultWriteResult(SecretDefaultWriteOutcome.KeptAncestorSource,
+                    keptDefault.SourceTenantId);
+            }
 
             var existing = sameKey.FirstOrDefault();
             foreach (var duplicate in sameKey.Skip(1))
@@ -734,7 +744,9 @@ internal class CommunicationRepository : ICommunicationRepository
             }
 
             await session.CommitTransactionAsync();
-            return existing is null ? SecretDefaultWriteOutcome.Created : SecretDefaultWriteOutcome.Updated;
+            return new SecretDefaultWriteResult(existing is null
+                ? SecretDefaultWriteOutcome.Created
+                : SecretDefaultWriteOutcome.Updated);
         }
         catch
         {

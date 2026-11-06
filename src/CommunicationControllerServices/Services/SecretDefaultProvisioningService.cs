@@ -33,16 +33,36 @@ internal sealed class SecretDefaultProvisioningService(
             return SecretDefaultProvisioningResult.Nothing;
         }
 
-        var servedTenantIds = await ResolveServedTenantsAsync(sourceTenantId, cancellationToken);
-        var applicationEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkApplicationTypeId, application.RtId);
+        var projection = new ProjectionContext(sourceTenantId, application,
+            new RtEntityId(SystemCommunicationCkIds.RtCkApplicationTypeId, application.RtId));
         var result = SecretDefaultProvisioningResult.Nothing;
 
-        foreach (var declaration in declarations)
+        var validDeclarations = new List<CheckedSecretDefaultDeclaration>();
+        foreach (var checkedDeclaration in SecretDefaultDeclarationValidator.Check(declarations))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            result = Combine(result,
-                await ProvisionDeclarationAsync(sourceTenantId, application, applicationEntityId, declaration,
-                    servedTenantIds, cancellationToken));
+            if (checkedDeclaration.Issue == SecretDefaultDeclarationIssue.None)
+            {
+                validDeclarations.Add(checkedDeclaration);
+                continue;
+            }
+
+            await ReportInvalidDeclarationAsync(projection, checkedDeclaration);
+            result = Combine(result, new SecretDefaultProvisioningResult(0, 0, 1));
+        }
+
+        if (validDeclarations.Count > 0)
+        {
+            var servedTenantIds = await ResolveServedTenantsAsync(sourceTenantId, cancellationToken);
+            var ancestorTenantIds =
+                await tenantScopeResolver.ResolveAncestorTenantsAsync(sourceTenantId, cancellationToken);
+
+            foreach (var validDeclaration in validDeclarations)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                result = Combine(result,
+                    await ProvisionDeclarationAsync(projection, validDeclaration, servedTenantIds, ancestorTenantIds,
+                        cancellationToken));
+            }
         }
 
         Logger.Info(
@@ -66,22 +86,24 @@ internal sealed class SecretDefaultProvisioningService(
         return servedTenantIds;
     }
 
-    private async Task<SecretDefaultProvisioningResult> ProvisionDeclarationAsync(string sourceTenantId,
-        RtApplication application, RtEntityId applicationEntityId, RtSecretDefaultProjectionRecord declaration,
-        IReadOnlySet<string> servedTenantIds, CancellationToken cancellationToken)
+    private async Task<SecretDefaultProvisioningResult> ProvisionDeclarationAsync(ProjectionContext projection,
+        CheckedSecretDefaultDeclaration checkedDeclaration, IReadOnlySet<string> servedTenantIds,
+        IReadOnlyCollection<string> ancestorTenantIds, CancellationToken cancellationToken)
     {
-        var key = declaration.Key.Trim();
-        var revealAccess = new SecretAccessContext(sourceTenantId, application.CkTypeId?.ToString(),
+        var declaration = checkedDeclaration.Declaration!;
+        var key = checkedDeclaration.Key;
+        var application = projection.Application;
+        var revealAccess = new SecretAccessContext(projection.SourceTenantId, application.CkTypeId?.ToString(),
             SecretValueAttributePath);
         var plaintext = encryptionService.RevealOrNull(declaration.SecretValue, revealAccess);
         if (string.IsNullOrEmpty(plaintext))
         {
             Logger.Error("[{TenantId}] Secret default '{Key}' of application '{ApplicationName}' ({ApplicationRtId}) " +
-                         "has no readable value; it was not projected", sourceTenantId, key, application.Name,
-                application.RtId);
-            await communicationEventService.StoreErrorEventAsync(sourceTenantId,
+                         "has no readable value; it was not projected", projection.SourceTenantId, key,
+                application.Name, application.RtId);
+            await communicationEventService.StoreErrorEventAsync(projection.SourceTenantId,
                 $"Secret default '{key}' of application '{application.Name}' has no readable value and was not " +
-                "projected. Set its SecretValue again and redeploy the application.", applicationEntityId);
+                "projected. Set its SecretValue again and redeploy the application.", projection.ApplicationEntityId);
             return new SecretDefaultProvisioningResult(0, 0, 1);
         }
 
@@ -93,12 +115,12 @@ internal sealed class SecretDefaultProvisioningService(
         foreach (var targetTenantId in targetTenantIds)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var write = new SecretDefaultWrite(key, RtSecretValue.Pending(plaintext), sourceTenantId,
-                application.RtId.ToString(), timeProvider.GetUtcNow().UtcDateTime);
+            var write = new SecretDefaultWrite(key, RtSecretValue.Pending(plaintext), projection.SourceTenantId,
+                application.RtId.ToString(), timeProvider.GetUtcNow().UtcDateTime, ancestorTenantIds);
             try
             {
-                var outcome = await communicationRepository.UpsertSecretDefaultAsync(targetTenantId, write);
-                switch (outcome)
+                var writeResult = await communicationRepository.UpsertSecretDefaultAsync(targetTenantId, write);
+                switch (writeResult.Outcome)
                 {
                     case SecretDefaultWriteOutcome.Created:
                     case SecretDefaultWriteOutcome.Updated:
@@ -106,8 +128,7 @@ internal sealed class SecretDefaultProvisioningService(
                         break;
                     default:
                         skipped++;
-                        await ReportSkippedTargetAsync(sourceTenantId, application, applicationEntityId, key,
-                            targetTenantId, outcome);
+                        await ReportSkippedTargetAsync(projection, key, targetTenantId, writeResult);
                         break;
                 }
             }
@@ -120,29 +141,59 @@ internal sealed class SecretDefaultProvisioningService(
                 failed++;
                 Logger.Error(writeFailure,
                     "[{TenantId}] Could not write secret default '{Key}' of application '{ApplicationName}' " +
-                    "({ApplicationRtId}) into tenant '{TargetTenantId}'", sourceTenantId, key, application.Name,
-                    application.RtId, targetTenantId);
-                await communicationEventService.StoreErrorEventAsync(sourceTenantId,
+                    "({ApplicationRtId}) into tenant '{TargetTenantId}'", projection.SourceTenantId, key,
+                    application.Name, application.RtId, targetTenantId);
+                await communicationEventService.StoreErrorEventAsync(projection.SourceTenantId,
                     $"Secret default '{key}' of application '{application.Name}' could not be written into tenant " +
-                    $"'{targetTenantId}'. The next deploy of the application retries it.", applicationEntityId);
+                    $"'{targetTenantId}'. The next deploy of the application retries it.",
+                    projection.ApplicationEntityId);
             }
         }
 
         return new SecretDefaultProvisioningResult(written, skipped, failed);
     }
 
-    private async Task ReportSkippedTargetAsync(string sourceTenantId, RtApplication application,
-        RtEntityId applicationEntityId, string key, string targetTenantId, SecretDefaultWriteOutcome outcome)
+    private async Task ReportInvalidDeclarationAsync(ProjectionContext projection,
+        CheckedSecretDefaultDeclaration checkedDeclaration)
     {
-        var reason = outcome == SecretDefaultWriteOutcome.ModelMissing
-            ? "it does not have the System.Communication version that defines SecretDefault"
-            : "it cannot be resolved";
+        var entryName = string.IsNullOrEmpty(checkedDeclaration.Key)
+            ? "an entry without a key"
+            : $"'{checkedDeclaration.Key}'";
+        var problem = checkedDeclaration.Issue switch
+        {
+            SecretDefaultDeclarationIssue.KeyEmpty => "its key is empty",
+            SecretDefaultDeclarationIssue.KeyInvalid => "its key has invalid characters or is too long",
+            SecretDefaultDeclarationIssue.KeyDuplicate => "its key is declared more than once",
+            _ => "it has no SecretValue"
+        };
+        var application = projection.Application;
+        Logger.Error("[{TenantId}] Secret default {EntryName} of application '{ApplicationName}' ({ApplicationRtId}) " +
+                     "was not projected: {Problem}", projection.SourceTenantId, entryName, application.Name,
+            application.RtId, problem);
+        await communicationEventService.StoreErrorEventAsync(projection.SourceTenantId,
+            $"Secret default {entryName} of application '{application.Name}' was not projected: {problem}.",
+            projection.ApplicationEntityId);
+    }
+
+    private async Task ReportSkippedTargetAsync(ProjectionContext projection, string key, string targetTenantId,
+        SecretDefaultWriteResult writeResult)
+    {
+        var reason = writeResult.Outcome switch
+        {
+            SecretDefaultWriteOutcome.ModelMissing =>
+                "it does not have the System.Communication version that defines SecretDefault",
+            SecretDefaultWriteOutcome.KeptAncestorSource =>
+                $"it keeps the default of tenant '{writeResult.KeptSourceTenantId}', which is closer to the root " +
+                $"than the refused source '{projection.SourceTenantId}'",
+            _ => "it cannot be resolved"
+        };
+        var application = projection.Application;
         Logger.Warn("[{TenantId}] Secret default '{Key}' of application '{ApplicationName}' ({ApplicationRtId}) " +
-                    "skipped tenant '{TargetTenantId}': {Reason}", sourceTenantId, key, application.Name,
+                    "skipped tenant '{TargetTenantId}': {Reason}", projection.SourceTenantId, key, application.Name,
             application.RtId, targetTenantId, reason);
-        await communicationEventService.StoreWarningEventAsync(sourceTenantId,
+        await communicationEventService.StoreWarningEventAsync(projection.SourceTenantId,
             $"Secret default '{key}' of application '{application.Name}' was not written into tenant " +
-            $"'{targetTenantId}': {reason}.", applicationEntityId);
+            $"'{targetTenantId}': {reason}.", projection.ApplicationEntityId);
     }
 
     private static IReadOnlyCollection<string> NarrowToAllowedTenants(IReadOnlySet<string> servedTenantIds,
@@ -163,5 +214,17 @@ internal sealed class SecretDefaultProvisioningService(
     {
         return new SecretDefaultProvisioningResult(total.DefaultsWritten + part.DefaultsWritten,
             total.TargetsSkipped + part.TargetsSkipped, total.TargetsFailed + part.TargetsFailed);
+    }
+
+    private sealed class ProjectionContext(
+        string sourceTenantId,
+        RtApplication application,
+        RtEntityId applicationEntityId)
+    {
+        public string SourceTenantId { get; } = sourceTenantId;
+
+        public RtApplication Application { get; } = application;
+
+        public RtEntityId ApplicationEntityId { get; } = applicationEntityId;
     }
 }

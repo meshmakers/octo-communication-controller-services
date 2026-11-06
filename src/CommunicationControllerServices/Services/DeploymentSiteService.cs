@@ -726,13 +726,14 @@ internal class DeploymentSiteService : IDeploymentSiteService
         {
             validate();
         }
-        catch (DeploymentSiteServiceException e)
+        catch (DeploymentSiteServiceException rejection)
         {
             Logger.Warn("[{TenantId}] Workload '{WorkloadName}' ({WorkloadRtId}) rejected: {Reason}", tenantId,
-                workload.Name, workload.RtId, e.Message);
+                workload.Name, workload.RtId, rejection.Message);
             try
             {
-                await SetWorkloadDeploymentStateAsync(tenantId, workload, RtDeploymentStateEnum.Error, e.Message);
+                await SetWorkloadDeploymentStateAsync(tenantId, workload, RtDeploymentStateEnum.Error,
+                    rejection.Message);
             }
             catch (Exception writeFailure)
             {

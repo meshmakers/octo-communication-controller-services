@@ -89,6 +89,18 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyCollection<string>> ResolveAncestorTenantsAsync(string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var ancestors = await ResolveAncestorsAsync(tenantId).ConfigureAwait(false);
+        ancestors.Remove(tenantId);
+        return ancestors;
+    }
+
+    /// <inheritdoc />
     public void Invalidate(string lenderTenantId)
     {
         foreach (var key in _cache.Keys.Where(k =>
