@@ -10,7 +10,7 @@ tenant_id="${2:?usage: call-verify-captcha.sh <adapterBaseUrl> <tenantId> [token
 captcha_token="${3:-XXXX.DUMMY.TOKEN.XXXX}"
 
 request_body=$(printf '{"captchaToken":"%s"}' "$captcha_token")
-curl --silent --show-error --insecure \
+curl --silent --show-error \
   --header 'Content-Type: application/json' \
   --data "$request_body" \
   "${adapter_base_url%/}/${tenant_id}/secret-default-demo/verify-captcha"

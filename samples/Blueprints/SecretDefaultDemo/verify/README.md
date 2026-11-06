@@ -13,11 +13,11 @@ without that environment's own go.
 - The served tenants' Mesh Adapter reachable from the shell, e.g. `http://localhost:5020` through
   `kubectl port-forward`.
 
-Variables used below (bash):
+Variables used below (bash; replace the example tenant ids with your own):
 
 ```bash
 sample_root=samples/Blueprints/SecretDefaultDemo
-parent_tenant=<parent>      child_tenant=<child>      grandchild_tenant=<grandchild>
+parent_tenant=sddemo-parent   child_tenant=sddemo-child   grandchild_tenant=sddemo-grandchild
 adapter_base_url=http://localhost:5020
 ```
 

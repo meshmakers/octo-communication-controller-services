@@ -33,7 +33,10 @@ Application                            System.Communication/SecretDefault "demo-
 3. **Deploy the Application.** `DeployWorkload` projects each entry into a platform-owned
    `System.Communication/SecretDefault` (well-known name = Key) in the Application's own tenant and
    its whole subtree, never siblings; `AllowedTenantIds` on the entry can only narrow that set.
-   A redeploy after a new value rotates it everywhere.
+   A redeploy after a new value rotates it. The projection is best effort per tenant: the deploy
+   succeeds even when a tenant is skipped (no System.Communication 4.15.0, not resolvable) or its write
+   fails, and each such tenant is a Warning or Error event on the Application. Read those events
+   before you revoke an old secret at the provider.
 4. **Use it only through a platform node.** `VerifyCaptcha@1` takes the tenant's own secret when it is
    set, else the default named by `defaultKey`, calls Cloudflare's siteverify endpoint (fixed in code)
    and writes only `{ valid, source, reason }`. `source` says which key was used (`tenant`, `default`,
@@ -71,8 +74,10 @@ The projected default belongs to the platform, not to the tenant:
 - `VerifyCaptcha@1` reads it with an internal session, only in the executing tenant and only by
   `defaultKey`. The secret never enters the data context, a debug point, a log line or the response.
 - A tenant that wants its own widget writes its own secret (here `CaptchaConfiguration.CaptchaSecret`).
-  The projection never touches it; clearing it falls back to the default. A set tenant secret that
-  cannot be decrypted is `verification-unavailable`, with no fallback.
+  The projection never touches it; clearing it falls back to the default. A tenant secret encrypted
+  with a key the adapter's key ring does not hold counts as not set (logged as an error naming the key
+  id) and falls back to the default; any other tenant secret that cannot be decrypted is
+  `verification-unavailable`, with no fallback.
 
 ## Test keys only
 
