@@ -117,7 +117,8 @@ try
     // ancestors and siblings lend it. Singleton and stateless, next to the service-account
     // provisioning it mirrors in shape; both are driven from the same tenant-start hook.
     builder.Services
-        .AddSingleton<IAdapterPoolMirrorProvisioningService, AdapterPoolMirrorProvisioningService>();
+        .AddSingleton<IAdapterPoolMirrorProvisioningService, AdapterPoolMirrorProvisioningService>()
+        .AddSingleton<ISecretDefaultProvisioningService, SecretDefaultProvisioningService>();
 
     // AB#5112: identity-health aggregate + hardened deploy guard. The reader answers "does the
     // identity client exist / what does it carry" by forwarding the calling user's bearer token to

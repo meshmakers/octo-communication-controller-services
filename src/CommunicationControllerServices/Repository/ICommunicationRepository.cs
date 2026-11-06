@@ -172,6 +172,15 @@ public interface ICommunicationRepository
     Task RemoveLentAdapterPoolMirrorAsync(string borrowerTenantId, OctoObjectId mirrorRtId);
 
     /// <summary>
+    ///     Creates or overwrites the platform-owned SecretDefault whose well-known name is the write's key in the
+    ///     target tenant. Writes nothing else; further SecretDefaults with the same well-known name are erased.
+    /// </summary>
+    /// <param name="targetTenantId">Tenant that receives the default.</param>
+    /// <param name="write">Key, value and source of the default.</param>
+    /// <returns>What was done; an unresolvable tenant or a tenant without the type is reported, not thrown.</returns>
+    Task<SecretDefaultWriteOutcome> UpsertSecretDefaultAsync(string targetTenantId, SecretDefaultWrite write);
+
+    /// <summary>
     ///     Points one leased adapter's <c>LentFrom</c> edge at an existing mirror, and reports whether
     ///     the edge was written (AB#5349).
     /// </summary>
