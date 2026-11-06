@@ -178,4 +178,80 @@ public class SecretDefaultRepositoryTests(CommunicationControllerFixture fixture
         stored.SourceTenantId.Should().Be("ancestor-tenant");
         Reveal(stored.Value).Should().Be("zq7244-integration-ancestor");
     }
+    [Fact]
+    public async Task UpsertSecretDefaultAsync_TwoConcurrentWritesOfANewKey_LeaveExactlyOneEntity()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var key = $"secret-default-{Guid.NewGuid():N}";
+        var firstWorkloadRtId = OctoObjectId.GenerateNewId().ToString();
+        var secondWorkloadRtId = OctoObjectId.GenerateNewId().ToString();
+
+        var writeResults = await Task.WhenAll(
+            repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
+                BuildWrite(key, "zq7245-integration-first-writer", firstWorkloadRtId)),
+            repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
+                BuildWrite(key, "zq7245-integration-second-writer", secondWorkloadRtId)));
+
+        writeResults.Select(writeResult => writeResult.Outcome).Should().BeEquivalentTo(
+            [SecretDefaultWriteOutcome.Created, SecretDefaultWriteOutcome.Updated]);
+        var stored = (await ReadSecretDefaultsAsync(key)).Should().ContainSingle().Subject;
+        Reveal(stored.Value).Should().BeOneOf("zq7245-integration-first-writer", "zq7245-integration-second-writer");
+    }
+
+    [Fact]
+    public async Task GetSecretDefaultsAsync_ListsKeyAndSourceButNoValue()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var key = $"secret-default-{Guid.NewGuid():N}";
+        var sourceWorkloadRtId = OctoObjectId.GenerateNewId().ToString();
+        await repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
+            BuildWrite(key, "zq7245-integration-listed", sourceWorkloadRtId));
+
+        var inventory = await repository.GetSecretDefaultsAsync(fixture.TestTenantId);
+
+        inventory.Availability.Should().Be(SecretDefaultTenantAvailability.Available);
+        var listed = inventory.Defaults.Should().ContainSingle(storedDefault => storedDefault.Key == key).Subject;
+        listed.SourceTenantId.Should().Be(SourceTenantId);
+        listed.SourceWorkloadRtId.Should().Be(sourceWorkloadRtId);
+        listed.ToString().Should().NotContain("zq7245-integration-listed");
+    }
+
+    [Fact]
+    public async Task DeleteSecretDefaultAsync_ErasesTheEntityAndANewWriteCreatesItAgain()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var key = $"secret-default-{Guid.NewGuid():N}";
+        await repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
+            BuildWrite(key, "zq7245-integration-deleted", OctoObjectId.GenerateNewId().ToString()));
+        var storedRtId = (await ReadSecretDefaultsAsync(key)).Single().RtId;
+
+        await repository.DeleteSecretDefaultAsync(fixture.TestTenantId, storedRtId);
+        var afterDelete = await ReadSecretDefaultsAsync(key);
+        var recreated = await repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
+            BuildWrite(key, "zq7245-integration-recreated", OctoObjectId.GenerateNewId().ToString()));
+
+        afterDelete.Should().BeEmpty();
+        recreated.Outcome.Should().Be(SecretDefaultWriteOutcome.Created);
+        Reveal((await ReadSecretDefaultsAsync(key)).Single().Value).Should().Be("zq7245-integration-recreated");
+    }
+
+    [Fact]
+    public async Task GetSecretDefaultsAsync_AnUnknownTenant_IsReportedUnavailable()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+
+        var inventory = await repository.GetSecretDefaultsAsync($"missing-{Guid.NewGuid():N}");
+
+        inventory.Availability.Should().Be(SecretDefaultTenantAvailability.TenantUnavailable);
+    }
+
+    [Fact]
+    public async Task GetSecretDefaultSourceApplicationsAsync_AnUnknownTenant_IsNull()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+
+        var applications = await repository.GetSecretDefaultSourceApplicationsAsync($"missing-{Guid.NewGuid():N}");
+
+        applications.Should().BeNull();
+    }
 }

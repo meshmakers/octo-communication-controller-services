@@ -143,6 +143,18 @@ internal class TenantLendingScopeResolverTests
     }
 
     [Test]
+    public async Task AncestorTenantsOfATenantCreatedAfterTheTreeWasCached_AreReadAgain()
+    {
+        GivenTree((Lender, null), ("childA", Lender));
+        await _resolver.ResolveAncestorTenantsAsync("childA");
+        GivenTree(("grandchildNew", "childA"));
+
+        var ancestors = await _resolver.ResolveAncestorTenantsAsync("grandchildNew");
+
+        await Assert.That(ancestors).IsEquivalentTo(new[] { "childA", Lender });
+    }
+
+    [Test]
     public async Task AncestorTenantsOfARoot_AreEmpty()
     {
         GivenTree((Lender, null), ("childA", Lender));

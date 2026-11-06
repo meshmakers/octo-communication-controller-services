@@ -180,15 +180,62 @@ internal class DeployWorkloadSecretDefaultsTests : PoolServiceTestsBase
     }
 
     [Test]
-    public async Task AnApplicationWithoutSecretDefaults_IsNotProjected()
+    public async Task AnApplicationWithoutSecretDefaults_IsStillProjectedSoItsFormerDefaultsAreRemoved()
     {
         var application = GivenApplication();
         application.SecretDefaults = null;
 
         await DeploymentSiteService.DeployWorkloadAsync(TenantId, application.RtId);
 
+        await SecretDefaultProvisioningService.Received(1)
+            .ProvisionForSourceAsync(TenantId, application.RtId, Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task DeployingTheDeploymentSite_DeploysNoWorkloadAndProjectsNothing()
+    {
+        var application = GivenApplication(Entry(CaptchaKey, SentinelSecret), Entry(CaptchaKey, "zq7245-duplicate"));
+        CommunicationRepository.GetWorkloadsForDeploymentSiteAsync(TenantId, DeploymentSiteRtId)
+            .Returns(new RtDeployableWorkload[] { application });
+
+        await DeploymentSiteService.DeployDeploymentSiteAsync(TenantId, DeploymentSiteRtId);
+
+        using var assertionScope = Assert.Multiple();
+        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
+            .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
         await SecretDefaultProvisioningService.DidNotReceiveWithAnyArgs()
             .ProvisionForSourceAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task APendingApplicationRedispatchedOnSiteRegistration_IsValidatedLikeADeploy()
+    {
+        var application = GivenApplication(Entry(CaptchaKey, SentinelSecret), Entry(CaptchaKey, "zq7245-duplicate"));
+        application.DeploymentState = RtDeploymentStateEnum.Pending;
+        CommunicationRepository.GetWorkloadsForDeploymentSiteAsync(TenantId, DeploymentSiteRtId)
+            .Returns(new RtDeployableWorkload[] { application });
+
+        await DeploymentSiteService.ReconcilePendingWorkloadsAsync(TenantId, DeploymentSiteRtId);
+
+        using var assertionScope = Assert.Multiple();
+        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
+            .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
+        await SecretDefaultProvisioningService.DidNotReceiveWithAnyArgs()
+            .ProvisionForSourceAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task APendingApplicationRedispatchedOnSiteRegistration_IsProjectedLikeADeploy()
+    {
+        var application = GivenApplication(Entry(CaptchaKey, SentinelSecret));
+        application.DeploymentState = RtDeploymentStateEnum.Pending;
+        CommunicationRepository.GetWorkloadsForDeploymentSiteAsync(TenantId, DeploymentSiteRtId)
+            .Returns(new RtDeployableWorkload[] { application });
+
+        await DeploymentSiteService.ReconcilePendingWorkloadsAsync(TenantId, DeploymentSiteRtId);
+
+        await SecretDefaultProvisioningService.Received(1)
+            .ProvisionForSourceAsync(TenantId, application.RtId, Arg.Any<CancellationToken>());
     }
 
     [Test]

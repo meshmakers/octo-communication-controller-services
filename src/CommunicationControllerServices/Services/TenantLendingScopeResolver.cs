@@ -96,6 +96,12 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
         cancellationToken.ThrowIfCancellationRequested();
 
         var parentMap = await ResolveParentMapEntryAsync(requireComplete: true).ConfigureAwait(false);
+        if (parentMap.IsComplete && !parentMap.KnownTenantIds.Contains(tenantId))
+        {
+            parentMap = await ResolveParentMapEntryAsync(requireComplete: true, forceRebuild: true)
+                .ConfigureAwait(false);
+        }
+
         if (!parentMap.IsComplete)
         {
             throw new InvalidOperationException(
@@ -317,12 +323,13 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
     }
 
     /// <summary>
-    ///     The cached parent map entry, rebuilt when expired, or when <paramref name="requireComplete" /> is set and
-    ///     the cached entry was built after a failed read.
+    ///     The cached parent map entry, rebuilt when expired, when <paramref name="requireComplete" /> is set and
+    ///     the cached entry was built after a failed read, or when <paramref name="forceRebuild" /> is set because a
+    ///     tenant created after the last walk was asked for.
     /// </summary>
-    private async Task<ParentMapEntry> ResolveParentMapEntryAsync(bool requireComplete)
+    private async Task<ParentMapEntry> ResolveParentMapEntryAsync(bool requireComplete, bool forceRebuild = false)
     {
-        if (_parentMap is { IsExpired: false } cached && (cached.IsComplete || !requireComplete))
+        if (!forceRebuild && _parentMap is { IsExpired: false } cached && (cached.IsComplete || !requireComplete))
         {
             return cached;
         }
@@ -385,7 +392,7 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
                 "Could not build the tenant parent map; ancestor and sibling resolution will be partial");
         }
 
-        var entry = new ParentMapEntry(parents, DateTimeOffset.UtcNow.Add(CacheDuration), isComplete);
+        var entry = new ParentMapEntry(parents, visited, DateTimeOffset.UtcNow.Add(CacheDuration), isComplete);
         _parentMap = entry;
         return entry;
     }
@@ -413,8 +420,8 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
     ///     A class rather than a struct: the field holding it is <c>volatile</c>, which C# does not
     ///     allow for a value type, and a reference swap is what makes the refresh atomic.
     /// </summary>
-    private sealed record ParentMapEntry(IReadOnlyDictionary<string, string> Parents, DateTimeOffset ExpiresAt,
-        bool IsComplete)
+    private sealed record ParentMapEntry(IReadOnlyDictionary<string, string> Parents,
+        IReadOnlySet<string> KnownTenantIds, DateTimeOffset ExpiresAt, bool IsComplete)
     {
         public bool IsExpired => DateTimeOffset.UtcNow >= ExpiresAt;
     }

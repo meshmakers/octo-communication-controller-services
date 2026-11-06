@@ -32,6 +32,7 @@ internal class DefaultConfigurationCreatorService(
     IAdapterService adapterService,
     IPipelineServiceAccountProvisioningService serviceAccountProvisioningService,
     IAdapterPoolMirrorProvisioningService adapterPoolMirrorProvisioningService,
+    ISecretDefaultProvisioningService secretDefaultProvisioningService,
     FailedTenantRegistry failedTenantRegistry,
     TenantSetupRetryTracker tenantSetupRetryTracker,
     ICommunicationEventService communicationEventService,
@@ -131,6 +132,8 @@ internal class DefaultConfigurationCreatorService(
         // cover — a tenant created after the pool, a tenant re-parented, a mirror deleted by hand —
         // because none of them touch the lender at all.
         await EnsureLentAdapterPoolMirrorsAsync(tenantId);
+
+        await EnsureSecretDefaultsAsync(tenantId);
 
         // try to load the configuration from the cache
         await adapterCachePublish.LoadConfigurationAsync(tenantId);
@@ -254,6 +257,40 @@ internal class DefaultConfigurationCreatorService(
             await communicationEventService.StoreErrorEventAsync(tenantId,
                 "Lent adapter pool mirrors could not be reconciled (AB#5271); leased adapters cannot be linked to " +
                 $"an adapter pool until this succeeds: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Reconciles the tenant's SecretDefaults against what its own tenant and its ancestors provide, without ever
+    /// failing tenant startup. A failure is an Error event; the next tenant load or the reconcile endpoint retries.
+    /// </summary>
+    internal async Task EnsureSecretDefaultsAsync(string tenantId)
+    {
+        try
+        {
+            var result = await secretDefaultProvisioningService.ProvisionForTargetAsync(tenantId);
+            if (result.DefaultsCreated > 0 || result.DefaultsRemoved > 0)
+            {
+                await communicationEventService.StoreInformationEventAsync(tenantId,
+                    $"Secret defaults reconciled: {result.DefaultsCreated} created, {result.DefaultsUpdated} " +
+                    $"refreshed, {result.DefaultsRemoved} removed, {result.DefaultsKept} kept.");
+            }
+        }
+        catch (Exception reconcileFailure)
+        {
+            logger.LogError(reconcileFailure,
+                "Secret defaults of tenant '{TenantId}' could not be reconciled. Tenant startup continues", tenantId);
+            try
+            {
+                await communicationEventService.StoreErrorEventAsync(tenantId,
+                    "Secret defaults could not be reconciled on tenant load; the next load or POST " +
+                    "v1/secretDefaults/reconcile retries it.");
+            }
+            catch (Exception eventFailure)
+            {
+                logger.LogWarning(eventFailure,
+                    "Could not store the secret default reconcile failure of tenant '{TenantId}'", tenantId);
+            }
         }
     }
 

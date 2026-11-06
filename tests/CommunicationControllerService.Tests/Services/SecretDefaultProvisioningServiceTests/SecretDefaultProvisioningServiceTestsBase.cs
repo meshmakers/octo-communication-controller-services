@@ -45,6 +45,15 @@ internal abstract class SecretDefaultProvisioningServiceTestsBase
 
     private readonly Dictionary<(string TargetTenantId, string Key), RecordedSecretDefaultWrite> _storedDefaults = [];
 
+    private readonly Dictionary<(string TargetTenantId, string Key), OctoObjectId> _storedRtIds = [];
+
+    private readonly Dictionary<string, List<RtApplication>> _applicationsByTenant =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly Dictionary<string, Exception> _unreadableSourceTenants = new(StringComparer.OrdinalIgnoreCase);
+
+    protected readonly List<(string TenantId, string Key)> Deletions = [];
+
     protected SecretDefaultProvisioningServiceTestsBase()
     {
         Service = new SecretDefaultProvisioningService(CommunicationRepository, TenantScopeResolver,
@@ -54,6 +63,10 @@ internal abstract class SecretDefaultProvisioningServiceTestsBase
             descendantTenantIds: [FirstChildTenantId, SecondChildTenantId, GrandchildTenantId]);
         ArrangeTenant(FirstChildTenantId, ancestorTenantIds: [SourceTenantId],
             descendantTenantIds: [GrandchildTenantId]);
+        ArrangeTenant(SecondChildTenantId, ancestorTenantIds: [SourceTenantId], descendantTenantIds: []);
+        ArrangeTenant(GrandchildTenantId, ancestorTenantIds: [FirstChildTenantId, SourceTenantId],
+            descendantTenantIds: []);
+        ArrangeTenant(SiblingTenantId, ancestorTenantIds: [], descendantTenantIds: []);
 
         CommunicationRepository
             .UpsertSecretDefaultAsync(Arg.Any<string>(), Arg.Any<SecretDefaultWrite>())
@@ -86,10 +99,86 @@ internal abstract class SecretDefaultProvisioningServiceTestsBase
                 Writes.Add(recorded);
                 var isUpdate = _storedDefaults.ContainsKey(storageKey);
                 _storedDefaults[storageKey] = recorded;
+                _storedRtIds.TryAdd(storageKey, OctoObjectId.GenerateNewId());
                 return Task.FromResult(new SecretDefaultWriteResult(isUpdate
                     ? SecretDefaultWriteOutcome.Updated
                     : SecretDefaultWriteOutcome.Created));
             });
+
+        CommunicationRepository
+            .GetSecretDefaultsAsync(Arg.Any<string>())
+            .Returns(call => Task.FromResult(InventoryOf(call.ArgAt<string>(0))));
+
+        CommunicationRepository
+            .DeleteSecretDefaultAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>())
+            .Returns(call =>
+            {
+                var tenantId = call.ArgAt<string>(0);
+                var deletedRtId = call.ArgAt<OctoObjectId>(1);
+                var storageKey = _storedRtIds.Single(stored =>
+                    string.Equals(stored.Key.TargetTenantId, tenantId, StringComparison.OrdinalIgnoreCase) &&
+                    stored.Value == deletedRtId).Key;
+                _storedRtIds.Remove(storageKey);
+                _storedDefaults.Remove(storageKey);
+                Deletions.Add(storageKey);
+                return Task.CompletedTask;
+            });
+
+        CommunicationRepository
+            .GetSecretDefaultSourceApplicationsAsync(Arg.Any<string>())
+            .Returns(call =>
+            {
+                var tenantId = call.ArgAt<string>(0);
+                if (_unreadableSourceTenants.TryGetValue(tenantId, out var readFailure))
+                {
+                    throw readFailure;
+                }
+
+                IReadOnlyCollection<RtApplication> applications =
+                    _applicationsByTenant.GetValueOrDefault(tenantId)?.ToList() ?? [];
+                return Task.FromResult<IReadOnlyCollection<RtApplication>?>(applications);
+            });
+    }
+
+    private SecretDefaultInventory InventoryOf(string tenantId)
+    {
+        var outcome = _outcomeByTenant.GetValueOrDefault(tenantId, SecretDefaultWriteOutcome.Created);
+        if (outcome == SecretDefaultWriteOutcome.TenantUnavailable)
+        {
+            return SecretDefaultInventory.TenantUnavailable;
+        }
+
+        if (outcome == SecretDefaultWriteOutcome.ModelMissing)
+        {
+            return SecretDefaultInventory.ModelMissing;
+        }
+
+        var storedDefaults = _storedDefaults
+            .Where(stored => string.Equals(stored.Key.TargetTenantId, tenantId, StringComparison.OrdinalIgnoreCase))
+            .Select(stored => new StoredSecretDefault(_storedRtIds[stored.Key], stored.Key.Key,
+                stored.Value.SourceTenantId, stored.Value.SourceWorkloadRtId))
+            .ToList();
+        return new SecretDefaultInventory(SecretDefaultTenantAvailability.Available, storedDefaults);
+    }
+
+    protected void ArrangeStoredDefault(string targetTenantId, string key, string revealedValue,
+        string sourceTenantId, string sourceWorkloadRtId)
+    {
+        var storageKey = (targetTenantId, key);
+        _storedDefaults[storageKey] = new RecordedSecretDefaultWrite(targetTenantId, key, revealedValue,
+            sourceTenantId, sourceWorkloadRtId, Clock.UtcNow);
+        _storedRtIds[storageKey] = OctoObjectId.GenerateNewId();
+    }
+
+    protected void ArrangeUnreadableSource(string sourceTenantId)
+    {
+        _unreadableSourceTenants[sourceTenantId] = new InvalidOperationException("source tenant unreadable");
+    }
+
+    protected void RemoveApplication(string tenantId, RtApplication application)
+    {
+        _applicationsByTenant.GetValueOrDefault(tenantId)?.Remove(application);
+        CommunicationRepository.GetWorkloadByRtIdAsync(tenantId, application.RtId).Returns((RtDeployableWorkload?)null);
     }
 
     protected void ArrangeTenant(string tenantId, string[] ancestorTenantIds, string[] descendantTenantIds)
@@ -135,6 +224,13 @@ internal abstract class SecretDefaultProvisioningServiceTestsBase
         }
 
         CommunicationRepository.GetWorkloadByRtIdAsync(tenantId, application.RtId).Returns(application);
+        if (!_applicationsByTenant.TryGetValue(tenantId, out var applicationsOfTenant))
+        {
+            applicationsOfTenant = [];
+            _applicationsByTenant[tenantId] = applicationsOfTenant;
+        }
+
+        applicationsOfTenant.Add(application);
         return application;
     }
 

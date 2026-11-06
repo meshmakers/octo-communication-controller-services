@@ -4242,9 +4242,8 @@ rollout starts rather than during it, so a slow identity service delays a deploy
 half-configuring one. The best-effort contract is unchanged: a provisioning failure is still
 swallowed and the workload still deploys, just without credentials.
 
-Note `DeployManagedWorkloadsAsync` (the pool fan-out) calls `BuildWorkloadDeployedDtoAsync` without
-provisioning first — it has no live caller today, and the tenant-start sweep
-(`EnsurePipelineServiceAccountsAsync`) is what covers that path.
+The former pool fan-out `DeployManagedWorkloadsAsync` had no live caller and was removed with AB#7245; every workload
+deploy goes through `DeployWorkloadAsync`.
 
 Phase 4 tests: `Services/PoolServiceTests/DeployWorkloadServiceAccountCredentialsTests` (both paths
 projected with the right secret flags, Application projects nothing and never asks the resolver, no
@@ -5415,10 +5414,24 @@ An Application's `SecretDefaults` (System.Communication 4.15.0) are projected by
 tenant's own secret of the same purpose (e.g. `RegistrationCaptchaSecret`) is never touched; the platform node that
 consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tenant's value and falls back to it.
 
-- **Authority.** Only the deploy of the Application writes SecretDefaults. `DeploymentSiteService.DeployWorkloadAsync`
-  calls `ISecretDefaultProvisioningService.ProvisionForSourceAsync(tenantId, applicationRtId)` after the Helm
-  notification, for an `RtApplication` with at least one entry. Best effort like the adapter-pool mirror fan-out: a
-  failure of the whole projection is an Error event on the Application, the deploy succeeds, the next deploy retries.
+- **Triggers (AB#7245).** The controller writes SecretDefaults on four paths, all through
+  `ISecretDefaultProvisioningService`, all best effort (a failure is an Error event, never a failed deploy or tenant load):
+  1. **Deploy** - `DeploymentSiteService.DeployWorkloadAsync` calls `ProvisionForSourceAsync(tenantId, applicationRtId)`
+     after the Helm notification for **every** `RtApplication`, also one without entries, so a redeploy removes what it no
+     longer declares. A failure of the whole projection is an Error event on the Application; the next deploy retries.
+  2. **Deployment-site deploy** - `DeployDeploymentSiteAsync` deploys no workload (decoupled in f2f8bbd; the unused
+     `DeployManagedWorkloadsAsync` fan-out was removed with AB#7245), so every Application reaches Helm through
+     `DeployWorkloadAsync` and its validation and projection; the re-dispatch of a Pending workload on site registration
+     (`ReconcilePendingWorkloadsAsync`) calls it too. Tests: `DeployWorkloadSecretDefaultsTests`.
+  3. **Tenant load** - `DefaultConfigurationCreatorService.EnsureSecretDefaultsAsync` runs `ProvisionForTargetAsync(tenantId)`
+     next to the lent-pool mirrors (service start, Enable, `PosUpdateTenant`), so a tenant created or loaded after the deploy
+     receives its defaults without a redeploy. It never fails the load; an Information event only when something was
+     created or removed.
+  4. **Reconcile endpoint** - `POST {tenantId}/v1/secretDefaults/reconcile` (`SecretDefaultsController`, policy
+     `TenantCommunicationApiReadWritePolicy` like `adapterPool/mirrors/refresh`) runs the target reconcile for the route
+     tenant and every tenant of its subtree and answers with one `SecretDefaultTargetResult` per tenant: status
+     (`Reconciled`, `TenantUnavailable`, `ModelMissing`, `TreeUnreadable`) and counts (created, updated, removed, kept,
+     unreadable sources, failed), never a value. Use it after deleting an Application, which reaches no hook.
 - **Target set.** The Application's own tenant plus its whole subtree, read through
   `ITenantLendingScopeResolver.ResolveLendableTenantsAsync(source, LendingScope.Descendants)` (the descendant walk with
   the ancestor guard). Never siblings. A non-empty `AllowedTenantIds` intersects that set; a listed tenant outside it is
@@ -5452,9 +5465,35 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   `{release}-octo-secrets`. The plaintext appears in no log line, event, exception message or workload status
   (`ProvisionForSourceAsyncTests.ThePlaintext_ReachesNoLogLineAndNoEvent`, `DeployWorkloadSecretDefaultsTests`). See
   also "Platform-only secrets" above (AB#7246): a SecretDefault is never part of an adapter's configuration list.
-- **Not yet here** (AB#7245): tenants created or loaded after the deploy, removal of a default from all targets, per-tenant
-  status and a reconcile endpoint.
-- Tests: `tests/CommunicationControllerService.Tests/Services/SecretDefaultProvisioningServiceTests/`,
-  `DeploymentSiteServiceTests/DeployWorkloadSecretDefaultsTests.cs`, integration
-  `Repository/SecretDefaultRepositoryTests.cs` (encryption, rotation in place, another secret of the tenant unchanged,
-  duplicate erase, a protected source kept).
+- **Target reconcile (AB#7245).** `ProvisionForTargetAsync(target)` brings one tenant to the desired state. Sources are the
+  tenant itself and all its ancestors (`ResolveAncestorTenantsAsync`, complete tree required; never siblings); every
+  Application of a source whose valid entry reaches the target (`AllowedTenantIds` empty or naming it) is an offer. Per key
+  the offer of the source closest to the root wins (same precedence as the deploy); between Applications of one tenant the
+  one that already holds the default stays, else the lowest RtId. The winner is written on every reconcile, so an edited or
+  deleted SecretDefault gets the projected value back. A source without System.Communication 4.15.0 offers nothing. The
+  ancestor walk re-reads the tenant tree when the tenant is not in the cached parent map, so a tenant created seconds
+  ago finds its ancestors.
+- **Removal rule (desired state).** A SecretDefault is deleted (Erase) when no Application provides it to that tenant any
+  more: its entry was removed, the Application was deleted, the tenant left the entry's `AllowedTenantIds`, or its source
+  is no ancestor any more. Matching is by `SourceTenantId` + `SourceWorkloadRtId` + key, so a default of another Application
+  stays. An entry that is present but invalid keeps its existing defaults (never written, never removed). On deploy the
+  source side sweeps its own tenant and subtree for defaults of this Application that it no longer provides and, where it
+  removed one, runs the target reconcile so another source can take the key over. **Unknown, never empty:** a source
+  tenant that cannot be read keeps the defaults it projected and is named in a Warning event in the target; a tenant tree
+  that cannot be read completely changes nothing (`TreeUnreadable`, Warning event).
+- **Exactly one per name under concurrency.** A new SecretDefault is created with an RtId derived from its key
+  (`SecretDefaultIdentity.RtIdFor`, SHA-256 of a namespace plus the key). Two writers creating the same key at the same
+  time insert the same document id; MongoDB refuses one (write conflict or duplicate key), and `UpsertSecretDefaultAsync`
+  repeats it (at most 3 attempts) as an update. An entity found by that RtId but renamed by the tenant is taken over.
+  `VerifyCaptcha@1` refuses duplicates, which is why this matters.
+- **Visibility.** Events carry tenant ids, keys and counts only: per-target Warning (skipped, kept, unreadable source),
+  Error (write or delete failed, unreadable value) and an Information summary on the Application after a deploy that
+  wrote or removed something. Application `StatusMessage` is not used: it is the live deployment status line that every
+  operator report overwrites.
+- Tests: `tests/CommunicationControllerService.Tests/Services/SecretDefaultProvisioningServiceTests/` (target side:
+  `ProvisionForTargetAsyncTests`, removal on deploy: `ProvisionForSourceRemovalTests`),
+  `DeploymentSiteServiceTests/DeployWorkloadSecretDefaultsTests.cs`,
+  `DefaultConfigurationCreatorServiceTests/EnsureSecretDefaultsAsyncTests.cs`, `Controllers/SecretDefaultsControllerTests.cs`,
+  `Repository/SecretDefaultIdentityTests.cs`, integration `Repository/SecretDefaultRepositoryTests.cs` (encryption,
+  rotation in place, another secret of the tenant unchanged, duplicate erase, a protected source kept, two concurrent
+  creates leave one entity, list and delete).
