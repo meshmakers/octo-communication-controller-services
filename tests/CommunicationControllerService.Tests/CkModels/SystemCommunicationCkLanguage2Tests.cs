@@ -113,7 +113,7 @@ internal class SystemCommunicationCkLanguage2Tests
     }
 
     /// <summary>
-    ///     The only tightened attribute is <c>SecretDefault.Value</c> (Hidden, row T7a, acknowledged in ckModel.yaml): the
+    ///     The only tightened attribute is <c>SecretDefault.Value</c> (Hidden, row T7a, acknowledged in the published 4.16.0): the
     ///     controller writes it through its repository only. The configuration credentials stay ReadWrite because Refinery
     ///     Studio writes them through the generic GraphQL update, and service-written state stays ReadWrite because a
     ///     ReadOnly on an attribute that is not securitySensitive is a MAJOR (row T7). Any further tightening is a
@@ -139,17 +139,16 @@ internal class SystemCommunicationCkLanguage2Tests
     }
 
     /// <summary>
-    ///     The access tightening of SecretDefault.Value stays acknowledged in 4.17.0 (AB#8595): 4.16.0 was never published
-    ///     (publishSystemCkModels), so the published baseline is still 4.15.0 and the tightening is part of this release's
-    ///     diff. The entry goes with the first bump after a version carrying it has been published (OCTO-CK204).
+    ///     4.17.0 carries no acknowledgement (AB#8595): the SecretDefault.Value tightening was released and acknowledged in
+    ///     the published 4.16.0, and an acknowledgement is valid for one release only - keeping it fails the compile gate
+    ///     with OCTO-CK204 against the published baseline. A new acknowledgement is a deliberate decision that updates this test.
     /// </summary>
     [Test]
-    public async Task TheAccessTightening_IsAcknowledged()
+    public async Task NoAcknowledgement_IsCarriedOver()
     {
         var root = await LoadEmbeddedSystemCommunicationAsync();
 
         var acknowledged = root.Compatibility?.Acknowledge?.Select(a => a.Change).ToList() ?? [];
-        await Assert.That(acknowledged)
-            .IsEquivalentTo(new[] { "TypeAttribute:SecretDefault-1/Value#Modified:access" });
+        await Assert.That(acknowledged).IsEmpty();
     }
 }
