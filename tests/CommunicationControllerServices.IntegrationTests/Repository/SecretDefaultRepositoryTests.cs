@@ -216,23 +216,66 @@ public class SecretDefaultRepositoryTests(CommunicationControllerFixture fixture
         listed.ToString().Should().NotContain("zq7245-integration-listed");
     }
 
+    private static async Task<StoredSecretDefault> ListedDefaultAsync(ICommunicationRepository repository,
+        string tenantId, string key)
+    {
+        return (await repository.GetSecretDefaultsAsync(tenantId)).Defaults
+            .Single(storedDefault => storedDefault.Key == key);
+    }
+
     [Fact]
-    public async Task DeleteSecretDefaultAsync_ErasesTheEntityAndANewWriteCreatesItAgain()
+    public async Task DeleteSecretDefaultIfUnchangedAsync_ErasesTheEntityAndANewWriteCreatesItAgain()
     {
         var repository = fixture.GetService<ICommunicationRepository>();
         var key = $"secret-default-{Guid.NewGuid():N}";
         await repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
             BuildWrite(key, "zq7245-integration-deleted", OctoObjectId.GenerateNewId().ToString()));
-        var storedRtId = (await ReadSecretDefaultsAsync(key)).Single().RtId;
+        var listedDefault = await ListedDefaultAsync(repository, fixture.TestTenantId, key);
 
-        await repository.DeleteSecretDefaultAsync(fixture.TestTenantId, storedRtId);
+        var deleteOutcome = await repository.DeleteSecretDefaultIfUnchangedAsync(fixture.TestTenantId, listedDefault);
         var afterDelete = await ReadSecretDefaultsAsync(key);
         var recreated = await repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
             BuildWrite(key, "zq7245-integration-recreated", OctoObjectId.GenerateNewId().ToString()));
 
+        deleteOutcome.Should().Be(SecretDefaultDeleteOutcome.Deleted);
         afterDelete.Should().BeEmpty();
         recreated.Outcome.Should().Be(SecretDefaultWriteOutcome.Created);
         Reveal((await ReadSecretDefaultsAsync(key)).Single().Value).Should().Be("zq7245-integration-recreated");
+    }
+
+    [Fact]
+    public async Task DeleteSecretDefaultIfUnchangedAsync_ADefaultWrittenAfterTheRead_IsKept()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var key = $"secret-default-{Guid.NewGuid():N}";
+        await repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
+            BuildWrite(key, "zq7245-integration-read", OctoObjectId.GenerateNewId().ToString()));
+        var listedDefault = await ListedDefaultAsync(repository, fixture.TestTenantId, key);
+        var takingOverWorkloadRtId = OctoObjectId.GenerateNewId().ToString();
+        await repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
+            BuildWrite(key, "zq7245-integration-rewritten", takingOverWorkloadRtId));
+
+        var deleteOutcome = await repository.DeleteSecretDefaultIfUnchangedAsync(fixture.TestTenantId, listedDefault);
+
+        deleteOutcome.Should().Be(SecretDefaultDeleteOutcome.Changed);
+        var stored = (await ReadSecretDefaultsAsync(key)).Should().ContainSingle().Subject;
+        stored.SourceWorkloadRtId.Should().Be(takingOverWorkloadRtId);
+        Reveal(stored.Value).Should().Be("zq7245-integration-rewritten");
+    }
+
+    [Fact]
+    public async Task DeleteSecretDefaultIfUnchangedAsync_ADefaultThatIsGone_IsReportedNotFound()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var key = $"secret-default-{Guid.NewGuid():N}";
+        await repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
+            BuildWrite(key, "zq7245-integration-gone", OctoObjectId.GenerateNewId().ToString()));
+        var listedDefault = await ListedDefaultAsync(repository, fixture.TestTenantId, key);
+        await repository.DeleteSecretDefaultIfUnchangedAsync(fixture.TestTenantId, listedDefault);
+
+        var deleteOutcome = await repository.DeleteSecretDefaultIfUnchangedAsync(fixture.TestTenantId, listedDefault);
+
+        deleteOutcome.Should().Be(SecretDefaultDeleteOutcome.NotFound);
     }
 
     [Fact]

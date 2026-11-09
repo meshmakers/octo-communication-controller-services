@@ -27,7 +27,24 @@ public sealed record StoredSecretDefault(
     OctoObjectId RtId,
     string Key,
     string? SourceTenantId,
-    string? SourceWorkloadRtId);
+    string? SourceWorkloadRtId)
+{
+    /// <summary>UTC time of the projection that wrote it, when set; part of the snapshot a removal compares.</summary>
+    public DateTime? LastProjectedAt { get; init; }
+}
+
+/// <summary>What a conditional removal of a SecretDefault did.</summary>
+public enum SecretDefaultDeleteOutcome
+{
+    /// <summary>The default was still as read and was erased.</summary>
+    Deleted,
+
+    /// <summary>The default was written since it was read and was kept.</summary>
+    Changed,
+
+    /// <summary>The default did not exist any more.</summary>
+    NotFound
+}
 
 /// <summary>The SecretDefaults of one tenant, never their values.</summary>
 /// <param name="Availability">Whether the tenant could be read.</param>

@@ -110,19 +110,9 @@ internal abstract class SecretDefaultProvisioningServiceTestsBase
             .Returns(call => Task.FromResult(InventoryOf(call.ArgAt<string>(0))));
 
         CommunicationRepository
-            .DeleteSecretDefaultAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>())
-            .Returns(call =>
-            {
-                var tenantId = call.ArgAt<string>(0);
-                var deletedRtId = call.ArgAt<OctoObjectId>(1);
-                var storageKey = _storedRtIds.Single(stored =>
-                    string.Equals(stored.Key.TargetTenantId, tenantId, StringComparison.OrdinalIgnoreCase) &&
-                    stored.Value == deletedRtId).Key;
-                _storedRtIds.Remove(storageKey);
-                _storedDefaults.Remove(storageKey);
-                Deletions.Add(storageKey);
-                return Task.CompletedTask;
-            });
+            .DeleteSecretDefaultIfUnchangedAsync(Arg.Any<string>(), Arg.Any<StoredSecretDefault>())
+            .Returns(call => Task.FromResult(DeleteIfUnchanged(call.ArgAt<string>(0),
+                call.ArgAt<StoredSecretDefault>(1))));
 
         CommunicationRepository
             .GetSecretDefaultSourceApplicationsAsync(Arg.Any<string>())
@@ -138,6 +128,36 @@ internal abstract class SecretDefaultProvisioningServiceTestsBase
                     _applicationsByTenant.GetValueOrDefault(tenantId)?.ToList() ?? [];
                 return Task.FromResult<IReadOnlyCollection<RtApplication>?>(applications);
             });
+    }
+
+    /// <summary>Runs between the read of a default and its conditional removal, as a concurrent writer would.</summary>
+    protected Action<string, StoredSecretDefault>? BeforeConditionalDelete { get; set; }
+
+    private SecretDefaultDeleteOutcome DeleteIfUnchanged(string tenantId, StoredSecretDefault expectedDefault)
+    {
+        BeforeConditionalDelete?.Invoke(tenantId, expectedDefault);
+        var storedEntry = _storedRtIds.FirstOrDefault(stored =>
+            string.Equals(stored.Key.TargetTenantId, tenantId, StringComparison.OrdinalIgnoreCase) &&
+            stored.Value == expectedDefault.RtId);
+        if (storedEntry.Value == default)
+        {
+            return SecretDefaultDeleteOutcome.NotFound;
+        }
+
+        var currentDefault = _storedDefaults[storedEntry.Key];
+        var isUnchanged = currentDefault.Key == expectedDefault.Key &&
+                          currentDefault.SourceTenantId == expectedDefault.SourceTenantId &&
+                          currentDefault.SourceWorkloadRtId == expectedDefault.SourceWorkloadRtId &&
+                          currentDefault.ProjectedAt == expectedDefault.LastProjectedAt;
+        if (!isUnchanged)
+        {
+            return SecretDefaultDeleteOutcome.Changed;
+        }
+
+        _storedRtIds.Remove(storedEntry.Key);
+        _storedDefaults.Remove(storedEntry.Key);
+        Deletions.Add(storedEntry.Key);
+        return SecretDefaultDeleteOutcome.Deleted;
     }
 
     private SecretDefaultInventory InventoryOf(string tenantId)
@@ -156,18 +176,21 @@ internal abstract class SecretDefaultProvisioningServiceTestsBase
         var storedDefaults = _storedDefaults
             .Where(stored => string.Equals(stored.Key.TargetTenantId, tenantId, StringComparison.OrdinalIgnoreCase))
             .Select(stored => new StoredSecretDefault(_storedRtIds[stored.Key], stored.Key.Key,
-                stored.Value.SourceTenantId, stored.Value.SourceWorkloadRtId))
+                stored.Value.SourceTenantId, stored.Value.SourceWorkloadRtId)
+            {
+                LastProjectedAt = stored.Value.ProjectedAt
+            })
             .ToList();
         return new SecretDefaultInventory(SecretDefaultTenantAvailability.Available, storedDefaults);
     }
 
     protected void ArrangeStoredDefault(string targetTenantId, string key, string revealedValue,
-        string sourceTenantId, string sourceWorkloadRtId)
+        string? sourceTenantId, string? sourceWorkloadRtId)
     {
         var storageKey = (targetTenantId, key);
         _storedDefaults[storageKey] = new RecordedSecretDefaultWrite(targetTenantId, key, revealedValue,
             sourceTenantId, sourceWorkloadRtId, Clock.UtcNow);
-        _storedRtIds[storageKey] = OctoObjectId.GenerateNewId();
+        _storedRtIds.TryAdd(storageKey, OctoObjectId.GenerateNewId());
     }
 
     protected void ArrangeUnreadableSource(string sourceTenantId)
@@ -278,7 +301,7 @@ internal abstract class SecretDefaultProvisioningServiceTestsBase
         string TargetTenantId,
         string Key,
         string? RevealedValue,
-        string SourceTenantId,
-        string SourceWorkloadRtId,
+        string? SourceTenantId,
+        string? SourceWorkloadRtId,
         DateTime ProjectedAt);
 }

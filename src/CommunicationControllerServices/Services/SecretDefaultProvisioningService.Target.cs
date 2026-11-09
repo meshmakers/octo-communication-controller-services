@@ -126,13 +126,14 @@ internal sealed partial class SecretDefaultProvisioningService
             var removedInTenant = 0;
             foreach (var withdrawnDefault in withdrawnDefaults)
             {
-                if (await TryDeleteAsync(servedTenantId, withdrawnDefault))
+                switch (await TryDeleteAsync(servedTenantId, withdrawnDefault))
                 {
-                    removedInTenant++;
-                }
-                else
-                {
-                    failed++;
+                    case RemovalAttempt.Removed:
+                        removedInTenant++;
+                        break;
+                    case RemovalAttempt.Failed:
+                        failed++;
+                        break;
                 }
             }
 
@@ -264,27 +265,38 @@ internal sealed partial class SecretDefaultProvisioningService
                 continue;
             }
 
-            if (await TryDeleteAsync(targetTenantId, storedDefault))
+            switch (await TryDeleteAsync(targetTenantId, storedDefault))
             {
-                removal.RemovedRtIds.Add(storedDefault.RtId.ToString());
-            }
-            else
-            {
-                removal.Failed++;
+                case RemovalAttempt.Removed:
+                    removal.RemovedRtIds.Add(storedDefault.RtId.ToString());
+                    break;
+                case RemovalAttempt.Failed:
+                    removal.Failed++;
+                    break;
             }
         }
 
         return removal;
     }
 
-    private async Task<bool> TryDeleteAsync(string tenantId, StoredSecretDefault storedDefault)
+    private async Task<RemovalAttempt> TryDeleteAsync(string tenantId, StoredSecretDefault storedDefault)
     {
         try
         {
-            await communicationRepository.DeleteSecretDefaultAsync(tenantId, storedDefault.RtId);
+            var deleteOutcome = await communicationRepository.DeleteSecretDefaultIfUnchangedAsync(tenantId,
+                storedDefault);
+            if (deleteOutcome != SecretDefaultDeleteOutcome.Deleted)
+            {
+                Logger.Info("[{TenantId}] Secret default '{Key}' from tenant '{SourceTenantId}' was not removed: it " +
+                            "{DeleteOutcome} since it was read", tenantId, storedDefault.Key,
+                    storedDefault.SourceTenantId,
+                    deleteOutcome == SecretDefaultDeleteOutcome.Changed ? "was written again" : "was removed");
+                return RemovalAttempt.Skipped;
+            }
+
             Logger.Info("[{TenantId}] Secret default '{Key}' from tenant '{SourceTenantId}' removed: no application " +
                         "provides it to this tenant any more", tenantId, storedDefault.Key, storedDefault.SourceTenantId);
-            return true;
+            return RemovalAttempt.Removed;
         }
         catch (Exception deleteFailure) when (deleteFailure is not OperationCanceledException)
         {
@@ -293,7 +305,7 @@ internal sealed partial class SecretDefaultProvisioningService
             await communicationEventService.StoreErrorEventAsync(tenantId,
                 $"Secret default '{storedDefault.Key}' is no longer provided to this tenant but could not be " +
                 "removed. The next reconcile retries it.");
-            return false;
+            return RemovalAttempt.Failed;
         }
     }
 
@@ -449,6 +461,13 @@ internal sealed partial class SecretDefaultProvisioningService
         public HashSet<ProvidedDefault> ProvidedDefaults { get; } = [];
 
         public List<SecretDefaultOffer> Offers { get; } = [];
+    }
+
+    private enum RemovalAttempt
+    {
+        Removed,
+        Skipped,
+        Failed
     }
 
     private sealed class RemovalOutcome

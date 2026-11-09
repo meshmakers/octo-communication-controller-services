@@ -799,13 +799,17 @@ internal class CommunicationRepository : ICommunicationRepository
             .Items
             .Where(secretDefault => !string.IsNullOrEmpty(secretDefault.RtWellKnownName))
             .Select(secretDefault => new StoredSecretDefault(secretDefault.RtId, secretDefault.RtWellKnownName!,
-                secretDefault.SourceTenantId, secretDefault.SourceWorkloadRtId))
+                secretDefault.SourceTenantId, secretDefault.SourceWorkloadRtId)
+            {
+                LastProjectedAt = secretDefault.LastProjectedAt
+            })
             .ToList();
         return new SecretDefaultInventory(SecretDefaultTenantAvailability.Available, storedDefaults);
     }
 
     /// <inheritdoc />
-    public async Task DeleteSecretDefaultAsync(string tenantId, OctoObjectId secretDefaultRtId)
+    public async Task<SecretDefaultDeleteOutcome> DeleteSecretDefaultIfUnchangedAsync(string tenantId,
+        StoredSecretDefault expectedDefault)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
 
@@ -813,9 +817,26 @@ internal class CommunicationRepository : ICommunicationRepository
         session.StartTransaction();
         try
         {
-            await tenantRepository.DeleteOneRtEntityByRtIdAsync<RtSecretDefault>(session, secretDefaultRtId,
+            var currentDefault =
+                await tenantRepository.GetRtEntityByRtIdAsync<RtSecretDefault>(session, expectedDefault.RtId);
+            if (currentDefault is null || !SecretDefaultIdentity.IsUnchanged(currentDefault, expectedDefault))
+            {
+                await session.CommitTransactionAsync();
+                return currentDefault is null ? SecretDefaultDeleteOutcome.NotFound : SecretDefaultDeleteOutcome.Changed;
+            }
+
+            await tenantRepository.DeleteOneRtEntityByRtIdAsync<RtSecretDefault>(session, expectedDefault.RtId,
                 DeleteOptions.Erase);
             await session.CommitTransactionAsync();
+            return SecretDefaultDeleteOutcome.Deleted;
+        }
+        catch (Exception concurrentWrite) when (SecretDefaultIdentity.IsConcurrentCreateCollision(concurrentWrite))
+        {
+            await session.AbortTransactionAsync();
+            _logger.LogInformation(concurrentWrite,
+                "Secret default '{Key}' in tenant '{TenantId}' was written concurrently; it is not removed",
+                expectedDefault.Key, tenantId);
+            return SecretDefaultDeleteOutcome.Changed;
         }
         catch
         {

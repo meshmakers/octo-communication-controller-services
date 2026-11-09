@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using MongoDB.Driver;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
@@ -27,6 +28,17 @@ internal static class SecretDefaultIdentity
         var keyHash = SHA256.HashData(Encoding.UTF8.GetBytes(RtIdNamespace + key));
         var objectIdHex = Convert.ToHexStringLower(keyHash.AsSpan(0, ObjectIdByteLength));
         return new OctoObjectId(objectIdHex);
+    }
+
+    /// <summary>True when the stored entity is still the default that was read as <paramref name="expectedDefault" />.</summary>
+    public static bool IsUnchanged(RtSecretDefault currentDefault, StoredSecretDefault expectedDefault)
+    {
+        return currentDefault.RtId == expectedDefault.RtId &&
+               string.Equals(currentDefault.RtWellKnownName, expectedDefault.Key, StringComparison.Ordinal) &&
+               string.Equals(currentDefault.SourceTenantId, expectedDefault.SourceTenantId, StringComparison.Ordinal) &&
+               string.Equals(currentDefault.SourceWorkloadRtId, expectedDefault.SourceWorkloadRtId,
+                   StringComparison.Ordinal) &&
+               Nullable.Equals(currentDefault.LastProjectedAt, expectedDefault.LastProjectedAt);
     }
 
     /// <summary>

@@ -181,9 +181,9 @@ internal sealed class ProvisionForTargetAsyncTests : SecretDefaultProvisioningSe
     {
         ArrangeApplication(ProtectedEntry(CaptchaKey, SentinelSecret));
         await Service.ProvisionForTargetAsync(FirstChildTenantId);
-        var storedRtId = (await CommunicationRepository.GetSecretDefaultsAsync(FirstChildTenantId)).Defaults
-            .Single().RtId;
-        await CommunicationRepository.DeleteSecretDefaultAsync(FirstChildTenantId, storedRtId);
+        var storedDefault = (await CommunicationRepository.GetSecretDefaultsAsync(FirstChildTenantId)).Defaults
+            .Single();
+        await CommunicationRepository.DeleteSecretDefaultIfUnchangedAsync(FirstChildTenantId, storedDefault);
 
         await Service.ProvisionForTargetAsync(FirstChildTenantId);
 

@@ -189,12 +189,15 @@ public interface ICommunicationRepository
     Task<SecretDefaultInventory> GetSecretDefaultsAsync(string tenantId);
 
     /// <summary>
-    ///     Erases one SecretDefault of a tenant. A default is derived state the reconcile rebuilds, so no tombstone
-    ///     is kept.
+    ///     Erases one SecretDefault of a tenant, but only while it is still the entity that was read: same RtId,
+    ///     well-known name, source tenant, source workload and projection time. A default a concurrent deploy has
+    ///     written since is kept. A default is derived state the reconcile rebuilds, so no tombstone is kept.
     /// </summary>
     /// <param name="tenantId">Tenant that holds the default.</param>
-    /// <param name="secretDefaultRtId">RtId of the SecretDefault entity.</param>
-    Task DeleteSecretDefaultAsync(string tenantId, OctoObjectId secretDefaultRtId);
+    /// <param name="expectedDefault">The default as read before the decision to remove it.</param>
+    /// <returns>Whether it was erased, had changed, or was gone already.</returns>
+    Task<SecretDefaultDeleteOutcome> DeleteSecretDefaultIfUnchangedAsync(string tenantId,
+        StoredSecretDefault expectedDefault);
 
     /// <summary>
     ///     The Applications of a tenant, read as possible sources of SecretDefaults.
