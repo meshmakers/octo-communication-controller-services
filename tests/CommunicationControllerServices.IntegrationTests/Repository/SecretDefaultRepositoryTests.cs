@@ -178,20 +178,53 @@ public class SecretDefaultRepositoryTests(CommunicationControllerFixture fixture
         stored.SourceTenantId.Should().Be("ancestor-tenant");
         Reveal(stored.Value).Should().Be("zq7244-integration-ancestor");
     }
+
     [Fact]
     public async Task UpsertSecretDefaultAsync_TwoConcurrentWritesOfANewKey_LeaveExactlyOneEntity()
     {
         var repository = fixture.GetService<ICommunicationRepository>();
+        var concreteRepository = repository.Should().BeOfType<CommunicationRepository>().Subject;
         var key = $"secret-default-{Guid.NewGuid():N}";
         var firstWorkloadRtId = OctoObjectId.GenerateNewId().ToString();
         var secondWorkloadRtId = OctoObjectId.GenerateNewId().ToString();
+        var bothWritersHaveRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var readsOfTheKey = 0;
+        concreteRepository.AfterSecretDefaultUpsertReadAsync = async readKey =>
+        {
+            if (readKey != key)
+            {
+                return;
+            }
 
-        var writeResults = await Task.WhenAll(
-            repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
-                BuildWrite(key, "zq7245-integration-first-writer", firstWorkloadRtId)),
-            repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
-                BuildWrite(key, "zq7245-integration-second-writer", secondWorkloadRtId)));
+            var readNumber = Interlocked.Increment(ref readsOfTheKey);
+            if (readNumber > 2)
+            {
+                return;
+            }
 
+            if (readNumber == 2)
+            {
+                bothWritersHaveRead.TrySetResult();
+            }
+
+            await bothWritersHaveRead.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        };
+
+        SecretDefaultWriteResult[] writeResults;
+        try
+        {
+            writeResults = await Task.WhenAll(
+                Task.Run(() => repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
+                    BuildWrite(key, "zq7245-integration-first-writer", firstWorkloadRtId))),
+                Task.Run(() => repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
+                    BuildWrite(key, "zq7245-integration-second-writer", secondWorkloadRtId))));
+        }
+        finally
+        {
+            concreteRepository.AfterSecretDefaultUpsertReadAsync = null;
+        }
+
+        readsOfTheKey.Should().BeGreaterThan(2, "both writers read before either wrote, so one had to repeat");
         writeResults.Select(writeResult => writeResult.Outcome).Should().BeEquivalentTo(
             [SecretDefaultWriteOutcome.Created, SecretDefaultWriteOutcome.Updated]);
         var stored = (await ReadSecretDefaultsAsync(key)).Should().ContainSingle().Subject;

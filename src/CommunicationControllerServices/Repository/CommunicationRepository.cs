@@ -677,6 +677,12 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
+    /// <summary>
+    ///     Runs inside an upsert after it has read the SecretDefaults of its key and before it writes, with the key.
+    ///     Null in production; a test sets it to make two writers overlap.
+    /// </summary>
+    internal Func<string, Task>? AfterSecretDefaultUpsertReadAsync { get; set; }
+
     /// <inheritdoc />
     public async Task<SecretDefaultWriteResult> UpsertSecretDefaultAsync(string targetTenantId,
         SecretDefaultWrite write)
@@ -738,6 +744,11 @@ internal class CommunicationRepository : ICommunicationRepository
             var existing = sameKey.FirstOrDefault() ??
                            await tenantRepository.GetRtEntityByRtIdAsync<RtSecretDefault>(session,
                                SecretDefaultIdentity.RtIdFor(write.Key));
+            if (AfterSecretDefaultUpsertReadAsync is { } afterReadHook)
+            {
+                await afterReadHook(write.Key);
+            }
+
             foreach (var duplicate in sameKey.Skip(1))
             {
                 await tenantRepository.DeleteOneRtEntityByRtIdAsync<RtSecretDefault>(session, duplicate.RtId,
