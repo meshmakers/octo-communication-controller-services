@@ -39,12 +39,18 @@ internal sealed partial class SecretDefaultProvisioningService
     }
 
     /// <summary>
-    ///     Only an Application whose deploy was accepted (Pending) or completed (Deployed) is a source. One that was
-    ///     never deployed, is undeployed or disabled, or was refused (Error) offers nothing.
+    ///     An Application whose deploy passed the guard is a source: Pending, Deployed, and Error after a failed rollout.
+    ///     One that was never deployed, is undeployed or disabled, or whose deploy the controller refused (Error with
+    ///     the <see cref="DeploymentRejection" /> marker) offers nothing.
     /// </summary>
     internal static bool IsReleasedSource(RtApplication application)
     {
-        return application.DeploymentState is RtDeploymentStateEnum.Pending or RtDeploymentStateEnum.Deployed;
+        return application.DeploymentState switch
+        {
+            RtDeploymentStateEnum.Pending or RtDeploymentStateEnum.Deployed => true,
+            RtDeploymentStateEnum.Error => !DeploymentRejection.IsRejection(application.LastDeploymentError),
+            _ => false
+        };
     }
 
     private async Task<SecretDefaultProvisioningResult> RemoveWithdrawnDefaultsAsync(string sourceTenantId,

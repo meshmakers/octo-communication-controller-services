@@ -5488,10 +5488,14 @@ An Application's `SecretDefaults` (System.Communication 4.15.0) are projected by
 tenant's own secret of the same purpose (e.g. `RegistrationCaptchaSecret`) is never touched; the platform node that
 consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tenant's value and falls back to it.
 
-- **The deploy is the release (AB#7245, decision 3a).** Only an Application in `DeploymentState` Pending or Deployed is a
-  source (`IsReleasedSource`). One that was never deployed, is undeployed or disabled, or was refused by the deploy guard
-  (Error, also after an earlier successful deploy, and also when a rollout fails) offers nothing, so its defaults are
-  removed. **Undeploying an Application withdraws its defaults**: e.g. undeploying the EC app removes the CAPTCHA
+- **The deploy is the release (AB#7245, decision 3a, refined by decision 2 ii).** An Application whose deploy passed the
+  guard is a source (`IsReleasedSource`): Pending, Deployed, and Error after a failed Helm rollout - **a failed rollout keeps
+  the defaults**. One that was never deployed, is undeployed or disabled, or whose deploy the controller refused offers
+  nothing, so its defaults are removed (a refusal also after an earlier successful deploy). The two kinds of Error are told
+  apart by `LastDeploymentError`: a refusal recorded by `EnsureValidOrRecordRejectionAsync` (secret-default declaration,
+  typed resource settings) is stored as `DeploymentRejection.Format(reason)`, i.e. with the prefix `Deploy refused: `,
+  which an operator report never carries; no CK change. A guard check that throws without recording (e.g. a missing chart
+  name) leaves the previous state, and with it the previous release. **Undeploying an Application withdraws its defaults**: e.g. undeploying the EC app removes the CAPTCHA
   default from every community without its own key pair; the next deploy projects it again.
 - **Triggers (AB#7245).** The controller writes SecretDefaults on five paths, all through
   `ISecretDefaultProvisioningService`, all best effort (a failure is an Error event, never a failed deploy, undeploy or tenant load):

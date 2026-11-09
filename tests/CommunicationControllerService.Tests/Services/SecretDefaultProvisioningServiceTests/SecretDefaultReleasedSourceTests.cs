@@ -29,9 +29,8 @@ internal sealed class SecretDefaultReleasedSourceTests : SecretDefaultProvisioni
 
     [Test]
     [Arguments(RtDeploymentStateEnum.Undeployed)]
-    [Arguments(RtDeploymentStateEnum.Error)]
     [Arguments(RtDeploymentStateEnum.Disabled)]
-    public async Task AnApplicationNeverDeployedRefusedOrDisabled_OffersNothing(RtDeploymentStateEnum deploymentState)
+    public async Task AnApplicationNeverDeployedOrDisabled_OffersNothing(RtDeploymentStateEnum deploymentState)
     {
         ArrangeTenant(NewChildTenantId, ancestorTenantIds: [SourceTenantId], descendantTenantIds: []);
         var application = ArrangeApplication(ProtectedEntry(CaptchaKey, SentinelSecret));
@@ -59,15 +58,57 @@ internal sealed class SecretDefaultReleasedSourceTests : SecretDefaultProvisioni
     }
 
     [Test]
+    public async Task AnApplicationRefusedByTheDeployGuard_OffersNothing()
+    {
+        ArrangeTenant(NewChildTenantId, ancestorTenantIds: [SourceTenantId], descendantTenantIds: []);
+        var application = ArrangeApplication(ProtectedEntry(CaptchaKey, SentinelSecret));
+        application.DeploymentState = RtDeploymentStateEnum.Error;
+        application.LastDeploymentError = DeploymentRejection.Format("Secret default 'ec-captcha-secret' has no SecretValue");
+
+        await Service.ProvisionForTargetAsync(NewChildTenantId);
+
+        await Assert.That(StoredDefault(NewChildTenantId, CaptchaKey)).IsNull();
+    }
+
+    [Test]
     public async Task AnApplicationRefusedAfterItsDeploy_LosesItsDefaultsOnTheNextReconcile()
     {
         var application = ArrangeApplication(ProtectedEntry(CaptchaKey, SentinelSecret));
         await Service.ProvisionForTargetAsync(FirstChildTenantId);
         application.DeploymentState = RtDeploymentStateEnum.Error;
+        application.LastDeploymentError = DeploymentRejection.Format("CPU limit is invalid");
 
         await Service.ProvisionForTargetAsync(FirstChildTenantId);
 
         await Assert.That(StoredDefault(FirstChildTenantId, CaptchaKey)).IsNull();
+    }
+
+    [Test]
+    public async Task AFailedRolloutAfterASuccessfulDeploy_KeepsOfferingItsDefaults()
+    {
+        var application = ArrangeApplication(ProtectedEntry(CaptchaKey, SentinelSecret));
+        await Service.ProvisionForTargetAsync(FirstChildTenantId);
+        application.DeploymentState = RtDeploymentStateEnum.Error;
+        application.LastDeploymentError = "helm upgrade failed: timed out waiting for the condition";
+
+        var result = await Service.ProvisionForTargetAsync(FirstChildTenantId);
+
+        using var assertionScope = Assert.Multiple();
+        await Assert.That(result.DefaultsRemoved).IsEqualTo(0);
+        await Assert.That(StoredDefault(FirstChildTenantId, CaptchaKey)!.RevealedValue).IsEqualTo(SentinelSecret);
+    }
+
+    [Test]
+    public async Task AFailedFirstRollout_OffersItsDefaultsToANewTenant()
+    {
+        ArrangeTenant(NewChildTenantId, ancestorTenantIds: [SourceTenantId], descendantTenantIds: []);
+        var application = ArrangeApplication(ProtectedEntry(CaptchaKey, SentinelSecret));
+        application.DeploymentState = RtDeploymentStateEnum.Error;
+        application.LastDeploymentError = "(no message)";
+
+        await Service.ProvisionForTargetAsync(NewChildTenantId);
+
+        await Assert.That(StoredDefault(NewChildTenantId, CaptchaKey)!.RevealedValue).IsEqualTo(SentinelSecret);
     }
 
     [Test]
