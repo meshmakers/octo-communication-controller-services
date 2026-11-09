@@ -3,6 +3,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTests.F
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts.Services;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Runtime.Contracts;
 using Xunit;
 
@@ -25,7 +26,8 @@ public class SystemCommunicationCkLanguage2PersistenceTests(CommunicationControl
     {
         var tenantContext = await fixture.GetTestTenantContextAsync();
         var operationResult = new OperationResult();
-        await tenantContext.ImportCkModelAsync(new CkModelId("System.Communication-4.16.0"), operationResult);
+        // The embedded id, so the test follows the next version bump (the version itself is pinned by the unit test).
+        await tenantContext.ImportCkModelAsync(SystemCommunicationCkIds.CkModelId, operationResult);
         operationResult.HasErrors.Should().BeFalse("re-import (service restart): {0}", operationResult);
 
         var cache = fixture.GetService<ICkCacheService>();
