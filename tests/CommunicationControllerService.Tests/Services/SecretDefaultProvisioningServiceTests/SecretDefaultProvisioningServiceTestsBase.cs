@@ -52,6 +52,8 @@ internal abstract class SecretDefaultProvisioningServiceTestsBase
 
     private readonly Dictionary<string, Exception> _unreadableSourceTenants = new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly HashSet<string> _sourceTenantsWithoutModel = new(StringComparer.OrdinalIgnoreCase);
+
     protected readonly List<(string TenantId, string Key)> Deletions = [];
 
     protected SecretDefaultProvisioningServiceTestsBase()
@@ -124,9 +126,15 @@ internal abstract class SecretDefaultProvisioningServiceTestsBase
                     throw readFailure;
                 }
 
+                if (_sourceTenantsWithoutModel.Contains(tenantId))
+                {
+                    return Task.FromResult(SecretDefaultSources.ModelMissing);
+                }
+
                 IReadOnlyCollection<RtApplication> applications =
                     _applicationsByTenant.GetValueOrDefault(tenantId)?.ToList() ?? [];
-                return Task.FromResult<IReadOnlyCollection<RtApplication>?>(applications);
+                return Task.FromResult(new SecretDefaultSources(SecretDefaultTenantAvailability.Available,
+                    applications));
             });
     }
 
@@ -198,6 +206,11 @@ internal abstract class SecretDefaultProvisioningServiceTestsBase
         _unreadableSourceTenants[sourceTenantId] = new InvalidOperationException("source tenant unreadable");
     }
 
+    protected void ArrangeSourceWithoutModel(string sourceTenantId)
+    {
+        _sourceTenantsWithoutModel.Add(sourceTenantId);
+    }
+
     protected void RemoveApplication(string tenantId, RtApplication application)
     {
         _applicationsByTenant.GetValueOrDefault(tenantId)?.Remove(application);
@@ -240,6 +253,7 @@ internal abstract class SecretDefaultProvisioningServiceTestsBase
         params RtSecretDefaultProjectionRecord[] secretDefaults)
     {
         var application = RtEntityCreator.CreateApplication("energy-community-app");
+        application.DeploymentState = RtDeploymentStateEnum.Deployed;
         application.SecretDefaults = new AttributeRecordValueList<RtSecretDefaultProjectionRecord>();
         foreach (var secretDefault in secretDefaults)
         {

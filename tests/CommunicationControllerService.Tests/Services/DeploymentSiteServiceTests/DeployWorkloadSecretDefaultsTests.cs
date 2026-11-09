@@ -253,4 +253,33 @@ internal class DeployWorkloadSecretDefaultsTests : PoolServiceTestsBase
         await CommunicationEventService.Received(1).StoreErrorEventAsync(TenantId,
             Arg.Is<string>(message => message.Contains("energy-community-app")), Arg.Any<RtEntityId?>());
     }
+
+    [Test]
+    public async Task UndeployingAnApplication_WithdrawsItsSecretDefaults()
+    {
+        var application = GivenApplication(Entry(CaptchaKey, SentinelSecret));
+        application.DeploymentState = RtDeploymentStateEnum.Deployed;
+
+        await DeploymentSiteService.UndeployWorkloadAsync(TenantId, application.RtId);
+
+        using var assertionScope = Assert.Multiple();
+        await OperatorConnectionManager.Received(1).NotifyWorkloadUndeployedAsync(Arg.Any<WorkloadUndeployedDto>());
+        await SecretDefaultProvisioningService.Received(1)
+            .WithdrawForSourceAsync(TenantId, application.RtId, Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task AFailingWithdrawal_DoesNotFailTheUndeployAndIsStoredAsAnErrorEvent()
+    {
+        var application = GivenApplication(Entry(CaptchaKey, SentinelSecret));
+        application.DeploymentState = RtDeploymentStateEnum.Deployed;
+        SecretDefaultProvisioningService
+            .WithdrawForSourceAsync(TenantId, application.RtId, Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("tree walk failed"));
+
+        await DeploymentSiteService.UndeployWorkloadAsync(TenantId, application.RtId);
+
+        await CommunicationEventService.Received(1).StoreErrorEventAsync(TenantId,
+            Arg.Is<string>(message => message.Contains("energy-community-app")), Arg.Any<RtEntityId?>());
+    }
 }

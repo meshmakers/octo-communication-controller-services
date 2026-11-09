@@ -857,24 +857,24 @@ internal class CommunicationRepository : ICommunicationRepository
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyCollection<RtApplication>?> GetSecretDefaultSourceApplicationsAsync(string tenantId)
+    public async Task<SecretDefaultSources> GetSecretDefaultSourceApplicationsAsync(string tenantId)
     {
         var tenantContext = await _systemContext.TryFindTenantContextAsync(tenantId);
         var tenantRepository = await _systemContext.TryFindTenantRepositoryAsync(tenantId);
         if (tenantContext is null || tenantRepository is null)
         {
-            return null;
+            return SecretDefaultSources.TenantUnavailable;
         }
 
         if (!await tenantContext.IsCkModelSatisfiedAsync(SecretDefaultMinimumModelId))
         {
-            return [];
+            return SecretDefaultSources.ModelMissing;
         }
 
         using var session = await tenantRepository.GetSessionAsync();
         var applications = await tenantRepository.GetRtEntitiesByTypeAsync<RtApplication>(session,
             RtEntityQueryOptions.Create());
-        return applications.Items.ToList();
+        return new SecretDefaultSources(SecretDefaultTenantAvailability.Available, applications.Items.ToList());
     }
 
     public async Task<RtDeploymentSite?> GetDeploymentSiteForWorkloadAsync(string tenantId, OctoObjectId workloadRtId)

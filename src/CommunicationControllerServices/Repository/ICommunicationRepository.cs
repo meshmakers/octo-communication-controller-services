@@ -200,14 +200,14 @@ public interface ICommunicationRepository
         StoredSecretDefault expectedDefault);
 
     /// <summary>
-    ///     The Applications of a tenant, read as possible sources of SecretDefaults.
+    ///     The Applications of a tenant, read as possible sources of SecretDefaults, whatever their deployment state.
     /// </summary>
     /// <param name="tenantId">Tenant to read.</param>
     /// <returns>
-    ///     The Applications; empty when the tenant lacks the System.Communication version that defines
-    ///     SecretDefaults, null when the tenant cannot be resolved. A failed read throws.
+    ///     The Applications; an unresolvable tenant or a tenant without the System.Communication version that defines
+    ///     SecretDefaults is reported, not thrown. A failed read throws.
     /// </returns>
-    Task<IReadOnlyCollection<RtApplication>?> GetSecretDefaultSourceApplicationsAsync(string tenantId);
+    Task<SecretDefaultSources> GetSecretDefaultSourceApplicationsAsync(string tenantId);
 
     /// <summary>
     ///     Points one leased adapter's <c>LentFrom</c> edge at an existing mirror, and reports whether

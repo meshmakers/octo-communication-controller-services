@@ -322,12 +322,13 @@ public class SecretDefaultRepositoryTests(CommunicationControllerFixture fixture
     }
 
     [Fact]
-    public async Task GetSecretDefaultSourceApplicationsAsync_AnUnknownTenant_IsNull()
+    public async Task GetSecretDefaultSourceApplicationsAsync_AnUnknownTenant_IsReportedUnavailable()
     {
         var repository = fixture.GetService<ICommunicationRepository>();
 
-        var applications = await repository.GetSecretDefaultSourceApplicationsAsync($"missing-{Guid.NewGuid():N}");
+        var sources = await repository.GetSecretDefaultSourceApplicationsAsync($"missing-{Guid.NewGuid():N}");
 
-        applications.Should().BeNull();
+        sources.Availability.Should().Be(SecretDefaultTenantAvailability.TenantUnavailable);
+        sources.Applications.Should().BeEmpty();
     }
 }

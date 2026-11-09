@@ -41,7 +41,7 @@ internal sealed partial class SecretDefaultProvisioningService
             };
         }
 
-        var desiredState = await ReadDesiredStateAsync(targetTenantId, sourceTenants, cancellationToken);
+        var desiredState = await ReadDesiredStateAsync(targetTenantId, inventory, sourceTenants, cancellationToken);
         var removal = await RemoveUnprovidedDefaultsAsync(targetTenantId, inventory, desiredState);
         var writes = await WriteWinningOffersAsync(targetTenantId, inventory, desiredState, removal.RemovedRtIds,
             cancellationToken);
@@ -94,72 +94,6 @@ internal sealed partial class SecretDefaultProvisioningService
         return results;
     }
 
-    private async Task<SecretDefaultProvisioningResult> RemoveWithdrawnDefaultsAsync(ProjectionContext projection,
-        IReadOnlyList<CheckedSecretDefaultDeclaration> checkedDeclarations, IReadOnlySet<string> servedTenantIds,
-        CancellationToken cancellationToken)
-    {
-        var applicationRtId = projection.Application.RtId.ToString();
-        var removed = 0;
-        var failed = 0;
-
-        foreach (var servedTenantId in servedTenantIds)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            SecretDefaultInventory inventory;
-            try
-            {
-                inventory = await communicationRepository.GetSecretDefaultsAsync(servedTenantId);
-            }
-            catch (Exception readFailure) when (readFailure is not OperationCanceledException)
-            {
-                Logger.Warn(readFailure, "[{TenantId}] Could not read the secret defaults of tenant '{TargetTenantId}'; " +
-                                         "withdrawn defaults of application '{ApplicationName}' stay there until its " +
-                                         "next reconcile", projection.SourceTenantId, servedTenantId,
-                    projection.Application.Name);
-                continue;
-            }
-
-            var withdrawnDefaults = inventory.Defaults
-                .Where(storedDefault => IsProjectedBy(storedDefault, projection.SourceTenantId, applicationRtId) &&
-                                        !StillProvides(checkedDeclarations, storedDefault.Key, servedTenantId))
-                .ToList();
-            var removedInTenant = 0;
-            foreach (var withdrawnDefault in withdrawnDefaults)
-            {
-                switch (await TryDeleteAsync(servedTenantId, withdrawnDefault))
-                {
-                    case RemovalAttempt.Removed:
-                        removedInTenant++;
-                        break;
-                    case RemovalAttempt.Failed:
-                        failed++;
-                        break;
-                }
-            }
-
-            removed += removedInTenant;
-            if (removedInTenant > 0)
-            {
-                await HandOverToRemainingSourcesAsync(servedTenantId, cancellationToken);
-            }
-        }
-
-        return new SecretDefaultProvisioningResult(0, 0, failed, removed);
-    }
-
-    private async Task HandOverToRemainingSourcesAsync(string targetTenantId, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await ProvisionForTargetAsync(targetTenantId, cancellationToken);
-        }
-        catch (Exception reconcileFailure) when (reconcileFailure is not OperationCanceledException)
-        {
-            Logger.Warn(reconcileFailure, "[{TenantId}] Secret defaults of the tenant could not be reconciled after a " +
-                                          "removal; the next tenant load retries", targetTenantId);
-        }
-    }
-
     private async Task<IReadOnlyList<SourceTenant>> ResolveSourceTenantsAsync(string targetTenantId,
         CancellationToken cancellationToken)
     {
@@ -177,41 +111,66 @@ internal sealed partial class SecretDefaultProvisioningService
     }
 
     private async Task<DesiredSecretDefaults> ReadDesiredStateAsync(string targetTenantId,
-        IReadOnlyList<SourceTenant> sourceTenants, CancellationToken cancellationToken)
+        SecretDefaultInventory inventory, IReadOnlyList<SourceTenant> sourceTenants,
+        CancellationToken cancellationToken)
     {
         var desiredState = new DesiredSecretDefaults();
         foreach (var sourceTenant in sourceTenants)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            IReadOnlyCollection<RtApplication>? applications;
+            SecretDefaultSources? sources;
             try
             {
-                applications = await communicationRepository.GetSecretDefaultSourceApplicationsAsync(
-                    sourceTenant.TenantId);
+                sources = await communicationRepository.GetSecretDefaultSourceApplicationsAsync(sourceTenant.TenantId);
             }
             catch (Exception readFailure) when (readFailure is not OperationCanceledException)
             {
                 Logger.Warn(readFailure, "[{TenantId}] Could not read the applications of source tenant " +
                                          "'{SourceTenantId}'", targetTenantId, sourceTenant.TenantId);
-                applications = null;
+                sources = null;
             }
 
-            if (applications is null)
+            if (sources is not { Availability: SecretDefaultTenantAvailability.Available })
             {
                 desiredState.UnreadableSourceTenantIds.Add(sourceTenant.TenantId);
-                await communicationEventService.StoreWarningEventAsync(targetTenantId,
-                    $"Secret defaults: the applications of source tenant '{sourceTenant.TenantId}' could not be " +
-                    "read; the defaults it projected into this tenant are kept until it can be read again.");
+                await ReportUnreadableSourceAsync(targetTenantId, inventory, sourceTenant.TenantId,
+                    sources?.Availability);
                 continue;
             }
 
-            foreach (var application in applications)
+            foreach (var application in sources.Applications.Where(IsReleasedSource))
             {
                 CollectOffers(targetTenantId, sourceTenant, application, desiredState);
             }
         }
 
         return desiredState;
+    }
+
+    private async Task ReportUnreadableSourceAsync(string targetTenantId, SecretDefaultInventory inventory,
+        string sourceTenantId, SecretDefaultTenantAvailability? sourceAvailability)
+    {
+        if (sourceAvailability == SecretDefaultTenantAvailability.ModelMissing)
+        {
+            var keptDefaultCount = inventory.Defaults.Count(storedDefault =>
+                string.Equals(storedDefault.SourceTenantId, sourceTenantId, StringComparison.OrdinalIgnoreCase));
+            Logger.Info("[{TenantId}] Source tenant '{SourceTenantId}' lacks the System.Communication version that " +
+                        "defines SecretDefaults; its {KeptCount} default(s) here are kept", targetTenantId,
+                sourceTenantId, keptDefaultCount);
+            if (keptDefaultCount == 0)
+            {
+                return;
+            }
+
+            await communicationEventService.StoreWarningEventAsync(targetTenantId,
+                $"Secret defaults: source tenant '{sourceTenantId}' lacks the System.Communication version that " +
+                $"defines SecretDefaults; the {keptDefaultCount} default(s) it projected into this tenant are kept.");
+            return;
+        }
+
+        await communicationEventService.StoreWarningEventAsync(targetTenantId,
+            $"Secret defaults: the applications of source tenant '{sourceTenantId}' could not be read; the " +
+            "defaults it projected into this tenant are kept until it can be read again.");
     }
 
     private static void CollectOffers(string targetTenantId, SourceTenant sourceTenant, RtApplication application,
@@ -277,36 +236,6 @@ internal sealed partial class SecretDefaultProvisioningService
         }
 
         return removal;
-    }
-
-    private async Task<RemovalAttempt> TryDeleteAsync(string tenantId, StoredSecretDefault storedDefault)
-    {
-        try
-        {
-            var deleteOutcome = await communicationRepository.DeleteSecretDefaultIfUnchangedAsync(tenantId,
-                storedDefault);
-            if (deleteOutcome != SecretDefaultDeleteOutcome.Deleted)
-            {
-                Logger.Info("[{TenantId}] Secret default '{Key}' from tenant '{SourceTenantId}' was not removed: it " +
-                            "{DeleteOutcome} since it was read", tenantId, storedDefault.Key,
-                    storedDefault.SourceTenantId,
-                    deleteOutcome == SecretDefaultDeleteOutcome.Changed ? "was written again" : "was removed");
-                return RemovalAttempt.Skipped;
-            }
-
-            Logger.Info("[{TenantId}] Secret default '{Key}' from tenant '{SourceTenantId}' removed: no application " +
-                        "provides it to this tenant any more", tenantId, storedDefault.Key, storedDefault.SourceTenantId);
-            return RemovalAttempt.Removed;
-        }
-        catch (Exception deleteFailure) when (deleteFailure is not OperationCanceledException)
-        {
-            Logger.Error(deleteFailure, "[{TenantId}] Could not remove secret default '{Key}'", tenantId,
-                storedDefault.Key);
-            await communicationEventService.StoreErrorEventAsync(tenantId,
-                $"Secret default '{storedDefault.Key}' is no longer provided to this tenant but could not be " +
-                "removed. The next reconcile retries it.");
-            return RemovalAttempt.Failed;
-        }
     }
 
     private async Task<WriteOutcome> WriteWinningOffersAsync(string targetTenantId, SecretDefaultInventory inventory,
@@ -395,15 +324,6 @@ internal sealed partial class SecretDefaultProvisioningService
                string.Equals(storedDefault.SourceWorkloadRtId, applicationRtId, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool StillProvides(IReadOnlyList<CheckedSecretDefaultDeclaration> checkedDeclarations, string key,
-        string targetTenantId)
-    {
-        return checkedDeclarations.Any(checkedDeclaration =>
-            checkedDeclaration.Key == key &&
-            (checkedDeclaration.Issue != SecretDefaultDeclarationIssue.None ||
-             AllowsTenant(checkedDeclaration.Declaration!, targetTenantId)));
-    }
-
     private static bool AllowsTenant(RtSecretDefaultProjectionRecord declaration, string targetTenantId)
     {
         var allowedTenantIds = declaration.AllowedTenantIds?.ToList();
@@ -461,13 +381,6 @@ internal sealed partial class SecretDefaultProvisioningService
         public HashSet<ProvidedDefault> ProvidedDefaults { get; } = [];
 
         public List<SecretDefaultOffer> Offers { get; } = [];
-    }
-
-    private enum RemovalAttempt
-    {
-        Removed,
-        Skipped,
-        Failed
     }
 
     private sealed class RemovalOutcome

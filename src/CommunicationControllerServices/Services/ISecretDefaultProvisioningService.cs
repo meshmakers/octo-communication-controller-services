@@ -23,8 +23,19 @@ public interface ISecretDefaultProvisioningService
         OctoObjectId applicationRtId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    ///     Brings the SecretDefaults of one tenant to the desired state: the defaults the Applications of the tenant
-    ///     and of all its ancestors provide to it are written (the source closer to the root wins), defaults no
+    ///     Removes every SecretDefault the Application projected into its own tenant and its subtree, as a redeploy
+    ///     without entries would; where something was removed the tenant is reconciled so another source can take
+    ///     the key over. Called when the Application is undeployed: only a deployed Application is a source.
+    /// </summary>
+    /// <param name="sourceTenantId">Tenant of the Application.</param>
+    /// <param name="applicationRtId">RtId of the Application.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<SecretDefaultProvisioningResult> WithdrawForSourceAsync(string sourceTenantId,
+        OctoObjectId applicationRtId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    ///     Brings the SecretDefaults of one tenant to the desired state: the defaults the deployed Applications of the
+    ///     tenant and of all its ancestors provide to it are written (the source closer to the root wins), defaults no
     ///     Application provides any more are deleted. A source tenant that cannot be read keeps the defaults it
     ///     projected and is named in a Warning event; a tenant tree that cannot be read completely changes nothing.
     /// </summary>

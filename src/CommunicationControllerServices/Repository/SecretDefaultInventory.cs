@@ -1,4 +1,5 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 
@@ -59,5 +60,21 @@ public sealed record SecretDefaultInventory(
 
     /// <summary>A tenant without the System.Communication version that defines SecretDefault.</summary>
     public static readonly SecretDefaultInventory ModelMissing =
+        new(SecretDefaultTenantAvailability.ModelMissing, []);
+}
+
+/// <summary>The Applications of a tenant read as possible sources of SecretDefaults.</summary>
+/// <param name="Availability">Whether the tenant could be read.</param>
+/// <param name="Applications">Every Application of the tenant; empty unless <see cref="SecretDefaultTenantAvailability.Available" />.</param>
+public sealed record SecretDefaultSources(
+    SecretDefaultTenantAvailability Availability,
+    IReadOnlyCollection<RtApplication> Applications)
+{
+    /// <summary>A tenant that cannot be resolved.</summary>
+    public static readonly SecretDefaultSources TenantUnavailable =
+        new(SecretDefaultTenantAvailability.TenantUnavailable, []);
+
+    /// <summary>A tenant without the System.Communication version that defines SecretDefaults.</summary>
+    public static readonly SecretDefaultSources ModelMissing =
         new(SecretDefaultTenantAvailability.ModelMissing, []);
 }

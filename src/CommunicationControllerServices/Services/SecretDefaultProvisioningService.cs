@@ -68,7 +68,8 @@ internal sealed partial class SecretDefaultProvisioningService(
         }
 
         result = Combine(result,
-            await RemoveWithdrawnDefaultsAsync(projection, checkedDeclarations, servedTenantIds, cancellationToken));
+            await RemoveWithdrawnDefaultsAsync(sourceTenantId, application.RtId.ToString(), application.Name,
+                checkedDeclarations, servedTenantIds, cancellationToken));
 
         if (result != SecretDefaultProvisioningResult.Nothing)
         {

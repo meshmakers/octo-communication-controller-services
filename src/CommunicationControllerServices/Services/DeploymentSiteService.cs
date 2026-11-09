@@ -803,6 +803,45 @@ internal class DeploymentSiteService : IDeploymentSiteService
             $"Workload '{workload.Name}' undeploy requested (resting state: {restingState}).");
 
         await FanOutAdapterPoolMirrorsAsync(tenantId, workload);
+
+        await WithdrawSecretDefaultsAsync(tenantId, workload);
+    }
+
+    /// <summary>
+    ///     Removes the SecretDefaults an undeployed Application projected: only a deployed Application is a source.
+    ///     Best effort: the undeploy has already been sent, so a failure is stored as an Error event and the next
+    ///     load of each served tenant removes them.
+    /// </summary>
+    private async Task WithdrawSecretDefaultsAsync(string tenantId, RtDeployableWorkload workload)
+    {
+        if (workload is not RtApplication application)
+        {
+            return;
+        }
+
+        try
+        {
+            await _secretDefaultProvisioningService.WithdrawForSourceAsync(tenantId, application.RtId);
+        }
+        catch (Exception withdrawalFailure)
+        {
+            Logger.Error(withdrawalFailure,
+                "[{TenantId}] Could not withdraw the secret defaults of application '{WorkloadName}' ({WorkloadRtId})",
+                tenantId, application.Name, application.RtId);
+            try
+            {
+                await _eventService.StoreErrorEventAsync(tenantId,
+                    $"Secret defaults of application '{application.Name}' could not be removed after the undeploy. " +
+                    "The next load of each tenant it served removes them.",
+                    new RtEntityId(SystemCommunicationCkIds.RtCkApplicationTypeId, application.RtId));
+            }
+            catch (Exception eventFailure)
+            {
+                Logger.Warn(eventFailure, "[{TenantId}] Could not store the withdrawal failure event of application " +
+                                          "'{WorkloadName}' ({WorkloadRtId})", tenantId, application.Name,
+                    application.RtId);
+            }
+        }
     }
 
     /// <summary>
