@@ -96,4 +96,25 @@ internal sealed class SecretDefaultConcurrentRemovalTests : SecretDefaultProvisi
         await CommunicationEventService.DidNotReceiveWithAnyArgs()
             .StoreErrorEventAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<RtEntityId?>());
     }
+
+    [Test]
+    public async Task AFailedRemovalWhoseEventCannotBeStored_DoesNotStopTheSweep()
+    {
+        var application = ArrangeApplication(ProtectedEntry(CaptchaKey, SentinelSecret));
+        await Service.ProvisionForSourceAsync(SourceTenantId, application.RtId);
+        application.SecretDefaults = new AttributeRecordValueList<RtSecretDefaultProjectionRecord>();
+        CommunicationRepository
+            .DeleteSecretDefaultIfUnchangedAsync(FirstChildTenantId, Arg.Any<StoredSecretDefault>())
+            .Returns<SecretDefaultDeleteOutcome>(_ => throw new InvalidOperationException("tenant database down"));
+        CommunicationEventService
+            .StoreErrorEventAsync(FirstChildTenantId, Arg.Any<string>(), Arg.Any<RtEntityId?>())
+            .Returns<Task>(_ => throw new InvalidOperationException("tenant database down"));
+
+        var result = await Service.ProvisionForSourceAsync(SourceTenantId, application.RtId);
+
+        using var assertionScope = Assert.Multiple();
+        await Assert.That(result.TargetsFailed).IsEqualTo(1);
+        await Assert.That(result.DefaultsRemoved).IsEqualTo(3);
+        await Assert.That(StoredDefault(GrandchildTenantId, CaptchaKey)).IsNull();
+    }
 }

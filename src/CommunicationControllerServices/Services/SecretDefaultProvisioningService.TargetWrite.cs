@@ -60,7 +60,7 @@ internal sealed partial class SecretDefaultProvisioningService
             Logger.Error("[{TenantId}] Secret default '{Key}' of application '{ApplicationName}' in tenant " +
                          "'{SourceTenantId}' has no readable value; it was not written", targetTenantId, offer.Key,
                 application.Name, sourceTenantId);
-            await communicationEventService.StoreErrorEventAsync(targetTenantId,
+            await TryStoreErrorEventAsync(targetTenantId,
                 $"Secret default '{offer.Key}' of application '{application.Name}' in tenant '{sourceTenantId}' has " +
                 "no readable value and was not written into this tenant.", applicationLink);
             return;
@@ -97,7 +97,7 @@ internal sealed partial class SecretDefaultProvisioningService
             Logger.Error(writeFailure, "[{TenantId}] Could not write secret default '{Key}' of application " +
                                        "'{ApplicationName}' from tenant '{SourceTenantId}'", targetTenantId,
                 offer.Key, application.Name, sourceTenantId);
-            await communicationEventService.StoreErrorEventAsync(targetTenantId,
+            await TryStoreErrorEventAsync(targetTenantId,
                 $"Secret default '{offer.Key}' of application '{application.Name}' from tenant '{sourceTenantId}' " +
                 "could not be written into this tenant. The next reconcile retries it.", applicationLink);
         }

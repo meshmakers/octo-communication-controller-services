@@ -135,12 +135,28 @@ internal sealed partial class SecretDefaultProvisioningService
         {
             Logger.Error(deleteFailure, "[{TenantId}] Could not remove secret default '{Key}'", tenantId,
                 storedDefault.Key);
-            await communicationEventService.StoreErrorEventAsync(tenantId,
+            await TryStoreErrorEventAsync(tenantId,
                 $"Secret default '{storedDefault.Key}' of application '{storedDefault.SourceWorkloadRtId}' in tenant " +
                 $"'{storedDefault.SourceTenantId}' is no longer provided to this tenant but could not be removed. " +
                 "The next reconcile retries it.",
                 ApplicationLinkIn(tenantId, storedDefault.SourceTenantId, storedDefault.SourceWorkloadRtId));
             return RemovalAttempt.Failed;
+        }
+    }
+
+    /// <summary>
+    ///     Stores the Error event of a failed write or removal. The failure usually means the tenant's database is
+    ///     unreachable, so the event write may fail too; that must not end the run for the remaining tenants.
+    /// </summary>
+    private async Task TryStoreErrorEventAsync(string tenantId, string message, RtEntityId? applicationLink)
+    {
+        try
+        {
+            await communicationEventService.StoreErrorEventAsync(tenantId, message, applicationLink);
+        }
+        catch (Exception eventFailure) when (eventFailure is not OperationCanceledException)
+        {
+            Logger.Warn(eventFailure, "[{TenantId}] Could not store a secret default failure event", tenantId);
         }
     }
 
