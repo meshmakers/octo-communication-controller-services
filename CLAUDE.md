@@ -770,7 +770,7 @@ F4.3, Epic AB#5584; rules: `octo-construction-kit-engine/docs/ck-semver-rules.md
   (`Name`, `Enabled`; message 97) and under the interface's name (message 98); removing an interface is a MAJOR (row T3).
   Not implemented: `Pipeline` (`Enabled` optional), `Named-1` on types with an optional `Name`, `SecretDefault`, `Hierarchical-1`.
 - **Access.** `SecretDefault.Value` is `access: Hidden` and its definition `SecretDefaultValue` is `securitySensitive: true`
-  (row T7a, acknowledged in `ckModel.yaml`). GraphQL, REST, MCP, import (message 139) and export cannot read or write it. The
+  (row T7a, acknowledged in 4.16.0). GraphQL, REST, MCP, import (message 139) and export cannot read or write it. The
   controller writes and reveals it through `CommunicationRepository` (`UpsertSecretDefaultAsync`, repository reads), which the
   access rules do not guard. Every other attribute is `ReadWrite`: Studio writes the configuration credentials through the
   generic GraphQL update, and a `ReadOnly`/`MethodOnly` on an attribute that is not `securitySensitive` in every published
@@ -781,13 +781,14 @@ F4.3, Epic AB#5584; rules: `octo-construction-kit-engine/docs/ck-semver-rules.md
   `sensitive` result to 3.5.36, `execution.mode` to 3.5.67. The methods of 4.17.0 therefore leave `dataAccess` at its default
   (`Write`) instead of spelling it out.
 - **Acknowledgements live for one release - of the published baseline.** The compile gate diffs against the newest
-  **published** version (CI: the private GitHub catalog). A merge does not publish (`publishSystemCkModels`), so 4.16.0 was
-  never published and 4.17.0 still diffs against 4.15.0: it keeps the `SecretDefault.Value` acknowledgement. Remove the entry
-  with the first bump after a version that carries it has been published (otherwise `OCTO-CK204`). Locally the gate diffs
+  **published** version (CI: the private GitHub catalog). A merge does not publish (`publishSystemCkModels`), but a manual
+  main CI may: 4.16.0 was published on 2026-11-09 with the `SecretDefault.Value` acknowledgement, so 4.17.0 diffs against
+  4.16.0 and carries no acknowledgement (keeping it failed main CI with `OCTO-CK204`, AB#8595). Check the private catalog
+  (Pages mirror `ck-models/v3/s/System.Communication/4/catalog.json`) before you keep or drop an entry. Locally the gate diffs
   against the lane's `local-catalog`; a local build of an unpublished version there gives a false `OCTO-CK204` - remove that
   version from the local catalog instead of the acknowledgement.
 - Tests: `tests/CommunicationControllerService.Tests/CkModels/SystemCommunicationCkLanguage2Tests.cs` (embedded model: version,
-  ckLanguage, minEngineVersion, derivable, interfaces, the only tightened attribute, the acknowledgement) and
+  ckLanguage, minEngineVersion, derivable, interfaces, the only tightened attribute, no acknowledgement in 4.17.0) and
   `tests/CommunicationControllerServices.IntegrationTests/Repository/SystemCommunicationCkLanguage2PersistenceTests.cs`
   (re-import, the CK v2 keys survive the MongoDB round trip into the CK cache).
 

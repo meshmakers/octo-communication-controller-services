@@ -9,7 +9,8 @@
   with four result records shaped like the REST answers. Every method declares `roles: [CommunicationManagement]`, an
   explicit timeout and idempotency, no sensitive marker (the rotation result carries no secret, like REST) and the default
   `dataAccess`, so `minEngineVersion` stays 3.5.1. The REST endpoints are unchanged. The `SecretDefault.Value`
-  acknowledgement stays (4.16.0 was not published; the published baseline is 4.15.0). Switch:
+  acknowledgement is removed: 4.16.0 is published and already carries it, so CI's compile gate (diff against the
+  published 4.16.0) failed with `OCTO-CK204` on main. Switch:
   `Methods:Communication:Enabled` (default true). Details: CLAUDE.md "CK method service handlers".
 
 - AB#8594 New: System.Communication 4.16.0 is the first `ckLanguage: 2` release of the model, a Minor against 4.15.0.
