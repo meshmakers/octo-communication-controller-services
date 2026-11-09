@@ -4491,6 +4491,37 @@ baseline, unprivileged user sends no roles, `EffectiveRoleNames`),
 `Services/ServiceAccountRightsAnalysisTests` (`…DeclaredStreamDataReader_IsBaselineNotSuperfluous`,
 `…TypeGrantedByTheBaseline_IsNotMissing`).
 
+### Phase 9 — roles identity grants by design (AB#8582)
+
+The identity service grants `FileManagement` to every `octo-pipeline-sa-*` client on its own
+(AB#6467: `CreateIdentityDataCommandRequestConsumer` adds the edge on every identity-data command and
+treats it as implicitly declared, `PipelineServiceAccountFileRoleGrant` adds it at every tenant setup;
+octo-identity-services `docs/persistence.md`). Phase 8's health check did not know this, so every
+adapter account showed `roles-drift` with `FileManagement` superfluous.
+
+`PipelineServiceAccountProvisioningService.IdentityGrantedRoleNames` (`[FileManagement]`), next to
+`BaselineRoleNames`, is the single list of these roles; `IdentityGrantedRoleNamesFor(clientId)`
+returns it for a client with `ClientIdPrefix` (`octo-pipeline-sa-`, ordinal like identity) or a
+not-yet-derived id, and nothing for a custom client id. Rules:
+
+- **Never sent.** The roles are not part of `EffectiveRoleNames`; the controller neither sends nor
+  removes them.
+- **Tolerated, not required.** The health check excludes them from `SuperfluousRoles` but never
+  reports them missing — identity grants `FileManagement` only when the role is seeded (System.Files
+  installed). Every other undeclared role is still `roles-drift`.
+- **Same answer in the rights analysis.** They count as coverage, and a declared `FileManagement` is
+  reported under `BaselineRoles`, not as superfluous. On a custom client id both views treat
+  `FileManagement` like any other role.
+- **Keep in sync** with identity: a new identity-side grant for pipeline service accounts goes into
+  this list in the same change.
+
+Tests: `Services/ServiceAccountHealthTests` (`…PipelineAccountWithIdentityGrantedFileManagement_IsHealthy`,
+`…PipelineAccountWithoutFileManagement_IsHealthy`, `…PipelineAccountWithUnexpectedRole_ReportsOnlyThatRole`,
+`…CustomClientIdWithFileManagement_ReportsItSuperfluous`), `Services/ServiceAccountRightsAnalysisTests`
+(`…PipelineAccountDeclaringFileManagement_IsBaselineButUnexpectedRoleStaysSuperfluous`,
+`…TypeGrantedByIdentityGrantedFileManagement_IsNotMissing`, `…CustomClientIdDeclaringFileManagement_IsSuperfluous`),
+`Services/PipelineServiceAccountReconcileTests.IdentityGrantedRoleNamesFor_PrefixedOrDerivedClient_IsFileManagementAndNeverSynced`.
+
 ### The tenant gate only started working in AB#5054
 
 The section below describes a middleware that, until AB#5054, **never ran a single check in this

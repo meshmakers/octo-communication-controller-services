@@ -436,6 +436,87 @@ internal class ServiceAccountRightsAnalysisTests
         await Assert.That(dto.MissingRoles).IsEmpty();
     }
 
+    /// <summary>AB#8582: a declarative pipeline service account (octo-pipeline-sa-* client).</summary>
+    private static RtServiceAccountConfiguration CreateDeclaredPipelineAccount(params string[] roleNames)
+    {
+        var configuration = CreateDeclaredConfiguration(roleNames);
+        configuration.ClientId = "octo-pipeline-sa-6900a0000000000000000001";
+        return configuration;
+    }
+
+    [Test]
+    public async Task AnalyzeAdapter_PipelineAccountDeclaringFileManagement_IsBaselineButUnexpectedRoleStaysSuperfluous()
+    {
+        // AB#8582: identity grants FileManagement to every octo-pipeline-sa-* client, so a declared
+        // FileManagement is baseline (same answer as the health check); a role nobody expects is
+        // still superfluous.
+        var sut = CreateSut();
+        var configuration = CreateDeclaredPipelineAccount(CommonConstants.CommunicationManagementRole,
+            CommonConstants.FileManagementRole, "Stale");
+        var pipeline = CreateNamedPipeline("import", $"""
+            transformations:
+              - type: GetRtEntities@1
+                ckTypeId: {DocumentType}
+            """);
+        var adapter = ArrangeAdapterWithPipelines(configuration, pipeline);
+
+        var policy = CreatePolicy("DocumentPolicy", [DocumentType]);
+        ArrangeIdentityGraph((policy, CreatePermission("document.read"), ["Reader"]));
+
+        var dto = await sut.AnalyzeAdapterAsync(TenantId, adapter);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(dto.SuperfluousRoles).IsEquivalentTo(new List<string> { "Stale" });
+        await Assert.That(dto.BaselineRoles).IsEquivalentTo(
+            new List<string> { CommonConstants.CommunicationManagementRole, CommonConstants.FileManagementRole });
+    }
+
+    [Test]
+    public async Task AnalyzeAdapter_TypeGrantedByIdentityGrantedFileManagement_IsNotMissing()
+    {
+        // AB#8582: a pipeline SA holds FileManagement whether declared or not, so a protected type
+        // (System.Files) whose policy grants FileManagement is covered.
+        var sut = CreateSut();
+        var configuration = CreateDeclaredPipelineAccount(CommonConstants.CommunicationManagementRole);
+        var pipeline = CreateNamedPipeline("import", $"""
+            transformations:
+              - type: GetRtEntities@1
+                ckTypeId: {DocumentType}
+            """);
+        var adapter = ArrangeAdapterWithPipelines(configuration, pipeline);
+
+        var policy = CreatePolicy("FilesPolicy", [DocumentType]);
+        ArrangeIdentityGraph((policy, CreatePermission("files.manage"), [CommonConstants.FileManagementRole]));
+
+        var dto = await sut.AnalyzeAdapterAsync(TenantId, adapter);
+
+        await Assert.That(dto.MissingRoles).IsEmpty();
+    }
+
+    [Test]
+    public async Task AnalyzeAdapter_CustomClientIdDeclaringFileManagement_IsSuperfluous()
+    {
+        // AB#8582: identity grants FileManagement only to the octo-pipeline-sa- prefix — on a custom
+        // client id a declared FileManagement that grants nothing stays a removal candidate.
+        var sut = CreateSut();
+        var configuration = CreateDeclaredConfiguration(CommonConstants.CommunicationManagementRole,
+            CommonConstants.FileManagementRole);
+        var pipeline = CreateNamedPipeline("import", $"""
+            transformations:
+              - type: GetRtEntities@1
+                ckTypeId: {DocumentType}
+            """);
+        var adapter = ArrangeAdapterWithPipelines(configuration, pipeline);
+
+        var policy = CreatePolicy("DocumentPolicy", [DocumentType]);
+        ArrangeIdentityGraph((policy, CreatePermission("document.read"), ["Reader"]));
+
+        var dto = await sut.AnalyzeAdapterAsync(TenantId, adapter);
+
+        await Assert.That(dto.SuperfluousRoles).IsEquivalentTo(
+            new List<string> { CommonConstants.FileManagementRole });
+    }
+
     [Test]
     public async Task AnalyzeAdapter_LegacyConfigurationWithoutDeclaration_ReportsRecommendationWithoutDelta()
     {

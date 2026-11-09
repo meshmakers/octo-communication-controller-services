@@ -87,6 +87,39 @@ internal class PipelineServiceAccountProvisioningService(
     }
 
     /// <summary>
+    /// AB#6457 / AB#6467: client-id prefix of the pipeline service accounts (<see cref="BuildClientId" />).
+    /// The identity side keys two behaviours on it: the declarative role sync (AB#5111) and the
+    /// <see cref="IdentityGrantedRoleNames">identity-granted roles</see>.
+    /// </summary>
+    internal const string ClientIdPrefix = "octo-pipeline-sa-";
+
+    /// <summary>
+    /// AB#8582: roles the <b>identity service</b> grants by design to every client with the
+    /// <see cref="ClientIdPrefix" />, independent of the declaration — today <c>FileManagement</c>
+    /// (AB#6467: <c>CreateIdentityDataCommandRequestConsumer</c> adds the edge on every identity-data
+    /// command and treats it as implicitly declared, <c>PipelineServiceAccountFileRoleGrant</c> adds it
+    /// at every tenant setup; see <c>docs/persistence.md</c> "FileManagement for the pipeline service
+    /// accounts" in octo-identity-services). The controller neither sends nor removes these roles.
+    /// Unlike the <see cref="BaselineRoleNames">baseline</see> they are <b>tolerated, not required</b>:
+    /// identity grants <c>FileManagement</c> only when the role is seeded (System.Files installed), so
+    /// an account without it is not drift. Keep this list in sync with the identity side.
+    /// </summary>
+    internal static readonly string[] IdentityGrantedRoleNames = [CommonConstants.FileManagementRole];
+
+    /// <summary>
+    /// AB#8582: the <see cref="IdentityGrantedRoleNames" /> a client with this id holds — all of them
+    /// for a prefixed client, none for a custom client id outside the prefix (identity does not grant
+    /// them there, so such a role on it stays unexpected). A missing id counts as prefixed: the
+    /// reconcile derives it with <see cref="BuildClientId" />.
+    /// </summary>
+    internal static IReadOnlyList<string> IdentityGrantedRoleNamesFor(string? clientId)
+    {
+        return string.IsNullOrWhiteSpace(clientId) || clientId.StartsWith(ClientIdPrefix, StringComparison.Ordinal)
+            ? IdentityGrantedRoleNames
+            : [];
+    }
+
+    /// <summary>
     /// Recognises the <c>{{service.authority}}</c> token, case-insensitively and tolerant of the
     /// same inner whitespace <c>WorkloadTemplateResolver.PlaceholderPattern</c> accepts — the check
     /// must never be stricter than the resolver, or a value the projection resolves fine would be
@@ -1475,7 +1508,7 @@ internal class PipelineServiceAccountProvisioningService(
     /// </summary>
     internal static string BuildClientId(OctoObjectId ownerRtId)
     {
-        return $"octo-pipeline-sa-{ownerRtId}";
+        return $"{ClientIdPrefix}{ownerRtId}";
     }
 
     /// <summary>

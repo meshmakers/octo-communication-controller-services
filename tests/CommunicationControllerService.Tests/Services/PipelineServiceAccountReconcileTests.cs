@@ -307,6 +307,28 @@ internal class PipelineServiceAccountReconcileTests
             .IsEquivalentTo(new[] { CommonConstants.StreamDataReaderRole });
     }
 
+    [Test]
+    public async Task IdentityGrantedRoleNamesFor_PrefixedOrDerivedClient_IsFileManagementAndNeverSynced()
+    {
+        // AB#8582: FileManagement is granted identity-side (AB#6467) to octo-pipeline-sa-* clients
+        // only; the controller tolerates it but never puts it on the wire.
+        using var _ = Assert.Multiple();
+        await Assert.That(PipelineServiceAccountProvisioningService.IdentityGrantedRoleNames)
+            .IsEquivalentTo(new[] { CommonConstants.FileManagementRole });
+        await Assert.That(PipelineServiceAccountProvisioningService.IdentityGrantedRoleNamesFor(
+                PipelineServiceAccountProvisioningService.BuildClientId(OctoObjectId.GenerateNewId())))
+            .IsEquivalentTo(new[] { CommonConstants.FileManagementRole });
+        await Assert.That(PipelineServiceAccountProvisioningService.IdentityGrantedRoleNamesFor(null))
+            .IsEquivalentTo(new[] { CommonConstants.FileManagementRole });
+        await Assert.That(PipelineServiceAccountProvisioningService.IdentityGrantedRoleNamesFor("custom-client"))
+            .IsEmpty();
+        await Assert.That(PipelineServiceAccountProvisioningService.IdentityGrantedRoleNamesFor("OCTO-PIPELINE-SA-x"))
+            .IsEmpty();
+        await Assert.That(PipelineServiceAccountProvisioningService.EffectiveRoleNames(
+                [CommonConstants.CommunicationManagementRole]))
+            .DoesNotContain(CommonConstants.FileManagementRole);
+    }
+
     // ---------------------------------------------------------------- legacy accounts
 
     [Test]
