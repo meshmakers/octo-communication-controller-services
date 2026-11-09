@@ -56,7 +56,7 @@ types:
       - methodId: Execute-1
         description: "Starts one execution of the pipeline on its adapter and returns its id without waiting for the end (REST POST Pipeline/execute). The caller is passed to a FromExecutePipelineCommand pipeline as with REST."
         parameters:
-          - { name: input, valueType: String, isOptional: true, sensitive: true, description: "Input of the execution (the REST request body). Sensitive: input data is never logged, audited or traced. For an execution on a Leased adapter (not a dry run) the input is stored in the PipelineExecution entity of the tenant until the lease runs it, exactly as with REST." }
+          - { name: input, valueType: String, isOptional: true, sensitive: true, description: "Input of the execution (the REST request body). Sensitive: input data is never logged, audited or traced. For an execution on a Leased adapter (not a dry run) the input is stored in the PipelineExecution entity of the tenant and stays there after the run (a retry copies it into the new execution), exactly as with REST." }
           - { name: isDryRun, valueType: Boolean, isOptional: true, description: "True runs the pipeline with every dry-run-honouring Load node suppressing its side effect. Default false." }
         result:
           valueType: Record

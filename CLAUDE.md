@@ -261,13 +261,16 @@ Code: `src/CommunicationControllerServices/Methods/Service/`. User guide: `octo-
   `Pipeline.Execute.input` are `sensitive`: the host keeps them out of logs, audit and traces. The handlers never log them
   and pass every failure message through `CommunicationMethodSupport.Redact` (the value as a whole and each line of 8+
   characters, plus the caller token), so a validation message that quotes a line does not echo it. `Execute.input` of a
-  non-dry-run execution on a **Leased** adapter is stored in the tenant's `PipelineExecution` (`InputData`) until the lease
-  runs it, as with REST.
+  non-dry-run execution on a **Leased** adapter is stored in the tenant's `PipelineExecution` (`InputData`) and stays there
+  after the run (a retry copies it), as with REST.
 - **Failure messages (AB#8596).** The `message` parameter of a Pipeline / DataFlow error (and the redeploy `warning` of
   `MoveToAdapter`) carries only the text of the controller's own exceptions (`CommunicationMethodSupport.CallerSafeMessage`:
   `AdapterServiceException`, `AdapterHubCallbackException`, `CommunicationRepositoryException`,
   `WorkloadLifecycleServiceException` - the texts REST answers and the Studio shows), redacted; any other exception answers
   the error code without `message` and its text stays in the log.
+- **Parse failures (AB#8596).** `PipelineSchemaValidator` reports a definition that does not parse with a fixed text plus
+  line/column (`ParseFailureMessage`), never the parser's text: a duplicate key or broken scalar could quote a credential into
+  the logs, the REST answer and the method error. This also changes the REST error text of that case (position kept).
 - **Move retries (AB#8596).** `MoveToAdapter` with `redeploy: true` redeploys also when the move is a no-op (REST skips it),
   so a retry after a timed-out first call does not report success without the deploy. Tests:
   `CommunicationMethodHostTests.Pipeline` (integration, `AssertNeverEchoed`), `PipelineMethodSupportTests` (unit).

@@ -10,7 +10,8 @@
   messages; `minEngineVersion` stays 3.5.1. The tenant-level endpoints (enable/disable, lifecycle, validate-expression,
   encrypt-value) stay REST. REST endpoints unchanged; their audit texts moved into shared helpers
   (`PipelineController.BuildMoveAuditMessage` / `BuildDebugAuditMessage`, `WorkloadController.BuildChartVersionAuditMessage`),
-  pinned by tests. Details: CLAUDE.md "CK method service handlers".
+  pinned by tests. A definition that does not parse is reported with a fixed text plus line/column instead of the parser's
+  text (it could quote a credential; also changes that REST error text). Details: CLAUDE.md "CK method service handlers".
 
 - AB#8595 New: System.Communication 4.17.0 (Minor) declares the adapter, workload and adapter pool operations of the REST
   API as CK methods, and the controller handles them (`handler: service`, typed handler SDK of octo-common-services):
