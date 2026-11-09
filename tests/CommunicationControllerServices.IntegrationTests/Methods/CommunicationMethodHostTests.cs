@@ -328,6 +328,45 @@ public sealed class CommunicationMethodHostTests(CommunicationControllerFixture 
             Arg.Is<string>(m => m.Contains("The previous secret remains in effect.")));
     }
 
+    /// <summary>
+    ///     The secret is rotated on both sides before the audit event is written; a failing event store must not answer
+    ///     SERVICE_ACCOUNT_ROTATION_FAILED ("the previous secret remains"), or the operator skips the redeploy.
+    /// </summary>
+    [Fact]
+    public async Task RotateServiceAccountSecret_AFailingAuditEvent_DoesNotReportTheRotationAsFailed()
+    {
+        var adapter = ArrangeAdapter();
+        _provisioning.RotateAdapterSecretAsync(TenantId, adapter)
+            .Returns(new PipelineServiceAccountRotationResult("octo-pipeline-sa-z", "pipeline-service-account-z",
+                WasCreated: false));
+        _events.StoreInformationEventAsync(TenantId, Arg.Any<string>(), Arg.Any<RtEntityId?>())
+            .Returns(Task.FromException(new InvalidOperationException("event store down")));
+
+        var method = await InvokeAsync(SystemCommunicationCkIds.AdapterRotateServiceAccountSecretMethodId,
+            adapter.RtId.ToString());
+
+        method.Success.Should().BeTrue();
+        using var json = JsonDocument.Parse(method.ResultJson!);
+        json.RootElement.GetProperty("requiresPipelineRedeploy").GetBoolean().Should().BeTrue();
+        await _events.DidNotReceiveWithAnyArgs().StoreErrorEventAsync(default!, default!, default);
+    }
+
+    [Fact]
+    public async Task ReconcileServiceAccount_AFailingAuditEvent_DoesNotReportTheReconcileAsFailed()
+    {
+        var adapter = ArrangeAdapter();
+        _provisioning.ReconcileAdapterAsync(TenantId, adapter, Arg.Any<ServiceAccountReconcileContext>())
+            .Returns(new ServiceAccountReconcileResult(PipelineServiceAccountProvisioningOutcome.AlreadyProvisioned,
+                "octo-pipeline-sa-w", "pipeline-service-account-w", RoleChangesSkipped: true));
+        _events.StoreInformationEventAsync(TenantId, Arg.Any<string>(), Arg.Any<RtEntityId?>())
+            .Returns(Task.FromException(new InvalidOperationException("event store down")));
+
+        var method = await InvokeAsync(SystemCommunicationCkIds.AdapterReconcileServiceAccountMethodId,
+            adapter.RtId.ToString());
+
+        method.Success.Should().BeTrue();
+    }
+
     [Fact]
     public async Task RefreshAndPublishMirrors_AnswerWhatRestAnswers_ForTheCallsTenant()
     {

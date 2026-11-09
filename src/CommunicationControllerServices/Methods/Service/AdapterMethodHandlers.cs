@@ -112,30 +112,12 @@ internal sealed class AdapterReconcileServiceAccountHandler(
             return CkMethodOutcome<AdapterReconcileServiceAccountResult>.TargetNotFound();
         }
 
+        ServiceAccountReconcileResult result;
         try
         {
-            var result = await provisioningService.ReconcileAdapterAsync(context.TenantId, adapter,
+            result = await provisioningService.ReconcileAdapterAsync(context.TenantId, adapter,
                 ServiceAccountReconcileContext.User(HasRole(context.CallerPrincipal,
                     CommonConstants.UserManagementRole))).ConfigureAwait(false);
-            var dto = ServiceAccountController.BuildReconcileDto(result);
-
-            await eventService.StoreInformationEventAsync(context.TenantId,
-                $"Pipeline service account '{result.WellKnownName}' (client '{result.ClientId}') of adapter " +
-                $"'{adapter.Name ?? context.TargetRtId}' ({context.TargetRtId}) reconciled ({MethodSource}): " +
-                $"{result.Outcome}.{(result.RoleChangesSkipped ? " Declared roles were skipped." : string.Empty)}")
-                .ConfigureAwait(false);
-
-            return new AdapterReconcileServiceAccountResult
-            {
-                Value = new RtServiceAccountReconcileResultRecord
-                {
-                    Outcome = dto.Outcome,
-                    ClientId = dto.ClientId,
-                    ConfigurationWellKnownName = dto.ConfigurationWellKnownName,
-                    RoleChangesSkipped = dto.RoleChangesSkipped,
-                    Message = dto.Message
-                }
-            };
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
@@ -145,6 +127,26 @@ internal sealed class AdapterReconcileServiceAccountHandler(
             return CkMethodOutcome<AdapterReconcileServiceAccountResult>.Fail(
                 CommunicationMethodErrors.ServiceAccountReconcileFailed);
         }
+
+        // The reconcile has happened: a failing event store must not turn it into a reported failure.
+        await StoreInformationEventQuietlyAsync(eventService, logger, context.TenantId,
+            $"Pipeline service account '{result.WellKnownName}' (client '{result.ClientId}') of adapter " +
+            $"'{adapter.Name ?? context.TargetRtId}' ({context.TargetRtId}) reconciled ({MethodSource}): " +
+            $"{result.Outcome}.{(result.RoleChangesSkipped ? " Declared roles were skipped." : string.Empty)}")
+            .ConfigureAwait(false);
+
+        var dto = ServiceAccountController.BuildReconcileDto(result);
+        return new AdapterReconcileServiceAccountResult
+        {
+            Value = new RtServiceAccountReconcileResultRecord
+            {
+                Outcome = dto.Outcome,
+                ClientId = dto.ClientId,
+                ConfigurationWellKnownName = dto.ConfigurationWellKnownName,
+                RoleChangesSkipped = dto.RoleChangesSkipped,
+                Message = dto.Message
+            }
+        };
     }
 }
 
@@ -177,27 +179,10 @@ internal sealed class AdapterRotateServiceAccountSecretHandler(
         }
 
         var adapterName = adapter.Name ?? context.TargetRtId!;
+        PipelineServiceAccountRotationResult result;
         try
         {
-            var result = await provisioningService.RotateAdapterSecretAsync(context.TenantId, adapter)
-                .ConfigureAwait(false);
-            var message = AdapterController.BuildRotationMessage(result, adapterName);
-
-            await eventService.StoreInformationEventAsync(context.TenantId,
-                $"Pipeline service account secret rotated for adapter '{adapterName}' ({context.TargetRtId}), " +
-                $"client '{result.ClientId}' ({MethodSource}). {message}").ConfigureAwait(false);
-
-            return new AdapterRotateServiceAccountSecretResult
-            {
-                Value = new RtServiceAccountSecretRotationResultRecord
-                {
-                    ClientId = result.ClientId,
-                    ConfigurationWellKnownName = result.WellKnownName,
-                    WasCreated = result.WasCreated,
-                    RequiresPipelineRedeploy = result.RequiresPipelineRedeploy,
-                    Message = message
-                }
-            };
+            result = await provisioningService.RotateAdapterSecretAsync(context.TenantId, adapter).ConfigureAwait(false);
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
@@ -218,5 +203,24 @@ internal sealed class AdapterRotateServiceAccountSecretHandler(
             return CkMethodOutcome<AdapterRotateServiceAccountSecretResult>.Fail(
                 CommunicationMethodErrors.ServiceAccountRotationFailed);
         }
+
+        // The secret is rotated on both sides now. A failing event store must not report the rotation as failed: the
+        // caller would believe the previous secret is still valid and skip the pipeline redeploy.
+        var message = AdapterController.BuildRotationMessage(result, adapterName);
+        await StoreInformationEventQuietlyAsync(eventService, logger, context.TenantId,
+            $"Pipeline service account secret rotated for adapter '{adapterName}' ({context.TargetRtId}), " +
+            $"client '{result.ClientId}' ({MethodSource}). {message}").ConfigureAwait(false);
+
+        return new AdapterRotateServiceAccountSecretResult
+        {
+            Value = new RtServiceAccountSecretRotationResultRecord
+            {
+                ClientId = result.ClientId,
+                ConfigurationWellKnownName = result.WellKnownName,
+                WasCreated = result.WasCreated,
+                RequiresPipelineRedeploy = result.RequiresPipelineRedeploy,
+                Message = message
+            }
+        };
     }
 }

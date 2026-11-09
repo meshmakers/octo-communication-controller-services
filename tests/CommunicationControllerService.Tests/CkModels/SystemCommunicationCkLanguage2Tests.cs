@@ -139,15 +139,17 @@ internal class SystemCommunicationCkLanguage2Tests
     }
 
     /// <summary>
-    ///     The access tightening of SecretDefault.Value was acknowledged in 4.16.0. An acknowledgement is valid for one
-    ///     release only (OCTO-CK204), so 4.17.0 (AB#8595) carries none: it changes no access.
+    ///     The access tightening of SecretDefault.Value stays acknowledged in 4.17.0 (AB#8595): 4.16.0 was never published
+    ///     (publishSystemCkModels), so the published baseline is still 4.15.0 and the tightening is part of this release's
+    ///     diff. The entry goes with the first bump after a version carrying it has been published (OCTO-CK204).
     /// </summary>
     [Test]
-    public async Task NoAcknowledgementIsCarriedPastTheReleaseItWasFor()
+    public async Task TheAccessTightening_IsAcknowledged()
     {
         var root = await LoadEmbeddedSystemCommunicationAsync();
 
         var acknowledged = root.Compatibility?.Acknowledge?.Select(a => a.Change).ToList() ?? [];
-        await Assert.That(acknowledged).IsEmpty();
+        await Assert.That(acknowledged)
+            .IsEquivalentTo(new[] { "TypeAttribute:SecretDefault-1/Value#Modified:access" });
     }
 }

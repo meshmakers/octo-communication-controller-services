@@ -40,8 +40,8 @@ The adapter, workload and adapter pool operations of the REST API as CK methods 
 the communication controller (`handler: service`). The REST endpoints are unchanged. Every method declares
 `roles: [CommunicationManagement]` (the REST policy asks only for the scope `octo_api`; a method without roles admits
 administrators only). No result is `sensitive`: `RotateServiceAccountSecret` returns the client id and what to do next, never
-the secret, like the REST endpoint. The 4.16.0 acknowledgement of `SecretDefault.Value` is removed (valid for one release,
-OCTO-CK204); no access changes.
+the secret, like the REST endpoint. No access changes. The acknowledgement of `SecretDefault.Value` stays: 4.16.0 was not
+published, so the published baseline of this release is 4.15.0 and the tightening is still part of its diff.
 
 ## 4.16.0 - 2026-11-09
 

@@ -1,4 +1,5 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Services.Methods;
@@ -53,6 +54,23 @@ internal static class CommunicationMethodSupport
     {
         var adapters = await repository.GetAdaptersAsync(tenantId).ConfigureAwait(false);
         return adapters.FirstOrDefault(a => a.RtId == adapterRtId);
+    }
+
+    /// <summary>
+    ///     Writes the audit event of an operation that has already taken effect. A failure of the event store is logged as a
+    ///     warning and never turns the operation into a reported failure.
+    /// </summary>
+    public static async Task StoreInformationEventQuietlyAsync(ICommunicationEventService eventService, ILogger logger,
+        string tenantId, string message)
+    {
+        try
+        {
+            await eventService.StoreInformationEventAsync(tenantId, message).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            logger.LogWarning(e, "Could not store the audit event of a completed CK method call");
+        }
     }
 
     /// <summary><c>true</c> when the validated caller holds the role (case-insensitive, as the token's role claims).</summary>

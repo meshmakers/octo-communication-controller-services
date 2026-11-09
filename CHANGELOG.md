@@ -8,8 +8,9 @@
   `AdapterPool.RefreshMirrors` / `PublishMirrors` (static), `AdapterPool.GrantLease` and `AdapterPool.CancelQueuedExecution`,
   with four result records shaped like the REST answers. Every method declares `roles: [CommunicationManagement]`, an
   explicit timeout and idempotency, no sensitive marker (the rotation result carries no secret, like REST) and the default
-  `dataAccess`, so `minEngineVersion` stays 3.5.1. The REST endpoints are unchanged. The 4.16.0 acknowledgement is removed
-  (OCTO-CK204). Switch: `Methods:Communication:Enabled` (default true). Details: CLAUDE.md "CK method service handlers".
+  `dataAccess`, so `minEngineVersion` stays 3.5.1. The REST endpoints are unchanged. The `SecretDefault.Value`
+  acknowledgement stays (4.16.0 was not published; the published baseline is 4.15.0). Switch:
+  `Methods:Communication:Enabled` (default true). Details: CLAUDE.md "CK method service handlers".
 
 - AB#8594 New: System.Communication 4.16.0 is the first `ckLanguage: 2` release of the model, a Minor against 4.15.0.
   Every type and record declares `derivable: Any` (dependents keep deriving), `DataFlow`, `LentAdapterPool`,
