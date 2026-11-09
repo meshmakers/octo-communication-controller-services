@@ -1,5 +1,7 @@
+using System.Text;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 
@@ -17,7 +19,7 @@ public enum SecretDefaultTenantAvailability
 }
 
 /// <summary>
-///     A stored SecretDefault without its value: what the reconcile needs to decide whether the entity is still
+///     A stored SecretDefault as read, its value still encrypted: what the reconcile needs to decide whether the entity is still
 ///     provided by an Application.
 /// </summary>
 /// <param name="RtId">RtId of the SecretDefault entity.</param>
@@ -32,6 +34,22 @@ public sealed record StoredSecretDefault(
 {
     /// <summary>UTC time of the projection that wrote it, when set; part of the snapshot a removal compares.</summary>
     public DateTime? LastProjectedAt { get; init; }
+
+    /// <summary>Display name of the entity; the controller writes the key.</summary>
+    public string? Name { get; init; }
+
+    /// <summary>CK type of the entity, the context a reveal of <see cref="Value" /> is counted under.</summary>
+    public string? CkTypeId { get; init; }
+
+    /// <summary>The stored value as read, still encrypted; never part of <see cref="ToString" />.</summary>
+    public RtSecretValue? Value { get; init; }
+
+    private bool PrintMembers(StringBuilder builder)
+    {
+        builder.Append($"RtId = {RtId}, Key = {Key}, SourceTenantId = {SourceTenantId}, ");
+        builder.Append($"SourceWorkloadRtId = {SourceWorkloadRtId}, LastProjectedAt = {LastProjectedAt}");
+        return true;
+    }
 }
 
 /// <summary>What a conditional removal of a SecretDefault did.</summary>

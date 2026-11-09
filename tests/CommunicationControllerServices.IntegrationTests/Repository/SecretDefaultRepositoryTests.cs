@@ -180,6 +180,64 @@ public class SecretDefaultRepositoryTests(CommunicationControllerFixture fixture
     }
 
     [Fact]
+    public async Task UpsertSecretDefaultAsync_ASupersededDefaultFromAProtectedSource_IsReplacedInPlace()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var key = $"secret-default-{Guid.NewGuid():N}";
+        var ancestorDefault = await InsertSecretDefaultAsync(key, "zq7245-integration-withdrawn", "ancestor-tenant");
+        var supersededDefault = (await repository.GetSecretDefaultsAsync(fixture.TestTenantId)).Defaults
+            .Single(storedDefault => storedDefault.Key == key);
+        var write = new SecretDefaultWrite(key, RtSecretValue.Pending("zq7245-integration-takeover"),
+            "descendant-tenant", OctoObjectId.GenerateNewId().ToString(),
+            new DateTime(2026, 11, 6, 9, 0, 0, DateTimeKind.Utc), ["ancestor-tenant"], [supersededDefault]);
+
+        var writeResult = await repository.UpsertSecretDefaultAsync(fixture.TestTenantId, write);
+
+        writeResult.Outcome.Should().Be(SecretDefaultWriteOutcome.Updated);
+        var stored = (await ReadSecretDefaultsAsync(key)).Should().ContainSingle().Subject;
+        stored.RtId.Should().Be(ancestorDefault.RtId);
+        stored.SourceTenantId.Should().Be("descendant-tenant");
+        Reveal(stored.Value).Should().Be("zq7245-integration-takeover");
+    }
+
+    [Fact]
+    public async Task UpsertSecretDefaultAsync_AProtectedDefaultRewrittenAfterTheRead_IsKept()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var key = $"secret-default-{Guid.NewGuid():N}";
+        await InsertSecretDefaultAsync(key, "zq7245-integration-withdrawn", "ancestor-tenant");
+        var supersededDefault = (await repository.GetSecretDefaultsAsync(fixture.TestTenantId)).Defaults
+            .Single(storedDefault => storedDefault.Key == key);
+        await repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
+            new SecretDefaultWrite(key, RtSecretValue.Pending("zq7245-integration-redeployed"), "ancestor-tenant",
+                supersededDefault.SourceWorkloadRtId!, new DateTime(2026, 11, 6, 10, 0, 0, DateTimeKind.Utc)));
+        var write = new SecretDefaultWrite(key, RtSecretValue.Pending("zq7245-integration-takeover"),
+            "descendant-tenant", OctoObjectId.GenerateNewId().ToString(),
+            new DateTime(2026, 11, 6, 11, 0, 0, DateTimeKind.Utc), ["ancestor-tenant"], [supersededDefault]);
+
+        var writeResult = await repository.UpsertSecretDefaultAsync(fixture.TestTenantId, write);
+
+        writeResult.Outcome.Should().Be(SecretDefaultWriteOutcome.KeptAncestorSource);
+        Reveal((await ReadSecretDefaultsAsync(key)).Single().Value).Should().Be("zq7245-integration-redeployed");
+    }
+
+    [Fact]
+    public async Task GetSecretDefaultsAsync_PrintsNoValue()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var key = $"secret-default-{Guid.NewGuid():N}";
+        await repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
+            BuildWrite(key, "zq7245-integration-printed", OctoObjectId.GenerateNewId().ToString()));
+
+        var listed = (await repository.GetSecretDefaultsAsync(fixture.TestTenantId)).Defaults
+            .Single(storedDefault => storedDefault.Key == key);
+
+        listed.Value.Should().NotBeNull();
+        listed.ToString().Should().NotContain(listed.Value!.Envelope);
+        listed.ToString().Should().NotContain("zq7245-integration-printed");
+    }
+
+    [Fact]
     public async Task UpsertSecretDefaultAsync_TwoConcurrentWritesOfANewKey_LeaveExactlyOneEntity()
     {
         var repository = fixture.GetService<ICommunicationRepository>();

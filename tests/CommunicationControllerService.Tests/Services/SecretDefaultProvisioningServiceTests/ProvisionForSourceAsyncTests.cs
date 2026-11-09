@@ -280,4 +280,17 @@ internal sealed class ProvisionForSourceAsyncTests : SecretDefaultProvisioningSe
 
         await Assert.That(write.ToString()).DoesNotContain(SentinelSecret[..12]);
     }
+
+    [Test]
+    public async Task TheProjectionSummary_IsLinkedToTheApplication()
+    {
+        var application = ArrangeApplication(ProtectedEntry(CaptchaKey, SentinelSecret));
+
+        await Service.ProvisionForSourceAsync(SourceTenantId, application.RtId);
+
+        await CommunicationEventService.Received(1).StoreInformationEventAsync(SourceTenantId,
+            Arg.Is<string>(message => message.Contains("projected")),
+            Arg.Is<RtEntityId?>(link => link != null && link.Value.RtId == application.RtId &&
+                                        link.Value.CkTypeId == SystemCommunicationCkIds.RtCkApplicationTypeId));
+    }
 }

@@ -1,4 +1,5 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
+using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Runtime.Contracts.Secrets;
@@ -42,20 +43,20 @@ internal sealed partial class SecretDefaultProvisioningService
         }
 
         var desiredState = await ReadDesiredStateAsync(targetTenantId, inventory, sourceTenants, cancellationToken);
+        var writes = await WriteWinningOffersAsync(targetTenantId, inventory, desiredState, cancellationToken);
         var removal = await RemoveUnprovidedDefaultsAsync(targetTenantId, inventory, desiredState);
-        var writes = await WriteWinningOffersAsync(targetTenantId, inventory, desiredState, removal.RemovedRtIds,
-            cancellationToken);
 
         var result = new SecretDefaultTargetResult(targetTenantId, SecretDefaultTargetStatus.Reconciled,
             writes.Created, writes.Updated, removal.RemovedRtIds.Count, removal.Kept + writes.Kept,
-            desiredState.UnreadableSourceTenantIds.Count, removal.Failed + writes.Failed);
-        if (result.DefaultsCreated + result.DefaultsRemoved + result.WritesFailed + result.SourcesUnreadable > 0)
+            desiredState.UnreadableSourceTenantIds.Count, removal.Failed + writes.Failed, writes.Unchanged);
+        if (result.DefaultsWritten + result.DefaultsRemoved + result.WritesFailed + result.SourcesUnreadable > 0)
         {
             Logger.Info(
-                "[{TenantId}] Secret defaults reconciled: {Created} created, {Updated} updated, {Removed} removed, " +
-                "{Kept} kept, {SourcesUnreadable} source tenant(s) unreadable, {Failed} failed", targetTenantId,
-                result.DefaultsCreated, result.DefaultsUpdated, result.DefaultsRemoved, result.DefaultsKept,
-                result.SourcesUnreadable, result.WritesFailed);
+                "[{TenantId}] Secret defaults reconciled: {Created} created, {Updated} updated, {Unchanged} " +
+                "unchanged, {Removed} removed, {Kept} kept, {SourcesUnreadable} source tenant(s) unreadable, " +
+                "{Failed} failed", targetTenantId, result.DefaultsCreated, result.DefaultsUpdated,
+                result.DefaultsUnchanged, result.DefaultsRemoved, result.DefaultsKept, result.SourcesUnreadable,
+                result.WritesFailed);
         }
 
         return result;
@@ -210,18 +211,13 @@ internal sealed partial class SecretDefaultProvisioningService
         var removal = new RemovalOutcome();
         foreach (var storedDefault in inventory.Defaults)
         {
-            if (storedDefault.SourceTenantId is { } storedSourceTenantId &&
-                desiredState.UnreadableSourceTenantIds.Contains(storedSourceTenantId))
+            switch (Classify(storedDefault, desiredState))
             {
-                removal.Kept++;
-                continue;
-            }
-
-            if (storedDefault is { SourceTenantId: { } sourceTenantId, SourceWorkloadRtId: { } sourceWorkloadRtId } &&
-                desiredState.ProvidedDefaults.Contains(new ProvidedDefault(sourceTenantId, sourceWorkloadRtId,
-                    storedDefault.Key)))
-            {
-                continue;
+                case StoredDefaultStanding.SourceUnreadable:
+                    removal.Kept++;
+                    continue;
+                case StoredDefaultStanding.Provided:
+                    continue;
             }
 
             switch (await TryDeleteAsync(targetTenantId, storedDefault))
@@ -238,83 +234,40 @@ internal sealed partial class SecretDefaultProvisioningService
         return removal;
     }
 
-    private async Task<WriteOutcome> WriteWinningOffersAsync(string targetTenantId, SecretDefaultInventory inventory,
-        DesiredSecretDefaults desiredState, IReadOnlySet<string> removedRtIds, CancellationToken cancellationToken)
+    /// <summary>
+    ///     Whether a stored default is still provided, kept because its source could not be read, or no longer
+    ///     provided by anybody. A default without source fields was not written by a projection: nobody provides it.
+    /// </summary>
+    private static StoredDefaultStanding Classify(StoredSecretDefault storedDefault, DesiredSecretDefaults desiredState)
     {
-        var outcome = new WriteOutcome();
-        foreach (var offersOfKey in desiredState.Offers.GroupBy(offer => offer.Key, StringComparer.Ordinal))
+        if (storedDefault.SourceTenantId is { } storedSourceTenantId &&
+            desiredState.UnreadableSourceTenantIds.Contains(storedSourceTenantId))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var remainingStoredDefault = inventory.Defaults.FirstOrDefault(storedDefault =>
-                storedDefault.Key == offersOfKey.Key && !removedRtIds.Contains(storedDefault.RtId.ToString()));
-            var winningOffer = ChooseWinningOffer(offersOfKey.ToList(), remainingStoredDefault);
-            await WriteOfferAsync(targetTenantId, winningOffer, outcome);
+            return StoredDefaultStanding.SourceUnreadable;
         }
 
-        return outcome;
+        return storedDefault is { SourceTenantId: { } sourceTenantId, SourceWorkloadRtId: { } sourceWorkloadRtId } &&
+               desiredState.ProvidedDefaults.Contains(new ProvidedDefault(sourceTenantId, sourceWorkloadRtId,
+                   storedDefault.Key))
+            ? StoredDefaultStanding.Provided
+            : StoredDefaultStanding.Unprovided;
     }
 
-    private static SecretDefaultOffer ChooseWinningOffer(IReadOnlyList<SecretDefaultOffer> offersOfKey,
-        StoredSecretDefault? remainingStoredDefault)
+    /// <summary>
+    ///     The Application entity an event about a default may be linked to: only in the Application's own tenant,
+    ///     because an event cannot relate to an entity of another tenant.
+    /// </summary>
+    private static RtEntityId? ApplicationLinkIn(string eventTenantId, string? sourceTenantId,
+        string? applicationRtId)
     {
-        var closestDepth = offersOfKey.Min(offer => offer.SourceTenant.Depth);
-        var closestOffers = offersOfKey
-            .Where(offer => offer.SourceTenant.Depth == closestDepth)
-            .OrderBy(offer => offer.ApplicationRtId, StringComparer.Ordinal)
-            .ToList();
-        return closestOffers.FirstOrDefault(offer => remainingStoredDefault is not null &&
-                                                     IsProjectedBy(remainingStoredDefault,
-                                                         offer.SourceTenant.TenantId, offer.ApplicationRtId))
-               ?? closestOffers[0];
-    }
-
-    private async Task WriteOfferAsync(string targetTenantId, SecretDefaultOffer offer, WriteOutcome outcome)
-    {
-        var application = offer.Application;
-        var sourceTenantId = offer.SourceTenant.TenantId;
-        var revealAccess = new SecretAccessContext(sourceTenantId, application.CkTypeId?.ToString(),
-            SecretValueAttributePath);
-        var plaintext = encryptionService.RevealOrNull(offer.CheckedDeclaration.Declaration!.SecretValue,
-            revealAccess);
-        if (string.IsNullOrEmpty(plaintext))
+        if (applicationRtId is null ||
+            !string.Equals(eventTenantId, sourceTenantId, StringComparison.OrdinalIgnoreCase) ||
+            !OctoObjectId.TryParse(applicationRtId, out var parsedApplicationRtId))
         {
-            outcome.Failed++;
-            Logger.Error("[{TenantId}] Secret default '{Key}' of application '{ApplicationName}' in tenant " +
-                         "'{SourceTenantId}' has no readable value; it was not written", targetTenantId, offer.Key,
-                application.Name, sourceTenantId);
-            await communicationEventService.StoreErrorEventAsync(targetTenantId,
-                $"Secret default '{offer.Key}' of application '{application.Name}' in tenant '{sourceTenantId}' has " +
-                "no readable value and was not written into this tenant.");
-            return;
+            return null;
         }
 
-        var write = new SecretDefaultWrite(offer.Key, RtSecretValue.Pending(plaintext), sourceTenantId,
-            offer.ApplicationRtId, timeProvider.GetUtcNow().UtcDateTime, offer.SourceTenant.AncestorTenantIds);
-        try
-        {
-            var writeResult = await communicationRepository.UpsertSecretDefaultAsync(targetTenantId, write);
-            switch (writeResult.Outcome)
-            {
-                case SecretDefaultWriteOutcome.Created:
-                    outcome.Created++;
-                    break;
-                case SecretDefaultWriteOutcome.Updated:
-                    outcome.Updated++;
-                    break;
-                default:
-                    outcome.Kept++;
-                    break;
-            }
-        }
-        catch (Exception writeFailure) when (writeFailure is not OperationCanceledException)
-        {
-            outcome.Failed++;
-            Logger.Error(writeFailure, "[{TenantId}] Could not write secret default '{Key}' from tenant " +
-                                       "'{SourceTenantId}'", targetTenantId, offer.Key, sourceTenantId);
-            await communicationEventService.StoreErrorEventAsync(targetTenantId,
-                $"Secret default '{offer.Key}' from tenant '{sourceTenantId}' could not be written into this tenant. " +
-                "The next reconcile retries it.");
-        }
+        return new RtEntityId(SystemCommunicationCkIds.RtCkApplicationTypeId, parsedApplicationRtId);
     }
 
     private static bool IsProjectedBy(StoredSecretDefault storedDefault, string sourceTenantId,
@@ -383,20 +336,16 @@ internal sealed partial class SecretDefaultProvisioningService
         public List<SecretDefaultOffer> Offers { get; } = [];
     }
 
+    private enum StoredDefaultStanding
+    {
+        Provided,
+        SourceUnreadable,
+        Unprovided
+    }
+
     private sealed class RemovalOutcome
     {
         public HashSet<string> RemovedRtIds { get; } = new(StringComparer.Ordinal);
-
-        public int Kept { get; set; }
-
-        public int Failed { get; set; }
-    }
-
-    private sealed class WriteOutcome
-    {
-        public int Created { get; set; }
-
-        public int Updated { get; set; }
 
         public int Kept { get; set; }
 

@@ -733,7 +733,9 @@ internal class CommunicationRepository : ICommunicationRepository
 
             var protectedSources = new HashSet<string>(write.ProtectedSourceTenantIds, StringComparer.OrdinalIgnoreCase);
             var keptDefault = sameKey.FirstOrDefault(secretDefault =>
-                secretDefault.SourceTenantId is { } existingSource && protectedSources.Contains(existingSource));
+                secretDefault.SourceTenantId is { } existingSource && protectedSources.Contains(existingSource) &&
+                !write.SupersededDefaults.Any(supersededDefault =>
+                    SecretDefaultIdentity.IsUnchanged(secretDefault, supersededDefault)));
             if (keptDefault is not null)
             {
                 await session.CommitTransactionAsync();
@@ -812,7 +814,10 @@ internal class CommunicationRepository : ICommunicationRepository
             .Select(secretDefault => new StoredSecretDefault(secretDefault.RtId, secretDefault.RtWellKnownName!,
                 secretDefault.SourceTenantId, secretDefault.SourceWorkloadRtId)
             {
-                LastProjectedAt = secretDefault.LastProjectedAt
+                LastProjectedAt = secretDefault.LastProjectedAt,
+                Name = secretDefault.Name,
+                CkTypeId = secretDefault.CkTypeId?.ToString(),
+                Value = secretDefault.Value
             })
             .ToList();
         return new SecretDefaultInventory(SecretDefaultTenantAvailability.Available, storedDefaults);

@@ -83,17 +83,31 @@ internal sealed class EnsureSecretDefaultsAsyncTests
     }
 
     [Test]
-    public async Task ATenantWhoseDefaultsWereOnlyRefreshed_StaysSilent()
+    public async Task ATenantWhoseDefaultsWereAllUnchanged_StaysSilent()
     {
         _secretDefaultProvisioningService.ProvisionForTargetAsync(TenantId, Arg.Any<CancellationToken>())
             .Returns(new SecretDefaultTargetResult(TenantId, SecretDefaultTargetStatus.Reconciled,
-                DefaultsCreated: 0, DefaultsUpdated: 3, DefaultsRemoved: 0, DefaultsKept: 0, SourcesUnreadable: 0,
-                WritesFailed: 0));
+                DefaultsCreated: 0, DefaultsUpdated: 0, DefaultsRemoved: 0, DefaultsKept: 0, SourcesUnreadable: 0,
+                WritesFailed: 0, DefaultsUnchanged: 3));
 
         await CreateSut().EnsureSecretDefaultsAsync(TenantId);
 
         await _eventService.DidNotReceiveWithAnyArgs()
             .StoreInformationEventAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<RtEntityId?>());
+    }
+
+    [Test]
+    public async Task ATenantWhoseDefaultWasRestored_GetsAnInformationEvent()
+    {
+        _secretDefaultProvisioningService.ProvisionForTargetAsync(TenantId, Arg.Any<CancellationToken>())
+            .Returns(new SecretDefaultTargetResult(TenantId, SecretDefaultTargetStatus.Reconciled,
+                DefaultsCreated: 0, DefaultsUpdated: 1, DefaultsRemoved: 0, DefaultsKept: 0, SourcesUnreadable: 0,
+                WritesFailed: 0));
+
+        await CreateSut().EnsureSecretDefaultsAsync(TenantId);
+
+        await _eventService.Received(1).StoreInformationEventAsync(TenantId,
+            Arg.Is<string>(message => message.Contains("1 updated")), Arg.Any<RtEntityId?>());
     }
 
     [Test]

@@ -87,7 +87,9 @@ internal sealed class SecretDefaultReleasedSourceTests : SecretDefaultProvisioni
         }
 
         await CommunicationEventService.Received(1).StoreInformationEventAsync(SourceTenantId,
-            Arg.Is<string>(message => message.Contains("withdrawn")), Arg.Any<RtEntityId?>());
+            Arg.Is<string>(message => message.Contains("withdrawn")),
+            Arg.Is<RtEntityId?>(link => link != null && link.Value.RtId == application.RtId &&
+                                        link.Value.CkTypeId == SystemCommunicationCkIds.RtCkApplicationTypeId));
     }
 
     [Test]

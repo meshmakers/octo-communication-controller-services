@@ -174,7 +174,8 @@ public interface ICommunicationRepository
     /// <summary>
     ///     Creates or overwrites the platform-owned SecretDefault whose well-known name is the write's key in the
     ///     target tenant. Writes nothing else; further SecretDefaults with the same well-known name are erased. An
-    ///     existing default whose source is in <see cref="SecretDefaultWrite.ProtectedSourceTenantIds" /> is kept.
+    ///     existing default whose source is in <see cref="SecretDefaultWrite.ProtectedSourceTenantIds" /> is kept,
+    ///     unless it is still one of the <see cref="SecretDefaultWrite.SupersededDefaults" />.
     /// </summary>
     /// <param name="targetTenantId">Tenant that receives the default.</param>
     /// <param name="write">Key, value and source of the default.</param>

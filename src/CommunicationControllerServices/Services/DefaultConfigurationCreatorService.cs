@@ -269,11 +269,11 @@ internal class DefaultConfigurationCreatorService(
         try
         {
             var result = await secretDefaultProvisioningService.ProvisionForTargetAsync(tenantId);
-            if (result.DefaultsCreated > 0 || result.DefaultsRemoved > 0)
+            if (result.DefaultsWritten > 0 || result.DefaultsRemoved > 0)
             {
                 await communicationEventService.StoreInformationEventAsync(tenantId,
                     $"Secret defaults reconciled: {result.DefaultsCreated} created, {result.DefaultsUpdated} " +
-                    $"refreshed, {result.DefaultsRemoved} removed, {result.DefaultsKept} kept.");
+                    $"updated, {result.DefaultsRemoved} removed, {result.DefaultsKept} kept.");
             }
         }
         catch (Exception reconcileFailure)

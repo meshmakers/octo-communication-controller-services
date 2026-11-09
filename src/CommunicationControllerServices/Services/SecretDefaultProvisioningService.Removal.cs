@@ -136,8 +136,10 @@ internal sealed partial class SecretDefaultProvisioningService
             Logger.Error(deleteFailure, "[{TenantId}] Could not remove secret default '{Key}'", tenantId,
                 storedDefault.Key);
             await communicationEventService.StoreErrorEventAsync(tenantId,
-                $"Secret default '{storedDefault.Key}' is no longer provided to this tenant but could not be " +
-                "removed. The next reconcile retries it.");
+                $"Secret default '{storedDefault.Key}' of application '{storedDefault.SourceWorkloadRtId}' in tenant " +
+                $"'{storedDefault.SourceTenantId}' is no longer provided to this tenant but could not be removed. " +
+                "The next reconcile retries it.",
+                ApplicationLinkIn(tenantId, storedDefault.SourceTenantId, storedDefault.SourceWorkloadRtId));
             return RemovalAttempt.Failed;
         }
     }

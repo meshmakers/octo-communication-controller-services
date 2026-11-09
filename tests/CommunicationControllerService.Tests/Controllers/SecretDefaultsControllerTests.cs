@@ -106,7 +106,7 @@ internal sealed class SecretDefaultsControllerTests
             nameof(SecretDefaultTargetResult.DefaultsCreated), nameof(SecretDefaultTargetResult.DefaultsUpdated),
             nameof(SecretDefaultTargetResult.DefaultsWritten), nameof(SecretDefaultTargetResult.DefaultsRemoved),
             nameof(SecretDefaultTargetResult.DefaultsKept), nameof(SecretDefaultTargetResult.SourcesUnreadable),
-            nameof(SecretDefaultTargetResult.WritesFailed)
+            nameof(SecretDefaultTargetResult.WritesFailed), nameof(SecretDefaultTargetResult.DefaultsUnchanged)
         });
     }
 }

@@ -93,11 +93,12 @@ public enum SecretDefaultTargetStatus
 /// <param name="TenantId">The reconciled tenant.</param>
 /// <param name="Status">How the reconcile ended.</param>
 /// <param name="DefaultsCreated">SecretDefault entities the tenant did not hold before.</param>
-/// <param name="DefaultsUpdated">Existing SecretDefault entities overwritten with the projected value (refresh, restore, rotation).</param>
+/// <param name="DefaultsUpdated">Existing SecretDefault entities overwritten because their source, name or value differed (restore, rotation, takeover).</param>
 /// <param name="DefaultsRemoved">SecretDefault entities deleted because no Application provides them any more.</param>
 /// <param name="DefaultsKept">Defaults left as they are: their source could not be read, or a source closer to the root holds the key.</param>
 /// <param name="SourcesUnreadable">Source tenants (the tenant itself or an ancestor) whose Applications could not be read.</param>
 /// <param name="WritesFailed">Writes or deletes that failed, plus values that could not be read.</param>
+/// <param name="DefaultsUnchanged">Winning defaults the tenant already held as projected (source, name and value); not written.</param>
 public sealed record SecretDefaultTargetResult(
     string TenantId,
     SecretDefaultTargetStatus Status,
@@ -106,7 +107,8 @@ public sealed record SecretDefaultTargetResult(
     int DefaultsRemoved,
     int DefaultsKept,
     int SourcesUnreadable,
-    int WritesFailed)
+    int WritesFailed,
+    int DefaultsUnchanged = 0)
 {
     /// <summary>SecretDefault entities created or overwritten.</summary>
     public int DefaultsWritten => DefaultsCreated + DefaultsUpdated;

@@ -89,7 +89,12 @@ internal abstract class SecretDefaultProvisioningServiceTestsBase
 
                 var storageKey = (targetTenantId, write.Key);
                 if (_storedDefaults.TryGetValue(storageKey, out var stored) &&
-                    write.ProtectedSourceTenantIds.Contains(stored.SourceTenantId, StringComparer.OrdinalIgnoreCase))
+                    write.ProtectedSourceTenantIds.Contains(stored.SourceTenantId, StringComparer.OrdinalIgnoreCase) &&
+                    !write.SupersededDefaults.Any(supersededDefault =>
+                        supersededDefault.RtId == _storedRtIds[storageKey] &&
+                        supersededDefault.SourceTenantId == stored.SourceTenantId &&
+                        supersededDefault.SourceWorkloadRtId == stored.SourceWorkloadRtId &&
+                        supersededDefault.LastProjectedAt == stored.ProjectedAt))
                 {
                     return Task.FromResult(new SecretDefaultWriteResult(SecretDefaultWriteOutcome.KeptAncestorSource,
                         stored.SourceTenantId));
@@ -186,7 +191,12 @@ internal abstract class SecretDefaultProvisioningServiceTestsBase
             .Select(stored => new StoredSecretDefault(_storedRtIds[stored.Key], stored.Key.Key,
                 stored.Value.SourceTenantId, stored.Value.SourceWorkloadRtId)
             {
-                LastProjectedAt = stored.Value.ProjectedAt
+                LastProjectedAt = stored.Value.ProjectedAt,
+                Name = stored.Key.Key,
+                CkTypeId = SystemCommunicationCkIds.RtCkSecretDefaultTypeId.ToString(),
+                Value = stored.Value.RevealedValue is null
+                    ? null
+                    : SecretEncryption.Protector.Protect(stored.Value.RevealedValue)
             })
             .ToList();
         return new SecretDefaultInventory(SecretDefaultTenantAvailability.Available, storedDefaults);
