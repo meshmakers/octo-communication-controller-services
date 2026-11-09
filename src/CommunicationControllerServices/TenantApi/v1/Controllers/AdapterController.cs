@@ -568,12 +568,7 @@ public class AdapterController : ControllerBase
         {
             var result = await provisioningService.RotateAdapterSecretAsync(tenantId, adapter);
 
-            var message = result.RequiresPipelineRedeploy
-                ? $"The client secret of pipeline service account '{result.ClientId}' was rotated. " +
-                  "🔴 Redeploy the pipelines / data flows of this adapter — the adapter caches the credentials " +
-                  "in the pipeline configuration at registration time, so until then they still present the old secret."
-                : $"Adapter '{adapter.Name ?? adapterRtId}' had no pipeline service account; " +
-                  $"'{result.ClientId}' was provisioned instead. Nothing was invalidated.";
+            var message = BuildRotationMessage(result, adapter.Name ?? adapterRtId);
 
             await eventService.StoreInformationEventAsync(tenantId,
                 $"Pipeline service account secret rotated for adapter '{adapter.Name ?? adapterRtId}' " +
@@ -614,5 +609,19 @@ public class AdapterController : ControllerBase
                                "The previous secret remains in effect."
             });
         }
+    }
+
+    /// <summary>
+    /// The message of a rotation (AB#5032), shared by this endpoint and the CK method
+    /// <c>Adapter.RotateServiceAccountSecret</c> (AB#8595) so both answer the same. Never contains a secret.
+    /// </summary>
+    internal static string BuildRotationMessage(PipelineServiceAccountRotationResult result, string adapterDisplayName)
+    {
+        return result.RequiresPipelineRedeploy
+            ? $"The client secret of pipeline service account '{result.ClientId}' was rotated. " +
+              "🔴 Redeploy the pipelines / data flows of this adapter — the adapter caches the credentials " +
+              "in the pipeline configuration at registration time, so until then they still present the old secret."
+            : $"Adapter '{adapterDisplayName}' had no pipeline service account; " +
+              $"'{result.ClientId}' was provisioned instead. Nothing was invalidated.";
     }
 }

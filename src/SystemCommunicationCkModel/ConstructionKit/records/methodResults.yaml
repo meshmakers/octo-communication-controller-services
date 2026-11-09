@@ -1,0 +1,65 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+# AB#8595 (System.Communication 4.17.0) — the result records of the Adapter / AdapterPool CK methods. Each record has the
+# shape of the REST response of the same operation (ReconcileServiceAccountResultDto, RotateServiceAccountSecretResultDto,
+# AdapterPoolMirrorSyncResult, AdapterPoolLeaseResultDto), so the method answers what the REST endpoint answers.
+# New records take the ckLanguage 2 default `derivable: Model`: they are answers, not extension points.
+records:
+  - recordId: ServiceAccountReconcileResult
+    description: 'Result of Adapter.ReconcileServiceAccount: what the reconcile of the pipeline service account did. Never contains a secret.'
+    isFinal: true
+    attributes:
+      - id: ${this}/MethodResultOutcome
+        name: Outcome
+      - id: ${this}/MethodResultClientId
+        name: ClientId
+      - id: ${this}/MethodResultConfigurationWellKnownName
+        name: ConfigurationWellKnownName
+      - id: ${this}/MethodResultRoleChangesSkipped
+        name: RoleChangesSkipped
+      - id: ${this}/MethodResultMessage
+        name: Message
+  - recordId: ServiceAccountSecretRotationResult
+    description: 'Result of Adapter.RotateServiceAccountSecret. Deliberately carries no secret: the new secret is written into the ServiceAccountConfiguration and reaches the adapter on the next pipeline deploy, exactly as with the REST rotate endpoint.'
+    isFinal: true
+    attributes:
+      - id: ${this}/MethodResultClientId
+        name: ClientId
+      - id: ${this}/MethodResultConfigurationWellKnownName
+        name: ConfigurationWellKnownName
+      - id: ${this}/MethodResultWasCreated
+        name: WasCreated
+      - id: ${this}/MethodResultRequiresPipelineRedeploy
+        name: RequiresPipelineRedeploy
+      - id: ${this}/MethodResultMessage
+        name: Message
+  - recordId: AdapterPoolMirrorSyncResult
+    description: 'Result of AdapterPool.RefreshMirrors and AdapterPool.PublishMirrors: what the reconcile of the LentAdapterPool mirrors changed.'
+    isFinal: true
+    attributes:
+      - id: ${this}/MethodResultTenantsReconciled
+        name: TenantsReconciled
+      - id: ${this}/MethodResultMirrorsCreatedOrUpdated
+        name: MirrorsCreatedOrUpdated
+      - id: ${this}/MethodResultMirrorsRemoved
+        name: MirrorsRemoved
+      - id: ${this}/MethodResultLendersUnreadable
+        name: LendersUnreadable
+      - id: ${this}/MethodResultAdaptersRelinked
+        name: AdaptersRelinked
+      - id: ${this}/MethodResultIsNoOp
+        name: IsNoOp
+  - recordId: AdapterPoolLeaseResult
+    description: 'Result of AdapterPool.GrantLease: whether a lease was granted and on which member.'
+    isFinal: true
+    attributes:
+      - id: ${this}/MethodResultGranted
+        name: Granted
+      - id: ${this}/MethodResultLeaseId
+        name: LeaseId
+        isOptional: true
+      - id: ${this}/MethodResultMemberId
+        name: MemberId
+        isOptional: true
+      - id: ${this}/MethodResultStatusMessage
+        name: StatusMessage
+        isOptional: true

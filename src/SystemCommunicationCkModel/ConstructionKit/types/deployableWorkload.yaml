@@ -72,3 +72,16 @@ types:
     # for why `Hosts` and not `Deploys`, and for the three identifiers this moves.
     - id: ${this}/Hosts
       targetCkTypeId: ${this}/DeploymentSite
+  # AB#8595 (4.17.0, Feature AB#5697 F4.3): REST POST Adapter/{workloadRtId}/wake takes any workload (adapter, application
+  # or pool), so the method lives on the common base and every workload type inherits it. Handled by the communication
+  # controller; roles as on Adapter (see types/adapter.yaml).
+  methods:
+    - methodId: Wake-1
+      description: "Wakes a hibernated OnDemand workload: scales it to one replica and waits until it is registered and configured (budget LifecycleWakeBudgetSeconds, default 60 s). No-op for AlwaysOn workloads, for tenants without scale-to-zero and for running workloads (REST POST Adapter/{workloadRtId}/wake)."
+      errors:
+        - { code: WORKLOAD_WAKE_FAILED, description: "The workload did not reach the Configured state in the budget, or the operator could not scale it up. The wake may still complete in the cluster; retry shortly." }
+      authorization:
+        roles: [ CommunicationManagement ]
+      execution:
+        timeoutSeconds: 90
+        idempotent: true

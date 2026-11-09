@@ -31,11 +31,13 @@ internal class SystemCommunicationCkLanguage2Tests
     }
 
     [Test]
-    public async Task EmbeddedModel_IsSystemCommunication_4_16_0_OnCkLanguage2_WithTheCkV2MinEngineVersion()
+    public async Task EmbeddedModel_IsSystemCommunication_4_17_0_OnCkLanguage2_WithTheCkV2MinEngineVersion()
     {
         var root = await LoadEmbeddedSystemCommunicationAsync();
 
-        await Assert.That(root.ModelId.ToString()).IsEqualTo("System.Communication-4.16.0");
+        // AB#8595: 4.17.0 adds the Adapter / DeployableWorkload / AdapterPool methods (Minor, no sensitive marker, so the
+        // minimum engine version stays).
+        await Assert.That(root.ModelId.ToString()).IsEqualTo("System.Communication-4.17.0");
         await Assert.That(root.CkLanguage).IsEqualTo(2);
         // The compiler stamps minEngineVersion for a ckLanguage 2 model; the sources never set it. Pinned exactly: a
         // higher value means every service below it can no longer import System.Communication. A feature that raises it
@@ -49,6 +51,13 @@ internal class SystemCommunicationCkLanguage2Tests
     ///     the explicit <c>derivable: Any</c> every pre-existing type and record would be a MAJOR change (OCTO-CK200), and
     ///     the adapter, AI and energy models that derive from them would stop compiling (message 113).
     /// </summary>
+    /// <summary>The result records of the System.Communication methods (AB#8595, 4.17.0).</summary>
+    private static readonly string[] MethodResultRecords =
+    [
+        "ServiceAccountReconcileResult", "ServiceAccountSecretRotationResult", "AdapterPoolMirrorSyncResult",
+        "AdapterPoolLeaseResult"
+    ];
+
     [Test]
     public async Task EveryTypeAndRecord_StaysDerivableEverywhere()
     {
@@ -57,9 +66,15 @@ internal class SystemCommunicationCkLanguage2Tests
         var records = root.Records ?? [];
 
         await Assert.That(types.Count).IsEqualTo(32);
-        await Assert.That(records.Count).IsEqualTo(8);
+        // AB#8595 (4.17.0) adds four method result records; they are answers, not extension points, and keep the
+        // ckLanguage 2 default derivable: Model. Every record that existed before 4.17.0 stays derivable everywhere.
+        await Assert.That(records.Count).IsEqualTo(8 + MethodResultRecords.Length);
+        var newRecords = records.Where(r => MethodResultRecords.Contains(r.RecordId.Name)).ToList();
+        await Assert.That(newRecords.Count).IsEqualTo(MethodResultRecords.Length);
+        await Assert.That(newRecords.All(r => r.Derivable is null or CkDerivableDto.Model)).IsTrue();
         var notDerivable = types.Where(t => t.Derivable != CkDerivableDto.Any).Select(t => t.TypeId.Name)
-            .Concat(records.Where(r => r.Derivable != CkDerivableDto.Any).Select(r => r.RecordId.Name))
+            .Concat(records.Where(r => !MethodResultRecords.Contains(r.RecordId.Name) && r.Derivable != CkDerivableDto.Any)
+                .Select(r => r.RecordId.Name))
             .ToList();
         await Assert.That(notDerivable).IsEmpty();
     }
@@ -123,6 +138,11 @@ internal class SystemCommunicationCkLanguage2Tests
         await Assert.That(sensitive).IsEquivalentTo(new[] { "SecretDefaultValue" });
     }
 
+    /// <summary>
+    ///     The access tightening of SecretDefault.Value stays acknowledged in 4.17.0 (AB#8595): 4.16.0 was never published
+    ///     (publishSystemCkModels), so the published baseline is still 4.15.0 and the tightening is part of this release's
+    ///     diff. The entry goes with the first bump after a version carrying it has been published (OCTO-CK204).
+    /// </summary>
     [Test]
     public async Task TheAccessTightening_IsAcknowledged()
     {
