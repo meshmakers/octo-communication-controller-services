@@ -87,7 +87,7 @@ internal sealed partial class SecretDefaultProvisioningService
                 Logger.Error(reconcileFailure, "[{TenantId}] Secret defaults of tenant '{TargetTenantId}' could not " +
                                                "be reconciled", tenantId, reconciledTenantId);
                 results.Add(SecretDefaultTargetResult.Unchanged(reconciledTenantId,
-                    SecretDefaultTargetStatus.Reconciled) with { WritesFailed = 1 });
+                    SecretDefaultTargetStatus.Failed));
             }
         }
 

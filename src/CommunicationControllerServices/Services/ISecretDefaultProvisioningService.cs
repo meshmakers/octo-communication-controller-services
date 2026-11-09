@@ -83,7 +83,10 @@ public enum SecretDefaultTargetStatus
     ModelMissing,
 
     /// <summary>The tenant tree could not be read completely; the existing defaults were kept.</summary>
-    TreeUnreadable
+    TreeUnreadable,
+
+    /// <summary>The reconcile of the tenant failed as a whole (logged); what it changed before the failure stays.</summary>
+    Failed
 }
 
 /// <summary>Counts of the reconcile of one target tenant; never a value.</summary>

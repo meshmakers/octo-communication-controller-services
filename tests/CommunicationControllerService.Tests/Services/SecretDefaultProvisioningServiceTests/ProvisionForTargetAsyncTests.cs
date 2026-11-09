@@ -345,8 +345,10 @@ internal sealed class ProvisionForTargetAsyncTests : SecretDefaultProvisioningSe
 
         using var assertionScope = Assert.Multiple();
         await Assert.That(results.Count).IsEqualTo(4);
-        await Assert.That(results.Single(result => result.TenantId == SecondChildTenantId).WritesFailed)
-            .IsEqualTo(1);
+        await Assert.That(results.Single(result => result.TenantId == SecondChildTenantId).Status)
+            .IsEqualTo(SecretDefaultTargetStatus.Failed);
+        await Assert.That(results.Where(result => result.TenantId != SecondChildTenantId)
+            .All(result => result.Status == SecretDefaultTargetStatus.Reconciled)).IsTrue();
         await Assert.That(StoredDefault(GrandchildTenantId, CaptchaKey)).IsNotNull();
     }
 }
