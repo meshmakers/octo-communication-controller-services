@@ -118,21 +118,9 @@ public class WorkloadController : ControllerBase
 
             // Audit trail: operators inspect this in the event log when a CI
             // rollout misbehaves. Source tag distinguishes CI/CD-driven changes
-            // from manual Studio edits. "(latest)" is rendered for the empty
-            // sentinel so a CI/CD log line stays readable when the deploy
-            // pipeline pins MainLatest tenants to chase the rolling channel.
-            var newVersionLabel = normalisedChartVersion.Length == 0
-                ? "(latest)"
-                : normalisedChartVersion;
-            var previousVersionLabel = previousVersion switch
-            {
-                null => null,
-                "" => "(latest)",
-                _ => previousVersion,
-            };
-            var auditMessage = previousVersionLabel is null
-                ? $"Chart version for workload {workloadRtId} set to {newVersionLabel} (source: CI/CD)."
-                : $"Chart version for workload {workloadRtId} updated from {previousVersionLabel} to {newVersionLabel} (source: CI/CD).";
+            // from manual Studio edits.
+            var auditMessage = BuildChartVersionAuditMessage(workloadRtId, previousVersion, normalisedChartVersion,
+                "source: CI/CD");
             await _eventService.StoreInformationEventAsync(tenantId, auditMessage);
 
             return NoContent();
@@ -146,13 +134,37 @@ public class WorkloadController : ControllerBase
     }
 
     /// <summary>
+    /// The audit text of a chart version change (shared with the CK method <c>DeployableWorkload.SetChartVersion</c>,
+    /// AB#8596). "(latest)" is rendered for the empty sentinel so a CI/CD log line stays readable when the deploy
+    /// pipeline pins MainLatest tenants to chase the rolling channel.
+    /// </summary>
+    /// <param name="workloadRtId">The workload.</param>
+    /// <param name="previousVersion">The version before the change; null when none was set.</param>
+    /// <param name="newVersion">The normalised new version; empty means latest.</param>
+    /// <param name="source">The source tag, e.g. <c>source: CI/CD</c>.</param>
+    internal static string BuildChartVersionAuditMessage(OctoObjectId workloadRtId, string? previousVersion,
+        string newVersion, string source)
+    {
+        var newVersionLabel = newVersion.Length == 0 ? "(latest)" : newVersion;
+        var previousVersionLabel = previousVersion switch
+        {
+            null => null,
+            "" => "(latest)",
+            _ => previousVersion,
+        };
+        return previousVersionLabel is null
+            ? $"Chart version for workload {workloadRtId} set to {newVersionLabel} ({source})."
+            : $"Chart version for workload {workloadRtId} updated from {previousVersionLabel} to {newVersionLabel} ({source}).";
+    }
+
+    /// <summary>
     /// Cheap, format-only SemVer guard. We deliberately don't pull in a full
     /// SemVer library — the chart-version write itself doesn't care about
     /// ordering, only Helm at deploy time does, and Helm has its own (much
     /// stricter) validation. The intent here is to catch obvious typos before
     /// they reach Mongo, not to be RFC-perfect.
     /// </summary>
-    private static bool IsValidSemVer(string value)
+    internal static bool IsValidSemVer(string value)
     {
         // Accept MAJOR.MINOR.PATCH optionally followed by `-prerelease` and / or
         // `+buildmetadata`. Matches every Helm chart version Octo ships today.

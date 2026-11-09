@@ -209,9 +209,10 @@ execute command that reports the execution like the adapter hub does - the pipel
 this repository). The sample pipeline `Methods/SamplePipelines/Device.UpdateFirmware-1.pipeline.yaml` is the one printed
 in the guide and is the pipeline definition of the integration tests.
 
-### CK method service handlers (AB#8595, System.Communication 4.17.0)
+### CK method service handlers (AB#8595 / AB#8596, System.Communication 4.17.0 / 4.18.0)
 
-System.Communication 4.17.0 declares the adapter, workload and adapter pool operations of the REST API as CK methods
+System.Communication 4.17.0 declares the adapter, workload and adapter pool operations of the REST API as CK methods, 4.18.0
+the pipeline, data flow and workload chart-version operations
 (`handler: service`), and the controller handles them with the typed handler SDK of octo-common-services
 (`AddCkMethodHandlers`): one shared queue per method, announcement, heartbeat, caller token validation, the declared
 authorization and redaction are the host's. The REST endpoints are unchanged (client switch and deprecation: F5.3, AB#5701).
@@ -228,6 +229,13 @@ Code: `src/CommunicationControllerServices/Methods/Service/`. User guide: `octo-
 | `AdapterPool.PublishMirrors-1` | static | `POST AdapterPool/mirrors/publish` | `AdapterPoolPublishMirrorsHandler` | 120 s / yes |
 | `AdapterPool.GrantLease-1` | instance | `POST AdapterPool/{adapterPoolRtId}/lease` | `AdapterPoolGrantLeaseHandler` | 30 s / no |
 | `AdapterPool.CancelQueuedExecution-1` | instance | `DELETE AdapterPool/{adapterPoolRtId}/queue/{executionId}` | `AdapterPoolCancelQueuedExecutionHandler` | 15 s / no |
+| `Pipeline.Deploy-1` | instance | `POST Pipeline/deploy?adapterRtEntityId=&pipelineRtEntityId=` (body: definition) | `PipelineDeployHandler` | 200 s / yes |
+| `Pipeline.Execute-1` | instance | `POST Pipeline/execute?pipelineRtId=&isDryRun=` (body: input) | `PipelineExecuteHandler` | 30 s / no |
+| `Pipeline.SetDebugging-1` | instance | `PATCH Pipeline/{pipelineRtId}/debug` | `PipelineSetDebuggingHandler` | 300 s / yes |
+| `Pipeline.MoveToAdapter-1` | instance (one pipeline) | `PATCH Pipeline/move-to-adapter` | `PipelineMoveToAdapterHandler` | 200 s / yes |
+| `DataFlow.Deploy-1` | instance | `POST DataFlow/deploy?dataFlowRtId=` | `DataFlowDeployHandler` | 300 s / yes |
+| `DataFlow.Undeploy-1` | instance | `POST DataFlow/undeploy?dataFlowRtId=` | `DataFlowUndeployHandler` | 300 s / yes |
+| `DeployableWorkload.SetChartVersion-1` | instance (adapter, application, pool) | `PATCH Workload/{workloadRtId}/chart-version` | `DeployableWorkloadSetChartVersionHandler` | 15 s / yes |
 
 - **Adding a method (AB#8596 and later).** Declare it in the model (`handler: service` is the default), add a handler class in
   `Methods/Service/` that calls the same service as the REST endpoint, and add one row to `CommunicationMethodHost.Handlers`.
@@ -244,9 +252,33 @@ Code: `src/CommunicationControllerServices/Methods/Service/`. User guide: `octo-
   therefore not `sensitive`. Reconcile and rotation failures answer the declared error without the exception text (REST echoes
   it); the exception is logged with the invocation id. Redaction test: `Methods/Service/RotateServiceAccountSecretMethodRedactionTests`
   (real provisioning service: the generated secret is in no result, log line or event, on success and on failure).
+- **Timeouts and async candidates (AB#8596).** All methods are synchronous; no method sets `execution.mode` (omitted =
+  sync, the key alone would raise `minEngineVersion`). `Pipeline.Deploy` / `MoveToAdapter` budget one wake (60 s) plus one
+  push (120 s). `DataFlow.Deploy` / `Undeploy` and `Pipeline.SetDebugging` (it re-pushes the data flow) wake and push
+  adapter after adapter and use the maximum 300 s; they are the candidates for `execution.mode: async` once F3.6
+  (AB#5694) is available - a Major per method (`Deploy-2`, row M19).
+- **Sensitive parameters (AB#8596).** `Pipeline.Deploy.pipelineDefinition` (a definition can carry credentials) and
+  `Pipeline.Execute.input` are `sensitive`: the host keeps them out of logs, audit and traces. The handlers never log them
+  and pass every failure message through `CommunicationMethodSupport.Redact` (the value as a whole and each line of 8+
+  characters, plus the caller token), so a validation message that quotes a line does not echo it. Tests:
+  `CommunicationMethodHostTests.Pipeline` (integration, `AssertNeverEchoed`), `PipelineMethodSupportTests` (unit).
+- **What stays REST (AB#8596).** The tenant-level endpoints of `CommunicationController` are no type operations:
+  `enable` / `disable` toggle the communication capability of the tenant (role `TenantManagement`; they install or remove
+  the very model the method would be declared in), `GET`/`PUT lifecycle` is tenant configuration, `validate-expression` is
+  a stateless utility without an entity, and `encrypt-value` is deprecated (AB#5537, use `ValueOverride.SecretValue`) and
+  takes a secret, so it gets no new surface.
+- **Execute caller.** `Pipeline.Execute` passes the validated principal (`PipelineMethodInvoker.BuildCaller`, trust level 2)
+  and the caller token for delegation like REST; it passes no method-invocation marker (that is for `handler: pipeline`).
+  REST accepts the read-only scope for execute; the method requires `octo_api` (the host's scope rule) and the role.
+- **Audit texts.** The REST controllers and the handlers share the audit text builders
+  (`PipelineController.BuildMoveAuditMessage` / `BuildDebugAuditMessage`, `WorkloadController.BuildChartVersionAuditMessage`);
+  the methods write `source: User via CK method` or `source: CI/CD via CK method` (chart version).
 - **Differences to REST, all stricter:** an id that names no adapter is `METHOD_TARGET_NOT_FOUND` for `DeployUpdate`,
   `Reconcile...` and `Rotate...`; invalid lease parameters are `METHOD_VALIDATION_FAILED` (`adapterRtId`, `ttlSeconds` 1-3600,
-  `borrowerTenantId`); the audit events say `source: User via CK method`.
+  `borrowerTenantId`); the audit events say `source: User via CK method`. AB#8596: a pipeline that does not exist is
+  `METHOD_TARGET_NOT_FOUND` for `Pipeline.Deploy` / `Execute` / `SetDebugging` (REST 400/404), an unknown or malformed
+  `adapterRtId` / `targetAdapterRtId` and an invalid `chartVersion` are `METHOD_VALIDATION_FAILED`; `Pipeline.Deploy` without
+  `adapterRtId` deploys to the assigned adapter (`PIPELINE_ADAPTER_NOT_ASSIGNED` when there is none).
 - **Token.** `AddControllerCkMethodCallerTokenValidation` (shared with the pipeline handler, registered once) validates the
   forwarded token against `CommunicationController:AuthorityUrl` (`Methods:Token` overrides).
 - **Startup.** The SDK validates the registrations at order 15 against the CK cache of the **system tenant** (filled by the

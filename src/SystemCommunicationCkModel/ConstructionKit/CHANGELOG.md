@@ -1,5 +1,38 @@
 # Changelog
 
+## 4.18.0 - 2026-11-09
+
+_Required bump level: minor._
+
+### Added
+
+- Method 'DataFlow-1/Deploy-1' added _(minor — purely additive method)_
+- Method 'DataFlow-1/Undeploy-1' added _(minor — purely additive method)_
+- Method 'DeployableWorkload-1/SetChartVersion-1' added _(minor — purely additive method)_
+- Method 'Pipeline-1/Deploy-1' added _(minor — purely additive method)_
+- Method 'Pipeline-1/Execute-1' added _(minor — purely additive method)_
+- Method 'Pipeline-1/SetDebugging-1' added _(minor — purely additive method)_
+- Method 'Pipeline-1/MoveToAdapter-1' added _(minor — purely additive method)_
+- Attribute 'MethodResultAppliedToRunningAdapter-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultDebuggingEnabled-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultExecutionId-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultNewAdapterRtId-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultOldAdapterRtId-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultStartedAt-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultWarning-1' added _(minor — purely additive element)_
+- Record 'PipelineDebugResult-1' added _(minor — purely additive element)_
+- Record 'PipelineExecutionStartResult-1' added _(minor — purely additive element)_
+- Record 'PipelineMoveResult-1' added _(minor — purely additive element)_
+
+The Pipeline, DataFlow and workload chart-version operations of the REST API as CK methods (AB#8596, Feature AB#5697 F4.3),
+handled by the communication controller (`handler: service`); the REST endpoints are unchanged. Every method declares
+`roles: [CommunicationManagement]`. `Pipeline.Deploy.pipelineDefinition` and `Pipeline.Execute.input` are `sensitive`
+parameters (never logged, audited or traced); no result is sensitive and no method sets `execution.mode` (omitted = sync),
+so `minEngineVersion` stays 3.5.1. `DataFlow.Deploy`, `DataFlow.Undeploy` and `Pipeline.SetDebugging` use the maximum
+timeout of 300 s and are candidates for `execution.mode: async` once F3.6 (AB#5694) is available. The tenant-level
+operations of `CommunicationController` (enable/disable, lifecycle, validate-expression, encrypt-value) stay REST service
+endpoints. No access changes and no acknowledgement.
+
 ## 4.17.0 - 2026-11-09
 
 _Required bump level: minor._

@@ -34,3 +34,66 @@ types:
         targetCkTypeId: ${System}/Configuration
       - id: ${this}/SendsDataTo
         targetCkTypeId: ${this}/Pipeline
+    # AB#8596 (4.18.0, Feature AB#5697 F4.3): the operations of the REST PipelineController as CK methods, handled by the
+    # communication controller (handler: service). Roles as on Adapter (see types/adapter.yaml): the REST policies ask only
+    # for the scope octo_api, a method without roles admits administrators only. All methods are synchronous (no
+    # execution.mode key: omitted equals sync, and the key alone would raise minEngineVersion).
+    methods:
+      - methodId: Deploy-1
+        description: "Validates, persists and deploys the pipeline to its adapter (REST POST Pipeline/deploy). Wakes a hibernated OnDemand adapter first; a Leased adapter receives the definition with its next lease."
+        parameters:
+          - { name: adapterRtId, valueType: String, isOptional: true, description: "RtId (24 hexadecimal characters) of the adapter to deploy to. Default: the adapter the pipeline is assigned to." }
+          - { name: pipelineDefinition, valueType: String, isOptional: true, sensitive: true, description: "A pipeline definition (YAML) that replaces the stored one before the deploy. Default: the stored definition. Sensitive: a definition can carry credentials, so it is never logged, audited or traced." }
+        errors:
+          - { code: PIPELINE_ADAPTER_NOT_ASSIGNED, description: "No adapterRtId was given and the pipeline is not assigned to an adapter." }
+          - { code: PIPELINE_DEPLOY_REJECTED, description: "The adapter rejected the pipeline definition (REST 422). Parameter message names the cause." }
+          - { code: PIPELINE_DEPLOY_FAILED, description: "The deploy did not happen, e.g. the adapter is not deployed or not connected (REST 404/400). Parameter message names the cause." }
+        authorization:
+          roles: [ CommunicationManagement ]
+        execution:
+          timeoutSeconds: 200
+          idempotent: true
+      - methodId: Execute-1
+        description: "Starts one execution of the pipeline on its adapter and returns its id without waiting for the end (REST POST Pipeline/execute). The caller is passed to a FromExecutePipelineCommand pipeline as with REST."
+        parameters:
+          - { name: input, valueType: String, isOptional: true, sensitive: true, description: "Input of the execution (the REST request body). Sensitive: input data is never logged, audited or traced." }
+          - { name: isDryRun, valueType: Boolean, isOptional: true, description: "True runs the pipeline with every dry-run-honouring Load node suppressing its side effect. Default false." }
+        result:
+          valueType: Record
+          valueCkRecordId: ${this}/PipelineExecutionStartResult
+        errors:
+          - { code: PIPELINE_EXECUTION_START_FAILED, description: "The execution could not be started, e.g. the adapter is offline. Parameter message names the cause." }
+        authorization:
+          roles: [ CommunicationManagement ]
+        execution:
+          timeoutSeconds: 30
+          idempotent: false
+      - methodId: SetDebugging-1
+        description: "Switches debug capture of the pipeline on or off, persists it and re-pushes the data flow when the adapter is online (REST PATCH Pipeline/{pipelineRtId}/debug). An offline adapter receives the change with its next deploy."
+        parameters:
+          - { name: enabled, valueType: Boolean, description: "The desired debug state." }
+        result:
+          valueType: Record
+          valueCkRecordId: ${this}/PipelineDebugResult
+        errors:
+          - { code: PIPELINE_DEBUG_CHANGE_FAILED, description: "The debug state could not be changed, e.g. the pipeline belongs to no data flow or the adapter rejected the configuration. Parameter message names the cause." }
+        authorization:
+          roles: [ CommunicationManagement ]
+        execution:
+          timeoutSeconds: 300
+          idempotent: true
+      - methodId: MoveToAdapter-1
+        description: "Assigns the pipeline to another adapter and optionally redeploys it there (REST PATCH Pipeline/move-to-adapter, one pipeline per call). A failed redeploy does not roll the move back; the result carries a warning."
+        parameters:
+          - { name: targetAdapterRtId, valueType: String, description: "RtId (24 hexadecimal characters) of the new adapter." }
+          - { name: redeploy, valueType: Boolean, isOptional: true, description: "True redeploys the pipeline on the new adapter after the move. Default false." }
+        result:
+          valueType: Record
+          valueCkRecordId: ${this}/PipelineMoveResult
+        errors:
+          - { code: PIPELINE_MOVE_FAILED, description: "The pipeline could not be moved, e.g. the target adapter does not exist. Parameter message names the cause." }
+        authorization:
+          roles: [ CommunicationManagement ]
+        execution:
+          timeoutSeconds: 200
+          idempotent: true

@@ -12,7 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Methods.Service;
 
 /// <summary>
-///     AB#8595 — the contract of the System.Communication methods the controller handles: what the CK model declares for
+///     AB#8595, AB#8596 — the contract of the System.Communication methods the controller handles: what the CK model declares for
 ///     each of them (roles, timeout, idempotency, no sensitive marker) and how the host is wired. The calls themselves run
 ///     through the real host in the integration tests (<c>CommunicationMethodHostTests</c> there).
 /// </summary>
@@ -28,7 +28,25 @@ internal class CommunicationMethodHostTests
         [SystemCommunicationCkIds.AdapterPoolRefreshMirrorsMethodId] = (120, true, false),
         [SystemCommunicationCkIds.AdapterPoolPublishMirrorsMethodId] = (120, true, false),
         [SystemCommunicationCkIds.AdapterPoolGrantLeaseMethodId] = (30, false, true),
-        [SystemCommunicationCkIds.AdapterPoolCancelQueuedExecutionMethodId] = (15, false, true)
+        [SystemCommunicationCkIds.AdapterPoolCancelQueuedExecutionMethodId] = (15, false, true),
+        // AB#8596
+        [SystemCommunicationCkIds.PipelineDeployMethodId] = (200, true, true),
+        [SystemCommunicationCkIds.PipelineExecuteMethodId] = (30, false, true),
+        [SystemCommunicationCkIds.PipelineSetDebuggingMethodId] = (300, true, true),
+        [SystemCommunicationCkIds.PipelineMoveToAdapterMethodId] = (200, true, true),
+        [SystemCommunicationCkIds.DataFlowDeployMethodId] = (300, true, true),
+        [SystemCommunicationCkIds.DataFlowUndeployMethodId] = (300, true, true),
+        [SystemCommunicationCkIds.DeployableWorkloadSetChartVersionMethodId] = (15, true, true)
+    };
+
+    /// <summary>
+    ///     Method id → the parameters declared <c>sensitive</c> (AB#8596): a pipeline definition can carry credentials, an
+    ///     execution input can carry anything. Every other parameter and every result is not sensitive.
+    /// </summary>
+    private static readonly Dictionary<string, string[]> SensitiveParameters = new()
+    {
+        [SystemCommunicationCkIds.PipelineDeployMethodId] = ["pipelineDefinition"],
+        [SystemCommunicationCkIds.PipelineExecuteMethodId] = ["input"]
     };
 
     private static async Task<Dictionary<string, CkMethodDto>> LoadDeclaredMethodsAsync()
@@ -60,10 +78,12 @@ internal class CommunicationMethodHostTests
     /// <summary>
     ///     The REST policy asks for the scope <c>octo_api</c> only; a method without roles would admit administrators only
     ///     (default-deny of the evaluator), so every method declares <c>CommunicationManagement</c>. Timeout and
-    ///     idempotency are explicit, nothing is sensitive (the rotation result carries no secret), the handler is the service.
+    ///     idempotency are explicit, no result is sensitive (the rotation result carries no secret), only the listed
+    ///     parameters are, the handler is the service, no method sets <c>execution.mode</c> (omitted = sync; the key would
+    ///     raise minEngineVersion) and every timeout stays within the accept bound of 300 s.
     /// </summary>
     [Test]
-    public async Task EveryMethod_DeclaresTheRole_TheTimeout_TheIdempotency_AndNothingSensitive()
+    public async Task EveryMethod_DeclaresTheRole_TheTimeout_TheIdempotency_AndOnlyTheListedSensitiveParameters()
     {
         var declared = await LoadDeclaredMethodsAsync();
 
@@ -78,7 +98,9 @@ internal class CommunicationMethodHostTests
             await Assert.That(method.Execution.Handler is null or CkMethodHandlers.Service).IsTrue();
             await Assert.That(method.Execution.Mode).IsNull();
             await Assert.That(method.Kind).IsEqualTo(instance ? CkMethodKindDto.Instance : CkMethodKindDto.Static);
-            await Assert.That((method.Parameters ?? []).Any(p => p.Sensitive)).IsFalse();
+            await Assert.That((method.Parameters ?? []).Where(p => p.Sensitive).Select(p => p.Name).ToArray())
+                .IsEquivalentTo(SensitiveParameters.GetValueOrDefault(methodId, []));
+            await Assert.That(method.Execution.TimeoutSeconds ?? int.MaxValue).IsLessThanOrEqualTo(300);
             await Assert.That(method.Result?.Sensitive ?? false).IsFalse();
         }
     }

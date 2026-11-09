@@ -24,8 +24,8 @@ internal sealed record CommunicationMethodHandlerRegistration(
 
 /// <summary>
 ///     The one place that hosts the <c>handler: service</c> CK methods of System.Communication in the communication controller
-///     (AB#8595, Feature AB#5697 F4.3). A later story (AB#8596: Pipeline, DataFlow, workload chart version) adds a handler class
-///     and one row to <see cref="Handlers" />; host, caller token validation and the switch are set up here.
+///     (AB#8595, AB#8596, Feature AB#5697 F4.3). A new method adds a handler class and one row to <see cref="Handlers" />;
+///     host, caller token validation and the switch are set up here.
 /// </summary>
 /// <remarks>
 ///     <para>
@@ -52,7 +52,7 @@ internal static class CommunicationMethodHost
     /// <summary>Name of this service in the method handler registry.</summary>
     public const string ServiceName = "CommunicationControllerService";
 
-    /// <summary>All handlers of the controller (AB#8595).</summary>
+    /// <summary>All handlers of the controller (AB#8595, AB#8596).</summary>
     public static IReadOnlyList<CommunicationMethodHandlerRegistration> Handlers { get; } =
     [
         For<AdapterDeployUpdateHandler>(SystemCommunicationCkIds.AdapterDeployUpdateMethodId,
@@ -71,7 +71,23 @@ internal static class CommunicationMethodHost
         For<AdapterPoolGrantLeaseHandler>(SystemCommunicationCkIds.AdapterPoolGrantLeaseMethodId,
             "POST {tenantId}/v1/AdapterPool/{adapterPoolRtId}/lease"),
         For<AdapterPoolCancelQueuedExecutionHandler>(SystemCommunicationCkIds.AdapterPoolCancelQueuedExecutionMethodId,
-            "DELETE {tenantId}/v1/AdapterPool/{adapterPoolRtId}/queue/{executionId}")
+            "DELETE {tenantId}/v1/AdapterPool/{adapterPoolRtId}/queue/{executionId}"),
+
+        // AB#8596: Pipeline, DataFlow and the workload chart version.
+        For<PipelineDeployHandler>(SystemCommunicationCkIds.PipelineDeployMethodId,
+            "POST {tenantId}/v1/Pipeline/deploy?adapterRtEntityId=&pipelineRtEntityId="),
+        For<PipelineExecuteHandler>(SystemCommunicationCkIds.PipelineExecuteMethodId,
+            "POST {tenantId}/v1/Pipeline/execute?pipelineRtId=&isDryRun="),
+        For<PipelineSetDebuggingHandler>(SystemCommunicationCkIds.PipelineSetDebuggingMethodId,
+            "PATCH {tenantId}/v1/Pipeline/{pipelineRtId}/debug"),
+        For<PipelineMoveToAdapterHandler>(SystemCommunicationCkIds.PipelineMoveToAdapterMethodId,
+            "PATCH {tenantId}/v1/Pipeline/move-to-adapter"),
+        For<DataFlowDeployHandler>(SystemCommunicationCkIds.DataFlowDeployMethodId,
+            "POST {tenantId}/v1/DataFlow/deploy?dataFlowRtId="),
+        For<DataFlowUndeployHandler>(SystemCommunicationCkIds.DataFlowUndeployMethodId,
+            "POST {tenantId}/v1/DataFlow/undeploy?dataFlowRtId="),
+        For<DeployableWorkloadSetChartVersionHandler>(SystemCommunicationCkIds.DeployableWorkloadSetChartVersionMethodId,
+            "PATCH {tenantId}/v1/Workload/{workloadRtId}/chart-version")
     ];
 
     /// <summary>Reads the options (the host registration runs before the service provider exists).</summary>

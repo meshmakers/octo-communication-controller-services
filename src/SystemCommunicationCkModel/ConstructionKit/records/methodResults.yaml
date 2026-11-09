@@ -63,3 +63,31 @@ records:
       - id: ${this}/MethodResultStatusMessage
         name: StatusMessage
         isOptional: true
+  # AB#8596 (4.18.0): the result records of the Pipeline CK methods.
+  - recordId: PipelineExecutionStartResult
+    description: 'Result of Pipeline.Execute: the execution that was started. The pipeline runs on; the method does not wait for it.'
+    isFinal: true
+    attributes:
+      - id: ${this}/MethodResultExecutionId
+        name: ExecutionId
+      - id: ${this}/MethodResultStartedAt
+        name: StartedAt
+  - recordId: PipelineDebugResult
+    description: 'Result of Pipeline.SetDebugging: the persisted debug state and whether the running adapter received it.'
+    isFinal: true
+    attributes:
+      - id: ${this}/MethodResultDebuggingEnabled
+        name: Enabled
+      - id: ${this}/MethodResultAppliedToRunningAdapter
+        name: AppliedToRunningAdapter
+  - recordId: PipelineMoveResult
+    description: 'Result of Pipeline.MoveToAdapter: the adapter before and after the move, and a warning when the optional redeploy failed (the move stays committed).'
+    isFinal: true
+    attributes:
+      - id: ${this}/MethodResultOldAdapterRtId
+        name: OldAdapterRtId
+      - id: ${this}/MethodResultNewAdapterRtId
+        name: NewAdapterRtId
+      - id: ${this}/MethodResultWarning
+        name: Warning
+        isOptional: true

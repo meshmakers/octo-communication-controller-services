@@ -85,3 +85,14 @@ types:
       execution:
         timeoutSeconds: 90
         idempotent: true
+    # AB#8596 (4.18.0): REST PATCH Workload/{workloadRtId}/chart-version takes any workload, so the method lives on the
+    # common base like Wake.
+    - methodId: SetChartVersion-1
+      description: "Sets the Helm chart version of the workload (REST PATCH Workload/{workloadRtId}/chart-version). Empty or absent means: the newest chart of the configured repository. Does not deploy; deploy the workload afterwards."
+      parameters:
+        - { name: chartVersion, valueType: String, isOptional: true, description: "A SemVer (1.2.3, 1.2.3-beta.1); empty or absent = the newest chart in the configured repository." }
+      authorization:
+        roles: [ CommunicationManagement ]
+      execution:
+        timeoutSeconds: 15
+        idempotent: true
