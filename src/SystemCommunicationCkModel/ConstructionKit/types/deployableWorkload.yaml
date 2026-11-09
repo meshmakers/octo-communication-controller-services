@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
 - typeId: DeployableWorkload
+  derivable: Any
   description: 'Abstract base type for workloads that the Communication Operator deploys to Kubernetes via Helm. Carries the chart reference, base values.yaml, and structured value overrides shared by Adapter and Application.'
   isAbstract: true
   derivedFromCkTypeId: ${this}/DeployableEntity

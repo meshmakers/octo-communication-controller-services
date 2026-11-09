@@ -13,6 +13,7 @@ types:
 # `Manages` / `ManagedBy` -> `Hosts` / `HostedBy` (associations/hosts.yaml). Both halves move
 # together so the estate takes one migration instead of two (concept §8, Q18).
 - typeId: DeploymentSite
+  derivable: Any
   description: A deployment location that the Communication Operator serves — a cloud environment or a named edge site. Workloads are assigned to a site via the Hosts role, and the operator responsible for the site registers via SignalR to deploy and monitor them. Renamed from `Pool` in 4.0.0; the old name described a grouping the type never had and collided with the adapter pool introduced by AB#4924.
   derivedFromCkTypeId: ${this}/DeployableEntity
   isFinal: true

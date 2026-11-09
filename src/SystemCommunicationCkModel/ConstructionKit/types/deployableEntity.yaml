@@ -1,6 +1,9 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
 - typeId: DeployableEntity
+  derivable: Any
+  implements:
+    - ${System}/Describable-1
   description: Abstract base type for entities that can be deployed to adapters or pools. Tracks deployment state, name, description, and status messages.
   isAbstract: true
   derivedFromCkTypeId: ${System}/Entity

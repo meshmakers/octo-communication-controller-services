@@ -1,6 +1,18 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-meta.schema.json
-modelId: System.Communication-4.15.0
+# 4.16.0 (AB#8594, Feature AB#5697 F4.3, Epic AB#5584) is the FIRST ckLanguage 2 release of System.Communication,
+# a Minor against 4.15.0. Raising the language flips the `derivable` default of types and records from Any to Model
+# (a Major of its own, row T6 of docs/ck-semver-rules.md in octo-construction-kit-engine), so every pre-existing type
+# and record declares `derivable: Any` explicitly. The System floor moves from 2.5 to 2.7 for the System interfaces
+# (row D1: Minor, because 4.15.0 already resolved System 2.8.0). The only access tightening is SecretDefault.Value
+# (Hidden, row T7a, acknowledged below). See CLAUDE.md "System.Communication on ckLanguage 2". New types default to
+# `derivable: Model`; declare `derivable: Any` where another model should derive from them.
+modelId: System.Communication-4.16.0
+ckLanguage: 2
 description: Construction kit model for the OctoMesh Communication Controller. Defines adapters, adapter pools, deployment sites, pipelines, triggers, configurations, and execution tracking for data ingress and egress.
 dependencies:
-  - System-[2.5,3.0)
+  - System-[2.7,3.0)
   - System.Bot-[3.4,4.0)
+compatibility:
+  acknowledge:
+    - change: "TypeAttribute:SecretDefault-1/Value#Modified:access"
+      reason: "AB#8594: SecretDefault.Value is platform-only (AB#7243); only the controller writes it through its repository, no client reads or writes it through GraphQL, REST, MCP, import or export, so Hidden closes the generic API path without breaking a caller"

@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 records:
   - recordId: SignalRegistrationEvent
+    derivable: Any
     description: One audited Signal channel registration attempt (AB#5143). Appended server-side by the Communication Controller for every register/verify/delete attempt, including failures (captcha required, rate limited, wrong code). Stored newest-first on SignalChannel.RegistrationHistory, capped at the newest 50 entries; clients never write these.
     isFinal: true
     isAbstract: false

@@ -21,6 +21,10 @@ types:
 # octo-identity-services: the lender pushes changes down, the borrower never polls up. Every
 # attribute is therefore runtime state — see attributes/lentAdapterPool.yaml.
 - typeId: LentAdapterPool
+  derivable: Any
+  implements:
+    - ${System}/Named-1
+    - ${System}/Describable-1
   description: 'A borrower-local mirror of an AdapterPool owned by an ancestor or sibling tenant (AB#5271). Exists so a borrowing tenant can see, list and reference the pools lent to it, none of which is possible against an entity in another tenant database. Display and association only: the lease-time decision always re-reads the lending tenant''s own pool, so this mirror can never widen what a borrower is allowed to use. Provisioned and kept in sync by the Communication Controller; never author-set.'
   derivedFromCkTypeId: ${System}/Entity
   isFinal: true

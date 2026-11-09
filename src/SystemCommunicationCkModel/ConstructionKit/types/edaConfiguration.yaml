@@ -1,6 +1,7 @@
 ﻿$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
   - typeId: EdaConfiguration
+    derivable: Any
     derivedFromCkTypeId: ${System}/Configuration
     description: "Configuration for EDA integration"
     attributes:

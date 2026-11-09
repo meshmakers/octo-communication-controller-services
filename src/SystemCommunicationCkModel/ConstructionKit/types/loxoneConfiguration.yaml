@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
   - typeId: LoxoneConfiguration
+    derivable: Any
     derivedFromCkTypeId: ${System}/Configuration
     description: "Configuration for connecting to a Loxone Miniserver via REST API"
     isFinal: true
