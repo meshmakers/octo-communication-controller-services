@@ -274,7 +274,10 @@ internal partial class ServiceAccountRightsAnalysisService(
 
         if (declaredRoles != null)
         {
-            var declared = new HashSet<string>(declaredRoles, StringComparer.Ordinal);
+            // AB#8563: the account holds its declaration plus the baseline, so a type the baseline
+            // grants is covered.
+            var declared = new HashSet<string>(
+                PipelineServiceAccountProvisioningService.EffectiveRoleNames(declaredRoles), StringComparer.Ordinal);
             foreach (var (_, grantingRoles) in fullScopeRolesByType)
             {
                 if (grantingRoles.Overlaps(declared))
@@ -294,8 +297,12 @@ internal partial class ServiceAccountRightsAnalysisService(
                 protectedTypes.SelectMany(e => e.GrantingRoles), StringComparer.Ordinal);
             foreach (var role in declaredRoles)
             {
+                // AB#8563: the reconciled baseline (StreamDataReader) is never superfluous either —
+                // every account holds it whether declared or not.
                 if (PipelineServiceAccountProvisioningService.DefaultAssignedRoleNames
-                    .Contains(role, StringComparer.Ordinal))
+                        .Contains(role, StringComparer.Ordinal) ||
+                    PipelineServiceAccountProvisioningService.BaselineRoleNames
+                        .Contains(role, StringComparer.Ordinal))
                 {
                     baselineRoles.Add(role);
                 }

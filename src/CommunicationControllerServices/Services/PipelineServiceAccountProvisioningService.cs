@@ -63,6 +63,30 @@ internal class PipelineServiceAccountProvisioningService(
     internal static readonly string[] DefaultAssignedRoleNames = [CommonConstants.CommunicationManagementRole];
 
     /// <summary>
+    /// AB#8563: roles every <b>declarative</b> pipeline service account holds on top of its
+    /// declaration. The asset repository gates stream-data reads on <c>StreamDataReader</c>,
+    /// <c>StreamDataWriter</c> or <c>StreamDataAdmin</c> (AB#8559, <c>StreamDataReadAuthorization:RoleEnforcement</c>);
+    /// pipelines that read archives (EC allocation, billing, simulation) run as this account, so
+    /// under <c>Enforce</c> an account with only the declared default would be refused with
+    /// <c>StreamDataReadRoleRequired</c>. The baseline is added when the declaration is
+    /// materialised (<see cref="EffectiveRoleNames" />) and is <b>not</b> persisted into
+    /// <c>AssignedRoleNames</c>: the declaration stays what the operator wrote, existing accounts
+    /// pick the role up on their next system-initiated reconcile without a data migration, and
+    /// a declaration can extend the baseline but not drop it.
+    /// </summary>
+    internal static readonly string[] BaselineRoleNames = [CommonConstants.StreamDataReaderRole];
+
+    /// <summary>
+    /// AB#8563: the role set a declarative account is synced to — the declared roles (order kept)
+    /// followed by every <see cref="BaselineRoleNames">baseline role</see> the declaration does not
+    /// already name. Ordinal, like the identity-side declaration and the health check.
+    /// </summary>
+    internal static string[] EffectiveRoleNames(IEnumerable<string> declaredRoleNames)
+    {
+        return declaredRoleNames.Concat(BaselineRoleNames).Distinct(StringComparer.Ordinal).ToArray();
+    }
+
+    /// <summary>
     /// Recognises the <c>{{service.authority}}</c> token, case-insensitively and tolerant of the
     /// same inner whitespace <c>WorkloadTemplateResolver.PlaceholderPattern</c> accepts — the check
     /// must never be stricter than the resolver, or a value the projection resolves fine would be
@@ -508,7 +532,9 @@ internal class PipelineServiceAccountProvisioningService(
         var roleChangesSkipped = false;
         if (declaredRoleNames != null || isNewEntity)
         {
-            var declared = declaredRoleNames?.ToArray() ?? DefaultAssignedRoleNames;
+            // AB#8563: the declaration plus the baseline (StreamDataReader) — added, never replacing
+            // a declared role.
+            var declared = EffectiveRoleNames(declaredRoleNames ?? (IEnumerable<string>)DefaultAssignedRoleNames);
             if (context.MaterializeRoles)
             {
                 rolesToMaterialize = declared;

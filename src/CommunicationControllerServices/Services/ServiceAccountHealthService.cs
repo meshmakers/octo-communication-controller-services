@@ -439,10 +439,14 @@ internal class ServiceAccountHealthService(
                 "The client's role assignment could not be read from the identity service.");
         }
 
+        // AB#8563: the reconcile syncs to the declaration plus the baseline (StreamDataReader), so
+        // the baseline is expected, not drift — and missing when the edge is absent.
+        var expectedRoleNames = PipelineServiceAccountProvisioningService.EffectiveRoleNames(declaredRoleNames);
+
         // Ordinal on purpose: role names are exact identifiers tenant-side (the reconcile
         // materialises them verbatim), so a case-folded "match" would hide a real mismatch.
-        var missing = declaredRoleNames.Except(actualRoleNames, StringComparer.Ordinal).ToList();
-        var superfluous = actualRoleNames.Except(declaredRoleNames, StringComparer.Ordinal).ToList();
+        var missing = expectedRoleNames.Except(actualRoleNames, StringComparer.Ordinal).ToList();
+        var superfluous = actualRoleNames.Except(expectedRoleNames, StringComparer.Ordinal).ToList();
 
         if (missing.Count == 0 && superfluous.Count == 0)
         {
