@@ -88,7 +88,7 @@ internal class ServiceAccountHealthTests
                     ClientId = callInfo.ArgAt<string>(1),
                     AllowedGrantTypes = ["client_credentials", LocalConstants.OnBehalfOfGrantType]
                 },
-                [CommonConstants.CommunicationManagementRole], null));
+                [CommonConstants.CommunicationManagementRole, CommonConstants.StreamDataReaderRole], null));
     }
 
     private static ServiceAccountHealthCheckDto Check(ServiceAccountHealthDto dto, string name)
@@ -275,7 +275,7 @@ internal class ServiceAccountHealthTests
                     ClientId = "client-id",
                     AllowedGrantTypes = ["client_credentials", LocalConstants.OnBehalfOfGrantType]
                 },
-                ["RoleB", "RoleC"], null));
+                ["RoleB", "RoleC", CommonConstants.StreamDataReaderRole], null));
 
         var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
 
@@ -288,6 +288,30 @@ internal class ServiceAccountHealthTests
         await Assert.That(roles.SuperfluousRoles!).IsEquivalentTo(new[] { "RoleC" });
         await Assert.That(roles.Message!).Contains("'RoleA'");
         await Assert.That(roles.Message!).Contains("'RoleC'");
+    }
+
+    [Test]
+    public async Task GetConfigurationHealth_BaselineEdgeMissing_ReportsStreamDataReaderMissing()
+    {
+        // AB#8563: an account the reconcile has not reached since the baseline was introduced.
+        var sut = CreateSut();
+        var configuration = CreateHealthyConfiguration();
+        _identityReader.GetClientAsync(TenantId, "client-id", true)
+            .Returns(new IdentityClientLookup(IdentityClientLookupStatus.Found,
+                new ClientDto
+                {
+                    ClientId = "client-id",
+                    AllowedGrantTypes = ["client_credentials", LocalConstants.OnBehalfOfGrantType]
+                },
+                [CommonConstants.CommunicationManagementRole], null));
+
+        var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
+
+        using var _ = Assert.Multiple();
+        var roles = Check(dto, "roles");
+        await Assert.That(roles.Code).IsEqualTo("roles-drift");
+        await Assert.That(roles.MissingRoles!).IsEquivalentTo(new[] { CommonConstants.StreamDataReaderRole });
+        await Assert.That(roles.SuperfluousRoles!).IsEmpty();
     }
 
     [Test]
@@ -328,7 +352,7 @@ internal class ServiceAccountHealthTests
         _identityReader.GetClientAsync(TenantId, "client-id", true)
             .Returns(new IdentityClientLookup(IdentityClientLookupStatus.Found,
                 new ClientDto { ClientId = "client-id", AllowedGrantTypes = ["client_credentials"] },
-                [CommonConstants.CommunicationManagementRole], null));
+                [CommonConstants.CommunicationManagementRole, CommonConstants.StreamDataReaderRole], null));
 
         var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
 

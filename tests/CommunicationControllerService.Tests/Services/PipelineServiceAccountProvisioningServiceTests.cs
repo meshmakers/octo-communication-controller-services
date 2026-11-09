@@ -157,7 +157,7 @@ internal class PipelineServiceAccountProvisioningServiceTests
     }
 
     [Test]
-    public async Task Provision_FreshAdapter_AssignsTheCommunicationManagementRole()
+    public async Task Provision_FreshAdapter_AssignsCommunicationManagementAndStreamDataReader()
     {
         var adapter = RtEntityCreator.CreateAdapter();
 
@@ -167,8 +167,10 @@ internal class PipelineServiceAccountProvisioningServiceTests
         // The controller's own policies gate on the octo_api SCOPE, not on a role — but the AB#5031
         // delegated token is the INTERSECTION of service-account and user roles, so a role the
         // service account does not hold can never reach a delegated token.
+        // AB#8563: plus the baseline StreamDataReader, so archive-reading pipelines keep working
+        // when the asset repository enforces the stream-data read role.
         await Assert.That(client.AssignedRoleNames)
-            .IsEquivalentTo(new[] { CommonConstants.CommunicationManagementRole });
+            .IsEquivalentTo(new[] { CommonConstants.CommunicationManagementRole, CommonConstants.StreamDataReaderRole });
     }
 
     [Test]

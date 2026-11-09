@@ -389,6 +389,54 @@ internal class ServiceAccountRightsAnalysisTests
     }
 
     [Test]
+    public async Task AnalyzeAdapter_DeclaredStreamDataReader_IsBaselineNotSuperfluous()
+    {
+        // AB#8563: StreamDataReader is reconciled onto every declarative pipeline SA; declaring it
+        // explicitly must not be reported as superfluous.
+        var sut = CreateSut();
+        var configuration = CreateDeclaredConfiguration(CommonConstants.CommunicationManagementRole,
+            CommonConstants.StreamDataReaderRole);
+        var pipeline = CreateNamedPipeline("import", $"""
+            transformations:
+              - type: GetRtEntities@1
+                ckTypeId: {DocumentType}
+            """);
+        var adapter = ArrangeAdapterWithPipelines(configuration, pipeline);
+
+        var policy = CreatePolicy("DocumentPolicy", [DocumentType]);
+        ArrangeIdentityGraph((policy, CreatePermission("document.read"), ["Reader"]));
+
+        var dto = await sut.AnalyzeAdapterAsync(TenantId, adapter);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(dto.SuperfluousRoles).IsEmpty();
+        await Assert.That(dto.BaselineRoles).IsEquivalentTo(
+            new List<string> { CommonConstants.CommunicationManagementRole, CommonConstants.StreamDataReaderRole });
+    }
+
+    [Test]
+    public async Task AnalyzeAdapter_TypeGrantedByTheBaseline_IsNotMissing()
+    {
+        // AB#8563: a protected type whose policy grants StreamDataReader is covered by the baseline
+        // even when the declaration does not name the role.
+        var sut = CreateSut();
+        var configuration = CreateDeclaredConfiguration(CommonConstants.CommunicationManagementRole);
+        var pipeline = CreateNamedPipeline("import", $"""
+            transformations:
+              - type: GetRtEntities@1
+                ckTypeId: {DocumentType}
+            """);
+        var adapter = ArrangeAdapterWithPipelines(configuration, pipeline);
+
+        var policy = CreatePolicy("DocumentPolicy", [DocumentType]);
+        ArrangeIdentityGraph((policy, CreatePermission("document.read"), [CommonConstants.StreamDataReaderRole]));
+
+        var dto = await sut.AnalyzeAdapterAsync(TenantId, adapter);
+
+        await Assert.That(dto.MissingRoles).IsEmpty();
+    }
+
+    [Test]
     public async Task AnalyzeAdapter_LegacyConfigurationWithoutDeclaration_ReportsRecommendationWithoutDelta()
     {
         var sut = CreateSut();
