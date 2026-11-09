@@ -129,6 +129,24 @@ internal static class CommunicationMethodSupport
         return text;
     }
 
+    /// <summary>
+    ///     The message a method may return for a service failure (CodeRabbit on PR #105): the text of the controller's own
+    ///     exceptions (<c>AdapterServiceException</c>, <c>AdapterHubCallbackException</c>, <c>CommunicationRepositoryException</c>,
+    ///     <c>WorkloadLifecycleServiceException</c> - the texts REST answers and the Studio shows, e.g. the adapter's
+    ///     validation errors of a definition the caller may read anyway), redacted of the sensitive values and the token;
+    ///     <c>null</c> for any other exception, whose free text of unknown origin stays in the log (as AB#8595 does for the
+    ///     service account reconcile).
+    /// </summary>
+    public static string? CallerSafeMessage(Exception exception, params string?[] sensitiveValues) =>
+        exception is AdapterServiceException or Hubs.AdapterHubCallbackException or CommunicationRepositoryException
+            or WorkloadLifecycleServiceException
+            ? Redact(exception.Message, sensitiveValues)
+            : null;
+
+    /// <summary>The failure parameters: the caller-safe message when there is one, otherwise none.</summary>
+    public static (string Name, string Value)[] MessageParameters(string? message) =>
+        message is null ? [] : [(CommunicationMethodErrors.MessageParameter, message)];
+
     /// <summary>The placeholder of a redacted value.</summary>
     public const string Masked = "***";
 

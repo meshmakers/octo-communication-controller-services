@@ -27,7 +27,8 @@ _Required bump level: minor._
 The Pipeline, DataFlow and workload chart-version operations of the REST API as CK methods (AB#8596, Feature AB#5697 F4.3),
 handled by the communication controller (`handler: service`); the REST endpoints are unchanged. Every method declares
 `roles: [CommunicationManagement]`. `Pipeline.Deploy.pipelineDefinition` and `Pipeline.Execute.input` are `sensitive`
-parameters (never logged, audited or traced); no result is sensitive and no method sets `execution.mode` (omitted = sync),
+parameters (never logged, audited or traced; the input of a non-dry-run execution on a Leased adapter is stored in the
+tenant's `PipelineExecution` until the lease runs it, as with REST); no result is sensitive and no method sets `execution.mode` (omitted = sync),
 so `minEngineVersion` stays 3.5.1. `DataFlow.Deploy`, `DataFlow.Undeploy` and `Pipeline.SetDebugging` use the maximum
 timeout of 300 s and are candidates for `execution.mode: async` once F3.6 (AB#5694) is available. The tenant-level
 operations of `CommunicationController` (enable/disable, lifecycle, validate-expression, encrypt-value) stay REST service

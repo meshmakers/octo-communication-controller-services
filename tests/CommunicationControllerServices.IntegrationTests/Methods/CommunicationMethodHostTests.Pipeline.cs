@@ -94,9 +94,7 @@ public sealed partial class CommunicationMethodHostTests
         var adapter = ArrangeAdapter();
         var pipeline = ArrangePipeline(adapter);
         var text = $"invalid node in line 'password: {SecretInDefinition}'";
-        Exception failure = rejectedByAdapter
-            ? HubRejection(text)
-            : new InvalidOperationException(text);
+        var failure = rejectedByAdapter ? HubRejection(text) : ServiceFailure(text);
         _adapterService.DeployPipelineAsync(TenantId, adapter.ToRtEntityId(), pipeline.ToRtEntityId(), Definition)
             .Throws(failure);
 
@@ -106,6 +104,21 @@ public sealed partial class CommunicationMethodHostTests
         method.Error!.Code.Should().Be(rejectedByAdapter ? "PIPELINE_DEPLOY_REJECTED" : "PIPELINE_DEPLOY_FAILED");
         method.Error.Parameters["message"].Should().StartWith("invalid node in line '***'");
         AssertNeverEchoed(SecretInDefinition, method);
+    }
+
+    [Fact]
+    public async Task PipelineDeploy_AnUnexpectedException_AnswersWithoutItsText()
+    {
+        var adapter = ArrangeAdapter();
+        var pipeline = ArrangePipeline(adapter);
+        _adapterService.DeployPipelineAsync(TenantId, adapter.ToRtEntityId(), pipeline.ToRtEntityId(), null)
+            .Throws(new InvalidOperationException("internal detail mongodb://user@host"));
+
+        var method = await InvokeAsync(SystemCommunicationCkIds.PipelineDeployMethodId, pipeline.RtId.ToString());
+
+        method.Error!.Code.Should().Be("PIPELINE_DEPLOY_FAILED");
+        method.Error.Parameters.Should().NotContainKey("message");
+        JsonSerializer.Serialize(method.Error).Should().NotContain("internal detail");
     }
 
     // ------------------------------------------------------------------ Pipeline.Execute
@@ -154,7 +167,7 @@ public sealed partial class CommunicationMethodHostTests
         _trigger.StartExecutePipelineAsync(TenantId, pipeline.RtId, Arg.Any<string?>(), Arg.Any<bool>(),
                 Arg.Any<ExecutePipelineCaller?>(), Arg.Any<string?>(), Arg.Any<RtPipelineTriggerTypeEnum>(),
                 Arg.Any<ExecutePipelineMethodInvocation?>())
-            .Throws(new InvalidOperationException($"adapter offline; input {input}; token {token}"));
+            .Throws(ServiceFailure($"adapter offline; input {input}; token {token}"));
 
         var method = await InvokeAsync(SystemCommunicationCkIds.PipelineExecuteMethodId, pipeline.RtId.ToString(),
             new { input }, token);
@@ -230,7 +243,7 @@ public sealed partial class CommunicationMethodHostTests
         if (redeployFails)
         {
             _adapterService.DeployPipelineAsync(TenantId, newAdapter, pipelineRtEntityId)
-                .Throws(new InvalidOperationException("target adapter offline"));
+                .Throws(ServiceFailure("target adapter offline"));
         }
 
         var rest = await PipelineController().MovePipelinesToAdapter(
@@ -250,6 +263,26 @@ public sealed partial class CommunicationMethodHostTests
         await _adapterService.Received(redeploy ? 2 : 0).DeployPipelineAsync(TenantId, newAdapter, pipelineRtEntityId);
         await _events.Received(1).StoreInformationEventAsync(TenantId,
             Arg.Is<string>(m => m.Contains("source: User via CK method")));
+    }
+
+    /// <summary>
+    ///     A retry of a move that already happened (the pipeline points at the target) still redeploys when asked; REST
+    ///     skips the redeploy of a no-op move. CodeRabbit on PR #105.
+    /// </summary>
+    [Fact]
+    public async Task PipelineMoveToAdapter_ARetriedMove_StillRedeploys()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+        var adapter = new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, OctoObjectId.GenerateNewId());
+        _repository.MovePipelineToAdapterAsync(TenantId, pipelineRtId, adapter.RtId)
+            .Returns(new PipelineMoveResult(pipelineRtId, adapter, adapter));
+
+        var method = await InvokeAsync(SystemCommunicationCkIds.PipelineMoveToAdapterMethodId, pipelineRtId.ToString(),
+            new { targetAdapterRtId = adapter.RtId.ToString(), redeploy = true });
+
+        method.Success.Should().BeTrue();
+        await _adapterService.Received(1).DeployPipelineAsync(TenantId, adapter,
+            new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipelineRtId));
     }
 
     [Fact]
@@ -299,7 +332,8 @@ public sealed partial class CommunicationMethodHostTests
         failedDeploy.Error!.Code.Should().Be("DATA_FLOW_DEPLOY_FAILED");
         failedDeploy.Error.Parameters["message"].Should().Be("definition rejected");
         failedUndeploy.Error!.Code.Should().Be("DATA_FLOW_UNDEPLOY_FAILED");
-        failedUndeploy.Error.Parameters["message"].Should().Be("adapter gone");
+        failedUndeploy.Error.Parameters.Should().NotContainKey("message",
+            "the text of an unexpected exception stays in the log");
     }
 
     // ------------------------------------------------------------------ DeployableWorkload.SetChartVersion
@@ -364,6 +398,11 @@ public sealed partial class CommunicationMethodHostTests
     /// <summary>The adapter's rejection (the exception has private constructors; the service creates it).</summary>
     private static Exception HubRejection(string message) =>
         (Exception)Activator.CreateInstance(typeof(AdapterHubCallbackException),
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance, null, [message], null)!;
+
+    /// <summary>A failure of the adapter service (private constructors, like <see cref="HubRejection" />).</summary>
+    private static Exception ServiceFailure(string message) =>
+        (Exception)Activator.CreateInstance(typeof(AdapterServiceException),
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance, null, [message], null)!;
 
     /// <summary>A sensitive value appears in no log line, no stored event and not in the answer.</summary>

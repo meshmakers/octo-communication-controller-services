@@ -260,7 +260,16 @@ Code: `src/CommunicationControllerServices/Methods/Service/`. User guide: `octo-
 - **Sensitive parameters (AB#8596).** `Pipeline.Deploy.pipelineDefinition` (a definition can carry credentials) and
   `Pipeline.Execute.input` are `sensitive`: the host keeps them out of logs, audit and traces. The handlers never log them
   and pass every failure message through `CommunicationMethodSupport.Redact` (the value as a whole and each line of 8+
-  characters, plus the caller token), so a validation message that quotes a line does not echo it. Tests:
+  characters, plus the caller token), so a validation message that quotes a line does not echo it. `Execute.input` of a
+  non-dry-run execution on a **Leased** adapter is stored in the tenant's `PipelineExecution` (`InputData`) until the lease
+  runs it, as with REST.
+- **Failure messages (AB#8596).** The `message` parameter of a Pipeline / DataFlow error (and the redeploy `warning` of
+  `MoveToAdapter`) carries only the text of the controller's own exceptions (`CommunicationMethodSupport.CallerSafeMessage`:
+  `AdapterServiceException`, `AdapterHubCallbackException`, `CommunicationRepositoryException`,
+  `WorkloadLifecycleServiceException` - the texts REST answers and the Studio shows), redacted; any other exception answers
+  the error code without `message` and its text stays in the log.
+- **Move retries (AB#8596).** `MoveToAdapter` with `redeploy: true` redeploys also when the move is a no-op (REST skips it),
+  so a retry after a timed-out first call does not report success without the deploy. Tests:
   `CommunicationMethodHostTests.Pipeline` (integration, `AssertNeverEchoed`), `PipelineMethodSupportTests` (unit).
 - **What stays REST (AB#8596).** The tenant-level endpoints of `CommunicationController` are no type operations:
   `enable` / `disable` toggle the communication capability of the tenant (role `TenantManagement`; they install or remove

@@ -76,14 +76,15 @@ internal sealed class PipelineDeployHandler(
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
-            var message = Redact(e.Message, definition, context.CallerAccessToken);
+            // never the exception object: its text and its inner exceptions may quote the definition
             logger.LogError(
-                "Deploying pipeline '{PipelineRtId}' to adapter '{AdapterRtId}' failed (CK method, invocation {InvocationId}): {Reason}",
-                pipelineRtId, adapter.RtId, context.InvocationId, message);
+                "Deploying pipeline '{PipelineRtId}' to adapter '{AdapterRtId}' failed (CK method, invocation {InvocationId}): {ExceptionType}: {Reason}",
+                pipelineRtId, adapter.RtId, context.InvocationId, e.GetType().Name,
+                Redact(e.Message, definition, context.CallerAccessToken));
             return CkMethodOutcome.Fail(e is AdapterHubCallbackException
                     ? CommunicationMethodErrors.PipelineDeployRejected
                     : CommunicationMethodErrors.PipelineDeployFailed,
-                (CommunicationMethodErrors.MessageParameter, message));
+                MessageParameters(CallerSafeMessage(e, definition, context.CallerAccessToken)));
         }
     }
 }
@@ -140,12 +141,12 @@ internal sealed class PipelineExecuteHandler(
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
-            var message = Redact(e.Message, input, context.CallerAccessToken);
+            // never the exception object: its text and its inner exceptions may quote the input or the token
             logger.LogError(
-                "Starting pipeline '{PipelineRtId}' failed (CK method, invocation {InvocationId}): {Reason}",
-                pipelineRtId, context.InvocationId, message);
+                "Starting pipeline '{PipelineRtId}' failed (CK method, invocation {InvocationId}): {ExceptionType}: {Reason}",
+                pipelineRtId, context.InvocationId, e.GetType().Name, Redact(e.Message, input, context.CallerAccessToken));
             return CkMethodOutcome<PipelineExecuteResult>.Fail(CommunicationMethodErrors.PipelineExecutionStartFailed,
-                (CommunicationMethodErrors.MessageParameter, message));
+                MessageParameters(CallerSafeMessage(e, input, context.CallerAccessToken)));
         }
     }
 }
@@ -188,7 +189,7 @@ internal sealed class PipelineSetDebuggingHandler(
             logger.LogError(e, "Setting debugging of pipeline '{PipelineRtId}' failed (CK method, invocation {InvocationId})",
                 pipelineRtId, context.InvocationId);
             return CkMethodOutcome<PipelineSetDebuggingResult>.Fail(CommunicationMethodErrors.PipelineDebugChangeFailed,
-                (CommunicationMethodErrors.MessageParameter, e.Message));
+                MessageParameters(CallerSafeMessage(e)));
         }
 
         // The flag is persisted: a failing event store must not report the change as failed.
@@ -250,12 +251,14 @@ internal sealed class PipelineMoveToAdapterHandler(
                 "Moving pipeline '{PipelineRtId}' to adapter '{TargetAdapterRtId}' failed (CK method, invocation {InvocationId})",
                 pipelineRtId, targetAdapterRtId, context.InvocationId);
             return CkMethodOutcome<PipelineMoveToAdapterResult>.Fail(CommunicationMethodErrors.PipelineMoveFailed,
-                (CommunicationMethodErrors.MessageParameter, e.Message));
+                MessageParameters(CallerSafeMessage(e)));
         }
 
+        // Unlike REST, a move that is a no-op (the pipeline already points at the target) still redeploys when asked: a
+        // retry after a timed-out or failed first call (the method is idempotent, the host does not de-duplicate it) must
+        // not report success without the deploy the caller asked for (CodeRabbit on PR #105). Deploying is idempotent.
         string? warning = null;
-        if (context.Parameters.Redeploy == true &&
-            !moveResult.OldAdapterRtEntityId.Equals(moveResult.NewAdapterRtEntityId))
+        if (context.Parameters.Redeploy == true)
         {
             try
             {
@@ -266,7 +269,9 @@ internal sealed class PipelineMoveToAdapterHandler(
             {
                 logger.LogWarning(e, "Pipeline {PipelineRtId} moved to {Adapter} but redeploy failed (CK method)",
                     pipelineRtId, moveResult.NewAdapterRtEntityId);
-                warning = $"Move OK; redeploy on new adapter failed: {e.Message}";
+                warning = CallerSafeMessage(e) is { } reason
+                    ? $"Move OK; redeploy on new adapter failed: {reason}"
+                    : "Move OK; redeploy on new adapter failed.";
             }
         }
 
@@ -311,7 +316,7 @@ internal sealed class DataFlowDeployHandler(
             logger.LogError(e, "Failed to deploy data flow '{DataFlowRtId}' (CK method, invocation {InvocationId})",
                 dataFlowRtId, context.InvocationId);
             return CkMethodOutcome.Fail(CommunicationMethodErrors.DataFlowDeployFailed,
-                (CommunicationMethodErrors.MessageParameter, e.Message));
+                MessageParameters(CallerSafeMessage(e)));
         }
     }
 }
@@ -342,7 +347,7 @@ internal sealed class DataFlowUndeployHandler(
             logger.LogError(e, "Failed to undeploy data flow '{DataFlowRtId}' (CK method, invocation {InvocationId})",
                 dataFlowRtId, context.InvocationId);
             return CkMethodOutcome.Fail(CommunicationMethodErrors.DataFlowUndeployFailed,
-                (CommunicationMethodErrors.MessageParameter, e.Message));
+                MessageParameters(CallerSafeMessage(e)));
         }
     }
 }

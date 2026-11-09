@@ -56,7 +56,7 @@ types:
       - methodId: Execute-1
         description: "Starts one execution of the pipeline on its adapter and returns its id without waiting for the end (REST POST Pipeline/execute). The caller is passed to a FromExecutePipelineCommand pipeline as with REST."
         parameters:
-          - { name: input, valueType: String, isOptional: true, sensitive: true, description: "Input of the execution (the REST request body). Sensitive: input data is never logged, audited or traced." }
+          - { name: input, valueType: String, isOptional: true, sensitive: true, description: "Input of the execution (the REST request body). Sensitive: input data is never logged, audited or traced. For an execution on a Leased adapter (not a dry run) the input is stored in the PipelineExecution entity of the tenant until the lease runs it, exactly as with REST." }
           - { name: isDryRun, valueType: Boolean, isOptional: true, description: "True runs the pipeline with every dry-run-honouring Load node suppressing its side effect. Default false." }
         result:
           valueType: Record
@@ -83,7 +83,7 @@ types:
           timeoutSeconds: 300
           idempotent: true
       - methodId: MoveToAdapter-1
-        description: "Assigns the pipeline to another adapter and optionally redeploys it there (REST PATCH Pipeline/move-to-adapter, one pipeline per call). A failed redeploy does not roll the move back; the result carries a warning."
+        description: "Assigns the pipeline to another adapter and optionally redeploys it there (REST PATCH Pipeline/move-to-adapter, one pipeline per call). A failed redeploy does not roll the move back; the result carries a warning. Unlike REST, redeploy also runs when the pipeline already points at the target adapter, so a retried call still deploys."
         parameters:
           - { name: targetAdapterRtId, valueType: String, description: "RtId (24 hexadecimal characters) of the new adapter." }
           - { name: redeploy, valueType: Boolean, isOptional: true, description: "True redeploys the pipeline on the new adapter after the move. Default false." }
