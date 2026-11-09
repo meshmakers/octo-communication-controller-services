@@ -209,6 +209,52 @@ execute command that reports the execution like the adapter hub does - the pipel
 this repository). The sample pipeline `Methods/SamplePipelines/Device.UpdateFirmware-1.pipeline.yaml` is the one printed
 in the guide and is the pipeline definition of the integration tests.
 
+### CK method service handlers (AB#8595, System.Communication 4.17.0)
+
+System.Communication 4.17.0 declares the adapter, workload and adapter pool operations of the REST API as CK methods
+(`handler: service`), and the controller handles them with the typed handler SDK of octo-common-services
+(`AddCkMethodHandlers`): one shared queue per method, announcement, heartbeat, caller token validation, the declared
+authorization and redaction are the host's. The REST endpoints are unchanged (client switch and deprecation: F5.3, AB#5701).
+Code: `src/CommunicationControllerServices/Methods/Service/`. User guide: `octo-documentation` ->
+`technologyGuide/communication/methods.md` (en + de).
+
+| Method | Kind | REST endpoint it mirrors | Handler | Timeout / idempotent |
+|---|---|---|---|---|
+| `Adapter.DeployUpdate-1` | instance | `POST Adapter/deployUpdate?adapterRtEntityId=` | `AdapterDeployUpdateHandler` | 90 s / yes |
+| `DeployableWorkload.Wake-1` | instance (adapter, application, pool) | `POST Adapter/{workloadRtId}/wake` | `DeployableWorkloadWakeHandler` | 90 s / yes |
+| `Adapter.ReconcileServiceAccount-1` | instance | `POST Adapter/{adapterRtId}/serviceAccount/reconcile` | `AdapterReconcileServiceAccountHandler` | 60 s / yes |
+| `Adapter.RotateServiceAccountSecret-1` | instance | `POST Adapter/{adapterRtId}/serviceAccount/rotateSecret` | `AdapterRotateServiceAccountSecretHandler` | 60 s / no |
+| `AdapterPool.RefreshMirrors-1` | static | `POST AdapterPool/mirrors/refresh` | `AdapterPoolRefreshMirrorsHandler` | 120 s / yes |
+| `AdapterPool.PublishMirrors-1` | static | `POST AdapterPool/mirrors/publish` | `AdapterPoolPublishMirrorsHandler` | 120 s / yes |
+| `AdapterPool.GrantLease-1` | instance | `POST AdapterPool/{adapterPoolRtId}/lease` | `AdapterPoolGrantLeaseHandler` | 30 s / no |
+| `AdapterPool.CancelQueuedExecution-1` | instance | `DELETE AdapterPool/{adapterPoolRtId}/queue/{executionId}` | `AdapterPoolCancelQueuedExecutionHandler` | 15 s / no |
+
+- **Adding a method (AB#8596 and later).** Declare it in the model (`handler: service` is the default), add a handler class in
+  `Methods/Service/` that calls the same service as the REST endpoint, and add one row to `CommunicationMethodHost.Handlers`.
+  The unit test `Methods/Service/CommunicationMethodHostTests` fails until every declared method of the three types has a row
+  and its contract (role, timeout, idempotency) is listed; extend its `Expected` table and the integration test
+  `Methods/CommunicationMethodHostTests` (REST vs. method on the same substitutes).
+- **Roles.** The REST policies ask only for the scope `octo_api`. A method without `roles` admits administrators only
+  (default-deny of `CkMethodAuthorizationEvaluator`), so every method declares `roles: [CommunicationManagement]` - the role of
+  the Studio's integration section and of every pipeline service account. Widening the list later is a Minor, narrowing it a
+  Major. `ReconcileServiceAccount` materialises declared roles only when the validated caller also holds `UserManagement`
+  (REST parity).
+- **No secret in a result.** `RotateServiceAccountSecret` returns client id, well-known name, `wasCreated`,
+  `requiresPipelineRedeploy` and the REST message (`AdapterController.BuildRotationMessage`), never the secret; the result is
+  therefore not `sensitive`. Reconcile and rotation failures answer the declared error without the exception text (REST echoes
+  it); the exception is logged with the invocation id. Redaction test: `Methods/Service/RotateServiceAccountSecretMethodRedactionTests`
+  (real provisioning service: the generated secret is in no result, log line or event, on success and on failure).
+- **Differences to REST, all stricter:** an id that names no adapter is `METHOD_TARGET_NOT_FOUND` for `DeployUpdate`,
+  `Reconcile...` and `Rotate...`; invalid lease parameters are `METHOD_VALIDATION_FAILED` (`adapterRtId`, `ttlSeconds` 1-3600,
+  `borrowerTenantId`); the audit events say `source: User via CK method`.
+- **Token.** `AddControllerCkMethodCallerTokenValidation` (shared with the pipeline handler, registered once) validates the
+  forwarded token against `CommunicationController:AuthorityUrl` (`Methods:Token` overrides).
+- **Startup.** The SDK validates the registrations at order 15 against the CK cache of the **system tenant** (filled by the
+  default configuration at order 10, which applies the System.Communication blueprint to it). A system tenant without
+  System.Communication fails the startup naming the method. Switch: `Methods:Communication:Enabled=false`
+  (`OCTO_METHODS__COMMUNICATION__ENABLED`) - no handler, no queue; the REST endpoints keep working and calls answer
+  `METHOD_HANDLER_NOT_AVAILABLE`.
+
 ### Multi-Tenancy
 
 All operations are tenant-scoped. Routes use a custom `tenantId` constraint. The MongoDB-backed repository supports per-tenant data isolation via `ISystemContext.FindTenantRepositoryAsync(tenantId)`.
@@ -724,15 +770,18 @@ F4.3, Epic AB#5584; rules: `octo-construction-kit-engine/docs/ck-semver-rules.md
   (`Name`, `Enabled`; message 97) and under the interface's name (message 98); removing an interface is a MAJOR (row T3).
   Not implemented: `Pipeline` (`Enabled` optional), `Named-1` on types with an optional `Name`, `SecretDefault`, `Hierarchical-1`.
 - **Access.** `SecretDefault.Value` is `access: Hidden` and its definition `SecretDefaultValue` is `securitySensitive: true`
-  (row T7a, acknowledged in `ckModel.yaml`). GraphQL, REST, MCP, import (message 139) and export cannot read or write it. The
+  (row T7a, acknowledged in the 4.16.0 `ckModel.yaml`; the entry was removed with 4.17.0). GraphQL, REST, MCP, import (message 139) and export cannot read or write it. The
   controller writes and reveals it through `CommunicationRepository` (`UpsertSecretDefaultAsync`, repository reads), which the
   access rules do not guard. Every other attribute is `ReadWrite`: Studio writes the configuration credentials through the
   generic GraphQL update, and a `ReadOnly`/`MethodOnly` on an attribute that is not `securitySensitive` in every published
   4.x version is a MAJOR (row T7). The T7a exception is used up: a further tightening in 4.x is a MAJOR. The method stories
   (Adapter/Pipeline/Pool methods) can tighten credentials only together with a method that writes them, in 5.0.
-- **Engine.** The compiler stamps `minEngineVersion: 3.5.1`; the model is published under `ck-models/v3/` only.
+- **Engine.** The compiler stamps `minEngineVersion: 3.5.1`; the model is published under `ck-models/v3/` only. Keep it there:
+  an explicit `authorization.dataAccess` on any method raises it to 3.5.40 (`CkEngineVersion.DataAccessMinEngineVersion`), a
+  `sensitive` result to 3.5.36, `execution.mode` to 3.5.67. The methods of 4.17.0 therefore leave `dataAccess` at its default
+  (`Write`) instead of spelling it out.
 - **Acknowledgements live for one release.** Remove the `compatibility.acknowledge` entry in `ckModel.yaml` with the next
-  version bump (otherwise `OCTO-CK204`).
+  version bump (otherwise `OCTO-CK204`); 4.17.0 removed the 4.16.0 entry.
 - Tests: `tests/CommunicationControllerService.Tests/CkModels/SystemCommunicationCkLanguage2Tests.cs` (embedded model: version,
   ckLanguage, minEngineVersion, derivable, interfaces, the only tightened attribute, the acknowledgement) and
   `tests/CommunicationControllerServices.IntegrationTests/Repository/SystemCommunicationCkLanguage2PersistenceTests.cs`

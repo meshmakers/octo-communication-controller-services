@@ -1,5 +1,48 @@
 # Changelog
 
+## 4.17.0 - 2026-11-09
+
+_Required bump level: minor._
+
+### Added
+
+- Method 'Adapter-1/DeployUpdate-1' added _(minor — purely additive method)_
+- Method 'Adapter-1/ReconcileServiceAccount-1' added _(minor — purely additive method)_
+- Method 'Adapter-1/RotateServiceAccountSecret-1' added _(minor — purely additive method)_
+- Method 'AdapterPool-1/RefreshMirrors-1' added _(minor — purely additive method)_
+- Method 'AdapterPool-1/PublishMirrors-1' added _(minor — purely additive method)_
+- Method 'AdapterPool-1/GrantLease-1' added _(minor — purely additive method)_
+- Method 'AdapterPool-1/CancelQueuedExecution-1' added _(minor — purely additive method)_
+- Method 'DeployableWorkload-1/Wake-1' added _(minor — purely additive method)_
+- Attribute 'MethodResultAdaptersRelinked-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultClientId-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultConfigurationWellKnownName-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultGranted-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultIsNoOp-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultLeaseId-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultLendersUnreadable-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultMemberId-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultMessage-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultMirrorsCreatedOrUpdated-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultMirrorsRemoved-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultOutcome-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultRequiresPipelineRedeploy-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultRoleChangesSkipped-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultStatusMessage-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultTenantsReconciled-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultWasCreated-1' added _(minor — purely additive element)_
+- Record 'AdapterPoolLeaseResult-1' added _(minor — purely additive element)_
+- Record 'AdapterPoolMirrorSyncResult-1' added _(minor — purely additive element)_
+- Record 'ServiceAccountReconcileResult-1' added _(minor — purely additive element)_
+- Record 'ServiceAccountSecretRotationResult-1' added _(minor — purely additive element)_
+
+The adapter, workload and adapter pool operations of the REST API as CK methods (AB#8595, Feature AB#5697 F4.3), handled by
+the communication controller (`handler: service`). The REST endpoints are unchanged. Every method declares
+`roles: [CommunicationManagement]` (the REST policy asks only for the scope `octo_api`; a method without roles admits
+administrators only). No result is `sensitive`: `RotateServiceAccountSecret` returns the client id and what to do next, never
+the secret, like the REST endpoint. The 4.16.0 acknowledgement of `SecretDefault.Value` is removed (valid for one release,
+OCTO-CK204); no access changes.
+
 ## 4.16.0 - 2026-11-09
 
 _Required bump level: minor._

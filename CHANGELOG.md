@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- AB#8595 New: System.Communication 4.17.0 (Minor) declares the adapter, workload and adapter pool operations of the REST
+  API as CK methods, and the controller handles them (`handler: service`, typed handler SDK of octo-common-services):
+  `Adapter.DeployUpdate`, `Adapter.ReconcileServiceAccount`, `Adapter.RotateServiceAccountSecret`, `DeployableWorkload.Wake`,
+  `AdapterPool.RefreshMirrors` / `PublishMirrors` (static), `AdapterPool.GrantLease` and `AdapterPool.CancelQueuedExecution`,
+  with four result records shaped like the REST answers. Every method declares `roles: [CommunicationManagement]`, an
+  explicit timeout and idempotency, no sensitive marker (the rotation result carries no secret, like REST) and the default
+  `dataAccess`, so `minEngineVersion` stays 3.5.1. The REST endpoints are unchanged. The 4.16.0 acknowledgement is removed
+  (OCTO-CK204). Switch: `Methods:Communication:Enabled` (default true). Details: CLAUDE.md "CK method service handlers".
+
 - AB#8594 New: System.Communication 4.16.0 is the first `ckLanguage: 2` release of the model, a Minor against 4.15.0.
   Every type and record declares `derivable: Any` (dependents keep deriving), `DataFlow`, `LentAdapterPool`,
   `DeployableEntity`, `PipelineTrigger` and `DataPointMapping` implement the System interfaces `Named-1`, `Describable-1`

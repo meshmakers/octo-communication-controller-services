@@ -65,3 +65,42 @@ types:
   # DeploymentSite) and RenameAssociationRole rewrites the stored associationRoleId
   # (Manages -> Hosts). Neither is optional — the role id and the type ids are persisted per
   # edge, so skipping either orphans the edge silently. See migrations/3.35.0-to-4.0.0.yaml.
+  # AB#8595 (4.17.0, Feature AB#5697 F4.3): the adapter operations of the REST API as CK methods, handled by the
+  # communication controller (execution.handler service). The REST endpoints stay unchanged (client switch and
+  # deprecation: F5.3, AB#5701). Roles: the REST policy asks only for the scope octo_api; a method without roles would
+  # admit administrators only (default-deny), so the methods declare CommunicationManagement, the role of the Studio's
+  # Integration section and of every pipeline service account. Widening the list later is a Minor, narrowing a Major.
+  methods:
+    - methodId: DeployUpdate-1
+      description: "Pushes the current pipeline configuration to the running adapter (REST POST Adapter/deployUpdate). Wakes a hibernated OnDemand adapter first. Fails when the adapter has no live connection."
+      errors:
+        - { code: ADAPTER_CONFIGURATION_DEPLOY_FAILED, description: "The configuration could not be pushed, e.g. the adapter is not deployed or not connected. Parameter reason names the cause." }
+      authorization:
+        roles: [ CommunicationManagement ]
+      execution:
+        timeoutSeconds: 90
+        idempotent: true
+    - methodId: ReconcileServiceAccount-1
+      description: "Reconciles the pipeline service account of the adapter against its declaration (REST POST Adapter/{adapterRtId}/serviceAccount/reconcile). The declared roles are materialised only when the caller holds UserManagement. Never rotates an existing secret."
+      result:
+        valueType: Record
+        valueCkRecordId: ${this}/ServiceAccountReconcileResult
+      errors:
+        - { code: SERVICE_ACCOUNT_RECONCILE_FAILED, description: "The reconcile did not complete (identity bus or tenant repository failed)." }
+      authorization:
+        roles: [ CommunicationManagement ]
+      execution:
+        timeoutSeconds: 60
+        idempotent: true
+    - methodId: RotateServiceAccountSecret-1
+      description: "Rotates the client secret of the pipeline service account of the adapter (REST POST Adapter/{adapterRtId}/serviceAccount/rotateSecret). The new secret is written into the ServiceAccountConfiguration only and is never part of the result; it takes effect when the pipelines of the adapter are redeployed."
+      result:
+        valueType: Record
+        valueCkRecordId: ${this}/ServiceAccountSecretRotationResult
+      errors:
+        - { code: SERVICE_ACCOUNT_ROTATION_FAILED, description: "The rotation did not happen; the old secret stays valid." }
+      authorization:
+        roles: [ CommunicationManagement ]
+      execution:
+        timeoutSeconds: 60
+        idempotent: false

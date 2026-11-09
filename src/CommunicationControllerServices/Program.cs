@@ -8,6 +8,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Extensions;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Methods;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Middleware;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
@@ -161,6 +162,10 @@ try
     // AB#6879: the controller is the handler of every CK method declared `execution.handler: pipeline`: it
     // starts the pipeline whose well-known name equals the method id and maps its result to the method envelope.
     builder.Services.AddPipelineMethodHandler(builder.Configuration);
+    // AB#8595: the controller is also the handler (`handler: service`) of the Adapter, DeployableWorkload and
+    // AdapterPool methods of System.Communication; the REST endpoints stay unchanged. Methods:Communication:Enabled
+    // switches the host off (the REST endpoints keep working).
+    var communicationMethodsHosted = builder.Services.AddCommunicationCkMethodHost(builder.Configuration);
     builder.Services.AddSingleton<INotificationRepository, NotificationRepository>();
     builder.Services.AddTransient<INotificationScheduleService, NotificationScheduleService>();
 
@@ -316,6 +321,12 @@ try
             // AB#6879: answers the discovery requests of method dispatchers with an immediate announcement of
             // the pipeline-handled CK methods this controller serves.
             c.AddPipelineMethodDiscovery();
+
+            // AB#8595: the same for the service-handled System.Communication methods (only when they are hosted).
+            if (communicationMethodsHosted)
+            {
+                c.AddCommunicationMethodDiscovery();
+            }
         });
 
     builder.Services.AddRuntimeEngine()
