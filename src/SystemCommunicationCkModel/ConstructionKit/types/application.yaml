@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
 - typeId: Application
+  derivable: Any
   description: 'A tenant-specific web application deployed by the Communication Operator via Helm. Examples: energy-community, voest-app, maco-app. Most configuration (URIs, env vars, secrets) lives in ValuesYaml / Values inherited from DeployableWorkload; only operator-relevant fields are exposed as typed attributes. Ingress (IngressEnabled + Hostname) is inherited from DeployableWorkload. Optional SecretDefaults (AB#7243) declare secrets the platform provides to every tenant the application serves, never through Helm values.'
   derivedFromCkTypeId: ${this}/DeployableWorkload
   isFinal: true

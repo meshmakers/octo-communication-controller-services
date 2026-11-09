@@ -29,6 +29,7 @@ types:
 # MinReplicas and IdleTimeoutMinutes (inherited from DeployableWorkload) are what drain a
 # member instead.
 - typeId: AdapterPool
+  derivable: Any
   description: 'A pool of interchangeable adapter processes owned by one tenant and leased to tenants in its subtree, one work item per lease (AB#4924). The pool declares how many members may exist (MinReplicas..MaxReplicas), how big each member is, what queue pressure starts another one, and which tenants may borrow. Members are replicas of this one workload rather than separate entities: a lease binds a member to a tenant for the duration of one work item and the member retains nothing tenant-scoped afterwards. Not to be confused with DeploymentSite, which is where a workload is deployed and which was itself called Pool before 4.0.0.'
   derivedFromCkTypeId: ${this}/DeployableWorkload
   isFinal: true

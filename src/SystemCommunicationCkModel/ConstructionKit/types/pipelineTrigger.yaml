@@ -1,6 +1,9 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
   - typeId: PipelineTrigger
+    derivable: Any
+    implements:
+      - ${System}/Enableable-1
     description: A scheduled trigger that executes one or more pipelines based on a cron expression. Organized within data flows alongside the pipelines they trigger.
     derivedFromCkTypeId: ${this}/DeployableEntity
     attributes:

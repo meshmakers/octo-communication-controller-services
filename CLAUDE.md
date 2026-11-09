@@ -705,10 +705,38 @@ System.Communication 4.15.0 defines the model contract (record, attribute, type)
 |---------|------|--------------------------|------|
 | `SecretDefaultProjection` | record (final, key `Key`) | `RtSecretDefaultProjectionRecord`: `Key`, `SecretValue` (Secret), `AllowedTenantIds` (optional), `Description` (optional) | No scope field: the target set is the Application's own tenant plus its whole subtree; `AllowedTenantIds` only narrows |
 | `SecretDefaults` | optional attribute (RecordArray) on `Application` only | `RtApplication.SecretDefaults` | Not a `ValueOverride`: never reaches Helm values, the pod or the app's Kubernetes Secret |
-| `SecretDefault` | type (final), derived from `System/Entity`, not from a Configuration type | `RtSecretDefault`: `Name`, `Value` (Secret), `SourceTenantId`, `SourceWorkloadRtId`, `LastProjectedAt` | Provisioned by the controller, never author-set; `Value` is platform-only (no tenant pipeline, user or role may reveal it); all attributes except `Value` are `RuntimeState`; `Value`, `SourceTenantId` and `SourceWorkloadRtId` are optional (the controller always sets them, but export drops Secret and RuntimeState values, so a required one would make an exported entity unimportable). Because it is not a Configuration type the controller never ships it to adapters as pipeline configuration |
+| `SecretDefault` | type (final), derived from `System/Entity`, not from a Configuration type | `RtSecretDefault`: `Name`, `Value` (Secret), `SourceTenantId`, `SourceWorkloadRtId`, `LastProjectedAt` | Provisioned by the controller, never author-set; `Value` is platform-only (no tenant pipeline, user or role may reveal it; `access: Hidden` since 4.16.0, see below); all attributes except `Value` are `RuntimeState`; `Value`, `SourceTenantId` and `SourceWorkloadRtId` are optional (the controller always sets them, but export drops Secret and RuntimeState values, so a required one would make an exported entity unimportable). Because it is not a Configuration type the controller never ships it to adapters as pipeline configuration |
 
 A Secret attribute takes ownership `Secret` and nothing else (`SecretAttributeValidator` in the engine). Model tests:
 `tests/CommunicationControllerService.Tests/Services/SecretDefaultModelTests.cs`.
+
+#### System.Communication on ckLanguage 2 (4.16.0, AB#8594)
+
+System.Communication 4.16.0 is the first `ckLanguage: 2` release of the model, a **Minor** against 4.15.0 (Feature AB#5697
+F4.3, Epic AB#5584; rules: `octo-construction-kit-engine/docs/ck-semver-rules.md`). What a later change must keep in mind:
+
+- **`derivable: Any` on every type and record.** ckLanguage 2 flips the default to `Model`. A pre-existing element without the
+  explicit key is a MAJOR (row T6) and breaks every model that derives from it (message 113: Loxone, System.Ai, adapters). A
+  **new** type or record defaults to `Model`; declare `derivable: Any` when another model should derive from it.
+- **System interfaces** (System floor `[2.7,3.0)`): `DataFlow` and `LentAdapterPool` implement `Named-1` + `Describable-1`,
+  `DeployableEntity` (and so every pipeline, trigger, adapter and workload) `Describable-1`, `PipelineTrigger` and
+  `DataPointMapping` `Enableable-1`. An implementing type must keep the member required where the interface requires it
+  (`Name`, `Enabled`; message 97) and under the interface's name (message 98); removing an interface is a MAJOR (row T3).
+  Not implemented: `Pipeline` (`Enabled` optional), `Named-1` on types with an optional `Name`, `SecretDefault`, `Hierarchical-1`.
+- **Access.** `SecretDefault.Value` is `access: Hidden` and its definition `SecretDefaultValue` is `securitySensitive: true`
+  (row T7a, acknowledged in `ckModel.yaml`). GraphQL, REST, MCP, import (message 139) and export cannot read or write it. The
+  controller writes and reveals it through `CommunicationRepository` (`UpsertSecretDefaultAsync`, repository reads), which the
+  access rules do not guard. Every other attribute is `ReadWrite`: Studio writes the configuration credentials through the
+  generic GraphQL update, and a `ReadOnly`/`MethodOnly` on an attribute that is not `securitySensitive` in every published
+  4.x version is a MAJOR (row T7). The T7a exception is used up: a further tightening in 4.x is a MAJOR. The method stories
+  (Adapter/Pipeline/Pool methods) can tighten credentials only together with a method that writes them, in 5.0.
+- **Engine.** The compiler stamps `minEngineVersion: 3.5.1`; the model is published under `ck-models/v3/` only.
+- **Acknowledgements live for one release.** Remove the `compatibility.acknowledge` entry in `ckModel.yaml` with the next
+  version bump (otherwise `OCTO-CK204`).
+- Tests: `tests/CommunicationControllerService.Tests/CkModels/SystemCommunicationCkLanguage2Tests.cs` (embedded model: version,
+  ckLanguage, minEngineVersion, derivable, interfaces, the only tightened attribute, the acknowledgement) and
+  `tests/CommunicationControllerServices.IntegrationTests/Repository/SystemCommunicationCkLanguage2PersistenceTests.cs`
+  (re-import, the CK v2 keys survive the MongoDB round trip into the CK cache).
 
 #### Publishing the CK model: explicit release decision (AB#7432)
 

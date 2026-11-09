@@ -136,6 +136,9 @@ public class SystemCommunication411DependentsTests(CommunicationControllerFixtur
         Func<string, string>? transform = null)
     {
         var json = Regex.Replace(await ReadResourceAsync(resource), @"System-2\.\d+\.\d+", SystemCkIds.CkModelId.ToString());
+        // Same for the System.Bot closure pin (3.5.0 in the published files): the tenant holds the System.Bot this build
+        // embeds (3.6.0 since AB#8593), and the classic copy of the negative control is judged by its exact pins only.
+        json = Regex.Replace(json, @"System\.Bot-3\.\d+\.\d+", SystemBotCkIds.CkModelId.ToString());
         json = transform?.Invoke(json) ?? json;
         var result = new OperationResult();
         var model = await fixture.GetService<ICkJsonSerializer>()

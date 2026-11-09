@@ -1,6 +1,9 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
   - typeId: DataPointMapping
+    derivable: Any
+    implements:
+      - ${System}/Enableable-1
     derivedFromCkTypeId: ${System}/Entity
     description: Maps a source entity attribute to a target entity attribute with optional expression transformation
     associations:

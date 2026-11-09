@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- AB#8594 New: System.Communication 4.16.0 is the first `ckLanguage: 2` release of the model, a Minor against 4.15.0.
+  Every type and record declares `derivable: Any` (dependents keep deriving), `DataFlow`, `LentAdapterPool`,
+  `DeployableEntity`, `PipelineTrigger` and `DataPointMapping` implement the System interfaces `Named-1`, `Describable-1`
+  and `Enableable-1` they already satisfied (System floor 2.5 → 2.7), and `SecretDefault.Value` is `access: Hidden`
+  (acknowledged first-release exception, row T7a): no GraphQL, REST, MCP, import or export path reads or writes it, the
+  controller keeps writing it through its repository. `minEngineVersion` 3.5.1, `ck-models/v3/` only. A merge does not
+  publish the model (`publishSystemCkModels`). Details: model `CHANGELOG.md`, CLAUDE.md "System.Communication on
+  ckLanguage 2". The integration test `SystemCommunication411DependentsTests` now also maps the System.Bot closure pin of
+  the published fixtures to the embedded System.Bot (3.6.0 since AB#8593).
+
 - AB#8582 Fix: the service-account health check no longer reports every adapter account as Unhealthy because of
   `FileManagement`. The identity service grants that role by design to every `octo-pipeline-sa-*` client (AB#6467) and
   the controller's reconcile never removes it, so it is now expected: the new named list
