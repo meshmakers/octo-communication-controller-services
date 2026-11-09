@@ -4079,7 +4079,8 @@ that returns nothing, a pipeline that "does nothing" — with **no error anywher
 
 So when you set up delegation for a tenant, grant the pipeline service account
 (`octo-pipeline-sa-{adapterRtId}`, one per adapter) the fachliche roles its pipelines must act
-under, on top of `CommunicationManagement`:
+under, on top of `CommunicationManagement` (and `StreamDataReader`, which the reconcile adds to every
+declarative account since AB#8563, see phase 8):
 
 ```
 octo-cli AddClientToRole --clientId octo-pipeline-sa-<adapterRtId> --roleName <Role> --context <tenant>
@@ -4371,7 +4372,8 @@ types are **dropped** (no policy targets them → no role needed). `ProtectedTyp
 owner-scoped grants is called out as blind in the summary. Delta: `MissingRoles` = full-scope
 granting roles of uncovered types; `SuperfluousRoles` = declared roles granting nothing for any
 touched type — except the provisioning baseline (`CommunicationManagement`,
-`PipelineServiceAccountProvisioningService.DefaultAssignedRoleNames`), which lands in
+`PipelineServiceAccountProvisioningService.DefaultAssignedRoleNames`, and since AB#8563
+`StreamDataReader`, `…BaselineRoleNames`), which lands in
 `BaselineRoles` instead (it grants no data access and every pipeline SA needs it). Robustness:
 unparsable/empty definitions become `Warnings` entries, an empty pipeline set returns an
 empty-but-valid result.
@@ -4446,6 +4448,78 @@ credential-aware secret, all four impersonation states, foreign pairing, placeho
 matrix (capable actor deploys incl. placeholder target secret, no/incapable actor refused with
 remedy, identity-down non-blocking); `…/PipelineServiceAccountProjectionTests` — empty issuer
 passes through empty.
+
+### Phase 8 — `StreamDataReader` baseline (AB#8563)
+
+The asset repository gates stream-data reads on `StreamDataReader`, `StreamDataWriter` or
+`StreamDataAdmin` (AB#8559, `StreamDataReadAuthorization:RoleEnforcement` Off / Warn / **Enforce**,
+error code `StreamDataReadRoleRequired`). Pipelines that read archives (EC allocation, billing,
+simulation) run as the adapter's pipeline service account, which held only `CommunicationManagement`
+— under `Enforce` they were refused.
+
+`PipelineServiceAccountProvisioningService.BaselineRoleNames` (`[StreamDataReader]`) is therefore
+added to every **declarative** account's roles when the declaration is materialised
+(`EffectiveRoleNames` = declared roles in their order + every baseline role not declared yet).
+Rules:
+
+- **Not persisted.** `AssignedRoleNames` stays what the operator (or the default
+  `DefaultAssignedRoleNames = [CommunicationManagement]`) wrote. Existing accounts get the role on
+  their next **system-initiated** reconcile (tenant start / `clearCache`, workload deploy) — no data
+  migration, no manual step, the entity is not rewritten.
+- **Added, never replacing.** Declared roles are sent as before; a declaration that names
+  `StreamDataReader` itself sends it once. An empty declaration still carries the baseline — the
+  baseline cannot be removed through the declaration.
+- **Same security gate.** A user-initiated reconcile without `UserManagement` sends no roles at all,
+  baseline included (AB#5111).
+- **Legacy accounts are not covered.** An account without `AssignedRoleNames` (pre-CK 3.32.0) keeps
+  `null` on the wire, so identity leaves its role edges alone — grant `StreamDataReader` by hand
+  (`octo-cli AddClientToRole --clientId octo-pipeline-sa-<adapterRtId> --roleName StreamDataReader`)
+  or opt the account into declarative management, before the asset repository goes to `Enforce`.
+- **Identity side.** The roles travel over the bus (`CreateIdentityDataCommandRequest`); its consumer
+  syncs the declared list for `octo-pipeline-sa-` clients and does not run the HTTP `RoleChangeGuard`
+  (AB#7914 / AB#5859), so the controller's own roles do not limit what it can assign here.
+- **Read side follows.** The health check expects declared ∪ baseline (a missing `StreamDataReader`
+  edge is `roles-drift` until the next reconcile); the rights analysis counts the baseline as
+  coverage and reports a declared `StreamDataReader` under `BaselineRoles`, never as superfluous.
+
+Tests: `Services/PipelineServiceAccountReconcileTests` (existing default declaration gets the role
+without an entity write, declaration naming the baseline sends it once, empty declaration keeps the
+baseline, unprivileged user sends no roles, `EffectiveRoleNames`),
+`Services/PipelineServiceAccountProvisioningServiceTests.Provision_FreshAdapter_AssignsCommunicationManagementAndStreamDataReader`,
+`Services/ServiceAccountHealthTests.GetConfigurationHealth_BaselineEdgeMissing_ReportsStreamDataReaderMissing`,
+`Services/ServiceAccountRightsAnalysisTests` (`…DeclaredStreamDataReader_IsBaselineNotSuperfluous`,
+`…TypeGrantedByTheBaseline_IsNotMissing`).
+
+### Phase 9 — roles identity grants by design (AB#8582)
+
+The identity service grants `FileManagement` to every `octo-pipeline-sa-*` client on its own
+(AB#6467: `CreateIdentityDataCommandRequestConsumer` adds the edge on every identity-data command and
+treats it as implicitly declared, `PipelineServiceAccountFileRoleGrant` adds it at every tenant setup;
+octo-identity-services `docs/persistence.md`). Phase 8's health check did not know this, so every
+adapter account showed `roles-drift` with `FileManagement` superfluous.
+
+`PipelineServiceAccountProvisioningService.IdentityGrantedRoleNames` (`[FileManagement]`), next to
+`BaselineRoleNames`, is the single list of these roles; `IdentityGrantedRoleNamesFor(clientId)`
+returns it for a client with `ClientIdPrefix` (`octo-pipeline-sa-`, ordinal like identity) or a
+not-yet-derived id, and nothing for a custom client id. Rules:
+
+- **Never sent.** The roles are not part of `EffectiveRoleNames`; the controller neither sends nor
+  removes them.
+- **Tolerated, not required.** The health check excludes them from `SuperfluousRoles` but never
+  reports them missing — identity grants `FileManagement` only when the role is seeded (System.Files
+  installed). Every other undeclared role is still `roles-drift`.
+- **Same answer in the rights analysis.** They count as coverage, and a declared `FileManagement` is
+  reported under `BaselineRoles`, not as superfluous. On a custom client id both views treat
+  `FileManagement` like any other role.
+- **Keep in sync** with identity: a new identity-side grant for pipeline service accounts goes into
+  this list in the same change.
+
+Tests: `Services/ServiceAccountHealthTests` (`…PipelineAccountWithIdentityGrantedFileManagement_IsHealthy`,
+`…PipelineAccountWithoutFileManagement_IsHealthy`, `…PipelineAccountWithUnexpectedRole_ReportsOnlyThatRole`,
+`…CustomClientIdWithFileManagement_ReportsItSuperfluous`), `Services/ServiceAccountRightsAnalysisTests`
+(`…PipelineAccountDeclaringFileManagement_IsBaselineButUnexpectedRoleStaysSuperfluous`,
+`…TypeGrantedByIdentityGrantedFileManagement_IsNotMissing`, `…CustomClientIdDeclaringFileManagement_IsSuperfluous`),
+`Services/PipelineServiceAccountReconcileTests.IdentityGrantedRoleNamesFor_PrefixedOrDerivedClient_IsFileManagementAndNeverSynced`.
 
 ### The tenant gate only started working in AB#5054
 
