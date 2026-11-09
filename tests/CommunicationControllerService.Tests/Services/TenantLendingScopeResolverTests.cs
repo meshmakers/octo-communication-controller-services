@@ -32,6 +32,9 @@ internal class TenantLendingScopeResolverTests
     /// <summary>Tenant id -> its parent, the independent upward view.</summary>
     private readonly Dictionary<string, string?> _parents = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Root tenant id -> the ParentTenantId its system registry entry records instead of null.</summary>
+    private readonly Dictionary<string, string> _rootParentOverrides = new(StringComparer.OrdinalIgnoreCase);
+
     public TenantLendingScopeResolverTests()
     {
         _resolver = new TenantLendingScopeResolver(_systemContext);
@@ -65,13 +68,13 @@ internal class TenantLendingScopeResolverTests
         // all — every tenant below the first level resolved to "no parent", so it had no ancestors
         // and no siblings, silently. `AGrandchildResolvesItsAncestorsAndSiblings` is the test that
         // fails if the parent lookup goes back to this call.
-        var roots = _parents.Where(kvp => kvp.Value is null)
-            .Select(kvp => new OctoTenant(kvp.Key, $"db_{kvp.Key}", null))
-            .ToList();
         var adminSession = Substitute.For<IOctoAdminSession>();
         _systemContext.GetAdminSessionAsync().Returns(adminSession);
         _systemContext.GetAllTenantsAsync(adminSession, Arg.Any<int?>(), Arg.Any<int?>())
-            .Returns(_ => CreateResultSet(roots));
+            .Returns(_ => CreateResultSet(_parents.Where(kvp => kvp.Value is null)
+                .Select(kvp => new OctoTenant(kvp.Key, $"db_{kvp.Key}",
+                    _rootParentOverrides.GetValueOrDefault(kvp.Key)))
+                .ToList()));
     }
 
     private ITenantContext CreateContext(string tenantId)
@@ -83,7 +86,7 @@ internal class TenantLendingScopeResolverTests
         context.GetAdminSessionAsync().Returns(session);
         context.GetDirectChildTenantsAsync(session).Returns(_ =>
             CreateResultSet(_children.TryGetValue(tenantId, out var kids)
-                ? kids.Select(k => new OctoTenant(k, $"db_{k}", tenantId)).ToList()
+                ? kids.Select(k => new OctoTenant(k, $"db_{k}", _parents.GetValueOrDefault(k) ?? tenantId)).ToList()
                 : []));
 
         context.TryGetChildTenantContextAsync(Arg.Any<string>())
@@ -152,6 +155,59 @@ internal class TenantLendingScopeResolverTests
         var ancestors = await _resolver.ResolveAncestorTenantsAsync("grandchildNew");
 
         await Assert.That(ancestors).IsEquivalentTo(new[] { "childA", Lender });
+    }
+
+    [Test]
+    public async Task AncestorTenants_WhenATenantOfTheTreeCannotBeResolved_Throw()
+    {
+        GivenTree((Lender, null), ("childA", Lender), ("grandchildA1", "childA"), ("childB", Lender));
+        _systemContext.TryFindTenantContextAsync("childB").Returns((ITenantContext?)null);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await _resolver.ResolveAncestorTenantsAsync("grandchildA1"));
+    }
+
+    [Test]
+    public async Task AncestorTenants_WhenAChildRecordsAnotherParent_Throw()
+    {
+        GivenTree((Lender, null), ("childA", Lender), ("childB", Lender), ("grandchildA1", "childA"));
+        _parents["grandchildA1"] = "childB";
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await _resolver.ResolveAncestorTenantsAsync("grandchildA1"));
+    }
+
+    [Test]
+    public async Task AncestorTenants_WhenTwoTenantsListTheSameChild_Throw()
+    {
+        GivenTree((Lender, null), ("childA", Lender), ("childB", Lender), ("grandchildA1", "childA"));
+        _children["childB"].Add("grandchildA1");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await _resolver.ResolveAncestorTenantsAsync("grandchildA1"));
+    }
+
+    [Test]
+    public async Task AncestorTenants_WhenARootRecordsAParentThatDoesNotListIt_Throw()
+    {
+        GivenTree((Lender, null), ("childA", Lender), ("orphanRoot", null));
+        _rootParentOverrides["orphanRoot"] = Lender;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await _resolver.ResolveAncestorTenantsAsync("childA"));
+    }
+
+    [Test]
+    public async Task Lending_WithAnInconsistentTree_StillUsesThePartialMap()
+    {
+        GivenTree((Lender, null), ("childA", Lender), ("childB", Lender), ("grandchildA1", "childA"));
+        _systemContext.TryFindTenantContextAsync("childB").Returns((ITenantContext?)null);
+
+        var candidates = await _resolver.ResolveCandidateLenderTenantsAsync("grandchildA1");
+
+        using var assertionScope = Assert.Multiple();
+        await Assert.That(candidates).Contains("childA");
+        await Assert.That(candidates).Contains(Lender);
     }
 
     [Test]
