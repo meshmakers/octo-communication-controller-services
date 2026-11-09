@@ -815,6 +815,7 @@ internal class CommunicationRepository : ICommunicationRepository
                 secretDefault.SourceTenantId, secretDefault.SourceWorkloadRtId)
             {
                 LastProjectedAt = secretDefault.LastProjectedAt,
+                RtVersion = secretDefault.RtVersion,
                 Name = secretDefault.Name,
                 CkTypeId = secretDefault.CkTypeId?.ToString(),
                 Value = secretDefault.Value

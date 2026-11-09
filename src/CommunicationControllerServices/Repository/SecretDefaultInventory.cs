@@ -35,6 +35,9 @@ public sealed record StoredSecretDefault(
     /// <summary>UTC time of the projection that wrote it, when set; part of the snapshot a removal compares.</summary>
     public DateTime? LastProjectedAt { get; init; }
 
+    /// <summary>Version of the entity as read; every write raises it, so it is part of the snapshot a removal compares.</summary>
+    public ulong RtVersion { get; init; }
+
     /// <summary>Display name of the entity; the controller writes the key.</summary>
     public string? Name { get; init; }
 
@@ -47,7 +50,8 @@ public sealed record StoredSecretDefault(
     private bool PrintMembers(StringBuilder builder)
     {
         builder.Append($"RtId = {RtId}, Key = {Key}, SourceTenantId = {SourceTenantId}, ");
-        builder.Append($"SourceWorkloadRtId = {SourceWorkloadRtId}, LastProjectedAt = {LastProjectedAt}");
+        builder.Append($"SourceWorkloadRtId = {SourceWorkloadRtId}, LastProjectedAt = {LastProjectedAt}, ");
+        builder.Append($"RtVersion = {RtVersion}");
         return true;
     }
 }

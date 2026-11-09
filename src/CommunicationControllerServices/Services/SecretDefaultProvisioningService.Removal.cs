@@ -75,40 +75,53 @@ internal sealed partial class SecretDefaultProvisioningService
                 .Where(storedDefault => IsProjectedBy(storedDefault, sourceTenantId, applicationRtId) &&
                                         !StillProvides(checkedDeclarations, storedDefault.Key, servedTenantId))
                 .ToList();
-            var removedInTenant = 0;
+            if (withdrawnDefaults.Count == 0)
+            {
+                continue;
+            }
+
+            var handOver = await TryHandOverAsync(servedTenantId, cancellationToken);
+            if (handOver is { Status: SecretDefaultTargetStatus.Reconciled })
+            {
+                removed += handOver.DefaultsRemoved;
+                failed += handOver.WritesFailed;
+                continue;
+            }
+
             foreach (var withdrawnDefault in withdrawnDefaults)
             {
                 switch (await TryDeleteAsync(servedTenantId, withdrawnDefault))
                 {
                     case RemovalAttempt.Removed:
-                        removedInTenant++;
+                        removed++;
                         break;
                     case RemovalAttempt.Failed:
                         failed++;
                         break;
                 }
             }
-
-            removed += removedInTenant;
-            if (removedInTenant > 0)
-            {
-                await HandOverToRemainingSourcesAsync(servedTenantId, cancellationToken);
-            }
         }
 
         return new SecretDefaultProvisioningResult(0, 0, failed, removed);
     }
 
-    private async Task HandOverToRemainingSourcesAsync(string targetTenantId, CancellationToken cancellationToken)
+    /// <summary>
+    ///     Reconciles a tenant that holds withdrawn defaults: another source's winner is written before the withdrawn
+    ///     default is removed, so the key has no gap, and a failed replacement keeps the old default. Null when the
+    ///     reconcile threw; the caller then removes the withdrawn defaults itself.
+    /// </summary>
+    private async Task<SecretDefaultTargetResult?> TryHandOverAsync(string targetTenantId,
+        CancellationToken cancellationToken)
     {
         try
         {
-            await ProvisionForTargetAsync(targetTenantId, cancellationToken);
+            return await ProvisionForTargetAsync(targetTenantId, cancellationToken);
         }
         catch (Exception reconcileFailure) when (reconcileFailure is not OperationCanceledException)
         {
-            Logger.Warn(reconcileFailure, "[{TenantId}] Secret defaults of the tenant could not be reconciled after a " +
-                                          "removal; the next tenant load retries", targetTenantId);
+            Logger.Warn(reconcileFailure, "[{TenantId}] Secret defaults of the tenant could not be reconciled for a " +
+                                          "withdrawal; the withdrawn defaults are removed directly", targetTenantId);
+            return null;
         }
     }
 

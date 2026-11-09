@@ -38,7 +38,8 @@ internal static class SecretDefaultIdentity
                string.Equals(currentDefault.SourceTenantId, expectedDefault.SourceTenantId, StringComparison.Ordinal) &&
                string.Equals(currentDefault.SourceWorkloadRtId, expectedDefault.SourceWorkloadRtId,
                    StringComparison.Ordinal) &&
-               Nullable.Equals(currentDefault.LastProjectedAt, expectedDefault.LastProjectedAt);
+               Nullable.Equals(currentDefault.LastProjectedAt, expectedDefault.LastProjectedAt) &&
+               currentDefault.RtVersion == expectedDefault.RtVersion;
     }
 
     /// <summary>

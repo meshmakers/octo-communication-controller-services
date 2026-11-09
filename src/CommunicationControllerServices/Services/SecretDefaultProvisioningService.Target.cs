@@ -44,7 +44,7 @@ internal sealed partial class SecretDefaultProvisioningService
 
         var desiredState = await ReadDesiredStateAsync(targetTenantId, inventory, sourceTenants, cancellationToken);
         var writes = await WriteWinningOffersAsync(targetTenantId, inventory, desiredState, cancellationToken);
-        var removal = await RemoveUnprovidedDefaultsAsync(targetTenantId, inventory, desiredState);
+        var removal = await RemoveUnprovidedDefaultsAsync(targetTenantId, inventory, desiredState, writes.FailedKeys);
 
         var result = new SecretDefaultTargetResult(targetTenantId, SecretDefaultTargetStatus.Reconciled,
             writes.Created, writes.Updated, removal.RemovedRtIds.Count, removal.Kept + writes.Kept,
@@ -206,11 +206,17 @@ internal sealed partial class SecretDefaultProvisioningService
     }
 
     private async Task<RemovalOutcome> RemoveUnprovidedDefaultsAsync(string targetTenantId,
-        SecretDefaultInventory inventory, DesiredSecretDefaults desiredState)
+        SecretDefaultInventory inventory, DesiredSecretDefaults desiredState, IReadOnlySet<string> failedWriteKeys)
     {
         var removal = new RemovalOutcome();
         foreach (var storedDefault in inventory.Defaults)
         {
+            if (failedWriteKeys.Contains(storedDefault.Key))
+            {
+                removal.Kept++;
+                continue;
+            }
+
             switch (Classify(storedDefault, desiredState))
             {
                 case StoredDefaultStanding.SourceUnreadable:

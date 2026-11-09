@@ -5461,7 +5461,8 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   would drop ancestors), which stops the projection before any write; lending keeps using the partial map. Incomplete
   means: a read failed, a tenant of the walk cannot be resolved (its children are unknown), a child's registry entry
   names another parent than the tenant listing it, a child is listed by two parents, or a root names a walked parent that
-  does not list it. An inconsistent map is cached like a complete one (30 s), a failed read is retried at once. An existing SecretDefault whose `SourceTenantId` is one of them is kept
+  does not list it. An inconsistent map is cached like a complete one (30 s), a failed read is retried at once. A tenant
+  that is still not in the tree after a rebuild (other than the system tenant) is refused the same way. An existing SecretDefault whose `SourceTenantId` is one of them is kept
   (`KeptAncestorSource`), and a Warning event in the deploying tenant names the target tenant, the key, the kept source and
   the refused source. The same source (redeploy, rotation) or a descendant source overwrites; so does an unrelated source
   (last deploy wins). Example: P projects `k`, then C1 deploys `k` -> C1 and its subtree keep P's value; C1 projects first,
@@ -5489,7 +5490,8 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   value in the target (`RevealOrNull`, attribute `Value`) and compares it with the source value in constant time; neither
   is logged or kept, and an unreadable stored value counts as changed. **Write before remove:** the winners are written
   first, then the unprovided defaults are removed, so a holder change replaces the default in place and the consumer never
-  sees a gap. The write names the defaults it found unprovided (`SecretDefaultWrite.SupersededDefaults`); such a default is
+  sees a gap. When the winner's write fails (or its value cannot be read), the unprovided defaults of that key are kept
+  instead of removed, so the key never goes empty. The write names the defaults it found unprovided (`SecretDefaultWrite.SupersededDefaults`); such a default is
   replaced even when its source is protected, as long as it is unchanged since the read. A source tenant that cannot be
   resolved or lacks System.Communication 4.15.0 is unreadable: its defaults are kept (Warning event; for a missing model
   only when the target holds defaults of it, because a root without Communication would otherwise warn on every load). The
@@ -5501,11 +5503,14 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   so a default of another Application stays. A default without `SourceTenantId` or `SourceWorkloadRtId` was not written by
   a projection (or lost them on an import) and is always removed, also from a tenant whose sources cannot be read.
   **Conditional removal:** `DeleteSecretDefaultIfUnchangedAsync` re-reads the entity in the delete transaction and erases
-  it only while RtId, well-known name, `SourceTenantId`, `SourceWorkloadRtId` and `LastProjectedAt` match what was read;
+  it only while RtId, well-known name, `SourceTenantId`, `SourceWorkloadRtId`, `LastProjectedAt` and `RtVersion` (raised
+  by every write, so a rotation within the same tick is seen too) match what was read;
   a default a concurrent deploy wrote meanwhile is kept (`Changed`, a write conflict counts as `Changed`), a gone one is
   `NotFound`; neither is a failure. The target reconcile and the source sweep both use it. An entry that is present but invalid keeps its existing defaults (never written, never removed). On deploy the
-  source side sweeps its own tenant and subtree for defaults of this Application that it no longer provides and, where it
-  removed one, runs the target reconcile so another source can take the key over. **Unknown, never empty:** a source
+  source side sweeps its own tenant and subtree for defaults of this Application that it no longer provides; in every
+  tenant that holds one it runs the target reconcile, which writes another source's winner first and removes the withdrawn
+  default after, so the key has no gap and a failed replacement keeps the old default. Only when that reconcile does not
+  end `Reconciled` (tree unreadable, exception) does the sweep remove the withdrawn defaults itself (conditionally). **Unknown, never empty:** a source
   tenant that cannot be read keeps the defaults it projected and is named in a Warning event in the target; a tenant tree
   that cannot be read completely changes nothing (`TreeUnreadable`, Warning event).
 - **Exactly one per name under concurrency.** A new SecretDefault is created with an RtId derived from its key

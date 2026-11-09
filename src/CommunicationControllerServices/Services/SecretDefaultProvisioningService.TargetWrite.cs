@@ -57,6 +57,7 @@ internal sealed partial class SecretDefaultProvisioningService
         if (string.IsNullOrEmpty(plaintext))
         {
             outcome.Failed++;
+            outcome.FailedKeys.Add(offer.Key);
             Logger.Error("[{TenantId}] Secret default '{Key}' of application '{ApplicationName}' in tenant " +
                          "'{SourceTenantId}' has no readable value; it was not written", targetTenantId, offer.Key,
                 application.Name, sourceTenantId);
@@ -94,6 +95,7 @@ internal sealed partial class SecretDefaultProvisioningService
         catch (Exception writeFailure) when (writeFailure is not OperationCanceledException)
         {
             outcome.Failed++;
+            outcome.FailedKeys.Add(offer.Key);
             Logger.Error(writeFailure, "[{TenantId}] Could not write secret default '{Key}' of application " +
                                        "'{ApplicationName}' from tenant '{SourceTenantId}'", targetTenantId,
                 offer.Key, application.Name, sourceTenantId);
@@ -153,5 +155,7 @@ internal sealed partial class SecretDefaultProvisioningService
         public int Unchanged { get; set; }
 
         public int Failed { get; set; }
+
+        public HashSet<string> FailedKeys { get; } = new(StringComparer.Ordinal);
     }
 }
