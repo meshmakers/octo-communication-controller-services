@@ -187,7 +187,7 @@ internal sealed class ProvisionForSourceAsyncTests : SecretDefaultProvisioningSe
     }
 
     [Test]
-    public async Task AnApplicationWithoutSecretDefaults_WritesNothingAndDoesNotWalkTheTree()
+    public async Task AnApplicationWithoutSecretDefaults_WritesNothing()
     {
         var application = ArrangeApplication();
         application.SecretDefaults = null;
@@ -196,8 +196,7 @@ internal sealed class ProvisionForSourceAsyncTests : SecretDefaultProvisioningSe
 
         using var assertionScope = Assert.Multiple();
         await Assert.That(result).IsEqualTo(SecretDefaultProvisioningResult.Nothing);
-        await TenantScopeResolver.DidNotReceive().ResolveLendableTenantsAsync(Arg.Any<string>(),
-            Arg.Any<LendingScope>(), Arg.Any<CancellationToken>());
+        await Assert.That(Writes).IsEmpty();
     }
 
     [Test]
@@ -232,7 +231,11 @@ internal sealed class ProvisionForSourceAsyncTests : SecretDefaultProvisioningSe
             .OrderBy(name => name, StringComparer.Ordinal)
             .ToList();
         await Assert.That(repositoryCallNames).IsEquivalentTo(new[]
-            { nameof(ICommunicationRepository.GetWorkloadByRtIdAsync), nameof(ICommunicationRepository.UpsertSecretDefaultAsync) });
+        {
+            nameof(ICommunicationRepository.GetSecretDefaultsAsync),
+            nameof(ICommunicationRepository.GetWorkloadByRtIdAsync),
+            nameof(ICommunicationRepository.UpsertSecretDefaultAsync)
+        });
     }
 
     [Test]
@@ -276,5 +279,18 @@ internal sealed class ProvisionForSourceAsyncTests : SecretDefaultProvisioningSe
             NewRtId().ToString(), Clock.UtcNow);
 
         await Assert.That(write.ToString()).DoesNotContain(SentinelSecret[..12]);
+    }
+
+    [Test]
+    public async Task TheProjectionSummary_IsLinkedToTheApplication()
+    {
+        var application = ArrangeApplication(ProtectedEntry(CaptchaKey, SentinelSecret));
+
+        await Service.ProvisionForSourceAsync(SourceTenantId, application.RtId);
+
+        await CommunicationEventService.Received(1).StoreInformationEventAsync(SourceTenantId,
+            Arg.Is<string>(message => message.Contains("projected")),
+            Arg.Is<RtEntityId?>(link => link != null && link.Value.RtId == application.RtId &&
+                                        link.Value.CkTypeId == SystemCommunicationCkIds.RtCkApplicationTypeId));
     }
 }

@@ -96,6 +96,12 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
         cancellationToken.ThrowIfCancellationRequested();
 
         var parentMap = await ResolveParentMapEntryAsync(requireComplete: true).ConfigureAwait(false);
+        if (parentMap.IsComplete && !parentMap.KnownTenantIds.Contains(tenantId))
+        {
+            parentMap = await ResolveParentMapEntryAsync(requireComplete: true, forceRebuild: true)
+                .ConfigureAwait(false);
+        }
+
         if (!parentMap.IsComplete)
         {
             throw new InvalidOperationException(
@@ -309,7 +315,9 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
     ///     per level. Same cycle guard as the descendant walk — a tenant already seen is not
     ///     enqueued again, so a corrupted registry degrades to a partial map instead of looping.
     ///     A child whose context cannot be resolved is still recorded (its parent is known) but its
-    ///     own subtree is not walked, exactly as in <see cref="WalkAsync" />.
+    ///     own subtree is not walked, exactly as in <see cref="WalkAsync" />. Such a tenant, or an edge that
+    ///     contradicts a registry entry's <c>ParentTenantId</c>, marks the map incomplete: lending keeps using it,
+    ///     <see cref="ResolveAncestorTenantsAsync" /> refuses it.
     /// </remarks>
     private async Task<IReadOnlyDictionary<string, string>> ResolveParentMapAsync()
     {
@@ -317,19 +325,23 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
     }
 
     /// <summary>
-    ///     The cached parent map entry, rebuilt when expired, or when <paramref name="requireComplete" /> is set and
-    ///     the cached entry was built after a failed read.
+    ///     The cached parent map entry, rebuilt when expired, when <paramref name="requireComplete" /> is set and
+    ///     the cached entry was built after a failed read (an inconsistent tree is not read again before it
+    ///     expires), or when <paramref name="forceRebuild" /> is set because a
+    ///     tenant created after the last walk was asked for.
     /// </summary>
-    private async Task<ParentMapEntry> ResolveParentMapEntryAsync(bool requireComplete)
+    private async Task<ParentMapEntry> ResolveParentMapEntryAsync(bool requireComplete, bool forceRebuild = false)
     {
-        if (_parentMap is { IsExpired: false } cached && (cached.IsComplete || !requireComplete))
+        if (!forceRebuild && _parentMap is { IsExpired: false } cached &&
+            (cached.IsComplete || !requireComplete || !cached.ReadFailed))
         {
             return cached;
         }
 
         var parents = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var isComplete = true;
+        var inconsistencies = new List<string>();
+        var readFailed = false;
 
         try
         {
@@ -356,6 +368,7 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
                     var context = await systemContext.TryFindTenantContextAsync(tenantId).ConfigureAwait(false);
                     if (context is null)
                     {
+                        inconsistencies.Add($"tenant '{tenantId}' cannot be resolved, its children are unknown");
                         continue;
                     }
 
@@ -366,13 +379,15 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
 
                     foreach (var child in children.Items)
                     {
-                        parents[child.TenantId] = tenantId;
+                        RecordEdge(parents, child, tenantId, inconsistencies);
                         if (visited.Add(child.TenantId))
                         {
                             queue.Enqueue(child.TenantId);
                         }
                     }
                 }
+
+                CheckRootsAgainstDiscoveredEdges(roots.Items, parents, visited, inconsistencies);
             }
         }
         catch (Exception readFailure)
@@ -380,14 +395,77 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
             // A partial map is still better than none for lending: the caller degrades to "no ancestors", which
             // is the conservative direction there — a narrower lending scope and a borrower shown fewer pools,
             // never more. ResolveAncestorTenantsAsync refuses such a map instead.
-            isComplete = false;
+            readFailed = true;
             Logger.Warn(readFailure,
                 "Could not build the tenant parent map; ancestor and sibling resolution will be partial");
         }
 
-        var entry = new ParentMapEntry(parents, DateTimeOffset.UtcNow.Add(CacheDuration), isComplete);
+        if (inconsistencies.Count > 0)
+        {
+            Logger.Warn("The tenant parent map is incomplete; ancestors are not resolved until it is consistent: " +
+                        "{Inconsistencies}", string.Join("; ", inconsistencies));
+        }
+
+        var isComplete = !readFailed && inconsistencies.Count == 0;
+        var entry = new ParentMapEntry(parents, visited, DateTimeOffset.UtcNow.Add(CacheDuration), isComplete,
+            readFailed);
         _parentMap = entry;
         return entry;
+    }
+
+    /// <summary>
+    ///     Records child → parent as found by the walk. The registry entry of the child names its parent too; a
+    ///     different parent there, or a child listed by two parents, makes the map inconsistent. A record without
+    ///     a parent (written before <c>ParentTenantId</c> existed) is no contradiction.
+    /// </summary>
+    private static void RecordEdge(Dictionary<string, string> parents, OctoTenant child, string listingTenantId,
+        List<string> inconsistencies)
+    {
+        if (!string.IsNullOrWhiteSpace(child.ParentTenantId) &&
+            !string.Equals(child.ParentTenantId, listingTenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            inconsistencies.Add($"tenant '{child.TenantId}' is listed by '{listingTenantId}' but records " +
+                                $"'{child.ParentTenantId}' as its parent");
+        }
+
+        if (parents.TryGetValue(child.TenantId, out var earlierParentId) &&
+            !string.Equals(earlierParentId, listingTenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            inconsistencies.Add($"tenant '{child.TenantId}' is listed by both '{earlierParentId}' and " +
+                                $"'{listingTenantId}'");
+        }
+
+        parents[child.TenantId] = listingTenantId;
+    }
+
+    /// <summary>
+    ///     A root whose registry entry names a parent that was walked must have been found below that parent, and a
+    ///     root without a parent must not have been found below another tenant.
+    /// </summary>
+    private static void CheckRootsAgainstDiscoveredEdges(IEnumerable<OctoTenant> roots,
+        IReadOnlyDictionary<string, string> parents, IReadOnlySet<string> visited, List<string> inconsistencies)
+    {
+        foreach (var root in roots)
+        {
+            var discoveredParentId = parents.GetValueOrDefault(root.TenantId);
+            if (string.IsNullOrWhiteSpace(root.ParentTenantId))
+            {
+                if (discoveredParentId is not null)
+                {
+                    inconsistencies.Add($"tenant '{root.TenantId}' has no parent in the registry but is listed by " +
+                                        $"'{discoveredParentId}'");
+                }
+
+                continue;
+            }
+
+            if (visited.Contains(root.ParentTenantId) &&
+                !string.Equals(discoveredParentId, root.ParentTenantId, StringComparison.OrdinalIgnoreCase))
+            {
+                inconsistencies.Add($"tenant '{root.TenantId}' records '{root.ParentTenantId}' as its parent, " +
+                                    "which does not list it");
+            }
+        }
     }
 
     private static IReadOnlyCollection<string> Intersect(IReadOnlyCollection<string> resolved,
@@ -413,8 +491,8 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
     ///     A class rather than a struct: the field holding it is <c>volatile</c>, which C# does not
     ///     allow for a value type, and a reference swap is what makes the refresh atomic.
     /// </summary>
-    private sealed record ParentMapEntry(IReadOnlyDictionary<string, string> Parents, DateTimeOffset ExpiresAt,
-        bool IsComplete)
+    private sealed record ParentMapEntry(IReadOnlyDictionary<string, string> Parents,
+        IReadOnlySet<string> KnownTenantIds, DateTimeOffset ExpiresAt, bool IsComplete, bool ReadFailed)
     {
         public bool IsExpired => DateTimeOffset.UtcNow >= ExpiresAt;
     }

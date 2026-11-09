@@ -8,7 +8,7 @@ using NLog;
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
 /// <inheritdoc cref="ISecretDefaultProvisioningService" />
-internal sealed class SecretDefaultProvisioningService(
+internal sealed partial class SecretDefaultProvisioningService(
     ICommunicationRepository communicationRepository,
     ITenantLendingScopeResolver tenantScopeResolver,
     IWorkloadEncryptionService encryptionService,
@@ -28,7 +28,7 @@ internal sealed class SecretDefaultProvisioningService(
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceTenantId);
 
         var workload = await communicationRepository.GetWorkloadByRtIdAsync(sourceTenantId, applicationRtId);
-        if (workload is not RtApplication application || application.SecretDefaults is not { Count: > 0 } declarations)
+        if (workload is not RtApplication application)
         {
             return SecretDefaultProvisioningResult.Nothing;
         }
@@ -37,8 +37,10 @@ internal sealed class SecretDefaultProvisioningService(
             new RtEntityId(SystemCommunicationCkIds.RtCkApplicationTypeId, application.RtId));
         var result = SecretDefaultProvisioningResult.Nothing;
 
+        var checkedDeclarations =
+            SecretDefaultDeclarationValidator.Check(application.SecretDefaults ?? Enumerable.Empty<RtSecretDefaultProjectionRecord>());
         var validDeclarations = new List<CheckedSecretDefaultDeclaration>();
-        foreach (var checkedDeclaration in SecretDefaultDeclarationValidator.Check(declarations))
+        foreach (var checkedDeclaration in checkedDeclarations)
         {
             if (checkedDeclaration.Issue == SecretDefaultDeclarationIssue.None)
             {
@@ -50,9 +52,9 @@ internal sealed class SecretDefaultProvisioningService(
             result = Combine(result, new SecretDefaultProvisioningResult(0, 0, 1));
         }
 
+        var servedTenantIds = await ResolveServedTenantsAsync(sourceTenantId, cancellationToken);
         if (validDeclarations.Count > 0)
         {
-            var servedTenantIds = await ResolveServedTenantsAsync(sourceTenantId, cancellationToken);
             var ancestorTenantIds =
                 await tenantScopeResolver.ResolveAncestorTenantsAsync(sourceTenantId, cancellationToken);
 
@@ -65,11 +67,23 @@ internal sealed class SecretDefaultProvisioningService(
             }
         }
 
-        Logger.Info(
-            "[{TenantId}] Secret defaults of application '{ApplicationName}' ({ApplicationRtId}) projected: " +
-            "{DefaultsWritten} written, {TargetsSkipped} skipped, {TargetsFailed} failed",
-            sourceTenantId, application.Name, application.RtId, result.DefaultsWritten, result.TargetsSkipped,
-            result.TargetsFailed);
+        result = Combine(result,
+            await RemoveWithdrawnDefaultsAsync(sourceTenantId, application.RtId.ToString(), application.Name,
+                checkedDeclarations, servedTenantIds, cancellationToken));
+
+        if (result != SecretDefaultProvisioningResult.Nothing)
+        {
+            Logger.Info(
+                "[{TenantId}] Secret defaults of application '{ApplicationName}' ({ApplicationRtId}) projected: " +
+                "{DefaultsWritten} written, {DefaultsRemoved} removed, {TargetsSkipped} skipped, {TargetsFailed} failed",
+                sourceTenantId, application.Name, application.RtId, result.DefaultsWritten, result.DefaultsRemoved,
+                result.TargetsSkipped, result.TargetsFailed);
+            await communicationEventService.StoreInformationEventAsync(sourceTenantId,
+                $"Secret defaults of application '{application.Name}' projected: {result.DefaultsWritten} written, " +
+                $"{result.DefaultsRemoved} removed, {result.TargetsSkipped} tenant(s) skipped, " +
+                $"{result.TargetsFailed} failed.", projection.ApplicationEntityId);
+        }
+
         return result;
     }
 
@@ -213,7 +227,8 @@ internal sealed class SecretDefaultProvisioningService(
         SecretDefaultProvisioningResult part)
     {
         return new SecretDefaultProvisioningResult(total.DefaultsWritten + part.DefaultsWritten,
-            total.TargetsSkipped + part.TargetsSkipped, total.TargetsFailed + part.TargetsFailed);
+            total.TargetsSkipped + part.TargetsSkipped, total.TargetsFailed + part.TargetsFailed,
+            total.DefaultsRemoved + part.DefaultsRemoved);
     }
 
     private sealed class ProjectionContext(

@@ -180,15 +180,62 @@ internal class DeployWorkloadSecretDefaultsTests : PoolServiceTestsBase
     }
 
     [Test]
-    public async Task AnApplicationWithoutSecretDefaults_IsNotProjected()
+    public async Task AnApplicationWithoutSecretDefaults_IsStillProjectedSoItsFormerDefaultsAreRemoved()
     {
         var application = GivenApplication();
         application.SecretDefaults = null;
 
         await DeploymentSiteService.DeployWorkloadAsync(TenantId, application.RtId);
 
+        await SecretDefaultProvisioningService.Received(1)
+            .ProvisionForSourceAsync(TenantId, application.RtId, Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task DeployingTheDeploymentSite_DeploysNoWorkloadAndProjectsNothing()
+    {
+        var application = GivenApplication(Entry(CaptchaKey, SentinelSecret), Entry(CaptchaKey, "zq7245-duplicate"));
+        CommunicationRepository.GetWorkloadsForDeploymentSiteAsync(TenantId, DeploymentSiteRtId)
+            .Returns(new RtDeployableWorkload[] { application });
+
+        await DeploymentSiteService.DeployDeploymentSiteAsync(TenantId, DeploymentSiteRtId);
+
+        using var assertionScope = Assert.Multiple();
+        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
+            .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
         await SecretDefaultProvisioningService.DidNotReceiveWithAnyArgs()
             .ProvisionForSourceAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task APendingApplicationRedispatchedOnSiteRegistration_IsValidatedLikeADeploy()
+    {
+        var application = GivenApplication(Entry(CaptchaKey, SentinelSecret), Entry(CaptchaKey, "zq7245-duplicate"));
+        application.DeploymentState = RtDeploymentStateEnum.Pending;
+        CommunicationRepository.GetWorkloadsForDeploymentSiteAsync(TenantId, DeploymentSiteRtId)
+            .Returns(new RtDeployableWorkload[] { application });
+
+        await DeploymentSiteService.ReconcilePendingWorkloadsAsync(TenantId, DeploymentSiteRtId);
+
+        using var assertionScope = Assert.Multiple();
+        await OperatorConnectionManager.DidNotReceiveWithAnyArgs()
+            .NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
+        await SecretDefaultProvisioningService.DidNotReceiveWithAnyArgs()
+            .ProvisionForSourceAsync(Arg.Any<string>(), Arg.Any<OctoObjectId>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task APendingApplicationRedispatchedOnSiteRegistration_IsProjectedLikeADeploy()
+    {
+        var application = GivenApplication(Entry(CaptchaKey, SentinelSecret));
+        application.DeploymentState = RtDeploymentStateEnum.Pending;
+        CommunicationRepository.GetWorkloadsForDeploymentSiteAsync(TenantId, DeploymentSiteRtId)
+            .Returns(new RtDeployableWorkload[] { application });
+
+        await DeploymentSiteService.ReconcilePendingWorkloadsAsync(TenantId, DeploymentSiteRtId);
+
+        await SecretDefaultProvisioningService.Received(1)
+            .ProvisionForSourceAsync(TenantId, application.RtId, Arg.Any<CancellationToken>());
     }
 
     [Test]
@@ -203,6 +250,35 @@ internal class DeployWorkloadSecretDefaultsTests : PoolServiceTestsBase
 
         using var assertionScope = Assert.Multiple();
         await OperatorConnectionManager.Received(1).NotifyWorkloadDeployedAsync(Arg.Any<WorkloadDeployedDto>());
+        await CommunicationEventService.Received(1).StoreErrorEventAsync(TenantId,
+            Arg.Is<string>(message => message.Contains("energy-community-app")), Arg.Any<RtEntityId?>());
+    }
+
+    [Test]
+    public async Task UndeployingAnApplication_WithdrawsItsSecretDefaults()
+    {
+        var application = GivenApplication(Entry(CaptchaKey, SentinelSecret));
+        application.DeploymentState = RtDeploymentStateEnum.Deployed;
+
+        await DeploymentSiteService.UndeployWorkloadAsync(TenantId, application.RtId);
+
+        using var assertionScope = Assert.Multiple();
+        await OperatorConnectionManager.Received(1).NotifyWorkloadUndeployedAsync(Arg.Any<WorkloadUndeployedDto>());
+        await SecretDefaultProvisioningService.Received(1)
+            .WithdrawForSourceAsync(TenantId, application.RtId, Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task AFailingWithdrawal_DoesNotFailTheUndeployAndIsStoredAsAnErrorEvent()
+    {
+        var application = GivenApplication(Entry(CaptchaKey, SentinelSecret));
+        application.DeploymentState = RtDeploymentStateEnum.Deployed;
+        SecretDefaultProvisioningService
+            .WithdrawForSourceAsync(TenantId, application.RtId, Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("tree walk failed"));
+
+        await DeploymentSiteService.UndeployWorkloadAsync(TenantId, application.RtId);
+
         await CommunicationEventService.Received(1).StoreErrorEventAsync(TenantId,
             Arg.Is<string>(message => message.Contains("energy-community-app")), Arg.Any<RtEntityId?>());
     }
