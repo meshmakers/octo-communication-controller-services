@@ -14,13 +14,21 @@ internal sealed partial class SecretDefaultProvisioningService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetTenantId);
 
+        return (await ReconcileTargetAsync(targetTenantId, cancellationToken)).Result;
+    }
+
+    private async Task<TargetReconcile> ReconcileTargetAsync(string targetTenantId,
+        CancellationToken cancellationToken)
+    {
         var inventory = await communicationRepository.GetSecretDefaultsAsync(targetTenantId);
         switch (inventory.Availability)
         {
             case SecretDefaultTenantAvailability.TenantUnavailable:
-                return SecretDefaultTargetResult.Unchanged(targetTenantId, SecretDefaultTargetStatus.TenantUnavailable);
+                return TargetReconcile.Of(SecretDefaultTargetResult.Unchanged(targetTenantId,
+                    SecretDefaultTargetStatus.TenantUnavailable));
             case SecretDefaultTenantAvailability.ModelMissing:
-                return SecretDefaultTargetResult.Unchanged(targetTenantId, SecretDefaultTargetStatus.ModelMissing);
+                return TargetReconcile.Of(SecretDefaultTargetResult.Unchanged(targetTenantId,
+                    SecretDefaultTargetStatus.ModelMissing));
         }
 
         IReadOnlyList<SourceTenant> sourceTenants;
@@ -36,10 +44,11 @@ internal sealed partial class SecretDefaultProvisioningService
             await communicationEventService.StoreWarningEventAsync(targetTenantId,
                 "Secret defaults were not reconciled because the tenant tree could not be read completely; the " +
                 $"{inventory.Defaults.Count} existing default(s) are kept.");
-            return SecretDefaultTargetResult.Unchanged(targetTenantId, SecretDefaultTargetStatus.TreeUnreadable) with
-            {
-                DefaultsKept = inventory.Defaults.Count
-            };
+            return TargetReconcile.Of(
+                SecretDefaultTargetResult.Unchanged(targetTenantId, SecretDefaultTargetStatus.TreeUnreadable) with
+                {
+                    DefaultsKept = inventory.Defaults.Count
+                });
         }
 
         var desiredState = await ReadDesiredStateAsync(targetTenantId, inventory, sourceTenants, cancellationToken);
@@ -59,7 +68,7 @@ internal sealed partial class SecretDefaultProvisioningService
                 result.WritesFailed);
         }
 
-        return result;
+        return new TargetReconcile(result, removal.RemovedRtIds, removal.UnremovedRtIds);
     }
 
     /// <inheritdoc />
@@ -215,6 +224,7 @@ internal sealed partial class SecretDefaultProvisioningService
             if (failedWriteKeys.Contains(storedDefault.Key))
             {
                 removal.Kept++;
+                removal.UnremovedRtIds.Add(storedDefault.RtId.ToString());
                 continue;
             }
 
@@ -222,6 +232,7 @@ internal sealed partial class SecretDefaultProvisioningService
             {
                 case StoredDefaultStanding.SourceUnreadable:
                     removal.Kept++;
+                    removal.UnremovedRtIds.Add(storedDefault.RtId.ToString());
                     continue;
                 case StoredDefaultStanding.Provided:
                     continue;
@@ -234,6 +245,7 @@ internal sealed partial class SecretDefaultProvisioningService
                     break;
                 case RemovalAttempt.Failed:
                     removal.Failed++;
+                    removal.UnremovedRtIds.Add(storedDefault.RtId.ToString());
                     break;
             }
         }
@@ -354,8 +366,25 @@ internal sealed partial class SecretDefaultProvisioningService
     {
         public HashSet<string> RemovedRtIds { get; } = new(StringComparer.Ordinal);
 
+        public HashSet<string> UnremovedRtIds { get; } = new(StringComparer.Ordinal);
+
         public int Kept { get; set; }
 
         public int Failed { get; set; }
+    }
+
+    /// <summary>
+    ///     The result of a target reconcile, plus which stored defaults it removed and which it had to leave (failed
+    ///     removal, failed replacement, unreadable source), so a source sweep can count only its own.
+    /// </summary>
+    private sealed record TargetReconcile(
+        SecretDefaultTargetResult Result,
+        IReadOnlySet<string> RemovedRtIds,
+        IReadOnlySet<string> UnremovedRtIds)
+    {
+        public static TargetReconcile Of(SecretDefaultTargetResult result)
+        {
+            return new TargetReconcile(result, new HashSet<string>(), new HashSet<string>());
+        }
     }
 }

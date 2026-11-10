@@ -157,6 +157,24 @@ internal sealed class SecretDefaultReleasedSourceTests : SecretDefaultProvisioni
     }
 
     [Test]
+    public async Task WithdrawForSource_CountsOnlyTheDefaultsOfThisApplication()
+    {
+        var application = ArrangeApplication(ProtectedEntry(CaptchaKey, SentinelSecret));
+        await Service.ProvisionForSourceAsync(SourceTenantId, application.RtId);
+        ArrangeStoredDefault(FirstChildTenantId, "orphaned-key", "zq7245-orphan-value", SourceTenantId,
+            NewRtId().ToString());
+        application.DeploymentState = RtDeploymentStateEnum.Undeployed;
+        CommunicationEventService.ClearReceivedCalls();
+
+        var result = await Service.WithdrawForSourceAsync(SourceTenantId, application.RtId);
+
+        using var assertionScope = Assert.Multiple();
+        await Assert.That(result.DefaultsRemoved).IsEqualTo(4);
+        await CommunicationEventService.Received(1).StoreInformationEventAsync(SourceTenantId,
+            Arg.Is<string>(message => message.Contains("withdrawn: 4 removed, 0 failed")), Arg.Any<RtEntityId?>());
+    }
+
+    [Test]
     public async Task WithdrawForSource_HandsTheKeyToAnotherDeployedSource()
     {
         var parentApplication = ArrangeApplication(ProtectedEntry(CaptchaKey, "zq7245-parent-value"));

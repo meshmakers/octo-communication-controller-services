@@ -90,10 +90,12 @@ internal sealed partial class SecretDefaultProvisioningService
             }
 
             var handOver = await TryHandOverAsync(servedTenantId, cancellationToken);
-            if (handOver is { Status: SecretDefaultTargetStatus.Reconciled })
+            if (handOver is { Result.Status: SecretDefaultTargetStatus.Reconciled })
             {
-                removed += handOver.DefaultsRemoved;
-                failed += handOver.WritesFailed;
+                var withdrawnRtIds = withdrawnDefaults.Select(withdrawnDefault => withdrawnDefault.RtId.ToString())
+                    .ToList();
+                removed += withdrawnRtIds.Count(handOver.RemovedRtIds.Contains);
+                failed += withdrawnRtIds.Count(handOver.UnremovedRtIds.Contains);
                 continue;
             }
 
@@ -119,12 +121,12 @@ internal sealed partial class SecretDefaultProvisioningService
     ///     default is removed, so the key has no gap, and a failed replacement keeps the old default. Null when the
     ///     reconcile threw; the caller then removes the withdrawn defaults itself.
     /// </summary>
-    private async Task<SecretDefaultTargetResult?> TryHandOverAsync(string targetTenantId,
+    private async Task<TargetReconcile?> TryHandOverAsync(string targetTenantId,
         CancellationToken cancellationToken)
     {
         try
         {
-            return await ProvisionForTargetAsync(targetTenantId, cancellationToken);
+            return await ReconcileTargetAsync(targetTenantId, cancellationToken);
         }
         catch (Exception reconcileFailure) when (reconcileFailure is not OperationCanceledException)
         {

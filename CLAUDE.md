@@ -5722,7 +5722,12 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   source side sweeps its own tenant and subtree for defaults of this Application that it no longer provides; in every
   tenant that holds one it runs the target reconcile, which writes another source's winner first and removes the withdrawn
   default after, so the key has no gap and a failed replacement keeps the old default. Only when that reconcile does not
-  end `Reconciled` (tree unreadable, exception) does the sweep remove the withdrawn defaults itself (conditionally). **Unknown, never empty:** a source
+  end `Reconciled` (tree unreadable, exception) does the sweep remove the withdrawn defaults itself (conditionally). The
+  counts of the sweep (its Information event on the Application, `SecretDefaultProvisioningResult`) are this
+  Application's own: removed = its withdrawn defaults the reconcile removed, failed = its withdrawn defaults it had to leave
+  (failed removal or replacement, unreadable source); what the reconcile changes for other sources in that tenant is not
+  counted. Integration test of the `RtVersion` read: `SecretDefaultRepositoryTests` (a same-tick rotation is `Changed`
+  for the stale read and removable after a new read). **Unknown, never empty:** a source
   tenant that cannot be read keeps the defaults it projected and is named in a Warning event in the target; a tenant tree
   that cannot be read completely changes nothing (`TreeUnreadable`, Warning event).
 - **Exactly one per name under concurrency.** A new SecretDefault is created with an RtId derived from its key
