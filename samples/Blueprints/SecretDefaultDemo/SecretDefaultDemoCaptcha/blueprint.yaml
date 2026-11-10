@@ -21,7 +21,7 @@ description: |
   asset repository reads (local: `octo-ckc -c Publish`).
 
 ckModelDependencies:
-  - System.Communication-[4.15,5.0)
+  - System.Communication-[4.16,5.0)
   - SecretDefaultDemo-[1.0,2.0)
 
 seedDataPath: seed-data/entities.yaml

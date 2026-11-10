@@ -31,6 +31,6 @@ description: |
   it and returns only a verdict.
 
 ckModelDependencies:
-  - System.Communication-[4.15,5.0)
+  - System.Communication-[4.16,5.0)
 
 seedDataPath: seed-data/entities.yaml

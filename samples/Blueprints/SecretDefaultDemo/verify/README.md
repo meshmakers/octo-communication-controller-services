@@ -6,8 +6,8 @@ without that environment's own go.
 ## Prerequisites
 
 - Local stack with a Communication Controller that contains the secret-default projection (AB#7244,
-  AB#7245) and a Mesh Adapter that contains `VerifyCaptcha@1` (AB#7251); System.Communication 4.15.0
-  or later in the CK catalog the asset repository reads.
+  AB#7245) and a Mesh Adapter that contains `VerifyCaptcha@1` (AB#7251); System.Communication 4.16.0
+  or later in the CK catalog the asset repository reads and in every tenant of the tree.
 - `octo-cli` with the `GraphQl` command and its `-vars` option, one context per tenant (`<parent>`,
   `<child>`, `<grandchild>`). Logins are done by the developer, not by an agent. `jq` for
   `write-secret.sh`.
@@ -61,7 +61,7 @@ The seed declares no `SecretDefaults` entry, so nothing reaches a served tenant 
 
 ```bash
 for served_tenant in "$parent_tenant" "$child_tenant" "$grandchild_tenant"; do
-  octo-cli -c GraphQl -tid "$served_tenant" -f "$sample_root/verify/read-secret-default.graphql"
+  octo-cli --context "local_$served_tenant" -c GraphQl -tid "$served_tenant" -f "$sample_root/verify/read-secret-default.graphql"
 done
 ```
 
@@ -79,7 +79,7 @@ printf '%s\n' 1x0000000000000000000000000000000AA \
   | "$sample_root/verify/write-secret.sh" default "$parent_tenant"
 octo-cli --context "local_$parent_tenant" -c DeployWorkload -id 5ecdef0000000000000000a1
 for served_tenant in "$parent_tenant" "$child_tenant" "$grandchild_tenant"; do
-  octo-cli -c GraphQl -tid "$served_tenant" -f "$sample_root/verify/read-secret-default.graphql"
+  octo-cli --context "local_$served_tenant" -c GraphQl -tid "$served_tenant" -f "$sample_root/verify/read-secret-default.graphql"
 done
 ```
 
@@ -96,13 +96,13 @@ default, and the parent and grandchild have none.
 
 | Step | Command | Expected answer |
 |---|---|---|
-| Default in the child | `verify/call-verify-captcha.sh "$adapter_base_url" "$child_tenant"` | `{"valid":true,"source":"default"}` |
-| Default in the grandchild | `verify/call-verify-captcha.sh "$adapter_base_url" "$grandchild_tenant"` | `{"valid":true,"source":"default"}` |
-| Child sets the always-fail secret | `printf '%s\n' 2x0000000000000000000000000000000AA \| verify/write-secret.sh tenant "$child_tenant"` | `captchaSecret { isSet: true }` |
-| Override in the child | `verify/call-verify-captcha.sh "$adapter_base_url" "$child_tenant"` | `{"valid":false,"source":"tenant","reason":"invalid-token"}` |
-| Grandchild untouched | `verify/call-verify-captcha.sh "$adapter_base_url" "$grandchild_tenant"` | `{"valid":true,"source":"default"}` |
-| Child clears its secret | `octo-cli -c GraphQl -tid "$child_tenant" -f verify/clear-tenant-secret.graphql` | `captchaSecret { isSet: false }` |
-| Back to the default | `verify/call-verify-captcha.sh "$adapter_base_url" "$child_tenant"` | `{"valid":true,"source":"default"}` |
+| Default in the child | `"$sample_root/verify/call-verify-captcha.sh" "$adapter_base_url" "$child_tenant"` | `{"valid":true,"source":"default"}` |
+| Default in the grandchild | `"$sample_root/verify/call-verify-captcha.sh" "$adapter_base_url" "$grandchild_tenant"` | `{"valid":true,"source":"default"}` |
+| Child sets the always-fail secret | `printf '%s\n' 2x0000000000000000000000000000000AA \| "$sample_root/verify/write-secret.sh" tenant "$child_tenant"` | `captchaSecret { isSet: true }` |
+| Override in the child | `"$sample_root/verify/call-verify-captcha.sh" "$adapter_base_url" "$child_tenant"` | `{"valid":false,"source":"tenant","reason":"invalid-token"}` |
+| Grandchild untouched | `"$sample_root/verify/call-verify-captcha.sh" "$adapter_base_url" "$grandchild_tenant"` | `{"valid":true,"source":"default"}` |
+| Child clears its secret | `octo-cli --context "local_$child_tenant" -c GraphQl -tid "$child_tenant" -f "$sample_root/verify/clear-tenant-secret.graphql"` | `captchaSecret { isSet: false }` |
+| Back to the default | `"$sample_root/verify/call-verify-captcha.sh" "$adapter_base_url" "$child_tenant"` | `{"valid":true,"source":"default"}` |
 
 No answer, log line or GraphQL response may contain a secret: grep them for `1x0000` and `2x0000`.
 `RevealSecret@1` on the `SecretDefault` is refused for every identity (proof story AB#7247).
@@ -112,12 +112,12 @@ No answer, log line or GraphQL response may contain a secret: grep them for `1x0
 ```bash
 octo-cli --context "local_$parent_tenant" -c UndeployWorkload -id 5ecdef0000000000000000a1 -y
 for served_tenant in "$parent_tenant" "$child_tenant" "$grandchild_tenant"; do
-  octo-cli -c GraphQl -tid "$served_tenant" -f "$sample_root/verify/read-secret-default.graphql"
+  octo-cli --context "local_$served_tenant" -c GraphQl -tid "$served_tenant" -f "$sample_root/verify/read-secret-default.graphql"
 done
 ```
 
 Expected: `totalCount: 0` everywhere - an undeployed Application is no source - and
-`call-verify-captcha.sh` in a tenant without its own secret answers `"valid":false` with
+`"$sample_root/verify/call-verify-captcha.sh"` in a tenant without its own secret answers `"valid":false` with
 `"source":"none"`. The Information event of the withdrawal is linked to the Application.
 
 Then delete the child and grandchild tenants and remove the sample model and blueprints from the local

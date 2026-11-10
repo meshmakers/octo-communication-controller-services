@@ -11,8 +11,12 @@ a tenant can still set its own secret, and nobody in a tenant can read the defau
 | `ConstructionKit/` | CK model `SecretDefaultDemo-1.0.0`: type `CaptchaConfiguration` with the Secret attribute `CaptchaSecret` | publish to a CK catalog; the second blueprint pulls it |
 | `verify/` | The commands that prove the pattern on a local tenant tree | - |
 
-Requires System.Communication 4.15.0 or later in every tenant of the tree, a Communication Controller with
-the secret-default projection (AB#7244, AB#7245) and a Mesh Adapter with `VerifyCaptcha@1` (AB#7251).
+Requires System.Communication 4.16.0 or later in every tenant of the tree, a Communication Controller with
+the secret-default projection (AB#7244, AB#7245) and a Mesh Adapter with `VerifyCaptcha@1` (AB#7251). The
+projection itself needs 4.15.0, but only from 4.16.0 on is the projected value `Hidden`: on 4.15.0 a tenant
+identity with generic write access could overwrite it (the next reconcile writes the projected value back).
+Both blueprints require 4.16; the parent's blueprint cannot constrain the descendant tenants, so install
+`SecretDefaultDemoCaptcha` (or update System.Communication) in each of them.
 
 ## The pattern
 
@@ -71,8 +75,8 @@ adds it after the install:
   replaces the Application's list: use it while the Application carries no other entry, otherwise the
   Studio form) and the secret passed as a **GraphQL variable**, never inline in the document:
   [`verify/write-secret-default.graphql`](verify/write-secret-default.graphql).
-  `verify/write-secret.sh default <tenant> [allowedTenantId ...]` sends it with the value read from
-  standard input; the variables reach `octo-cli` on its standard input (`-vars @/dev/stdin`), so the
+  `verify/write-secret.sh default <tenant> [allowedTenantId ...]` sends it (always through the context
+  `local_<tenant>`) with the value read from standard input; the variables reach `octo-cli` on its standard input (`-vars @/dev/stdin`), so the
   secret is on no command line, in no file and in no shell history. Then `DeployWorkload`.
 - **A CD from a secret store**, as the Energy Community app does on test-2 (Vault -> `SecretDefaults`
   before the deploy). Then the store is the source of truth and a Studio edit is overwritten by the

@@ -4,6 +4,7 @@
 #   write-secret.sh tenant  <tenantId>                         the tenant's own CaptchaSecret (override)
 # The secret never appears on a command line or in the document: jq turns standard input into the
 # variables JSON, which octo-cli reads from its own standard input. The response carries only isSet.
+# It always uses the context local_<tenantId>, never the active one, so it cannot write to a shared environment.
 set -euo pipefail
 
 usage='usage: write-secret.sh default|tenant <tenantId> [allowedTenantId ...]'
@@ -40,4 +41,4 @@ esac
 printf '%s' "$secret_value" \
   | jq -Rsc --argjson allowedTenantIds "$allowed_tenant_ids_json" --arg target "$secret_target" \
       'if $target == "default" then { secretValue: ., allowedTenantIds: $allowedTenantIds } else { secretValue: . } end' \
-  | octo-cli -c GraphQl -tid "$tenant_id" -f "$document_file" -vars @/dev/stdin
+  | octo-cli --context "local_$tenant_id" -c GraphQl -tid "$tenant_id" -f "$document_file" -vars @/dev/stdin
