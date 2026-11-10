@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- AB#7245 New: secret defaults follow the tenants and the deploy state of their Application. A tenant loaded after the
+  deploy (service start, Enable, tenant update) receives the defaults its own and its ancestors' Applications provide
+  (`ProvisionForTargetAsync`, never fails the load), and a default no Application provides any more is removed;
+  removals are conditional on what was read (incl. `RtVersion`), so a concurrent rewrite survives, and a key is never left
+  empty while its replacement fails. **Undeploying an Application withdraws its defaults** from its tenant and subtree,
+  where another deployed source takes the key over without a gap. An Application whose redeploy was refused or whose
+  Helm rollout failed keeps the defaults its running release projected; one refused before it was ever deployed offers
+  nothing. `LastDeploymentError` of a refused deploy keeps its text (`[tenant] Cannot deploy workload 'x': ...`), so the
+  Studio's field marks still work. New endpoint `POST {tenantId}/v1/secretDefaults/reconcile`
+  (`TenantCommunicationApiReadWritePolicy`) reconciles the tenant and its subtree and answers one result per tenant
+  (status and counts, never a value); use it after deleting an Application. Events about a source's defaults are linked to
+  the Application in its own tenant, and the counts of a withdrawal name only that Application's defaults.
+
+- AB#7244 New: deploying an Application projects its `SecretDefaults` (System.Communication 4.15.0) into the
+  platform-owned `System.Communication/SecretDefault` of its own tenant and its whole subtree, narrowed by
+  `AllowedTenantIds`, never siblings. The value is revealed once in the source and encrypted by the engine in each target;
+  it never becomes a Helm value, a log line or an event. The source closer to the root wins; a tenant that is unavailable
+  or lacks the model is skipped with a Warning event. The deploy guard refuses an invalid declaration (empty or malformed
+  key, duplicate key, missing `SecretValue`) before anything reaches Helm.
+
 - AB#8596 New: System.Communication 4.18.0 (Minor) declares the Pipeline, DataFlow and workload chart-version operations of
   the REST API as CK methods handled by the controller: `Pipeline.Deploy`, `Pipeline.Execute`, `Pipeline.SetDebugging`,
   `Pipeline.MoveToAdapter` (one pipeline per call), `DataFlow.Deploy`, `DataFlow.Undeploy` and
