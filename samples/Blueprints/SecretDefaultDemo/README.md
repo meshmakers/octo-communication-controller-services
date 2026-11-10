@@ -11,9 +11,9 @@ a tenant can still set its own secret, and nobody in a tenant can read the defau
 | `ConstructionKit/` | CK model `SecretDefaultDemo-1.0.0`: type `CaptchaConfiguration` with the Secret attribute `CaptchaSecret` | publish to a CK catalog; the second blueprint pulls it |
 | `verify/` | The commands that prove the pattern on a local tenant tree | - |
 
-Requires System.Communication 4.16.0 or later in every tenant of the tree, a Communication Controller with
-the secret-default projection (AB#7244, AB#7245) and a Mesh Adapter with `VerifyCaptcha@1` (AB#7251). The
-projection itself needs 4.15.0, but only from 4.16.0 on is the projected value `Hidden`: on 4.15.0 a tenant
+Requires System.Communication `[4.16,5.0)` (4.16.0 or later, below 5.0.0) in every tenant of the tree, a
+Communication Controller with the secret-default projection (AB#7244, AB#7245), and a Mesh Adapter with
+`VerifyCaptcha@1` (AB#7251) and outbound HTTPS to `challenges.cloudflare.com`. The projection itself needs 4.15.0, but only from 4.16.0 on is the projected value `Hidden`: on 4.15.0 a tenant
 identity with generic write access could overwrite it (the next reconcile writes the projected value back).
 Both blueprints require 4.16; the parent's blueprint cannot constrain the descendant tenants, so install
 `SecretDefaultDemoCaptcha` (or update System.Communication) in each of them.

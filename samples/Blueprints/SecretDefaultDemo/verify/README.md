@@ -6,8 +6,11 @@ without that environment's own go.
 ## Prerequisites
 
 - Local stack with a Communication Controller that contains the secret-default projection (AB#7244,
-  AB#7245) and a Mesh Adapter that contains `VerifyCaptcha@1` (AB#7251); System.Communication 4.16.0
-  or later in the CK catalog the asset repository reads and in every tenant of the tree.
+  AB#7245) and a Mesh Adapter that contains `VerifyCaptcha@1` (AB#7251); System.Communication in the
+  range `[4.16,5.0)` (4.16.0 or later, below 5.0.0) in the CK catalog the asset repository reads and in
+  every tenant of the tree.
+- Outbound HTTPS from the Mesh Adapter to `challenges.cloudflare.com` (Turnstile siteverify, even for
+  the test keys); without it every check answers `verification-unavailable`.
 - `octo-cli` with the `GraphQl` command and its `-vars` option, one context per tenant (`<parent>`,
   `<child>`, `<grandchild>`). Logins are done by the developer, not by an agent. `jq` for
   `write-secret.sh`.
