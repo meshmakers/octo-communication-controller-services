@@ -91,6 +91,8 @@ types:
       description: "Sets the Helm chart version of the workload (REST PATCH Workload/{workloadRtId}/chart-version). Empty or absent means: the newest chart of the configured repository. Does not deploy; deploy the workload afterwards."
       parameters:
         - { name: chartVersion, valueType: String, isOptional: true, description: "A SemVer (1.2.3, 1.2.3-beta.1); empty or absent = the newest chart in the configured repository." }
+      errors:
+        - { code: WORKLOAD_CHART_VERSION_UPDATE_FAILED, description: "The workload exists but the new chart version could not be stored." }
       authorization:
         roles: [ CommunicationManagement ]
       execution:

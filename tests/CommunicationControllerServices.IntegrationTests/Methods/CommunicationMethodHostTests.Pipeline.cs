@@ -344,7 +344,7 @@ public sealed partial class CommunicationMethodHostTests
     [InlineData("", "")]
     public async Task SetChartVersion_WritesWhatRestWrites(string requested, string stored)
     {
-        var workloadRtId = OctoObjectId.GenerateNewId();
+        var workloadRtId = ArrangeWorkload();
         _repository.UpdateWorkloadChartVersionAsync(TenantId, workloadRtId, stored).Returns("1.0.0");
 
         var rest = await WorkloadController().UpdateChartVersion(workloadRtId, new UpdateChartVersionDto(requested));
@@ -358,6 +358,20 @@ public sealed partial class CommunicationMethodHostTests
             Arg.Is<string>(m => m.EndsWith("(source: CI/CD via CK method).")));
         await _events.Received(1).StoreInformationEventAsync(TenantId,
             Arg.Is<string>(m => m.EndsWith("(source: CI/CD).")));
+    }
+
+    [Fact]
+    public async Task SetChartVersion_AFailedWrite_IsTheDeclaredError_NotTargetNotFound()
+    {
+        var workloadRtId = ArrangeWorkload();
+        _repository.UpdateWorkloadChartVersionAsync(TenantId, workloadRtId, "3.0.0")
+            .Throws(new CommunicationRepositoryException("write failed"));
+
+        var method = await InvokeAsync(SystemCommunicationCkIds.DeployableWorkloadSetChartVersionMethodId,
+            workloadRtId.ToString(), new { chartVersion = "3.0.0" });
+
+        method.Error!.Code.Should().Be("WORKLOAD_CHART_VERSION_UPDATE_FAILED");
+        await _events.DidNotReceiveWithAnyArgs().StoreInformationEventAsync(default!, default!);
     }
 
     [Fact]
@@ -382,6 +396,17 @@ public sealed partial class CommunicationMethodHostTests
     }
 
     // ------------------------------------------------------------------ helpers
+
+    private OctoObjectId ArrangeWorkload()
+    {
+        var workload = new RtApplication
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            CkTypeId = SystemCommunicationCkIds.RtCkApplicationTypeId
+        };
+        _repository.GetWorkloadByRtIdAsync(TenantId, workload.RtId).Returns(workload);
+        return workload.RtId;
+    }
 
     private RtPipeline ArrangePipeline(RtAdapter? assignedTo)
     {

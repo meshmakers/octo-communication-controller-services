@@ -289,7 +289,9 @@ Code: `src/CommunicationControllerServices/Methods/Service/`. User guide: `octo-
   `Reconcile...` and `Rotate...`; invalid lease parameters are `METHOD_VALIDATION_FAILED` (`adapterRtId`, `ttlSeconds` 1-3600,
   `borrowerTenantId`); the audit events say `source: User via CK method`. AB#8596: a pipeline that does not exist is
   `METHOD_TARGET_NOT_FOUND` for `Pipeline.Deploy` / `Execute` / `SetDebugging` (REST 400/404), an unknown or malformed
-  `adapterRtId` / `targetAdapterRtId` and an invalid `chartVersion` are `METHOD_VALIDATION_FAILED`; `Pipeline.Deploy` without
+  `adapterRtId` / `targetAdapterRtId` and an invalid `chartVersion` are `METHOD_VALIDATION_FAILED`; `SetChartVersion` checks
+  the workload first (`METHOD_TARGET_NOT_FOUND`) and answers a failed write with `WORKLOAD_CHART_VERSION_UPDATE_FAILED` (REST
+  answers 404 for both); `Pipeline.Deploy` without
   `adapterRtId` deploys to the assigned adapter (`PIPELINE_ADAPTER_NOT_ASSIGNED` when there is none).
 - **Token.** `AddControllerCkMethodCallerTokenValidation` (shared with the pipeline handler, registered once) validates the
   forwarded token against `CommunicationController:AuthorityUrl` (`Methods:Token` overrides).

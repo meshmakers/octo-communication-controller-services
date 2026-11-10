@@ -360,7 +360,7 @@ internal sealed class DataFlowUndeployHandler(
 /// </summary>
 /// <remarks>
 ///     An invalid version is <c>METHOD_VALIDATION_FAILED</c> (field <c>chartVersion</c>, REST 400); a workload that does not
-///     exist is <c>METHOD_TARGET_NOT_FOUND</c> (REST 404).
+///     exist is <c>METHOD_TARGET_NOT_FOUND</c> (REST 404), a failed write <c>WORKLOAD_CHART_VERSION_UPDATE_FAILED</c> (REST 404 too).
 /// </remarks>
 internal sealed class DeployableWorkloadSetChartVersionHandler(
     ICommunicationRepository repository,
@@ -385,6 +385,14 @@ internal sealed class DeployableWorkloadSetChartVersionHandler(
             return CkMethodOutcome.ValidationFailed("chartVersion", "invalid-semver");
         }
 
+        // The repository throws the same exception for a missing workload and a failed write (REST answers 404 for
+        // both); the method tells them apart (CodeRabbit on PR #105): a missing workload is METHOD_TARGET_NOT_FOUND,
+        // a failed write WORKLOAD_CHART_VERSION_UPDATE_FAILED.
+        if (await repository.GetWorkloadByRtIdAsync(context.TenantId, workloadRtId).ConfigureAwait(false) is null)
+        {
+            return CkMethodOutcome.TargetNotFound();
+        }
+
         string? previousVersion;
         try
         {
@@ -396,7 +404,7 @@ internal sealed class DeployableWorkloadSetChartVersionHandler(
             logger.LogWarning(e,
                 "Chart version of workload '{WorkloadRtId}' not updated (CK method, invocation {InvocationId})",
                 workloadRtId, context.InvocationId);
-            return CkMethodOutcome.TargetNotFound();
+            return CkMethodOutcome.Fail(CommunicationMethodErrors.WorkloadChartVersionUpdateFailed);
         }
 
         await StoreInformationEventQuietlyAsync(eventService, logger, context.TenantId,

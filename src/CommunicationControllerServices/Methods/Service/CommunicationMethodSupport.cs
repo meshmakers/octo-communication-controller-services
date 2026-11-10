@@ -52,6 +52,9 @@ internal static class CommunicationMethodErrors
     /// <summary><c>DataFlow.Undeploy</c>: the data flow could not be undeployed (REST 422/404/400).</summary>
     public const string DataFlowUndeployFailed = "DATA_FLOW_UNDEPLOY_FAILED";
 
+    /// <summary><c>DeployableWorkload.SetChartVersion</c>: the workload exists but the write failed (REST 404).</summary>
+    public const string WorkloadChartVersionUpdateFailed = "WORKLOAD_CHART_VERSION_UPDATE_FAILED";
+
     /// <summary>Error parameter with the service's message, as the REST error body carries it. Never contains a secret.</summary>
     public const string MessageParameter = "message";
 }
