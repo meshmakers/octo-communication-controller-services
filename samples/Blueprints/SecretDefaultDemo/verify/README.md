@@ -5,11 +5,12 @@ without that environment's own go.
 
 ## Prerequisites
 
-- Local stack with a Communication Controller that contains the secret-default projection (AB#7244)
-  and a Mesh Adapter that contains `VerifyCaptcha@1` (AB#7251); System.Communication 4.15.0 in the
-  CK catalog the asset repository reads.
-- `octo-cli` with the `GraphQl` command, one context per tenant (`<parent>`, `<child>`, `<grandchild>`).
-  Logins are done by the developer, not by an agent.
+- Local stack with a Communication Controller that contains the secret-default projection (AB#7244,
+  AB#7245) and a Mesh Adapter that contains `VerifyCaptcha@1` (AB#7251); System.Communication 4.15.0
+  or later in the CK catalog the asset repository reads.
+- `octo-cli` with the `GraphQl` command and its `-vars` option, one context per tenant (`<parent>`,
+  `<child>`, `<grandchild>`). Logins are done by the developer, not by an agent. `jq` for
+  `write-secret.sh`.
 - The served tenants' Mesh Adapter reachable from the shell, e.g. `http://localhost:5020` through
   `kubectl port-forward`.
 
@@ -39,8 +40,9 @@ blueprints again when the run is over.
 
 ## 2. Tenant tree, install, data flows
 
-Create the tree **before** the Application is deployed, so the deploy in step 4 projects into every
-tenant of it.
+Create the tree before the deploy in step 4, so that the deploy itself projects into every tenant of
+it. A tenant created later receives the default on its first load, or at once with
+`POST {tenant}/v1/secretDefaults/reconcile` on the Communication Controller.
 
 ```bash
 octo-cli --context "local_$parent_tenant" -c Create -tid "$child_tenant" -db "$child_tenant"
@@ -53,28 +55,42 @@ for served_tenant in "$child_tenant" "$grandchild_tenant"; do
 done
 ```
 
-## 3. No value, no deploy
+## 3. Before the operator step: nothing to project
+
+The seed declares no `SecretDefaults` entry, so nothing reaches a served tenant yet:
 
 ```bash
-octo-cli --context "local_$parent_tenant" -c DeployWorkload -id 5ecdef0000000000000000a1
+for served_tenant in "$parent_tenant" "$child_tenant" "$grandchild_tenant"; do
+  octo-cli -c GraphQl -tid "$served_tenant" -f "$sample_root/verify/read-secret-default.graphql"
+done
 ```
 
-Expected: refused with "the SecretDefaults entry 'demo-captcha-secret' has no SecretValue", and
-`read-secret-default.graphql` finds no `SecretDefault` in the child.
+Expected: `totalCount: 0` in every tenant.
 
-## 4. Write the always-pass test secret and deploy
+## 4. Operator step: add the entry with the always-pass test secret, deploy
+
+This is the step an operator does in Refinery Studio (Application `secret-default-demo` -> Further
+attributes -> `SecretDefaults`: Key `demo-captcha-secret`, SecretValue, optional AllowedTenantIds and
+Description -> Save -> Deploy). The script does the same through
+`write-secret-default.graphql`, with the secret as the GraphQL variable `secretValue`:
 
 ```bash
 printf '%s\n' 1x0000000000000000000000000000000AA \
   | "$sample_root/verify/write-secret.sh" default "$parent_tenant"
 octo-cli --context "local_$parent_tenant" -c DeployWorkload -id 5ecdef0000000000000000a1
-for served_tenant in "$child_tenant" "$grandchild_tenant"; do
+for served_tenant in "$parent_tenant" "$child_tenant" "$grandchild_tenant"; do
   octo-cli -c GraphQl -tid "$served_tenant" -f "$sample_root/verify/read-secret-default.graphql"
 done
 ```
 
-Expected: the mutation answers `secretValue { isSet: true }`; each served tenant has one
-`SecretDefault` `demo-captcha-secret` with `value { isSet: true }` and `sourceTenantId` = the parent.
+Expected: the mutation answers `secretValue { isSet: true }` and `allowedTenantIds: []` (empty = the
+parent and its whole subtree); each tenant has one `SecretDefault` `demo-captcha-secret` with
+`sourceTenantId` = the parent and `sourceWorkloadRtId` = `5ecdef0000000000000000a1`. Its value is
+Hidden (System.Communication 4.16.0 and later), so the entity is the proof that the default is set.
+
+To narrow the set, list the tenants after the tenant id, e.g.
+`write-secret.sh default "$parent_tenant" "$child_tenant"`: after the deploy only the child holds the
+default, and the parent and grandchild have none.
 
 ## 5. Acceptance checks
 
@@ -91,7 +107,18 @@ Expected: the mutation answers `secretValue { isSet: true }`; each served tenant
 No answer, log line or GraphQL response may contain a secret: grep them for `1x0000` and `2x0000`.
 `RevealSecret@1` on the `SecretDefault` is refused for every identity (proof story AB#7247).
 
-## 6. Clean up
+## 6. Undeploy withdraws, clean up
 
-Undeploy the Application (`UndeployWorkload -id 5ecdef0000000000000000a1 -y`), delete the child and
-grandchild tenants, remove the sample model and blueprints from the local catalogs.
+```bash
+octo-cli --context "local_$parent_tenant" -c UndeployWorkload -id 5ecdef0000000000000000a1 -y
+for served_tenant in "$parent_tenant" "$child_tenant" "$grandchild_tenant"; do
+  octo-cli -c GraphQl -tid "$served_tenant" -f "$sample_root/verify/read-secret-default.graphql"
+done
+```
+
+Expected: `totalCount: 0` everywhere - an undeployed Application is no source - and
+`call-verify-captcha.sh` in a tenant without its own secret answers `"valid":false` with
+`"source":"none"`. The Information event of the withdrawal is linked to the Application.
+
+Then delete the child and grandchild tenants and remove the sample model and blueprints from the local
+catalogs.

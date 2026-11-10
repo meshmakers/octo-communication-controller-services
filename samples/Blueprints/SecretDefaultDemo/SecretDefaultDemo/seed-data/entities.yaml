@@ -43,12 +43,4 @@ entities:
                 value: 1x00000000000000000000AA
               - id: System.Communication/IsSecret
                 value: false
-      # No SecretValue: the operator writes it after the install (see verify/README.md).
-      - id: System.Communication/SecretDefaults
-        value:
-          - ckRecordId: System.Communication/SecretDefaultProjection
-            attributes:
-              - id: System.Communication/SecretDefaultKey
-                value: demo-captcha-secret
-              - id: System.Communication/SecretDefaultDescription
-                value: Turnstile secret every served tenant verifies CAPTCHAs with unless it sets its own.
+      # No SecretDefaults entry: a seed cannot carry a secret, the operator adds it (README).
