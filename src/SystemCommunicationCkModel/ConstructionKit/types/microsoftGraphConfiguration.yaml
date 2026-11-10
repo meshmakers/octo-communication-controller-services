@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
   - typeId: MicrosoftGraphConfiguration
+    derivable: Any
     derivedFromCkTypeId: ${System}/Configuration
     description: "Microsoft Graph API configuration for OAuth2 client credentials authentication"
     isFinal: true

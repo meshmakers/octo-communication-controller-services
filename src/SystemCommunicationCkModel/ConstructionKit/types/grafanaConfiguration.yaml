@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
   - typeId: GrafanaConfiguration
+    derivable: Any
     derivedFromCkTypeId: ${System}/Configuration
     isFinal: true
     description: "Configuration for Grafana integration. Used by the GrafanaProvisionTenant and GrafanaDeprovisionTenant pipeline nodes."

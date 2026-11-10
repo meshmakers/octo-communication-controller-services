@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
 - typeId: DeployableWorkload
+  derivable: Any
   description: 'Abstract base type for workloads that the Communication Operator deploys to Kubernetes via Helm. Carries the chart reference, base values.yaml, and structured value overrides shared by Adapter and Application.'
   isAbstract: true
   derivedFromCkTypeId: ${this}/DeployableEntity
@@ -71,3 +72,29 @@ types:
     # for why `Hosts` and not `Deploys`, and for the three identifiers this moves.
     - id: ${this}/Hosts
       targetCkTypeId: ${this}/DeploymentSite
+  # AB#8595 (4.17.0, Feature AB#5697 F4.3): REST POST Adapter/{workloadRtId}/wake takes any workload (adapter, application
+  # or pool), so the method lives on the common base and every workload type inherits it. Handled by the communication
+  # controller; roles as on Adapter (see types/adapter.yaml).
+  methods:
+    - methodId: Wake-1
+      description: "Wakes a hibernated OnDemand workload: scales it to one replica and waits until it is registered and configured (budget LifecycleWakeBudgetSeconds, default 60 s). No-op for AlwaysOn workloads, for tenants without scale-to-zero and for running workloads (REST POST Adapter/{workloadRtId}/wake)."
+      errors:
+        - { code: WORKLOAD_WAKE_FAILED, description: "The workload did not reach the Configured state in the budget, or the operator could not scale it up. The wake may still complete in the cluster; retry shortly." }
+      authorization:
+        roles: [ CommunicationManagement ]
+      execution:
+        timeoutSeconds: 90
+        idempotent: true
+    # AB#8596 (4.18.0): REST PATCH Workload/{workloadRtId}/chart-version takes any workload, so the method lives on the
+    # common base like Wake.
+    - methodId: SetChartVersion-1
+      description: "Sets the Helm chart version of the workload (REST PATCH Workload/{workloadRtId}/chart-version). Empty or absent means: the newest chart of the configured repository. Does not deploy; deploy the workload afterwards."
+      parameters:
+        - { name: chartVersion, valueType: String, isOptional: true, description: "A SemVer (1.2.3, 1.2.3-beta.1); empty or absent = the newest chart in the configured repository." }
+      errors:
+        - { code: WORKLOAD_CHART_VERSION_UPDATE_FAILED, description: "The workload exists but the new chart version could not be stored." }
+      authorization:
+        roles: [ CommunicationManagement ]
+      execution:
+        timeoutSeconds: 15
+        idempotent: true

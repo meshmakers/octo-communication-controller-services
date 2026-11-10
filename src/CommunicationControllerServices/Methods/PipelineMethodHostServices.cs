@@ -152,18 +152,7 @@ internal static class PipelineMethodServiceCollectionExtensions
         IConfiguration configuration)
     {
         services.Configure<PipelineMethodOptions>(configuration.GetSection(PipelineMethodOptions.SectionName));
-        // The forwarded caller token is re-validated here with the settings of the HTTP API of this service (shared
-        // helper of octo-common-services). Authority defaults to CommunicationController:AuthorityUrl;
-        // Methods:Token overrides it.
-        services.AddCkMethodCallerTokenValidation();
-        services.AddOptions<CkMethodTokenOptions>()
-            .Configure<IOptions<CommunicationControllerOptions>>((token, controller) =>
-            {
-                if (string.IsNullOrWhiteSpace(token.Authority) && string.IsNullOrWhiteSpace(token.MetadataAddress))
-                {
-                    token.Authority = controller.Value.AuthorityUrl;
-                }
-            });
+        services.AddControllerCkMethodCallerTokenValidation();
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IPipelineMethodCatalog, PipelineMethodCatalog>();
         services.AddSingleton<PipelineMethodHandlerInstance>();
@@ -175,9 +164,38 @@ internal static class PipelineMethodServiceCollectionExtensions
         return services;
     }
 
+    /// <summary>
+    ///     The caller token validation of every method host of the controller (pipeline handler AB#6879, service handlers
+    ///     AB#8595): the forwarded caller token is re-validated with the settings of the HTTP API of this service (shared
+    ///     helper of octo-common-services). Authority defaults to <c>CommunicationController:AuthorityUrl</c>;
+    ///     <c>Methods:Token</c> overrides it. Registered once, however many hosts call it.
+    /// </summary>
+    public static IServiceCollection AddControllerCkMethodCallerTokenValidation(this IServiceCollection services)
+    {
+        if (services.Any(d => d.ServiceType == typeof(ControllerCkMethodTokenMarker)))
+        {
+            return services;
+        }
+
+        services.AddSingleton<ControllerCkMethodTokenMarker>();
+        services.AddCkMethodCallerTokenValidation();
+        services.AddOptions<CkMethodTokenOptions>()
+            .Configure<IOptions<CommunicationControllerOptions>>((token, controller) =>
+            {
+                if (string.IsNullOrWhiteSpace(token.Authority) && string.IsNullOrWhiteSpace(token.MetadataAddress))
+                {
+                    token.Authority = controller.Value.AuthorityUrl;
+                }
+            });
+        return services;
+    }
+
     /// <summary>Lets the controller answer discovery requests of dispatchers (call in the event hub configuration).</summary>
     public static void AddPipelineMethodDiscovery(this IDistributionEventHubConfiguration configuration)
     {
         configuration.AddBroadcastEventConsumer<PipelineMethodDiscoveryConsumer, CkMethodHandlerDiscoveryRequested>();
     }
 }
+
+/// <summary>Marks that <see cref="PipelineMethodServiceCollectionExtensions.AddControllerCkMethodCallerTokenValidation" /> ran.</summary>
+internal sealed class ControllerCkMethodTokenMarker;

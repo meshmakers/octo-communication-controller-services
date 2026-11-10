@@ -357,6 +357,17 @@ Base route: `{tenantId}/v{version}/`
 | `/pipelinedebug/{executionId}` | GET | Get debug points for execution | ReadOnly |
 | `/pipelinedebug/{executionId}/point/{nodeId}` | GET | Get specific debug point | ReadOnly |
 
+### CK Methods (GraphQL)
+
+Since System.Communication 4.17.0 (AB#8595) the adapter, workload and adapter pool operations above are also CK methods
+handled by this service (`Adapter.DeployUpdate`, `Adapter.ReconcileServiceAccount`, `Adapter.RotateServiceAccountSecret`,
+`DeployableWorkload.Wake`, `AdapterPool.RefreshMirrors`, `AdapterPool.PublishMirrors`, `AdapterPool.GrantLease`,
+`AdapterPool.CancelQueuedExecution`), callable as typed GraphQL mutations through the asset repository with the role
+`CommunicationManagement`. Since 4.18.0 (AB#8596) the pipeline, data flow and workload chart-version operations follow
+(`Pipeline.Deploy`, `Pipeline.Execute`, `Pipeline.SetDebugging`, `Pipeline.MoveToAdapter`, `DataFlow.Deploy`,
+`DataFlow.Undeploy`, `DeployableWorkload.SetChartVersion`). The tenant-level endpoints of `CommunicationController` stay
+REST. The REST endpoints are unchanged. Details: `CLAUDE.md`, "CK method service handlers".
+
 ## Configuration
 
 ### Environment Variables

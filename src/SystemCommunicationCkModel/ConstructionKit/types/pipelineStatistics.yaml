@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
 - typeId: PipelineStatistics
+  derivable: Any
   description: Aggregated execution statistics for a pipeline across multiple time windows (rolling 60 min; 12, 24 and 720 UTC clock hours including the current partial hour — the latter three are exactly the sum of HourlyBuckets over the window, AB#5583). Tracks success/failure counts and average duration per period.
   derivedFromCkTypeId: ${System}/Entity
   attributes:

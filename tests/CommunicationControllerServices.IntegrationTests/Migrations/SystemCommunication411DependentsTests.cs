@@ -101,12 +101,15 @@ public class SystemCommunication411DependentsTests(CommunicationControllerFixtur
         await ImportPublishedAsync(tenant, "ck-basic-2.5.0.json", "Basic-2.5.0");
         await ImportPublishedAsync(tenant, "ck-system.communication-4.10.0.json", "System.Communication-4.10.0");
         // The closure pin of the published Loxone is 4.9.0; widen it to the installed 4.10.0 so the classic copy resolves
-        // before the upgrade, and drop the ranges so only that exact pin is left.
+        // before the upgrade, and drop the ranges so only that exact pin is left. System.Bot follows the embedded version.
         await ImportPublishedAsync(tenant, "ck-loxone-5.4.0.json", "Loxone-5.4.0", json =>
         {
             var node = System.Text.Json.Nodes.JsonNode.Parse(json)!.AsObject();
             node.Remove("dependencyRanges");
-            return node.ToJsonString().Replace("System.Communication-4.9.0", "System.Communication-4.10.0");
+            // The closure also pins the System.Bot the compiler saw (3.5.0); follow the System.Bot this build embeds,
+            // otherwise the test breaks whenever System.Bot is bumped (AB#8626).
+            return Regex.Replace(node.ToJsonString().Replace("System.Communication-4.9.0", "System.Communication-4.10.0"),
+                @"System\.Bot-3\.\d+\.\d+", SystemBotCkIds.CkModelId.ToString());
         });
         (await StatesAsync(tenantId))["Loxone-5.4.0"].Should().Be(Available, "precondition: resolves before the minor");
 
@@ -136,6 +139,9 @@ public class SystemCommunication411DependentsTests(CommunicationControllerFixtur
         Func<string, string>? transform = null)
     {
         var json = Regex.Replace(await ReadResourceAsync(resource), @"System-2\.\d+\.\d+", SystemCkIds.CkModelId.ToString());
+        // Same for the System.Bot closure pin (3.5.0 in the published files): the tenant holds the System.Bot this build
+        // embeds (3.6.0 since AB#8593), and the classic copy of the negative control is judged by its exact pins only.
+        json = Regex.Replace(json, @"System\.Bot-3\.\d+\.\d+", SystemBotCkIds.CkModelId.ToString());
         json = transform?.Invoke(json) ?? json;
         var result = new OperationResult();
         var model = await fixture.GetService<ICkJsonSerializer>()

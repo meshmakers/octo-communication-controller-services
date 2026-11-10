@@ -5,6 +5,7 @@ using Asp.Versioning;
 using Duende.IdentityModel;
 using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
@@ -297,9 +298,7 @@ public class PipelineController : ControllerBase
                     }
                 }
 
-                var auditMessage = movedToDifferentAdapter
-                    ? $"Pipeline {pipelineRtId} moved from adapter {moveResult.OldAdapterRtEntityId.RtId} to {moveResult.NewAdapterRtEntityId.RtId} (source: User)."
-                    : $"Pipeline {pipelineRtId} move requested but already pointed at adapter {moveResult.NewAdapterRtEntityId.RtId} (source: User, no-op).";
+                var auditMessage = BuildMoveAuditMessage(pipelineRtId, moveResult, "source: User");
                 await _eventService.StoreInformationEventAsync(tenantId, auditMessage);
 
                 results.Add(new MovePipelineResultDto(
@@ -347,13 +346,11 @@ public class PipelineController : ControllerBase
 
         try
         {
-            var state = body.Enabled ? "enabled" : "disabled";
             var appliedToRunningAdapter =
                 await _adapterService.SetPipelineDebuggingAsync(tenantId, pipelineRtEntityId, body.Enabled);
 
-            var auditMessage = appliedToRunningAdapter
-                ? $"Pipeline {pipelineRtId} debugging {state} and applied to the running adapter (source: User)."
-                : $"Pipeline {pipelineRtId} debugging {state}; adapter offline, will apply on next deploy (source: User).";
+            var auditMessage = BuildDebugAuditMessage(pipelineRtId, body.Enabled, appliedToRunningAdapter,
+                "source: User");
             await _eventService.StoreInformationEventAsync(tenantId, auditMessage);
 
             return Ok(new SetPipelineDebugResultDto(body.Enabled, appliedToRunningAdapter));
@@ -376,6 +373,33 @@ public class PipelineController : ControllerBase
                 pipelineRtId, tenantId);
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
         }
+    }
+
+    /// <summary>
+    /// The audit text of a pipeline move (shared with the CK method <c>Pipeline.MoveToAdapter</c>, AB#8596).
+    /// </summary>
+    /// <param name="pipelineRtId">The moved pipeline.</param>
+    /// <param name="moveResult">The adapters before and after the move.</param>
+    /// <param name="source">The source tag, e.g. <c>source: User</c>.</param>
+    internal static string BuildMoveAuditMessage(OctoObjectId pipelineRtId, PipelineMoveResult moveResult, string source) =>
+        !moveResult.OldAdapterRtEntityId.Equals(moveResult.NewAdapterRtEntityId)
+            ? $"Pipeline {pipelineRtId} moved from adapter {moveResult.OldAdapterRtEntityId.RtId} to {moveResult.NewAdapterRtEntityId.RtId} ({source})."
+            : $"Pipeline {pipelineRtId} move requested but already pointed at adapter {moveResult.NewAdapterRtEntityId.RtId} ({source}, no-op).";
+
+    /// <summary>
+    /// The audit text of a debug toggle (shared with the CK method <c>Pipeline.SetDebugging</c>, AB#8596).
+    /// </summary>
+    /// <param name="pipelineRtId">The pipeline.</param>
+    /// <param name="enabled">The new debug state.</param>
+    /// <param name="appliedToRunningAdapter">Whether the running adapter received the change.</param>
+    /// <param name="source">The source tag, e.g. <c>source: User</c>.</param>
+    internal static string BuildDebugAuditMessage(OctoObjectId pipelineRtId, bool enabled, bool appliedToRunningAdapter,
+        string source)
+    {
+        var state = enabled ? "enabled" : "disabled";
+        return appliedToRunningAdapter
+            ? $"Pipeline {pipelineRtId} debugging {state} and applied to the running adapter ({source})."
+            : $"Pipeline {pipelineRtId} debugging {state}; adapter offline, will apply on next deploy ({source}).";
     }
 
     /// <summary>

@@ -209,6 +209,98 @@ execute command that reports the execution like the adapter hub does - the pipel
 this repository). The sample pipeline `Methods/SamplePipelines/Device.UpdateFirmware-1.pipeline.yaml` is the one printed
 in the guide and is the pipeline definition of the integration tests.
 
+### CK method service handlers (AB#8595 / AB#8596, System.Communication 4.17.0 / 4.18.0)
+
+System.Communication 4.17.0 declares the adapter, workload and adapter pool operations of the REST API as CK methods, 4.18.0
+the pipeline, data flow and workload chart-version operations
+(`handler: service`), and the controller handles them with the typed handler SDK of octo-common-services
+(`AddCkMethodHandlers`): one shared queue per method, announcement, heartbeat, caller token validation, the declared
+authorization and redaction are the host's. The REST endpoints are unchanged (client switch and deprecation: F5.3, AB#5701).
+Code: `src/CommunicationControllerServices/Methods/Service/`. User guide: `octo-documentation` ->
+`technologyGuide/communication/methods.md` (en + de).
+
+| Method | Kind | REST endpoint it mirrors | Handler | Timeout / idempotent |
+|---|---|---|---|---|
+| `Adapter.DeployUpdate-1` | instance | `POST Adapter/deployUpdate?adapterRtEntityId=` | `AdapterDeployUpdateHandler` | 90 s / yes |
+| `DeployableWorkload.Wake-1` | instance (adapter, application, pool) | `POST Adapter/{workloadRtId}/wake` | `DeployableWorkloadWakeHandler` | 90 s / yes |
+| `Adapter.ReconcileServiceAccount-1` | instance | `POST Adapter/{adapterRtId}/serviceAccount/reconcile` | `AdapterReconcileServiceAccountHandler` | 60 s / yes |
+| `Adapter.RotateServiceAccountSecret-1` | instance | `POST Adapter/{adapterRtId}/serviceAccount/rotateSecret` | `AdapterRotateServiceAccountSecretHandler` | 60 s / no |
+| `AdapterPool.RefreshMirrors-1` | static | `POST AdapterPool/mirrors/refresh` | `AdapterPoolRefreshMirrorsHandler` | 120 s / yes |
+| `AdapterPool.PublishMirrors-1` | static | `POST AdapterPool/mirrors/publish` | `AdapterPoolPublishMirrorsHandler` | 120 s / yes |
+| `AdapterPool.GrantLease-1` | instance | `POST AdapterPool/{adapterPoolRtId}/lease` | `AdapterPoolGrantLeaseHandler` | 30 s / no |
+| `AdapterPool.CancelQueuedExecution-1` | instance | `DELETE AdapterPool/{adapterPoolRtId}/queue/{executionId}` | `AdapterPoolCancelQueuedExecutionHandler` | 15 s / no |
+| `Pipeline.Deploy-1` | instance | `POST Pipeline/deploy?adapterRtEntityId=&pipelineRtEntityId=` (body: definition) | `PipelineDeployHandler` | 200 s / yes |
+| `Pipeline.Execute-1` | instance | `POST Pipeline/execute?pipelineRtId=&isDryRun=` (body: input) | `PipelineExecuteHandler` | 30 s / no |
+| `Pipeline.SetDebugging-1` | instance | `PATCH Pipeline/{pipelineRtId}/debug` | `PipelineSetDebuggingHandler` | 300 s / yes |
+| `Pipeline.MoveToAdapter-1` | instance (one pipeline) | `PATCH Pipeline/move-to-adapter` | `PipelineMoveToAdapterHandler` | 200 s / yes |
+| `DataFlow.Deploy-1` | instance | `POST DataFlow/deploy?dataFlowRtId=` | `DataFlowDeployHandler` | 300 s / yes |
+| `DataFlow.Undeploy-1` | instance | `POST DataFlow/undeploy?dataFlowRtId=` | `DataFlowUndeployHandler` | 300 s / yes |
+| `DeployableWorkload.SetChartVersion-1` | instance (adapter, application, pool) | `PATCH Workload/{workloadRtId}/chart-version` | `DeployableWorkloadSetChartVersionHandler` | 15 s / yes |
+
+- **Adding a method (AB#8596 and later).** Declare it in the model (`handler: service` is the default), add a handler class in
+  `Methods/Service/` that calls the same service as the REST endpoint, and add one row to `CommunicationMethodHost.Handlers`.
+  The unit test `Methods/Service/CommunicationMethodHostTests` fails until every declared method of the three types has a row
+  and its contract (role, timeout, idempotency) is listed; extend its `Expected` table and the integration test
+  `Methods/CommunicationMethodHostTests` (REST vs. method on the same substitutes).
+- **Roles.** The REST policies ask only for the scope `octo_api`. A method without `roles` admits administrators only
+  (default-deny of `CkMethodAuthorizationEvaluator`), so every method declares `roles: [CommunicationManagement]` - the role of
+  the Studio's integration section and of every pipeline service account. Widening the list later is a Minor, narrowing it a
+  Major. `ReconcileServiceAccount` materialises declared roles only when the validated caller also holds `UserManagement`
+  (REST parity).
+- **No secret in a result.** `RotateServiceAccountSecret` returns client id, well-known name, `wasCreated`,
+  `requiresPipelineRedeploy` and the REST message (`AdapterController.BuildRotationMessage`), never the secret; the result is
+  therefore not `sensitive`. Reconcile and rotation failures answer the declared error without the exception text (REST echoes
+  it); the exception is logged with the invocation id. Redaction test: `Methods/Service/RotateServiceAccountSecretMethodRedactionTests`
+  (real provisioning service: the generated secret is in no result, log line or event, on success and on failure).
+- **Timeouts and async candidates (AB#8596).** All methods are synchronous; no method sets `execution.mode` (omitted =
+  sync, the key alone would raise `minEngineVersion`). `Pipeline.Deploy` / `MoveToAdapter` budget one wake (60 s) plus one
+  push (120 s). `DataFlow.Deploy` / `Undeploy` and `Pipeline.SetDebugging` (it re-pushes the data flow) wake and push
+  adapter after adapter and use the maximum 300 s; they are the candidates for `execution.mode: async` once F3.6
+  (AB#5694) is available - a Major per method (`Deploy-2`, row M19).
+- **Sensitive parameters (AB#8596).** `Pipeline.Deploy.pipelineDefinition` (a definition can carry credentials) and
+  `Pipeline.Execute.input` are `sensitive`: the host keeps them out of logs, audit and traces. The handlers never log them
+  and pass every failure message through `CommunicationMethodSupport.Redact` (the value as a whole and each line of 8+
+  characters, plus the caller token), so a validation message that quotes a line does not echo it. `Execute.input` of a
+  non-dry-run execution on a **Leased** adapter is stored in the tenant's `PipelineExecution` (`InputData`) and stays there
+  after the run (a retry copies it), as with REST.
+- **Failure messages (AB#8596).** The `message` parameter of a Pipeline / DataFlow error (and the redeploy `warning` of
+  `MoveToAdapter`) carries only the text of the controller's own exceptions (`CommunicationMethodSupport.CallerSafeMessage`:
+  `AdapterServiceException`, `AdapterHubCallbackException`, `CommunicationRepositoryException`,
+  `WorkloadLifecycleServiceException` - the texts REST answers and the Studio shows), redacted; any other exception answers
+  the error code without `message` and its text stays in the log.
+- **Parse failures (AB#8596).** `PipelineSchemaValidator` reports a definition that does not parse with a fixed text plus
+  line/column (`ParseFailureMessage`), never the parser's text: a duplicate key or broken scalar could quote a credential into
+  the logs, the REST answer and the method error. This also changes the REST error text of that case (position kept).
+- **Move retries (AB#8596).** `MoveToAdapter` with `redeploy: true` redeploys also when the move is a no-op (REST skips it),
+  so a retry after a timed-out first call does not report success without the deploy. Tests:
+  `CommunicationMethodHostTests.Pipeline` (integration, `AssertNeverEchoed`), `PipelineMethodSupportTests` (unit).
+- **What stays REST (AB#8596).** The tenant-level endpoints of `CommunicationController` are no type operations:
+  `enable` / `disable` toggle the communication capability of the tenant (role `TenantManagement`; they install or remove
+  the very model the method would be declared in), `GET`/`PUT lifecycle` is tenant configuration, `validate-expression` is
+  a stateless utility without an entity, and `encrypt-value` is deprecated (AB#5537, use `ValueOverride.SecretValue`) and
+  takes a secret, so it gets no new surface.
+- **Execute caller.** `Pipeline.Execute` passes the validated principal (`PipelineMethodInvoker.BuildCaller`, trust level 2)
+  and the caller token for delegation like REST; it passes no method-invocation marker (that is for `handler: pipeline`).
+  REST accepts the read-only scope for execute; the method requires `octo_api` (the host's scope rule) and the role.
+- **Audit texts.** The REST controllers and the handlers share the audit text builders
+  (`PipelineController.BuildMoveAuditMessage` / `BuildDebugAuditMessage`, `WorkloadController.BuildChartVersionAuditMessage`);
+  the methods write `source: User via CK method` or `source: CI/CD via CK method` (chart version).
+- **Differences to REST, all stricter:** an id that names no adapter is `METHOD_TARGET_NOT_FOUND` for `DeployUpdate`,
+  `Reconcile...` and `Rotate...`; invalid lease parameters are `METHOD_VALIDATION_FAILED` (`adapterRtId`, `ttlSeconds` 1-3600,
+  `borrowerTenantId`); the audit events say `source: User via CK method`. AB#8596: a pipeline that does not exist is
+  `METHOD_TARGET_NOT_FOUND` for `Pipeline.Deploy` / `Execute` / `SetDebugging` (REST 400/404), an unknown or malformed
+  `adapterRtId` / `targetAdapterRtId` and an invalid `chartVersion` are `METHOD_VALIDATION_FAILED`; `SetChartVersion` checks
+  the workload first (`METHOD_TARGET_NOT_FOUND`) and answers a failed write with `WORKLOAD_CHART_VERSION_UPDATE_FAILED` (REST
+  answers 404 for both); `Pipeline.Deploy` without
+  `adapterRtId` deploys to the assigned adapter (`PIPELINE_ADAPTER_NOT_ASSIGNED` when there is none).
+- **Token.** `AddControllerCkMethodCallerTokenValidation` (shared with the pipeline handler, registered once) validates the
+  forwarded token against `CommunicationController:AuthorityUrl` (`Methods:Token` overrides).
+- **Startup.** The SDK validates the registrations at order 15 against the CK cache of the **system tenant** (filled by the
+  default configuration at order 10, which applies the System.Communication blueprint to it). A system tenant without
+  System.Communication fails the startup naming the method. Switch: `Methods:Communication:Enabled=false`
+  (`OCTO_METHODS__COMMUNICATION__ENABLED`) - no handler, no queue; the REST endpoints keep working and calls answer
+  `METHOD_HANDLER_NOT_AVAILABLE`.
+
 ### Multi-Tenancy
 
 All operations are tenant-scoped. Routes use a custom `tenantId` constraint. The MongoDB-backed repository supports per-tenant data isolation via `ISystemContext.FindTenantRepositoryAsync(tenantId)`.
@@ -705,25 +797,59 @@ System.Communication 4.15.0 defines the model contract (record, attribute, type)
 |---------|------|--------------------------|------|
 | `SecretDefaultProjection` | record (final, key `Key`) | `RtSecretDefaultProjectionRecord`: `Key`, `SecretValue` (Secret), `AllowedTenantIds` (optional), `Description` (optional) | No scope field: the target set is the Application's own tenant plus its whole subtree; `AllowedTenantIds` only narrows |
 | `SecretDefaults` | optional attribute (RecordArray) on `Application` only | `RtApplication.SecretDefaults` | Not a `ValueOverride`: never reaches Helm values, the pod or the app's Kubernetes Secret |
-| `SecretDefault` | type (final), derived from `System/Entity`, not from a Configuration type | `RtSecretDefault`: `Name`, `Value` (Secret), `SourceTenantId`, `SourceWorkloadRtId`, `LastProjectedAt` | Provisioned by the controller, never author-set; `Value` is platform-only (no tenant pipeline, user or role may reveal it); all attributes except `Value` are `RuntimeState`; `Value`, `SourceTenantId` and `SourceWorkloadRtId` are optional (the controller always sets them, but export drops Secret and RuntimeState values, so a required one would make an exported entity unimportable). Because it is not a Configuration type the controller never ships it to adapters as pipeline configuration |
+| `SecretDefault` | type (final), derived from `System/Entity`, not from a Configuration type | `RtSecretDefault`: `Name`, `Value` (Secret), `SourceTenantId`, `SourceWorkloadRtId`, `LastProjectedAt` | Provisioned by the controller, never author-set; `Value` is platform-only (no tenant pipeline, user or role may reveal it; `access: Hidden` since 4.16.0, see below); all attributes except `Value` are `RuntimeState`; `Value`, `SourceTenantId` and `SourceWorkloadRtId` are optional (the controller always sets them, but export drops Secret and RuntimeState values, so a required one would make an exported entity unimportable). Because it is not a Configuration type the controller never ships it to adapters as pipeline configuration |
 
 A Secret attribute takes ownership `Secret` and nothing else (`SecretAttributeValidator` in the engine). Model tests:
 `tests/CommunicationControllerService.Tests/Services/SecretDefaultModelTests.cs`.
 
-#### Publishing the CK model: explicit release decision (AB#7432)
+#### System.Communication on ckLanguage 2 (4.16.0, AB#8594)
 
-A merge to `main` does **not** publish `System.Communication` to the CK catalogs. The pipeline parameter
-`publishSystemCkModels` (boolean, **default false**; same name and semantics as AB#7343 in `octo-construction-kit-engine`)
-feeds `publishOnMain` of `validate-and-publish-ck-versions.yml` (`tpl-v1.8.0`). A main build still runs ValidateVersion, the
-schema compile and the cascade check, logs `CK publish on main is OFF (publishOnMain=false)` and publishes nothing. Reason: a new
-System* version breaks exact-pinned dependents on live tenants until they are re-pinned (2026-10-23: System-2.6.0 reached the
+System.Communication 4.16.0 is the first `ckLanguage: 2` release of the model, a **Minor** against 4.15.0 (Feature AB#5697
+F4.3, Epic AB#5584; rules: `octo-construction-kit-engine/docs/ck-semver-rules.md`). What a later change must keep in mind:
+
+- **`derivable: Any` on every type and record.** ckLanguage 2 flips the default to `Model`. A pre-existing element without the
+  explicit key is a MAJOR (row T6) and breaks every model that derives from it (message 113: Loxone, System.Ai, adapters). A
+  **new** type or record defaults to `Model`; declare `derivable: Any` when another model should derive from it.
+- **System interfaces** (System floor `[2.7,3.0)`): `DataFlow` and `LentAdapterPool` implement `Named-1` + `Describable-1`,
+  `DeployableEntity` (and so every pipeline, trigger, adapter and workload) `Describable-1`, `PipelineTrigger` and
+  `DataPointMapping` `Enableable-1`. An implementing type must keep the member required where the interface requires it
+  (`Name`, `Enabled`; message 97) and under the interface's name (message 98); removing an interface is a MAJOR (row T3).
+  Not implemented: `Pipeline` (`Enabled` optional), `Named-1` on types with an optional `Name`, `SecretDefault`, `Hierarchical-1`.
+- **Access.** `SecretDefault.Value` is `access: Hidden` and its definition `SecretDefaultValue` is `securitySensitive: true`
+  (row T7a, acknowledged in 4.16.0). GraphQL, REST, MCP, import (message 139) and export cannot read or write it. The
+  controller writes and reveals it through `CommunicationRepository` (`UpsertSecretDefaultAsync`, repository reads), which the
+  access rules do not guard. Every other attribute is `ReadWrite`: Studio writes the configuration credentials through the
+  generic GraphQL update, and a `ReadOnly`/`MethodOnly` on an attribute that is not `securitySensitive` in every published
+  4.x version is a MAJOR (row T7). The T7a exception is used up: a further tightening in 4.x is a MAJOR. The method stories
+  (Adapter/Pipeline/Pool methods) can tighten credentials only together with a method that writes them, in 5.0.
+- **Engine.** The compiler stamps `minEngineVersion: 3.5.1`; the model is published under `ck-models/v3/` only. Keep it there:
+  an explicit `authorization.dataAccess` on any method raises it to 3.5.40 (`CkEngineVersion.DataAccessMinEngineVersion`), a
+  `sensitive` result to 3.5.36, `execution.mode` to 3.5.67. The methods of 4.17.0 therefore leave `dataAccess` at its default
+  (`Write`) instead of spelling it out.
+- **Acknowledgements live for one release - of the published baseline.** The compile gate diffs against the newest
+  **published** version (CI: the private GitHub catalog). A main merge publishes (`publishSystemCkModels`, default true since AB#8718; before that only a manual
+  main CI did): 4.16.0 was published on 2026-11-09 with the `SecretDefault.Value` acknowledgement, so 4.17.0 diffs against
+  4.16.0 and carries no acknowledgement (keeping it failed main CI with `OCTO-CK204`, AB#8595). Check the private catalog
+  (Pages mirror `ck-models/v3/s/System.Communication/4/catalog.json`) before you keep or drop an entry. Locally the gate diffs
+  against the lane's `local-catalog`; a local build of an unpublished version there gives a false `OCTO-CK204` - remove that
+  version from the local catalog instead of the acknowledgement.
+- Tests: `tests/CommunicationControllerService.Tests/CkModels/SystemCommunicationCkLanguage2Tests.cs` (embedded model: version,
+  ckLanguage, minEngineVersion, derivable, interfaces, the only tightened attribute, no acknowledgement in 4.17.0) and
+  `tests/CommunicationControllerServices.IntegrationTests/Repository/SystemCommunicationCkLanguage2PersistenceTests.cs`
+  (re-import, the CK v2 keys survive the MongoDB round trip into the CK cache).
+
+#### Publishing the CK model: automatic from main (AB#7432, default true since AB#8718)
+
+A merge to `main` publishes `System.Communication` to the private CK catalog automatically (AB#8718, decision 2026-11-10). The pipeline
+parameter `publishSystemCkModels` (boolean, **default true**; gate introduced as default false by AB#7343/AB#7432/AB#7433) feeds
+`publishOnMain` of `validate-and-publish-ck-versions.yml` (`tpl-v1.8.0` and later; pinned: `tpl-v1.11.0`). ValidateVersion, the schema compile and the cascade check
+run on every build and refuse a breaking change declared as minor; an already-published version is a no-op. Default true because CK v2
+range retention (AB#4696) and the completed re-pin (AB#5688, AB#6708) removed the exact-pin breakage that motivated default false.
 catalog from an engine merge before the re-pin gate).
 
-**To publish explicitly** (needs the release decision of the platform owner): Azure DevOps -> pipeline
-`octo-communication-controller-services-CI` -> *Run pipeline* -> branch `main` -> tick *Publish System CK models to the CK
-catalogs (main)*; CLI: `az pipelines run --name octo-communication-controller-services-CI --branch main --parameters publishSystemCkModels=true`.
-`r*` tags (release train) publish as before; `dev/*`/`test/*` builds never publish to the shared catalogs. A merge that bumps the
-model therefore leaves the version unpublished until that run; repos that need it must wait for it.
+**To build main without publishing:** Azure DevOps -> pipeline `octo-communication-controller-services-CI` -> *Run pipeline* -> branch `main` -> untick
+*Publish System CK models to the CK catalogs (main)*; CLI: `az pipelines run --id 101 --branch main --parameters publishSystemCkModels=false`.
+`r*` tags (release train) publish as before; `dev/*`/`test/*` builds never publish to the shared catalogs.
 
 ### Service-Managed Blueprints (System.Communication.*)
 

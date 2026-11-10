@@ -1,0 +1,105 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+# AB#8595 (System.Communication 4.17.0) — members of the result records of the Adapter / AdapterPool CK methods
+# (records/methodResults.yaml). They are never stored on an entity: a handler fills them in its answer only, so they are
+# runtime state (never seeded, never exported) by construction. The shapes equal the REST response DTOs of the same
+# operations, so a client that switches from REST to the method (F5.3, AB#5701) reads the same fields.
+attributes:
+  - id: MethodResultOutcome
+    valueType: String
+    isRuntimeState: true
+    description: "Method result member: the outcome of a service account reconcile (AlreadyProvisioned, Provisioned or Repaired), as the REST reconcile answers it."
+  - id: MethodResultClientId
+    valueType: String
+    isRuntimeState: true
+    description: "Method result member: the client id of the identity client of the pipeline service account. Never a secret."
+  - id: MethodResultConfigurationWellKnownName
+    valueType: String
+    isRuntimeState: true
+    description: "Method result member: the well-known name of the ServiceAccountConfiguration the operation converged or rotated."
+  - id: MethodResultRoleChangesSkipped
+    valueType: Boolean
+    isRuntimeState: true
+    description: "Method result member: true when the declared roles were not materialised because the caller lacks the UserManagement role (the client itself was converged)."
+  - id: MethodResultWasCreated
+    valueType: Boolean
+    isRuntimeState: true
+    description: "Method result member: true when the adapter had no pipeline service account and one was provisioned instead of rotated."
+  - id: MethodResultRequiresPipelineRedeploy
+    valueType: Boolean
+    isRuntimeState: true
+    description: "Method result member: true when the pipelines and data flows of the adapter must be redeployed before the rotated secret takes effect."
+  - id: MethodResultMessage
+    valueType: String
+    isRuntimeState: true
+    description: "Method result member: a human-readable summary of what the operation did. Never contains a secret."
+  - id: MethodResultTenantsReconciled
+    valueType: Int
+    isRuntimeState: true
+    description: "Method result member: number of borrowing tenants whose LentAdapterPool mirrors were reconciled."
+  - id: MethodResultMirrorsCreatedOrUpdated
+    valueType: Int
+    isRuntimeState: true
+    description: "Method result member: number of LentAdapterPool mirrors that are present after the run (created or updated)."
+  - id: MethodResultMirrorsRemoved
+    valueType: Int
+    isRuntimeState: true
+    description: "Method result member: number of LentAdapterPool mirrors removed because the pool no longer lends to the tenant."
+  - id: MethodResultLendersUnreadable
+    valueType: Int
+    isRuntimeState: true
+    description: "Method result member: number of lending tenants whose pools could not be read; their mirrors were left as they were."
+  - id: MethodResultAdaptersRelinked
+    valueType: Int
+    isRuntimeState: true
+    description: "Method result member: number of leased adapters whose LentFrom edge was restored."
+  - id: MethodResultIsNoOp
+    valueType: Boolean
+    isRuntimeState: true
+    description: "Method result member: true when the run changed nothing."
+  - id: MethodResultGranted
+    valueType: Boolean
+    isRuntimeState: true
+    description: "Method result member: true when a lease was granted. A refused lease (no idle member, not lent to the borrower) is a normal answer with false and a status message, as in REST."
+  - id: MethodResultLeaseId
+    valueType: String
+    isRuntimeState: true
+    description: "Method result member: the id of the granted lease."
+  - id: MethodResultMemberId
+    valueType: String
+    isRuntimeState: true
+    description: "Method result member: the pool member the lease was granted on."
+  - id: MethodResultStatusMessage
+    valueType: String
+    isRuntimeState: true
+    description: "Method result member: why a lease was not granted, or a short confirmation."
+  # AB#8596 (4.18.0): members of the result records of the Pipeline CK methods. Same rule as above: answer only, runtime
+  # state by construction, shaped like the REST answers (PipelineExecutionDataDto, SetPipelineDebugResultDto,
+  # MovePipelineResultDto).
+  - id: MethodResultExecutionId
+    valueType: String
+    isRuntimeState: true
+    description: "Method result member: the id of the pipeline execution that was started; poll the PipelineExecution entities or the execution REST endpoints with it."
+  - id: MethodResultStartedAt
+    valueType: DateTime
+    isRuntimeState: true
+    description: "Method result member: when the pipeline execution was started (UTC)."
+  - id: MethodResultDebuggingEnabled
+    valueType: Boolean
+    isRuntimeState: true
+    description: "Method result member: the debug state of the pipeline after the call."
+  - id: MethodResultAppliedToRunningAdapter
+    valueType: Boolean
+    isRuntimeState: true
+    description: "Method result member: true when the change was pushed to the running adapter; false when the adapter is offline and the change applies on the next deploy."
+  - id: MethodResultOldAdapterRtId
+    valueType: String
+    isRuntimeState: true
+    description: "Method result member: the RtId of the adapter the pipeline was assigned to before the move."
+  - id: MethodResultNewAdapterRtId
+    valueType: String
+    isRuntimeState: true
+    description: "Method result member: the RtId of the adapter the pipeline is assigned to after the move."
+  - id: MethodResultWarning
+    valueType: String
+    isRuntimeState: true
+    description: "Method result member: a warning about a step after the main operation, e.g. the move is committed but the redeploy on the new adapter failed. Absent when everything succeeded."
