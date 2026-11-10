@@ -139,7 +139,8 @@ internal sealed partial class SecretDefaultProvisioningService
                 continue;
             }
 
-            foreach (var application in sources.Applications.Where(IsReleasedSource))
+            foreach (var application in sources.Applications.Where(application =>
+                         IsSourceFor(application, sourceTenant.TenantId, inventory)))
             {
                 CollectOffers(targetTenantId, sourceTenant, application, desiredState);
             }

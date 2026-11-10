@@ -139,7 +139,7 @@ internal class DeployWorkloadSecretDefaultsTests : PoolServiceTestsBase
         await CommunicationRepository.Received(1).SetApplicationDeploymentStateAsync(TenantId,
             Arg.Is<RtEntityId>(entityId => entityId.RtId == application.RtId), RtDeploymentStateEnum.Error,
             Arg.Is<string?>(message => message != null && message.Contains(CaptchaKey) &&
-                                       DeploymentRejection.IsRejection(message)));
+                                       message.StartsWith($"[{TenantId}] Cannot deploy ")));
     }
 
     [Test]

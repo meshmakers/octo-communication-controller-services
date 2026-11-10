@@ -5614,15 +5614,23 @@ An Application's `SecretDefaults` (System.Communication 4.15.0) are projected by
 tenant's own secret of the same purpose (e.g. `RegistrationCaptchaSecret`) is never touched; the platform node that
 consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tenant's value and falls back to it.
 
-- **The deploy is the release (AB#7245, decision 3a, refined by decision 2 ii).** An Application whose deploy passed the
-  guard is a source (`IsReleasedSource`): Pending, Deployed, and Error after a failed Helm rollout - **a failed rollout keeps
-  the defaults**. One that was never deployed, is undeployed or disabled, or whose deploy the controller refused offers
-  nothing, so its defaults are removed (a refusal also after an earlier successful deploy). The two kinds of Error are told
-  apart by `LastDeploymentError`: a refusal recorded by `EnsureValidOrRecordRejectionAsync` (secret-default declaration,
-  typed resource settings) is stored as `DeploymentRejection.Format(reason)`, i.e. with the prefix `Deploy refused: `,
-  which an operator report never carries; no CK change. A guard check that throws without recording (e.g. a missing chart
-  name) leaves the previous state, and with it the previous release. **Undeploying an Application withdraws its defaults**: e.g. undeploying the EC app removes the CAPTCHA
-  default from every community without its own key pair; the next deploy projects it again.
+- **The deploy is the release; a running release keeps its defaults (AB#7245, decision 3a, refined by decision 2 ii).**
+  `IsSourceFor(application, sourceTenant, targetInventory)` decides per target tenant. Pending and Deployed are sources.
+  **Error** (a deploy the guard refused, or a Helm rollout that failed) is a source only in a tenant where the Application
+  still holds a default it projected: a refused or failed redeploy leaves the previous Helm release running
+  (`helm upgrade --install --rollback-on-failure` rolls a failed upgrade back, a refusal never reaches Helm), and that
+  release keeps its defaults. An Application refused before it was ever deployed holds none and offers nothing, and an
+  Application in Error offers nothing to a tenant it did not serve before (e.g. a tenant created meanwhile): it gets the
+  defaults with the next successful deploy. Never deployed, undeployed and disabled offer nothing. The stored projection
+  is the signal because neither the Application (`DeploymentState`, `LastDeploymentError`) nor the operator's status
+  report (`WorkloadDeploymentStatusDto`: success and message only) records whether a release is running; the error text
+  is not parsed, so `LastDeploymentError` keeps the form the Studio's field marks read
+  (`[tenant] Cannot deploy workload 'x': <sentence>`, AB#7422), and Applications refused before this rule need no
+  migration. Known limit: a first install whose rollout failed was Pending when it projected, so it keeps its defaults
+  although Helm removed the release, until it is undeployed or deployed successfully. A guard check that throws without
+  recording (e.g. a missing chart name) leaves the previous state. **Undeploying an Application withdraws its
+  defaults**, also one in Error: e.g. undeploying the EC app removes the CAPTCHA default from every community without its
+  own key pair; the next deploy projects it again.
 - **Triggers (AB#7245).** The controller writes SecretDefaults on five paths, all through
   `ISecretDefaultProvisioningService`, all best effort (a failure is an Error event, never a failed deploy, undeploy or tenant load):
   1. **Deploy** - `DeploymentSiteService.DeployWorkloadAsync` calls `ProvisionForSourceAsync(tenantId, applicationRtId)`

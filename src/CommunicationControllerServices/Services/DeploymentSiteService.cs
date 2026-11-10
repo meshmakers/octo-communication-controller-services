@@ -733,7 +733,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
             try
             {
                 await SetWorkloadDeploymentStateAsync(tenantId, workload, RtDeploymentStateEnum.Error,
-                    DeploymentRejection.Format(rejection.Message));
+                    rejection.Message);
             }
             catch (Exception writeFailure)
             {

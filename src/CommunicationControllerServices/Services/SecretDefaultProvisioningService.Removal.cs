@@ -39,16 +39,19 @@ internal sealed partial class SecretDefaultProvisioningService
     }
 
     /// <summary>
-    ///     An Application whose deploy passed the guard is a source: Pending, Deployed, and Error after a failed rollout.
-    ///     One that was never deployed, is undeployed or disabled, or whose deploy the controller refused (Error with
-    ///     the <see cref="DeploymentRejection" /> marker) offers nothing.
+    ///     Whether the Application provides SecretDefaults to the target tenant. Pending and Deployed: yes. Error: only
+    ///     where it still holds a default it projected, because a refused or failed redeploy leaves the previous release
+    ///     running and that release keeps its defaults; an Application refused before it was ever deployed holds none.
+    ///     Never deployed, undeployed or disabled: no.
     /// </summary>
-    internal static bool IsReleasedSource(RtApplication application)
+    internal static bool IsSourceFor(RtApplication application, string sourceTenantId,
+        SecretDefaultInventory targetInventory)
     {
         return application.DeploymentState switch
         {
             RtDeploymentStateEnum.Pending or RtDeploymentStateEnum.Deployed => true,
-            RtDeploymentStateEnum.Error => !DeploymentRejection.IsRejection(application.LastDeploymentError),
+            RtDeploymentStateEnum.Error => targetInventory.Defaults.Any(storedDefault =>
+                IsProjectedBy(storedDefault, sourceTenantId, application.RtId.ToString())),
             _ => false
         };
     }
