@@ -827,8 +827,8 @@ F4.3, Epic AB#5584; rules: `octo-construction-kit-engine/docs/ck-semver-rules.md
   `sensitive` result to 3.5.36, `execution.mode` to 3.5.67. The methods of 4.17.0 therefore leave `dataAccess` at its default
   (`Write`) instead of spelling it out.
 - **Acknowledgements live for one release - of the published baseline.** The compile gate diffs against the newest
-  **published** version (CI: the private GitHub catalog). A merge does not publish (`publishSystemCkModels`), but a manual
-  main CI may: 4.16.0 was published on 2026-11-09 with the `SecretDefault.Value` acknowledgement, so 4.17.0 diffs against
+  **published** version (CI: the private GitHub catalog). A main merge publishes (`publishSystemCkModels`, default true since AB#8718; before that only a manual
+  main CI did): 4.16.0 was published on 2026-11-09 with the `SecretDefault.Value` acknowledgement, so 4.17.0 diffs against
   4.16.0 and carries no acknowledgement (keeping it failed main CI with `OCTO-CK204`, AB#8595). Check the private catalog
   (Pages mirror `ck-models/v3/s/System.Communication/4/catalog.json`) before you keep or drop an entry. Locally the gate diffs
   against the lane's `local-catalog`; a local build of an unpublished version there gives a false `OCTO-CK204` - remove that
@@ -838,20 +838,18 @@ F4.3, Epic AB#5584; rules: `octo-construction-kit-engine/docs/ck-semver-rules.md
   `tests/CommunicationControllerServices.IntegrationTests/Repository/SystemCommunicationCkLanguage2PersistenceTests.cs`
   (re-import, the CK v2 keys survive the MongoDB round trip into the CK cache).
 
-#### Publishing the CK model: explicit release decision (AB#7432)
+#### Publishing the CK model: automatic from main (AB#7432, default true since AB#8718)
 
-A merge to `main` does **not** publish `System.Communication` to the CK catalogs. The pipeline parameter
-`publishSystemCkModels` (boolean, **default false**; same name and semantics as AB#7343 in `octo-construction-kit-engine`)
-feeds `publishOnMain` of `validate-and-publish-ck-versions.yml` (`tpl-v1.8.0`). A main build still runs ValidateVersion, the
-schema compile and the cascade check, logs `CK publish on main is OFF (publishOnMain=false)` and publishes nothing. Reason: a new
-System* version breaks exact-pinned dependents on live tenants until they are re-pinned (2026-10-23: System-2.6.0 reached the
+A merge to `main` publishes `System.Communication` to the private CK catalog automatically (AB#8718, decision 2026-11-10). The pipeline
+parameter `publishSystemCkModels` (boolean, **default true**; gate introduced as default false by AB#7343/AB#7432/AB#7433) feeds
+`publishOnMain` of `validate-and-publish-ck-versions.yml` (`tpl-v1.8.0` and later; pinned: `tpl-v1.11.0`). ValidateVersion, the schema compile and the cascade check
+run on every build and refuse a breaking change declared as minor; an already-published version is a no-op. Default true because CK v2
+range retention (AB#4696) and the completed re-pin (AB#5688, AB#6708) removed the exact-pin breakage that motivated default false.
 catalog from an engine merge before the re-pin gate).
 
-**To publish explicitly** (needs the release decision of the platform owner): Azure DevOps -> pipeline
-`octo-communication-controller-services-CI` -> *Run pipeline* -> branch `main` -> tick *Publish System CK models to the CK
-catalogs (main)*; CLI: `az pipelines run --name octo-communication-controller-services-CI --branch main --parameters publishSystemCkModels=true`.
-`r*` tags (release train) publish as before; `dev/*`/`test/*` builds never publish to the shared catalogs. A merge that bumps the
-model therefore leaves the version unpublished until that run; repos that need it must wait for it.
+**To build main without publishing:** Azure DevOps -> pipeline `octo-communication-controller-services-CI` -> *Run pipeline* -> branch `main` -> untick
+*Publish System CK models to the CK catalogs (main)*; CLI: `az pipelines run --id 101 --branch main --parameters publishSystemCkModels=false`.
+`r*` tags (release train) publish as before; `dev/*`/`test/*` builds never publish to the shared catalogs.
 
 ### Service-Managed Blueprints (System.Communication.*)
 
