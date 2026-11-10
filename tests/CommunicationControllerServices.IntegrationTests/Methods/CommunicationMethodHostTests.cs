@@ -37,7 +37,7 @@ using Xunit;
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTests.Methods;
 
 /// <summary>
-///     AB#8595: the Adapter, DeployableWorkload and AdapterPool methods of System.Communication 4.17.0, served by the
+///     AB#8595 / AB#8596: the Adapter, DeployableWorkload, AdapterPool, Pipeline and DataFlow methods of System.Communication, served by the
 ///     controller's handlers through the real method host of octo-common-services. The definitions come from the CK cache of
 ///     a real MongoDB tenant that imported the System.Communication this service embeds; the caller token is validated by the
 ///     real validator over a fake identity service (throw-away signing key). Every method is called once through REST
@@ -45,7 +45,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.IntegrationTes
 ///     be the same. A caller without the declared role and a token of another tenant are refused before any service is called.
 /// </summary>
 [Collection("CommunicationController")]
-public sealed class CommunicationMethodHostTests(CommunicationControllerFixture fixture) : IAsyncLifetime
+public sealed partial class CommunicationMethodHostTests(CommunicationControllerFixture fixture) : IAsyncLifetime
 {
     private const string Authority = "https://identity.test/";
     private const string KeyId = "comm-method-key";
@@ -71,6 +71,7 @@ public sealed class CommunicationMethodHostTests(CommunicationControllerFixture 
 
     private readonly ILeaseService _leases = Substitute.For<ILeaseService>();
     private readonly ILeaseSchedulerService _scheduler = Substitute.For<ILeaseSchedulerService>();
+    private readonly ITriggerManagementService _trigger = Substitute.For<ITriggerManagementService>();
     private ServiceProvider? _provider;
 
     private string TenantId => fixture.TestTenantId;
@@ -98,7 +99,7 @@ public sealed class CommunicationMethodHostTests(CommunicationControllerFixture 
             o.AuthorityUrl = Authority);
         services.AddSingleton(_repository).AddSingleton(_adapterService).AddSingleton(_lifecycle)
             .AddSingleton(_provisioning).AddSingleton(_events).AddSingleton(_mirrors).AddSingleton(_leases)
-            .AddSingleton(_scheduler);
+            .AddSingleton(_scheduler).AddSingleton(_trigger);
 
         services.AddCommunicationCkMethodHost(configuration).Should().BeTrue();
         services.AddSingleton<IHttpClientFactory>(new FakeIdentity(this));
@@ -138,7 +139,7 @@ public sealed class CommunicationMethodHostTests(CommunicationControllerFixture 
         CommunicationMethodHost.Handlers.Select(h => h.MethodId).Should().OnlyHaveUniqueItems();
 
         var cache = fixture.GetService<ICkCacheService>();
-        var declared = new[] { "Adapter", "DeployableWorkload", "AdapterPool" }
+        var declared = new[] { "Adapter", "DeployableWorkload", "AdapterPool", "Pipeline", "DataFlow" }
             .SelectMany(type => cache.GetRtCkType(TenantId, new RtCkId<CkTypeId>($"System.Communication/{type}"))
                 .DefinedMethods.Select(m => $"System.Communication/{type}.{m.MethodId}"))
             .ToList();
@@ -474,7 +475,10 @@ public sealed class CommunicationMethodHostTests(CommunicationControllerFixture 
     private void NoServiceWasCalled()
     {
         foreach (var service in new object[]
-                     { _repository, _adapterService, _lifecycle, _provisioning, _events, _mirrors, _leases, _scheduler })
+                     {
+                         _repository, _adapterService, _lifecycle, _provisioning, _events, _mirrors, _leases, _scheduler,
+                         _trigger
+                     })
         {
             service.ReceivedCalls().Should().BeEmpty($"{service.GetType().Name} must not be called for a refused caller");
         }
@@ -485,6 +489,9 @@ public sealed class CommunicationMethodHostTests(CommunicationControllerFixture 
         SystemCommunicationCkIds.AdapterPoolGrantLeaseMethodId => new
             { borrowerTenantId = "borrower", adapterRtId = OctoObjectId.GenerateNewId().ToString() },
         SystemCommunicationCkIds.AdapterPoolCancelQueuedExecutionMethodId => new { executionId = "exec-1" },
+        SystemCommunicationCkIds.PipelineSetDebuggingMethodId => new { enabled = true },
+        SystemCommunicationCkIds.PipelineMoveToAdapterMethodId => new
+            { targetAdapterRtId = OctoObjectId.GenerateNewId().ToString() },
         _ => new { }
     };
 

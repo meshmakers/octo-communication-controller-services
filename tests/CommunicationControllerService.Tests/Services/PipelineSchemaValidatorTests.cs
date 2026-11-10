@@ -175,4 +175,28 @@ internal class PipelineSchemaValidatorTests
 
         await Assert.That(errors).Count().IsGreaterThan(0);
     }
+
+    /// <summary>
+    ///     AB#8596: a parse failure never quotes the parser's text - a duplicate key or a broken scalar can carry a value of
+    ///     the definition (a credential) into logs, REST answers and CK method errors. The position stays.
+    /// </summary>
+    [Test]
+    [Arguments("transformations:\n  - type: HttpRequest@1\n    password: pw-Dup-1-secret\n    password: pw-Dup-2-secret\n")]
+    [Arguments("transformations:\n  - type: HttpRequest@1\n    password: \"pw-Unclosed-secret\n")]
+    [Arguments("{\"transformations\": [{\"password\": \"pw-Json-secret\", }")]
+    public async Task Validate_UnparseableDefinition_NeverQuotesItsValues(string broken)
+    {
+        var errors = _validator.Validate(broken, TypedSchema);
+
+        await Assert.That(errors).Count().IsGreaterThan(0);
+        foreach (var error in errors)
+        {
+            await Assert.That(error).DoesNotContain("pw-");
+        }
+
+        if (errors.Count == 1 && errors[0].StartsWith("The pipeline definition could not be parsed"))
+        {
+            await Assert.That(errors[0]).Contains("line ");
+        }
+    }
 }

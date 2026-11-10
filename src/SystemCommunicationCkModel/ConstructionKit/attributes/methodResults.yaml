@@ -72,3 +72,34 @@ attributes:
     valueType: String
     isRuntimeState: true
     description: "Method result member: why a lease was not granted, or a short confirmation."
+  # AB#8596 (4.18.0): members of the result records of the Pipeline CK methods. Same rule as above: answer only, runtime
+  # state by construction, shaped like the REST answers (PipelineExecutionDataDto, SetPipelineDebugResultDto,
+  # MovePipelineResultDto).
+  - id: MethodResultExecutionId
+    valueType: String
+    isRuntimeState: true
+    description: "Method result member: the id of the pipeline execution that was started; poll the PipelineExecution entities or the execution REST endpoints with it."
+  - id: MethodResultStartedAt
+    valueType: DateTime
+    isRuntimeState: true
+    description: "Method result member: when the pipeline execution was started (UTC)."
+  - id: MethodResultDebuggingEnabled
+    valueType: Boolean
+    isRuntimeState: true
+    description: "Method result member: the debug state of the pipeline after the call."
+  - id: MethodResultAppliedToRunningAdapter
+    valueType: Boolean
+    isRuntimeState: true
+    description: "Method result member: true when the change was pushed to the running adapter; false when the adapter is offline and the change applies on the next deploy."
+  - id: MethodResultOldAdapterRtId
+    valueType: String
+    isRuntimeState: true
+    description: "Method result member: the RtId of the adapter the pipeline was assigned to before the move."
+  - id: MethodResultNewAdapterRtId
+    valueType: String
+    isRuntimeState: true
+    description: "Method result member: the RtId of the adapter the pipeline is assigned to after the move."
+  - id: MethodResultWarning
+    valueType: String
+    isRuntimeState: true
+    description: "Method result member: a warning about a step after the main operation, e.g. the move is committed but the redeploy on the new adapter failed. Absent when everything succeeded."

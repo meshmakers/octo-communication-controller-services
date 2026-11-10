@@ -34,13 +34,29 @@ internal class PipelineSchemaValidator : IPipelineSchemaValidator
         catch (Exception e)
         {
             // A definition that does not parse cannot be schema-validated; report it as a finding
-            // rather than letting the exception escape into the deploy path.
-            return [$"The pipeline definition could not be parsed as YAML or JSON: {e.Message}"];
+            // rather than letting the exception escape into the deploy path. AB#8596 (CodeRabbit on #105):
+            // never the parser's text - a duplicate-key or scalar error can quote a value of the definition,
+            // which may be a credential, and the finding reaches logs, REST answers and CK method errors. The
+            // position is enough to find the error.
+            return [ParseFailureMessage(e)];
         }
 
         var schema = JsonSchema.FromJsonAsync(pipelineSchemaJson).GetAwaiter().GetResult();
         var validationErrors = schema.Validate(jsonString);
 
         return validationErrors.Select(e => e.ToString()).ToList();
+    }
+
+    /// <summary>The finding of a definition that does not parse: a fixed text plus the position, never the parser's text.</summary>
+    internal static string ParseFailureMessage(Exception exception)
+    {
+        const string text = "The pipeline definition could not be parsed as YAML or JSON";
+        return exception switch
+        {
+            YamlDotNet.Core.YamlException yaml => $"{text} (line {yaml.Start.Line}, column {yaml.Start.Column}).",
+            System.Text.Json.JsonException { LineNumber: { } line } json =>
+                $"{text} (line {line + 1}, position {json.BytePositionInLine + 1}).",
+            _ => $"{text}."
+        };
     }
 }

@@ -28,6 +28,33 @@ internal static class CommunicationMethodErrors
     /// <summary><c>AdapterPool.CancelQueuedExecution</c>: no such queued execution in the pool (REST 404).</summary>
     public const string QueuedExecutionNotFound = "QUEUED_EXECUTION_NOT_FOUND";
 
+    /// <summary><c>Pipeline.Deploy</c>: no adapter given and the pipeline is assigned to none.</summary>
+    public const string PipelineAdapterNotAssigned = "PIPELINE_ADAPTER_NOT_ASSIGNED";
+
+    /// <summary><c>Pipeline.Deploy</c>: the adapter rejected the definition (REST 422).</summary>
+    public const string PipelineDeployRejected = "PIPELINE_DEPLOY_REJECTED";
+
+    /// <summary><c>Pipeline.Deploy</c>: the deploy did not happen (REST 404/400).</summary>
+    public const string PipelineDeployFailed = "PIPELINE_DEPLOY_FAILED";
+
+    /// <summary><c>Pipeline.Execute</c>: the execution could not be started (REST 400).</summary>
+    public const string PipelineExecutionStartFailed = "PIPELINE_EXECUTION_START_FAILED";
+
+    /// <summary><c>Pipeline.SetDebugging</c>: the debug state could not be changed (REST 422/404/400).</summary>
+    public const string PipelineDebugChangeFailed = "PIPELINE_DEBUG_CHANGE_FAILED";
+
+    /// <summary><c>Pipeline.MoveToAdapter</c>: the move did not happen (REST: result entry with success false).</summary>
+    public const string PipelineMoveFailed = "PIPELINE_MOVE_FAILED";
+
+    /// <summary><c>DataFlow.Deploy</c>: the data flow could not be deployed (REST 422/404/400).</summary>
+    public const string DataFlowDeployFailed = "DATA_FLOW_DEPLOY_FAILED";
+
+    /// <summary><c>DataFlow.Undeploy</c>: the data flow could not be undeployed (REST 422/404/400).</summary>
+    public const string DataFlowUndeployFailed = "DATA_FLOW_UNDEPLOY_FAILED";
+
+    /// <summary><c>DeployableWorkload.SetChartVersion</c>: the workload exists but the write failed (REST 404).</summary>
+    public const string WorkloadChartVersionUpdateFailed = "WORKLOAD_CHART_VERSION_UPDATE_FAILED";
+
     /// <summary>Error parameter with the service's message, as the REST error body carries it. Never contains a secret.</summary>
     public const string MessageParameter = "message";
 }
@@ -72,6 +99,62 @@ internal static class CommunicationMethodSupport
             logger.LogWarning(e, "Could not store the audit event of a completed CK method call");
         }
     }
+
+    /// <summary>
+    ///     The text of a service failure without the values of sensitive parameters and the caller token (AB#8596): every
+    ///     value is replaced as a whole and line by line (a validation message may quote one line of a pipeline definition).
+    ///     Lines shorter than <see cref="MinRedactedLineLength" /> are left alone: they are YAML punctuation or short keys that
+    ///     would mask the useful part of the message without hiding anything.
+    /// </summary>
+    public static string Redact(string? text, params string?[] sensitiveValues)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return string.Empty;
+        }
+
+        foreach (var value in sensitiveValues)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                continue;
+            }
+
+            text = text.Replace(value, Masked, StringComparison.Ordinal);
+            foreach (var line in value.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                         .Where(l => l.Length >= MinRedactedLineLength)
+                         .OrderByDescending(l => l.Length))
+            {
+                text = text.Replace(line, Masked, StringComparison.Ordinal);
+            }
+        }
+
+        return text;
+    }
+
+    /// <summary>
+    ///     The message a method may return for a service failure (CodeRabbit on PR #105): the text of the controller's own
+    ///     exceptions (<c>AdapterServiceException</c>, <c>AdapterHubCallbackException</c>, <c>CommunicationRepositoryException</c>,
+    ///     <c>WorkloadLifecycleServiceException</c> - the texts REST answers and the Studio shows, e.g. the adapter's
+    ///     validation errors of a definition the caller may read anyway), redacted of the sensitive values and the token;
+    ///     <c>null</c> for any other exception, whose free text of unknown origin stays in the log (as AB#8595 does for the
+    ///     service account reconcile).
+    /// </summary>
+    public static string? CallerSafeMessage(Exception exception, params string?[] sensitiveValues) =>
+        exception is AdapterServiceException or Hubs.AdapterHubCallbackException or CommunicationRepositoryException
+            or WorkloadLifecycleServiceException
+            ? Redact(exception.Message, sensitiveValues)
+            : null;
+
+    /// <summary>The failure parameters: the caller-safe message when there is one, otherwise none.</summary>
+    public static (string Name, string Value)[] MessageParameters(string? message) =>
+        message is null ? [] : [(CommunicationMethodErrors.MessageParameter, message)];
+
+    /// <summary>The placeholder of a redacted value.</summary>
+    public const string Masked = "***";
+
+    /// <summary>Shortest line of a sensitive value that <see cref="Redact" /> masks on its own.</summary>
+    public const int MinRedactedLineLength = 8;
 
     /// <summary><c>true</c> when the validated caller holds the role (case-insensitive, as the token's role claims).</summary>
     public static bool HasRole(CkMethodPrincipal? principal, string role) =>
