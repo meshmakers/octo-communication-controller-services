@@ -1,6 +1,23 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-meta.schema.json
-modelId: System.Communication-4.15.0
+# 4.18.0 (AB#8596, Feature AB#5697 F4.3) adds the Pipeline, DataFlow and workload chart-version operations of the REST API
+# as CK methods (handler: service, the communication controller) plus their result records - additive, a Minor against
+# 4.17.0. No access changes, no acknowledgement.
+# 4.17.0 (AB#8595, Feature AB#5697 F4.3) adds the Adapter, DeployableWorkload and AdapterPool operations of the REST API as
+# CK methods (handler: service, the communication controller) plus their result records - additive, a Minor against the
+# published 4.16.0.
+# No access changes: the configuration credentials stay ReadWrite in 4.x (tightening comes with 5.0, decision of AB#8594).
+# No acknowledgement: 4.16.0 (published 2026-11-09) already carries the SecretDefault.Value tightening, so it is not part
+# of the diff of this release (an acknowledgement is valid for one release only, otherwise OCTO-CK204).
+# 4.16.0 (AB#8594, Feature AB#5697 F4.3, Epic AB#5584) is the FIRST ckLanguage 2 release of System.Communication,
+# a Minor against 4.15.0. Raising the language flips the `derivable` default of types and records from Any to Model
+# (a Major of its own, row T6 of docs/ck-semver-rules.md in octo-construction-kit-engine), so every pre-existing type
+# and record declares `derivable: Any` explicitly. The System floor moves from 2.5 to 2.7 for the System interfaces
+# (row D1: Minor, because 4.15.0 already resolved System 2.8.0). The only access tightening is SecretDefault.Value
+# (Hidden, row T7a, acknowledged in 4.16.0). See CLAUDE.md "System.Communication on ckLanguage 2". New types default to
+# `derivable: Model`; declare `derivable: Any` where another model should derive from them.
+modelId: System.Communication-4.18.0
+ckLanguage: 2
 description: Construction kit model for the OctoMesh Communication Controller. Defines adapters, adapter pools, deployment sites, pipelines, triggers, configurations, and execution tracking for data ingress and egress.
 dependencies:
-  - System-[2.5,3.0)
+  - System-[2.7,3.0)
   - System.Bot-[3.4,4.0)

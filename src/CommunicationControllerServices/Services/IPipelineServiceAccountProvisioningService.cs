@@ -194,7 +194,8 @@ public interface IPipelineServiceAccountProvisioningService
     /// the configuration entity exists (creating it with the declaration defaults —
     /// <c>AssignedRoleNames</c> = the platform's default role, <c>AllowDelegation</c> = true),
     /// ensures the identity client exists with the hashed secret, syncs its role edges to the
-    /// declared <c>AssignedRoleNames</c> (add missing, remove superfluous), sets or removes the
+    /// declared <c>AssignedRoleNames</c> plus the baseline role <c>StreamDataReader</c> (AB#8563;
+    /// add missing, remove superfluous), sets or removes the
     /// on-behalf-of grant per <c>AllowDelegation</c>, and converges <c>IssuerUri</c> /
     /// <c>TenantId</c> onto the AB#5115 installation default: new accounts are created with both
     /// EMPTY ("the adapter's own installation and tenant"), the historic installation spellings

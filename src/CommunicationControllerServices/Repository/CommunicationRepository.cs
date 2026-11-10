@@ -677,8 +677,35 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
+    /// <summary>
+    ///     Runs inside an upsert after it has read the SecretDefaults of its key and before it writes, with the key.
+    ///     Null in production; a test sets it to make two writers overlap.
+    /// </summary>
+    internal Func<string, Task>? AfterSecretDefaultUpsertReadAsync { get; set; }
+
     /// <inheritdoc />
     public async Task<SecretDefaultWriteResult> UpsertSecretDefaultAsync(string targetTenantId,
+        SecretDefaultWrite write)
+    {
+        for (var attempt = 1;; attempt++)
+        {
+            try
+            {
+                return await UpsertSecretDefaultOnceAsync(targetTenantId, write);
+            }
+            catch (Exception collision) when (attempt < SecretDefaultIdentity.MaximumUpsertAttempts &&
+                                              SecretDefaultIdentity.IsConcurrentCreateCollision(collision))
+            {
+                _logger.LogWarning(collision,
+                    "Concurrent write of secret default '{Key}' in tenant '{TenantId}'; attempt {Attempt} of " +
+                    "{MaximumAttempts} repeats it", write.Key, targetTenantId, attempt + 1,
+                    SecretDefaultIdentity.MaximumUpsertAttempts);
+                await Task.Delay(TimeSpan.FromMilliseconds(Random.Shared.Next(20, 80 * attempt)));
+            }
+        }
+    }
+
+    private async Task<SecretDefaultWriteResult> UpsertSecretDefaultOnceAsync(string targetTenantId,
         SecretDefaultWrite write)
     {
         var tenantContext = await _systemContext.TryFindTenantContextAsync(targetTenantId);
@@ -706,7 +733,9 @@ internal class CommunicationRepository : ICommunicationRepository
 
             var protectedSources = new HashSet<string>(write.ProtectedSourceTenantIds, StringComparer.OrdinalIgnoreCase);
             var keptDefault = sameKey.FirstOrDefault(secretDefault =>
-                secretDefault.SourceTenantId is { } existingSource && protectedSources.Contains(existingSource));
+                secretDefault.SourceTenantId is { } existingSource && protectedSources.Contains(existingSource) &&
+                !write.SupersededDefaults.Any(supersededDefault =>
+                    SecretDefaultIdentity.IsUnchanged(secretDefault, supersededDefault)));
             if (keptDefault is not null)
             {
                 await session.CommitTransactionAsync();
@@ -714,7 +743,14 @@ internal class CommunicationRepository : ICommunicationRepository
                     keptDefault.SourceTenantId);
             }
 
-            var existing = sameKey.FirstOrDefault();
+            var existing = sameKey.FirstOrDefault() ??
+                           await tenantRepository.GetRtEntityByRtIdAsync<RtSecretDefault>(session,
+                               SecretDefaultIdentity.RtIdFor(write.Key));
+            if (AfterSecretDefaultUpsertReadAsync is { } afterReadHook)
+            {
+                await afterReadHook(write.Key);
+            }
+
             foreach (var duplicate in sameKey.Skip(1))
             {
                 await tenantRepository.DeleteOneRtEntityByRtIdAsync<RtSecretDefault>(session, duplicate.RtId,
@@ -724,10 +760,10 @@ internal class CommunicationRepository : ICommunicationRepository
             var secretDefault = existing ?? await tenantRepository.CreateTransientRtEntityAsync<RtSecretDefault>();
             if (existing is null)
             {
-                secretDefault.RtId = OctoObjectId.GenerateNewId();
-                secretDefault.RtWellKnownName = write.Key;
+                secretDefault.RtId = SecretDefaultIdentity.RtIdFor(write.Key);
             }
 
+            secretDefault.RtWellKnownName = write.Key;
             secretDefault.Name = write.Key;
             secretDefault.Value = write.Value;
             secretDefault.SourceTenantId = write.SourceTenantId;
@@ -753,6 +789,97 @@ internal class CommunicationRepository : ICommunicationRepository
             await session.AbortTransactionAsync();
             throw;
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<SecretDefaultInventory> GetSecretDefaultsAsync(string tenantId)
+    {
+        var tenantContext = await _systemContext.TryFindTenantContextAsync(tenantId);
+        var tenantRepository = await _systemContext.TryFindTenantRepositoryAsync(tenantId);
+        if (tenantContext is null || tenantRepository is null)
+        {
+            return SecretDefaultInventory.TenantUnavailable;
+        }
+
+        if (!await tenantContext.IsCkModelSatisfiedAsync(SecretDefaultMinimumModelId))
+        {
+            return SecretDefaultInventory.ModelMissing;
+        }
+
+        using var session = await tenantRepository.GetSessionAsync();
+        var storedDefaults = (await tenantRepository.GetRtEntitiesByTypeAsync<RtSecretDefault>(session,
+                RtEntityQueryOptions.Create()))
+            .Items
+            .Where(secretDefault => !string.IsNullOrEmpty(secretDefault.RtWellKnownName))
+            .Select(secretDefault => new StoredSecretDefault(secretDefault.RtId, secretDefault.RtWellKnownName!,
+                secretDefault.SourceTenantId, secretDefault.SourceWorkloadRtId)
+            {
+                LastProjectedAt = secretDefault.LastProjectedAt,
+                Name = secretDefault.Name,
+                CkTypeId = secretDefault.CkTypeId?.ToString(),
+                Value = secretDefault.Value
+            })
+            .ToList();
+        return new SecretDefaultInventory(SecretDefaultTenantAvailability.Available, storedDefaults);
+    }
+
+    /// <inheritdoc />
+    public async Task<SecretDefaultDeleteOutcome> DeleteSecretDefaultIfUnchangedAsync(string tenantId,
+        StoredSecretDefault expectedDefault)
+    {
+        var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
+
+        using var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+        try
+        {
+            var currentDefault =
+                await tenantRepository.GetRtEntityByRtIdAsync<RtSecretDefault>(session, expectedDefault.RtId);
+            if (currentDefault is null || !SecretDefaultIdentity.IsUnchanged(currentDefault, expectedDefault))
+            {
+                await session.CommitTransactionAsync();
+                return currentDefault is null ? SecretDefaultDeleteOutcome.NotFound : SecretDefaultDeleteOutcome.Changed;
+            }
+
+            await tenantRepository.DeleteOneRtEntityByRtIdAsync<RtSecretDefault>(session, expectedDefault.RtId,
+                DeleteOptions.Erase);
+            await session.CommitTransactionAsync();
+            return SecretDefaultDeleteOutcome.Deleted;
+        }
+        catch (Exception concurrentWrite) when (SecretDefaultIdentity.IsConcurrentCreateCollision(concurrentWrite))
+        {
+            await session.AbortTransactionAsync();
+            _logger.LogInformation(concurrentWrite,
+                "Secret default '{Key}' in tenant '{TenantId}' was written concurrently; it is not removed",
+                expectedDefault.Key, tenantId);
+            return SecretDefaultDeleteOutcome.Changed;
+        }
+        catch
+        {
+            await session.AbortTransactionAsync();
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<SecretDefaultSources> GetSecretDefaultSourceApplicationsAsync(string tenantId)
+    {
+        var tenantContext = await _systemContext.TryFindTenantContextAsync(tenantId);
+        var tenantRepository = await _systemContext.TryFindTenantRepositoryAsync(tenantId);
+        if (tenantContext is null || tenantRepository is null)
+        {
+            return SecretDefaultSources.TenantUnavailable;
+        }
+
+        if (!await tenantContext.IsCkModelSatisfiedAsync(SecretDefaultMinimumModelId))
+        {
+            return SecretDefaultSources.ModelMissing;
+        }
+
+        using var session = await tenantRepository.GetSessionAsync();
+        var applications = await tenantRepository.GetRtEntitiesByTypeAsync<RtApplication>(session,
+            RtEntityQueryOptions.Create());
+        return new SecretDefaultSources(SecretDefaultTenantAvailability.Available, applications.Items.ToList());
     }
 
     public async Task<RtDeploymentSite?> GetDeploymentSiteForWorkloadAsync(string tenantId, OctoObjectId workloadRtId)

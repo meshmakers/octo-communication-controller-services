@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
   - typeId: DiscordConfiguration
+    derivable: Any
     derivedFromCkTypeId: ${System}/Configuration
     isFinal: true
     description: "Configuration for Discord bot integration used by the ToDiscord pipeline node (POST /channels/{id}/messages)."

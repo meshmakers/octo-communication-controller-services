@@ -68,6 +68,7 @@ internal class TenantSetupRetryWiringTests
         Substitute.For<IAdapterService>(),
         Substitute.For<IPipelineServiceAccountProvisioningService>(),
         Substitute.For<IAdapterPoolMirrorProvisioningService>(),
+        Substitute.For<ISecretDefaultProvisioningService>(),
         new FailedTenantRegistry(),
         _tracker,
         Substitute.For<ICommunicationEventService>(),

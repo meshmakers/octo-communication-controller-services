@@ -209,6 +209,98 @@ execute command that reports the execution like the adapter hub does - the pipel
 this repository). The sample pipeline `Methods/SamplePipelines/Device.UpdateFirmware-1.pipeline.yaml` is the one printed
 in the guide and is the pipeline definition of the integration tests.
 
+### CK method service handlers (AB#8595 / AB#8596, System.Communication 4.17.0 / 4.18.0)
+
+System.Communication 4.17.0 declares the adapter, workload and adapter pool operations of the REST API as CK methods, 4.18.0
+the pipeline, data flow and workload chart-version operations
+(`handler: service`), and the controller handles them with the typed handler SDK of octo-common-services
+(`AddCkMethodHandlers`): one shared queue per method, announcement, heartbeat, caller token validation, the declared
+authorization and redaction are the host's. The REST endpoints are unchanged (client switch and deprecation: F5.3, AB#5701).
+Code: `src/CommunicationControllerServices/Methods/Service/`. User guide: `octo-documentation` ->
+`technologyGuide/communication/methods.md` (en + de).
+
+| Method | Kind | REST endpoint it mirrors | Handler | Timeout / idempotent |
+|---|---|---|---|---|
+| `Adapter.DeployUpdate-1` | instance | `POST Adapter/deployUpdate?adapterRtEntityId=` | `AdapterDeployUpdateHandler` | 90 s / yes |
+| `DeployableWorkload.Wake-1` | instance (adapter, application, pool) | `POST Adapter/{workloadRtId}/wake` | `DeployableWorkloadWakeHandler` | 90 s / yes |
+| `Adapter.ReconcileServiceAccount-1` | instance | `POST Adapter/{adapterRtId}/serviceAccount/reconcile` | `AdapterReconcileServiceAccountHandler` | 60 s / yes |
+| `Adapter.RotateServiceAccountSecret-1` | instance | `POST Adapter/{adapterRtId}/serviceAccount/rotateSecret` | `AdapterRotateServiceAccountSecretHandler` | 60 s / no |
+| `AdapterPool.RefreshMirrors-1` | static | `POST AdapterPool/mirrors/refresh` | `AdapterPoolRefreshMirrorsHandler` | 120 s / yes |
+| `AdapterPool.PublishMirrors-1` | static | `POST AdapterPool/mirrors/publish` | `AdapterPoolPublishMirrorsHandler` | 120 s / yes |
+| `AdapterPool.GrantLease-1` | instance | `POST AdapterPool/{adapterPoolRtId}/lease` | `AdapterPoolGrantLeaseHandler` | 30 s / no |
+| `AdapterPool.CancelQueuedExecution-1` | instance | `DELETE AdapterPool/{adapterPoolRtId}/queue/{executionId}` | `AdapterPoolCancelQueuedExecutionHandler` | 15 s / no |
+| `Pipeline.Deploy-1` | instance | `POST Pipeline/deploy?adapterRtEntityId=&pipelineRtEntityId=` (body: definition) | `PipelineDeployHandler` | 200 s / yes |
+| `Pipeline.Execute-1` | instance | `POST Pipeline/execute?pipelineRtId=&isDryRun=` (body: input) | `PipelineExecuteHandler` | 30 s / no |
+| `Pipeline.SetDebugging-1` | instance | `PATCH Pipeline/{pipelineRtId}/debug` | `PipelineSetDebuggingHandler` | 300 s / yes |
+| `Pipeline.MoveToAdapter-1` | instance (one pipeline) | `PATCH Pipeline/move-to-adapter` | `PipelineMoveToAdapterHandler` | 200 s / yes |
+| `DataFlow.Deploy-1` | instance | `POST DataFlow/deploy?dataFlowRtId=` | `DataFlowDeployHandler` | 300 s / yes |
+| `DataFlow.Undeploy-1` | instance | `POST DataFlow/undeploy?dataFlowRtId=` | `DataFlowUndeployHandler` | 300 s / yes |
+| `DeployableWorkload.SetChartVersion-1` | instance (adapter, application, pool) | `PATCH Workload/{workloadRtId}/chart-version` | `DeployableWorkloadSetChartVersionHandler` | 15 s / yes |
+
+- **Adding a method (AB#8596 and later).** Declare it in the model (`handler: service` is the default), add a handler class in
+  `Methods/Service/` that calls the same service as the REST endpoint, and add one row to `CommunicationMethodHost.Handlers`.
+  The unit test `Methods/Service/CommunicationMethodHostTests` fails until every declared method of the three types has a row
+  and its contract (role, timeout, idempotency) is listed; extend its `Expected` table and the integration test
+  `Methods/CommunicationMethodHostTests` (REST vs. method on the same substitutes).
+- **Roles.** The REST policies ask only for the scope `octo_api`. A method without `roles` admits administrators only
+  (default-deny of `CkMethodAuthorizationEvaluator`), so every method declares `roles: [CommunicationManagement]` - the role of
+  the Studio's integration section and of every pipeline service account. Widening the list later is a Minor, narrowing it a
+  Major. `ReconcileServiceAccount` materialises declared roles only when the validated caller also holds `UserManagement`
+  (REST parity).
+- **No secret in a result.** `RotateServiceAccountSecret` returns client id, well-known name, `wasCreated`,
+  `requiresPipelineRedeploy` and the REST message (`AdapterController.BuildRotationMessage`), never the secret; the result is
+  therefore not `sensitive`. Reconcile and rotation failures answer the declared error without the exception text (REST echoes
+  it); the exception is logged with the invocation id. Redaction test: `Methods/Service/RotateServiceAccountSecretMethodRedactionTests`
+  (real provisioning service: the generated secret is in no result, log line or event, on success and on failure).
+- **Timeouts and async candidates (AB#8596).** All methods are synchronous; no method sets `execution.mode` (omitted =
+  sync, the key alone would raise `minEngineVersion`). `Pipeline.Deploy` / `MoveToAdapter` budget one wake (60 s) plus one
+  push (120 s). `DataFlow.Deploy` / `Undeploy` and `Pipeline.SetDebugging` (it re-pushes the data flow) wake and push
+  adapter after adapter and use the maximum 300 s; they are the candidates for `execution.mode: async` once F3.6
+  (AB#5694) is available - a Major per method (`Deploy-2`, row M19).
+- **Sensitive parameters (AB#8596).** `Pipeline.Deploy.pipelineDefinition` (a definition can carry credentials) and
+  `Pipeline.Execute.input` are `sensitive`: the host keeps them out of logs, audit and traces. The handlers never log them
+  and pass every failure message through `CommunicationMethodSupport.Redact` (the value as a whole and each line of 8+
+  characters, plus the caller token), so a validation message that quotes a line does not echo it. `Execute.input` of a
+  non-dry-run execution on a **Leased** adapter is stored in the tenant's `PipelineExecution` (`InputData`) and stays there
+  after the run (a retry copies it), as with REST.
+- **Failure messages (AB#8596).** The `message` parameter of a Pipeline / DataFlow error (and the redeploy `warning` of
+  `MoveToAdapter`) carries only the text of the controller's own exceptions (`CommunicationMethodSupport.CallerSafeMessage`:
+  `AdapterServiceException`, `AdapterHubCallbackException`, `CommunicationRepositoryException`,
+  `WorkloadLifecycleServiceException` - the texts REST answers and the Studio shows), redacted; any other exception answers
+  the error code without `message` and its text stays in the log.
+- **Parse failures (AB#8596).** `PipelineSchemaValidator` reports a definition that does not parse with a fixed text plus
+  line/column (`ParseFailureMessage`), never the parser's text: a duplicate key or broken scalar could quote a credential into
+  the logs, the REST answer and the method error. This also changes the REST error text of that case (position kept).
+- **Move retries (AB#8596).** `MoveToAdapter` with `redeploy: true` redeploys also when the move is a no-op (REST skips it),
+  so a retry after a timed-out first call does not report success without the deploy. Tests:
+  `CommunicationMethodHostTests.Pipeline` (integration, `AssertNeverEchoed`), `PipelineMethodSupportTests` (unit).
+- **What stays REST (AB#8596).** The tenant-level endpoints of `CommunicationController` are no type operations:
+  `enable` / `disable` toggle the communication capability of the tenant (role `TenantManagement`; they install or remove
+  the very model the method would be declared in), `GET`/`PUT lifecycle` is tenant configuration, `validate-expression` is
+  a stateless utility without an entity, and `encrypt-value` is deprecated (AB#5537, use `ValueOverride.SecretValue`) and
+  takes a secret, so it gets no new surface.
+- **Execute caller.** `Pipeline.Execute` passes the validated principal (`PipelineMethodInvoker.BuildCaller`, trust level 2)
+  and the caller token for delegation like REST; it passes no method-invocation marker (that is for `handler: pipeline`).
+  REST accepts the read-only scope for execute; the method requires `octo_api` (the host's scope rule) and the role.
+- **Audit texts.** The REST controllers and the handlers share the audit text builders
+  (`PipelineController.BuildMoveAuditMessage` / `BuildDebugAuditMessage`, `WorkloadController.BuildChartVersionAuditMessage`);
+  the methods write `source: User via CK method` or `source: CI/CD via CK method` (chart version).
+- **Differences to REST, all stricter:** an id that names no adapter is `METHOD_TARGET_NOT_FOUND` for `DeployUpdate`,
+  `Reconcile...` and `Rotate...`; invalid lease parameters are `METHOD_VALIDATION_FAILED` (`adapterRtId`, `ttlSeconds` 1-3600,
+  `borrowerTenantId`); the audit events say `source: User via CK method`. AB#8596: a pipeline that does not exist is
+  `METHOD_TARGET_NOT_FOUND` for `Pipeline.Deploy` / `Execute` / `SetDebugging` (REST 400/404), an unknown or malformed
+  `adapterRtId` / `targetAdapterRtId` and an invalid `chartVersion` are `METHOD_VALIDATION_FAILED`; `SetChartVersion` checks
+  the workload first (`METHOD_TARGET_NOT_FOUND`) and answers a failed write with `WORKLOAD_CHART_VERSION_UPDATE_FAILED` (REST
+  answers 404 for both); `Pipeline.Deploy` without
+  `adapterRtId` deploys to the assigned adapter (`PIPELINE_ADAPTER_NOT_ASSIGNED` when there is none).
+- **Token.** `AddControllerCkMethodCallerTokenValidation` (shared with the pipeline handler, registered once) validates the
+  forwarded token against `CommunicationController:AuthorityUrl` (`Methods:Token` overrides).
+- **Startup.** The SDK validates the registrations at order 15 against the CK cache of the **system tenant** (filled by the
+  default configuration at order 10, which applies the System.Communication blueprint to it). A system tenant without
+  System.Communication fails the startup naming the method. Switch: `Methods:Communication:Enabled=false`
+  (`OCTO_METHODS__COMMUNICATION__ENABLED`) - no handler, no queue; the REST endpoints keep working and calls answer
+  `METHOD_HANDLER_NOT_AVAILABLE`.
+
 ### Multi-Tenancy
 
 All operations are tenant-scoped. Routes use a custom `tenantId` constraint. The MongoDB-backed repository supports per-tenant data isolation via `ISystemContext.FindTenantRepositoryAsync(tenantId)`.
@@ -705,25 +797,59 @@ System.Communication 4.15.0 defines the model contract (record, attribute, type)
 |---------|------|--------------------------|------|
 | `SecretDefaultProjection` | record (final, key `Key`) | `RtSecretDefaultProjectionRecord`: `Key`, `SecretValue` (Secret), `AllowedTenantIds` (optional), `Description` (optional) | No scope field: the target set is the Application's own tenant plus its whole subtree; `AllowedTenantIds` only narrows |
 | `SecretDefaults` | optional attribute (RecordArray) on `Application` only | `RtApplication.SecretDefaults` | Not a `ValueOverride`: never reaches Helm values, the pod or the app's Kubernetes Secret |
-| `SecretDefault` | type (final), derived from `System/Entity`, not from a Configuration type | `RtSecretDefault`: `Name`, `Value` (Secret), `SourceTenantId`, `SourceWorkloadRtId`, `LastProjectedAt` | Provisioned by the controller, never author-set; `Value` is platform-only (no tenant pipeline, user or role may reveal it); all attributes except `Value` are `RuntimeState`; `Value`, `SourceTenantId` and `SourceWorkloadRtId` are optional (the controller always sets them, but export drops Secret and RuntimeState values, so a required one would make an exported entity unimportable). Because it is not a Configuration type the controller never ships it to adapters as pipeline configuration |
+| `SecretDefault` | type (final), derived from `System/Entity`, not from a Configuration type | `RtSecretDefault`: `Name`, `Value` (Secret), `SourceTenantId`, `SourceWorkloadRtId`, `LastProjectedAt` | Provisioned by the controller, never author-set; `Value` is platform-only (no tenant pipeline, user or role may reveal it; `access: Hidden` since 4.16.0, see below); all attributes except `Value` are `RuntimeState`; `Value`, `SourceTenantId` and `SourceWorkloadRtId` are optional (the controller always sets them, but export drops Secret and RuntimeState values, so a required one would make an exported entity unimportable). Because it is not a Configuration type the controller never ships it to adapters as pipeline configuration |
 
 A Secret attribute takes ownership `Secret` and nothing else (`SecretAttributeValidator` in the engine). Model tests:
 `tests/CommunicationControllerService.Tests/Services/SecretDefaultModelTests.cs`.
 
-#### Publishing the CK model: explicit release decision (AB#7432)
+#### System.Communication on ckLanguage 2 (4.16.0, AB#8594)
 
-A merge to `main` does **not** publish `System.Communication` to the CK catalogs. The pipeline parameter
-`publishSystemCkModels` (boolean, **default false**; same name and semantics as AB#7343 in `octo-construction-kit-engine`)
-feeds `publishOnMain` of `validate-and-publish-ck-versions.yml` (`tpl-v1.8.0`). A main build still runs ValidateVersion, the
-schema compile and the cascade check, logs `CK publish on main is OFF (publishOnMain=false)` and publishes nothing. Reason: a new
-System* version breaks exact-pinned dependents on live tenants until they are re-pinned (2026-10-23: System-2.6.0 reached the
+System.Communication 4.16.0 is the first `ckLanguage: 2` release of the model, a **Minor** against 4.15.0 (Feature AB#5697
+F4.3, Epic AB#5584; rules: `octo-construction-kit-engine/docs/ck-semver-rules.md`). What a later change must keep in mind:
+
+- **`derivable: Any` on every type and record.** ckLanguage 2 flips the default to `Model`. A pre-existing element without the
+  explicit key is a MAJOR (row T6) and breaks every model that derives from it (message 113: Loxone, System.Ai, adapters). A
+  **new** type or record defaults to `Model`; declare `derivable: Any` when another model should derive from it.
+- **System interfaces** (System floor `[2.7,3.0)`): `DataFlow` and `LentAdapterPool` implement `Named-1` + `Describable-1`,
+  `DeployableEntity` (and so every pipeline, trigger, adapter and workload) `Describable-1`, `PipelineTrigger` and
+  `DataPointMapping` `Enableable-1`. An implementing type must keep the member required where the interface requires it
+  (`Name`, `Enabled`; message 97) and under the interface's name (message 98); removing an interface is a MAJOR (row T3).
+  Not implemented: `Pipeline` (`Enabled` optional), `Named-1` on types with an optional `Name`, `SecretDefault`, `Hierarchical-1`.
+- **Access.** `SecretDefault.Value` is `access: Hidden` and its definition `SecretDefaultValue` is `securitySensitive: true`
+  (row T7a, acknowledged in 4.16.0). GraphQL, REST, MCP, import (message 139) and export cannot read or write it. The
+  controller writes and reveals it through `CommunicationRepository` (`UpsertSecretDefaultAsync`, repository reads), which the
+  access rules do not guard. Every other attribute is `ReadWrite`: Studio writes the configuration credentials through the
+  generic GraphQL update, and a `ReadOnly`/`MethodOnly` on an attribute that is not `securitySensitive` in every published
+  4.x version is a MAJOR (row T7). The T7a exception is used up: a further tightening in 4.x is a MAJOR. The method stories
+  (Adapter/Pipeline/Pool methods) can tighten credentials only together with a method that writes them, in 5.0.
+- **Engine.** The compiler stamps `minEngineVersion: 3.5.1`; the model is published under `ck-models/v3/` only. Keep it there:
+  an explicit `authorization.dataAccess` on any method raises it to 3.5.40 (`CkEngineVersion.DataAccessMinEngineVersion`), a
+  `sensitive` result to 3.5.36, `execution.mode` to 3.5.67. The methods of 4.17.0 therefore leave `dataAccess` at its default
+  (`Write`) instead of spelling it out.
+- **Acknowledgements live for one release - of the published baseline.** The compile gate diffs against the newest
+  **published** version (CI: the private GitHub catalog). A main merge publishes (`publishSystemCkModels`, default true since AB#8718; before that only a manual
+  main CI did): 4.16.0 was published on 2026-11-09 with the `SecretDefault.Value` acknowledgement, so 4.17.0 diffs against
+  4.16.0 and carries no acknowledgement (keeping it failed main CI with `OCTO-CK204`, AB#8595). Check the private catalog
+  (Pages mirror `ck-models/v3/s/System.Communication/4/catalog.json`) before you keep or drop an entry. Locally the gate diffs
+  against the lane's `local-catalog`; a local build of an unpublished version there gives a false `OCTO-CK204` - remove that
+  version from the local catalog instead of the acknowledgement.
+- Tests: `tests/CommunicationControllerService.Tests/CkModels/SystemCommunicationCkLanguage2Tests.cs` (embedded model: version,
+  ckLanguage, minEngineVersion, derivable, interfaces, the only tightened attribute, no acknowledgement in 4.17.0) and
+  `tests/CommunicationControllerServices.IntegrationTests/Repository/SystemCommunicationCkLanguage2PersistenceTests.cs`
+  (re-import, the CK v2 keys survive the MongoDB round trip into the CK cache).
+
+#### Publishing the CK model: automatic from main (AB#7432, default true since AB#8718)
+
+A merge to `main` publishes `System.Communication` to the private CK catalog automatically (AB#8718, decision 2026-11-10). The pipeline
+parameter `publishSystemCkModels` (boolean, **default true**; gate introduced as default false by AB#7343/AB#7432/AB#7433) feeds
+`publishOnMain` of `validate-and-publish-ck-versions.yml` (`tpl-v1.8.0` and later; pinned: `tpl-v1.11.0`). ValidateVersion, the schema compile and the cascade check
+run on every build and refuse a breaking change declared as minor; an already-published version is a no-op. Default true because CK v2
+range retention (AB#4696) and the completed re-pin (AB#5688, AB#6708) removed the exact-pin breakage that motivated default false.
 catalog from an engine merge before the re-pin gate).
 
-**To publish explicitly** (needs the release decision of the platform owner): Azure DevOps -> pipeline
-`octo-communication-controller-services-CI` -> *Run pipeline* -> branch `main` -> tick *Publish System CK models to the CK
-catalogs (main)*; CLI: `az pipelines run --name octo-communication-controller-services-CI --branch main --parameters publishSystemCkModels=true`.
-`r*` tags (release train) publish as before; `dev/*`/`test/*` builds never publish to the shared catalogs. A merge that bumps the
-model therefore leaves the version unpublished until that run; repos that need it must wait for it.
+**To build main without publishing:** Azure DevOps -> pipeline `octo-communication-controller-services-CI` -> *Run pipeline* -> branch `main` -> untick
+*Publish System CK models to the CK catalogs (main)*; CLI: `az pipelines run --id 101 --branch main --parameters publishSystemCkModels=false`.
+`r*` tags (release train) publish as before; `dev/*`/`test/*` builds never publish to the shared catalogs.
 
 ### Service-Managed Blueprints (System.Communication.*)
 
@@ -4083,7 +4209,8 @@ that returns nothing, a pipeline that "does nothing" — with **no error anywher
 
 So when you set up delegation for a tenant, grant the pipeline service account
 (`octo-pipeline-sa-{adapterRtId}`, one per adapter) the fachliche roles its pipelines must act
-under, on top of `CommunicationManagement`:
+under, on top of `CommunicationManagement` (and `StreamDataReader`, which the reconcile adds to every
+declarative account since AB#8563, see phase 8):
 
 ```
 octo-cli AddClientToRole --clientId octo-pipeline-sa-<adapterRtId> --roleName <Role> --context <tenant>
@@ -4246,9 +4373,8 @@ rollout starts rather than during it, so a slow identity service delays a deploy
 half-configuring one. The best-effort contract is unchanged: a provisioning failure is still
 swallowed and the workload still deploys, just without credentials.
 
-Note `DeployManagedWorkloadsAsync` (the pool fan-out) calls `BuildWorkloadDeployedDtoAsync` without
-provisioning first — it has no live caller today, and the tenant-start sweep
-(`EnsurePipelineServiceAccountsAsync`) is what covers that path.
+The former pool fan-out `DeployManagedWorkloadsAsync` had no live caller and was removed with AB#7245; every workload
+deploy goes through `DeployWorkloadAsync`.
 
 Phase 4 tests: `Services/PoolServiceTests/DeployWorkloadServiceAccountCredentialsTests` (both paths
 projected with the right secret flags, Application projects nothing and never asks the resolver, no
@@ -4376,7 +4502,8 @@ types are **dropped** (no policy targets them → no role needed). `ProtectedTyp
 owner-scoped grants is called out as blind in the summary. Delta: `MissingRoles` = full-scope
 granting roles of uncovered types; `SuperfluousRoles` = declared roles granting nothing for any
 touched type — except the provisioning baseline (`CommunicationManagement`,
-`PipelineServiceAccountProvisioningService.DefaultAssignedRoleNames`), which lands in
+`PipelineServiceAccountProvisioningService.DefaultAssignedRoleNames`, and since AB#8563
+`StreamDataReader`, `…BaselineRoleNames`), which lands in
 `BaselineRoles` instead (it grants no data access and every pipeline SA needs it). Robustness:
 unparsable/empty definitions become `Warnings` entries, an empty pipeline set returns an
 empty-but-valid result.
@@ -4451,6 +4578,78 @@ credential-aware secret, all four impersonation states, foreign pairing, placeho
 matrix (capable actor deploys incl. placeholder target secret, no/incapable actor refused with
 remedy, identity-down non-blocking); `…/PipelineServiceAccountProjectionTests` — empty issuer
 passes through empty.
+
+### Phase 8 — `StreamDataReader` baseline (AB#8563)
+
+The asset repository gates stream-data reads on `StreamDataReader`, `StreamDataWriter` or
+`StreamDataAdmin` (AB#8559, `StreamDataReadAuthorization:RoleEnforcement` Off / Warn / **Enforce**,
+error code `StreamDataReadRoleRequired`). Pipelines that read archives (EC allocation, billing,
+simulation) run as the adapter's pipeline service account, which held only `CommunicationManagement`
+— under `Enforce` they were refused.
+
+`PipelineServiceAccountProvisioningService.BaselineRoleNames` (`[StreamDataReader]`) is therefore
+added to every **declarative** account's roles when the declaration is materialised
+(`EffectiveRoleNames` = declared roles in their order + every baseline role not declared yet).
+Rules:
+
+- **Not persisted.** `AssignedRoleNames` stays what the operator (or the default
+  `DefaultAssignedRoleNames = [CommunicationManagement]`) wrote. Existing accounts get the role on
+  their next **system-initiated** reconcile (tenant start / `clearCache`, workload deploy) — no data
+  migration, no manual step, the entity is not rewritten.
+- **Added, never replacing.** Declared roles are sent as before; a declaration that names
+  `StreamDataReader` itself sends it once. An empty declaration still carries the baseline — the
+  baseline cannot be removed through the declaration.
+- **Same security gate.** A user-initiated reconcile without `UserManagement` sends no roles at all,
+  baseline included (AB#5111).
+- **Legacy accounts are not covered.** An account without `AssignedRoleNames` (pre-CK 3.32.0) keeps
+  `null` on the wire, so identity leaves its role edges alone — grant `StreamDataReader` by hand
+  (`octo-cli AddClientToRole --clientId octo-pipeline-sa-<adapterRtId> --roleName StreamDataReader`)
+  or opt the account into declarative management, before the asset repository goes to `Enforce`.
+- **Identity side.** The roles travel over the bus (`CreateIdentityDataCommandRequest`); its consumer
+  syncs the declared list for `octo-pipeline-sa-` clients and does not run the HTTP `RoleChangeGuard`
+  (AB#7914 / AB#5859), so the controller's own roles do not limit what it can assign here.
+- **Read side follows.** The health check expects declared ∪ baseline (a missing `StreamDataReader`
+  edge is `roles-drift` until the next reconcile); the rights analysis counts the baseline as
+  coverage and reports a declared `StreamDataReader` under `BaselineRoles`, never as superfluous.
+
+Tests: `Services/PipelineServiceAccountReconcileTests` (existing default declaration gets the role
+without an entity write, declaration naming the baseline sends it once, empty declaration keeps the
+baseline, unprivileged user sends no roles, `EffectiveRoleNames`),
+`Services/PipelineServiceAccountProvisioningServiceTests.Provision_FreshAdapter_AssignsCommunicationManagementAndStreamDataReader`,
+`Services/ServiceAccountHealthTests.GetConfigurationHealth_BaselineEdgeMissing_ReportsStreamDataReaderMissing`,
+`Services/ServiceAccountRightsAnalysisTests` (`…DeclaredStreamDataReader_IsBaselineNotSuperfluous`,
+`…TypeGrantedByTheBaseline_IsNotMissing`).
+
+### Phase 9 — roles identity grants by design (AB#8582)
+
+The identity service grants `FileManagement` to every `octo-pipeline-sa-*` client on its own
+(AB#6467: `CreateIdentityDataCommandRequestConsumer` adds the edge on every identity-data command and
+treats it as implicitly declared, `PipelineServiceAccountFileRoleGrant` adds it at every tenant setup;
+octo-identity-services `docs/persistence.md`). Phase 8's health check did not know this, so every
+adapter account showed `roles-drift` with `FileManagement` superfluous.
+
+`PipelineServiceAccountProvisioningService.IdentityGrantedRoleNames` (`[FileManagement]`), next to
+`BaselineRoleNames`, is the single list of these roles; `IdentityGrantedRoleNamesFor(clientId)`
+returns it for a client with `ClientIdPrefix` (`octo-pipeline-sa-`, ordinal like identity) or a
+not-yet-derived id, and nothing for a custom client id. Rules:
+
+- **Never sent.** The roles are not part of `EffectiveRoleNames`; the controller neither sends nor
+  removes them.
+- **Tolerated, not required.** The health check excludes them from `SuperfluousRoles` but never
+  reports them missing — identity grants `FileManagement` only when the role is seeded (System.Files
+  installed). Every other undeclared role is still `roles-drift`.
+- **Same answer in the rights analysis.** They count as coverage, and a declared `FileManagement` is
+  reported under `BaselineRoles`, not as superfluous. On a custom client id both views treat
+  `FileManagement` like any other role.
+- **Keep in sync** with identity: a new identity-side grant for pipeline service accounts goes into
+  this list in the same change.
+
+Tests: `Services/ServiceAccountHealthTests` (`…PipelineAccountWithIdentityGrantedFileManagement_IsHealthy`,
+`…PipelineAccountWithoutFileManagement_IsHealthy`, `…PipelineAccountWithUnexpectedRole_ReportsOnlyThatRole`,
+`…CustomClientIdWithFileManagement_ReportsItSuperfluous`), `Services/ServiceAccountRightsAnalysisTests`
+(`…PipelineAccountDeclaringFileManagement_IsBaselineButUnexpectedRoleStaysSuperfluous`,
+`…TypeGrantedByIdentityGrantedFileManagement_IsNotMissing`, `…CustomClientIdDeclaringFileManagement_IsSuperfluous`),
+`Services/PipelineServiceAccountReconcileTests.IdentityGrantedRoleNamesFor_PrefixedOrDerivedClient_IsFileManagementAndNeverSynced`.
 
 ### The tenant gate only started working in AB#5054
 
@@ -5419,10 +5618,34 @@ An Application's `SecretDefaults` (System.Communication 4.15.0) are projected by
 tenant's own secret of the same purpose (e.g. `RegistrationCaptchaSecret`) is never touched; the platform node that
 consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tenant's value and falls back to it.
 
-- **Authority.** Only the deploy of the Application writes SecretDefaults. `DeploymentSiteService.DeployWorkloadAsync`
-  calls `ISecretDefaultProvisioningService.ProvisionForSourceAsync(tenantId, applicationRtId)` after the Helm
-  notification, for an `RtApplication` with at least one entry. Best effort like the adapter-pool mirror fan-out: a
-  failure of the whole projection is an Error event on the Application, the deploy succeeds, the next deploy retries.
+- **The deploy is the release (AB#7245, decision 3a).** Only an Application in `DeploymentState` Pending or Deployed is a
+  source (`IsReleasedSource`). One that was never deployed, is undeployed or disabled, or was refused by the deploy guard
+  (Error, also after an earlier successful deploy, and also when a rollout fails) offers nothing, so its defaults are
+  removed. **Undeploying an Application withdraws its defaults**: e.g. undeploying the EC app removes the CAPTCHA
+  default from every community without its own key pair; the next deploy projects it again.
+- **Triggers (AB#7245).** The controller writes SecretDefaults on five paths, all through
+  `ISecretDefaultProvisioningService`, all best effort (a failure is an Error event, never a failed deploy, undeploy or tenant load):
+  1. **Deploy** - `DeploymentSiteService.DeployWorkloadAsync` calls `ProvisionForSourceAsync(tenantId, applicationRtId)`
+     after the Helm notification for **every** `RtApplication`, also one without entries, so a redeploy removes what it no
+     longer declares. A failure of the whole projection is an Error event on the Application; the next deploy retries.
+  2. **Deployment-site deploy** - `DeployDeploymentSiteAsync` deploys no workload (decoupled in f2f8bbd; the unused
+     `DeployManagedWorkloadsAsync` fan-out was removed with AB#7245), so every Application reaches Helm through
+     `DeployWorkloadAsync` and its validation and projection; the re-dispatch of a Pending workload on site registration
+     (`ReconcilePendingWorkloadsAsync`) calls it too. Tests: `DeployWorkloadSecretDefaultsTests`.
+  3. **Tenant load** - `DefaultConfigurationCreatorService.EnsureSecretDefaultsAsync` runs `ProvisionForTargetAsync(tenantId)`
+     next to the lent-pool mirrors (service start, Enable, `PosUpdateTenant`), so a tenant created or loaded after the deploy
+     receives its defaults without a redeploy. It never fails the load; an Information event only when something was
+     created, updated or removed.
+  4. **Undeploy** - `DeploymentSiteService.UndeployWorkloadAsync` calls `WithdrawForSourceAsync(tenantId, applicationRtId)`
+     after the resting state is set: the source-side sweep of a redeploy without entries, over its own tenant and subtree,
+     followed by the target reconcile where something was removed, so another deployed source takes the key over. A
+     failure is an Error event on the Application; the target reconcile removes the defaults on the next load.
+  5. **Reconcile endpoint** - `POST {tenantId}/v1/secretDefaults/reconcile` (`SecretDefaultsController`, policy
+     `TenantCommunicationApiReadWritePolicy` like `adapterPool/mirrors/refresh`) runs the target reconcile for the route
+     tenant and every tenant of its subtree and answers with one `SecretDefaultTargetResult` per tenant: status
+     (`Reconciled`, `TenantUnavailable`, `ModelMissing`, `TreeUnreadable`, `Failed` when the tenant's reconcile threw)
+     and counts (created, updated, unchanged, removed, kept, unreadable sources, failed), never a value. Use it after
+     deleting an Application, which reaches no hook.
 - **Target set.** The Application's own tenant plus its whole subtree, read through
   `ITenantLendingScopeResolver.ResolveLendableTenantsAsync(source, LendingScope.Descendants)` (the descendant walk with
   the ancestor guard). Never siblings. A non-empty `AllowedTenantIds` intersects that set; a listed tenant outside it is
@@ -5447,7 +5670,10 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
 - **Precedence: the source closer to the root wins.** Each write carries the ancestors of its source tenant
   (`ITenantLendingScopeResolver.ResolveAncestorTenantsAsync`, the resolver's own parent map) as
   `ProtectedSourceTenantIds`. That call throws when the tenant tree could not be read completely (a partial parent map
-  would drop ancestors), which stops the projection before any write; lending keeps using the partial map. An existing SecretDefault whose `SourceTenantId` is one of them is kept
+  would drop ancestors), which stops the projection before any write; lending keeps using the partial map. Incomplete
+  means: a read failed, a tenant of the walk cannot be resolved (its children are unknown), a child's registry entry
+  names another parent than the tenant listing it, a child is listed by two parents, or a root names a walked parent that
+  does not list it. An inconsistent map is cached like a complete one (30 s), a failed read is retried at once. An existing SecretDefault whose `SourceTenantId` is one of them is kept
   (`KeptAncestorSource`), and a Warning event in the deploying tenant names the target tenant, the key, the kept source and
   the refused source. The same source (redeploy, rotation) or a descendant source overwrites; so does an unrelated source
   (last deploy wins). Example: P projects `k`, then C1 deploys `k` -> C1 and its subtree keep P's value; C1 projects first,
@@ -5464,9 +5690,57 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   `{release}-octo-secrets`. The plaintext appears in no log line, event, exception message or workload status
   (`ProvisionForSourceAsyncTests.ThePlaintext_ReachesNoLogLineAndNoEvent`, `DeployWorkloadSecretDefaultsTests`). See
   also "Platform-only secrets" above (AB#7246): a SecretDefault is never part of an adapter's configuration list.
-- **Not yet here** (AB#7245): tenants created or loaded after the deploy, removal of a default from all targets, per-tenant
-  status and a reconcile endpoint.
-- Tests: `tests/CommunicationControllerService.Tests/Services/SecretDefaultProvisioningServiceTests/`,
-  `DeploymentSiteServiceTests/DeployWorkloadSecretDefaultsTests.cs`, integration
-  `Repository/SecretDefaultRepositoryTests.cs` (encryption, rotation in place, another secret of the tenant unchanged,
-  duplicate erase, a protected source kept).
+- **Target reconcile (AB#7245).** `ProvisionForTargetAsync(target)` brings one tenant to the desired state. Sources are the
+  tenant itself and all its ancestors (`ResolveAncestorTenantsAsync`, complete tree required; never siblings); every
+  Application of a source whose valid entry reaches the target (`AllowedTenantIds` empty or naming it) is an offer. Per key
+  the offer of the source closest to the root wins (same precedence as the deploy); between Applications of one tenant the
+  one that already holds the default stays, else the lowest RtId. **Write only on change:** the winner is written when the
+  tenant does not hold exactly it already (one entity for the key, same source tenant and Application, `Name` = key, same
+  value), so an edited or deleted SecretDefault gets the projected value back, while an unchanged tenant load writes
+  nothing (`DefaultsUnchanged`; `LastProjectedAt` is the time of the last real write). The value check reveals the stored
+  value in the target (`RevealOrNull`, attribute `Value`) and compares it with the source value in constant time; neither
+  is logged or kept, and an unreadable stored value counts as changed. **Write before remove:** the winners are written
+  first, then the unprovided defaults are removed, so a holder change replaces the default in place and the consumer never
+  sees a gap. The write names the defaults it found unprovided (`SecretDefaultWrite.SupersededDefaults`); such a default is
+  replaced even when its source is protected, as long as it is unchanged since the read. A source tenant that cannot be
+  resolved or lacks System.Communication 4.15.0 is unreadable: its defaults are kept (Warning event; for a missing model
+  only when the target holds defaults of it, because a root without Communication would otherwise warn on every load). The
+  ancestor walk re-reads the tenant tree when the tenant is not in the cached parent map, so a tenant created seconds
+  ago finds its ancestors.
+- **Removal rule (desired state).** A SecretDefault is deleted (Erase) when no Application provides it to that tenant any
+  more: its entry was removed, the Application was deleted or is not deployed (see above), the tenant left the entry's
+  `AllowedTenantIds`, or its source is no ancestor any more. Matching is by `SourceTenantId` + `SourceWorkloadRtId` + key,
+  so a default of another Application stays. A default without `SourceTenantId` or `SourceWorkloadRtId` was not written by
+  a projection (or lost them on an import) and is always removed, also from a tenant whose sources cannot be read.
+  **Conditional removal:** `DeleteSecretDefaultIfUnchangedAsync` re-reads the entity in the delete transaction and erases
+  it only while RtId, well-known name, `SourceTenantId`, `SourceWorkloadRtId` and `LastProjectedAt` match what was read;
+  a default a concurrent deploy wrote meanwhile is kept (`Changed`, a write conflict counts as `Changed`), a gone one is
+  `NotFound`; neither is a failure. The target reconcile and the source sweep both use it. An entry that is present but invalid keeps its existing defaults (never written, never removed). On deploy the
+  source side sweeps its own tenant and subtree for defaults of this Application that it no longer provides and, where it
+  removed one, runs the target reconcile so another source can take the key over. **Unknown, never empty:** a source
+  tenant that cannot be read keeps the defaults it projected and is named in a Warning event in the target; a tenant tree
+  that cannot be read completely changes nothing (`TreeUnreadable`, Warning event).
+- **Exactly one per name under concurrency.** A new SecretDefault is created with an RtId derived from its key
+  (`SecretDefaultIdentity.RtIdFor`, SHA-256 of a namespace plus the key). Two writers creating the same key at the same
+  time insert the same document id; MongoDB refuses one (write conflict or duplicate key), and `UpsertSecretDefaultAsync`
+  repeats it (at most 3 attempts) as an update. An entity found by that RtId but renamed by the tenant is taken over.
+  `VerifyCaptcha@1` refuses duplicates, which is why this matters.
+- **Visibility (decision: events).** Events carry tenant ids, keys, Application names and counts only: per-target Warning
+  (skipped, kept, unreadable source), Error (write or delete failed, unreadable value) and an Information summary after a
+  deploy or an undeploy that wrote or removed something. Every event about an Application's default is **linked to the
+  Application** (`associatedRtEntityId`, the Related association, so `relatesFrom(System.Notification/Event)` on the
+  Application finds it) when it is stored in the Application's own tenant: the deploy and withdrawal summaries, invalid
+  entries, skipped targets, and write or removal failures in the source tenant. An event in another tenant cannot relate
+  to it and names the Application and its tenant in the text instead. Events about the tree or a source tenant as a whole
+  link nothing. Application `StatusMessage` is not used: it is the live deployment status line that every operator report
+  overwrites.
+- Tests: `tests/CommunicationControllerService.Tests/Services/SecretDefaultProvisioningServiceTests/` (target side:
+  `ProvisionForTargetAsyncTests`, `ProvisionForTargetWriteTests`, `ProvisionForTargetIncompleteTreeTests`, deployed
+  sources and undeploy: `SecretDefaultReleasedSourceTests`, concurrent removal: `SecretDefaultConcurrentRemovalTests`,
+  removal on deploy: `ProvisionForSourceRemovalTests`), `TenantLendingScopeResolverTests`, `Repository/StoredSecretDefaultTests.cs`,
+  `DeploymentSiteServiceTests/DeployWorkloadSecretDefaultsTests.cs`,
+  `DefaultConfigurationCreatorServiceTests/EnsureSecretDefaultsAsyncTests.cs`, `Controllers/SecretDefaultsControllerTests.cs`,
+  `Repository/SecretDefaultIdentityTests.cs`, integration `Repository/SecretDefaultRepositoryTests.cs` (encryption,
+  rotation in place, another secret of the tenant unchanged, duplicate erase, a protected source kept, a superseded
+  protected default replaced and a re-projected one kept, two concurrent creates leave one entity (forced overlap through
+  the internal `CommunicationRepository.AfterSecretDefaultUpsertReadAsync` hook), list, conditional delete).

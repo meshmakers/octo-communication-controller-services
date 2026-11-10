@@ -145,9 +145,10 @@ internal class PipelineServiceAccountReconcileTests
 
         using var _ = Assert.Multiple();
         // The identity side syncs edges to exactly this list (add + remove — pinned by the
-        // identity-side integration tests); the controller's contract is sending it verbatim.
+        // identity-side integration tests); the controller's contract is sending the declaration
+        // verbatim plus the AB#8563 baseline.
         await Assert.That(SentClient().AssignedRoleNames)
-            .IsEquivalentTo(new[] { "AccountingRead", "AccountingWrite" });
+            .IsEquivalentTo(new[] { "AccountingRead", "AccountingWrite", CommonConstants.StreamDataReaderRole });
         await Assert.That(result.RoleChangesSkipped).IsFalse();
     }
 
@@ -224,6 +225,108 @@ internal class PipelineServiceAccountReconcileTests
         await _sut.ReconcileAdapterAsync(TenantId, adapter, ServiceAccountReconcileContext.System);
 
         await Assert.That(SentClient().AllowedGrantTypes).Contains(Constants.OnBehalfOfGrantType);
+    }
+
+    // ---------------------------------------------------------------- AB#8563 baseline role
+
+    [Test]
+    public async Task Reconcile_ExistingDefaultDeclaration_GetsStreamDataReaderWithoutRewritingTheEntity()
+    {
+        // An account provisioned before AB#8563: declaration = [CommunicationManagement], healthy.
+        var adapter = RtEntityCreator.CreateAdapter();
+        var serviceAccount = ArrangeDeclaredAdapter(adapter);
+
+        var result = await _sut.ReconcileAdapterAsync(TenantId, adapter,
+            ServiceAccountReconcileContext.System);
+
+        using var _ = Assert.Multiple();
+        // The next system-initiated reconcile (tenant start, workload deploy) adds the baseline at
+        // the identity side — no manual step, no data migration ...
+        await Assert.That(SentClient().AssignedRoleNames)
+            .IsEquivalentTo(new[] { CommonConstants.CommunicationManagementRole, CommonConstants.StreamDataReaderRole });
+        // ... and the declaration stays exactly what the operator (or the default) wrote.
+        await Assert.That(result.Outcome).IsEqualTo(PipelineServiceAccountProvisioningOutcome.AlreadyProvisioned);
+        await Assert.That(serviceAccount.AssignedRoleNames!.ToArray())
+            .IsEquivalentTo(new[] { CommonConstants.CommunicationManagementRole });
+        await _communicationRepository.DidNotReceiveWithAnyArgs().SavePipelineServiceAccountAsync(
+            Arg.Any<string>(), Arg.Any<RtEntityId>(), Arg.Any<RtServiceAccountConfiguration>(), Arg.Any<bool>());
+    }
+
+    [Test]
+    public async Task Reconcile_DeclarationAlreadyNamingTheBaseline_SendsItOnce()
+    {
+        var adapter = RtEntityCreator.CreateAdapter();
+        ArrangeDeclaredAdapter(adapter, sa => sa.AssignedRoleNames =
+            new AttributeStringValueList([CommonConstants.StreamDataReaderRole, "AccountingRead"]));
+
+        await _sut.ReconcileAdapterAsync(TenantId, adapter, ServiceAccountReconcileContext.System);
+
+        await Assert.That(SentClient().AssignedRoleNames)
+            .IsEquivalentTo(new[] { CommonConstants.StreamDataReaderRole, "AccountingRead" });
+    }
+
+    [Test]
+    public async Task Reconcile_EmptyDeclaration_StillCarriesTheBaseline()
+    {
+        // An explicitly empty declaration means "no declared roles", not "no roles at all": the
+        // baseline is not removable through the declaration.
+        var adapter = RtEntityCreator.CreateAdapter();
+        ArrangeDeclaredAdapter(adapter, sa => sa.AssignedRoleNames = new AttributeStringValueList([]));
+
+        await _sut.ReconcileAdapterAsync(TenantId, adapter, ServiceAccountReconcileContext.System);
+
+        await Assert.That(SentClient().AssignedRoleNames)
+            .IsEquivalentTo(new[] { CommonConstants.StreamDataReaderRole });
+    }
+
+    [Test]
+    public async Task Reconcile_UserWithoutUserManagement_DoesNotMaterialiseTheBaselineEither()
+    {
+        // The AB#5111 security gate covers the baseline like every other role.
+        var adapter = RtEntityCreator.CreateAdapter();
+        ArrangeDeclaredAdapter(adapter);
+
+        var result = await _sut.ReconcileAdapterAsync(TenantId, adapter,
+            ServiceAccountReconcileContext.User(callerHasUserManagementRole: false));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(SentClient().AssignedRoleNames).IsNull();
+        await Assert.That(result.RoleChangesSkipped).IsTrue();
+    }
+
+    [Test]
+    public async Task EffectiveRoleNames_AppendsTheBaselineOnceAndKeepsTheDeclaredOrder()
+    {
+        using var _ = Assert.Multiple();
+        await Assert.That(PipelineServiceAccountProvisioningService.EffectiveRoleNames(["B", "A"]))
+            .IsEquivalentTo(new[] { "B", "A", CommonConstants.StreamDataReaderRole });
+        await Assert.That(PipelineServiceAccountProvisioningService.EffectiveRoleNames(
+                [CommonConstants.StreamDataReaderRole, "A", "A"]))
+            .IsEquivalentTo(new[] { CommonConstants.StreamDataReaderRole, "A" });
+        await Assert.That(PipelineServiceAccountProvisioningService.BaselineRoleNames)
+            .IsEquivalentTo(new[] { CommonConstants.StreamDataReaderRole });
+    }
+
+    [Test]
+    public async Task IdentityGrantedRoleNamesFor_PrefixedOrDerivedClient_IsFileManagementAndNeverSynced()
+    {
+        // AB#8582: FileManagement is granted identity-side (AB#6467) to octo-pipeline-sa-* clients
+        // only; the controller tolerates it but never puts it on the wire.
+        using var _ = Assert.Multiple();
+        await Assert.That(PipelineServiceAccountProvisioningService.IdentityGrantedRoleNames)
+            .IsEquivalentTo(new[] { CommonConstants.FileManagementRole });
+        await Assert.That(PipelineServiceAccountProvisioningService.IdentityGrantedRoleNamesFor(
+                PipelineServiceAccountProvisioningService.BuildClientId(OctoObjectId.GenerateNewId())))
+            .IsEquivalentTo(new[] { CommonConstants.FileManagementRole });
+        await Assert.That(PipelineServiceAccountProvisioningService.IdentityGrantedRoleNamesFor(null))
+            .IsEquivalentTo(new[] { CommonConstants.FileManagementRole });
+        await Assert.That(PipelineServiceAccountProvisioningService.IdentityGrantedRoleNamesFor("custom-client"))
+            .IsEmpty();
+        await Assert.That(PipelineServiceAccountProvisioningService.IdentityGrantedRoleNamesFor("OCTO-PIPELINE-SA-x"))
+            .IsEmpty();
+        await Assert.That(PipelineServiceAccountProvisioningService.EffectiveRoleNames(
+                [CommonConstants.CommunicationManagementRole]))
+            .DoesNotContain(CommonConstants.FileManagementRole);
     }
 
     // ---------------------------------------------------------------- legacy accounts
@@ -436,7 +539,8 @@ internal class PipelineServiceAccountReconcileTests
             ServiceAccountReconcileContext.User(callerHasUserManagementRole: true));
 
         using var _ = Assert.Multiple();
-        await Assert.That(SentClient().AssignedRoleNames).IsEquivalentTo(new[] { "AccountingRead" });
+        await Assert.That(SentClient().AssignedRoleNames)
+            .IsEquivalentTo(new[] { "AccountingRead", CommonConstants.StreamDataReaderRole });
         await Assert.That(result.RoleChangesSkipped).IsFalse();
         await _eventService.DidNotReceiveWithAnyArgs()
             .StoreWarningEventAsync(Arg.Any<string>(), Arg.Any<string>());
@@ -515,7 +619,8 @@ internal class PipelineServiceAccountReconcileTests
         // Its own client id, its own well-known name — nothing adapter-shaped is invented.
         await Assert.That(result.ClientId).IsEqualTo("octo-pipeline-sa-custom");
         await Assert.That(result.WellKnownName).IsEqualTo("pipeline-override-account");
-        await Assert.That(SentClient().AssignedRoleNames).IsEquivalentTo(new[] { "AccountingRead" });
+        await Assert.That(SentClient().AssignedRoleNames)
+            .IsEquivalentTo(new[] { "AccountingRead", CommonConstants.StreamDataReaderRole });
         // Repaired in place, keeping the secret; and never through the adapter-edge write.
         await Assert.That(updated.RtId).IsEqualTo(standalone.RtId);
         await Assert.That(SecretTestValues.Plain(updated.ClientSecret)).IsEqualTo(ExistingSecret);
@@ -627,9 +732,10 @@ internal class PipelineServiceAccountReconcileTests
 
         using var _ = Assert.Multiple();
         // null on the wire = the identity side leaves the MayActAs edges untouched; the client
-        // itself still converges (roles went out verbatim).
+        // itself still converges (roles went out verbatim, plus the AB#8563 baseline).
         await Assert.That(SentClient().MayActAsClientIds).IsNull();
-        await Assert.That(SentClient().AssignedRoleNames).IsEquivalentTo(new[] { "AccountingRead" });
+        await Assert.That(SentClient().AssignedRoleNames)
+            .IsEquivalentTo(new[] { "AccountingRead", CommonConstants.StreamDataReaderRole });
         await Assert.That(result.Outcome).IsEqualTo(PipelineServiceAccountProvisioningOutcome.AlreadyProvisioned);
     }
 

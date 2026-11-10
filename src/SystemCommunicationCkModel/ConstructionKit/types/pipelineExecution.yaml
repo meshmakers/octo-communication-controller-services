@@ -1,6 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
 - typeId: PipelineExecution
+  derivable: Any
   description: Records an individual pipeline execution with its status, timing, trigger type, and optional input/output data. Linked to the executed pipeline and the adapter that performed the execution. On a leased adapter pool (AB#4924) the entity exists from the moment the work item is enqueued, so one work item is one PipelineExecution from Queued through Running to completion.
   derivedFromCkTypeId: ${System}/Entity
   indexes:

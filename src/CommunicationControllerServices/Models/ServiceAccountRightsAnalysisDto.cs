@@ -106,9 +106,11 @@ public sealed record RightsAnalysisWarningDto(
 /// </param>
 /// <param name="BaselineRoles">
 ///     Declared roles that are the operational baseline every pipeline service account carries
-///     (<c>CommunicationManagement</c> — the role the controller's own APIs require). They grant
-///     no data access and would otherwise always look superfluous, so they are reported here
-///     instead.
+///     (<c>CommunicationManagement</c> — the role the controller's own APIs require), the reconciled
+///     baseline (<c>StreamDataReader</c>, AB#8563) and the roles identity grants by design to
+///     <c>octo-pipeline-sa-*</c> clients (<c>FileManagement</c>, AB#8582). The account holds them
+///     whatever the analysed pipelines touch, so they would otherwise look superfluous; they are
+///     reported here instead.
 /// </param>
 /// <param name="Message">Human-readable summary of the whole analysis.</param>
 public sealed record ServiceAccountRightsAnalysisDto(

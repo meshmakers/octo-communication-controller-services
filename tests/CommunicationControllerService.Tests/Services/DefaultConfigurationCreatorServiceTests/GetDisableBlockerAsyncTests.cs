@@ -191,6 +191,7 @@ internal class GetDisableBlockerAsyncTests
         Substitute.For<IAdapterService>(),
         Substitute.For<IPipelineServiceAccountProvisioningService>(),
         Substitute.For<IAdapterPoolMirrorProvisioningService>(),
+        Substitute.For<ISecretDefaultProvisioningService>(),
         new FailedTenantRegistry(),
         new TenantSetupRetryTracker(),
         Substitute.For<ICommunicationEventService>(),

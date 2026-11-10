@@ -803,6 +803,45 @@ internal class DeploymentSiteService : IDeploymentSiteService
             $"Workload '{workload.Name}' undeploy requested (resting state: {restingState}).");
 
         await FanOutAdapterPoolMirrorsAsync(tenantId, workload);
+
+        await WithdrawSecretDefaultsAsync(tenantId, workload);
+    }
+
+    /// <summary>
+    ///     Removes the SecretDefaults an undeployed Application projected: only a deployed Application is a source.
+    ///     Best effort: the undeploy has already been sent, so a failure is stored as an Error event and the next
+    ///     load of each served tenant removes them.
+    /// </summary>
+    private async Task WithdrawSecretDefaultsAsync(string tenantId, RtDeployableWorkload workload)
+    {
+        if (workload is not RtApplication application)
+        {
+            return;
+        }
+
+        try
+        {
+            await _secretDefaultProvisioningService.WithdrawForSourceAsync(tenantId, application.RtId);
+        }
+        catch (Exception withdrawalFailure)
+        {
+            Logger.Error(withdrawalFailure,
+                "[{TenantId}] Could not withdraw the secret defaults of application '{WorkloadName}' ({WorkloadRtId})",
+                tenantId, application.Name, application.RtId);
+            try
+            {
+                await _eventService.StoreErrorEventAsync(tenantId,
+                    $"Secret defaults of application '{application.Name}' could not be removed after the undeploy. " +
+                    "The next load of each tenant it served removes them.",
+                    new RtEntityId(SystemCommunicationCkIds.RtCkApplicationTypeId, application.RtId));
+            }
+            catch (Exception eventFailure)
+            {
+                Logger.Warn(eventFailure, "[{TenantId}] Could not store the withdrawal failure event of application " +
+                                          "'{WorkloadName}' ({WorkloadRtId})", tenantId, application.Name,
+                    application.RtId);
+            }
+        }
     }
 
     /// <summary>
@@ -811,7 +850,7 @@ internal class DeploymentSiteService : IDeploymentSiteService
     /// </summary>
     private async Task ProjectSecretDefaultsAsync(string tenantId, RtDeployableWorkload workload)
     {
-        if (workload is not RtApplication { SecretDefaults.Count: > 0 } application)
+        if (workload is not RtApplication application)
         {
             return;
         }
@@ -974,55 +1013,6 @@ internal class DeploymentSiteService : IDeploymentSiteService
 
         await _eventService.StoreInformationEventAsync(tenantId,
             $"DeploymentSite '{deploymentSiteName}' undeployed (resting state: {restingState}).");
-    }
-
-    private async Task DeployManagedWorkloadsAsync(string tenantId, OctoObjectId deploymentSiteRtId, string deploymentSiteName)
-    {
-        IReadOnlyCollection<RtDeployableWorkload> workloads;
-        try
-        {
-            workloads = await _communicationRepository.GetWorkloadsForDeploymentSiteAsync(tenantId, deploymentSiteRtId);
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn(ex,
-                "[{TenantId}] Failed to enumerate managed workloads of deploymentSite '{DeploymentSiteName}'; deploymentSite is deployed but no workloads were fanned out",
-                tenantId, deploymentSiteName);
-            return;
-        }
-
-        if (workloads.Count == 0)
-        {
-            Logger.Info("[{TenantId}] DeploymentSite '{DeploymentSiteName}' has no managed workloads", tenantId, deploymentSiteName);
-            return;
-        }
-
-        Logger.Info("[{TenantId}] DeploymentSite '{DeploymentSiteName}' has {Count} managed workload(s) to deploy",
-            tenantId, deploymentSiteName, workloads.Count);
-
-        foreach (var workload in workloads)
-        {
-            try
-            {
-                var built = await BuildWorkloadDeployedDtoAsync(tenantId, deploymentSiteRtId, deploymentSiteName, workload);
-                if (built == null)
-                {
-                    Logger.Warn(
-                        "[{TenantId}] Workload '{WorkloadName}' is incomplete — skipping deploy",
-                        tenantId, workload.Name ?? string.Empty);
-                    continue;
-                }
-
-                await _operatorConnectionManager.NotifyWorkloadDeployedAsync(built.Dto);
-                await RecordDeploymentWarningAsync(tenantId, workload, built.Warning);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn(ex,
-                    "[{TenantId}] Failed to deploy workload '{WorkloadName}' of deploymentSite '{DeploymentSiteName}'",
-                    tenantId, workload.Name ?? string.Empty, deploymentSiteName);
-            }
-        }
     }
 
     private async Task UndeployManagedWorkloadsAsync(string tenantId, OctoObjectId deploymentSiteRtId, string deploymentSiteName)

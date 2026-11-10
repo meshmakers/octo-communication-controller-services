@@ -63,6 +63,63 @@ internal class PipelineServiceAccountProvisioningService(
     internal static readonly string[] DefaultAssignedRoleNames = [CommonConstants.CommunicationManagementRole];
 
     /// <summary>
+    /// AB#8563: roles every <b>declarative</b> pipeline service account holds on top of its
+    /// declaration. The asset repository gates stream-data reads on <c>StreamDataReader</c>,
+    /// <c>StreamDataWriter</c> or <c>StreamDataAdmin</c> (AB#8559, <c>StreamDataReadAuthorization:RoleEnforcement</c>);
+    /// pipelines that read archives (EC allocation, billing, simulation) run as this account, so
+    /// under <c>Enforce</c> an account with only the declared default would be refused with
+    /// <c>StreamDataReadRoleRequired</c>. The baseline is added when the declaration is
+    /// materialised (<see cref="EffectiveRoleNames" />) and is <b>not</b> persisted into
+    /// <c>AssignedRoleNames</c>: the declaration stays what the operator wrote, existing accounts
+    /// pick the role up on their next system-initiated reconcile without a data migration, and
+    /// a declaration can extend the baseline but not drop it.
+    /// </summary>
+    internal static readonly string[] BaselineRoleNames = [CommonConstants.StreamDataReaderRole];
+
+    /// <summary>
+    /// AB#8563: the role set a declarative account is synced to — the declared roles (order kept)
+    /// followed by every <see cref="BaselineRoleNames">baseline role</see> the declaration does not
+    /// already name. Ordinal, like the identity-side declaration and the health check.
+    /// </summary>
+    internal static string[] EffectiveRoleNames(IEnumerable<string> declaredRoleNames)
+    {
+        return declaredRoleNames.Concat(BaselineRoleNames).Distinct(StringComparer.Ordinal).ToArray();
+    }
+
+    /// <summary>
+    /// AB#6457 / AB#6467: client-id prefix of the pipeline service accounts (<see cref="BuildClientId" />).
+    /// The identity side keys two behaviours on it: the declarative role sync (AB#5111) and the
+    /// <see cref="IdentityGrantedRoleNames">identity-granted roles</see>.
+    /// </summary>
+    internal const string ClientIdPrefix = "octo-pipeline-sa-";
+
+    /// <summary>
+    /// AB#8582: roles the <b>identity service</b> grants by design to every client with the
+    /// <see cref="ClientIdPrefix" />, independent of the declaration — today <c>FileManagement</c>
+    /// (AB#6467: <c>CreateIdentityDataCommandRequestConsumer</c> adds the edge on every identity-data
+    /// command and treats it as implicitly declared, <c>PipelineServiceAccountFileRoleGrant</c> adds it
+    /// at every tenant setup; see <c>docs/persistence.md</c> "FileManagement for the pipeline service
+    /// accounts" in octo-identity-services). The controller neither sends nor removes these roles.
+    /// Unlike the <see cref="BaselineRoleNames">baseline</see> they are <b>tolerated, not required</b>:
+    /// identity grants <c>FileManagement</c> only when the role is seeded (System.Files installed), so
+    /// an account without it is not drift. Keep this list in sync with the identity side.
+    /// </summary>
+    internal static readonly string[] IdentityGrantedRoleNames = [CommonConstants.FileManagementRole];
+
+    /// <summary>
+    /// AB#8582: the <see cref="IdentityGrantedRoleNames" /> a client with this id holds — all of them
+    /// for a prefixed client, none for a custom client id outside the prefix (identity does not grant
+    /// them there, so such a role on it stays unexpected). A missing id counts as prefixed: the
+    /// reconcile derives it with <see cref="BuildClientId" />.
+    /// </summary>
+    internal static IReadOnlyList<string> IdentityGrantedRoleNamesFor(string? clientId)
+    {
+        return string.IsNullOrWhiteSpace(clientId) || clientId.StartsWith(ClientIdPrefix, StringComparison.Ordinal)
+            ? IdentityGrantedRoleNames
+            : [];
+    }
+
+    /// <summary>
     /// Recognises the <c>{{service.authority}}</c> token, case-insensitively and tolerant of the
     /// same inner whitespace <c>WorkloadTemplateResolver.PlaceholderPattern</c> accepts — the check
     /// must never be stricter than the resolver, or a value the projection resolves fine would be
@@ -508,7 +565,9 @@ internal class PipelineServiceAccountProvisioningService(
         var roleChangesSkipped = false;
         if (declaredRoleNames != null || isNewEntity)
         {
-            var declared = declaredRoleNames?.ToArray() ?? DefaultAssignedRoleNames;
+            // AB#8563: the declaration plus the baseline (StreamDataReader) — added, never replacing
+            // a declared role.
+            var declared = EffectiveRoleNames(declaredRoleNames ?? (IEnumerable<string>)DefaultAssignedRoleNames);
             if (context.MaterializeRoles)
             {
                 rolesToMaterialize = declared;
@@ -1449,7 +1508,7 @@ internal class PipelineServiceAccountProvisioningService(
     /// </summary>
     internal static string BuildClientId(OctoObjectId ownerRtId)
     {
-        return $"octo-pipeline-sa-{ownerRtId}";
+        return $"{ClientIdPrefix}{ownerRtId}";
     }
 
     /// <summary>

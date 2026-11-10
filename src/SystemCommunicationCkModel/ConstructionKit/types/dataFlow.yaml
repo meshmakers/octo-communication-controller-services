@@ -1,6 +1,10 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
   - typeId: DataFlow
+    derivable: Any
+    implements:
+      - ${System}/Named-1
+      - ${System}/Describable-1
     description: A logical grouping of pipelines and triggers that belong together. DataFlows organize the data integration logic within a tenant.
     derivedFromCkTypeId: ${System}/Entity
     attributes:
@@ -9,3 +13,26 @@ types:
     - id: ${System}/Description
       name: Description
       isOptional: true
+    # AB#8596 (4.18.0, Feature AB#5697 F4.3): deploy and undeploy of the REST DataFlowController as CK methods, handled by
+    # the communication controller. Roles as on Adapter. Synchronous with the maximum timeout: a data flow spanning several
+    # adapters wakes and pushes them one after the other (up to 60 s wake + 120 s push each), so both are candidates for
+    # execution.mode async once F3.6 (AB#5694) is available.
+    methods:
+      - methodId: Deploy-1
+        description: "Deploys every enabled pipeline of the data flow to its adapter (REST POST DataFlow/deploy). Wakes hibernated OnDemand adapters first."
+        errors:
+          - { code: DATA_FLOW_DEPLOY_FAILED, description: "The data flow could not be deployed, e.g. it has no pipelines, a pipeline has no adapter, an adapter is offline or rejected a definition. Parameter message names the cause." }
+        authorization:
+          roles: [ CommunicationManagement ]
+        execution:
+          timeoutSeconds: 300
+          idempotent: true
+      - methodId: Undeploy-1
+        description: "Removes the pipelines of the data flow from their adapters (REST POST DataFlow/undeploy)."
+        errors:
+          - { code: DATA_FLOW_UNDEPLOY_FAILED, description: "The data flow could not be undeployed, e.g. an adapter is offline or refused. Parameter message names the cause." }
+        authorization:
+          roles: [ CommunicationManagement ]
+        execution:
+          timeoutSeconds: 300
+          idempotent: true

@@ -12,13 +12,15 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 /// <param name="sourceWorkloadRtId">Bare RtId of that Application.</param>
 /// <param name="projectedAt">UTC time of this projection.</param>
 /// <param name="protectedSourceTenantIds">Sources whose existing default this write must not replace.</param>
+/// <param name="supersededDefaults">Defaults of this key, as read, that no Application provides any more.</param>
 public sealed class SecretDefaultWrite(
     string key,
     RtSecretValue value,
     string sourceTenantId,
     string sourceWorkloadRtId,
     DateTime projectedAt,
-    IReadOnlyCollection<string>? protectedSourceTenantIds = null)
+    IReadOnlyCollection<string>? protectedSourceTenantIds = null,
+    IReadOnlyCollection<StoredSecretDefault>? supersededDefaults = null)
 {
     /// <summary>Well-known name and name of the SecretDefault entity.</summary>
     public string Key { get; } = key;
@@ -41,6 +43,14 @@ public sealed class SecretDefaultWrite(
     /// </summary>
     public IReadOnlyCollection<string> ProtectedSourceTenantIds { get; } =
         protectedSourceTenantIds ?? Array.Empty<string>();
+
+    /// <summary>
+    ///     Defaults of this key the writer has found no Application provides any more, as it read them. One of them
+    ///     is replaced even when its source is protected, as long as it is still unchanged; a protected default
+    ///     written since is kept.
+    /// </summary>
+    public IReadOnlyCollection<StoredSecretDefault> SupersededDefaults { get; } =
+        supersededDefaults ?? Array.Empty<StoredSecretDefault>();
 
     /// <inheritdoc />
     public override string ToString()

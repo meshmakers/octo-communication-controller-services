@@ -242,7 +242,7 @@ internal class ServiceAccountHealthService(
 
                 default:
                     checks.Add(Healthy(ClientCheck));
-                    checks.Add(EvaluateRoles(declaredRoleNames, lookup.AssignedRoleNames));
+                    checks.Add(EvaluateRoles(declaredRoleNames, lookup.AssignedRoleNames, clientId));
                     checks.Add(EvaluateDelegation(allowDelegation, lookup.Client!.AllowedGrantTypes));
                     break;
             }
@@ -426,7 +426,7 @@ internal class ServiceAccountHealthService(
     /// list then means the role reads themselves failed (partial identity degradation) → Unknown.
     /// </summary>
     private static ServiceAccountHealthCheckDto EvaluateRoles(List<string>? declaredRoleNames,
-        IReadOnlyList<string>? actualRoleNames)
+        IReadOnlyList<string>? actualRoleNames, string? clientId)
     {
         if (declaredRoleNames == null)
         {
@@ -439,10 +439,21 @@ internal class ServiceAccountHealthService(
                 "The client's role assignment could not be read from the identity service.");
         }
 
+        // AB#8563: the reconcile syncs to the declaration plus the baseline (StreamDataReader), so
+        // the baseline is expected, not drift — and missing when the edge is absent.
+        var expectedRoleNames = PipelineServiceAccountProvisioningService.EffectiveRoleNames(declaredRoleNames);
+
         // Ordinal on purpose: role names are exact identifiers tenant-side (the reconcile
         // materialises them verbatim), so a case-folded "match" would hide a real mismatch.
-        var missing = declaredRoleNames.Except(actualRoleNames, StringComparer.Ordinal).ToList();
-        var superfluous = actualRoleNames.Except(declaredRoleNames, StringComparer.Ordinal).ToList();
+        var missing = expectedRoleNames.Except(actualRoleNames, StringComparer.Ordinal).ToList();
+        // AB#8582: roles identity grants by design (FileManagement on octo-pipeline-sa-* clients) are
+        // tolerated — never superfluous, and not missing either (identity grants them only when the
+        // role is seeded).
+        var toleratedRoleNames = PipelineServiceAccountProvisioningService.IdentityGrantedRoleNamesFor(clientId);
+        var superfluous = actualRoleNames
+            .Except(expectedRoleNames, StringComparer.Ordinal)
+            .Except(toleratedRoleNames, StringComparer.Ordinal)
+            .ToList();
 
         if (missing.Count == 0 && superfluous.Count == 0)
         {

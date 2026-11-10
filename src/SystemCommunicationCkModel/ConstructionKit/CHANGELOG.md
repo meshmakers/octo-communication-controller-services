@@ -1,5 +1,135 @@
 # Changelog
 
+## 4.18.0 - 2026-11-09
+
+_Required bump level: minor._
+
+### Added
+
+- Method 'DataFlow-1/Deploy-1' added _(minor — purely additive method)_
+- Method 'DataFlow-1/Undeploy-1' added _(minor — purely additive method)_
+- Method 'DeployableWorkload-1/SetChartVersion-1' added _(minor — purely additive method)_
+- Method 'Pipeline-1/Deploy-1' added _(minor — purely additive method)_
+- Method 'Pipeline-1/Execute-1' added _(minor — purely additive method)_
+- Method 'Pipeline-1/SetDebugging-1' added _(minor — purely additive method)_
+- Method 'Pipeline-1/MoveToAdapter-1' added _(minor — purely additive method)_
+- Attribute 'MethodResultAppliedToRunningAdapter-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultDebuggingEnabled-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultExecutionId-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultNewAdapterRtId-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultOldAdapterRtId-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultStartedAt-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultWarning-1' added _(minor — purely additive element)_
+- Record 'PipelineDebugResult-1' added _(minor — purely additive element)_
+- Record 'PipelineExecutionStartResult-1' added _(minor — purely additive element)_
+- Record 'PipelineMoveResult-1' added _(minor — purely additive element)_
+
+The Pipeline, DataFlow and workload chart-version operations of the REST API as CK methods (AB#8596, Feature AB#5697 F4.3),
+handled by the communication controller (`handler: service`); the REST endpoints are unchanged. Every method declares
+`roles: [CommunicationManagement]`. `Pipeline.Deploy.pipelineDefinition` and `Pipeline.Execute.input` are `sensitive`
+parameters (never logged, audited or traced; the input of a non-dry-run execution on a Leased adapter is stored in the
+tenant's `PipelineExecution` and stays there after the run, as with REST); no result is sensitive and no method sets `execution.mode` (omitted = sync),
+so `minEngineVersion` stays 3.5.1. `DataFlow.Deploy`, `DataFlow.Undeploy` and `Pipeline.SetDebugging` use the maximum
+timeout of 300 s and are candidates for `execution.mode: async` once F3.6 (AB#5694) is available. The tenant-level
+operations of `CommunicationController` (enable/disable, lifecycle, validate-expression, encrypt-value) stay REST service
+endpoints. No access changes and no acknowledgement.
+
+## 4.17.0 - 2026-11-09
+
+_Required bump level: minor._
+
+### Added
+
+- Method 'Adapter-1/DeployUpdate-1' added _(minor — purely additive method)_
+- Method 'Adapter-1/ReconcileServiceAccount-1' added _(minor — purely additive method)_
+- Method 'Adapter-1/RotateServiceAccountSecret-1' added _(minor — purely additive method)_
+- Method 'AdapterPool-1/RefreshMirrors-1' added _(minor — purely additive method)_
+- Method 'AdapterPool-1/PublishMirrors-1' added _(minor — purely additive method)_
+- Method 'AdapterPool-1/GrantLease-1' added _(minor — purely additive method)_
+- Method 'AdapterPool-1/CancelQueuedExecution-1' added _(minor — purely additive method)_
+- Method 'DeployableWorkload-1/Wake-1' added _(minor — purely additive method)_
+- Attribute 'MethodResultAdaptersRelinked-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultClientId-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultConfigurationWellKnownName-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultGranted-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultIsNoOp-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultLeaseId-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultLendersUnreadable-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultMemberId-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultMessage-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultMirrorsCreatedOrUpdated-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultMirrorsRemoved-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultOutcome-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultRequiresPipelineRedeploy-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultRoleChangesSkipped-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultStatusMessage-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultTenantsReconciled-1' added _(minor — purely additive element)_
+- Attribute 'MethodResultWasCreated-1' added _(minor — purely additive element)_
+- Record 'AdapterPoolLeaseResult-1' added _(minor — purely additive element)_
+- Record 'AdapterPoolMirrorSyncResult-1' added _(minor — purely additive element)_
+- Record 'ServiceAccountReconcileResult-1' added _(minor — purely additive element)_
+- Record 'ServiceAccountSecretRotationResult-1' added _(minor — purely additive element)_
+
+The adapter, workload and adapter pool operations of the REST API as CK methods (AB#8595, Feature AB#5697 F4.3), handled by
+the communication controller (`handler: service`). The REST endpoints are unchanged. Every method declares
+`roles: [CommunicationManagement]` (the REST policy asks only for the scope `octo_api`; a method without roles admits
+administrators only). No result is `sensitive`: `RotateServiceAccountSecret` returns the client id and what to do next, never
+the secret, like the REST endpoint. No access changes and no acknowledgement: the `SecretDefault.Value` tightening was
+released (and acknowledged) in 4.16.0, so it is not part of this release's diff against the published 4.16.0.
+
+## 4.16.0 - 2026-11-09
+
+_Required bump level: minor._
+
+### Added
+
+- Implemented interface 'DataFlow-1/System@2/Named-1' added _(minor — type implements an additional interface)_
+- Implemented interface 'DataFlow-1/System@2/Describable-1' added _(minor — type implements an additional interface)_
+- Implemented interface 'DataPointMapping-1/System@2/Enableable-1' added _(minor — type implements an additional interface)_
+- Implemented interface 'DeployableEntity-1/System@2/Describable-1' added _(minor — type implements an additional interface)_
+- Implemented interface 'LentAdapterPool-1/System@2/Named-1' added _(minor — type implements an additional interface)_
+- Implemented interface 'LentAdapterPool-1/System@2/Describable-1' added _(minor — type implements an additional interface)_
+- Implemented interface 'PipelineTrigger-1/System@2/Enableable-1' added _(minor — type implements an additional interface)_
+
+### Changed
+
+- Model 'System.Communication': ckLanguage changed '1' → '2' _(minor — CK language version raised; older engines reject the model with a clear error)_
+- Dependency range 'System': range changed '[2.5,3.0)' → '[2.7,3.0)' _(minor — dependency range changed within the same major (row D2/D3))_
+- Dependency range 'System': floor changed '2.5.0' → '2.7.0' _(minor — dependency floor raised — tenants need the newer dependency version (row D1))_
+- Attribute 'SecretDefaultValue-1': securitySensitive changed 'false' → 'true' _(minor — security-sensitivity marker set or cleared, no data or API change (row A3))_
+
+### Behavioural changes
+
+- Type attribute 'SecretDefault-1/Value': access changed 'ReadWrite' → 'Hidden' _(minor — access/security: access tightened on an attribute marked securitySensitive in the first ckLanguage 2 release of this classic model — accepted security exception (once per model), requires acknowledge (row T7a) — requires acknowledge)_
+
+### Acknowledged changes
+
+- Type attribute 'SecretDefault-1/Value': access changed 'ReadWrite' → 'Hidden' _(minor — acknowledged: AB#8594: SecretDefault.Value is platform-only (AB#7243); only the controller writes it through its repository, no client reads or writes it through GraphQL, REST, MCP, import or export, so Hidden closes the generic API path without breaking a caller)_
+
+First ckLanguage 2 release of System.Communication (AB#8594, Feature AB#5697 F4.3, Epic AB#5584). Every type and record
+declares `derivable: Any` explicitly: ckLanguage 2 changes the default to `Model`, and without the explicit value every type
+and record would be a MAJOR change (row T6, `OCTO-CK200`) and the adapter and AI models deriving from them would stop compiling
+(message 113). `visibility` stays `Public`, attribute `access` stays `ReadWrite` except `SecretDefault.Value`.
+
+### Compatibility
+
+- The compiled model equals the published 4.15.0 after the version, `ckLanguage`, `minEngineVersion`, `derivable`, `implements`,
+  `securitySensitive`, `access`, `compatibility` and the dependency closure/ranges are removed (same normalised SHA-256). Ids,
+  attributes, defaults, ownership, indexes and association roles are unchanged.
+- `minEngineVersion` 3.5.1 (the CK v2 minimum), published under `ck-models/v3/` only.
+- System floor 2.5 → 2.7 (the System interfaces exist from 2.7): Minor, because 4.15.0 already resolved System 2.8.0 (row D1).
+- Interfaces only where the type already carried the members with the required multiplicity. Left out: `Pipeline` for
+  `Enableable-1` (`Enabled` is optional), `DeployableEntity`, `EnergyCommunityConfiguration` and `DataPointMapping` for `Named-1`
+  (`Name` is optional), `SecretDefault` (platform-only entity, kept out of cross-type interface queries), `Hierarchical-1`
+  (`DataFlow`, the parent of pipelines and triggers, has no `ParentChild` role of its own).
+- Access: only `SecretDefault.Value` is tightened (Hidden, row T7a, the once-per-model exception). The configuration credentials
+  (`Password`, `ClientSecret`, `PrivateKey`, `PrivateKeyPassphrase`, `BotToken`, `ApiKey`, `AdminPassword`, `SecretValue`,
+  `SecretDefaultProjection.SecretValue`) stay `ReadWrite`: Refinery Studio writes them through the generic GraphQL update. The
+  service-written state (`CommunicationState`, `DeploymentState`, last-error and statistics attributes) stays `ReadWrite`: these
+  attributes are not `securitySensitive`, so `ReadOnly` would be a MAJOR (row T7). No archive-stored attribute is Hidden (AB#6247).
+- Dependents: `Loxone-5.4.0` and `System.Ai-4.7.0` are Compatible (range retention, no rebuild or bump); the exact-pinned
+  legacy majors (`Loxone-4.11.0`, `System.Ai-3.13.0`) stay on System.Communication 3.x (NotInRange).
+
 ## 4.15.0 - 2026-11-03
 
 _Required bump level: minor._

@@ -29,6 +29,7 @@ types:
 # MinReplicas and IdleTimeoutMinutes (inherited from DeployableWorkload) are what drain a
 # member instead.
 - typeId: AdapterPool
+  derivable: Any
   description: 'A pool of interchangeable adapter processes owned by one tenant and leased to tenants in its subtree, one work item per lease (AB#4924). The pool declares how many members may exist (MinReplicas..MaxReplicas), how big each member is, what queue pressure starts another one, and which tenants may borrow. Members are replicas of this one workload rather than separate entities: a lease binds a member to a tenant for the duration of one work item and the member retains nothing tenant-scoped afterwards. Not to be confused with DeploymentSite, which is where a workload is deployed and which was itself called Pool before 4.0.0.'
   derivedFromCkTypeId: ${this}/DeployableWorkload
   isFinal: true
@@ -81,3 +82,55 @@ types:
     # the PipelineServiceAccount role itself.
     - id: ${this}/PoolServiceAccount
       targetCkTypeId: ${this}/ServiceAccountConfiguration
+  # AB#8595 (4.17.0, Feature AB#5697 F4.3): the pool operations of the REST API as CK methods, handled by the
+  # communication controller. REST unchanged; roles as on Adapter (see types/adapter.yaml).
+  methods:
+    - methodId: RefreshMirrors-1
+      kind: Static
+      description: "Reconciles the LentAdapterPool mirrors of the calling tenant (the borrower) against what its ancestors and siblings lend it (REST POST AdapterPool/mirrors/refresh)."
+      result:
+        valueType: Record
+        valueCkRecordId: ${this}/AdapterPoolMirrorSyncResult
+      authorization:
+        roles: [ CommunicationManagement ]
+      execution:
+        timeoutSeconds: 120
+        idempotent: true
+    - methodId: PublishMirrors-1
+      kind: Static
+      description: "Pushes the adapter pools of the calling tenant (the lender) out to every tenant that may borrow from them (REST POST AdapterPool/mirrors/publish)."
+      result:
+        valueType: Record
+        valueCkRecordId: ${this}/AdapterPoolMirrorSyncResult
+      authorization:
+        roles: [ CommunicationManagement ]
+      execution:
+        timeoutSeconds: 120
+        idempotent: true
+    - methodId: GrantLease-1
+      description: "Grants a lease on a member of this pool to a borrowing tenant (REST POST AdapterPool/{adapterPoolRtId}/lease; a test and diagnostic surface, production leasing is the scheduler's). A refused lease is a normal result with granted false and a status message."
+      parameters:
+        - { name: borrowerTenantId, valueType: String, description: "The borrowing tenant; it must be in the lending scope of the pool." }
+        - { name: adapterRtId, valueType: String, description: "RtId (24 hexadecimal characters) of the Leased adapter in the borrowing tenant." }
+        - { name: executionId, valueType: String, isOptional: true, description: "The queued execution the lease is for." }
+        - { name: ttlSeconds, valueType: Int, isOptional: true, description: "Lease lifetime in seconds (1-3600); without it the default applies." }
+      result:
+        valueType: Record
+        valueCkRecordId: ${this}/AdapterPoolLeaseResult
+      authorization:
+        roles: [ CommunicationManagement ]
+      execution:
+        timeoutSeconds: 30
+        idempotent: false
+    - methodId: CancelQueuedExecution-1
+      description: "Cancels one execution that is still waiting in the queue of this pool for a lease (REST DELETE AdapterPool/{adapterPoolRtId}/queue/{executionId}). It never interrupts a running pipeline."
+      parameters:
+        - { name: executionId, valueType: String, description: "The queued execution to cancel." }
+      errors:
+        - { code: EXECUTION_ALREADY_LEASED, description: "The execution already holds a lease; cancelling it would interrupt a running pipeline, which is a different operation." }
+        - { code: QUEUED_EXECUTION_NOT_FOUND, description: "No queued execution with this id belongs to the pool." }
+      authorization:
+        roles: [ CommunicationManagement ]
+      execution:
+        timeoutSeconds: 15
+        idempotent: false
