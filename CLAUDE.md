@@ -822,7 +822,8 @@ F4.3, Epic AB#5584; rules: `octo-construction-kit-engine/docs/ck-semver-rules.md
   generic GraphQL update, and a `ReadOnly`/`MethodOnly` on an attribute that is not `securitySensitive` in every published
   4.x version is a MAJOR (row T7). The T7a exception is used up: a further tightening in 4.x is a MAJOR. The method stories
   (Adapter/Pipeline/Pool methods) can tighten credentials only together with a method that writes them, in 5.0.
-- **Engine.** The compiler stamps `minEngineVersion: 3.5.1`; the model is published under `ck-models/v3/` only. Keep it there:
+- **Engine.** The model itself needs `minEngineVersion` 3.5.1, but the compiler stamps the maximum over the model and its
+  dependencies: since System.Bot's async `Dump` method (AB#8445) the compiled model carries 3.5.67 (AB#8773); the model is published under `ck-models/v3/` only. Keep it there:
   an explicit `authorization.dataAccess` on any method raises it to 3.5.40 (`CkEngineVersion.DataAccessMinEngineVersion`), a
   `sensitive` result to 3.5.36, `execution.mode` to 3.5.67. The methods of 4.17.0 therefore leave `dataAccess` at its default
   (`Write`) instead of spelling it out.
