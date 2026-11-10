@@ -11,6 +11,9 @@ without that environment's own go.
   every tenant of the tree.
 - Outbound HTTPS from the Mesh Adapter to `challenges.cloudflare.com` (Turnstile siteverify, even for
   the test keys); without it every check answers `verification-unavailable`.
+- The Mesh Adapter holds the key ring the asset repository encrypts Secret attributes with (a local
+  stack shares it); without it the projected default cannot be decrypted and every check answers
+  `verification-unavailable`.
 - `octo-cli` with the `GraphQl` command and its `-vars` option, one context per tenant (`<parent>`,
   `<child>`, `<grandchild>`). Logins are done by the developer, not by an agent. `jq` for
   `write-secret.sh`.
