@@ -1,6 +1,7 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts.ModelCatalogs;
+using Meshmakers.Octo.ConstructionKit.Engine.Versioning;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -31,20 +32,35 @@ internal class SystemCommunicationCkLanguage2Tests
     }
 
     [Test]
-    public async Task EmbeddedModel_IsSystemCommunication_4_18_0_OnCkLanguage2_WithTheCkV2MinEngineVersion()
+    public async Task EmbeddedModel_IsSystemCommunication_4_18_0_OnCkLanguage2_WhoseOwnSourcesNeedOnlyTheCkV2Floor()
     {
         var root = await LoadEmbeddedSystemCommunicationAsync();
 
         // AB#8595: 4.17.0 adds the Adapter / DeployableWorkload / AdapterPool methods, AB#8596: 4.18.0 the Pipeline /
         // DataFlow / chart-version methods (Minor each). Sensitive parameters, no sensitive result, no execution.mode and
-        // no dataAccess, so the minimum engine version stays.
+        // no dataAccess, so the model's own floor stays the CK v2 floor.
         await Assert.That(root.ModelId.ToString()).IsEqualTo("System.Communication-4.18.0");
         await Assert.That(root.CkLanguage).IsEqualTo(2);
-        // The compiler stamps minEngineVersion for a ckLanguage 2 model; the sources never set it. Pinned exactly: a
-        // higher value means every service below it can no longer import System.Communication. A feature that raises it
-        // (e.g. a method with execution.mode) is a deliberate rollout decision and updates this assertion.
+        // A feature of the model's own sources that raises the floor (e.g. a method with execution.mode) is a deliberate
+        // rollout decision and updates this assertion.
+        await Assert.That(CkEngineVersion.GetRequiredMinEngineVersion(root)).IsEqualTo(CkEngineVersion.CkV2MinEngineVersion);
+    }
+
+    /// <summary>
+    ///     The compiler stamps the highest <c>minEngineVersion</c> of the model's own floor and of every resolved
+    ///     dependency (an engine that cannot read a dependency cannot import the model either), so a dependency that
+    ///     raises its floor raises System.Communication's with it: System.Bot 3.7.0 (execution.mode) lifts it to 3.5.67.
+    ///     The resolved dependencies come from the CK catalogs at build time and are not embedded, so this test checks the
+    ///     lower bound; the model's own floor is pinned by the test above.
+    /// </summary>
+    [Test]
+    public async Task EmbeddedModel_MinEngineVersion_IsAtLeastTheModelsOwnFloor()
+    {
+        var root = await LoadEmbeddedSystemCommunicationAsync();
+        var ownFloor = Version.Parse(CkEngineVersion.GetRequiredMinEngineVersion(root)!);
+
         await Assert.That(root.MinEngineVersion).IsNotNull();
-        await Assert.That(Version.Parse(root.MinEngineVersion!)).IsEqualTo(new Version(3, 5, 1));
+        await Assert.That(Version.Parse(root.MinEngineVersion!)).IsGreaterThanOrEqualTo(ownFloor);
     }
 
     /// <summary>
