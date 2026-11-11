@@ -40,15 +40,16 @@ public class TriggerManagementServiceException : Exception
     }
 
     /// <summary>
-    ///     AB#8716: the execute command got no answer in time - the adapter is offline or has not deployed the pipeline. The
-    ///     text names the adapter; it reaches the caller of <c>Pipeline.Execute</c> (parameter <c>message</c>).
+    ///     AB#8716: the execute command got no answer in time - most likely the adapter is offline or has not deployed the
+    ///     pipeline, but a timeout alone does not prove that the execution did not start, so the outcome is reported as unknown.
+    ///     The text names the adapter; it reaches the caller of <c>Pipeline.Execute</c> (parameter <c>message</c>).
     /// </summary>
     internal static Exception AdapterDidNotAnswer(string tenantId, OctoObjectId pipelineRtId, string adapterName,
         Exception exception)
     {
         return new TriggerManagementServiceException(
-            $"Pipeline {pipelineRtId} of tenant {tenantId} could not be started: adapter '{adapterName}' did not answer " +
-            "(it is offline or has not deployed the pipeline).", exception);
+            $"Adapter '{adapterName}' did not answer the start of pipeline {pipelineRtId} of tenant {tenantId} in time: it is " +
+            "probably offline or has not deployed the pipeline. The outcome of the execution is unknown.", exception);
     }
 
     internal static Exception ExecutePipelineExecutionIdNull(string tenantId, OctoObjectId dataFlowRtId)

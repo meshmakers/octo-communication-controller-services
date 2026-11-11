@@ -194,8 +194,9 @@ internal class StartExecutePipelineAsyncTests : TriggerManagementServiceTestsBas
                 await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null))
             .Throws<TriggerManagementServiceException>();
 
-        await Assert.That(exception!.Message).Contains("adapter 'offline-adapter-7' did not answer");
+        await Assert.That(exception!.Message).Contains("Adapter 'offline-adapter-7' did not answer");
         await Assert.That(exception.Message).Contains("offline");
+        await Assert.That(exception.Message).Contains("outcome of the execution is unknown");
         await CommunicationEventService.Received(1).StoreErrorEventAsync(TenantId,
             Arg.Is<string>(m => m.Contains("offline-adapter-7")));
     }
@@ -215,7 +216,7 @@ internal class StartExecutePipelineAsyncTests : TriggerManagementServiceTestsBas
                 await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null))
             .Throws<TriggerManagementServiceException>();
 
-        await Assert.That(exception!.Message).Contains("adapter 'unknown' did not answer");
+        await Assert.That(exception!.Message).Contains("Adapter 'unknown' did not answer");
     }
 
     /// <summary>The timeout of the routed command client (its constructors are not public).</summary>

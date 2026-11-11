@@ -100,7 +100,8 @@ internal class TriggerManagementService(
             // Say so, with the adapter, instead of the generic "failed to execute".
             var adapterName = await TryGetAdapterNameAsync(tenantId, pipelineRtId);
             await eventService.StoreErrorEventAsync(tenantId,
-                $"Pipeline '{pipelineRtId}' execution failed: adapter '{adapterName}' did not answer (offline).");
+                $"Pipeline '{pipelineRtId}' execution: adapter '{adapterName}' did not answer in time (probably offline); " +
+                "the outcome is unknown.");
             throw TriggerManagementServiceException.AdapterDidNotAnswer(tenantId, pipelineRtId, adapterName, e);
         }
         catch (Exception e)

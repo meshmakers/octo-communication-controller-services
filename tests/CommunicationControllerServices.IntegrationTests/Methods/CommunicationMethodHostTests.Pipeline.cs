@@ -199,7 +199,7 @@ public sealed partial class CommunicationMethodHostTests
             new { input }, token);
 
         method.Error!.Code.Should().Be("PIPELINE_EXECUTION_START_FAILED");
-        method.Error.Parameters["message"].Should().Contain($"adapter '{adapter.Name}' did not answer")
+        method.Error.Parameters["message"].Should().Contain($"Adapter '{adapter.Name}' did not answer")
             .And.Contain("offline");
         AssertNeverEchoed(input, method);
         AssertNeverEchoed(token, method);

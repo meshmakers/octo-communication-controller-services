@@ -270,8 +270,8 @@ Code: `src/CommunicationControllerServices/Methods/Service/`. User guide: `octo-
   redacted; for any other exception a fixed text that names the operation and the invocation id (`"The execution could not
   be started; see the communication controller log (invocation <id>)."`) - its own text stays in the log. The redeploy
   `warning` of `MoveToAdapter` still uses `CallerSafeMessage` only. When the execute command gets no answer
-  (`DistributionTimeoutException`), `TriggerManagementService` throws `AdapterDidNotAnswer`, which names the adapter as offline
-  (also in the REST answer and the error event). Guard: `IntegrationTests/Methods/CommunicationMethodHostTests.FailureMessages`
+  (`DistributionTimeoutException`), `TriggerManagementService` throws `AdapterDidNotAnswer`, which names the adapter as probably offline
+  and the outcome as unknown (a timeout does not prove the start failed; also in the REST answer and the error event). Guard: `IntegrationTests/Methods/CommunicationMethodHostTests.FailureMessages`
   compares the errors with "Parameter message" in the model with the covered list and drives each failure path.
 - **Parse failures (AB#8596).** `PipelineSchemaValidator` reports a definition that does not parse with a fixed text plus
   line/column (`ParseFailureMessage`), never the parser's text: a duplicate key or broken scalar could quote a credential into
