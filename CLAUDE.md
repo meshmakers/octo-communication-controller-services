@@ -263,11 +263,16 @@ Code: `src/CommunicationControllerServices/Methods/Service/`. User guide: `octo-
   characters, plus the caller token), so a validation message that quotes a line does not echo it. `Execute.input` of a
   non-dry-run execution on a **Leased** adapter is stored in the tenant's `PipelineExecution` (`InputData`) and stays there
   after the run (a retry copies it), as with REST.
-- **Failure messages (AB#8596).** The `message` parameter of a Pipeline / DataFlow error (and the redeploy `warning` of
-  `MoveToAdapter`) carries only the text of the controller's own exceptions (`CommunicationMethodSupport.CallerSafeMessage`:
-  `AdapterServiceException`, `AdapterHubCallbackException`, `CommunicationRepositoryException`,
-  `WorkloadLifecycleServiceException` - the texts REST answers and the Studio shows), redacted; any other exception answers
-  the error code without `message` and its text stays in the log.
+- **Failure messages (AB#8596, AB#8716).** Every Pipeline / DataFlow error the model declares with "Parameter message" always
+  carries `message` (`CommunicationMethodSupport.FailureMessage`). It is the text of the controller's own exceptions
+  (`CallerSafeMessage`: `AdapterServiceException`, `AdapterHubCallbackException`, `CommunicationRepositoryException`,
+  `WorkloadLifecycleServiceException`, `TriggerManagementServiceException` - the texts REST answers and the Studio shows),
+  redacted; for any other exception a fixed text that names the operation and the invocation id (`"The execution could not
+  be started; see the communication controller log (invocation <id>)."`) - its own text stays in the log. The redeploy
+  `warning` of `MoveToAdapter` still uses `CallerSafeMessage` only. When the execute command gets no answer
+  (`DistributionTimeoutException`), `TriggerManagementService` throws `AdapterDidNotAnswer`, which names the adapter as offline
+  (also in the REST answer and the error event). Guard: `IntegrationTests/Methods/CommunicationMethodHostTests.FailureMessages`
+  compares the errors with "Parameter message" in the model with the covered list and drives each failure path.
 - **Parse failures (AB#8596).** `PipelineSchemaValidator` reports a definition that does not parse with a fixed text plus
   line/column (`ParseFailureMessage`), never the parser's text: a duplicate key or broken scalar could quote a credential into
   the logs, the REST answer and the method error. This also changes the REST error text of that case (position kept).

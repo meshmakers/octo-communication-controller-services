@@ -135,20 +135,37 @@ internal static class CommunicationMethodSupport
     /// <summary>
     ///     The message a method may return for a service failure (CodeRabbit on PR #105): the text of the controller's own
     ///     exceptions (<c>AdapterServiceException</c>, <c>AdapterHubCallbackException</c>, <c>CommunicationRepositoryException</c>,
-    ///     <c>WorkloadLifecycleServiceException</c> - the texts REST answers and the Studio shows, e.g. the adapter's
-    ///     validation errors of a definition the caller may read anyway), redacted of the sensitive values and the token;
-    ///     <c>null</c> for any other exception, whose free text of unknown origin stays in the log (as AB#8595 does for the
-    ///     service account reconcile).
+    ///     <c>WorkloadLifecycleServiceException</c>, <c>TriggerManagementServiceException</c> - the texts REST answers and the
+    ///     Studio shows, e.g. the adapter's validation errors of a definition the caller may read anyway), redacted of the
+    ///     sensitive values and the token; <c>null</c> for any other exception, whose free text of unknown origin stays in the
+    ///     log (as AB#8595 does for the service account reconcile).
     /// </summary>
     public static string? CallerSafeMessage(Exception exception, params string?[] sensitiveValues) =>
         exception is AdapterServiceException or Hubs.AdapterHubCallbackException or CommunicationRepositoryException
-            or WorkloadLifecycleServiceException
+            or WorkloadLifecycleServiceException or TriggerManagementServiceException
             ? Redact(exception.Message, sensitiveValues)
             : null;
 
-    /// <summary>The failure parameters: the caller-safe message when there is one, otherwise none.</summary>
-    public static (string Name, string Value)[] MessageParameters(string? message) =>
-        message is null ? [] : [(CommunicationMethodErrors.MessageParameter, message)];
+    /// <summary>
+    ///     The <c>message</c> parameter of a declared failure (AB#8716): the caller-safe text of the exception, otherwise a fixed
+    ///     text that names the operation and the invocation id, never the text of the exception. Every error the model declares
+    ///     with "Parameter message" therefore always carries it.
+    /// </summary>
+    /// <param name="exception">The service failure.</param>
+    /// <param name="operation">What did not happen, as a sentence start, e.g. "The execution could not be started".</param>
+    /// <param name="context">The call (its invocation id points to the controller log entry).</param>
+    /// <param name="sensitiveValues">Values that must not appear in the answer (sensitive parameters, the caller token).</param>
+    public static string FailureMessage(Exception exception, string operation, CkMethodContext context,
+        params string?[] sensitiveValues) =>
+        CallerSafeMessage(exception, sensitiveValues) ?? UnexpectedFailureMessage(operation, context.InvocationId);
+
+    /// <summary>The fixed text for an exception whose own text must not reach the caller (AB#8716).</summary>
+    public static string UnexpectedFailureMessage(string operation, Guid invocationId) =>
+        $"{operation}; see the communication controller log (invocation {invocationId}).";
+
+    /// <summary>The failure parameters: the message parameter (AB#8716: always present).</summary>
+    public static (string Name, string Value)[] MessageParameters(string message) =>
+        [(CommunicationMethodErrors.MessageParameter, message)];
 
     /// <summary>The placeholder of a redacted value.</summary>
     public const string Masked = "***";

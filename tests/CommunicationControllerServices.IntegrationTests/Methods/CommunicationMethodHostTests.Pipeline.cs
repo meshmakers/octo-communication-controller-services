@@ -116,8 +116,10 @@ public sealed partial class CommunicationMethodHostTests
 
         var method = await InvokeAsync(SystemCommunicationCkIds.PipelineDeployMethodId, pipeline.RtId.ToString());
 
+        // AB#8716: the declared message parameter is always there; for an exception of unknown origin it is a fixed text
         method.Error!.Code.Should().Be("PIPELINE_DEPLOY_FAILED");
-        method.Error.Parameters.Should().NotContainKey("message");
+        method.Error.Parameters["message"].Should().StartWith("The pipeline could not be deployed; see the communication " +
+                                                               "controller log (invocation ");
         JsonSerializer.Serialize(method.Error).Should().NotContain("internal detail");
     }
 
@@ -176,6 +178,50 @@ public sealed partial class CommunicationMethodHostTests
         method.Error.Parameters["message"].Should().Be("adapter offline; input ***; token ***");
         AssertNeverEchoed(input, method);
         AssertNeverEchoed(token, method);
+    }
+
+    [Fact]
+    public async Task PipelineExecute_AFailureOfTheTriggerService_CarriesItsText_WithoutTheInputOrTheToken()
+    {
+        // AB#8716: StartExecutePipelineAsync throws TriggerManagementServiceException (adapter offline, leasing disabled,
+        // ...); before, its text was dropped and the declared message parameter was missing.
+        var adapter = ArrangeAdapter();
+        var pipeline = ArrangePipeline(adapter);
+        var token = Token();
+        const string input = "secret-input-value-47";
+        _trigger.StartExecutePipelineAsync(TenantId, pipeline.RtId, Arg.Any<string?>(), Arg.Any<bool>(),
+                Arg.Any<ExecutePipelineCaller?>(), Arg.Any<string?>(), Arg.Any<RtPipelineTriggerTypeEnum>(),
+                Arg.Any<ExecutePipelineMethodInvocation?>())
+            .Throws(TriggerManagementServiceException.AdapterDidNotAnswer(TenantId, pipeline.RtId, adapter.Name!,
+                new InvalidOperationException($"inner {input} {token}")));
+
+        var method = await InvokeAsync(SystemCommunicationCkIds.PipelineExecuteMethodId, pipeline.RtId.ToString(),
+            new { input }, token);
+
+        method.Error!.Code.Should().Be("PIPELINE_EXECUTION_START_FAILED");
+        method.Error.Parameters["message"].Should().Contain($"adapter '{adapter.Name}' did not answer")
+            .And.Contain("offline");
+        AssertNeverEchoed(input, method);
+        AssertNeverEchoed(token, method);
+    }
+
+    [Fact]
+    public async Task PipelineExecute_AnUnexpectedException_AnswersAFixedTextWithTheInvocationId()
+    {
+        var pipeline = ArrangePipeline(assignedTo: null);
+        _trigger.StartExecutePipelineAsync(TenantId, pipeline.RtId, Arg.Any<string?>(), Arg.Any<bool>(),
+                Arg.Any<ExecutePipelineCaller?>(), Arg.Any<string?>(), Arg.Any<RtPipelineTriggerTypeEnum>(),
+                Arg.Any<ExecutePipelineMethodInvocation?>())
+            .Throws(new InvalidOperationException("internal detail mongodb://user@host"));
+        var invocationId = Guid.NewGuid();
+
+        var method = await InvokeAsync(SystemCommunicationCkIds.PipelineExecuteMethodId, pipeline.RtId.ToString(),
+            invocationId: invocationId);
+
+        method.Error!.Code.Should().Be("PIPELINE_EXECUTION_START_FAILED");
+        method.Error.Parameters["message"].Should().Be(
+            $"The execution could not be started; see the communication controller log (invocation {invocationId}).");
+        JsonSerializer.Serialize(method.Error).Should().NotContain("internal detail");
     }
 
     [Fact]
@@ -332,8 +378,9 @@ public sealed partial class CommunicationMethodHostTests
         failedDeploy.Error!.Code.Should().Be("DATA_FLOW_DEPLOY_FAILED");
         failedDeploy.Error.Parameters["message"].Should().Be("definition rejected");
         failedUndeploy.Error!.Code.Should().Be("DATA_FLOW_UNDEPLOY_FAILED");
-        failedUndeploy.Error.Parameters.Should().NotContainKey("message",
-            "the text of an unexpected exception stays in the log");
+        failedUndeploy.Error.Parameters["message"].Should().StartWith("The data flow could not be undeployed; see the " +
+            "communication controller log (invocation ", "the text of an unexpected exception stays in the log (AB#8716)");
+        JsonSerializer.Serialize(failedUndeploy.Error).Should().NotContain("adapter gone");
     }
 
     // ------------------------------------------------------------------ DeployableWorkload.SetChartVersion

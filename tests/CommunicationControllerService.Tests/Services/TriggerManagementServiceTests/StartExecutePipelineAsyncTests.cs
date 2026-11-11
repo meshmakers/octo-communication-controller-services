@@ -1,4 +1,8 @@
+using System.Reflection;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
+using Meshmakers.Octo.Common.DistributionEventHub;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using NSubstitute;
@@ -168,4 +172,55 @@ internal class StartExecutePipelineAsyncTests : TriggerManagementServiceTestsBas
             .GetResponse<ExecutePipelineResponse>(Arg.Any<string>(), Arg.Any<ExecutePipelineRequest>(),
                 Arg.Any<CancellationToken>(), Arg.Any<TimeSpan?>());
     }
+
+    /// <summary>
+    ///     AB#8716: no answer to the execute command means the adapter is offline (or has not deployed the pipeline). The
+    ///     failure names the adapter, so the caller of Pipeline.Execute learns why without reading the controller log.
+    /// </summary>
+    [Test]
+    public async Task StartExecutePipelineAsync_NoAnswerFromTheAdapter_NamesTheAdapterAsOffline()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+        var adapter = RtEntityCreator.CreateAdapter();
+        adapter.Name = "offline-adapter-7";
+        CommunicationRepository.GetAdapterByPipelineAsync(TenantId, Arg.Is<RtEntityId>(id => id.RtId == pipelineRtId))
+            .Returns(adapter);
+        ExecuteMeshPipelineCommandClient
+            .GetResponse<ExecutePipelineResponse>(Arg.Any<string>(), Arg.Any<ExecutePipelineRequest>(),
+                Arg.Any<CancellationToken>(), Arg.Any<TimeSpan?>())
+            .ThrowsAsync(Timeout());
+
+        var exception = await Assert.That(async () =>
+                await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null))
+            .Throws<TriggerManagementServiceException>();
+
+        await Assert.That(exception!.Message).Contains("adapter 'offline-adapter-7' did not answer");
+        await Assert.That(exception.Message).Contains("offline");
+        await CommunicationEventService.Received(1).StoreErrorEventAsync(TenantId,
+            Arg.Is<string>(m => m.Contains("offline-adapter-7")));
+    }
+
+    [Test]
+    public async Task StartExecutePipelineAsync_NoAnswer_AndTheAdapterCannotBeRead_StillSaysTheAdapterDidNotAnswer()
+    {
+        var pipelineRtId = OctoObjectId.GenerateNewId();
+        CommunicationRepository.GetAdapterByPipelineAsync(TenantId, Arg.Any<RtEntityId>())
+            .ThrowsAsync(new InvalidOperationException("db down"));
+        ExecuteMeshPipelineCommandClient
+            .GetResponse<ExecutePipelineResponse>(Arg.Any<string>(), Arg.Any<ExecutePipelineRequest>(),
+                Arg.Any<CancellationToken>(), Arg.Any<TimeSpan?>())
+            .ThrowsAsync(Timeout());
+
+        var exception = await Assert.That(async () =>
+                await TriggerManagementService.StartExecutePipelineAsync(TenantId, pipelineRtId, pipelineInput: null))
+            .Throws<TriggerManagementServiceException>();
+
+        await Assert.That(exception!.Message).Contains("adapter 'unknown' did not answer");
+    }
+
+    /// <summary>The timeout of the routed command client (its constructors are not public).</summary>
+    private static DistributionTimeoutException Timeout() =>
+        (DistributionTimeoutException)Activator.CreateInstance(typeof(DistributionTimeoutException),
+            BindingFlags.NonPublic | BindingFlags.Instance, null,
+            ["Command ExecutePipelineRequest timed out after 30 seconds.", new TimeoutException()], null)!;
 }

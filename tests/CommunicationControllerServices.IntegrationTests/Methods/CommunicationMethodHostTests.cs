@@ -496,12 +496,12 @@ public sealed partial class CommunicationMethodHostTests(CommunicationController
     };
 
     private Task<CkMethodResponse> InvokeAsync(string methodId, string? targetRtId, object? parameters = null,
-        string? token = "<valid>", string? ckTypeId = null)
+        string? token = "<valid>", string? ckTypeId = null, Guid? invocationId = null)
     {
         var declaringType = methodId[..methodId.LastIndexOf('.')];
         return Invoker.InvokeAsync(new CkMethodRequest(TenantId)
         {
-            InvocationId = Guid.NewGuid(),
+            InvocationId = invocationId ?? Guid.NewGuid(),
             MethodId = methodId,
             CkTypeId = ckTypeId ?? declaringType,
             TargetRtId = targetRtId,
