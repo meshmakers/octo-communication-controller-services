@@ -84,7 +84,8 @@ internal sealed class PipelineDeployHandler(
             return CkMethodOutcome.Fail(e is AdapterHubCallbackException
                     ? CommunicationMethodErrors.PipelineDeployRejected
                     : CommunicationMethodErrors.PipelineDeployFailed,
-                MessageParameters(CallerSafeMessage(e, definition, context.CallerAccessToken)));
+                MessageParameters(FailureMessage(e, "The pipeline could not be deployed", context, definition,
+                    context.CallerAccessToken)));
         }
     }
 }
@@ -146,7 +147,8 @@ internal sealed class PipelineExecuteHandler(
                 "Starting pipeline '{PipelineRtId}' failed (CK method, invocation {InvocationId}): {ExceptionType}: {Reason}",
                 pipelineRtId, context.InvocationId, e.GetType().Name, Redact(e.Message, input, context.CallerAccessToken));
             return CkMethodOutcome<PipelineExecuteResult>.Fail(CommunicationMethodErrors.PipelineExecutionStartFailed,
-                MessageParameters(CallerSafeMessage(e, input, context.CallerAccessToken)));
+                MessageParameters(FailureMessage(e, "The execution could not be started", context, input,
+                    context.CallerAccessToken)));
         }
     }
 }
@@ -189,7 +191,7 @@ internal sealed class PipelineSetDebuggingHandler(
             logger.LogError(e, "Setting debugging of pipeline '{PipelineRtId}' failed (CK method, invocation {InvocationId})",
                 pipelineRtId, context.InvocationId);
             return CkMethodOutcome<PipelineSetDebuggingResult>.Fail(CommunicationMethodErrors.PipelineDebugChangeFailed,
-                MessageParameters(CallerSafeMessage(e)));
+                MessageParameters(FailureMessage(e, "The debug state could not be changed", context)));
         }
 
         // The flag is persisted: a failing event store must not report the change as failed.
@@ -251,7 +253,7 @@ internal sealed class PipelineMoveToAdapterHandler(
                 "Moving pipeline '{PipelineRtId}' to adapter '{TargetAdapterRtId}' failed (CK method, invocation {InvocationId})",
                 pipelineRtId, targetAdapterRtId, context.InvocationId);
             return CkMethodOutcome<PipelineMoveToAdapterResult>.Fail(CommunicationMethodErrors.PipelineMoveFailed,
-                MessageParameters(CallerSafeMessage(e)));
+                MessageParameters(FailureMessage(e, "The pipeline could not be moved", context)));
         }
 
         // Unlike REST, a move that is a no-op (the pipeline already points at the target) still redeploys when asked: a
@@ -316,7 +318,7 @@ internal sealed class DataFlowDeployHandler(
             logger.LogError(e, "Failed to deploy data flow '{DataFlowRtId}' (CK method, invocation {InvocationId})",
                 dataFlowRtId, context.InvocationId);
             return CkMethodOutcome.Fail(CommunicationMethodErrors.DataFlowDeployFailed,
-                MessageParameters(CallerSafeMessage(e)));
+                MessageParameters(FailureMessage(e, "The data flow could not be deployed", context)));
         }
     }
 }
@@ -347,7 +349,7 @@ internal sealed class DataFlowUndeployHandler(
             logger.LogError(e, "Failed to undeploy data flow '{DataFlowRtId}' (CK method, invocation {InvocationId})",
                 dataFlowRtId, context.InvocationId);
             return CkMethodOutcome.Fail(CommunicationMethodErrors.DataFlowUndeployFailed,
-                MessageParameters(CallerSafeMessage(e)));
+                MessageParameters(FailureMessage(e, "The data flow could not be undeployed", context)));
         }
     }
 }

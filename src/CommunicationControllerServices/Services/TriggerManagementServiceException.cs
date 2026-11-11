@@ -39,6 +39,19 @@ public class TriggerManagementServiceException : Exception
         return new TriggerManagementServiceException($"Failed to execute data flow {dataFlowRtId} for tenant {tenantId}", exception);
     }
 
+    /// <summary>
+    ///     AB#8716: the execute command got no answer in time - most likely the adapter is offline or has not deployed the
+    ///     pipeline, but a timeout alone does not prove that the execution did not start, so the outcome is reported as unknown.
+    ///     The text names the adapter; it reaches the caller of <c>Pipeline.Execute</c> (parameter <c>message</c>).
+    /// </summary>
+    internal static Exception AdapterDidNotAnswer(string tenantId, OctoObjectId pipelineRtId, string adapterName,
+        Exception exception)
+    {
+        return new TriggerManagementServiceException(
+            $"Adapter '{adapterName}' did not answer the start of pipeline {pipelineRtId} of tenant {tenantId} in time: it is " +
+            "probably offline or has not deployed the pipeline. The outcome of the execution is unknown.", exception);
+    }
+
     internal static Exception ExecutePipelineExecutionIdNull(string tenantId, OctoObjectId dataFlowRtId)
     {
         return new TriggerManagementServiceException($"Pipeline execution id is null for data flow {dataFlowRtId} for tenant {tenantId}, but the adapter indicate that the execution start was successful");
