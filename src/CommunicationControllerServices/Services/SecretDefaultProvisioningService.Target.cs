@@ -151,6 +151,12 @@ internal sealed partial class SecretDefaultProvisioningService
             foreach (var application in sources.Applications.Where(application =>
                          IsSourceFor(application, sourceTenant.TenantId, inventory)))
             {
+                if (application.DeploymentState == RtDeploymentStateEnum.Error)
+                {
+                    HoldReleasedDefaults(sourceTenant, application, inventory, desiredState);
+                    continue;
+                }
+
                 CollectOffers(targetTenantId, sourceTenant, application, desiredState);
             }
         }
@@ -212,6 +218,23 @@ internal sealed partial class SecretDefaultProvisioningService
             desiredState.ProvidedDefaults.Add(new ProvidedDefault(sourceTenant.TenantId, applicationRtId,
                 checkedDeclaration.Key));
             desiredState.Offers.Add(new SecretDefaultOffer(sourceTenant, application, checkedDeclaration));
+        }
+    }
+
+    /// <summary>
+    ///     An Application in Error still runs its previous release, so it provides exactly the defaults it projected
+    ///     here, unchanged; its current declarations were never deployed and offer nothing.
+    /// </summary>
+    private static void HoldReleasedDefaults(SourceTenant sourceTenant, RtApplication application,
+        SecretDefaultInventory inventory, DesiredSecretDefaults desiredState)
+    {
+        var applicationRtId = application.RtId.ToString();
+        foreach (var storedDefault in inventory.Defaults.Where(storedDefault =>
+                     IsProjectedBy(storedDefault, sourceTenant.TenantId, applicationRtId)))
+        {
+            desiredState.ProvidedDefaults.Add(new ProvidedDefault(sourceTenant.TenantId, applicationRtId,
+                storedDefault.Key));
+            desiredState.HeldDefaults.Add(new HeldDefault(storedDefault.Key, sourceTenant.Depth));
         }
     }
 
@@ -353,7 +376,11 @@ internal sealed partial class SecretDefaultProvisioningService
         public HashSet<ProvidedDefault> ProvidedDefaults { get; } = [];
 
         public List<SecretDefaultOffer> Offers { get; } = [];
+
+        public List<HeldDefault> HeldDefaults { get; } = [];
     }
+
+    private readonly record struct HeldDefault(string Key, int SourceDepth);
 
     private enum StoredDefaultStanding
     {

@@ -8,7 +8,8 @@
   removals are conditional on what was read (incl. `RtVersion`), so a concurrent rewrite survives, and a key is never left
   empty while its replacement fails. **Undeploying an Application withdraws its defaults** from its tenant and subtree,
   where another deployed source takes the key over without a gap. An Application whose redeploy was refused or whose
-  Helm rollout failed keeps the defaults its running release projected; one refused before it was ever deployed offers
+  Helm rollout failed keeps the defaults its running release projected, as stored (declarations edited after that release
+  are not projected until a deploy succeeds); one refused before it was ever deployed offers
   nothing. `LastDeploymentError` of a refused deploy keeps its text (`[tenant] Cannot deploy workload 'x': ...`), so the
   Studio's field marks still work. New endpoint `POST {tenantId}/v1/secretDefaults/reconcile`
   (`TenantCommunicationApiReadWritePolicy`) reconciles the tenant and its subtree and answers one result per tenant

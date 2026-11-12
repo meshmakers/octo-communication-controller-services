@@ -5625,7 +5625,11 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   **Error** (a deploy the guard refused, or a Helm rollout that failed) is a source only in a tenant where the Application
   still holds a default it projected: a refused or failed redeploy leaves the previous Helm release running
   (`helm upgrade --install --rollback-on-failure` rolls a failed upgrade back, a refusal never reaches Helm), and that
-  release keeps its defaults. An Application refused before it was ever deployed holds none and offers nothing, and an
+  release keeps its defaults. It keeps them **as stored** (`HoldReleasedDefaults`): its declarations were edited after
+  that release and never deployed, so a reconcile neither removes a key the edit dropped nor writes a value the edit
+  changed or a key it added, and an Application of the same depth (another one in the same source tenant) does not
+  replace a held default; only a source closer to the root takes the key over. An Application refused before it was
+  ever deployed holds none and offers nothing, and an
   Application in Error offers nothing to a tenant it did not serve before (e.g. a tenant created meanwhile): it gets the
   defaults with the next successful deploy. Never deployed, undeployed and disabled offer nothing. The stored projection
   is the signal because neither the Application (`DeploymentState`, `LastDeploymentError`) nor the operator's status

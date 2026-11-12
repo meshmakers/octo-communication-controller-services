@@ -41,7 +41,8 @@ internal sealed partial class SecretDefaultProvisioningService
     /// <summary>
     ///     Whether the Application provides SecretDefaults to the target tenant. Pending and Deployed: yes. Error: only
     ///     where it still holds a default it projected, because a refused or failed redeploy leaves the previous release
-    ///     running and that release keeps its defaults; an Application refused before it was ever deployed holds none.
+    ///     running and that release keeps its defaults as stored; an Application refused before it was ever deployed
+    ///     holds none.
     ///     Never deployed, undeployed or disabled: no.
     /// </summary>
     internal static bool IsSourceFor(RtApplication application, string sourceTenantId,
