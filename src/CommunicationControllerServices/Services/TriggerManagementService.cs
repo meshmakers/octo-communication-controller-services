@@ -94,6 +94,16 @@ internal class TriggerManagementService(
                     pipelineRtId);
             }
         }
+        catch (DistributionTimeoutException e)
+        {
+            // AB#8716: nothing answered the execute command - the adapter is offline or has not deployed the pipeline.
+            // Say so, with the adapter, instead of the generic "failed to execute".
+            var adapterName = await TryGetAdapterNameAsync(tenantId, pipelineRtId);
+            await eventService.StoreErrorEventAsync(tenantId,
+                $"Pipeline '{pipelineRtId}' execution: adapter '{adapterName}' did not answer in time (probably offline); " +
+                "the outcome is unknown.");
+            throw TriggerManagementServiceException.AdapterDidNotAnswer(tenantId, pipelineRtId, adapterName, e);
+        }
         catch (Exception e)
         {
             await eventService.StoreErrorEventAsync(tenantId,
@@ -106,6 +116,23 @@ internal class TriggerManagementService(
         logger.LogError("[{TenantId}] Execution of pipeline '{PipelineRtId}' failed: {ErrorMessage}"
             , tenantId, pipelineRtId, r.ErrorMessage);
         throw TriggerManagementServiceException.ExecutePipelineFailed(tenantId, pipelineRtId, r.ErrorMessage);
+    }
+
+    /// <summary>The name (else the id) of the pipeline's adapter, or "unknown" when it cannot be read (AB#8716).</summary>
+    private async Task<string> TryGetAdapterNameAsync(string tenantId, OctoObjectId pipelineRtId)
+    {
+        try
+        {
+            var adapter = await communicationRepository.GetAdapterByPipelineAsync(tenantId,
+                new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipelineRtId));
+            return adapter is null ? "unknown" : adapter.Name ?? adapter.RtId.ToString();
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "[{TenantId}] Could not resolve the adapter of pipeline '{PipelineRtId}'", tenantId,
+                pipelineRtId);
+            return "unknown";
+        }
     }
 
     /// <summary>
