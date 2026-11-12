@@ -5650,7 +5650,7 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
      longer declares. It writes the valid declarations first, then sweeps: in every tenant that holds a default this
      Application no longer provides, the target reconcile runs **before** the removal (see "Removal rule"). A value that
      cannot be revealed on this host (no key ring, strict mode against clear text) fails only its own key, with an Error
-     event naming that cause; the other declarations and the sweep still run. A tenant the entry still reaches keeps
+     event naming that cause; the other declarations and the sweep still run. Every Error event of the deploy (invalid entry, unreadable value, failed write) is best effort: an event store that throws stops neither the other keys nor the sweep (`SecretDefaultDeployEventFailureTests`). A tenant the entry still reaches keeps
      the value it holds; from a tenant the entry no longer reaches (e.g. left `AllowedTenantIds`) the sweep removes it,
      also while the value cannot be revealed. A failure of the whole projection (e.g. tenant tree unreadable) is an Error event on the Application; once the cause
      is fixed, a deploy or the reconcile endpoint repeats it (a redeploy alone does not help while the cause persists).
@@ -5725,7 +5725,7 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   first, then the unprovided defaults are removed, so a holder change replaces the default in place and the consumer never
   sees a gap. **Revocation wins over keeping the old value:** when the winner's write fails (or its value cannot be
   read), a default whose source still reaches the tenant (source tenant still the tenant or an ancestor, Application
-  still a source, entry still allowing the tenant) is provided and keeps its old value; a default whose source no longer
+  still a source, entry still allowing the tenant, an invalid entry included) is provided and keeps its old value; a default whose source no longer
   reaches it is removed anyway, and the tenant has no default for that key until the replacement can be written
   (`SecretDefaultRevocationTests`). The write names the defaults it found unprovided (`SecretDefaultWrite.SupersededDefaults`); such a default is
   replaced even when its source is protected, as long as it is unchanged since the read. A source tenant that cannot be
@@ -5742,7 +5742,7 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   it only while RtId, well-known name, `SourceTenantId`, `SourceWorkloadRtId`, `LastProjectedAt` and `RtVersion` (raised
   by every write, so a rotation within the same tick is seen too) match what was read;
   a default a concurrent deploy wrote meanwhile is kept (`Changed`, a write conflict counts as `Changed`), a gone one is
-  `NotFound`; neither is a failure. The target reconcile and the source sweep both use it. An entry that is present but invalid keeps its existing defaults (never written, never removed). On deploy the
+  `NotFound`; neither is a failure. The target reconcile and the source sweep both use it. An entry that is present but invalid (no value, duplicated key, ...) is never written, and its `AllowedTenantIds` still apply, with no exception for invalid entries: a tenant it allows keeps the default it holds, a tenant it excludes loses it. Of duplicates of one key a tenant keeps the default only while every duplicate allows it, so a tenant any of them excludes loses it (revocation wins when they disagree; `SecretDefaultInvalidEntryRevocationTests`). On deploy the
   source side sweeps its own tenant and subtree for defaults of this Application that it no longer provides; in every
   tenant that holds one it runs the target reconcile, which writes another source's winner first and removes the withdrawn
   default after, so the key has no gap; a failed replacement does not keep the withdrawn default (revocation wins). Only when that reconcile does not

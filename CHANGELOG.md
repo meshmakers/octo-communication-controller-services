@@ -21,6 +21,9 @@
   deploy and on the reconcile. Known limits: a first install whose rollout failed keeps its defaults until it is undeployed
   or deployed successfully; an Application in Error offers nothing to a tenant created meanwhile; and while an Application
   is in Error, a copy a tenant edited stays edited and a deleted copy is not restored until a deploy succeeds.
+  An invalid entry (no value, duplicated key) is not projected, but its `AllowedTenantIds` still apply: a tenant it
+  excludes loses the default it holds, and of duplicates a tenant keeps it only while every duplicate allows it. The
+  Error events of a deploy are best effort: an event store that fails stops neither the other keys nor the sweep.
 
 - AB#7244 New: deploying an Application projects its `SecretDefaults` (System.Communication 4.15.0) into the
   platform-owned `System.Communication/SecretDefault` of its own tenant and its whole subtree, narrowed by
