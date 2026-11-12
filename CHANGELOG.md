@@ -22,6 +22,13 @@
   or lacks the model is skipped with a Warning event. The deploy guard refuses an invalid declaration (empty or malformed
   key, duplicate key, missing `SecretValue`) before anything reaches Helm.
 
+- AB#8716 Fix: every System.Communication method error declared with a `message` parameter carries it.
+  `Pipeline.Execute` answered `PIPELINE_EXECUTION_START_FAILED` without `message`, because `TriggerManagementServiceException`
+  was not on the caller-safe list; it is now (redacted of input and token). For an exception of unknown origin the handlers
+  answer a fixed text with the invocation id instead of dropping the parameter (Deploy, Execute, SetDebugging, DataFlow
+  Deploy/Undeploy). An execute command without answer now fails with "Adapter '<name>' did not answer ... in time: it is probably
+  offline or has not deployed the pipeline. The outcome of the execution is unknown." - also in the REST answer and the error
+  event (before: "Failed to execute data flow ...").
 - AB#8596 New: System.Communication 4.18.0 (Minor) declares the Pipeline, DataFlow and workload chart-version operations of
   the REST API as CK methods handled by the controller: `Pipeline.Deploy`, `Pipeline.Execute`, `Pipeline.SetDebugging`,
   `Pipeline.MoveToAdapter` (one pipeline per call), `DataFlow.Deploy`, `DataFlow.Undeploy` and

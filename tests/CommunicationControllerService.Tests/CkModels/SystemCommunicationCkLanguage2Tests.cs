@@ -40,11 +40,14 @@ internal class SystemCommunicationCkLanguage2Tests
         // no dataAccess, so the minimum engine version stays.
         await Assert.That(root.ModelId.ToString()).IsEqualTo("System.Communication-4.18.0");
         await Assert.That(root.CkLanguage).IsEqualTo(2);
-        // The compiler stamps minEngineVersion for a ckLanguage 2 model; the sources never set it. Pinned exactly: a
-        // higher value means every service below it can no longer import System.Communication. A feature that raises it
-        // (e.g. a method with execution.mode) is a deliberate rollout decision and updates this assertion.
+        // The compiler stamps minEngineVersion for a ckLanguage 2 model; the sources never set it. It is the maximum of
+        // the model's own features and of its dependencies (CatalogModelResolver). System.Communication itself needs
+        // only 3.5.1, but System.Bot (dependency [3.4,4.0)) carries 3.5.67 since its async Dump method (AB#8445,
+        // execution.mode), so the compiled model carries 3.5.67. Pinned exactly: a higher value means every service below
+        // it can no longer import System.Communication. A feature or dependency that raises it is a deliberate rollout
+        // decision and updates this assertion (AB#8773).
         await Assert.That(root.MinEngineVersion).IsNotNull();
-        await Assert.That(Version.Parse(root.MinEngineVersion!)).IsEqualTo(new Version(3, 5, 1));
+        await Assert.That(Version.Parse(root.MinEngineVersion!)).IsEqualTo(new Version(3, 5, 67));
     }
 
     /// <summary>
