@@ -868,7 +868,9 @@ internal class DeploymentSiteService : IDeploymentSiteService
             {
                 await _eventService.StoreErrorEventAsync(tenantId,
                     $"Secret defaults of application '{application.Name}' could not be projected into the tenants " +
-                    "it serves. The deploy continues; deploy the application again to retry.",
+                    "it serves (e.g. the tenant tree could not be read); the controller log names the cause. The " +
+                    "deploy continues; once the cause is fixed, deploy the application again or run the secret " +
+                    "defaults reconcile.",
                     new RtEntityId(SystemCommunicationCkIds.RtCkApplicationTypeId, application.RtId));
             }
             catch (Exception eventFailure)
