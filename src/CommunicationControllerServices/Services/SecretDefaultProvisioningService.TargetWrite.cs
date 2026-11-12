@@ -67,8 +67,20 @@ internal sealed partial class SecretDefaultProvisioningService
         var applicationLink = ApplicationLinkIn(targetTenantId, sourceTenantId, offer.ApplicationRtId);
         var revealAccess = new SecretAccessContext(sourceTenantId, application.CkTypeId?.ToString(),
             SecretValueAttributePath);
-        var plaintext = encryptionService.RevealOrNull(offer.CheckedDeclaration.Declaration!.SecretValue,
-            revealAccess);
+        string? plaintext;
+        try
+        {
+            plaintext = encryptionService.RevealOrNull(offer.CheckedDeclaration.Declaration!.SecretValue,
+                revealAccess);
+        }
+        catch (Exception revealFailure) when (revealFailure is not OperationCanceledException)
+        {
+            Logger.Warn(revealFailure, "[{TenantId}] Secret default '{Key}' of application '{ApplicationName}' in " +
+                                       "tenant '{SourceTenantId}' could not be revealed", targetTenantId, offer.Key,
+                application.Name, sourceTenantId);
+            plaintext = null;
+        }
+
         if (string.IsNullOrEmpty(plaintext))
         {
             outcome.Failed++;
