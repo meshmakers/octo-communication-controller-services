@@ -1,5 +1,8 @@
-using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.SecretDefaultProvisioningServiceTests;
 
@@ -63,6 +66,23 @@ internal sealed class SecretDefaultUnrevealableOfferTests : SecretDefaultProvisi
         await Assert.That(StoredEventMessages()).Contains(message =>
             message.Contains(CaptchaKey) && message.Contains("cannot be revealed on this host"));
         await Assert.That(StoredEventMessages().Any(message => message.Contains(RotatedSecret))).IsFalse();
+    }
+
+    [Test]
+    public async Task ADeployWhoseRevealFailureEventCannotBeStored_StillProjectsTheOtherDeclarations()
+    {
+        var application = ArrangeApplication(ProtectedEntry(CaptchaKey, RotatedSecret),
+            ProtectedEntry(MailKey, MailSecret));
+        CommunicationEventService
+            .StoreErrorEventAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<RtEntityId?>())
+            .ThrowsAsync(new InvalidOperationException("event store unreachable"));
+        var serviceThatCannotRevealOneValue = CreateServiceFailingRevealsOfPlaintext(RotatedSecret);
+
+        var result = await serviceThatCannotRevealOneValue.ProvisionForSourceAsync(SourceTenantId, application.RtId);
+
+        using var assertionScope = Assert.Multiple();
+        await Assert.That(result.TargetsFailed).IsEqualTo(1);
+        await Assert.That(TenantsWritten(MailKey)).Count().IsEqualTo(4);
     }
 
     [Test]

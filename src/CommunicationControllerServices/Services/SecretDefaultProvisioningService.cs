@@ -119,10 +119,10 @@ internal sealed partial class SecretDefaultProvisioningService(
             Logger.Error(revealFailure, "[{TenantId}] Secret default '{Key}' of application '{ApplicationName}' " +
                                         "({ApplicationRtId}) cannot be revealed on this host; it was not projected",
                 projection.SourceTenantId, key, application.Name, application.RtId);
-            await communicationEventService.StoreErrorEventAsync(projection.SourceTenantId,
+            await TryStoreErrorEventAsync(projection.SourceTenantId,
                 $"Secret default '{key}' of application '{application.Name}' cannot be revealed on this host (the " +
                 "controller has no key ring for secrets, or strict mode refuses a value stored in clear text) and was " +
-                "not projected; a tenant that holds a value keeps it. Fix the controller's secret encryption, then " +
+                "not projected; a tenant the entry still reaches keeps the value it holds. Fix the controller's secret encryption, then " +
                 "deploy the application again or run the secret defaults reconcile.", projection.ApplicationEntityId);
             return new SecretDefaultProvisioningResult(0, 0, 1);
         }

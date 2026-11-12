@@ -5650,8 +5650,9 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
      longer declares. It writes the valid declarations first, then sweeps: in every tenant that holds a default this
      Application no longer provides, the target reconcile runs **before** the removal (see "Removal rule"). A value that
      cannot be revealed on this host (no key ring, strict mode against clear text) fails only its own key, with an Error
-     event naming that cause; the other declarations and the sweep still run, and a tenant holding that key keeps it. A
-     failure of the whole projection (e.g. tenant tree unreadable) is an Error event on the Application; once the cause
+     event naming that cause; the other declarations and the sweep still run. A tenant the entry still reaches keeps
+     the value it holds; from a tenant the entry no longer reaches (e.g. left `AllowedTenantIds`) the sweep removes it,
+     also while the value cannot be revealed. A failure of the whole projection (e.g. tenant tree unreadable) is an Error event on the Application; once the cause
      is fixed, a deploy or the reconcile endpoint repeats it (a redeploy alone does not help while the cause persists).
   2. **Deployment-site deploy** - `DeployDeploymentSiteAsync` deploys no workload (decoupled in f2f8bbd; the unused
      `DeployManagedWorkloadsAsync` fan-out was removed with AB#7245), so every Application reaches Helm through
