@@ -93,7 +93,7 @@ internal sealed class ProvisionForSourceRemovalTests : SecretDefaultProvisioning
     }
 
     [Test]
-    public async Task ARemovalWhoseHandOverWriteFails_KeepsTheOldDefaultInThatTenant()
+    public async Task ARemovalWhoseHandOverWriteFails_StillRemovesTheWithdrawnDefaultInThatTenant()
     {
         var parentApplication = ArrangeApplication(ProtectedEntry(CaptchaKey, "zq7245-parent-value"));
         ArrangeApplicationIn(FirstChildTenantId, ProtectedEntry(CaptchaKey, "zq7245-child-value"));
@@ -104,9 +104,8 @@ internal sealed class ProvisionForSourceRemovalTests : SecretDefaultProvisioning
         var result = await Service.ProvisionForSourceAsync(SourceTenantId, parentApplication.RtId);
 
         using var assertionScope = Assert.Multiple();
-        await Assert.That(result.TargetsFailed).IsEqualTo(1);
-        await Assert.That(StoredDefault(GrandchildTenantId, CaptchaKey)!.RevealedValue)
-            .IsEqualTo("zq7245-parent-value");
+        await Assert.That(result.TargetsFailed).IsEqualTo(0);
+        await Assert.That(StoredDefault(GrandchildTenantId, CaptchaKey)).IsNull();
         await Assert.That(StoredDefault(SourceTenantId, CaptchaKey)).IsNull();
     }
 }

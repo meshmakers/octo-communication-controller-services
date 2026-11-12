@@ -119,7 +119,7 @@ internal sealed class ProvisionForTargetWriteTests : SecretDefaultProvisioningSe
     }
 
     [Test]
-    public async Task AFailedReplacement_KeepsTheWithdrawnDefaultInsteadOfLeavingAGap()
+    public async Task AFailedReplacement_StillRemovesTheWithdrawnDefault()
     {
         var parentApplication = ArrangeApplication(ProtectedEntry(CaptchaKey, "zq7245-parent-value"));
         ArrangeApplicationIn(FirstChildTenantId, ProtectedEntry(CaptchaKey, "zq7245-child-value"));
@@ -131,9 +131,7 @@ internal sealed class ProvisionForTargetWriteTests : SecretDefaultProvisioningSe
 
         using var assertionScope = Assert.Multiple();
         await Assert.That(result.WritesFailed).IsEqualTo(1);
-        await Assert.That(result.DefaultsRemoved).IsEqualTo(0);
-        await Assert.That(Deletions).IsEmpty();
-        await Assert.That(StoredDefault(GrandchildTenantId, CaptchaKey)!.RevealedValue)
-            .IsEqualTo("zq7245-parent-value");
+        await Assert.That(result.DefaultsRemoved).IsEqualTo(1);
+        await Assert.That(StoredDefault(GrandchildTenantId, CaptchaKey)).IsNull();
     }
 }

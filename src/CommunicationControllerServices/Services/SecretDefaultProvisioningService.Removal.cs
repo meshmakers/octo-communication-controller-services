@@ -119,8 +119,8 @@ internal sealed partial class SecretDefaultProvisioningService
 
     /// <summary>
     ///     Reconciles a tenant that holds withdrawn defaults: another source's winner is written before the withdrawn
-    ///     default is removed, so the key has no gap, and a failed replacement keeps the old default. Null when the
-    ///     reconcile threw; the caller then removes the withdrawn defaults itself.
+    ///     default is removed, so the key has no gap. A withdrawn default is removed also when its replacement fails.
+    ///     Null when the reconcile threw; the caller then removes the withdrawn defaults itself.
     /// </summary>
     private async Task<TargetReconcile?> TryHandOverAsync(string targetTenantId,
         CancellationToken cancellationToken)

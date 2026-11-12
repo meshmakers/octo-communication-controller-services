@@ -53,7 +53,7 @@ internal sealed partial class SecretDefaultProvisioningService
 
         var desiredState = await ReadDesiredStateAsync(targetTenantId, inventory, sourceTenants, cancellationToken);
         var writes = await WriteWinningOffersAsync(targetTenantId, inventory, desiredState, cancellationToken);
-        var removal = await RemoveUnprovidedDefaultsAsync(targetTenantId, inventory, desiredState, writes.FailedKeys);
+        var removal = await RemoveUnprovidedDefaultsAsync(targetTenantId, inventory, desiredState);
 
         var result = new SecretDefaultTargetResult(targetTenantId, SecretDefaultTargetStatus.Reconciled,
             writes.Created, writes.Updated, removal.RemovedRtIds.Count, removal.Kept + writes.Kept,
@@ -238,19 +238,17 @@ internal sealed partial class SecretDefaultProvisioningService
         }
     }
 
+    /// <summary>
+    ///     Removes every default no source provides to the tenant any more, also when the write of its replacement
+    ///     failed: revocation wins over keeping the old value. A default whose source still reaches the tenant is
+    ///     provided and stays, so a failed replacement of a still-reaching source keeps its old value.
+    /// </summary>
     private async Task<RemovalOutcome> RemoveUnprovidedDefaultsAsync(string targetTenantId,
-        SecretDefaultInventory inventory, DesiredSecretDefaults desiredState, IReadOnlySet<string> failedWriteKeys)
+        SecretDefaultInventory inventory, DesiredSecretDefaults desiredState)
     {
         var removal = new RemovalOutcome();
         foreach (var storedDefault in inventory.Defaults)
         {
-            if (failedWriteKeys.Contains(storedDefault.Key))
-            {
-                removal.Kept++;
-                removal.UnremovedRtIds.Add(storedDefault.RtId.ToString());
-                continue;
-            }
-
             switch (Classify(storedDefault, desiredState))
             {
                 case StoredDefaultStanding.SourceUnreadable:
@@ -402,7 +400,7 @@ internal sealed partial class SecretDefaultProvisioningService
 
     /// <summary>
     ///     The result of a target reconcile, plus which stored defaults it removed and which it had to leave (failed
-    ///     removal, failed replacement, unreadable source), so a source sweep can count only its own.
+    ///     removal, unreadable source), so a source sweep can count only its own.
     /// </summary>
     private sealed record TargetReconcile(
         SecretDefaultTargetResult Result,
