@@ -5628,7 +5628,9 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   release keeps its defaults. It keeps them **as stored** (`HoldReleasedDefaults`): its declarations were edited after
   that release and never deployed, so a reconcile neither removes a key the edit dropped nor writes a value the edit
   changed or a key it added, and an Application of the same depth (another one in the same source tenant) does not
-  replace a held default; only a source closer to the root takes the key over. An Application refused before it was
+  replace a held default; only a source closer to the root takes the key over. Known limit (follows from "as stored"):
+  while the Application is in Error, a copy a tenant edited stays edited and a copy a tenant deleted is not restored;
+  both come back with the next successful deploy. An Application refused before it was
   ever deployed holds none and offers nothing, and an
   Application in Error offers nothing to a tenant it did not serve before (e.g. a tenant created meanwhile): it gets the
   defaults with the next successful deploy. Never deployed, undeployed and disabled offer nothing. The stored projection
@@ -5645,7 +5647,12 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   `ISecretDefaultProvisioningService`, all best effort (a failure is an Error event, never a failed deploy, undeploy or tenant load):
   1. **Deploy** - `DeploymentSiteService.DeployWorkloadAsync` calls `ProvisionForSourceAsync(tenantId, applicationRtId)`
      after the Helm notification for **every** `RtApplication`, also one without entries, so a redeploy removes what it no
-     longer declares. A failure of the whole projection is an Error event on the Application; the next deploy retries.
+     longer declares. It writes the valid declarations first, then sweeps: in every tenant that holds a default this
+     Application no longer provides, the target reconcile runs **before** the removal (see "Removal rule"). A value that
+     cannot be revealed on this host (no key ring, strict mode against clear text) fails only its own key, with an Error
+     event naming that cause; the other declarations and the sweep still run, and a tenant holding that key keeps it. A
+     failure of the whole projection (e.g. tenant tree unreadable) is an Error event on the Application; once the cause
+     is fixed, a deploy or the reconcile endpoint repeats it (a redeploy alone does not help while the cause persists).
   2. **Deployment-site deploy** - `DeployDeploymentSiteAsync` deploys no workload (decoupled in f2f8bbd; the unused
      `DeployManagedWorkloadsAsync` fan-out was removed with AB#7245), so every Application reaches Helm through
      `DeployWorkloadAsync` and its validation and projection; the re-dispatch of a Pending workload on site registration
@@ -5655,9 +5662,10 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
      receives its defaults without a redeploy. It never fails the load; an Information event only when something was
      created, updated or removed.
   4. **Undeploy** - `DeploymentSiteService.UndeployWorkloadAsync` calls `WithdrawForSourceAsync(tenantId, applicationRtId)`
-     after the resting state is set: the source-side sweep of a redeploy without entries, over its own tenant and subtree,
-     followed by the target reconcile where something was removed, so another deployed source takes the key over. A
-     failure is an Error event on the Application; the target reconcile removes the defaults on the next load.
+     after the resting state is set: the source-side sweep of a redeploy without entries, over its own tenant and subtree.
+     In every tenant that holds a withdrawn default the target reconcile runs first, so another deployed source takes the
+     key over, and removes the withdrawn default after (also when that replacement fails). A failure is an Error event on
+     the Application; the target reconcile removes the defaults on the next load.
   5. **Reconcile endpoint** - `POST {tenantId}/v1/secretDefaults/reconcile` (`SecretDefaultsController`, policy
      `TenantCommunicationApiReadWritePolicy` like `adapterPool/mirrors/refresh`) runs the target reconcile for the route
      tenant and every tenant of its subtree and answers with one `SecretDefaultTargetResult` per tenant: status
@@ -5670,7 +5678,9 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   ignored, never granted.
 - **Value.** Each `SecretValue` is revealed once in the source tenant (`IWorkloadEncryptionService.RevealOrNull`,
   attribute path `SecretDefaults.SecretValue`) and handed to the write as `RtSecretValue.Pending`; the engine encrypts it
-  in the target. A redeploy overwrites (rotation). An unreadable value writes nothing for that key and is an Error event.
+  in the target. A redeploy overwrites (rotation). An unreadable value (empty, or a reveal that throws because the host
+  has no key ring or strict mode refuses clear text) writes nothing for that key and is an Error event; it never stops
+  the other keys, on the deploy or on the reconcile.
 - **Write.** `ICommunicationRepository.UpsertSecretDefaultAsync(targetTenantId, SecretDefaultWrite)` matches on
   `RtWellKnownName` = key (the name the consumer reads), sets `Name`, `Value`, `SourceTenantId`, `SourceWorkloadRtId` and
   `LastProjectedAt`, and erases further SecretDefaults with the same well-known name so the consumer finds exactly one. A
@@ -5712,8 +5722,11 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   value in the target (`RevealOrNull`, attribute `Value`) and compares it with the source value in constant time; neither
   is logged or kept, and an unreadable stored value counts as changed. **Write before remove:** the winners are written
   first, then the unprovided defaults are removed, so a holder change replaces the default in place and the consumer never
-  sees a gap. When the winner's write fails (or its value cannot be read), the unprovided defaults of that key are kept
-  instead of removed, so the key never goes empty. The write names the defaults it found unprovided (`SecretDefaultWrite.SupersededDefaults`); such a default is
+  sees a gap. **Revocation wins over keeping the old value:** when the winner's write fails (or its value cannot be
+  read), a default whose source still reaches the tenant (source tenant still the tenant or an ancestor, Application
+  still a source, entry still allowing the tenant) is provided and keeps its old value; a default whose source no longer
+  reaches it is removed anyway, and the tenant has no default for that key until the replacement can be written
+  (`SecretDefaultRevocationTests`). The write names the defaults it found unprovided (`SecretDefaultWrite.SupersededDefaults`); such a default is
   replaced even when its source is protected, as long as it is unchanged since the read. A source tenant that cannot be
   resolved or lacks System.Communication 4.15.0 is unreadable: its defaults are kept (Warning event; for a missing model
   only when the target holds defaults of it, because a root without Communication would otherwise warn on every load). The
@@ -5731,11 +5744,11 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   `NotFound`; neither is a failure. The target reconcile and the source sweep both use it. An entry that is present but invalid keeps its existing defaults (never written, never removed). On deploy the
   source side sweeps its own tenant and subtree for defaults of this Application that it no longer provides; in every
   tenant that holds one it runs the target reconcile, which writes another source's winner first and removes the withdrawn
-  default after, so the key has no gap and a failed replacement keeps the old default. Only when that reconcile does not
+  default after, so the key has no gap; a failed replacement does not keep the withdrawn default (revocation wins). Only when that reconcile does not
   end `Reconciled` (tree unreadable, exception) does the sweep remove the withdrawn defaults itself (conditionally). The
   counts of the sweep (its Information event on the Application, `SecretDefaultProvisioningResult`) are this
   Application's own: removed = its withdrawn defaults the reconcile removed, failed = its withdrawn defaults it had to leave
-  (failed removal or replacement, unreadable source); what the reconcile changes for other sources in that tenant is not
+  (failed removal, unreadable source); what the reconcile changes for other sources in that tenant is not
   counted. Integration test of the `RtVersion` read: `SecretDefaultRepositoryTests` (a same-tick rotation is `Changed`
   for the stale read and removable after a new read). **Unknown, never empty:** a source
   tenant that cannot be read keeps the defaults it projected and is named in a Warning event in the target; a tenant tree
@@ -5756,7 +5769,8 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   overwrites.
 - Tests: `tests/CommunicationControllerService.Tests/Services/SecretDefaultProvisioningServiceTests/` (target side:
   `ProvisionForTargetAsyncTests`, `ProvisionForTargetWriteTests`, `ProvisionForTargetIncompleteTreeTests`, deployed
-  sources and undeploy: `SecretDefaultReleasedSourceTests`, concurrent removal: `SecretDefaultConcurrentRemovalTests`,
+  sources and undeploy: `SecretDefaultReleasedSourceTests`, concurrent removal: `SecretDefaultConcurrentRemovalTests`, revocation on a failed replacement:
+  `SecretDefaultRevocationTests`, values that cannot be revealed: `SecretDefaultUnrevealableOfferTests`,
   removal on deploy: `ProvisionForSourceRemovalTests`), `TenantLendingScopeResolverTests`, `Repository/StoredSecretDefaultTests.cs`,
   `DeploymentSiteServiceTests/DeployWorkloadSecretDefaultsTests.cs`,
   `DefaultConfigurationCreatorServiceTests/EnsureSecretDefaultsAsyncTests.cs`, `Controllers/SecretDefaultsControllerTests.cs`,
