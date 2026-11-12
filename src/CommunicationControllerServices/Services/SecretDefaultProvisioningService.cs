@@ -132,7 +132,7 @@ internal sealed partial class SecretDefaultProvisioningService(
             Logger.Error("[{TenantId}] Secret default '{Key}' of application '{ApplicationName}' ({ApplicationRtId}) " +
                          "has no readable value; it was not projected", projection.SourceTenantId, key,
                 application.Name, application.RtId);
-            await communicationEventService.StoreErrorEventAsync(projection.SourceTenantId,
+            await TryStoreErrorEventAsync(projection.SourceTenantId,
                 $"Secret default '{key}' of application '{application.Name}' has no readable value and was not " +
                 "projected. Set its SecretValue again and redeploy the application.", projection.ApplicationEntityId);
             return new SecretDefaultProvisioningResult(0, 0, 1);
@@ -174,7 +174,7 @@ internal sealed partial class SecretDefaultProvisioningService(
                     "[{TenantId}] Could not write secret default '{Key}' of application '{ApplicationName}' " +
                     "({ApplicationRtId}) into tenant '{TargetTenantId}'", projection.SourceTenantId, key,
                     application.Name, application.RtId, targetTenantId);
-                await communicationEventService.StoreErrorEventAsync(projection.SourceTenantId,
+                await TryStoreErrorEventAsync(projection.SourceTenantId,
                     $"Secret default '{key}' of application '{application.Name}' could not be written into tenant " +
                     $"'{targetTenantId}'. The next deploy of the application retries it.",
                     projection.ApplicationEntityId);
@@ -201,7 +201,7 @@ internal sealed partial class SecretDefaultProvisioningService(
         Logger.Error("[{TenantId}] Secret default {EntryName} of application '{ApplicationName}' ({ApplicationRtId}) " +
                      "was not projected: {Problem}", projection.SourceTenantId, entryName, application.Name,
             application.RtId, problem);
-        await communicationEventService.StoreErrorEventAsync(projection.SourceTenantId,
+        await TryStoreErrorEventAsync(projection.SourceTenantId,
             $"Secret default {entryName} of application '{application.Name}' was not projected: {problem}.",
             projection.ApplicationEntityId);
     }
