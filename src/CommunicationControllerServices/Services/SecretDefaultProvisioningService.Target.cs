@@ -205,8 +205,12 @@ internal sealed partial class SecretDefaultProvisioningService
 
             if (checkedDeclaration.Issue != SecretDefaultDeclarationIssue.None)
             {
-                desiredState.ProvidedDefaults.Add(new ProvidedDefault(sourceTenant.TenantId, applicationRtId,
-                    checkedDeclaration.Key));
+                if (InvalidEntriesStillReach(checkedDeclarations, checkedDeclaration.Key, targetTenantId))
+                {
+                    desiredState.ProvidedDefaults.Add(new ProvidedDefault(sourceTenant.TenantId, applicationRtId,
+                        checkedDeclaration.Key));
+                }
+
                 continue;
             }
 
@@ -323,6 +327,20 @@ internal sealed partial class SecretDefaultProvisioningService
         return allowedTenantIds is null || allowedTenantIds.Count == 0 ||
                allowedTenantIds.Any(allowedTenantId =>
                    string.Equals(allowedTenantId.Trim(), targetTenantId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    ///     An invalid entry is never written, but its AllowedTenantIds still narrow where its existing defaults stay:
+    ///     a tenant keeps the default only while every entry of the key allows it, so of disagreeing duplicates the
+    ///     narrowest wins and a tenant any of them excludes loses the default.
+    /// </summary>
+    private static bool InvalidEntriesStillReach(IReadOnlyList<CheckedSecretDefaultDeclaration> checkedDeclarations,
+        string key, string targetTenantId)
+    {
+        return checkedDeclarations
+            .Where(checkedDeclaration => checkedDeclaration.Key == key)
+            .All(checkedDeclaration => checkedDeclaration.Declaration is not { } declaration ||
+                                       AllowsTenant(declaration, targetTenantId));
     }
 
     private sealed class SourceTenant(string tenantId, IReadOnlyCollection<string> ancestorTenantIds)

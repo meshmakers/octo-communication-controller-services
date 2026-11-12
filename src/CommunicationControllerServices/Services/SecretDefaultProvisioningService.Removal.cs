@@ -190,8 +190,9 @@ internal sealed partial class SecretDefaultProvisioningService
     {
         return checkedDeclarations.Any(checkedDeclaration =>
             checkedDeclaration.Key == key &&
-            (checkedDeclaration.Issue != SecretDefaultDeclarationIssue.None ||
-             AllowsTenant(checkedDeclaration.Declaration!, targetTenantId)));
+            (checkedDeclaration.Issue == SecretDefaultDeclarationIssue.None
+                ? AllowsTenant(checkedDeclaration.Declaration!, targetTenantId)
+                : InvalidEntriesStillReach(checkedDeclarations, key, targetTenantId)));
     }
 
     private enum RemovalAttempt
