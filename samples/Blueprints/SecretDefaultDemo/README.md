@@ -15,7 +15,9 @@ Requires System.Communication `[4.16,5.0)` (4.16.0 or later, below 5.0.0) in the
 repository reads and in every tenant of the tree, a Communication Controller with the secret-default
 projection (AB#7244, AB#7245), and a Mesh Adapter with `VerifyCaptcha@1` (AB#7251), outbound HTTPS to
 `challenges.cloudflare.com` and the key ring the asset repository encrypts Secret attributes with (without
-it the default cannot be decrypted and every check answers `verification-unavailable`). The projection itself needs 4.15.0, but only from 4.16.0 on is the projected value `Hidden`: on 4.15.0 a tenant
+any key ring the default cannot be decrypted and every check answers `verification-unavailable`; a key ring
+that lacks the default's key id treats the default as not set, so a tenant without its own secret gets
+`not-configured`). The projection itself needs 4.15.0, but only from 4.16.0 on is the projected value `Hidden`: on 4.15.0 a tenant
 identity with generic write access could overwrite it (the next reconcile writes the projected value back).
 Both blueprints require `[4.16,5.0)`; the parent's blueprint cannot constrain the descendant tenants, so
 install `SecretDefaultDemoCaptcha` (or bring System.Communication into that range) in each of them.
