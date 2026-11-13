@@ -1,0 +1,5 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-meta.schema.json
+modelId: SecretDefaultDemo-1.0.0
+description: Sample model of the secret-default demo. One configuration type whose Secret attribute is a served tenant's own CAPTCHA secret, the override of the platform's secret default.
+dependencies:
+  - System-[2.5,3.0)

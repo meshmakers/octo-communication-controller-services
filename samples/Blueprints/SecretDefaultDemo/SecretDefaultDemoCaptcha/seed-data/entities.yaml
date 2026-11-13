@@ -1,0 +1,101 @@
+$schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+
+dependencies:
+  - System.Communication-[4.16,5.0)
+  - SecretDefaultDemo-[1.0,2.0)
+
+entities:
+  # No CaptchaSecret: the tenant admin writes one to override the default.
+  - rtId: '5ecdef0000000000000000b1'
+    ckTypeId: SecretDefaultDemo/CaptchaConfiguration
+    rtWellKnownName: CaptchaConfiguration
+    attributes:
+      - id: System/Name
+        value: CAPTCHA configuration
+
+  - rtId: '5ecdef0000000000000000b2'
+    ckTypeId: System.Communication/DataFlow
+    rtWellKnownName: SecretDefaultDemoFlow
+    attributes:
+      - id: System/Name
+        value: Secret Default Demo
+      - id: System/Description
+        value: >-
+          HTTP API on the Mesh Adapter: POST /secret-default-demo/verify-captcha verifies a
+          Turnstile token with the tenant's own secret, else the platform's secret default.
+
+  - rtId: '5ecdef0000000000000000b3'
+    ckTypeId: System.Communication/Pipeline
+    rtWellKnownName: SecretDefaultDemoVerifyCaptcha
+    associations:
+      - roleId: System/ParentChild
+        targetRtId: '5ecdef0000000000000000b2'
+        targetCkTypeId: System.Communication/DataFlow
+      - roleId: System.Communication/Executes
+        targetRtId: '670000000000000000000002'
+        targetCkTypeId: System.Communication/Adapter
+    attributes:
+      - id: System/Name
+        value: verify-captcha
+      - id: System/Description
+        value: POST /secret-default-demo/verify-captcha - answers { valid, source, reason }
+      - id: System/Enabled
+        value: true
+      - id: System.Communication/DeploymentState
+        value: 0
+      - id: System.Communication/PipelineDefinition
+        value: |
+          triggers:
+            - type: FromHttpRequest@2
+              path: /secret-default-demo/verify-captcha
+              method: Post
+              allowAnonymous: true
+              requiredRoles: []
+          transformations:
+            # ServiceAccount, because the route is anonymous: the caller has no identity
+            # that could read the tenant's override.
+            - type: VerifyCaptcha@1
+              description: Verify with the tenant's own secret, else the platform's secret default
+              provider: Turnstile
+              tokenPath: $.body.captchaToken
+              tenantSecret:
+                ckTypeId: SecretDefaultDemo/CaptchaConfiguration
+                wellKnownName: CaptchaConfiguration
+                attributeName: CaptchaSecret
+              defaultKey: demo-captcha-secret
+              targetPath: $.verdict
+              timeoutSeconds: 10
+              identity: ServiceAccount
+
+            - type: SetPrimitiveValue@1
+              targetPath: $.valid
+              valuePath: $.verdict.valid
+              valueType: Boolean
+            - type: SetPrimitiveValue@1
+              targetPath: $.source
+              valuePath: $.verdict.source
+              valueType: String
+            # reason exists only when valid is false; SetPrimitiveValue@1 fails on a missing path.
+            - type: If@1
+              description: the CAPTCHA was not passed
+              path: $.verdict.valid
+              operator: Equals
+              value: false
+              valueType: Boolean
+              transformations:
+                - type: SetPrimitiveValue@1
+                  targetPath: $.reason
+                  valuePath: $.verdict.reason
+                  valueType: String
+
+            # The response is the whole data context: keep the verdict, drop the request.
+            - type: Project@1
+              description: Reduce the response to valid, source and reason
+              clear: true
+              fields:
+                - path: $.valid
+                  inclusion: true
+                - path: $.source
+                  inclusion: true
+                - path: $.reason
+                  inclusion: true

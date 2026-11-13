@@ -1,0 +1,12 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+  - typeId: CaptchaConfiguration
+    description: 'CAPTCHA settings of one served tenant. Holds the tenant''s own secret (the override); the default comes from the platform as a System.Communication/SecretDefault and is never stored here.'
+    derivedFromCkTypeId: ${System}/Entity
+    isFinal: true
+    attributes:
+      - id: ${System}/Name
+        name: Name
+      - id: ${this}/CaptchaSecret
+        name: CaptchaSecret
+        isOptional: true

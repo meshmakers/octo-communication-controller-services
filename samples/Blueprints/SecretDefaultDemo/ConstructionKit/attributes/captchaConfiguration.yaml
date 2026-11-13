@@ -1,0 +1,6 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+attributes:
+  - id: CaptchaSecret
+    valueType: Secret
+    ownership: Secret
+    description: 'The tenant''s own CAPTCHA secret. When set, VerifyCaptcha@1 uses it instead of the platform''s secret default; clearing it falls back to the default. Write the plaintext; the engine encrypts it and reads only report whether it is set.'

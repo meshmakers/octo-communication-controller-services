@@ -901,6 +901,10 @@ The `System.` name prefix tells Refinery Studio (`BlueprintIdExtensions.IsServic
 
 The optional `HelloCommunication-1.0.0` demo blueprint lives in `samples/Blueprints/` (not embedded). It's admin-installable: drop the folder into a `LocalFileSystemBlueprintCatalog` root or publish it via a GitHub catalog. Its `blueprintDependencies` reference `System.Communication-[1.0,2.0)` so it can be applied on top of the service-managed baseline.
 
+`samples/Blueprints/SecretDefaultDemo/` is the secret-default sample (AB#7252): two blueprints (`SecretDefaultDemo` with
+the Application, whose `SecretDefaults` entry the operator adds after the install, `SecretDefaultDemoCaptcha` with a tenant override and a `VerifyCaptcha@1`
+route), a small CK model and the `verify/` commands. See "Secret defaults (AB#7219)".
+
 #### Runtime-State Attributes (do NOT reset on blueprint re-apply)
 
 `System.Communication-3.22.0` (paired with blueprints
@@ -5682,6 +5686,18 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   in the target. A redeploy overwrites (rotation). An unreadable value (empty, or a reveal that throws because the host
   has no key ring or strict mode refuses clear text) writes nothing for that key and is an Error event; it never stops
   the other keys, on the deploy or on the reconcile.
+- **Supplying the value (AB#7252, pattern of EC AB#8254).** A blueprint seeds the Application **without** a
+  `SecretDefaults` entry: the engine's secret seed lint allows only an empty or omitted Secret in a seed (a value, a
+  `<...>` / `TODO_SET_*` placeholder and a `${...}` variable are all refused), blueprints have no install-time
+  parameters, and an entry without `SecretValue` would make the deploy guard below refuse the Application. An operator
+  adds the entry after the install through the asset repository: Studio (Application -> Further attributes ->
+  `SecretDefaults`: `Key`, `SecretValue`, optional `AllowedTenantIds` and `Description` -> Save -> Deploy), or
+  `systemCommunicationApplications.update` with the whole `secretDefaults` list and the value passed as a GraphQL
+  variable, never inline; or a CD that reads it from Vault (EC on test-2). A re-apply or blueprint update keeps it
+  (`SecretDefaults` is TenantOwned, a Secret record member is carried over by record key). Never as a `ValueOverride`,
+  `ValuesYaml` or Helm value. Since `SecretDefault.Value` is Hidden (4.16.0), a projected entity in the target tenant is
+  the "set" signal. Worked sample with a tenant override and `VerifyCaptcha@1`: `samples/Blueprints/SecretDefaultDemo/`
+  (README + `verify/`).
 - **Write.** `ICommunicationRepository.UpsertSecretDefaultAsync(targetTenantId, SecretDefaultWrite)` matches on
   `RtWellKnownName` = key (the name the consumer reads), sets `Name`, `Value`, `SourceTenantId`, `SourceWorkloadRtId` and
   `LastProjectedAt`, and erases further SecretDefaults with the same well-known name so the consumer finds exactly one. A
