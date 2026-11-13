@@ -50,8 +50,9 @@ Application                            System.Communication/SecretDefault "demo-
    (e.g. after deleting an Application), a redeploy after a new value rotates it, and **undeploying the
    Application withdraws its defaults** from every tenant. A redeploy the deploy guard refuses (state
    Error) does not: the previous release keeps running, so the Application holds the defaults it already
-   projected and offers nothing to a tenant it did not serve before. Revocation wins: removing the entry
-   or narrowing `AllowedTenantIds` removes the default from every tenant it no longer reaches. The
+   projected and offers nothing to a tenant it did not serve before. Removing the entry or narrowing
+   `AllowedTenantIds` removes the default from every tenant it no longer reaches at the next projection, but
+   not while the Application is in Error: it keeps them until a redeploy succeeds (undeploy to withdraw). The
    projection is best effort per tenant: the deploy succeeds even when a tenant is skipped (no
    System.Communication 4.15.0, not resolvable) or its write fails, and each such tenant is a Warning or
    Error event linked to the Application. Read those events before you revoke an old secret at the
