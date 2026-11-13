@@ -45,11 +45,13 @@ Application                            System.Communication/SecretDefault "demo-
    `System.Communication/SecretDefault` (well-known name = Key) in the Application's own tenant and
    its whole subtree, never siblings. `AllowedTenantIds` empty or absent means that whole set; a
    non-empty list narrows it and never widens it (a listed tenant outside the subtree is ignored).
-   Only a deployed Application is a source: a tenant created or loaded later receives the default on
+   A Pending or Deployed Application is a source: a tenant created or loaded later receives the default on
    its load, `POST {tenant}/v1/secretDefaults/reconcile` brings a tenant and its subtree up to date
    (e.g. after deleting an Application), a redeploy after a new value rotates it, and **undeploying the
-   Application withdraws its defaults** from every tenant. So does a redeploy the deploy guard refuses
-   (state Error), even after an earlier successful deploy: the next reconcile removes them. The
+   Application withdraws its defaults** from every tenant. A redeploy the deploy guard refuses (state
+   Error) does not: the previous release keeps running, so the Application holds the defaults it already
+   projected and offers nothing to a tenant it did not serve before. Revocation wins: removing the entry
+   or narrowing `AllowedTenantIds` removes the default from every tenant it no longer reaches. The
    projection is best effort per tenant: the deploy succeeds even when a tenant is skipped (no
    System.Communication 4.15.0, not resolvable) or its write fails, and each such tenant is a Warning or
    Error event linked to the Application. Read those events before you revoke an old secret at the
