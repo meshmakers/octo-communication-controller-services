@@ -51,4 +51,25 @@ internal sealed class StoredSecretDefaultTests
         await Assert.That(unchangedBeforeTheRewrite).IsTrue();
         await Assert.That(unchangedAfterTheRewrite).IsFalse();
     }
+
+    [Test]
+    public async Task IsUnchanged_RefusesAnEntityWrittenAgainInTheSameTick()
+    {
+        var projectedAt = new DateTime(2026, 11, 6, 9, 0, 0, DateTimeKind.Utc);
+        var currentDefault = new RtSecretDefault
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            RtWellKnownName = "ec-captcha-secret",
+            SourceTenantId = "parent-p",
+            SourceWorkloadRtId = OctoObjectId.GenerateNewId().ToString(),
+            LastProjectedAt = projectedAt,
+            RtVersion = 4
+        };
+        var readDefault = new StoredSecretDefault(currentDefault.RtId, "ec-captcha-secret", "parent-p",
+            currentDefault.SourceWorkloadRtId) { LastProjectedAt = projectedAt, RtVersion = 4 };
+
+        currentDefault.RtVersion = 5;
+
+        await Assert.That(SecretDefaultIdentity.IsUnchanged(currentDefault, readDefault)).IsFalse();
+    }
 }

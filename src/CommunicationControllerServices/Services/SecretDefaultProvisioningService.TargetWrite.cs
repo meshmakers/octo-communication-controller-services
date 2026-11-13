@@ -14,9 +14,19 @@ internal sealed partial class SecretDefaultProvisioningService
         DesiredSecretDefaults desiredState, CancellationToken cancellationToken)
     {
         var outcome = new WriteOutcome();
+        var offeredKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var offersOfKey in desiredState.Offers.GroupBy(offer => offer.Key, StringComparer.Ordinal))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            offeredKeys.Add(offersOfKey.Key);
+            var closestOfferDepth = offersOfKey.Min(offer => offer.SourceTenant.Depth);
+            if (desiredState.HeldDefaults.Any(heldDefault =>
+                    heldDefault.Key == offersOfKey.Key && heldDefault.SourceDepth <= closestOfferDepth))
+            {
+                outcome.Unchanged++;
+                continue;
+            }
+
             var storedDefaultsOfKey = inventory.Defaults
                 .Where(storedDefault => storedDefault.Key == offersOfKey.Key)
                 .ToList();
@@ -27,6 +37,11 @@ internal sealed partial class SecretDefaultProvisioningService
             await WriteOfferAsync(targetTenantId, winningOffer, storedDefaultsOfKey, supersededDefaults, outcome);
         }
 
+        outcome.Unchanged += desiredState.HeldDefaults
+            .Select(heldDefault => heldDefault.Key)
+            .Where(heldKey => !offeredKeys.Contains(heldKey))
+            .Distinct(StringComparer.Ordinal)
+            .Count();
         return outcome;
     }
 
@@ -52,8 +67,20 @@ internal sealed partial class SecretDefaultProvisioningService
         var applicationLink = ApplicationLinkIn(targetTenantId, sourceTenantId, offer.ApplicationRtId);
         var revealAccess = new SecretAccessContext(sourceTenantId, application.CkTypeId?.ToString(),
             SecretValueAttributePath);
-        var plaintext = encryptionService.RevealOrNull(offer.CheckedDeclaration.Declaration!.SecretValue,
-            revealAccess);
+        string? plaintext;
+        try
+        {
+            plaintext = encryptionService.RevealOrNull(offer.CheckedDeclaration.Declaration!.SecretValue,
+                revealAccess);
+        }
+        catch (Exception revealFailure) when (revealFailure is not OperationCanceledException)
+        {
+            Logger.Warn(revealFailure, "[{TenantId}] Secret default '{Key}' of application '{ApplicationName}' in " +
+                                       "tenant '{SourceTenantId}' could not be revealed", targetTenantId, offer.Key,
+                application.Name, sourceTenantId);
+            plaintext = null;
+        }
+
         if (string.IsNullOrEmpty(plaintext))
         {
             outcome.Failed++;

@@ -109,13 +109,30 @@ internal sealed partial class SecretDefaultProvisioningService(
         var application = projection.Application;
         var revealAccess = new SecretAccessContext(projection.SourceTenantId, application.CkTypeId?.ToString(),
             SecretValueAttributePath);
-        var plaintext = encryptionService.RevealOrNull(declaration.SecretValue, revealAccess);
+        string? plaintext;
+        try
+        {
+            plaintext = encryptionService.RevealOrNull(declaration.SecretValue, revealAccess);
+        }
+        catch (Exception revealFailure) when (revealFailure is not OperationCanceledException)
+        {
+            Logger.Error(revealFailure, "[{TenantId}] Secret default '{Key}' of application '{ApplicationName}' " +
+                                        "({ApplicationRtId}) cannot be revealed on this host; it was not projected",
+                projection.SourceTenantId, key, application.Name, application.RtId);
+            await TryStoreErrorEventAsync(projection.SourceTenantId,
+                $"Secret default '{key}' of application '{application.Name}' cannot be revealed on this host (the " +
+                "controller has no key ring for secrets, or strict mode refuses a value stored in clear text) and was " +
+                "not projected; a tenant the entry still reaches keeps the value it holds. Fix the controller's secret encryption, then " +
+                "deploy the application again or run the secret defaults reconcile.", projection.ApplicationEntityId);
+            return new SecretDefaultProvisioningResult(0, 0, 1);
+        }
+
         if (string.IsNullOrEmpty(plaintext))
         {
             Logger.Error("[{TenantId}] Secret default '{Key}' of application '{ApplicationName}' ({ApplicationRtId}) " +
                          "has no readable value; it was not projected", projection.SourceTenantId, key,
                 application.Name, application.RtId);
-            await communicationEventService.StoreErrorEventAsync(projection.SourceTenantId,
+            await TryStoreErrorEventAsync(projection.SourceTenantId,
                 $"Secret default '{key}' of application '{application.Name}' has no readable value and was not " +
                 "projected. Set its SecretValue again and redeploy the application.", projection.ApplicationEntityId);
             return new SecretDefaultProvisioningResult(0, 0, 1);
@@ -157,7 +174,7 @@ internal sealed partial class SecretDefaultProvisioningService(
                     "[{TenantId}] Could not write secret default '{Key}' of application '{ApplicationName}' " +
                     "({ApplicationRtId}) into tenant '{TargetTenantId}'", projection.SourceTenantId, key,
                     application.Name, application.RtId, targetTenantId);
-                await communicationEventService.StoreErrorEventAsync(projection.SourceTenantId,
+                await TryStoreErrorEventAsync(projection.SourceTenantId,
                     $"Secret default '{key}' of application '{application.Name}' could not be written into tenant " +
                     $"'{targetTenantId}'. The next deploy of the application retries it.",
                     projection.ApplicationEntityId);
@@ -184,7 +201,7 @@ internal sealed partial class SecretDefaultProvisioningService(
         Logger.Error("[{TenantId}] Secret default {EntryName} of application '{ApplicationName}' ({ApplicationRtId}) " +
                      "was not projected: {Problem}", projection.SourceTenantId, entryName, application.Name,
             application.RtId, problem);
-        await communicationEventService.StoreErrorEventAsync(projection.SourceTenantId,
+        await TryStoreErrorEventAsync(projection.SourceTenantId,
             $"Secret default {entryName} of application '{application.Name}' was not projected: {problem}.",
             projection.ApplicationEntityId);
     }

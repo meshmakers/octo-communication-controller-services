@@ -198,6 +198,15 @@ internal class TenantLendingScopeResolverTests
     }
 
     [Test]
+    public async Task AncestorTenants_OfATenantMissingFromTheTreeAfterARebuild_Throw()
+    {
+        GivenTree((Lender, null), ("childA", Lender));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await _resolver.ResolveAncestorTenantsAsync("ghostTenant"));
+    }
+
+    [Test]
     public async Task Lending_WithAnInconsistentTree_StillUsesThePartialMap()
     {
         GivenTree((Lender, null), ("childA", Lender), ("childB", Lender), ("grandchildA1", "childA"));

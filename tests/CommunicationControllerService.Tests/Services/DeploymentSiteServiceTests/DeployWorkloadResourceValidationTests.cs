@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -110,6 +111,27 @@ internal class DeployWorkloadResourceValidationTests : PoolServiceTestsBase
         await CommunicationRepository.Received(1).SetApplicationDeploymentStateAsync(TenantId,
             Arg.Is<RtEntityId>(id => id.RtId == application.RtId), RtDeploymentStateEnum.Error,
             Arg.Is<string?>(m => m != null && m.Contains("MemoryLimit 'lots'")));
+    }
+
+    [Test]
+    public async Task DeployWorkloadAsync_ApplicationRejected_RecordsTheTextTheStudioFieldMarksParse()
+    {
+        var application = GivenWorkload(NewApplication());
+        application.MemoryLimit = "lots";
+
+        await Assert.ThrowsAsync<Exception>(
+            async () => await DeploymentSiteService.DeployWorkloadAsync(TenantId, application.RtId));
+
+        var recordedError = CommunicationRepository.ReceivedCalls()
+            .Where(call => call.GetMethodInfo().Name ==
+                           nameof(CommunicationRepository.SetApplicationDeploymentStateAsync))
+            .Select(call => call.GetArguments()[3] as string)
+            .Single();
+        var studioPrefix = new Regex(@"^\[[^\]]*]\s*Cannot deploy workload '[^']*':\s*");
+        await Assert.That(recordedError).IsNotNull();
+        await Assert.That(studioPrefix.IsMatch(recordedError!)).IsTrue();
+        var sentence = studioPrefix.Replace(recordedError!, string.Empty);
+        await Assert.That(sentence).StartsWith("MemoryLimit 'lots' is not a valid Kubernetes quantity.");
     }
 
     [Test]

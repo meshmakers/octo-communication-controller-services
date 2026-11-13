@@ -108,6 +108,13 @@ internal sealed class TenantLendingScopeResolver(ISystemContext systemContext) :
                 $"The ancestors of tenant '{tenantId}' cannot be resolved: the tenant tree could not be read completely.");
         }
 
+        if (!parentMap.KnownTenantIds.Contains(tenantId) &&
+            !string.Equals(tenantId, systemContext.TenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"The ancestors of tenant '{tenantId}' cannot be resolved: the tenant is not in the tenant tree.");
+        }
+
         var ancestors = WalkAncestors(parentMap.Parents, tenantId);
         ancestors.Remove(tenantId);
         return ancestors;
