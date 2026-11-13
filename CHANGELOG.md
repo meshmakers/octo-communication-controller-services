@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+- AB#7245 New: secret defaults follow the tenants and the deploy state of their Application. A tenant loaded after the
+  deploy (service start, Enable, tenant update) receives the defaults its own and its ancestors' Applications provide
+  (`ProvisionForTargetAsync`, never fails the load), and a default no Application provides any more is removed;
+  removals are conditional on what was read (incl. `RtVersion`), so a concurrent rewrite survives. A failed replacement
+  keeps the old value only while its source still reaches the tenant; revocation wins otherwise (tenant left
+  `AllowedTenantIds`, moved to another parent, key withdrawn, Application undeployed), and the key stays empty until the
+  replacement can be written. **Undeploying an Application withdraws its defaults** from its tenant and subtree,
+  where another deployed source takes the key over without a gap. An Application whose redeploy was refused or whose
+  Helm rollout failed keeps the defaults its running release projected, as stored (declarations edited after that release
+  are not projected until a deploy succeeds); one refused before it was ever deployed offers
+  nothing. `LastDeploymentError` of a refused deploy keeps its text (`[tenant] Cannot deploy workload 'x': ...`), so the
+  Studio's field marks still work. New endpoint `POST {tenantId}/v1/secretDefaults/reconcile`
+  (`TenantCommunicationApiReadWritePolicy`) reconciles the tenant and its subtree and answers one result per tenant
+  (status and counts, never a value); use it after deleting an Application. Events about a source's defaults are linked to
+  the Application in its own tenant, and the counts of a withdrawal name only that Application's defaults. A value that
+  cannot be revealed on the controller's host (no key ring, strict mode against clear text) fails only its own key, on the
+  deploy and on the reconcile. Known limits: a first install whose rollout failed keeps its defaults until it is undeployed
+  or deployed successfully; an Application in Error offers nothing to a tenant created meanwhile; and while an Application
+  is in Error, a copy a tenant edited stays edited and a deleted copy is not restored until a deploy succeeds.
+  An invalid entry (no value, duplicated key) is not projected, but its `AllowedTenantIds` still apply: a tenant it
+  excludes loses the default it holds, and of duplicates a tenant keeps it only while every duplicate allows it. The
+  Error events of a deploy are best effort: an event store that fails stops neither the other keys nor the sweep.
+
+- AB#7244 New: deploying an Application projects its `SecretDefaults` (System.Communication 4.15.0) into the
+  platform-owned `System.Communication/SecretDefault` of its own tenant and its whole subtree, narrowed by
+  `AllowedTenantIds`, never siblings. The value is revealed once in the source and encrypted by the engine in each target;
+  it never becomes a Helm value, a log line or an event. The source closer to the root wins; a tenant that is unavailable
+  or lacks the model is skipped with a Warning event. The deploy guard refuses an invalid declaration (empty or malformed
+  key, duplicate key, missing `SecretValue`) before anything reaches Helm.
+
 - AB#8716 Fix: every System.Communication method error declared with a `message` parameter carries it.
   `Pipeline.Execute` answered `PIPELINE_EXECUTION_START_FAILED` without `message`, because `TriggerManagementServiceException`
   was not on the caller-safe list; it is now (redacted of input and token). For an exception of unknown origin the handlers

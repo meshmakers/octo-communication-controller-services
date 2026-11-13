@@ -6,12 +6,17 @@ using NSubstitute;
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.SecretDefaultProvisioningServiceTests;
 
 /// <summary>
-///     The deploy is the release: only an Application in a deployed state is a source of SecretDefaults, and an
-///     undeploy withdraws what it projected.
+///     The deploy is the release: an Application in a deployed state is a source of SecretDefaults, one whose
+///     redeploy failed keeps what its running release projected, and an undeploy withdraws it.
 /// </summary>
 internal sealed class SecretDefaultReleasedSourceTests : SecretDefaultProvisioningServiceTestsBase
 {
     private const string NewChildTenantId = "child-new";
+
+    private const string RefusalText = "[parent-p] Cannot deploy workload 'energy-community-app': MemoryLimit 'lots' " +
+                                       "is not a valid Kubernetes quantity.";
+
+    private const string RolloutFailureText = "helm upgrade failed: timed out waiting for the condition";
 
     [Test]
     [Arguments(RtDeploymentStateEnum.Pending)]
@@ -29,9 +34,8 @@ internal sealed class SecretDefaultReleasedSourceTests : SecretDefaultProvisioni
 
     [Test]
     [Arguments(RtDeploymentStateEnum.Undeployed)]
-    [Arguments(RtDeploymentStateEnum.Error)]
     [Arguments(RtDeploymentStateEnum.Disabled)]
-    public async Task AnApplicationNeverDeployedRefusedOrDisabled_OffersNothing(RtDeploymentStateEnum deploymentState)
+    public async Task AnApplicationNeverDeployedOrDisabled_OffersNothing(RtDeploymentStateEnum deploymentState)
     {
         ArrangeTenant(NewChildTenantId, ancestorTenantIds: [SourceTenantId], descendantTenantIds: []);
         var application = ArrangeApplication(ProtectedEntry(CaptchaKey, SentinelSecret));
@@ -59,15 +63,75 @@ internal sealed class SecretDefaultReleasedSourceTests : SecretDefaultProvisioni
     }
 
     [Test]
-    public async Task AnApplicationRefusedAfterItsDeploy_LosesItsDefaultsOnTheNextReconcile()
+    public async Task AnApplicationRefusedBeforeItWasEverDeployed_OffersNothing()
+    {
+        ArrangeTenant(NewChildTenantId, ancestorTenantIds: [SourceTenantId], descendantTenantIds: []);
+        var application = ArrangeApplication(ProtectedEntry(CaptchaKey, SentinelSecret));
+        application.DeploymentState = RtDeploymentStateEnum.Error;
+        application.LastDeploymentError = RefusalText;
+
+        var newTenantResult = await Service.ProvisionForTargetAsync(NewChildTenantId);
+        var ownTenantResult = await Service.ProvisionForTargetAsync(SourceTenantId);
+
+        using var assertionScope = Assert.Multiple();
+        await Assert.That(newTenantResult.DefaultsWritten + ownTenantResult.DefaultsWritten).IsEqualTo(0);
+        await Assert.That(StoredDefault(NewChildTenantId, CaptchaKey)).IsNull();
+        await Assert.That(StoredDefault(SourceTenantId, CaptchaKey)).IsNull();
+    }
+
+    [Test]
+    [Arguments(RefusalText)]
+    [Arguments(RolloutFailureText)]
+    [Arguments(null)]
+    public async Task ARunningApplicationWhoseRedeployFailed_KeepsItsDefaults(string? lastDeploymentError)
     {
         var application = ArrangeApplication(ProtectedEntry(CaptchaKey, SentinelSecret));
-        await Service.ProvisionForTargetAsync(FirstChildTenantId);
+        await Service.ProvisionForSourceAsync(SourceTenantId, application.RtId);
         application.DeploymentState = RtDeploymentStateEnum.Error;
+        application.LastDeploymentError = lastDeploymentError;
 
-        await Service.ProvisionForTargetAsync(FirstChildTenantId);
+        var results = await Service.ReconcileTenantAndSubtreeAsync(SourceTenantId);
 
-        await Assert.That(StoredDefault(FirstChildTenantId, CaptchaKey)).IsNull();
+        using var assertionScope = Assert.Multiple();
+        await Assert.That(results.Sum(result => result.DefaultsRemoved)).IsEqualTo(0);
+        foreach (var tenantId in new[] { SourceTenantId, FirstChildTenantId, SecondChildTenantId, GrandchildTenantId })
+        {
+            await Assert.That(StoredDefault(tenantId, CaptchaKey)!.RevealedValue).IsEqualTo(SentinelSecret);
+        }
+    }
+
+    [Test]
+    public async Task AnApplicationInError_OffersNothingToATenantItDidNotServeBefore()
+    {
+        var application = ArrangeApplication(ProtectedEntry(CaptchaKey, SentinelSecret));
+        await Service.ProvisionForSourceAsync(SourceTenantId, application.RtId);
+        ArrangeTenant(NewChildTenantId, ancestorTenantIds: [SourceTenantId], descendantTenantIds: []);
+        application.DeploymentState = RtDeploymentStateEnum.Error;
+        application.LastDeploymentError = RefusalText;
+
+        await Service.ProvisionForTargetAsync(NewChildTenantId);
+
+        await Assert.That(StoredDefault(NewChildTenantId, CaptchaKey)).IsNull();
+    }
+
+    [Test]
+    public async Task UndeployingAnApplicationInError_WithdrawsTheDefaultsItKept()
+    {
+        var application = ArrangeApplication(ProtectedEntry(CaptchaKey, SentinelSecret));
+        await Service.ProvisionForSourceAsync(SourceTenantId, application.RtId);
+        application.DeploymentState = RtDeploymentStateEnum.Error;
+        application.LastDeploymentError = RefusalText;
+        await Service.ReconcileTenantAndSubtreeAsync(SourceTenantId);
+        application.DeploymentState = RtDeploymentStateEnum.Undeployed;
+
+        var result = await Service.WithdrawForSourceAsync(SourceTenantId, application.RtId);
+
+        using var assertionScope = Assert.Multiple();
+        await Assert.That(result.DefaultsRemoved).IsEqualTo(4);
+        foreach (var tenantId in new[] { SourceTenantId, FirstChildTenantId, SecondChildTenantId, GrandchildTenantId })
+        {
+            await Assert.That(StoredDefault(tenantId, CaptchaKey)).IsNull();
+        }
     }
 
     [Test]
@@ -90,6 +154,24 @@ internal sealed class SecretDefaultReleasedSourceTests : SecretDefaultProvisioni
             Arg.Is<string>(message => message.Contains("withdrawn")),
             Arg.Is<RtEntityId?>(link => link != null && link.Value.RtId == application.RtId &&
                                         link.Value.CkTypeId == SystemCommunicationCkIds.RtCkApplicationTypeId));
+    }
+
+    [Test]
+    public async Task WithdrawForSource_CountsOnlyTheDefaultsOfThisApplication()
+    {
+        var application = ArrangeApplication(ProtectedEntry(CaptchaKey, SentinelSecret));
+        await Service.ProvisionForSourceAsync(SourceTenantId, application.RtId);
+        ArrangeStoredDefault(FirstChildTenantId, "orphaned-key", "zq7245-orphan-value", SourceTenantId,
+            NewRtId().ToString());
+        application.DeploymentState = RtDeploymentStateEnum.Undeployed;
+        CommunicationEventService.ClearReceivedCalls();
+
+        var result = await Service.WithdrawForSourceAsync(SourceTenantId, application.RtId);
+
+        using var assertionScope = Assert.Multiple();
+        await Assert.That(result.DefaultsRemoved).IsEqualTo(4);
+        await CommunicationEventService.Received(1).StoreInformationEventAsync(SourceTenantId,
+            Arg.Is<string>(message => message.Contains("withdrawn: 4 removed, 0 failed")), Arg.Any<RtEntityId?>());
     }
 
     [Test]

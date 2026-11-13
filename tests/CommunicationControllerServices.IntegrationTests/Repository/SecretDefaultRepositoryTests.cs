@@ -355,6 +355,33 @@ public class SecretDefaultRepositoryTests(CommunicationControllerFixture fixture
     }
 
     [Fact]
+    public async Task DeleteSecretDefaultIfUnchangedAsync_ARotationInTheSameTick_IsKeptAndRemovableAfterARead()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var key = $"secret-default-{Guid.NewGuid():N}";
+        var sourceWorkloadRtId = OctoObjectId.GenerateNewId().ToString();
+        await repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
+            BuildWrite(key, "zq7245-integration-before-rotation", sourceWorkloadRtId));
+        var readBeforeRotation = await ListedDefaultAsync(repository, fixture.TestTenantId, key);
+        await repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
+            BuildWrite(key, "zq7245-integration-rotated", sourceWorkloadRtId));
+        var readAfterRotation = await ListedDefaultAsync(repository, fixture.TestTenantId, key);
+
+        var staleDeleteOutcome =
+            await repository.DeleteSecretDefaultIfUnchangedAsync(fixture.TestTenantId, readBeforeRotation);
+        var valueAfterStaleDelete = Reveal((await ReadSecretDefaultsAsync(key)).Single().Value);
+        var freshDeleteOutcome =
+            await repository.DeleteSecretDefaultIfUnchangedAsync(fixture.TestTenantId, readAfterRotation);
+
+        readAfterRotation.LastProjectedAt.Should().Be(readBeforeRotation.LastProjectedAt);
+        readAfterRotation.RtVersion.Should().BeGreaterThan(readBeforeRotation.RtVersion);
+        staleDeleteOutcome.Should().Be(SecretDefaultDeleteOutcome.Changed);
+        valueAfterStaleDelete.Should().Be("zq7245-integration-rotated");
+        freshDeleteOutcome.Should().Be(SecretDefaultDeleteOutcome.Deleted);
+        (await ReadSecretDefaultsAsync(key)).Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task DeleteSecretDefaultIfUnchangedAsync_ADefaultThatIsGone_IsReportedNotFound()
     {
         var repository = fixture.GetService<ICommunicationRepository>();

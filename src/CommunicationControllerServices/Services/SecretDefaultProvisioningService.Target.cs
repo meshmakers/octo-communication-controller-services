@@ -14,13 +14,21 @@ internal sealed partial class SecretDefaultProvisioningService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetTenantId);
 
+        return (await ReconcileTargetAsync(targetTenantId, cancellationToken)).Result;
+    }
+
+    private async Task<TargetReconcile> ReconcileTargetAsync(string targetTenantId,
+        CancellationToken cancellationToken)
+    {
         var inventory = await communicationRepository.GetSecretDefaultsAsync(targetTenantId);
         switch (inventory.Availability)
         {
             case SecretDefaultTenantAvailability.TenantUnavailable:
-                return SecretDefaultTargetResult.Unchanged(targetTenantId, SecretDefaultTargetStatus.TenantUnavailable);
+                return TargetReconcile.Of(SecretDefaultTargetResult.Unchanged(targetTenantId,
+                    SecretDefaultTargetStatus.TenantUnavailable));
             case SecretDefaultTenantAvailability.ModelMissing:
-                return SecretDefaultTargetResult.Unchanged(targetTenantId, SecretDefaultTargetStatus.ModelMissing);
+                return TargetReconcile.Of(SecretDefaultTargetResult.Unchanged(targetTenantId,
+                    SecretDefaultTargetStatus.ModelMissing));
         }
 
         IReadOnlyList<SourceTenant> sourceTenants;
@@ -36,10 +44,11 @@ internal sealed partial class SecretDefaultProvisioningService
             await communicationEventService.StoreWarningEventAsync(targetTenantId,
                 "Secret defaults were not reconciled because the tenant tree could not be read completely; the " +
                 $"{inventory.Defaults.Count} existing default(s) are kept.");
-            return SecretDefaultTargetResult.Unchanged(targetTenantId, SecretDefaultTargetStatus.TreeUnreadable) with
-            {
-                DefaultsKept = inventory.Defaults.Count
-            };
+            return TargetReconcile.Of(
+                SecretDefaultTargetResult.Unchanged(targetTenantId, SecretDefaultTargetStatus.TreeUnreadable) with
+                {
+                    DefaultsKept = inventory.Defaults.Count
+                });
         }
 
         var desiredState = await ReadDesiredStateAsync(targetTenantId, inventory, sourceTenants, cancellationToken);
@@ -59,7 +68,7 @@ internal sealed partial class SecretDefaultProvisioningService
                 result.WritesFailed);
         }
 
-        return result;
+        return new TargetReconcile(result, removal.RemovedRtIds, removal.UnremovedRtIds);
     }
 
     /// <inheritdoc />
@@ -139,8 +148,15 @@ internal sealed partial class SecretDefaultProvisioningService
                 continue;
             }
 
-            foreach (var application in sources.Applications.Where(IsReleasedSource))
+            foreach (var application in sources.Applications.Where(application =>
+                         IsSourceFor(application, sourceTenant.TenantId, inventory)))
             {
+                if (application.DeploymentState == RtDeploymentStateEnum.Error)
+                {
+                    HoldReleasedDefaults(sourceTenant, application, inventory, desiredState);
+                    continue;
+                }
+
                 CollectOffers(targetTenantId, sourceTenant, application, desiredState);
             }
         }
@@ -189,8 +205,12 @@ internal sealed partial class SecretDefaultProvisioningService
 
             if (checkedDeclaration.Issue != SecretDefaultDeclarationIssue.None)
             {
-                desiredState.ProvidedDefaults.Add(new ProvidedDefault(sourceTenant.TenantId, applicationRtId,
-                    checkedDeclaration.Key));
+                if (InvalidEntriesStillReach(checkedDeclarations, checkedDeclaration.Key, targetTenantId))
+                {
+                    desiredState.ProvidedDefaults.Add(new ProvidedDefault(sourceTenant.TenantId, applicationRtId,
+                        checkedDeclaration.Key));
+                }
+
                 continue;
             }
 
@@ -205,6 +225,28 @@ internal sealed partial class SecretDefaultProvisioningService
         }
     }
 
+    /// <summary>
+    ///     An Application in Error still runs its previous release, so it provides exactly the defaults it projected
+    ///     here, unchanged; its current declarations were never deployed and offer nothing.
+    /// </summary>
+    private static void HoldReleasedDefaults(SourceTenant sourceTenant, RtApplication application,
+        SecretDefaultInventory inventory, DesiredSecretDefaults desiredState)
+    {
+        var applicationRtId = application.RtId.ToString();
+        foreach (var storedDefault in inventory.Defaults.Where(storedDefault =>
+                     IsProjectedBy(storedDefault, sourceTenant.TenantId, applicationRtId)))
+        {
+            desiredState.ProvidedDefaults.Add(new ProvidedDefault(sourceTenant.TenantId, applicationRtId,
+                storedDefault.Key));
+            desiredState.HeldDefaults.Add(new HeldDefault(storedDefault.Key, sourceTenant.Depth));
+        }
+    }
+
+    /// <summary>
+    ///     Removes every default no source provides to the tenant any more, also when the write of its replacement
+    ///     failed: revocation wins over keeping the old value. A default whose source still reaches the tenant is
+    ///     provided and stays, so a failed replacement of a still-reaching source keeps its old value.
+    /// </summary>
     private async Task<RemovalOutcome> RemoveUnprovidedDefaultsAsync(string targetTenantId,
         SecretDefaultInventory inventory, DesiredSecretDefaults desiredState)
     {
@@ -215,6 +257,7 @@ internal sealed partial class SecretDefaultProvisioningService
             {
                 case StoredDefaultStanding.SourceUnreadable:
                     removal.Kept++;
+                    removal.UnremovedRtIds.Add(storedDefault.RtId.ToString());
                     continue;
                 case StoredDefaultStanding.Provided:
                     continue;
@@ -227,6 +270,7 @@ internal sealed partial class SecretDefaultProvisioningService
                     break;
                 case RemovalAttempt.Failed:
                     removal.Failed++;
+                    removal.UnremovedRtIds.Add(storedDefault.RtId.ToString());
                     break;
             }
         }
@@ -285,6 +329,20 @@ internal sealed partial class SecretDefaultProvisioningService
                    string.Equals(allowedTenantId.Trim(), targetTenantId, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    ///     An invalid entry is never written, but its AllowedTenantIds still narrow where its existing defaults stay:
+    ///     a tenant keeps the default only while every entry of the key allows it, so of disagreeing duplicates the
+    ///     narrowest wins and a tenant any of them excludes loses the default.
+    /// </summary>
+    private static bool InvalidEntriesStillReach(IReadOnlyList<CheckedSecretDefaultDeclaration> checkedDeclarations,
+        string key, string targetTenantId)
+    {
+        return checkedDeclarations
+            .Where(checkedDeclaration => checkedDeclaration.Key == key)
+            .All(checkedDeclaration => checkedDeclaration.Declaration is not { } declaration ||
+                                       AllowsTenant(declaration, targetTenantId));
+    }
+
     private sealed class SourceTenant(string tenantId, IReadOnlyCollection<string> ancestorTenantIds)
     {
         public string TenantId { get; } = tenantId;
@@ -334,7 +392,11 @@ internal sealed partial class SecretDefaultProvisioningService
         public HashSet<ProvidedDefault> ProvidedDefaults { get; } = [];
 
         public List<SecretDefaultOffer> Offers { get; } = [];
+
+        public List<HeldDefault> HeldDefaults { get; } = [];
     }
+
+    private readonly record struct HeldDefault(string Key, int SourceDepth);
 
     private enum StoredDefaultStanding
     {
@@ -347,8 +409,25 @@ internal sealed partial class SecretDefaultProvisioningService
     {
         public HashSet<string> RemovedRtIds { get; } = new(StringComparer.Ordinal);
 
+        public HashSet<string> UnremovedRtIds { get; } = new(StringComparer.Ordinal);
+
         public int Kept { get; set; }
 
         public int Failed { get; set; }
+    }
+
+    /// <summary>
+    ///     The result of a target reconcile, plus which stored defaults it removed and which it had to leave (failed
+    ///     removal, unreadable source), so a source sweep can count only its own.
+    /// </summary>
+    private sealed record TargetReconcile(
+        SecretDefaultTargetResult Result,
+        IReadOnlySet<string> RemovedRtIds,
+        IReadOnlySet<string> UnremovedRtIds)
+    {
+        public static TargetReconcile Of(SecretDefaultTargetResult result)
+        {
+            return new TargetReconcile(result, new HashSet<string>(), new HashSet<string>());
+        }
     }
 }

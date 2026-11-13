@@ -39,12 +39,22 @@ internal sealed partial class SecretDefaultProvisioningService
     }
 
     /// <summary>
-    ///     Only an Application whose deploy was accepted (Pending) or completed (Deployed) is a source. One that was
-    ///     never deployed, is undeployed or disabled, or was refused (Error) offers nothing.
+    ///     Whether the Application provides SecretDefaults to the target tenant. Pending and Deployed: yes. Error: only
+    ///     where it still holds a default it projected, because a refused or failed redeploy leaves the previous release
+    ///     running and that release keeps its defaults as stored; an Application refused before it was ever deployed
+    ///     holds none.
+    ///     Never deployed, undeployed or disabled: no.
     /// </summary>
-    internal static bool IsReleasedSource(RtApplication application)
+    internal static bool IsSourceFor(RtApplication application, string sourceTenantId,
+        SecretDefaultInventory targetInventory)
     {
-        return application.DeploymentState is RtDeploymentStateEnum.Pending or RtDeploymentStateEnum.Deployed;
+        return application.DeploymentState switch
+        {
+            RtDeploymentStateEnum.Pending or RtDeploymentStateEnum.Deployed => true,
+            RtDeploymentStateEnum.Error => targetInventory.Defaults.Any(storedDefault =>
+                IsProjectedBy(storedDefault, sourceTenantId, application.RtId.ToString())),
+            _ => false
+        };
     }
 
     private async Task<SecretDefaultProvisioningResult> RemoveWithdrawnDefaultsAsync(string sourceTenantId,
@@ -75,40 +85,55 @@ internal sealed partial class SecretDefaultProvisioningService
                 .Where(storedDefault => IsProjectedBy(storedDefault, sourceTenantId, applicationRtId) &&
                                         !StillProvides(checkedDeclarations, storedDefault.Key, servedTenantId))
                 .ToList();
-            var removedInTenant = 0;
+            if (withdrawnDefaults.Count == 0)
+            {
+                continue;
+            }
+
+            var handOver = await TryHandOverAsync(servedTenantId, cancellationToken);
+            if (handOver is { Result.Status: SecretDefaultTargetStatus.Reconciled })
+            {
+                var withdrawnRtIds = withdrawnDefaults.Select(withdrawnDefault => withdrawnDefault.RtId.ToString())
+                    .ToList();
+                removed += withdrawnRtIds.Count(handOver.RemovedRtIds.Contains);
+                failed += withdrawnRtIds.Count(handOver.UnremovedRtIds.Contains);
+                continue;
+            }
+
             foreach (var withdrawnDefault in withdrawnDefaults)
             {
                 switch (await TryDeleteAsync(servedTenantId, withdrawnDefault))
                 {
                     case RemovalAttempt.Removed:
-                        removedInTenant++;
+                        removed++;
                         break;
                     case RemovalAttempt.Failed:
                         failed++;
                         break;
                 }
             }
-
-            removed += removedInTenant;
-            if (removedInTenant > 0)
-            {
-                await HandOverToRemainingSourcesAsync(servedTenantId, cancellationToken);
-            }
         }
 
         return new SecretDefaultProvisioningResult(0, 0, failed, removed);
     }
 
-    private async Task HandOverToRemainingSourcesAsync(string targetTenantId, CancellationToken cancellationToken)
+    /// <summary>
+    ///     Reconciles a tenant that holds withdrawn defaults: another source's winner is written before the withdrawn
+    ///     default is removed, so the key has no gap. A withdrawn default is removed also when its replacement fails.
+    ///     Null when the reconcile threw; the caller then removes the withdrawn defaults itself.
+    /// </summary>
+    private async Task<TargetReconcile?> TryHandOverAsync(string targetTenantId,
+        CancellationToken cancellationToken)
     {
         try
         {
-            await ProvisionForTargetAsync(targetTenantId, cancellationToken);
+            return await ReconcileTargetAsync(targetTenantId, cancellationToken);
         }
         catch (Exception reconcileFailure) when (reconcileFailure is not OperationCanceledException)
         {
-            Logger.Warn(reconcileFailure, "[{TenantId}] Secret defaults of the tenant could not be reconciled after a " +
-                                          "removal; the next tenant load retries", targetTenantId);
+            Logger.Warn(reconcileFailure, "[{TenantId}] Secret defaults of the tenant could not be reconciled for a " +
+                                          "withdrawal; the withdrawn defaults are removed directly", targetTenantId);
+            return null;
         }
     }
 
@@ -165,8 +190,9 @@ internal sealed partial class SecretDefaultProvisioningService
     {
         return checkedDeclarations.Any(checkedDeclaration =>
             checkedDeclaration.Key == key &&
-            (checkedDeclaration.Issue != SecretDefaultDeclarationIssue.None ||
-             AllowsTenant(checkedDeclaration.Declaration!, targetTenantId)));
+            (checkedDeclaration.Issue == SecretDefaultDeclarationIssue.None
+                ? AllowsTenant(checkedDeclaration.Declaration!, targetTenantId)
+                : InvalidEntriesStillReach(checkedDeclarations, key, targetTenantId)));
     }
 
     private enum RemovalAttempt

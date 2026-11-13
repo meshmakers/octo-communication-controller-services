@@ -4,6 +4,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using Meshmakers.Octo.Runtime.Contracts.Secrets;
 using NSubstitute;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.SecretDefaultProvisioningServiceTests;
@@ -300,6 +301,47 @@ internal abstract class SecretDefaultProvisioningServiceTestsBase
 
         return entry;
     }
+
+    /// <summary>
+    ///     A service whose reveal throws, as on a host without key ring or in strict mode against legacy clear text, for
+    ///     every source value the predicate names; stored SecretDefaults stay readable.
+    /// </summary>
+    protected SecretDefaultProvisioningService CreateServiceFailingReveals(
+        Func<object?, SecretAccessContext?, bool> failsToReveal)
+    {
+        var realEncryptionService = SecretEncryption.EncryptionService;
+        var failingEncryptionService = Substitute.For<IWorkloadEncryptionService>();
+        failingEncryptionService
+            .RevealOrNull(Arg.Any<object?>(), Arg.Any<SecretAccessContext?>())
+            .Returns(call =>
+            {
+                var storedValue = call.ArgAt<object?>(0);
+                var accessContext = call.ArgAt<SecretAccessContext?>(1);
+                if (accessContext?.CkTypeId != SecretDefaultCkTypeId && failsToReveal(storedValue, accessContext))
+                {
+                    throw new SecretEncryptionNotConfiguredException("No key ring in this host.");
+                }
+
+                return realEncryptionService.RevealOrNull(storedValue, accessContext);
+            });
+        return new SecretDefaultProvisioningService(CommunicationRepository, TenantScopeResolver,
+            failingEncryptionService, CommunicationEventService, Clock);
+    }
+
+    protected SecretDefaultProvisioningService CreateServiceFailingRevealsOf(string sourceTenantIdWithoutKeyRing)
+    {
+        return CreateServiceFailingReveals((_, accessContext) => string.Equals(accessContext?.TenantId,
+            sourceTenantIdWithoutKeyRing, StringComparison.OrdinalIgnoreCase));
+    }
+
+    protected SecretDefaultProvisioningService CreateServiceFailingRevealsOfPlaintext(string unrevealablePlaintext)
+    {
+        var realEncryptionService = SecretEncryption.EncryptionService;
+        return CreateServiceFailingReveals((storedValue, accessContext) =>
+            realEncryptionService.RevealOrNull(storedValue, accessContext) == unrevealablePlaintext);
+    }
+
+    private static string SecretDefaultCkTypeId => SystemCommunicationCkIds.RtCkSecretDefaultTypeId.ToString();
 
     protected IReadOnlyList<string> TenantsWritten(string key)
     {
