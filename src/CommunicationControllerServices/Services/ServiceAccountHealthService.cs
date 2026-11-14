@@ -43,6 +43,7 @@ internal class ServiceAccountHealthService(
     private const string TenantCheck = "tenant";
     private const string IssuerUriCheck = "issuerUri";
     private const string ImpersonationCheck = "impersonation";
+    private const string LinkedConfigurationsCheck = "linkedConfigurations";
 
     /// <summary>
     /// AB#5114: what the aggregate knows about the account's impersonation actor — the adapter's
@@ -83,7 +84,7 @@ internal class ServiceAccountHealthService(
                 "The reconcile creates it with the declaration defaults."));
             checks.AddRange(NotEvaluated(ClientCheck, RolesCheck, DelegationCheck, SecretCheck, TenantCheck,
                 IssuerUriCheck, ImpersonationCheck));
-            return Build(null, checks);
+            return await BuildWithLinkedConfigurationsAsync(tenantId, adapter, null, checks);
         }
 
         checks.Add(Healthy(ConfigurationCheck));
@@ -96,7 +97,68 @@ internal class ServiceAccountHealthService(
                 NoActorReason:
                 "this account IS the adapter's own client (AB#5072) — it cannot impersonate itself, so a " +
                 "usable secret is its only credential"));
-        return Build(configuration, checks);
+        return await BuildWithLinkedConfigurationsAsync(tenantId, adapter, configuration, checks);
+    }
+
+    /// <summary>
+    /// AB#8982: the adapter variant also reports every standalone configuration the adapter's
+    /// pipelines link via <c>Uses</c> (per-pipeline overrides). Each one is evaluated like the
+    /// configuration-scoped variant, with this adapter as the impersonation actor, and returned in <see cref="ServiceAccountHealthDto.LinkedConfigurations" />;
+    /// the <c>linkedConfigurations</c> check rolls them up into the adapter's overall status, so a
+    /// missing client or a role drift of an override no longer hides behind a healthy adapter account.
+    /// A failing lookup degrades to <c>Unknown</c>, like every other check of this read-only aggregate.
+    /// </summary>
+    private async Task<ServiceAccountHealthDto> BuildWithLinkedConfigurationsAsync(string tenantId,
+        RtAdapter adapter, RtServiceAccountConfiguration? configuration, List<ServiceAccountHealthCheckDto> checks)
+    {
+        IReadOnlyList<RtServiceAccountConfiguration> linked;
+        try
+        {
+            linked = await UsesLinkedServiceAccountLookup.FindAsync(communicationRepository, tenantId, adapter.RtId);
+        }
+        catch (Exception e)
+        {
+            checks.Add(new ServiceAccountHealthCheckDto(LinkedConfigurationsCheck, ServiceAccountHealthStatus.Unknown,
+                null, $"The service accounts linked by the adapter's pipelines could not be looked up: {e.Message}"));
+            return Build(configuration, checks);
+        }
+
+        var linkedHealth = new List<ServiceAccountHealthDto>(linked.Count);
+        foreach (var linkedConfiguration in linked)
+        {
+            linkedHealth.Add(await GetLinkedConfigurationHealthAsync(tenantId, adapter, linkedConfiguration));
+        }
+
+        string Names(string overall) => string.Join(", ", linkedHealth.Where(h => h.OverallStatus == overall)
+            .Select(h => $"'{h.ConfigurationWellKnownName ?? h.ConfigurationRtId}'"));
+
+        if (linkedHealth.Count == 0)
+        {
+            checks.Add(new ServiceAccountHealthCheckDto(LinkedConfigurationsCheck,
+                ServiceAccountHealthStatus.NotApplicable, null,
+                "No pipeline of this adapter links a service account of its own via 'Uses'."));
+        }
+        else if (linkedHealth.Any(h => h.OverallStatus == ServiceAccountHealthStatus.OverallUnhealthy))
+        {
+            checks.Add(Violation(LinkedConfigurationsCheck, "linked-configuration-unhealthy",
+                $"Service account(s) {Names(ServiceAccountHealthStatus.OverallUnhealthy)} used by this adapter's pipelines " +
+                "are unhealthy (see linkedConfigurations). The reconcile heals them " +
+                "(POST {tenantId}/v1/serviceAccount/reconcile?configurationRtId=<rtId>; it also runs on tenant load, " +
+                "blueprint apply and workload deploy)."));
+        }
+        else if (linkedHealth.Any(h => h.OverallStatus == ServiceAccountHealthStatus.OverallUnknown))
+        {
+            checks.Add(new ServiceAccountHealthCheckDto(LinkedConfigurationsCheck, ServiceAccountHealthStatus.Unknown,
+                null,
+                $"Service account(s) {Names(ServiceAccountHealthStatus.OverallUnknown)} used by this adapter's pipelines " +
+                "could not be fully evaluated (see linkedConfigurations)."));
+        }
+        else
+        {
+            checks.Add(Healthy(LinkedConfigurationsCheck));
+        }
+
+        return Build(configuration, checks) with { LinkedConfigurations = linkedHealth };
     }
 
     /// <inheritdoc />
@@ -160,15 +222,8 @@ internal class ServiceAccountHealthService(
                 }
 
                 hasAdapterContext = true;
-                var adapterDefault = await serviceAccountResolver.GetAdapterDefaultAsync(tenantId, adapter.RtId);
-                var actorClientId = adapterDefault == null
-                    ? null
-                    : ReadAttribute(adapterDefault, nameof(RtServiceAccountConfiguration.ClientId));
-                var actorSecret = adapterDefault == null
-                    ? null
-                    : ReadRawAttribute(adapterDefault, nameof(RtServiceAccountConfiguration.ClientSecret));
-                if (!string.IsNullOrWhiteSpace(actorClientId) && actorClientId != targetClientId &&
-                    encryptionService.DescribeSecret(actorSecret).IsSet)
+                var actorClientId = await ResolveCapableActorClientIdAsync(tenantId, adapter, targetClientId);
+                if (actorClientId != null)
                 {
                     return new ImpersonationContext(HasAdapterContext: true, actorClientId, null);
                 }
@@ -185,6 +240,57 @@ internal class ServiceAccountHealthService(
         {
             return ImpersonationContext.NoAdapter;
         }
+    }
+
+    /// <summary>
+    /// The own client of <paramref name="adapter" /> when it can act as the target account: its
+    /// default account has a client id other than the target's and a usable secret; otherwise <c>null</c>.
+    /// </summary>
+    private async Task<string?> ResolveCapableActorClientIdAsync(string tenantId, RtAdapter adapter,
+        string? targetClientId)
+    {
+        var adapterDefault = await serviceAccountResolver.GetAdapterDefaultAsync(tenantId, adapter.RtId);
+        var actorClientId = adapterDefault == null
+            ? null
+            : ReadAttribute(adapterDefault, nameof(RtServiceAccountConfiguration.ClientId));
+        var actorSecret = adapterDefault == null
+            ? null
+            : ReadRawAttribute(adapterDefault, nameof(RtServiceAccountConfiguration.ClientSecret));
+        return !string.IsNullOrWhiteSpace(actorClientId) && actorClientId != targetClientId &&
+               encryptionService.DescribeSecret(actorSecret).IsSet
+            ? actorClientId
+            : null;
+    }
+
+    /// <summary>
+    /// AB#8982: health of a Uses-linked account as seen from <paramref name="adapter" /> — the
+    /// impersonation check evaluates THIS adapter's own client as the actor (its MayActAs edge), not
+    /// the first capable adapter of the tenant, so an account shared by several adapters is judged
+    /// per adapter.
+    /// </summary>
+    private async Task<ServiceAccountHealthDto> GetLinkedConfigurationHealthAsync(string tenantId, RtAdapter adapter,
+        RtServiceAccountConfiguration configuration)
+    {
+        var targetClientId = ReadAttribute(configuration, nameof(RtServiceAccountConfiguration.ClientId));
+        ImpersonationContext impersonation;
+        try
+        {
+            var actorClientId = await ResolveCapableActorClientIdAsync(tenantId, adapter, targetClientId);
+            impersonation = actorClientId != null
+                ? new ImpersonationContext(HasAdapterContext: true, actorClientId, null)
+                : new ImpersonationContext(HasAdapterContext: true, ActorClientId: null,
+                    NoActorReason:
+                    $"adapter '{adapter.Name ?? adapter.RtId.ToString()}' has no own client with a usable secret " +
+                    "(reconcile the adapter to provision its pipeline service account, AB#5072)");
+        }
+        catch (Exception)
+        {
+            impersonation = ImpersonationContext.NoAdapter;
+        }
+
+        var checks = new List<ServiceAccountHealthCheckDto> { Healthy(ConfigurationCheck) };
+        await EvaluateConfigurationAsync(tenantId, configuration, checks, impersonation);
+        return Build(configuration, checks);
     }
 
     /// <summary>

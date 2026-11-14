@@ -1,4 +1,6 @@
+using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
+using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Common.DistributionEventHub.Consumers;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
@@ -154,5 +156,55 @@ internal class BlueprintAppliedConsumerTests
 
         await Assert.That(async () => await CreateSut().ConsumeAsync(UpdatedContext(added: 0, updated: 1)))
             .ThrowsNothing();
+    }
+
+    // ---------------------------------------------------------------- AB#8982 through the real provisioning service
+
+    private static BlueprintAppliedConsumer CreateSutWithRealProvisioning(UsesLinkedServiceAccountFixture fixture)
+    {
+        return new BlueprintAppliedConsumer(NullLogger<BlueprintAppliedConsumer>.Instance,
+            fixture.CreateProvisioningService(), Substitute.For<IAdapterService>());
+    }
+
+    private static IDistributedContext<T> ContextFor<T>(T message) where T : class
+    {
+        var context = Substitute.For<IDistributedContext<T>>();
+        context.Message.Returns(message);
+        return context;
+    }
+
+    [Test]
+    public async Task BlueprintInstall_CreatesTheClientsOfUsesLinkedAccounts()
+    {
+        var fixture = new UsesLinkedServiceAccountFixture();
+        var aiPrompt = fixture.AddStandalone("accounting-ai-prompt", ["AccountingRead"]);
+        var reader = fixture.AddStandalone("accounting-pipeline-reader", ["AccountingRead"]);
+
+        await CreateSutWithRealProvisioning(fixture).ConsumeAsync(ContextFor(new BlueprintApplied(
+            UsesLinkedServiceAccountFixture.TenantId, "MeshmakersAccounting-3.29.0", "Initial", 12, 0, 0,
+            Guid.NewGuid(), DateTime.UtcNow)));
+
+        var sentClientIds = fixture.SentClients().Select(c => c.ClientId).ToList();
+        using var _ = Assert.Multiple();
+        await Assert.That(sentClientIds).Contains(PipelineServiceAccountProvisioningService.BuildClientId(aiPrompt.RtId));
+        await Assert.That(sentClientIds).Contains(PipelineServiceAccountProvisioningService.BuildClientId(reader.RtId));
+        await Assert.That(fixture.UpdatedStandalone().Count).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task BlueprintUpdate_MaterialisesChangedDeclarationsOfUsesLinkedAccounts()
+    {
+        var fixture = new UsesLinkedServiceAccountFixture();
+        var reader = fixture.AddStandalone("accounting-pipeline-reader", ["AccountingRead", "AccountingWrite"],
+            clientId: "octo-pipeline-sa-reader");
+        reader.ClientSecret = SecretTestValues.Stored("reader-secret");
+
+        await CreateSutWithRealProvisioning(fixture).ConsumeAsync(ContextFor(new BlueprintUpdated(
+            UsesLinkedServiceAccountFixture.TenantId, "MeshmakersAccounting-3.30.0", "MeshmakersAccounting-3.29.0",
+            "Merge", 0, 3, 0, Guid.NewGuid(), DateTime.UtcNow)));
+
+        var sent = fixture.SentClients().Single(c => c.ClientId == "octo-pipeline-sa-reader");
+        await Assert.That(sent.AssignedRoleNames)
+            .IsEquivalentTo(new[] { "AccountingRead", "AccountingWrite", CommonConstants.StreamDataReaderRole });
     }
 }

@@ -136,9 +136,13 @@ internal class ServiceAccountHealthTests
         using var _ = Assert.Multiple();
         await Assert.That(dto.OverallStatus).IsEqualTo("Healthy");
         await Assert.That(Check(dto, "association").Status).IsEqualTo("Healthy");
-        await Assert.That(dto.Checks.Where(c => c.Check != "impersonation")
+        await Assert.That(dto.Checks.Where(c => c.Check != "impersonation" && c.Check != "linkedConfigurations")
             .All(c => c.Status == "Healthy")).IsTrue();
         await Assert.That(Check(dto, "impersonation").Status).IsEqualTo("NotApplicable");
+        // AB#8982: no pipeline links an account of its own.
+        await Assert.That(Check(dto, "linkedConfigurations").Status).IsEqualTo("NotApplicable");
+        await Assert.That(dto.LinkedConfigurations).IsNotNull();
+        await Assert.That(dto.LinkedConfigurations!.Count).IsEqualTo(0);
     }
 
     // ---------------------------------------------------------------- association / configuration
@@ -849,5 +853,139 @@ internal class ServiceAccountHealthTests
         await Assert.That(Check(dto, "client").Status).IsEqualTo("Healthy");
         await Assert.That(Check(dto, "roles").Status).IsEqualTo("Unknown");
         await Assert.That(Check(dto, "delegation").Status).IsEqualTo("Healthy");
+    }
+
+    // ---------------------------------------------------------------- AB#8982 Uses-linked configurations
+
+    /// <summary>
+    /// Arranges a healthy adapter account plus one standalone account (<c>accounting-ai-prompt</c>)
+    /// that a pipeline of the adapter links via <c>Uses</c>.
+    /// </summary>
+    private (RtAdapter Adapter, RtServiceAccountConfiguration Linked) ArrangeAdapterWithUsesLinkedConfiguration()
+    {
+        var adapter = RtEntityCreator.CreateAdapter();
+        var adapterAccount = CreateHealthyConfiguration();
+        _resolver.GetAdapterDefaultAsync(TenantId, adapter.RtId).Returns(adapterAccount);
+
+        var linked = CreateHealthyConfiguration();
+        linked.RtId = OctoObjectId.GenerateNewId();
+        linked.RtWellKnownName = "accounting-ai-prompt";
+        linked.ClientId = "linked-client";
+        var pipeline = RtEntityCreator.CreatePipeline();
+        _repo.GetServiceAccountsAsync(TenantId).Returns([adapterAccount, linked]);
+        _repo.GetAdapterForServiceAccountAsync(TenantId, adapterAccount.RtId).Returns(adapter);
+        _repo.GetAdapterForServiceAccountAsync(TenantId, linked.RtId).Returns((RtAdapter?)null);
+        _repo.GetPipelinesUsingServiceAccountAsync(TenantId, linked.RtId).Returns([pipeline]);
+        _repo.GetAdapterByPipelineAsync(TenantId, Arg.Any<RtEntityId>()).Returns(adapter);
+        return (adapter, linked);
+    }
+
+    [Test]
+    public async Task GetAdapterHealth_UsesLinkedConfigurationHealthy_ReportsItAndStaysHealthy()
+    {
+        var sut = CreateSut();
+        var (adapter, linked) = ArrangeAdapterWithUsesLinkedConfiguration();
+        ArrangeMatchingIdentityClient();
+
+        var dto = await sut.GetAdapterHealthAsync(TenantId, adapter);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(dto.OverallStatus).IsEqualTo("Healthy");
+        await Assert.That(Check(dto, "linkedConfigurations").Status).IsEqualTo("Healthy");
+        await Assert.That(dto.LinkedConfigurations!.Count).IsEqualTo(1);
+        await Assert.That(dto.LinkedConfigurations[0].ConfigurationRtId).IsEqualTo(linked.RtId.ToString());
+        await Assert.That(dto.LinkedConfigurations[0].ClientId).IsEqualTo("linked-client");
+        await Assert.That(dto.LinkedConfigurations[0].OverallStatus).IsEqualTo("Healthy");
+    }
+
+    [Test]
+    public async Task GetAdapterHealth_UsesLinkedConfigurationClientMissing_AdapterIsUnhealthy()
+    {
+        var sut = CreateSut();
+        var (adapter, _) = ArrangeAdapterWithUsesLinkedConfiguration();
+        ArrangeMatchingIdentityClient();
+        // The bug: the blueprint shipped the account, but its identity client was never created.
+        _identityReader.GetClientAsync(TenantId, "linked-client", Arg.Any<bool>())
+            .Returns(IdentityClientLookup.NotFound);
+
+        var dto = await sut.GetAdapterHealthAsync(TenantId, adapter);
+
+        using var __ = Assert.Multiple();
+        await Assert.That(dto.OverallStatus).IsEqualTo("Unhealthy");
+        await Assert.That(Check(dto, "association").Status).IsEqualTo("Healthy");
+        var linkedCheck = Check(dto, "linkedConfigurations");
+        await Assert.That(linkedCheck.Status).IsEqualTo("Violation");
+        await Assert.That(linkedCheck.Code).IsEqualTo("linked-configuration-unhealthy");
+        await Assert.That(linkedCheck.Message!).Contains("accounting-ai-prompt");
+        await Assert.That(Check(dto.LinkedConfigurations![0], "client").Code).IsEqualTo("client-missing");
+    }
+
+    [Test]
+    public async Task GetAdapterHealth_UsesLinkedConfigurationOfAnotherAdapter_IsNotReported()
+    {
+        var sut = CreateSut();
+        var (adapter, _) = ArrangeAdapterWithUsesLinkedConfiguration();
+        _repo.GetAdapterByPipelineAsync(TenantId, Arg.Any<RtEntityId>()).Returns(RtEntityCreator.CreateAdapter());
+        ArrangeMatchingIdentityClient();
+
+        var dto = await sut.GetAdapterHealthAsync(TenantId, adapter);
+
+        await Assert.That(Check(dto, "linkedConfigurations").Status).IsEqualTo("NotApplicable");
+    }
+
+    [Test]
+    public async Task GetAdapterHealth_LinkedLookupFails_DegradesToUnknown()
+    {
+        var sut = CreateSut();
+        var adapter = RtEntityCreator.CreateAdapter();
+        _resolver.GetAdapterDefaultAsync(TenantId, adapter.RtId).Returns(CreateHealthyConfiguration());
+        _repo.GetServiceAccountsAsync(TenantId)
+            .Returns<IReadOnlyCollection<RtServiceAccountConfiguration>>(_ => throw new InvalidOperationException("unloading"));
+        ArrangeMatchingIdentityClient();
+
+        var dto = await sut.GetAdapterHealthAsync(TenantId, adapter);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(dto.OverallStatus).IsEqualTo("Unknown");
+        await Assert.That(Check(dto, "linkedConfigurations").Status).IsEqualTo("Unknown");
+    }
+
+    [Test]
+    public async Task GetAdapterHealth_SharedSecretlessLinkedAccount_IsJudgedWithEachAdapterAsActor()
+    {
+        // Two adapters run pipelines of the same secretless account; identity holds the MayActAs
+        // edge only for adapter A. A's view is healthy, B's must show the missing edge (not A's edge).
+        var sut = CreateSut();
+        var shared = CreateInstallationDefaultConfiguration(withSecret: false);
+        shared.RtWellKnownName = "accounting-ai-prompt";
+        var adapterA = RtEntityCreator.CreateAdapter();
+        var adapterB = RtEntityCreator.CreateAdapter();
+        var ownA = RtEntityCreator.CreateServiceAccountConfiguration("own-a");
+        ownA.ClientId = "octo-pipeline-sa-a";
+        var ownB = RtEntityCreator.CreateServiceAccountConfiguration("own-b");
+        ownB.ClientId = "octo-pipeline-sa-b";
+        _resolver.GetAdapterDefaultAsync(TenantId, adapterA.RtId).Returns(ownA);
+        _resolver.GetAdapterDefaultAsync(TenantId, adapterB.RtId).Returns(ownB);
+        var pipelineA = RtEntityCreator.CreatePipeline();
+        var pipelineB = RtEntityCreator.CreatePipeline();
+        _repo.GetServiceAccountsAsync(TenantId).Returns([shared]);
+        _repo.GetAdapterForServiceAccountAsync(TenantId, shared.RtId).Returns((RtAdapter?)null);
+        _repo.GetPipelinesUsingServiceAccountAsync(TenantId, shared.RtId).Returns([pipelineA, pipelineB]);
+        _repo.GetAdapterByPipelineAsync(TenantId, pipelineA.ToRtEntityId()).Returns(adapterA);
+        _repo.GetAdapterByPipelineAsync(TenantId, pipelineB.ToRtEntityId()).Returns(adapterB);
+        ArrangeMatchingIdentityClient();
+        _identityReader.GetActorClientIdsAsync(TenantId, "client-id")
+            .Returns(IdentityClientActorsLookup.Found(["octo-pipeline-sa-a"]));
+
+        var healthA = await sut.GetAdapterHealthAsync(TenantId, adapterA);
+        var healthB = await sut.GetAdapterHealthAsync(TenantId, adapterB);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(Check(healthA.LinkedConfigurations![0], "impersonation").Status).IsEqualTo("Healthy");
+        await Assert.That(Check(healthB.LinkedConfigurations![0], "impersonation").Code)
+            .IsEqualTo("impersonation-edge-missing");
+        await Assert.That(Check(healthB.LinkedConfigurations[0], "impersonation").Message!)
+            .Contains("octo-pipeline-sa-b");
+        await Assert.That(Check(healthB, "linkedConfigurations").Status).IsEqualTo("Violation");
     }
 }
