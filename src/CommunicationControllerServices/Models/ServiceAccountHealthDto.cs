@@ -6,8 +6,8 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 /// <param name="Check">
 ///     Machine-readable name of the check: <c>association</c>, <c>configuration</c>,
 ///     <c>client</c>, <c>secret</c>, <c>roles</c>, <c>delegation</c>, <c>tenant</c>,
-///     <c>issuerUri</c>, <c>impersonation</c> (AB#5114). The <c>association</c> check only
-///     appears on the adapter-scoped variant.
+///     <c>issuerUri</c>, <c>impersonation</c> (AB#5114), <c>linkedConfigurations</c> (AB#8982). The
+///     <c>association</c> and <c>linkedConfigurations</c> checks only appear on the adapter-scoped variant.
 /// </param>
 /// <param name="Status">
 ///     <c>Healthy</c>, <c>Violation</c>, <c>Unknown</c> (an identity-backed check that could not
@@ -18,7 +18,7 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 /// <param name="Code">
 ///     Machine-readable violation code (<c>association-missing</c>, <c>configuration-missing</c>,
 ///     <c>client-missing</c>, <c>secret-missing</c>, <c>secret-key-missing</c>, <c>roles-drift</c>, <c>delegation-drift</c>,
-///     <c>tenant-mismatch</c>, <c>issuer-uri-drift</c>); <c>null</c> unless Status is
+///     <c>tenant-mismatch</c>, <c>issuer-uri-drift</c>, <c>linked-configuration-unhealthy</c>); <c>null</c> unless Status is
 ///     <c>Violation</c>.
 /// </param>
 /// <param name="Message">Human-readable finding; always set except for a healthy check.</param>
@@ -57,9 +57,16 @@ public sealed record ServiceAccountHealthCheckDto(
 /// <param name="ConfigurationWellKnownName">Its <c>RtWellKnownName</c>, when one exists.</param>
 /// <param name="ClientId">The identity client id the account maps to, when one is set.</param>
 /// <param name="Checks">The individual findings, in evaluation order.</param>
+/// <param name="LinkedConfigurations">
+///     AB#8982, adapter-scoped variant only: the health of every standalone configuration the
+///     adapter's pipelines link via <c>Uses</c> (per-pipeline overrides), each evaluated like the
+///     configuration-scoped variant. Rolled up into <see cref="OverallStatus" /> through the
+///     <c>linkedConfigurations</c> check. <c>null</c> on the configuration-scoped variant.
+/// </param>
 public sealed record ServiceAccountHealthDto(
     string OverallStatus,
     string? ConfigurationRtId,
     string? ConfigurationWellKnownName,
     string? ClientId,
-    IReadOnlyList<ServiceAccountHealthCheckDto> Checks);
+    IReadOnlyList<ServiceAccountHealthCheckDto> Checks,
+    IReadOnlyList<ServiceAccountHealthDto>? LinkedConfigurations = null);

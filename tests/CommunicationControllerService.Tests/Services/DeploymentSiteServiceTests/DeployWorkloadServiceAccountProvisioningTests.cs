@@ -58,6 +58,24 @@ internal class DeployWorkloadServiceAccountProvisioningTests : PoolServiceTestsB
     }
 
     [Test]
+    public async Task DeployWorkloadAsync_Adapter_ReconcilesTheUsesLinkedAccountsOfItsPipelinesAfterItsOwn()
+    {
+        // AB#8982: the per-pipeline accounts the adapter's pipelines link via Uses are converged on
+        // deploy too — after the adapter's own account, which is their impersonation actor.
+        var deploymentSite = ArrangeCloudPool();
+        var adapter = RtEntityCreator.CreateAdapter();
+        ArrangeDeployableWorkload(deploymentSite, adapter);
+
+        await DeploymentSiteService.DeployWorkloadAsync(TenantId, adapter.RtId);
+
+        Received.InOrder(() =>
+        {
+            ServiceAccountProvisioningService.EnsureAdapterProvisionedAsync(TenantId, adapter);
+            ServiceAccountProvisioningService.EnsureLinkedConfigurationsProvisionedAsync(TenantId, adapter);
+        });
+    }
+
+    [Test]
     public async Task DeployWorkloadAsync_Application_DoesNotProvision()
     {
         var deploymentSite = ArrangeCloudPool();
@@ -74,6 +92,8 @@ internal class DeployWorkloadServiceAccountProvisioningTests : PoolServiceTestsB
         // An Application executes no pipelines and therefore has no pipeline identity.
         await ServiceAccountProvisioningService.DidNotReceiveWithAnyArgs()
             .EnsureAdapterProvisionedAsync(Arg.Any<string>(), Arg.Any<RtAdapter>());
+        await ServiceAccountProvisioningService.DidNotReceiveWithAnyArgs()
+            .EnsureLinkedConfigurationsProvisionedAsync(Arg.Any<string>(), Arg.Any<RtAdapter?>());
     }
 
     [Test]

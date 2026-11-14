@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- AB#8982 Fix: blueprint apply (install and update), tenant load and workload deploy now also reconcile every standalone
+  `ServiceAccountConfiguration` that pipelines link via `Uses` (per-pipeline overrides such as `accounting-ai-prompt`):
+  its identity client is created with the declared roles, so `DeployDataFlow` no longer needs a manual
+  `POST {tenantId}/v1/serviceAccount/reconcile?configurationRtId=…` first. Adapter accounts are reconciled first (they are
+  the `MayActAs` actors); each linked account is isolated, a failure becomes a tenant error event. The adapter health
+  `GET {tenantId}/v1/adapter/{adapterRtId}/serviceAccount/health` reports these accounts in the new
+  `LinkedConfigurations` list and rolls them up through the check `linkedConfigurations`
+  (`linked-configuration-unhealthy`).
+
 - AB#7245 New: secret defaults follow the tenants and the deploy state of their Application. A tenant loaded after the
   deploy (service start, Enable, tenant update) receives the defaults its own and its ancestors' Applications provide
   (`ProvisionForTargetAsync`, never fails the load), and a default no Application provides any more is removed;

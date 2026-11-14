@@ -285,11 +285,6 @@ internal class PipelineServiceAccountProvisioningService(
                 [$"Adapter lookup failed: {e.Message}"]);
         }
 
-        if (adapters.Count == 0)
-        {
-            return PipelineServiceAccountProvisioningReport.Empty;
-        }
-
         var provisioned = 0;
         var repaired = 0;
         var alreadyProvisioned = 0;
@@ -315,6 +310,87 @@ internal class PipelineServiceAccountProvisioningService(
                     failures.Add(
                         $"Adapter '{adapter.Name ?? adapter.RtId.ToString()}' ({adapter.RtId}) has no pipeline service account.");
                     break;
+            }
+        }
+
+        // AB#8982: after the adapters, so their own clients exist as the impersonation actors the
+        // standalone accounts declare (MayActAs). A blueprint ships these accounts without a client
+        // id; until this ran, DeployDataFlow refused their pipelines.
+        var linked = await EnsureLinkedConfigurationsProvisionedAsync(tenantId);
+
+        return new PipelineServiceAccountProvisioningReport(provisioned + linked.Provisioned,
+            repaired + linked.Repaired, alreadyProvisioned + linked.AlreadyProvisioned,
+            [.. failures, .. linked.Failures]);
+    }
+
+    /// <inheritdoc />
+    public async Task<PipelineServiceAccountProvisioningReport> EnsureLinkedConfigurationsProvisionedAsync(
+        string tenantId, RtAdapter? adapter = null)
+    {
+        IReadOnlyList<RtServiceAccountConfiguration> configurations;
+        try
+        {
+            configurations = await UsesLinkedServiceAccountLookup.FindAsync(communicationRepository, tenantId,
+                adapter?.RtId);
+        }
+        catch (Exception e)
+        {
+            Logger.Warn(e,
+                "[{TenantId}] Reconcile of the Uses-linked service accounts skipped: configuration lookup failed",
+                tenantId);
+            return new PipelineServiceAccountProvisioningReport(0, 0, 0,
+                [$"Lookup of the Uses-linked service accounts failed: {e.Message}"]);
+        }
+
+        var provisioned = 0;
+        var repaired = 0;
+        var alreadyProvisioned = 0;
+        var failures = new List<string>();
+        foreach (var configuration in configurations)
+        {
+            var name = configuration.RtWellKnownName ?? configuration.RtId.ToString();
+            try
+            {
+                var result = await ReconcileConfigurationAsync(tenantId, configuration,
+                    ServiceAccountReconcileContext.System);
+                switch (result.Outcome)
+                {
+                    case PipelineServiceAccountProvisioningOutcome.Provisioned:
+                        provisioned++;
+                        break;
+                    case PipelineServiceAccountProvisioningOutcome.Repaired:
+                        repaired++;
+                        break;
+                    case PipelineServiceAccountProvisioningOutcome.AlreadyProvisioned:
+                        alreadyProvisioned++;
+                        break;
+                    default:
+                        failures.Add($"Service account '{name}' ({configuration.RtId}) was not reconciled.");
+                        break;
+                }
+            }
+            catch (Exception e)
+            {
+                // Per-configuration isolation, like the adapter sweep: one broken account must not stop
+                // the others, and the caller (tenant start, blueprint consumer, workload deploy) never fails.
+                Logger.Error(e,
+                    "[{TenantId}] Failed to reconcile the Uses-linked pipeline service account '{WellKnownName}' ({ConfigurationRtId})",
+                    tenantId, name, configuration.RtId);
+                failures.Add($"Service account '{name}' ({configuration.RtId}) could not be reconciled: {e.Message}");
+                try
+                {
+                    await eventService.StoreErrorEventAsync(tenantId,
+                        $"Could not reconcile the pipeline service account '{name}' (AB#8982): {e.Message}. " +
+                        "Until its identity client exists, deploying the data flows whose pipelines use it is refused. " +
+                        "The next tenant load or blueprint update retries; to retry now, call " +
+                        $"POST {{tenantId}}/v1/serviceAccount/reconcile?configurationRtId={configuration.RtId}.",
+                        configuration.ToRtEntityId());
+                }
+                catch (Exception eventException)
+                {
+                    Logger.Warn(eventException,
+                        "[{TenantId}] Could not store the service-account reconcile error event", tenantId);
+                }
             }
         }
 

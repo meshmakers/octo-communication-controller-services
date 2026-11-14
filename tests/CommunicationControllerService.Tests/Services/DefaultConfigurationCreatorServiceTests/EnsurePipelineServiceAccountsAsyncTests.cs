@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Caches.Adapters;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -112,6 +113,25 @@ internal class EnsurePipelineServiceAccountsAsyncTests
         await _notificationScheduleService.Received(1).UpdateScheduleAsync(TenantId);
         await _eventService.Received(1).StoreErrorEventAsync(TenantId,
             Arg.Is<string>(m => m.Contains("Notification schedule could not be rebuilt")));
+    }
+
+    [Test]
+    public async Task TenantLoad_ReconcilesUsesLinkedAccountsThroughTheRealProvisioningService()
+    {
+        // AB#8982: the tenant-load hook converges the blueprint-shipped standalone accounts as well.
+        var fixture = new UsesLinkedServiceAccountFixture();
+        var aiPrompt = fixture.AddStandalone("accounting-ai-prompt", ["AccountingRead"]);
+        var sut = new TestableCreator(fixture.CreateProvisioningService(), _eventService,
+            _notificationScheduleService, _systemContext);
+
+        await sut.EnsurePipelineServiceAccountsAsync(UsesLinkedServiceAccountFixture.TenantId);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(fixture.SentClients().Select(c => c.ClientId))
+            .Contains(PipelineServiceAccountProvisioningService.BuildClientId(aiPrompt.RtId));
+        await Assert.That(fixture.UpdatedStandalone().Single().RtId).IsEqualTo(aiPrompt.RtId);
+        await _eventService.Received(1).StoreInformationEventAsync(UsesLinkedServiceAccountFixture.TenantId,
+            Arg.Is<string>(m => m.Contains("AB#5027")));
     }
 
     private TestableCreator CreateSut()

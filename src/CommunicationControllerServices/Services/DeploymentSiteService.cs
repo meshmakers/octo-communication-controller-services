@@ -354,6 +354,11 @@ internal class DeploymentSiteService : IDeploymentSiteService
             try
             {
                 await _serviceAccountProvisioningService.EnsureAdapterProvisionedAsync(tenantId, adapterWorkload);
+
+                // AB#8982: and the standalone accounts this adapter's pipelines link via Uses — after the
+                // adapter's own account, which is their impersonation actor. Non-throwing as well.
+                await _serviceAccountProvisioningService.EnsureLinkedConfigurationsProvisionedAsync(tenantId,
+                    adapterWorkload);
             }
             catch (Exception e)
             {
