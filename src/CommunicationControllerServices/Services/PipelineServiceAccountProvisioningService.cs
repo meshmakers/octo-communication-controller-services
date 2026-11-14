@@ -545,7 +545,8 @@ internal class PipelineServiceAccountProvisioningService(
     /// <param name="context">Who triggered the pass and whether roles may be materialised.</param>
     /// <param name="keepIdentitySecretWhileImpersonating">
     ///     <c>true</c> on the automatic paths: an account on impersonation (no stored secret) gets
-    ///     no secret on the wire, so identity keeps the one it has. Between an impersonation switch
+    ///     no secret on the wire, so identity keeps the one it has; so does an existing client without a
+    ///     stored secret whose impersonation could not be verified. Between an impersonation switch
     ///     and its explicit invalidation (<see cref="InvalidateSwitchedSecretAsync" />) running
     ///     pipelines still present the old secret; a background pass must not end that early.
     /// </param>
@@ -635,8 +636,9 @@ internal class PipelineServiceAccountProvisioningService(
     /// </param>
     /// <param name="saveAsync">Writes the (new or repaired) entity; receives <c>isNewEntity</c>.</param>
     /// <param name="keepIdentitySecretWhileImpersonating">
-    ///     AB#8982: on the impersonation path send no secret (identity keeps the one it has) instead
-    ///     of a throwaway value — see <see cref="ReconcileConfigurationCoreAsync" />.
+    ///     AB#8982: an existing client without a stored secret (on impersonation, or with an impersonation
+    ///     verdict that is negative or unknown) gets no secret on the wire — identity keeps the one it
+    ///     has — instead of a throwaway or fresh value; see <see cref="ReconcileConfigurationCoreAsync" />.
     /// </param>
     private async Task<ServiceAccountReconcileResult> ReconcileCoreAsync(string tenantId,
         RtServiceAccountConfiguration? existing, bool isLinked, string wellKnownName, string clientId,
@@ -759,11 +761,23 @@ internal class PipelineServiceAccountProvisioningService(
         // send none instead — identity then keeps its current secret (or creates the client without
         // one), so a background pass cannot invalidate the old secret of a switch that is still
         // waiting for its data flows to be redeployed; that stays the switch's explicit step (d).
+        // The same holds when the impersonation verdict is negative or could not be established
+        // (IsImpersonationCapableAsync answers false when its lookup fails): an EXISTING client
+        // without a stored secret is never re-keyed by a background pass. Only a client that does not
+        // exist yet (no ClientId — the blueprint-shipped shape) gets a fresh secret there.
+        var keepIdentitySecret = keepIdentitySecretWhileImpersonating && !secretUsable &&
+                                 (impersonating || !string.IsNullOrWhiteSpace(existingClientId));
         var secret = secretUsable
             ? existingSecret!
-            : impersonating && keepIdentitySecretWhileImpersonating
+            : keepIdentitySecret
                 ? null
                 : GenerateSecret();
+        if (keepIdentitySecret && !impersonating)
+        {
+            Logger.Warn(
+                "[{TenantId}] Pipeline service account '{WellKnownName}' (client '{ClientId}') has no stored secret and impersonation is not available or could not be verified; the automatic reconcile kept the identity client's secret. Run the manual reconcile or the secret rotation to issue a new one.",
+                tenantId, wellKnownName, clientId);
+        }
 
         await SendIdentityClientAsync(tenantId, clientDisplayName, clientId, secret, rolesToMaterialize,
             allowDelegation, mayActAsClientIds);

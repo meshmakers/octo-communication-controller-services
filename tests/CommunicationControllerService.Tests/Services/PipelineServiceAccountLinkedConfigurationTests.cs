@@ -232,4 +232,47 @@ internal class PipelineServiceAccountLinkedConfigurationTests
         await Assert.That(report.HasFailures).IsFalse();
         await Assert.That(_fixture.SentClients().Count).IsEqualTo(0);
     }
+
+    [Test]
+    public async Task EnsureLinkedConfigurations_ExistingSecretlessClientWithoutVerifiableActor_IsNotReKeyed()
+    {
+        // CodeRabbit round 2: the actor check fails (here: the adapter running the pipeline has no
+        // own account), so the account does not count as impersonating. A background pass must still
+        // not replace the secret of the existing client — a pending switch would lose it.
+        var bareAdapter = RtEntityCreator.CreateAdapter();
+        _fixture.Repository.GetServiceAccountForAdapterAsync(TenantId, bareAdapter.RtId)
+            .Returns((RtServiceAccountConfiguration?)null);
+        _fixture.AddStandalone("accounting-ai-prompt", ["AccountingRead"], runsOn: bareAdapter,
+            clientId: "octo-pipeline-sa-switched");
+        var sut = _fixture.CreateProvisioningService();
+
+        await sut.EnsureLinkedConfigurationsProvisionedAsync(TenantId);
+
+        var sent = _fixture.SentClients().Single(c => c.ClientId == "octo-pipeline-sa-switched");
+        using var _ = Assert.Multiple();
+        await Assert.That(sent.ClientSecret).IsNull();
+        await Assert.That(_fixture.UpdatedStandalone().All(c =>
+            c.GetAttributeValueOrDefault(nameof(RtServiceAccountConfiguration.ClientSecret)) == null)).IsTrue();
+    }
+
+    [Test]
+    public async Task EnsureLinkedConfigurations_NewAccountWithoutActor_GetsAFreshStoredSecret()
+    {
+        // The blueprint shape (no ClientId yet) on an adapter without an own account: nothing exists
+        // identity-side that could be cut short, so the account gets a real secret of its own.
+        var bareAdapter = RtEntityCreator.CreateAdapter();
+        _fixture.Repository.GetServiceAccountForAdapterAsync(TenantId, bareAdapter.RtId)
+            .Returns((RtServiceAccountConfiguration?)null);
+        var account = _fixture.AddStandalone("accounting-ai-prompt", ["AccountingRead"], runsOn: bareAdapter);
+        var sut = _fixture.CreateProvisioningService();
+
+        await sut.EnsureLinkedConfigurationsProvisionedAsync(TenantId);
+
+        var sent = _fixture.SentClients()
+            .Single(c => c.ClientId == PipelineServiceAccountProvisioningService.BuildClientId(account.RtId));
+        using var _ = Assert.Multiple();
+        await Assert.That(sent.ClientSecret).IsNotNull();
+        await Assert.That(_fixture.UpdatedStandalone().Single()
+            .GetAttributeValueOrDefault(nameof(RtServiceAccountConfiguration.ClientSecret))).IsNotNull();
+    }
 }
