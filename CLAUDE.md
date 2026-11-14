@@ -4670,26 +4670,37 @@ and the adapter health still answered `Healthy`.
   base `RtConfiguration` and a type test never matches (see `AdapterService.CreatePipelineConfigurationAsync`).
   Unused accounts are left to the manual endpoint.
 - **Reconcile** — `IPipelineServiceAccountProvisioningService.EnsureLinkedConfigurationsProvisionedAsync(tenantId,
-  adapter?)` runs `ReconcileConfigurationAsync` with the `System` context (roles are materialised) per account,
+  adapter?)` runs the reconcile of `ReconcileConfigurationAsync` with the `System` context (roles are materialised) per account,
   isolated and non-throwing: a failure is logged, stored as a tenant error event naming the account and the manual
-  endpoint, and reported in `Failures`. `EnsureTenantProvisionedAsync` calls it **after** the adapter sweep (the
-  adapters' own clients are the accounts' `MayActAs` actors) and adds its counts to the report, so blueprint apply
+  endpoint, and reported in `Failures`. Three differences to the manual endpoint: (a) the passes are serialised per
+  account in the process (`SemaphoreSlim` per tenant and rtId) and the account is re-read under the guard
+  (`GetServiceAccountByRtIdAsync`), so overlapping passes reuse a secret the previous one saved; across controller
+  instances the next pass heals a lost race, because it re-sends the stored secret; (b) an account with a foreign
+  `IssuerUri` or `TenantId` (AB#5115) is skipped, because its client lives in another installation or tenant;
+  (c) an account on impersonation (no stored secret) is sent with **no** secret, so identity keeps the one it has
+  (`CreateIdentityDataCommandRequestConsumer` keeps the existing secret when none arrives). Between an impersonation
+  switch and its invalidation step the old secret is still in use; only `InvalidateSwitchedSecretAsync` ends it.
+  The manual endpoint keeps the AB#5114 throwaway secret.
+  `EnsureTenantProvisionedAsync` calls it **after** the adapter sweep (the adapters' own clients are the accounts' `MayActAs` actors) and adds its counts to the report, so blueprint apply
   (`BlueprintAppliedConsumer`) and tenant load (`DefaultConfigurationCreatorService`) cover them without code of their
   own; the early "no adapters" exit is gone. `DeploymentSiteService.DeployWorkloadAsync` calls it for the deployed
   adapter right after `EnsureAdapterProvisionedAsync`. No background retry (AB#8145 is per adapter): a transient
   identity failure is healed by the next tenant load, blueprint apply or workload deploy, or by the manual endpoint.
 - **Health** — the adapter-scoped `GET …/adapter/{adapterRtId}/serviceAccount/health` evaluates each Uses-linked
-  account of the adapter's pipelines like the configuration-bound variant and returns them in
+  account of the adapter's pipelines like the configuration-bound variant, but with **this** adapter's own client as
+  the impersonation actor (an account shared by several adapters is judged per adapter), and returns them in
   `ServiceAccountHealthDto.LinkedConfigurations`. The check `linkedConfigurations` rolls them up: `Violation`
   (`linked-configuration-unhealthy`, names the accounts) when one is unhealthy, `Unknown` when one could not be
   evaluated or the lookup failed, `NotApplicable` when no pipeline links an account of its own, else `Healthy`.
 
 Tests: `Services/PipelineServiceAccountLinkedConfigurationTests` (install shape, update of the declaration, adapter
-first, unused/adapter-owned skipped, no adapters, isolation, lookup failure, adapter scope),
+first, unused/adapter-owned skipped, no adapters, isolation, lookup failure, adapter scope, impersonating account
+keeps its identity secret, foreign target skipped, re-read entity wins, deleted meanwhile),
 `Consumers/BlueprintAppliedConsumerTests` (`BlueprintInstall_…`, `BlueprintUpdate_…`, real provisioning service),
 `DefaultConfigurationCreatorServiceTests/EnsurePipelineServiceAccountsAsyncTests.TenantLoad_…`,
 `DeploymentSiteServiceTests/DeployWorkloadServiceAccountProvisioningTests` (order, Application skipped),
-`Services/ServiceAccountHealthTests` (`GetAdapterHealth_UsesLinked…`, `…LinkedLookupFails_DegradesToUnknown`),
+`Services/ServiceAccountHealthTests` (`GetAdapterHealth_UsesLinked…`, `…LinkedLookupFails_DegradesToUnknown`,
+`…SharedSecretlessLinkedAccount_IsJudgedWithEachAdapterAsActor`),
 integration `Repository/UsesLinkedServiceAccountLookupTests` (real MongoDB graph reads). Shared fixture:
 `Helper/UsesLinkedServiceAccountFixture`.
 

@@ -158,4 +158,78 @@ internal class PipelineServiceAccountLinkedConfigurationTests
 
         await Assert.That(_fixture.UpdatedStandalone().Select(c => c.RtId)).IsEquivalentTo(new[] { mine.RtId });
     }
+
+    [Test]
+    public async Task EnsureLinkedConfigurations_SecretlessImpersonatingAccount_KeepsTheIdentitySecret()
+    {
+        // An account between an impersonation switch and its invalidation: stored secret cleared, the
+        // identity client still holds the old secret that running pipelines present. The automatic
+        // pass must not replace it (the manual reconcile still does, by design).
+        var switched = _fixture.AddStandalone("accounting-ai-prompt", ["AccountingRead"],
+            clientId: "octo-pipeline-sa-switched");
+        var sut = _fixture.CreateProvisioningService();
+
+        await sut.EnsureLinkedConfigurationsProvisionedAsync(TenantId);
+
+        var sent = _fixture.SentClients().Single(c => c.ClientId == "octo-pipeline-sa-switched");
+        using var _ = Assert.Multiple();
+        await Assert.That(sent.ClientSecret).IsNull();
+        await Assert.That(sent.MayActAsClientIds!).IsEquivalentTo(new[] { _fixture.AdapterClientId });
+        await Assert.That(_fixture.UpdatedStandalone().Count).IsEqualTo(0);
+
+        // Contrast: the manual endpoint's path sends a throwaway secret (AB#5114 behaviour, unchanged).
+        await sut.ReconcileConfigurationAsync(TenantId, switched, ServiceAccountReconcileContext.System);
+        await Assert.That(_fixture.SentClients().Last().ClientSecret).IsNotNull();
+    }
+
+    [Test]
+    public async Task EnsureLinkedConfigurations_ForeignIdentityTarget_IsNotReconciledAutomatically()
+    {
+        var foreign = _fixture.AddStandalone("cross-tenant-account", ["AccountingRead"], clientId: "foreign-client");
+        foreign.ClientSecret = SecretTestValues.Stored("foreign-secret");
+        foreign.IssuerUri = "https://identity.other-installation.example.com";
+        var sut = _fixture.CreateProvisioningService();
+
+        var report = await sut.EnsureLinkedConfigurationsProvisionedAsync(TenantId);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(_fixture.SentClients().Any(c => c.ClientId == "foreign-client")).IsFalse();
+        await Assert.That(report.HasChanges).IsFalse();
+        await Assert.That(report.HasFailures).IsFalse();
+    }
+
+    [Test]
+    public async Task EnsureLinkedConfigurations_ReconcilesTheCurrentEntity_NotTheListedSnapshot()
+    {
+        // Another pass saved a secret after the list was read: the re-read entity wins, so no second
+        // secret is issued.
+        var listed = _fixture.AddStandalone("accounting-pipeline-reader", ["AccountingRead"]);
+        var current = _fixture.AddStandalone("accounting-pipeline-reader", ["AccountingRead"],
+            clientId: "octo-pipeline-sa-reader");
+        _fixture.Accounts.Remove(current);
+        current.RtId = listed.RtId;
+        current.ClientSecret = SecretTestValues.Stored("saved-by-the-other-pass");
+        _fixture.Repository.GetServiceAccountByRtIdAsync(TenantId, listed.RtId).Returns(current);
+        var sut = _fixture.CreateProvisioningService();
+
+        await sut.EnsureLinkedConfigurationsProvisionedAsync(TenantId);
+
+        var sent = _fixture.SentClients().Single(c => c.ClientId == "octo-pipeline-sa-reader");
+        await Assert.That(sent.ClientSecret).IsEqualTo("saved-by-the-other-pass");
+    }
+
+    [Test]
+    public async Task EnsureLinkedConfigurations_AccountDeletedMeanwhile_IsSkipped()
+    {
+        var gone = _fixture.AddStandalone("accounting-ai-prompt", ["AccountingRead"]);
+        _fixture.Repository.GetServiceAccountByRtIdAsync(TenantId, gone.RtId)
+            .Returns((RtServiceAccountConfiguration?)null);
+        var sut = _fixture.CreateProvisioningService();
+
+        var report = await sut.EnsureLinkedConfigurationsProvisionedAsync(TenantId);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(report.HasFailures).IsFalse();
+        await Assert.That(_fixture.SentClients().Count).IsEqualTo(0);
+    }
 }

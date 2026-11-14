@@ -949,4 +949,43 @@ internal class ServiceAccountHealthTests
         await Assert.That(dto.OverallStatus).IsEqualTo("Unknown");
         await Assert.That(Check(dto, "linkedConfigurations").Status).IsEqualTo("Unknown");
     }
+
+    [Test]
+    public async Task GetAdapterHealth_SharedSecretlessLinkedAccount_IsJudgedWithEachAdapterAsActor()
+    {
+        // Two adapters run pipelines of the same secretless account; identity holds the MayActAs
+        // edge only for adapter A. A's view is healthy, B's must show the missing edge (not A's edge).
+        var sut = CreateSut();
+        var shared = CreateInstallationDefaultConfiguration(withSecret: false);
+        shared.RtWellKnownName = "accounting-ai-prompt";
+        var adapterA = RtEntityCreator.CreateAdapter();
+        var adapterB = RtEntityCreator.CreateAdapter();
+        var ownA = RtEntityCreator.CreateServiceAccountConfiguration("own-a");
+        ownA.ClientId = "octo-pipeline-sa-a";
+        var ownB = RtEntityCreator.CreateServiceAccountConfiguration("own-b");
+        ownB.ClientId = "octo-pipeline-sa-b";
+        _resolver.GetAdapterDefaultAsync(TenantId, adapterA.RtId).Returns(ownA);
+        _resolver.GetAdapterDefaultAsync(TenantId, adapterB.RtId).Returns(ownB);
+        var pipelineA = RtEntityCreator.CreatePipeline();
+        var pipelineB = RtEntityCreator.CreatePipeline();
+        _repo.GetServiceAccountsAsync(TenantId).Returns([shared]);
+        _repo.GetAdapterForServiceAccountAsync(TenantId, shared.RtId).Returns((RtAdapter?)null);
+        _repo.GetPipelinesUsingServiceAccountAsync(TenantId, shared.RtId).Returns([pipelineA, pipelineB]);
+        _repo.GetAdapterByPipelineAsync(TenantId, pipelineA.ToRtEntityId()).Returns(adapterA);
+        _repo.GetAdapterByPipelineAsync(TenantId, pipelineB.ToRtEntityId()).Returns(adapterB);
+        ArrangeMatchingIdentityClient();
+        _identityReader.GetActorClientIdsAsync(TenantId, "client-id")
+            .Returns(IdentityClientActorsLookup.Found(["octo-pipeline-sa-a"]));
+
+        var healthA = await sut.GetAdapterHealthAsync(TenantId, adapterA);
+        var healthB = await sut.GetAdapterHealthAsync(TenantId, adapterB);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(Check(healthA.LinkedConfigurations![0], "impersonation").Status).IsEqualTo("Healthy");
+        await Assert.That(Check(healthB.LinkedConfigurations![0], "impersonation").Code)
+            .IsEqualTo("impersonation-edge-missing");
+        await Assert.That(Check(healthB.LinkedConfigurations[0], "impersonation").Message!)
+            .Contains("octo-pipeline-sa-b");
+        await Assert.That(Check(healthB, "linkedConfigurations").Status).IsEqualTo("Violation");
+    }
 }

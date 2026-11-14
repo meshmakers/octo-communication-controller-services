@@ -188,6 +188,9 @@ public interface IPipelineServiceAccountProvisioningService
     /// calls it after the adapter sweep, so the adapters' own clients exist as impersonation actors).
     /// Never throws: each configuration is isolated, a failure is logged, stored as a tenant error
     /// event and reported in <see cref="PipelineServiceAccountProvisioningReport.Failures" />.
+    /// Unlike the manual endpoint it re-reads each account under a per-account guard, skips accounts
+    /// with a foreign <c>IssuerUri</c>/<c>TenantId</c> (AB#5115), and sends an account on impersonation
+    /// without a secret, so identity keeps the one it has until the switch's explicit invalidation.
     /// </summary>
     Task<PipelineServiceAccountProvisioningReport> EnsureLinkedConfigurationsProvisionedAsync(string tenantId,
         RtAdapter? adapter = null);

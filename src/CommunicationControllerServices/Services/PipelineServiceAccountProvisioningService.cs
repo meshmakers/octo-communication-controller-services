@@ -158,6 +158,23 @@ internal class PipelineServiceAccountProvisioningService(
     /// <inheritdoc />
     public int PendingRetryCount => _pendingRetries.Count;
 
+    /// <summary>AB#8982: serialises the automatic reconcile per standalone account (process-local).</summary>
+    private readonly ConcurrentDictionary<(string TenantId, OctoObjectId ConfigurationRtId), SemaphoreSlim>
+        _linkedReconcileGuards = new();
+
+    /// <summary>
+    /// AB#8982: whether a standalone account deliberately targets another installation or tenant — the
+    /// AB#5115 rule (<see cref="ConvergeIssuerUri" />, <see cref="ConvergeTenantId" />): a value they
+    /// return verbatim is foreign.
+    /// </summary>
+    private bool TargetsForeignIdentity(string tenantId, RtServiceAccountConfiguration configuration)
+    {
+        var issuerUri = ReadAttribute(configuration, nameof(RtServiceAccountConfiguration.IssuerUri));
+        var targetTenantId = ReadAttribute(configuration, nameof(RtServiceAccountConfiguration.TenantId));
+        return ConvergeIssuerUri(issuerUri, options.Value.AuthorityUrl) != null ||
+               ConvergeTenantId(targetTenantId, tenantId) != null;
+    }
+
     /// <summary>
     /// Delay before attempt number <paramref name="attempt" /> (1-based): initial delay doubled per
     /// attempt, capped at the configured maximum.
@@ -346,13 +363,36 @@ internal class PipelineServiceAccountProvisioningService(
         var repaired = 0;
         var alreadyProvisioned = 0;
         var failures = new List<string>();
-        foreach (var configuration in configurations)
+        foreach (var listed in configurations)
         {
-            var name = configuration.RtWellKnownName ?? configuration.RtId.ToString();
+            var name = listed.RtWellKnownName ?? listed.RtId.ToString();
+            // AB#8982: one pass per account at a time in this process (blueprint consumer, tenant load
+            // and workload deploy can overlap), and the account re-read under the guard, so a pass that
+            // waited reuses the secret the previous one saved instead of issuing a second one. Across
+            // controller instances the next pass heals a lost race: it re-sends the stored secret.
+            var guard = _linkedReconcileGuards.GetOrAdd((tenantId, listed.RtId), _ => new SemaphoreSlim(1, 1));
+            await guard.WaitAsync();
             try
             {
-                var result = await ReconcileConfigurationAsync(tenantId, configuration,
-                    ServiceAccountReconcileContext.System);
+                var configuration =
+                    await communicationRepository.GetServiceAccountByRtIdAsync(tenantId, listed.RtId);
+                if (configuration == null)
+                {
+                    continue; // deleted meanwhile
+                }
+
+                if (TargetsForeignIdentity(tenantId, configuration))
+                {
+                    // A deliberate foreign target (AB#5115) authenticates against another installation
+                    // or tenant; its client is not ours to create. The manual endpoint stays available.
+                    Logger.Info(
+                        "[{TenantId}] Uses-linked service account '{WellKnownName}' targets a foreign identity (IssuerUri/TenantId); not reconciled automatically",
+                        tenantId, name);
+                    continue;
+                }
+
+                var result = await ReconcileConfigurationCoreAsync(tenantId, configuration,
+                    ServiceAccountReconcileContext.System, keepIdentitySecretWhileImpersonating: true);
                 switch (result.Outcome)
                 {
                     case PipelineServiceAccountProvisioningOutcome.Provisioned:
@@ -365,7 +405,7 @@ internal class PipelineServiceAccountProvisioningService(
                         alreadyProvisioned++;
                         break;
                     default:
-                        failures.Add($"Service account '{name}' ({configuration.RtId}) was not reconciled.");
+                        failures.Add($"Service account '{name}' ({listed.RtId}) was not reconciled.");
                         break;
                 }
             }
@@ -375,22 +415,26 @@ internal class PipelineServiceAccountProvisioningService(
                 // the others, and the caller (tenant start, blueprint consumer, workload deploy) never fails.
                 Logger.Error(e,
                     "[{TenantId}] Failed to reconcile the Uses-linked pipeline service account '{WellKnownName}' ({ConfigurationRtId})",
-                    tenantId, name, configuration.RtId);
-                failures.Add($"Service account '{name}' ({configuration.RtId}) could not be reconciled: {e.Message}");
+                    tenantId, name, listed.RtId);
+                failures.Add($"Service account '{name}' ({listed.RtId}) could not be reconciled: {e.Message}");
                 try
                 {
                     await eventService.StoreErrorEventAsync(tenantId,
                         $"Could not reconcile the pipeline service account '{name}' (AB#8982): {e.Message}. " +
                         "Until its identity client exists, deploying the data flows whose pipelines use it is refused. " +
-                        "The next tenant load or blueprint update retries; to retry now, call " +
-                        $"POST {{tenantId}}/v1/serviceAccount/reconcile?configurationRtId={configuration.RtId}.",
-                        configuration.ToRtEntityId());
+                        "The next tenant load, blueprint apply or workload deploy retries; to retry now, call " +
+                        $"POST {{tenantId}}/v1/serviceAccount/reconcile?configurationRtId={listed.RtId}.",
+                        listed.ToRtEntityId());
                 }
                 catch (Exception eventException)
                 {
                     Logger.Warn(eventException,
                         "[{TenantId}] Could not store the service-account reconcile error event", tenantId);
                 }
+            }
+            finally
+            {
+                guard.Release();
             }
         }
 
@@ -486,8 +530,28 @@ internal class PipelineServiceAccountProvisioningService(
     }
 
     /// <inheritdoc />
-    public async Task<ServiceAccountReconcileResult> ReconcileConfigurationAsync(string tenantId,
+    public Task<ServiceAccountReconcileResult> ReconcileConfigurationAsync(string tenantId,
         RtServiceAccountConfiguration configuration, ServiceAccountReconcileContext context)
+    {
+        return ReconcileConfigurationCoreAsync(tenantId, configuration, context,
+            keepIdentitySecretWhileImpersonating: false);
+    }
+
+    /// <summary>
+    /// <see cref="ReconcileConfigurationAsync" /> with the AB#8982 switch for the automatic paths.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier.</param>
+    /// <param name="configuration">The account to reconcile.</param>
+    /// <param name="context">Who triggered the pass and whether roles may be materialised.</param>
+    /// <param name="keepIdentitySecretWhileImpersonating">
+    ///     <c>true</c> on the automatic paths: an account on impersonation (no stored secret) gets
+    ///     no secret on the wire, so identity keeps the one it has. Between an impersonation switch
+    ///     and its explicit invalidation (<see cref="InvalidateSwitchedSecretAsync" />) running
+    ///     pipelines still present the old secret; a background pass must not end that early.
+    /// </param>
+    private async Task<ServiceAccountReconcileResult> ReconcileConfigurationCoreAsync(string tenantId,
+        RtServiceAccountConfiguration configuration, ServiceAccountReconcileContext context,
+        bool keepIdentitySecretWhileImpersonating)
     {
         // A configuration owned by an adapter reconciles through the adapter path: the adapter's
         // rtId defines the deterministic well-known name / client id, so both entry points can
@@ -529,7 +593,8 @@ internal class PipelineServiceAccountProvisioningService(
 
         var result = await ReconcileCoreAsync(tenantId, configuration, isLinked: true, wellKnownName, clientId,
             BuildStandaloneClientDisplayName(wellKnownName), context, mayActAsClientIds, impersonationCapable,
-            (entity, _) => communicationRepository.UpdateServiceAccountAsync(tenantId, entity));
+            (entity, _) => communicationRepository.UpdateServiceAccountAsync(tenantId, entity),
+            keepIdentitySecretWhileImpersonating);
 
         if (result.Outcome != PipelineServiceAccountProvisioningOutcome.AlreadyProvisioned)
         {
@@ -569,10 +634,15 @@ internal class PipelineServiceAccountProvisioningService(
     ///     for impersonation; otherwise a fresh secret is issued. Always <c>false</c> on the adapter path.
     /// </param>
     /// <param name="saveAsync">Writes the (new or repaired) entity; receives <c>isNewEntity</c>.</param>
+    /// <param name="keepIdentitySecretWhileImpersonating">
+    ///     AB#8982: on the impersonation path send no secret (identity keeps the one it has) instead
+    ///     of a throwaway value — see <see cref="ReconcileConfigurationCoreAsync" />.
+    /// </param>
     private async Task<ServiceAccountReconcileResult> ReconcileCoreAsync(string tenantId,
         RtServiceAccountConfiguration? existing, bool isLinked, string wellKnownName, string clientId,
         string clientDisplayName, ServiceAccountReconcileContext context, IList<string>? mayActAsClientIds,
-        bool impersonationCapable, Func<RtServiceAccountConfiguration, bool, Task> saveAsync)
+        bool impersonationCapable, Func<RtServiceAccountConfiguration, bool, Task> saveAsync,
+        bool keepIdentitySecretWhileImpersonating = false)
     {
         // Read through GetAttributeValueOrDefault, never through the generated properties — kept
         // even though 3.33.0 made IssuerUri/ClientSecret/TenantId optional (their getters no
@@ -685,10 +755,15 @@ internal class PipelineServiceAccountProvisioningService(
         //
         // On the impersonation path the identity client still requires a secret, so it receives a
         // fresh throwaway value that is never stored anywhere: nothing can authenticate with it,
-        // and any secret the account carried before stops working.
+        // and any secret the account carried before stops working. AB#8982: the automatic paths
+        // send none instead — identity then keeps its current secret (or creates the client without
+        // one), so a background pass cannot invalidate the old secret of a switch that is still
+        // waiting for its data flows to be redeployed; that stays the switch's explicit step (d).
         var secret = secretUsable
             ? existingSecret!
-            : GenerateSecret();
+            : impersonating && keepIdentitySecretWhileImpersonating
+                ? null
+                : GenerateSecret();
 
         await SendIdentityClientAsync(tenantId, clientDisplayName, clientId, secret, rolesToMaterialize,
             allowDelegation, mayActAsClientIds);
@@ -1248,7 +1323,10 @@ internal class PipelineServiceAccountProvisioningService(
     /// <param name="tenantId">Tenant identifier the command is addressed to.</param>
     /// <param name="clientDisplayName">Human-readable client name.</param>
     /// <param name="clientId">The (deterministic) client id the consumer upserts on.</param>
-    /// <param name="secret">The plaintext secret; hashed identity-side, never logged.</param>
+    /// <param name="secret">
+    ///     The plaintext secret; hashed identity-side, never logged. <c>null</c> (AB#8982, automatic
+    ///     impersonation path only) keeps the secret the identity client already has.
+    /// </param>
     /// <param name="assignedRoleNames">
     ///     The roles the client should carry, or <c>null</c> to leave its role edges completely
     ///     untouched (legacy accounts, rotation, and the role-gated user reconcile). For a
@@ -1268,7 +1346,7 @@ internal class PipelineServiceAccountProvisioningService(
     ///     no edges.
     /// </param>
     private async Task SendIdentityClientAsync(string tenantId, string clientDisplayName, string clientId,
-        string secret, string[]? assignedRoleNames, bool allowDelegation, IList<string>? mayActAsClientIds)
+        string? secret, string[]? assignedRoleNames, bool allowDelegation, IList<string>? mayActAsClientIds)
     {
         var allowedGrantTypes = new List<string> { OidcConstants.GrantTypes.ClientCredentials };
         // AB#5114: every pipeline service account may be an ACTOR for another one (an adapter's

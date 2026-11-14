@@ -91,6 +91,8 @@ internal sealed class UsesLinkedServiceAccountFixture
         }
 
         Repository.GetAdapterForServiceAccountAsync(TenantId, configuration.RtId).Returns((RtAdapter?)null);
+        // The automatic pass re-reads the account under its guard (AB#8982).
+        Repository.GetServiceAccountByRtIdAsync(TenantId, configuration.RtId).Returns(configuration);
         if (linked)
         {
             var pipeline = RtEntityCreator.CreatePipeline();

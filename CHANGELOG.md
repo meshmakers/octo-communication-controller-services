@@ -6,10 +6,14 @@
   `ServiceAccountConfiguration` that pipelines link via `Uses` (per-pipeline overrides such as `accounting-ai-prompt`):
   its identity client is created with the declared roles, so `DeployDataFlow` no longer needs a manual
   `POST {tenantId}/v1/serviceAccount/reconcile?configurationRtId=…` first. Adapter accounts are reconciled first (they are
-  the `MayActAs` actors); each linked account is isolated, a failure becomes a tenant error event. The adapter health
+  the `MayActAs` actors); each linked account is isolated, a failure becomes a tenant error event. Accounts with a foreign
+  `IssuerUri`/`TenantId` are skipped, and an account on impersonation keeps the secret its identity client has (an
+  impersonation switch still waiting for its redeploy is not cut short). The adapter health
   `GET {tenantId}/v1/adapter/{adapterRtId}/serviceAccount/health` reports these accounts in the new
-  `LinkedConfigurations` list and rolls them up through the check `linkedConfigurations`
-  (`linked-configuration-unhealthy`).
+  `LinkedConfigurations` list (impersonation judged with that adapter as the actor) and rolls them up through the check
+  `linkedConfigurations` (`linked-configuration-unhealthy`). Known limit: these accounts have no background retry (the AB#8145 retry is per
+  adapter); after a transient identity failure the health shows it, and the next tenant load, blueprint apply or
+  workload deploy, or the manual reconcile endpoint, heals it.
 
 - AB#7245 New: secret defaults follow the tenants and the deploy state of their Application. A tenant loaded after the
   deploy (service start, Enable, tenant update) receives the defaults its own and its ancestors' Applications provide
