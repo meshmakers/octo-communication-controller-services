@@ -37,7 +37,10 @@ public interface IServiceAccountHealthService
     /// additionally checks that the <c>PipelineServiceAccount</c> association is present. Like the
     /// reconcile, an existing-but-unlinked configuration (found by its deterministic well-known
     /// name) is still evaluated, so the report shows "association missing" next to the otherwise
-    /// intact account instead of an empty page.
+    /// intact account instead of an empty page. AB#8982: it also evaluates every standalone
+    /// configuration the adapter's pipelines link via <c>Uses</c>
+    /// (<see cref="ServiceAccountHealthDto.LinkedConfigurations" />) and rolls them up into the
+    /// overall status (check <c>linkedConfigurations</c>).
     /// </summary>
     Task<ServiceAccountHealthDto> GetAdapterHealthAsync(string tenantId, RtAdapter adapter);
 

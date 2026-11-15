@@ -28,13 +28,14 @@ public enum PipelineServiceAccountProvisioningOutcome
 }
 
 /// <summary>
-/// Result of one tenant-wide provisioning sweep (AB#5027).
+/// Result of one tenant-wide provisioning sweep (AB#5027). Since AB#8982 the counts cover the
+/// adapters' own accounts and the standalone configurations linked via <c>Uses</c>.
 /// </summary>
-/// <param name="Provisioned">Adapters that got a service account for the first time.</param>
-/// <param name="Repaired">Adapters whose incomplete or unlinked account was fixed.</param>
-/// <param name="AlreadyProvisioned">Adapters that were already healthy — the steady state.</param>
+/// <param name="Provisioned">Accounts that got an identity client (adapters: a service account) for the first time.</param>
+/// <param name="Repaired">Accounts whose incomplete or unlinked state was fixed.</param>
+/// <param name="AlreadyProvisioned">Accounts that were already healthy — the steady state.</param>
 /// <param name="Failures">
-///     One human-readable line per adapter (or for the tenant as a whole) that could not be
+///     One human-readable line per adapter or configuration (or for the tenant as a whole) that could not be
 ///     provisioned. Non-empty means the caller must surface a persistent, visible warning.
 /// </param>
 public record PipelineServiceAccountProvisioningReport(
@@ -162,7 +163,9 @@ public interface IPipelineServiceAccountProvisioningService
 {
     /// <summary>
     /// Backfill / convergence sweep over every adapter of the tenant. This is the path that keeps
-    /// tenants which pre-date AB#5027 out of the deploy guard.
+    /// tenants which pre-date AB#5027 out of the deploy guard. AB#8982: after the adapters it also
+    /// reconciles the standalone configurations linked via <c>Uses</c>
+    /// (<see cref="EnsureLinkedConfigurationsProvisionedAsync" />); the report counts both.
     /// </summary>
     Task<PipelineServiceAccountProvisioningReport> EnsureTenantProvisionedAsync(string tenantId);
 
@@ -173,6 +176,24 @@ public interface IPipelineServiceAccountProvisioningService
     /// context.
     /// </summary>
     Task<PipelineServiceAccountProvisioningOutcome> EnsureAdapterProvisionedAsync(string tenantId, RtAdapter adapter);
+
+    /// <summary>
+    /// AB#8982 — reconciles every <b>standalone</b> <c>ServiceAccountConfiguration</c> that pipelines
+    /// link through <c>Uses</c> (per-pipeline overrides a blueprint ships, e.g. <c>accounting-ai-prompt</c>)
+    /// with the <see cref="ServiceAccountReconcileContext.System" /> context, exactly like
+    /// <see cref="ReconcileConfigurationAsync" /> does for the manual endpoint: the identity client is
+    /// created with its declared roles, so <c>DeployDataFlow</c> no longer needs a manual reconcile call.
+    /// With <paramref name="adapter" /> set, only the configurations used by pipelines of that adapter
+    /// (the workload deploy); otherwise all of the tenant (<see cref="EnsureTenantProvisionedAsync" />
+    /// calls it after the adapter sweep, so the adapters' own clients exist as impersonation actors).
+    /// Never throws: each configuration is isolated, a failure is logged, stored as a tenant error
+    /// event and reported in <see cref="PipelineServiceAccountProvisioningReport.Failures" />.
+    /// Unlike the manual endpoint it re-reads each account under a per-account guard, skips accounts
+    /// with a foreign <c>IssuerUri</c>/<c>TenantId</c> (AB#5115), and sends an account on impersonation
+    /// without a secret, so identity keeps the one it has until the switch's explicit invalidation.
+    /// </summary>
+    Task<PipelineServiceAccountProvisioningReport> EnsureLinkedConfigurationsProvisionedAsync(string tenantId,
+        RtAdapter? adapter = null);
 
     /// <summary>
     /// AB#8145 — number of adapters whose provisioning failed transiently (identity unreachable)
