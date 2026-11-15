@@ -33,6 +33,8 @@ internal class ServiceAccountHealthService(
     IWorkloadEncryptionService encryptionService)
     : IServiceAccountHealthService
 {
+    private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
+
     // Check names — the machine-readable half of every finding.
     private const string AssociationCheck = "association";
     private const string ConfigurationCheck = "configuration";
@@ -288,9 +290,14 @@ internal class ServiceAccountHealthService(
         }
         catch (Exception e)
         {
-            // The adapter is known — only its actor could not be read. Unknown, never a violation.
+            // The adapter is known — only its actor could not be read. Unknown, never a violation. The
+            // exception stays in the server log: the DTO goes back to the REST caller.
+            Logger.Warn(e,
+                "[{TenantId}] Health of Uses-linked service account '{WellKnownName}': the impersonation actor of adapter '{AdapterRtId}' could not be looked up",
+                tenantId, configuration.RtWellKnownName, adapter.RtId);
             impersonation = new ImpersonationContext(HasAdapterContext: true, ActorClientId: null,
-                NoActorReason: null, LookupFailure: e.Message);
+                NoActorReason: null,
+                LookupFailure: "the impersonation actor of this adapter could not be looked up (details in the controller log)");
         }
 
         var checks = new List<ServiceAccountHealthCheckDto> { Healthy(ConfigurationCheck) };

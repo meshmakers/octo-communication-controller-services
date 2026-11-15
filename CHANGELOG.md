@@ -7,9 +7,10 @@
   its identity client is created with the declared roles, so `DeployDataFlow` no longer needs a manual
   `POST {tenantId}/v1/serviceAccount/reconcile?configurationRtId=…` first. Adapter accounts are reconciled first (they are
   the `MayActAs` actors); each linked account is isolated, a failure becomes a tenant error event. Accounts with a foreign
-  `IssuerUri`/`TenantId` are skipped, and an account on impersonation, or whose impersonation actors could not be looked
-  up, keeps the secret its identity client has (an impersonation switch still waiting for its redeploy is not cut
-  short). The adapter health `GET {tenantId}/v1/adapter/{adapterRtId}/serviceAccount/health` reports these accounts
+  `IssuerUri`/`TenantId` are skipped, and the automatic paths never re-key an account that already declares a ClientId (also
+  not on impersonation or when its actors could not be looked up): the identity client keeps its secret, so an
+  impersonation switch still waiting for its redeploy is not cut short. Fresh secrets for such accounts come from
+  the manual reconcile or the rotate endpoint. The adapter health `GET {tenantId}/v1/adapter/{adapterRtId}/serviceAccount/health` reports these accounts
   in the new `LinkedConfigurations` list (impersonation judged with that adapter as the actor) and rolls them up
   through the check `linkedConfigurations` (`linked-configuration-unhealthy`). Known limit: these accounts have no
   background retry (the AB#8145 retry is per adapter); after a transient identity failure the health shows it, and the next tenant load, blueprint apply or

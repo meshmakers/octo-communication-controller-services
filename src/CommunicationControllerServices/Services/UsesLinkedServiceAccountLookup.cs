@@ -68,9 +68,10 @@ internal static class UsesLinkedServiceAccountLookup
             {
                 adapter = await communicationRepository.GetAdapterByPipelineAsync(tenantId, pipeline.ToRtEntityId());
             }
-            catch (CommunicationRepositoryException)
+            catch (CommunicationRepositoryException e) when (e.InnerException == null)
             {
-                // Not assigned to any adapter: nothing executes it.
+                // Not assigned to any adapter: nothing executes it. A wrapped query failure
+                // (InnerException set) propagates — the callers isolate it.
                 continue;
             }
 

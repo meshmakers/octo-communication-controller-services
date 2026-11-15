@@ -4677,13 +4677,18 @@ and the adapter health still answered `Healthy`.
   (`GetServiceAccountByRtIdAsync`), so overlapping passes reuse a secret the previous one saved; across controller
   instances the next pass heals a lost race, because it re-sends the stored secret; (b) an account with a foreign
   `IssuerUri` or `TenantId` (AB#5115) is skipped, because its client lives in another installation or tenant;
-  (c) an account without a stored secret that is on impersonation, or whose impersonation actors could not be
-  looked up this pass (`ResolveImpersonationActorClientIdsAsync` failed, or `IsImpersonationCapableAsync` answered
-  `null`), is sent with **no** secret, so identity keeps the one it has (`CreateIdentityDataCommandRequestConsumer`
-  keeps the existing secret when none arrives). Between an impersonation switch and its invalidation step the old
-  secret is still in use; only `InvalidateSwitchedSecretAsync` ends it. An authoritative "no capable actor" gets a
-  fresh stored secret, also for a declared `ClientId` (a declared id does not prove a client exists). The manual
-  endpoint keeps the AB#5114 behaviour (throwaway secret; a failed lookup counts as not capable).
+  (c) **the automatic paths never re-key an account that already declares a `ClientId`** (decision on PR #110,
+  Odin 2026-11-15). An account without a stored secret that is on impersonation, that declares a `ClientId`, or whose
+  impersonation actors could not be looked up this pass (`ResolveImpersonationActorClientIdsAsync` failed, or
+  `IsImpersonationCapableAsync` answered `null`) is sent with **no** secret, so identity keeps the one it has
+  (`CreateIdentityDataCommandRequestConsumer` keeps the existing secret when none arrives). Reason: a pending
+  impersonation switch is not persisted, so "client waiting for `InvalidateSwitchedSecretAsync`" cannot be told apart
+  from "client never created", and cutting a running credential short is the worse failure. Only an account without
+  a `ClientId` (the blueprint shape) that cannot impersonate gets a fresh stored secret; every other fresh secret
+  comes from the manual reconcile (AB#5114 behaviour: throwaway secret, a failed lookup counts as not capable) or the
+  rotate endpoint. A `CommunicationRepositoryException` with an inner exception from `GetAdapterByPipelineAsync` is a
+  failed query, not "pipeline not assigned": the actor lookups propagate it (verdict unknown), only the plain refusal
+  counts as no adapter.
   `EnsureTenantProvisionedAsync` calls it **after** the adapter sweep (the adapters' own clients are the accounts'
   `MayActAs` actors) and adds its counts to the report, so blueprint apply (`BlueprintAppliedConsumer`) and tenant load (`DefaultConfigurationCreatorService`) cover them without code of their
   own; the early "no adapters" exit is gone. `DeploymentSiteService.DeployWorkloadAsync` calls it for the deployed
@@ -4692,15 +4697,17 @@ and the adapter health still answered `Healthy`.
 - **Health** — the adapter-scoped `GET …/adapter/{adapterRtId}/serviceAccount/health` evaluates each Uses-linked
   account of the adapter's pipelines like the configuration-bound variant, but with **this** adapter's own client as
   the impersonation actor (an account shared by several adapters is judged per adapter; if that actor cannot be looked
-  up, the `secret` and `impersonation` checks answer `Unknown`, never a violation), and returns them in
+  up, the `secret` and `impersonation` checks answer `Unknown`, never a violation; the exception is logged, the REST
+  answer carries a generic text), and returns them in
   `ServiceAccountHealthDto.LinkedConfigurations`. The check `linkedConfigurations` rolls them up: `Violation`
   (`linked-configuration-unhealthy`, names the accounts) when one is unhealthy, `Unknown` when one could not be
   evaluated or the lookup failed, `NotApplicable` when no pipeline links an account of its own, else `Healthy`.
 
 Tests: `Services/PipelineServiceAccountLinkedConfigurationTests` (install shape, update of the declaration, adapter
 first, unused/adapter-owned skipped, no adapters, isolation, lookup failure, adapter scope, impersonating account
-keeps its identity secret, actor lookup failure keeps it too, declared ClientId without actor and new account
-without actor get a stored secret, foreign target skipped, re-read entity wins, deleted meanwhile),
+keeps its identity secret, actor lookup failure keeps it too, declared ClientId without actor is not re-keyed, new
+account without actor gets a stored secret, wrapped adapter lookup failure is not "no actor", unassigned pipeline
+is, foreign target skipped, re-read entity wins, deleted meanwhile),
 `Consumers/BlueprintAppliedConsumerTests` (`BlueprintInstall_…`, `BlueprintUpdate_…`, real provisioning service),
 `DefaultConfigurationCreatorServiceTests/EnsurePipelineServiceAccountsAsyncTests.TenantLoad_…`,
 `DeploymentSiteServiceTests/DeployWorkloadServiceAccountProvisioningTests` (order, Application skipped),

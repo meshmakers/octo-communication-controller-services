@@ -1,4 +1,5 @@
 using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -235,11 +236,12 @@ internal class PipelineServiceAccountLinkedConfigurationTests
     }
 
     [Test]
-    public async Task EnsureLinkedConfigurations_ExplicitClientIdWithoutActor_GetsAFreshStoredSecret()
+    public async Task EnsureLinkedConfigurations_DeclaredClientIdWithoutActor_IsNotReKeyed()
     {
-        // CodeRabbit round 2: a declared ClientId does not prove a client exists. With an authoritative
-        // "no capable actor" (the adapter running the pipeline has no own account) the account gets a
-        // real secret, stored on the entity, like the manual reconcile.
+        // Decision on PR #110 (option a): a background pass never re-keys an account that declares a
+        // ClientId, even with an authoritative "no capable actor" (here: the adapter running the
+        // pipeline has no own account). A pending switch is not persisted, so the old secret may still
+        // be in use; a fresh secret comes only from the manual reconcile or the rotate endpoint.
         var bareAdapter = RtEntityCreator.CreateAdapter();
         _fixture.Repository.GetServiceAccountForAdapterAsync(TenantId, bareAdapter.RtId)
             .Returns((RtServiceAccountConfiguration?)null);
@@ -251,9 +253,44 @@ internal class PipelineServiceAccountLinkedConfigurationTests
 
         var sent = _fixture.SentClients().Single(c => c.ClientId == "octo-pipeline-sa-declared");
         using var _ = Assert.Multiple();
+        await Assert.That(sent.ClientSecret).IsNull();
+        await Assert.That(_fixture.UpdatedStandalone().All(c =>
+            c.GetAttributeValueOrDefault(nameof(RtServiceAccountConfiguration.ClientSecret)) == null)).IsTrue();
+    }
+
+    [Test]
+    public async Task EnsureLinkedConfigurations_WrappedAdapterLookupFailure_IsNotTakenAsNoActor()
+    {
+        // GetAdapterByPipelineAsync wraps query failures in a CommunicationRepositoryException WITH an
+        // inner exception; only one without (pipeline not assigned) means "no adapter". A new account
+        // whose actor lookup failed must not get a fresh secret on the strength of a failed query.
+        var account = _fixture.AddStandalone("accounting-ai-prompt", ["AccountingRead"]);
+        _fixture.Repository.GetAdapterByPipelineAsync(TenantId, Arg.Any<RtEntityId>())
+            .ThrowsAsync(new CommunicationRepositoryException("query failed", new TimeoutException()));
+        var sut = _fixture.CreateProvisioningService();
+
+        await sut.EnsureLinkedConfigurationsProvisionedAsync(TenantId);
+
+        var sent = _fixture.SentClients()
+            .Single(c => c.ClientId == PipelineServiceAccountProvisioningService.BuildClientId(account.RtId));
+        await Assert.That(sent.ClientSecret).IsNull();
+    }
+
+    [Test]
+    public async Task EnsureLinkedConfigurations_UnassignedPipeline_CountsAsNoActor()
+    {
+        // The plain (no inner exception) refusal means "not assigned to an adapter": an authoritative
+        // "no actor", so the new account gets a real secret of its own.
+        var account = _fixture.AddStandalone("accounting-ai-prompt", ["AccountingRead"]);
+        _fixture.Repository.GetAdapterByPipelineAsync(TenantId, Arg.Any<RtEntityId>())
+            .ThrowsAsync(new CommunicationRepositoryException("not assigned"));
+        var sut = _fixture.CreateProvisioningService();
+
+        await sut.EnsureLinkedConfigurationsProvisionedAsync(TenantId);
+
+        var sent = _fixture.SentClients()
+            .Single(c => c.ClientId == PipelineServiceAccountProvisioningService.BuildClientId(account.RtId));
         await Assert.That(sent.ClientSecret).IsNotNull();
-        await Assert.That(_fixture.UpdatedStandalone().Single()
-            .GetAttributeValueOrDefault(nameof(RtServiceAccountConfiguration.ClientSecret))).IsNotNull();
     }
 
     [Test]

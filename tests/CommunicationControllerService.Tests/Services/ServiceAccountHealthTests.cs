@@ -1011,5 +1011,7 @@ internal class ServiceAccountHealthTests
         await Assert.That(Check(linkedHealth, "impersonation").Status).IsEqualTo("Unknown");
         await Assert.That(linkedHealth.Checks.Any(c => c.Status == "Violation")).IsFalse();
         await Assert.That(Check(dto, "linkedConfigurations").Status).IsEqualTo("Unknown");
+        // The exception text stays in the server log; the REST answer carries a generic message.
+        await Assert.That(linkedHealth.Checks.Any(c => c.Message?.Contains("repository down") == true)).IsFalse();
     }
 }

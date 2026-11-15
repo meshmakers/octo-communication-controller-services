@@ -545,8 +545,9 @@ internal class PipelineServiceAccountProvisioningService(
     /// <param name="context">Who triggered the pass and whether roles may be materialised.</param>
     /// <param name="keepIdentitySecretWhileImpersonating">
     ///     <c>true</c> on the automatic paths: an account on impersonation (no stored secret) gets
-    ///     no secret on the wire, so identity keeps the one it has; so does an account without a stored
-    ///     secret whose impersonation actors could not be looked up. Between an impersonation switch
+    ///     no secret on the wire, so identity keeps the one it has; so does any account without a stored
+    ///     secret that already declares a ClientId or whose impersonation actors could not be looked up.
+    ///     Between an impersonation switch
     ///     and its explicit invalidation (<see cref="InvalidateSwitchedSecretAsync" />) running
     ///     pipelines still present the old secret; a background pass must not end that early.
     /// </param>
@@ -639,9 +640,10 @@ internal class PipelineServiceAccountProvisioningService(
     /// </param>
     /// <param name="saveAsync">Writes the (new or repaired) entity; receives <c>isNewEntity</c>.</param>
     /// <param name="keepIdentitySecretWhileImpersonating">
-    ///     AB#8982: an account without a stored secret that is on impersonation, or whose impersonation
-    ///     verdict is unknown, gets no secret on the wire — identity keeps the one it has — instead of a
-    ///     throwaway or fresh value; see <see cref="ReconcileConfigurationCoreAsync" />.
+    ///     AB#8982: an account without a stored secret that is on impersonation, whose impersonation
+    ///     verdict is unknown, or that already declares a ClientId gets no secret on the wire — identity
+    ///     keeps the one it has — instead of a throwaway or fresh value; see
+    ///     <see cref="ReconcileConfigurationCoreAsync" />.
     /// </param>
     /// <param name="impersonationVerdictUnknown">
     ///     AB#8982: an actor lookup failed this pass, so <paramref name="impersonationCapable" /> is not
@@ -768,12 +770,16 @@ internal class PipelineServiceAccountProvisioningService(
         // send none instead — identity then keeps its current secret (or creates the client without
         // one), so a background pass cannot invalidate the old secret of a switch that is still
         // waiting for its data flows to be redeployed; that stays the switch's explicit step (d).
-        // The same holds when the verdict could not be established because an actor lookup failed:
-        // the account may be in the middle of a switch, so a background pass waits for a pass with an
-        // authoritative answer. An authoritative "no capable actor" (also for a declared ClientId with
-        // no client behind it yet) gets a fresh stored secret, like the manual reconcile.
+        // Decision on PR #110 (Odin, 2026-11-15): a background pass never re-keys an account that
+        // already declares a ClientId — a pending switch is not persisted, so "client waiting for its
+        // invalidation" cannot be told apart from "client never created", and cutting a running
+        // credential short is the worse failure. Fresh secrets for such accounts come only from the
+        // manual reconcile or the rotate endpoint. The same holds when the impersonation verdict is
+        // unknown (an actor lookup failed). Only an account without a ClientId (the blueprint shape:
+        // no client can exist yet) gets a fresh stored secret here when it cannot impersonate.
         var keepIdentitySecret = keepIdentitySecretWhileImpersonating && !secretUsable &&
-                                 (impersonating || impersonationVerdictUnknown);
+                                 (impersonating || impersonationVerdictUnknown ||
+                                  !string.IsNullOrWhiteSpace(existingClientId));
         var secret = secretUsable
             ? existingSecret!
             : keepIdentitySecret
@@ -782,7 +788,7 @@ internal class PipelineServiceAccountProvisioningService(
         if (keepIdentitySecret && !impersonating)
         {
             Logger.Warn(
-                "[{TenantId}] Pipeline service account '{WellKnownName}' (client '{ClientId}') has no stored secret and its impersonation actors could not be verified; the automatic reconcile kept the identity client's secret. The next pass with a successful lookup decides; the manual reconcile or the secret rotation issues a new one now.",
+                "[{TenantId}] Pipeline service account '{WellKnownName}' (client '{ClientId}') has no stored secret and cannot be used via impersonation (or its actors could not be verified); the automatic reconcile kept the identity client's secret. Run the manual reconcile or the secret rotation to issue a new one.",
                 tenantId, wellKnownName, clientId);
         }
 
@@ -1185,9 +1191,11 @@ internal class PipelineServiceAccountProvisioningService(
             {
                 adapter = await communicationRepository.GetAdapterByPipelineAsync(tenantId, pipeline.ToRtEntityId());
             }
-            catch (CommunicationRepositoryException)
+            catch (CommunicationRepositoryException e) when (e.InnerException == null)
             {
-                // Not assigned to any adapter: nothing executes it, nothing breaks.
+                // Not assigned to any adapter: nothing executes it, nothing breaks. AB#8982: a wrapped
+                // query failure (InnerException set) is NOT "unassigned" — it propagates, so the
+                // caller's verdict becomes "unknown" instead of "no capable actor".
                 continue;
             }
 
@@ -1596,10 +1604,11 @@ internal class PipelineServiceAccountProvisioningService(
                     adapter = await communicationRepository.GetAdapterByPipelineAsync(tenantId,
                         pipeline.ToRtEntityId());
                 }
-                catch (CommunicationRepositoryException)
+                catch (CommunicationRepositoryException e) when (e.InnerException == null)
                 {
                     // A pipeline without an Executes edge cannot tell us its adapter — the deploy
                     // paths own that error; for the edge materialisation it contributes nothing.
+                    // AB#8982: a wrapped query failure propagates and marks the lookup as failed.
                     continue;
                 }
 
