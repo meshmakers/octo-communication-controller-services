@@ -3,6 +3,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
+using Meshmakers.Octo.Runtime.Contracts;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 
@@ -234,22 +235,51 @@ internal class PipelineServiceAccountLinkedConfigurationTests
     }
 
     [Test]
-    public async Task EnsureLinkedConfigurations_ExistingSecretlessClientWithoutVerifiableActor_IsNotReKeyed()
+    public async Task EnsureLinkedConfigurations_ExplicitClientIdWithoutActor_GetsAFreshStoredSecret()
     {
-        // CodeRabbit round 2: the actor check fails (here: the adapter running the pipeline has no
-        // own account), so the account does not count as impersonating. A background pass must still
-        // not replace the secret of the existing client — a pending switch would lose it.
+        // CodeRabbit round 2: a declared ClientId does not prove a client exists. With an authoritative
+        // "no capable actor" (the adapter running the pipeline has no own account) the account gets a
+        // real secret, stored on the entity, like the manual reconcile.
         var bareAdapter = RtEntityCreator.CreateAdapter();
         _fixture.Repository.GetServiceAccountForAdapterAsync(TenantId, bareAdapter.RtId)
             .Returns((RtServiceAccountConfiguration?)null);
         _fixture.AddStandalone("accounting-ai-prompt", ["AccountingRead"], runsOn: bareAdapter,
+            clientId: "octo-pipeline-sa-declared");
+        var sut = _fixture.CreateProvisioningService();
+
+        await sut.EnsureLinkedConfigurationsProvisionedAsync(TenantId);
+
+        var sent = _fixture.SentClients().Single(c => c.ClientId == "octo-pipeline-sa-declared");
+        using var _ = Assert.Multiple();
+        await Assert.That(sent.ClientSecret).IsNotNull();
+        await Assert.That(_fixture.UpdatedStandalone().Single()
+            .GetAttributeValueOrDefault(nameof(RtServiceAccountConfiguration.ClientSecret))).IsNotNull();
+    }
+
+    [Test]
+    [Arguments(2)] // the MayActAs actor resolution fails
+    [Arguments(3)] // the strict capability check fails
+    public async Task EnsureLinkedConfigurations_ActorLookupFails_KeepsTheIdentitySecret(int failingCall)
+    {
+        // The account may be between an impersonation switch and its invalidation; without an
+        // authoritative verdict a background pass must not re-key it. Call 1 of the Uses lookup is the
+        // discovery, call 2 the actor resolution, call 3 the capability check.
+        var switched = _fixture.AddStandalone("accounting-ai-prompt", ["AccountingRead"],
             clientId: "octo-pipeline-sa-switched");
+        var pipeline = RtEntityCreator.CreatePipeline();
+        _fixture.Repository.GetAdapterByPipelineAsync(TenantId, pipeline.ToRtEntityId()).Returns(_fixture.Adapter);
+        var call = 0;
+        _fixture.Repository.GetPipelinesUsingServiceAccountAsync(TenantId, switched.RtId)
+            .Returns(_ => ++call == failingCall
+                ? throw new InvalidOperationException("lookup failed")
+                : (IReadOnlyCollection<RtPipeline>)[pipeline]);
         var sut = _fixture.CreateProvisioningService();
 
         await sut.EnsureLinkedConfigurationsProvisionedAsync(TenantId);
 
         var sent = _fixture.SentClients().Single(c => c.ClientId == "octo-pipeline-sa-switched");
         using var _ = Assert.Multiple();
+        await Assert.That(call).IsGreaterThanOrEqualTo(failingCall);
         await Assert.That(sent.ClientSecret).IsNull();
         await Assert.That(_fixture.UpdatedStandalone().All(c =>
             c.GetAttributeValueOrDefault(nameof(RtServiceAccountConfiguration.ClientSecret)) == null)).IsTrue();

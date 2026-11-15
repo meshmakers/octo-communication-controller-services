@@ -51,8 +51,11 @@ internal class ServiceAccountHealthService(
     /// pod). <paramref name="HasAdapterContext" /> is false only for the configuration-scoped
     /// variant of a standalone account that no pipeline links yet; <paramref name="ActorClientId" />
     /// is non-null only when an actor with a usable secret exists that is not the account itself.
+    /// <paramref name="LookupFailure" /> (AB#8982) is set when the actor of a known adapter could not be
+    /// looked up; the secret and impersonation checks then answer <c>Unknown</c>.
     /// </summary>
-    private sealed record ImpersonationContext(bool HasAdapterContext, string? ActorClientId, string? NoActorReason)
+    private sealed record ImpersonationContext(bool HasAdapterContext, string? ActorClientId, string? NoActorReason,
+        string? LookupFailure = null)
     {
         public static readonly ImpersonationContext NoAdapter = new(false, null, null);
     }
@@ -283,9 +286,11 @@ internal class ServiceAccountHealthService(
                     $"adapter '{adapter.Name ?? adapter.RtId.ToString()}' has no own client with a usable secret " +
                     "(reconcile the adapter to provision its pipeline service account, AB#5072)");
         }
-        catch (Exception)
+        catch (Exception e)
         {
-            impersonation = ImpersonationContext.NoAdapter;
+            // The adapter is known — only its actor could not be read. Unknown, never a violation.
+            impersonation = new ImpersonationContext(HasAdapterContext: true, ActorClientId: null,
+                NoActorReason: null, LookupFailure: e.Message);
         }
 
         var checks = new List<ServiceAccountHealthCheckDto> { Healthy(ConfigurationCheck) };
@@ -375,6 +380,12 @@ internal class ServiceAccountHealthService(
                 "and the reconcile does not replace it: add the key to the ring, or enter a new secret / rotate it " +
                 "(POST .../serviceAccount/rotateSecret)."));
         }
+        else if (impersonation.LookupFailure != null)
+        {
+            checks.Add(Unknown(SecretCheck,
+                "The configuration holds no usable client secret, and whether an adapter client can impersonate " +
+                $"the account could not be determined: {impersonation.LookupFailure}."));
+        }
         else if (impersonation.ActorClientId != null)
         {
             checks.Add(Healthy(SecretCheck,
@@ -401,6 +412,11 @@ internal class ServiceAccountHealthService(
         {
             checks.Add(NotApplicable(ImpersonationCheck,
                 "The configuration authenticates with its own client secret; impersonation is not used."));
+        }
+        else if (impersonation.LookupFailure != null)
+        {
+            checks.Add(Unknown(ImpersonationCheck,
+                $"The impersonation actor could not be looked up: {impersonation.LookupFailure}."));
         }
         else if (!impersonation.HasAdapterContext)
         {

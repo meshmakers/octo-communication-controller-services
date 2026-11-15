@@ -545,8 +545,8 @@ internal class PipelineServiceAccountProvisioningService(
     /// <param name="context">Who triggered the pass and whether roles may be materialised.</param>
     /// <param name="keepIdentitySecretWhileImpersonating">
     ///     <c>true</c> on the automatic paths: an account on impersonation (no stored secret) gets
-    ///     no secret on the wire, so identity keeps the one it has; so does an existing client without a
-    ///     stored secret whose impersonation could not be verified. Between an impersonation switch
+    ///     no secret on the wire, so identity keeps the one it has; so does an account without a stored
+    ///     secret whose impersonation actors could not be looked up. Between an impersonation switch
     ///     and its explicit invalidation (<see cref="InvalidateSwitchedSecretAsync" />) running
     ///     pipelines still present the old secret; a background pass must not end that early.
     /// </param>
@@ -581,21 +581,24 @@ internal class PipelineServiceAccountProvisioningService(
         // resolved (nothing links the configuration yet, or the adapters have no provisioned own
         // account), null goes onto the wire — the identity side changes no edges — and the next
         // reconcile pass after the linkage exists materialises them.
-        var mayActAsClientIds = await ResolveImpersonationActorClientIdsAsync(tenantId, configuration.RtId,
-            wellKnownName, clientId);
+        var (mayActAsClientIds, actorLookupFailed) = await ResolveImpersonationActorClientIdsAsync(tenantId,
+            configuration.RtId, wellKnownName, clientId);
 
         // AB#5537: whether impersonation may STAND IN for a missing secret is judged strictly —
         // every adapter running a pipeline of the account must hold a usable own secret (the same
         // check the impersonation switch uses). The lenient actor list above only decides which
         // edges to declare; a single incapable adapter means the account needs a real secret.
-        var impersonationCapable = mayActAsClientIds is { Count: > 0 } &&
-                                   await IsImpersonationCapableAsync(tenantId, configuration.RtId, wellKnownName,
-                                       clientId);
+        bool? capability = mayActAsClientIds is { Count: > 0 }
+            ? await IsImpersonationCapableAsync(tenantId, configuration.RtId, wellKnownName, clientId)
+            : false;
+        var impersonationCapable = capability == true;
+        // AB#8982: whether a lookup failed, so the verdict above is not authoritative.
+        var impersonationVerdictUnknown = actorLookupFailed || capability == null;
 
         var result = await ReconcileCoreAsync(tenantId, configuration, isLinked: true, wellKnownName, clientId,
             BuildStandaloneClientDisplayName(wellKnownName), context, mayActAsClientIds, impersonationCapable,
             (entity, _) => communicationRepository.UpdateServiceAccountAsync(tenantId, entity),
-            keepIdentitySecretWhileImpersonating);
+            keepIdentitySecretWhileImpersonating, impersonationVerdictUnknown);
 
         if (result.Outcome != PipelineServiceAccountProvisioningOutcome.AlreadyProvisioned)
         {
@@ -636,15 +639,19 @@ internal class PipelineServiceAccountProvisioningService(
     /// </param>
     /// <param name="saveAsync">Writes the (new or repaired) entity; receives <c>isNewEntity</c>.</param>
     /// <param name="keepIdentitySecretWhileImpersonating">
-    ///     AB#8982: an existing client without a stored secret (on impersonation, or with an impersonation
-    ///     verdict that is negative or unknown) gets no secret on the wire — identity keeps the one it
-    ///     has — instead of a throwaway or fresh value; see <see cref="ReconcileConfigurationCoreAsync" />.
+    ///     AB#8982: an account without a stored secret that is on impersonation, or whose impersonation
+    ///     verdict is unknown, gets no secret on the wire — identity keeps the one it has — instead of a
+    ///     throwaway or fresh value; see <see cref="ReconcileConfigurationCoreAsync" />.
+    /// </param>
+    /// <param name="impersonationVerdictUnknown">
+    ///     AB#8982: an actor lookup failed this pass, so <paramref name="impersonationCapable" /> is not
+    ///     authoritative.
     /// </param>
     private async Task<ServiceAccountReconcileResult> ReconcileCoreAsync(string tenantId,
         RtServiceAccountConfiguration? existing, bool isLinked, string wellKnownName, string clientId,
         string clientDisplayName, ServiceAccountReconcileContext context, IList<string>? mayActAsClientIds,
         bool impersonationCapable, Func<RtServiceAccountConfiguration, bool, Task> saveAsync,
-        bool keepIdentitySecretWhileImpersonating = false)
+        bool keepIdentitySecretWhileImpersonating = false, bool impersonationVerdictUnknown = false)
     {
         // Read through GetAttributeValueOrDefault, never through the generated properties — kept
         // even though 3.33.0 made IssuerUri/ClientSecret/TenantId optional (their getters no
@@ -761,12 +768,12 @@ internal class PipelineServiceAccountProvisioningService(
         // send none instead — identity then keeps its current secret (or creates the client without
         // one), so a background pass cannot invalidate the old secret of a switch that is still
         // waiting for its data flows to be redeployed; that stays the switch's explicit step (d).
-        // The same holds when the impersonation verdict is negative or could not be established
-        // (IsImpersonationCapableAsync answers false when its lookup fails): an EXISTING client
-        // without a stored secret is never re-keyed by a background pass. Only a client that does not
-        // exist yet (no ClientId — the blueprint-shipped shape) gets a fresh secret there.
+        // The same holds when the verdict could not be established because an actor lookup failed:
+        // the account may be in the middle of a switch, so a background pass waits for a pass with an
+        // authoritative answer. An authoritative "no capable actor" (also for a declared ClientId with
+        // no client behind it yet) gets a fresh stored secret, like the manual reconcile.
         var keepIdentitySecret = keepIdentitySecretWhileImpersonating && !secretUsable &&
-                                 (impersonating || !string.IsNullOrWhiteSpace(existingClientId));
+                                 (impersonating || impersonationVerdictUnknown);
         var secret = secretUsable
             ? existingSecret!
             : keepIdentitySecret
@@ -775,7 +782,7 @@ internal class PipelineServiceAccountProvisioningService(
         if (keepIdentitySecret && !impersonating)
         {
             Logger.Warn(
-                "[{TenantId}] Pipeline service account '{WellKnownName}' (client '{ClientId}') has no stored secret and impersonation is not available or could not be verified; the automatic reconcile kept the identity client's secret. Run the manual reconcile or the secret rotation to issue a new one.",
+                "[{TenantId}] Pipeline service account '{WellKnownName}' (client '{ClientId}') has no stored secret and its impersonation actors could not be verified; the automatic reconcile kept the identity client's secret. The next pass with a successful lookup decides; the manual reconcile or the secret rotation issues a new one now.",
                 tenantId, wellKnownName, clientId);
         }
 
@@ -1127,10 +1134,11 @@ internal class PipelineServiceAccountProvisioningService(
     /// <summary>
     /// AB#5537: the strict impersonation check for the reconcile — <c>true</c> only when the account
     /// is used and every adapter running one of its pipelines can act as it
-    /// (<see cref="AnalyseImpersonationActorsAsync" />). A lookup failure answers <c>false</c>: the
-    /// reconcile then issues a real secret, the safe direction for a running pipeline.
+    /// (<see cref="AnalyseImpersonationActorsAsync" />). A lookup failure answers <c>null</c>
+    /// (unknown): the manual reconcile treats it as <c>false</c> and issues a real secret, the
+    /// automatic paths keep the identity client's secret (AB#8982).
     /// </summary>
-    private async Task<bool> IsImpersonationCapableAsync(string tenantId, OctoObjectId configurationRtId,
+    private async Task<bool?> IsImpersonationCapableAsync(string tenantId, OctoObjectId configurationRtId,
         string wellKnownName, string targetClientId)
     {
         try
@@ -1151,9 +1159,9 @@ internal class PipelineServiceAccountProvisioningService(
         catch (Exception e)
         {
             Logger.Warn(e,
-                "[{TenantId}] Could not verify the impersonation actors of standalone pipeline service account '{WellKnownName}' (client '{ClientId}'); treating it as not impersonation-capable (AB#5537)",
+                "[{TenantId}] Could not verify the impersonation actors of standalone pipeline service account '{WellKnownName}' (client '{ClientId}'); the impersonation verdict is unknown this pass (AB#5537, AB#8982)",
                 tenantId, wellKnownName, targetClientId);
-            return false;
+            return null;
         }
     }
 
@@ -1569,8 +1577,8 @@ internal class PipelineServiceAccountProvisioningService(
     /// actor — the reconcile must never fail over it — and <c>null</c> is returned when no actor
     /// could be resolved at all, which leaves the identity edges untouched.
     /// </summary>
-    private async Task<IList<string>?> ResolveImpersonationActorClientIdsAsync(string tenantId,
-        OctoObjectId configurationRtId, string wellKnownName, string targetClientId)
+    private async Task<(IList<string>? Actors, bool LookupFailed)> ResolveImpersonationActorClientIdsAsync(
+        string tenantId, OctoObjectId configurationRtId, string wellKnownName, string targetClientId)
     {
         try
         {
@@ -1614,13 +1622,13 @@ internal class PipelineServiceAccountProvisioningService(
                 Logger.Info(
                     "[{TenantId}] Reconcile of standalone pipeline service account '{WellKnownName}' (client '{ClientId}') declares no MayActAs actors: no adapter with an own client could be resolved from the account's Uses linkage (AB#5114). Impersonation of this account stays unauthorized until a later pass finds one.",
                     tenantId, wellKnownName, targetClientId);
-                return null;
+                return (null, false);
             }
 
             Logger.Debug(
                 "[{TenantId}] Reconcile of standalone pipeline service account '{WellKnownName}' (client '{ClientId}') declares MayActAs actors: {Actors} (AB#5114)",
                 tenantId, wellKnownName, targetClientId, string.Join(", ", actorClientIds));
-            return actorClientIds.ToList();
+            return (actorClientIds.ToList(), false);
         }
         catch (Exception e)
         {
@@ -1629,7 +1637,7 @@ internal class PipelineServiceAccountProvisioningService(
             Logger.Warn(e,
                 "[{TenantId}] Could not resolve the MayActAs actors of standalone pipeline service account '{WellKnownName}' (client '{ClientId}'); the identity edges are left untouched this pass (AB#5114)",
                 tenantId, wellKnownName, targetClientId);
-            return null;
+            return (null, true);
         }
     }
 

@@ -988,4 +988,28 @@ internal class ServiceAccountHealthTests
             .Contains("octo-pipeline-sa-b");
         await Assert.That(Check(healthB, "linkedConfigurations").Status).IsEqualTo("Violation");
     }
+
+    [Test]
+    public async Task GetAdapterHealth_LinkedActorLookupFails_SecretAndImpersonationAreUnknown()
+    {
+        // CodeRabbit round 2: the adapter's own account was read, then the actor lookup for the linked
+        // account throws. The adapter is known, so this is Unknown, never a violation.
+        var sut = CreateSut();
+        var (adapter, linked) = ArrangeAdapterWithUsesLinkedConfiguration();
+        linked.ClientSecret = null;
+        var adapterAccount = CreateHealthyConfiguration();
+        var reads = 0;
+        _resolver.GetAdapterDefaultAsync(TenantId, adapter.RtId)
+            .Returns(_ => ++reads == 1 ? adapterAccount : throw new InvalidOperationException("repository down"));
+        ArrangeMatchingIdentityClient();
+
+        var dto = await sut.GetAdapterHealthAsync(TenantId, adapter);
+
+        var linkedHealth = dto.LinkedConfigurations![0];
+        using var _ = Assert.Multiple();
+        await Assert.That(Check(linkedHealth, "secret").Status).IsEqualTo("Unknown");
+        await Assert.That(Check(linkedHealth, "impersonation").Status).IsEqualTo("Unknown");
+        await Assert.That(linkedHealth.Checks.Any(c => c.Status == "Violation")).IsFalse();
+        await Assert.That(Check(dto, "linkedConfigurations").Status).IsEqualTo("Unknown");
+    }
 }
