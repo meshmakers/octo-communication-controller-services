@@ -7,8 +7,10 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 /// writes of pipelines and pipeline triggers. Two writers can touch the same deployment site, adapter,
 /// pipeline or trigger document in parallel (operator claim, disconnect handling, reconciliation sweep,
 /// tenant setup racing an adapter re-registration). MongoDB then aborts one transaction with a WriteConflict
-/// (TransientTransactionError). The write is idempotent and the guard keeps stale values out,
-/// so the controller repeats it instead of leaving the stored state stale until the next claim.
+/// (TransientTransactionError). The write is idempotent, so the controller repeats it instead of leaving
+/// the stored state stale until the next claim. For communication states the timestamp guard keeps stale
+/// values out; the pipeline and trigger deployment-state writes have no guard and are last-writer-wins, as
+/// the first attempt would have been.
 /// Non-transient errors are never retried.
 /// </summary>
 internal static class StateWriteRetry
