@@ -4,7 +4,8 @@
 #   write-secret.sh tenant  <tenantId>                         the tenant's own CaptchaSecret (override)
 # The secret never appears on a command line or in the document: jq turns standard input into the
 # variables JSON, which octo-cli reads from its own standard input. The response carries only isSet.
-# It always uses the context local_<tenantId>, never the active one, so it cannot write to a shared environment.
+# It uses the context ${OCTO_CONTEXT_PREFIX:-local_}<tenantId>, never the active one: by default only a local
+# context, and another environment only when the prefix names it (e.g. OCTO_CONTEXT_PREFIX=test-2_).
 set -euo pipefail
 
 usage='usage: write-secret.sh default|tenant <tenantId> [allowedTenantId ...]'
@@ -12,6 +13,7 @@ secret_target="${1:?$usage}"
 tenant_id="${2:?$usage}"
 shift 2
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+octo_context="${OCTO_CONTEXT_PREFIX:-local_}${tenant_id}"
 
 IFS= read -r -s secret_value || true
 if [[ -z "$secret_value" ]]; then
@@ -41,4 +43,4 @@ esac
 printf '%s' "$secret_value" \
   | jq -Rsc --argjson allowedTenantIds "$allowed_tenant_ids_json" --arg target "$secret_target" \
       'if $target == "default" then { secretValue: ., allowedTenantIds: $allowedTenantIds } else { secretValue: . } end' \
-  | octo-cli --context "local_$tenant_id" -c GraphQl -tid "$tenant_id" -f "$document_file" -vars @/dev/stdin
+  | octo-cli --context "$octo_context" -c GraphQl -tid "$tenant_id" -f "$document_file" -vars @/dev/stdin

@@ -15,9 +15,10 @@ without that environment's own go.
   stack shares it); without any key ring the projected default cannot be decrypted and every check
   answers `verification-unavailable`, and a key ring that lacks the default's key id treats the default as
   not set, so a tenant without its own secret gets `not-configured`.
-- `octo-cli` with the `GraphQl` command and its `-vars` option, one context per tenant (`<parent>`,
-  `<child>`, `<grandchild>`). Logins are done by the developer, not by an agent. `jq` for
-  `write-secret.sh`.
+- `octo-cli` with the `GraphQl` command and its `-vars` option, one context per tenant, named
+  `<prefix><tenant>`: `local_<tenant>` on the local stack, `<installation>_<tenant>` elsewhere (see
+  [On a shared environment](#8-on-a-shared-environment)). Logins are done by the developer, not by an agent.
+  `jq` for `write-secret.sh` and `prove-no-reveal.sh`, `unzip` for `prove-no-reveal.sh`.
 - The served tenants' Mesh Adapter reachable from the shell, e.g. `http://localhost:5020` through
   `kubectl port-forward`.
 
@@ -27,7 +28,10 @@ Variables used below (bash; replace the example tenant ids with your own):
 sample_root=samples/Blueprints/SecretDefaultDemo
 parent_tenant=sddemo-parent   child_tenant=sddemo-child   grandchild_tenant=sddemo-grandchild
 adapter_base_url=http://localhost:5020
+export OCTO_CONTEXT_PREFIX=local_
 ```
+
+`write-secret.sh` and `prove-no-reveal.sh` read `OCTO_CONTEXT_PREFIX` too (default `local_`).
 
 ## 1. Publish the model and the blueprints locally
 
@@ -35,7 +39,7 @@ adapter_base_url=http://localhost:5020
 octo-ckc -c Compile -p "$sample_root/ConstructionKit" -o ./ck-out
 octo-ckc -c Publish -f ./ck-out/ck-secretdefaultdemo.yaml -r
 catalog_root=~/.octo/local-blueprint-catalog/blueprints/v1
-for blueprint_name in SecretDefaultDemo SecretDefaultDemoCaptcha; do
+for blueprint_name in SecretDefaultDemo SecretDefaultDemoCaptcha SecretDefaultDemoProbe; do
   mkdir -p "$catalog_root/$blueprint_name/1.0.0"
   cp -r "$sample_root/$blueprint_name/." "$catalog_root/$blueprint_name/1.0.0/"
 done
@@ -52,13 +56,13 @@ it. A tenant created later receives the default on its first load, or at once wi
 `POST {tenant}/v1/secretDefaults/reconcile` on the Communication Controller.
 
 ```bash
-octo-cli --context "local_$parent_tenant" -c Create -tid "$child_tenant" -db "$child_tenant"
-octo-cli --context "local_$child_tenant"  -c Create -tid "$grandchild_tenant" -db "$grandchild_tenant"
+octo-cli --context "${OCTO_CONTEXT_PREFIX}$parent_tenant" -c Create -tid "$child_tenant" -db "$child_tenant"
+octo-cli --context "${OCTO_CONTEXT_PREFIX}$child_tenant"  -c Create -tid "$grandchild_tenant" -db "$grandchild_tenant"
 
-octo-cli --context "local_$parent_tenant" -c InstallBlueprint -b SecretDefaultDemo-1.0.0
+octo-cli --context "${OCTO_CONTEXT_PREFIX}$parent_tenant" -c InstallBlueprint -b SecretDefaultDemo-1.0.0
 for served_tenant in "$child_tenant" "$grandchild_tenant"; do
-  octo-cli --context "local_$served_tenant" -c InstallBlueprint -b SecretDefaultDemoCaptcha-1.0.0
-  octo-cli --context "local_$served_tenant" -c DeployDataFlow -id 5ecdef0000000000000000b2
+  octo-cli --context "${OCTO_CONTEXT_PREFIX}$served_tenant" -c InstallBlueprint -b SecretDefaultDemoCaptcha-1.0.0
+  octo-cli --context "${OCTO_CONTEXT_PREFIX}$served_tenant" -c DeployDataFlow -id 5ecdef0000000000000000b2
 done
 ```
 
@@ -68,7 +72,7 @@ The seed declares no `SecretDefaults` entry, so nothing reaches a served tenant 
 
 ```bash
 for served_tenant in "$parent_tenant" "$child_tenant" "$grandchild_tenant"; do
-  octo-cli --context "local_$served_tenant" -c GraphQl -tid "$served_tenant" -f "$sample_root/verify/read-secret-default.graphql"
+  octo-cli --context "${OCTO_CONTEXT_PREFIX}$served_tenant" -c GraphQl -tid "$served_tenant" -f "$sample_root/verify/read-secret-default.graphql"
 done
 ```
 
@@ -84,9 +88,9 @@ Description -> Save -> Deploy). The script does the same through
 ```bash
 printf '%s\n' 1x0000000000000000000000000000000AA \
   | "$sample_root/verify/write-secret.sh" default "$parent_tenant"
-octo-cli --context "local_$parent_tenant" -c DeployWorkload -id 5ecdef0000000000000000a1
+octo-cli --context "${OCTO_CONTEXT_PREFIX}$parent_tenant" -c DeployWorkload -id 5ecdef0000000000000000a1
 for served_tenant in "$parent_tenant" "$child_tenant" "$grandchild_tenant"; do
-  octo-cli --context "local_$served_tenant" -c GraphQl -tid "$served_tenant" -f "$sample_root/verify/read-secret-default.graphql"
+  octo-cli --context "${OCTO_CONTEXT_PREFIX}$served_tenant" -c GraphQl -tid "$served_tenant" -f "$sample_root/verify/read-secret-default.graphql"
 done
 ```
 
@@ -108,18 +112,71 @@ default, and the parent and grandchild have none.
 | Child sets the always-fail secret | `printf '%s\n' 2x0000000000000000000000000000000AA \| "$sample_root/verify/write-secret.sh" tenant "$child_tenant"` | `captchaSecret { isSet: true }` |
 | Override in the child | `"$sample_root/verify/call-verify-captcha.sh" "$adapter_base_url" "$child_tenant"` | `{"valid":false,"source":"tenant","reason":"invalid-token"}` |
 | Grandchild untouched | `"$sample_root/verify/call-verify-captcha.sh" "$adapter_base_url" "$grandchild_tenant"` | `{"valid":true,"source":"default"}` |
-| Child clears its secret | `octo-cli --context "local_$child_tenant" -c GraphQl -tid "$child_tenant" -f "$sample_root/verify/clear-tenant-secret.graphql"` | `captchaSecret { isSet: false }` |
+| Child clears its secret | `octo-cli --context "${OCTO_CONTEXT_PREFIX}$child_tenant" -c GraphQl -tid "$child_tenant" -f "$sample_root/verify/clear-tenant-secret.graphql"` | `captchaSecret { isSet: false }` |
 | Back to the default | `"$sample_root/verify/call-verify-captcha.sh" "$adapter_base_url" "$child_tenant"` | `{"valid":true,"source":"default"}` |
 
 No answer, log line or GraphQL response may contain a secret: grep them for `1x0000` and `2x0000`.
-`RevealSecret@1` on the `SecretDefault` is refused for every identity (proof story AB#7247).
+`RevealSecret@1` on the `SecretDefault` is refused for every identity: step 6 proves it.
 
-## 6. Undeploy withdraws, clean up
+## 6. Prove that no read path reveals the default
+
+As a **tenant admin** of a served tenant (every role of that tenant), with the default deployed (step 4).
+Install the probe blueprint in that tenant and deploy its data flow, then pipe the default's value into
+the script as the sentinel. It is read from standard input like in `write-secret.sh`, so it is on no
+command line; the script prints one line per read path and never a response body. A random value is the
+stronger sentinel (write it with `write-secret.sh default` and deploy again before the run); the CAPTCHA
+probe then answers `valid: false`, which is expected.
 
 ```bash
-octo-cli --context "local_$parent_tenant" -c UndeployWorkload -id 5ecdef0000000000000000a1 -y
+octo-cli --context "${OCTO_CONTEXT_PREFIX}$child_tenant" -c InstallBlueprint -b SecretDefaultDemoProbe-1.0.0
+octo-cli --context "${OCTO_CONTEXT_PREFIX}$child_tenant" -c DeployDataFlow -id 5ecdef0000000000000000c2
+printf '%s\n' 1x0000000000000000000000000000000AA \
+  | "$sample_root/verify/prove-no-reveal.sh" "$child_tenant"
+```
+
+`OCTO_CONTEXT` names a context of its own, e.g. one in which the tenant-admin test user is logged in
+(`OCTO_CONTEXT=local_sddemo-child-admin`); without it the script uses `${OCTO_CONTEXT_PREFIX}<tenant>`.
+
+| Read path | How the script tries it | Expected |
+|---|---|---|
+| GraphQL, typed root | `probe-typed-value.graphql` selects `value` on `systemCommunicationSecretDefault` | refused: the field does not exist (Hidden) |
+| GraphQL, generic root | `probe-generic-attributes.graphql`: `runtimeEntities` with `attributes` and no `attributeNames` (all attributes) | answered, no attribute `value` |
+| Export by deep graph | `ExportRtByDeepGraph` of the `SecretDefault` | the entity is exported, without the value and without an `enc:v…:` envelope |
+| Export by query | `ExportRtByQuery` of the probe query `5ecdef0000000000000000c1` | as above |
+| `RevealSecret@1`, caller | `ExecutePipeline` of `5ecdef0000000000000000c3` | execution failed, message names the type platform-only |
+| `RevealSecret@1`, service account | `ExecutePipeline` of `5ecdef0000000000000000c4` | as above |
+| `GetPipelineConfigByCkTypeId@1` | `ExecutePipeline` of `5ecdef0000000000000000c5` | as above |
+| `VerifyCaptcha@1` without a route | `ExecutePipeline` of `5ecdef0000000000000000c6` | completed, the debug points carry the verdict and its `source` |
+
+For each pipeline the script turns debug on (`SetPipelineDebug`), waits for the execution and searches
+the execution, its debug points (`GetPipelineDebugPoints`) and the execution history
+(`GetPipelineExecutions`) for the sentinel. Expected output, with the always-pass test secret:
+
+```text
+Tenant sddemo-child, context local_sddemo-child, SecretDefault <rtId>
+PASS  GraphQL typed field value                    refused: the schema has no field value
+PASS  GraphQL runtimeEntities, all attributes      answered without the value attribute
+PASS  ExportRtByDeepGraph                          exported without value and without envelope
+PASS  ExportRtByQuery                              exported without value and without envelope
+PASS  RevealSecret@1 as Caller                     refused as platform-only; no value in debug points or history
+PASS  RevealSecret@1 as ServiceAccount             refused as platform-only; no value in debug points or history
+PASS  GetPipelineConfigByCkTypeId@1                refused as platform-only; no value in debug points or history
+PASS  VerifyCaptcha@1 via ExecutePipeline          verdict source=default; no value in debug points or history
+Every read path refused.
+```
+
+Exit code 0 when every path refused, 1 when one did not (the line says which, never the value), 2 when the
+tenant has no projected default or no sentinel was given. The script asserts refusals only: the dump and
+restore of a tenant and the log sweep are separate (a restored `SecretDefault` without a providing
+Application is removed by the next reconcile, which the controller's unit tests
+`RestoredSecretDefaultReconcileTests` cover; for the logs see step 9).
+
+## 7. Undeploy withdraws, clean up
+
+```bash
+octo-cli --context "${OCTO_CONTEXT_PREFIX}$parent_tenant" -c UndeployWorkload -id 5ecdef0000000000000000a1 -y
 for served_tenant in "$parent_tenant" "$child_tenant" "$grandchild_tenant"; do
-  octo-cli --context "local_$served_tenant" -c GraphQl -tid "$served_tenant" -f "$sample_root/verify/read-secret-default.graphql"
+  octo-cli --context "${OCTO_CONTEXT_PREFIX}$served_tenant" -c GraphQl -tid "$served_tenant" -f "$sample_root/verify/read-secret-default.graphql"
 done
 ```
 
@@ -129,3 +186,61 @@ Expected: `totalCount: 0` everywhere - an undeployed Application is no source - 
 
 Then delete the child and grandchild tenants and remove the sample model and blueprints from the local
 catalogs.
+
+## 8. On a shared environment
+
+Only with that environment's own go. The steps are the same, with these differences:
+
+- **Contexts.** One octo-cli context per tenant, named `<installation>_<tenant>` (e.g. `test-2_sddemo-child`), and
+  `export OCTO_CONTEXT_PREFIX=test-2_` before the steps; every command and both scripts use it. Nothing in
+  the steps names `local_` any more.
+- **Catalogs.** The model and the blueprints come from the environment's catalogs, not from the local folders
+  of step 1 (publish them there, then refresh the catalogs).
+- **Deployment site.** A tenant created for the run has no running deployment site, and a workload deploy
+  there does nothing. Deploy the site once before step 4:
+
+  ```bash
+  octo-cli --context "${OCTO_CONTEXT_PREFIX}$parent_tenant" -c GraphQl -tid "$parent_tenant" \
+    -f "$sample_root/verify/read-deployment-site.graphql"
+  octo-cli --context "${OCTO_CONTEXT_PREFIX}$parent_tenant" -c DeployDeploymentSite -id <deploymentSiteRtId>
+  ```
+
+- **No ingress for the adapter.** Where the tenant's Mesh Adapter has no ingress, `call-verify-captcha.sh` cannot
+  reach the route. Use the probe pipeline instead: install `SecretDefaultDemoProbe`, deploy its data flow and
+  run it with `ExecutePipeline`; the verdict is in its debug points.
+
+  ```bash
+  octo-cli --context "${OCTO_CONTEXT_PREFIX}$child_tenant" -c SetPipelineDebug -id 5ecdef0000000000000000c6 -e true
+  octo-cli --context "${OCTO_CONTEXT_PREFIX}$child_tenant" -c ExecutePipeline -id 5ecdef0000000000000000c6
+  octo-cli --context "${OCTO_CONTEXT_PREFIX}$child_tenant" -c GetPipelineDebugPoints \
+    -id 5ecdef0000000000000000c6 -eid <executionId>
+  ```
+
+  `prove-no-reveal.sh` uses this pipeline anyway, so it needs no ingress.
+
+## 9. Trace sweep: raise the log levels, then restore them
+
+To show that no log line carries the sentinel, raise the levels before step 4 (projection) and step 5
+(verification), grep the logs for the sentinel, then restore the levels.
+
+- **Communication Controller** (and the asset repository, which stores the value) at run time:
+
+  ```bash
+  for service_name in CommunicationController AssetRepository; do
+    for logger_name in 'Meshmakers.*' '*'; do
+      octo-cli --context "${OCTO_CONTEXT_PREFIX}$parent_tenant" -c ReconfigureLogLevel \
+        -n "$service_name" -ln "$logger_name" -minL Trace -maxL Fatal
+    done
+  done
+  ```
+
+  Restore with the same loop and `-minL Info` (or the level the deployment sets with `OCTO_LOG_LEVEL` /
+  `OCTO_LOG_LEVEL_ROOT`). The change lives in memory only: a restart of the service restores the configured level
+  as well.
+- **Mesh Adapter and Communication Operator** read their level at start from `OCTO_LOG_LEVEL` (our code) and
+  `OCTO_LOG_LEVEL_ROOT` (frameworks), default `Info`. Local stack: set both to `Trace` in the service's
+  environment and restart it. kind: `kubectl -n <namespace> set env deployment/<name> OCTO_LOG_LEVEL=Trace
+  OCTO_LOG_LEVEL_ROOT=Trace`, restore with `kubectl -n <namespace> set env deployment/<name> OCTO_LOG_LEVEL-
+  OCTO_LOG_LEVEL_ROOT-` (the next deploy of the release renders the chart again and drops them too).
+- **Search** the logs for the sentinel with `grep -cF` and report only the count; never print a matching line.
+  Then restore every level before you leave the environment.

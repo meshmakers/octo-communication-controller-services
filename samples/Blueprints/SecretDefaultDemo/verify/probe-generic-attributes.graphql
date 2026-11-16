@@ -1,0 +1,19 @@
+# Reads every attribute of every SecretDefault through the generic root. attributes without
+# attributeNames returns all attributes; a Hidden attribute must not be among them.
+query probeGenericAttributes {
+  runtime {
+    runtimeEntities(ckId: "System.Communication/SecretDefault") {
+      totalCount
+      items {
+        rtId
+        ckTypeId
+        attributes {
+          items {
+            attributeName
+            value
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+# The tenant's deployment site; DeployDeploymentSite takes its rtId before the first workload deploy.
+query readDeploymentSite {
+  runtime {
+    systemCommunicationDeploymentSite(first: 10) {
+      items {
+        rtId
+        name
+        deploymentState
+      }
+    }
+  }
+}

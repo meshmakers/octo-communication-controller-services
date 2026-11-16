@@ -8,6 +8,7 @@ a tenant can still set its own secret, and nobody in a tenant can read the defau
 |---|---|---|
 | `SecretDefaultDemo/` | Blueprint `SecretDefaultDemo-1.0.0`: the Application, without a `SecretDefaults` entry - the operator adds `demo-captcha-secret` after the install | the tenant that hosts the Application (the parent) |
 | `SecretDefaultDemoCaptcha/` | Blueprint `SecretDefaultDemoCaptcha-1.0.0`: the tenant override `CaptchaConfiguration` and the route `POST /secret-default-demo/verify-captcha` | every served tenant that verifies CAPTCHAs (child, grandchild) |
+| `SecretDefaultDemoProbe/` | Blueprint `SecretDefaultDemoProbe-1.0.0`: a persisted query on `SecretDefault` and four `ExecutePipeline` pipelines that try to read the default (`RevealSecret@1` as caller and as service account, `GetPipelineConfigByCkTypeId@1`) or use it without an HTTP route (`VerifyCaptcha@1`) | a served test tenant, only for the proof (`verify/prove-no-reveal.sh`) |
 | `ConstructionKit/` | CK model `SecretDefaultDemo-1.0.0`: type `CaptchaConfiguration` with the Secret attribute `CaptchaSecret` | publish to a CK catalog; the second blueprint pulls it |
 | `verify/` | The commands that prove the pattern on a local tenant tree | - |
 
@@ -82,8 +83,8 @@ adds it after the install:
   replaces the Application's list: use it while the Application carries no other entry, otherwise the
   Studio form) and the secret passed as a **GraphQL variable**, never inline in the document:
   [`verify/write-secret-default.graphql`](verify/write-secret-default.graphql).
-  `verify/write-secret.sh default <tenant> [allowedTenantId ...]` sends it (always through the context
-  `local_<tenant>`) with the value read from standard input; the variables reach `octo-cli` on its standard input (`-vars @/dev/stdin`), so the
+  `verify/write-secret.sh default <tenant> [allowedTenantId ...]` sends it (through the context
+  `${OCTO_CONTEXT_PREFIX:-local_}<tenant>`) with the value read from standard input; the variables reach `octo-cli` on its standard input (`-vars @/dev/stdin`), so the
   secret is on no command line, in no file and in no shell history. Then `DeployWorkload`.
 - **A CD from a secret store**, as the Energy Community app does on test-2 (Vault -> `SecretDefaults`
   before the deploy). Then the store is the source of truth and a Studio edit is overwritten by the
@@ -131,3 +132,5 @@ The sample uses Cloudflare's public Turnstile test keys and never a real key:
 
 See [`verify/README.md`](verify/README.md): publish the model, install both blueprints on a
 parent/child/grandchild tree, add the entry with the test secret, deploy, call the route.
+`verify/prove-no-reveal.sh` then shows, as a tenant admin of a served tenant, that no read path returns
+the value; the same README covers a shared environment and a log sweep at Trace level.

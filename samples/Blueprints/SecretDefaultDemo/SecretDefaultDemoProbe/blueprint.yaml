@@ -1,0 +1,24 @@
+$schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
+blueprintId: SecretDefaultDemoProbe-1.0.0
+description: |
+  The PROOF half of the secret-default sample, for a test tenant only. Install it on a
+  served tenant (e.g. the child) after `SecretDefaultDemoCaptcha-1.0.0`, deploy its data
+  flow and run `verify/prove-no-reveal.sh` as a tenant admin of that tenant. Never install
+  it on a tenant that serves real users.
+
+  It seeds the tools a tenant admin has to try to read the projected default:
+  - a persisted query on `System.Communication/SecretDefault` (for `ExportRtByQuery`);
+  - three pipelines started with `ExecutePipeline` that try to reveal it:
+    `RevealSecret@1` as the caller, `RevealSecret@1` as the pipeline's service account,
+    and `GetPipelineConfigByCkTypeId@1` on the type; every one must fail as platform-only;
+  - one pipeline started with `ExecutePipeline` that runs `VerifyCaptcha@1` with the
+    default, for an adapter without an ingress where the HTTP route of
+    `SecretDefaultDemoCaptcha` cannot be called.
+
+  Deploy the data flow after the install (`DeployDataFlow -id 5ecdef0000000000000000c2`).
+
+ckModelDependencies:
+  - System.Communication-[4.16,5.0)
+  - SecretDefaultDemo-[1.0,2.0)
+
+seedDataPath: seed-data/entities.yaml

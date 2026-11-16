@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- AB#7247 Test: the secret-default sample proves that a tenant admin cannot read a projected default.
+  `verify/prove-no-reveal.sh` tries the typed and the generic GraphQL root, `ExportRtByDeepGraph`, `ExportRtByQuery`,
+  `RevealSecret@1` as caller and as service account, `GetPipelineConfigByCkTypeId@1` and `VerifyCaptcha@1` through
+  `ExecutePipeline`, and searches answers, exports, debug points and execution history for the sentinel; the new
+  blueprint `SecretDefaultDemoProbe-1.0.0` seeds the probe query and pipelines. The verify README gains a
+  shared-environment section (context prefix `OCTO_CONTEXT_PREFIX`, `DeployDeploymentSite`, the route through
+  `ExecutePipeline`) and a Trace log sweep. Unit tests `RestoredSecretDefaultReconcileTests`: a SecretDefault restored
+  into a tenant that no Application of its source reaches, or naming no existing Application, is removed by the next
+  reconcile.
+
 - AB#7245 Fix: a SecretDefault a tenant deleted with the generic delete (which archives it) is restored by the next
   reconcile. The upsert found the archived entity under the key's RtId and updated it in place, so it stayed archived:
   the tenant lost the default for good, and every reconcile wrote it again and stored a new event. The tombstone is now
