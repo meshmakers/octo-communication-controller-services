@@ -2329,7 +2329,19 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task SetPipelineTriggerDeploymentStateAsync(string tenantId, OctoObjectId triggerRtId,
+    public Task SetPipelineTriggerDeploymentStateAsync(string tenantId, OctoObjectId triggerRtId,
+        RtDeploymentStateEnum deploymentState)
+    {
+        // AB#9121: a transient write conflict is repeated (max 2x, StateWriteRetry); anything else surfaces at once.
+        // Seen on prod-2 (tenant sbeg, 2026-11-15): tenant setup set a trigger to Pending while the adapter
+        // re-registered and redeployed its pipelines; the WriteConflict failed the whole tenant setup.
+        return StateWriteRetry.ExecuteAsync(
+            () => SetPipelineTriggerDeploymentStateOnceAsync(tenantId, triggerRtId, deploymentState),
+            _logger,
+            $"deployment state '{deploymentState}' of pipeline trigger '{triggerRtId}' in tenant '{tenantId}'");
+    }
+
+    private async Task SetPipelineTriggerDeploymentStateOnceAsync(string tenantId, OctoObjectId triggerRtId,
         RtDeploymentStateEnum deploymentState)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);
@@ -2372,7 +2384,17 @@ internal class CommunicationRepository : ICommunicationRepository
         }
     }
 
-    public async Task SetPipelineDeploymentStateAsync(string tenantId, RtEntityId pipelineRtEntityId,
+    public Task SetPipelineDeploymentStateAsync(string tenantId, RtEntityId pipelineRtEntityId,
+        RtDeploymentStateEnum deploymentState, string? stateMessage)
+    {
+        // AB#9121: same bounded retry as the trigger deployment state above.
+        return StateWriteRetry.ExecuteAsync(
+            () => SetPipelineDeploymentStateOnceAsync(tenantId, pipelineRtEntityId, deploymentState, stateMessage),
+            _logger,
+            $"deployment state '{deploymentState}' of pipeline '{pipelineRtEntityId}' in tenant '{tenantId}'");
+    }
+
+    private async Task SetPipelineDeploymentStateOnceAsync(string tenantId, RtEntityId pipelineRtEntityId,
         RtDeploymentStateEnum deploymentState, string? stateMessage)
     {
         var tenantRepository = await _systemContext.FindTenantRepositoryAsync(tenantId);

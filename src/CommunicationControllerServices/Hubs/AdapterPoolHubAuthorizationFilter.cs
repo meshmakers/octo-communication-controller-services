@@ -118,7 +118,8 @@ internal class AdapterPoolHubAuthorizationFilter : IHubFilter
         var reasonCode = HubAuthorizationMetrics.ToTagValue(verdict.Reason);
 
         var caller = $"{HubConnectionPrincipal.Describe(user, context.Context.ConnectionId)}, " +
-                     $"token tenant '{(string.IsNullOrEmpty(tokenTenantId) ? "<none>" : tokenTenantId)}'";
+                     $"token tenant '{(string.IsNullOrEmpty(tokenTenantId) ? "<none>" : tokenTenantId)}', " +
+                     HubConnectionPrincipal.DescribeOrigin(context, user);
 
         if (enforcing)
         {

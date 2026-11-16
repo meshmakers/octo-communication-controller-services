@@ -136,9 +136,28 @@ connection or a token-acquired log line in the window.
    - controller log has no `Refused an operator connection` / `Refused an adapter connection` lines.
 4. Note the switch (date, cluster, hub) in AB#5528 before moving to the next one.
 
-## 4. Rollback
+## 4. Refusals and rollback
 
-Set the mode back to `LogOnly` in the same values file and run the same CD pipeline. Refused clients
+**First: who is refused.** Do not switch to `LogOnly` as the first step. A refusal in Enforce is either a probing
+or stale client (expected, no action) or a legitimate operator/adapter that is locked out (fix that client). The
+refusal log line (`Refused an operator|adapter|pool-member connection ...`, AB#9030) names what can be named
+without secrets: the connection id, the reason code, the request path (hub), the remote address (behind the
+ingress this is the ingress pod), the whole `X-Forwarded-For` chain (client-controlled; only the right-most
+entries were added by your own proxies), the user agent and — for a token that was presented but not accepted
+(expired, wrong audience, bad signature) — the **unverified** `client_id` read from the token without validation.
+The token itself is never logged. Values the caller controls are quoted with `'` replaced by `"`, control characters removed and capped at 200 characters. Remote addresses are personal data: they live in Dash0 with its 30-day retention; do not copy them into work items. Read it in Dash0 (`getLogRecords`, body contains `Refused`, dataset of the
+cluster) and decide:
+
+- `no token presented` from unknown addresses and a browser/scanner user agent: probing, nothing to do. The alert
+  rule `OctoMeshHubAuthorizationRefused` only fires for refusals that continue for 10 minutes (at least 4 per 3
+  minutes), so a burst does not page.
+- `client_id 'octo-communication-operator'` (or an adapter client) or a known pod address: a legitimate client is
+  locked out. Fix the cause (credentials in Vault, expired secret, image too old, wrong tenant) and check that the
+  client reconnects. Controller versions before AB#9030 log, for an unauthenticated caller, only the connection id (authenticated callers carry `client_id`, `sub` and scopes): compare the refusal time with the
+  operator/adapter logs instead.
+- Only when a legitimate fleet is locked out and the cause is not found quickly: roll back, as below.
+
+Rollback: set the mode back to `LogOnly` in the same values file and run the same CD pipeline. Refused clients
 retry on their own (operator and adapter hub clients reconnect in a loop) and are let in on the next
 attempt; a pool or adapter still offline after ~5 minutes: restart that operator / adapter pod.
 

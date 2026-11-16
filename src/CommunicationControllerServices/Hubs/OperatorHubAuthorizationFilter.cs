@@ -73,7 +73,8 @@ internal class OperatorHubAuthorizationFilter : IHubFilter
             reason);
 
         var reasonCode = HubAuthorizationMetrics.ToTagValue(reason);
-        var caller = HubConnectionPrincipal.Describe(user, context.Context.ConnectionId);
+        var caller = $"{HubConnectionPrincipal.Describe(user, context.Context.ConnectionId)}, " +
+                     HubConnectionPrincipal.DescribeOrigin(context, user);
 
         if (enforcing)
         {
