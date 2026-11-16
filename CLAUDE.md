@@ -336,7 +336,7 @@ everything it does is a system-level write.
 
 | `OperatorHubAuthorization:Mode` | Behaviour |
 |---|---|
-| `LogOnly` (**default**, and the enum's zero value) | Connection outcomes identical to no gate at all, but every connection an enforcing run would refuse is logged as a warning naming connection id, `client_id`, `sub` and scopes. That log **is** the consumer inventory. |
+| `LogOnly` (**default**, and the enum's zero value) | Connection outcomes identical to no gate at all, but every connection an enforcing run would refuse is logged as a warning naming connection id, `client_id`, `sub` and scopes. That log **is** the consumer inventory. Since AB#9030 every refusal/inventory line (all three hubs) also carries the request path, remote address, `X-Forwarded-For`, user agent and, for a rejected bearer token, its unverified `client_id` (`HubConnectionPrincipal.DescribeOrigin`; control characters stripped, 200-char cap, never the token). |
 | `Enforce` | A connection that does not satisfy the policy is refused with a `HubException`. |
 
 🔴 **It shipped on `LogOnly` because the operator had no credential — a precondition outside this

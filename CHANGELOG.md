@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- AB#9030 Fix: the hub refusal and LogOnly inventory log lines of `/operatorHub`, `/{tenant}/adapterHub` and
+  `/adapterPoolHub` now name where the connection came from: request path, remote address, the `X-Forwarded-For`
+  chain, the user agent and, for a bearer token that was presented but not accepted, the unverified `client_id`
+  inside it. Caller-controlled text is stripped of control characters and capped at 200 characters; the token is never
+  logged. Runbook `hub-authorization-enforce-rollout.md` section 4 says to identify the client before any rollback.
+
 - AB#7245 Fix: a SecretDefault a tenant deleted with the generic delete (which archives it) is restored by the next
   reconcile. The upsert found the archived entity under the key's RtId and updated it in place, so it stayed archived:
   the tenant lost the default for good, and every reconcile wrote it again and stored a new event. The tombstone is now

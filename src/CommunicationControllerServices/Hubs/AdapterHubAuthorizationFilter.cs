@@ -92,7 +92,8 @@ internal class AdapterHubAuthorizationFilter : IHubFilter
         var reasonCode = HubAuthorizationMetrics.ToTagValue(verdict.Reason);
         var caller = $"{HubConnectionPrincipal.Describe(user, context.Context.ConnectionId)}, " +
                      $"token tenant '{TokenTenantOrNone(user)}', " +
-                     $"route tenant '{(string.IsNullOrEmpty(routeTenantId) ? "<none>" : routeTenantId)}'";
+                     $"route tenant '{(string.IsNullOrEmpty(routeTenantId) ? "<none>" : routeTenantId)}', " +
+                     HubConnectionPrincipal.DescribeOrigin(context, user);
 
         if (enforcing)
         {
