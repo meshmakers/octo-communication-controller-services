@@ -81,7 +81,7 @@ check_typed_value_field() {
     report FAIL "GraphQL typed field value" "the request was answered"
   elif holds_secret_material "$output_file" "$error_file"; then
     report FAIL "GraphQL typed field value" "refused, but the answer holds the value"
-  elif grep -qiE 'field[^A-Za-z]+value[^A-Za-z]+does not exist|cannot query field[^A-Za-z]+value' \
+  elif grep -qiE 'field[^A-Za-z]+value[^A-Za-z]+does not exist|cannot query field[^A-Za-z]+(u0027)?value' \
     "$output_file" "$error_file"; then
     report PASS "GraphQL typed field value" "refused: the schema has no field value"
   else
@@ -136,10 +136,12 @@ run_probe_pipeline() {
     | grep -oE '[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}' | tail -n 1) || return 1
   [[ -n "$execution_id" ]] || return 1
   for ((attempt = 1; attempt <= execution_poll_attempts; attempt++)); do
-    octo -c GetLatestPipelineExecution -id "$pipeline_rt_id" -j >"$work_dir/latest.out" 2>/dev/null || true
-    latest_execution=$(last_json_line "$work_dir/latest.out" || true)
-    if [[ -n "$latest_execution" ]] && jq -e --arg executionId "$execution_id" \
-      '(.Id | ascii_downcase) == ($executionId | ascii_downcase) and ((.Status | tostring) | IN("0", "Running") | not)' \
+    jq -cn --arg executionId "$execution_id" '{ executionId: $executionId }' \
+      | octo -c GraphQl -tid "$tenant_id" -f "$script_dir/read-pipeline-execution.graphql" -vars @/dev/stdin \
+        >"$work_dir/latest.out" 2>/dev/null || true
+    latest_execution=$(last_json_line "$work_dir/latest.out" \
+      | jq -c '.data.runtime.systemCommunicationPipelineExecution.items[0] // empty' 2>/dev/null || true)
+    if [[ -n "$latest_execution" ]] && jq -e '.status | IN("QUEUED", "RUNNING") | not' \
       <<<"$latest_execution" >/dev/null; then
       printf '%s\n' "$latest_execution" >"$execution_file"
       break
@@ -168,7 +170,7 @@ check_refusing_pipeline() {
     report FAIL "$read_path" "the execution did not finish; nothing was checked"
   elif traces_unreadable "$file_stem"; then
     report FAIL "$read_path" "debug points or history could not be read; nothing was checked"
-  elif jq -e '((.Status | tostring) | IN("2", "Failed")) and ((.ErrorMessage // "") | contains("platform-only"))' \
+  elif jq -e '(.status == "FAILED") and ((.errorMessage // "") | contains("platform-only"))' \
     "$file_stem.execution" >/dev/null; then
     report PASS "$read_path" "refused as platform-only; no value in debug points or history"
   else
@@ -184,13 +186,13 @@ check_verify_captcha_pipeline() {
     report FAIL "$read_path" "the probe pipeline could not be started; nothing was checked"
     return
   fi
-  verdict_source=$(grep -oE '"source"[[:space:]]*:[[:space:]]*"[a-z]+"' "$file_stem.debug" | head -n 1 \
-    | grep -oE '"[a-z]+"$' | tr -d '"' || true)
+  verdict_source=$(jq -r '.outputData // empty
+    | if type == "string" then (fromjson? // empty) else . end | .source? // empty' "$file_stem.execution" 2>/dev/null || true)
   if holds_secret_material "$file_stem.execution" "$file_stem.debug" "$file_stem.history"; then
     report FAIL "$read_path" "the value is in the execution, its debug points or the history"
   elif [[ ! -s "$file_stem.execution" ]] || traces_unreadable "$file_stem"; then
     report FAIL "$read_path" "no finished execution or unreadable debug points; nothing was checked"
-  elif ! jq -e '(.Status | tostring) | IN("1", "Completed")' "$file_stem.execution" >/dev/null; then
+  elif ! jq -e '.status == "COMPLETED"' "$file_stem.execution" >/dev/null; then
     report FAIL "$read_path" "the execution did not complete"
   elif [[ "$verdict_source" != default ]]; then
     report FAIL "$read_path" "verdict source=${verdict_source:-none found}, expected default"

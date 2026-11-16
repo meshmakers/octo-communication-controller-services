@@ -157,8 +157,8 @@ entities:
         value: verify-captcha-probe
       - id: System/Description
         value: >-
-          VerifyCaptcha@1 with Cloudflare's dummy token, started with ExecutePipeline; the verdict is in the
-          debug points. For an adapter without an ingress.
+          VerifyCaptcha@1 with Cloudflare's dummy token, started with ExecutePipeline; the verdict is the
+          execution's result. For an adapter without an ingress.
       - id: System/Enabled
         value: true
       - id: System.Communication/DeploymentState
@@ -183,3 +183,5 @@ entities:
               targetPath: $.verdict
               timeoutSeconds: 10
               identity: ServiceAccount
+            - type: SetPipelineExecutionResult@1
+              path: $.verdict
