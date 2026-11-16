@@ -95,6 +95,11 @@ check_generic_attributes() {
     report FAIL "GraphQL runtimeEntities, all attributes" "the query failed; nothing was checked"
     return
   fi
+  if ! last_json_line "$output_file" | jq -e --arg rtId "$secret_default_rt_id" \
+    '[.. | objects | select(.rtId? == $rtId)] | length > 0' >/dev/null 2>&1; then
+    report FAIL "GraphQL runtimeEntities, all attributes" "the SecretDefault is not in the answer; nothing was checked"
+    return
+  fi
   value_attribute_count=$(last_json_line "$output_file" | jq '[.. | objects | select(has("attributeName"))
     | .attributeName | ascii_downcase | select(. == "value" or . == "secretdefaultvalue")] | length')
   if holds_secret_material "$output_file" || [[ "$value_attribute_count" != 0 ]]; then
@@ -125,10 +130,11 @@ check_export() {
 run_probe_pipeline() {
   local pipeline_rt_id="$1" execution_file="$2" debug_points_file="$3" history_file="$4"
   local execution_id attempt latest_execution
-  octo -c SetPipelineDebug -id "$pipeline_rt_id" -e true >/dev/null
-  execution_id=$(octo -c ExecutePipeline -id "$pipeline_rt_id" \
-    | grep -oE '[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}' | tail -n 1)
   : >"$execution_file"
+  octo -c SetPipelineDebug -id "$pipeline_rt_id" -e true >/dev/null 2>&1 || return 1
+  execution_id=$(octo -c ExecutePipeline -id "$pipeline_rt_id" 2>/dev/null \
+    | grep -oE '[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}' | tail -n 1) || return 1
+  [[ -n "$execution_id" ]] || return 1
   for ((attempt = 1; attempt <= execution_poll_attempts; attempt++)); do
     octo -c GetLatestPipelineExecution -id "$pipeline_rt_id" -j >"$work_dir/latest.out" 2>/dev/null || true
     latest_execution=$(last_json_line "$work_dir/latest.out" || true)
@@ -152,7 +158,10 @@ traces_unreadable() {
 
 check_refusing_pipeline() {
   local read_path="$1" pipeline_rt_id="$2" file_stem="$work_dir/$2"
-  run_probe_pipeline "$pipeline_rt_id" "$file_stem.execution" "$file_stem.debug" "$file_stem.history"
+  if ! run_probe_pipeline "$pipeline_rt_id" "$file_stem.execution" "$file_stem.debug" "$file_stem.history"; then
+    report FAIL "$read_path" "the probe pipeline could not be started; nothing was checked"
+    return
+  fi
   if holds_secret_material "$file_stem.execution" "$file_stem.debug" "$file_stem.history"; then
     report FAIL "$read_path" "the value is in the execution, its debug points or the history"
   elif [[ ! -s "$file_stem.execution" ]]; then
@@ -170,7 +179,11 @@ check_refusing_pipeline() {
 check_verify_captcha_pipeline() {
   local read_path="VerifyCaptcha@1 via ExecutePipeline" file_stem="$work_dir/$verify_captcha_pipeline_rt_id"
   local verdict_source
-  run_probe_pipeline "$verify_captcha_pipeline_rt_id" "$file_stem.execution" "$file_stem.debug" "$file_stem.history"
+  if ! run_probe_pipeline "$verify_captcha_pipeline_rt_id" "$file_stem.execution" "$file_stem.debug" \
+    "$file_stem.history"; then
+    report FAIL "$read_path" "the probe pipeline could not be started; nothing was checked"
+    return
+  fi
   verdict_source=$(grep -oE '"source"[[:space:]]*:[[:space:]]*"[a-z]+"' "$file_stem.debug" | head -n 1 \
     | grep -oE '"[a-z]+"$' | tr -d '"' || true)
   if holds_secret_material "$file_stem.execution" "$file_stem.debug" "$file_stem.history"; then
