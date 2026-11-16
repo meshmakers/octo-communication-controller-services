@@ -5798,7 +5798,10 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   one that already holds the default stays, else the lowest RtId. **Write only on change:** the winner is written when the
   tenant does not hold exactly it already (one entity for the key, same source tenant and Application, `Name` = key, same
   value), so an edited or deleted SecretDefault gets the projected value back, while an unchanged tenant load writes
-  nothing (`DefaultsUnchanged`; `LastProjectedAt` is the time of the last real write). The value check reveals the stored
+  nothing (`DefaultsUnchanged`; `LastProjectedAt` is the time of the last real write). A tenant's delete through the
+  generic `runtimeEntities.delete` only archives the entity, which every typed read then skips; `UpsertSecretDefaultAsync`
+  erases such a tombstone under the key's RtId and inserts the default again (`Created`), so it is restored rather than
+  an archived document being updated forever (`SecretDefaultArchivedRestoreTests`). The value check reveals the stored
   value in the target (`RevealOrNull`, attribute `Value`) and compares it with the source value in constant time; neither
   is logged or kept, and an unreadable stored value counts as changed. **Write before remove:** the winners are written
   first, then the unprovided defaults are removed, so a holder change replaces the default in place and the consumer never
@@ -5821,7 +5824,7 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   it only while RtId, well-known name, `SourceTenantId`, `SourceWorkloadRtId`, `LastProjectedAt` and `RtVersion` (raised
   by every write, so a rotation within the same tick is seen too) match what was read;
   a default a concurrent deploy wrote meanwhile is kept (`Changed`, a write conflict counts as `Changed`), a gone one is
-  `NotFound`; neither is a failure. The target reconcile and the source sweep both use it. An entry that is present but invalid (no value, duplicated key, ...) is never written, and its `AllowedTenantIds` still apply, with no exception for invalid entries: a tenant it allows keeps the default it holds, a tenant it excludes loses it. Of duplicates of one key a tenant keeps the default only while every duplicate allows it, so a tenant any of them excludes loses it (revocation wins when they disagree; `SecretDefaultInvalidEntryRevocationTests`). On deploy the
+  `NotFound`, and one the tenant archived since the read is erased and also `NotFound`; neither is a failure. The target reconcile and the source sweep both use it. An entry that is present but invalid (no value, duplicated key, ...) is never written, and its `AllowedTenantIds` still apply, with no exception for invalid entries: a tenant it allows keeps the default it holds, a tenant it excludes loses it. Of duplicates of one key a tenant keeps the default only while every duplicate allows it, so a tenant any of them excludes loses it (revocation wins when they disagree; `SecretDefaultInvalidEntryRevocationTests`). On deploy the
   source side sweeps its own tenant and subtree for defaults of this Application that it no longer provides; in every
   tenant that holds one it runs the target reconcile, which writes another source's winner first and removes the withdrawn
   default after, so the key has no gap; a failed replacement does not keep the withdrawn default (revocation wins). Only when that reconcile does not

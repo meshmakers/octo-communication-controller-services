@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- AB#7245 Fix: a SecretDefault a tenant deleted with the generic delete (which archives it) is restored by the next
+  reconcile. The upsert found the archived entity under the key's RtId and updated it in place, so it stayed archived:
+  the tenant lost the default for good, and every reconcile wrote it again and stored a new event. The tombstone is now
+  erased and the default inserted again (`Created`); concurrent writers still end with exactly one entity. A conditional
+  removal that meets an archived default erases it as well (`NotFound`) instead of keeping it as `Changed`.
+
 - AB#8982 Fix: blueprint apply (install and update), tenant load and workload deploy now also reconcile every standalone
   `ServiceAccountConfiguration` that pipelines link via `Uses` (per-pipeline overrides such as `accounting-ai-prompt`):
   its identity client is created with the declared roles, so `DeployDataFlow` no longer needs a manual
