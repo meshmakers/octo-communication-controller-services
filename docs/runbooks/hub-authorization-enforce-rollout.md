@@ -145,7 +145,7 @@ without secrets: the connection id, the reason code, the request path (hub), the
 ingress this is the ingress pod), the whole `X-Forwarded-For` chain (client-controlled; only the right-most
 entries were added by your own proxies), the user agent and — for a token that was presented but not accepted
 (expired, wrong audience, bad signature) — the **unverified** `client_id` read from the token without validation.
-The token itself is never logged. Read it in Dash0 (`getLogRecords`, body contains `Refused`, dataset of the
+The token itself is never logged. Values the caller controls are quoted with `'` replaced by `"`, control characters removed and capped at 200 characters. Remote addresses are personal data: they live in Dash0 with its 30-day retention; do not copy them into work items. Read it in Dash0 (`getLogRecords`, body contains `Refused`, dataset of the
 cluster) and decide:
 
 - `no token presented` from unknown addresses and a browser/scanner user agent: probing, nothing to do. The alert
@@ -153,7 +153,7 @@ cluster) and decide:
   minutes), so a burst does not page.
 - `client_id 'octo-communication-operator'` (or an adapter client) or a known pod address: a legitimate client is
   locked out. Fix the cause (credentials in Vault, expired secret, image too old, wrong tenant) and check that the
-  client reconnects. Controller versions before AB#9030 log only the connection id: compare the refusal time with the
+  client reconnects. Controller versions before AB#9030 log, for an unauthenticated caller, only the connection id (authenticated callers carry `client_id`, `sub` and scopes): compare the refusal time with the
   operator/adapter logs instead.
 - Only when a legitimate fleet is locked out and the cause is not found quickly: roll back, as below.
 

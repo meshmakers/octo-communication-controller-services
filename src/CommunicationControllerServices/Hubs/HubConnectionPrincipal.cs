@@ -128,6 +128,7 @@ internal static class HubConnectionPrincipal
 
         var remote = http.Connection.RemoteIpAddress?.ToString() ?? "<none>";
         var forwarded = Sanitize(http.Request.Headers["X-Forwarded-For"].ToString());
+        var originalFor = http.Request.Headers["X-Original-For"].ToString();
         var userAgent = Sanitize(http.Request.Headers.UserAgent.ToString());
         var path = Sanitize(http.Request.Path.Value);
 
@@ -144,30 +145,35 @@ internal static class HubConnectionPrincipal
 
     private static string TryDescribeRejectedToken(HttpContext http)
     {
-        var token = ExtractBearerToken(http);
-        if (token == null)
+        const string prefix = "Bearer ";
+        var header = http.Request.Headers.Authorization.ToString();
+        string? token;
+        if (!string.IsNullOrWhiteSpace(header))
+        {
+            if (!header.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                var scheme = header.Split(' ', 2)[0];
+                return $", Authorization header with a non-Bearer scheme '{Sanitize(scheme)}'";
+            }
+
+            token = header[prefix.Length..].Trim();
+        }
+        else
+        {
+            // Browsers and the WebSocket transport send the token as access_token on the query string.
+            token = http.Request.Query["access_token"].ToString();
+        }
+
+        if (string.IsNullOrWhiteSpace(token))
         {
             return ", no token presented";
         }
 
         var clientId = ReadUnverifiedClientId(token);
         return clientId == null
-            ? ", token presented but not readable as a JWT"
+            ? $", token presented but no client_id could be read (length {token.Length}, " +
+              $"{token.Count(c => c == '.') + 1} dot-separated segments; opaque, encrypted, oversized or malformed)"
             : $", token presented and not accepted, client_id '{Sanitize(clientId)}' (unverified, read from the token without validation)";
-    }
-
-    private static string? ExtractBearerToken(HttpContext http)
-    {
-        const string prefix = "Bearer ";
-        var header = http.Request.Headers.Authorization.ToString();
-        if (header.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return header[prefix.Length..].Trim();
-        }
-
-        // Browsers and the WebSocket transport send the token as access_token on the query string.
-        var query = http.Request.Query["access_token"].ToString();
-        return string.IsNullOrWhiteSpace(query) ? null : query;
     }
 
     /// <summary>
@@ -205,8 +211,10 @@ internal static class HubConnectionPrincipal
     }
 
     /// <summary>
-    ///     Makes caller-controlled text safe for one log line: control characters (log forging) become
-    ///     spaces, length is capped, empty becomes <c>&lt;none&gt;</c>.
+    ///     Makes caller-controlled text safe for one log line: control, line/paragraph separator and format
+    ///     characters (log forging) become spaces, the single quote that delimits our fields becomes a
+    ///     double quote (so a user agent cannot forge a <c>client_id '...'</c> field), length is capped
+    ///     without splitting a surrogate pair, empty becomes <c>&lt;none&gt;</c>.
     /// </summary>
     internal static string Sanitize(string? value)
     {
@@ -215,13 +223,27 @@ internal static class HubConnectionPrincipal
             return "<none>";
         }
 
-        var builder = new StringBuilder(Math.Min(value.Length, MaxLoggedHeaderLength));
-        foreach (var c in value.Take(MaxLoggedHeaderLength))
+        var length = Math.Min(value.Length, MaxLoggedHeaderLength);
+        if (length < value.Length && char.IsHighSurrogate(value[length - 1]))
         {
-            builder.Append(char.IsControl(c) ? ' ' : c);
+            length--;
         }
 
-        return value.Length > MaxLoggedHeaderLength ? builder + "..." : builder.ToString();
+        var builder = new StringBuilder(length + 3);
+        foreach (var c in value.AsSpan(0, length))
+        {
+            builder.Append(IsUnsafeForLogLine(c) ? ' ' : c == '\'' ? '"' : c);
+        }
+
+        return length < value.Length ? builder.Append("...").ToString() : builder.ToString();
+    }
+
+    private static bool IsUnsafeForLogLine(char c)
+    {
+        return char.IsControl(c) || char.GetUnicodeCategory(c) is
+            System.Globalization.UnicodeCategory.LineSeparator or
+            System.Globalization.UnicodeCategory.ParagraphSeparator or
+            System.Globalization.UnicodeCategory.Format;
     }
 
     /// <summary>

@@ -165,6 +165,45 @@ internal class HubRefusalOriginLogTests
     }
 
     [Test]
+    [NotInParallel(nameof(NLog.LogManager))]
+    public async Task OperatorRefusal_UserAgentCannotForgeAClientIdField()
+    {
+        var line = await RefusedLineAsync(http =>
+        {
+            http.Request.Headers.UserAgent =
+                "x', token presented and not accepted, client_id 'octo-communication-operator' (unverified\u2028";
+        });
+
+        using var _ = Assert.Multiple();
+        await Assert.That(line).DoesNotContain("client_id 'octo-communication-operator'");
+        await Assert.That(line).DoesNotContain("\u2028");
+        await Assert.That(line).Contains("no token presented");
+    }
+
+    [Test]
+    [NotInParallel(nameof(NLog.LogManager))]
+    public async Task OperatorRefusal_NonBearerAuthorizationHeader_IsNotReportedAsNoToken()
+    {
+        var line = await RefusedLineAsync(http => http.Request.Headers.Authorization = "Basic dXNlcjpwdw==");
+
+        using var _ = Assert.Multiple();
+        await Assert.That(line).Contains("non-Bearer scheme 'Basic'");
+        await Assert.That(line).DoesNotContain("no token presented");
+        await Assert.That(line).DoesNotContain("dXNlcjpwdw==");
+    }
+
+    [Test]
+    [NotInParallel(nameof(NLog.LogManager))]
+    public async Task OperatorRefusal_OpaqueToken_ReportsLengthAndSegmentsOnly()
+    {
+        var line = await RefusedLineAsync(http => http.Request.Headers.Authorization = "Bearer opaque-reference-token-123");
+
+        using var _ = Assert.Multiple();
+        await Assert.That(line).Contains("no client_id could be read (length 26, 1 dot-separated segments");
+        await Assert.That(line).DoesNotContain("opaque-reference-token-123");
+    }
+
+    [Test]
     public async Task UnreadableToken_IsReportedAsSuch()
     {
         using var _ = Assert.Multiple();
