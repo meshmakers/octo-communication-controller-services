@@ -1,7 +1,10 @@
 using System.Security.Claims;
+using System.Text;
+using System.Text.Json;
 using Meshmakers.Octo.Services.Infrastructure;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
 using NLog;
 
@@ -95,6 +98,130 @@ internal static class HubConnectionPrincipal
 
         return $"connection '{connectionId}', client_id '{clientId}', sub '{subject}', " +
                $"scopes '{(string.IsNullOrWhiteSpace(scopes) ? "<none>" : scopes)}'";
+    }
+
+    private const int MaxLoggedHeaderLength = 200;
+    private const int MaxTokenLengthToInspect = 16 * 1024;
+
+    /// <summary>
+    ///     Where a connection came from, for the refusal and inventory log lines (AB#9030): the remote
+    ///     address, the <c>X-Forwarded-For</c> chain, the user agent, the request path and — when the caller
+    ///     presented a bearer token that was NOT accepted — the unverified <c>client_id</c> inside it.
+    /// </summary>
+    /// <remarks>
+    ///     Without this a refusal names only the connection id, so an operator cannot tell a probing client
+    ///     from a misconfigured one. Behind the ingress <c>RemoteIpAddress</c> is the ingress pod; the
+    ///     client is in <c>X-Forwarded-For</c> (every hop appends, so only the right-most entries are
+    ///     trustworthy; the line carries the whole chain and says so). Everything here is
+    ///     caller-controlled text and is stripped of control characters and truncated before it is logged.
+    ///     <b>Never the token</b>: only the <c>client_id</c> claim of an unvalidated token is read, and it is
+    ///     labelled unverified. An accepted principal already carries a validated <c>client_id</c>
+    ///     (<see cref="Describe" />), so no token is inspected for it.
+    /// </remarks>
+    public static string DescribeOrigin(HubLifetimeContext context, ClaimsPrincipal? user)
+    {
+        var http = context.Context.GetHttpContext();
+        if (http == null)
+        {
+            return "origin unknown (no HTTP context)";
+        }
+
+        var remote = http.Connection.RemoteIpAddress?.ToString() ?? "<none>";
+        var forwarded = Sanitize(http.Request.Headers["X-Forwarded-For"].ToString());
+        var userAgent = Sanitize(http.Request.Headers.UserAgent.ToString());
+        var path = Sanitize(http.Request.Path.Value);
+
+        var origin = $"path '{path}', remote address '{remote}', x-forwarded-for '{forwarded}', " +
+                     $"user agent '{userAgent}'";
+
+        if (user?.Identity is not { IsAuthenticated: true })
+        {
+            origin += TryDescribeRejectedToken(http);
+        }
+
+        return origin;
+    }
+
+    private static string TryDescribeRejectedToken(HttpContext http)
+    {
+        var token = ExtractBearerToken(http);
+        if (token == null)
+        {
+            return ", no token presented";
+        }
+
+        var clientId = ReadUnverifiedClientId(token);
+        return clientId == null
+            ? ", token presented but not readable as a JWT"
+            : $", token presented and not accepted, client_id '{Sanitize(clientId)}' (unverified, read from the token without validation)";
+    }
+
+    private static string? ExtractBearerToken(HttpContext http)
+    {
+        const string prefix = "Bearer ";
+        var header = http.Request.Headers.Authorization.ToString();
+        if (header.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return header[prefix.Length..].Trim();
+        }
+
+        // Browsers and the WebSocket transport send the token as access_token on the query string.
+        var query = http.Request.Query["access_token"].ToString();
+        return string.IsNullOrWhiteSpace(query) ? null : query;
+    }
+
+    /// <summary>
+    ///     The <c>client_id</c> claim of a JWT payload, read without validating anything; <c>null</c> when
+    ///     the value is not a JWT or carries none. Reads the payload segment only.
+    /// </summary>
+    internal static string? ReadUnverifiedClientId(string token)
+    {
+        if (token.Length > MaxTokenLengthToInspect)
+        {
+            return null;
+        }
+
+        var segments = token.Split('.');
+        if (segments.Length != 3)
+        {
+            return null;
+        }
+
+        try
+        {
+            var payload = segments[1].Replace('-', '+').Replace('_', '/');
+            payload = payload.PadRight(payload.Length + (4 - payload.Length % 4) % 4, '=');
+            using var document = JsonDocument.Parse(Convert.FromBase64String(payload));
+            return document.RootElement.ValueKind == JsonValueKind.Object &&
+                   document.RootElement.TryGetProperty(ClientIdClaimType, out var value) &&
+                   value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+        }
+        catch (Exception e) when (e is FormatException or JsonException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    ///     Makes caller-controlled text safe for one log line: control characters (log forging) become
+    ///     spaces, length is capped, empty becomes <c>&lt;none&gt;</c>.
+    /// </summary>
+    internal static string Sanitize(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "<none>";
+        }
+
+        var builder = new StringBuilder(Math.Min(value.Length, MaxLoggedHeaderLength));
+        foreach (var c in value.Take(MaxLoggedHeaderLength))
+        {
+            builder.Append(char.IsControl(c) ? ' ' : c);
+        }
+
+        return value.Length > MaxLoggedHeaderLength ? builder + "..." : builder.ToString();
     }
 
     /// <summary>
