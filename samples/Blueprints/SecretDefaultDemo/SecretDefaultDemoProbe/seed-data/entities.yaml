@@ -63,7 +63,11 @@ entities:
             - type: GetRtEntitiesByType@1
               ckTypeId: System.Communication/SecretDefault
               targetPath: $.secretDefaults
-              take: 10
+              take: 1
+              fieldFilters:
+                - attributePath: rtWellKnownName
+                  operator: Equals
+                  comparisonValue: demo-captcha-secret
             - type: RevealSecret@1
               identity: Caller
               ckTypeId: System.Communication/SecretDefault
@@ -98,7 +102,11 @@ entities:
             - type: GetRtEntitiesByType@1
               ckTypeId: System.Communication/SecretDefault
               targetPath: $.secretDefaults
-              take: 10
+              take: 1
+              fieldFilters:
+                - attributePath: rtWellKnownName
+                  operator: Equals
+                  comparisonValue: demo-captcha-secret
             - type: RevealSecret@1
               identity: ServiceAccount
               ckTypeId: System.Communication/SecretDefault

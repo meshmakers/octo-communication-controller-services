@@ -123,7 +123,8 @@ No answer, log line or GraphQL response may contain a secret: grep them for `1x0
 As a **tenant admin** of a served tenant (every role of that tenant), with the default deployed (step 4).
 Install the probe blueprint in that tenant and deploy its data flow, then pipe the default's value into
 the script as the sentinel. It is read from standard input like in `write-secret.sh`, so it is on no
-command line; the script prints one line per read path and never a response body. A random value is the
+command line, and it must be at least 8 characters of `A-Z a-z 0-9 . _ -`, so no JSON or YAML escaping can
+hide it from the search. The script prints one line per read path and never a response body. A random value is the
 stronger sentinel (write it with `write-secret.sh default` and deploy again before the run); the CAPTCHA
 probe then answers `valid: false`, which is expected.
 
@@ -165,6 +166,8 @@ PASS  VerifyCaptcha@1 via ExecutePipeline          verdict source=default; no va
 Every read path refused.
 ```
 
+A path that could not be checked (another error than the expected one, unreadable debug points or history,
+an execution that did not finish, a verdict whose `source` is not `default`) is a FAIL as well.
 Exit code 0 when every path refused, 1 when one did not (the line says which, never the value), 2 when the
 tenant has no projected default or no sentinel was given. The script asserts refusals only: the dump and
 restore of a tenant and the log sweep are separate (a restored `SecretDefault` without a providing

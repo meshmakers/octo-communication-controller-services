@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Proves that a tenant admin cannot read the projected secret default of one tenant through any read path.
 #   prove-no-reveal.sh <tenantId>      the sentinel (the default's value) is read from standard input
+# The sentinel uses only letters, digits, '.', '_' and '-', so no JSON or YAML escaping can hide it from the search.
 # Context: $OCTO_CONTEXT, else ${OCTO_CONTEXT_PREFIX:-local_}<tenantId>; log it in as a tenant admin of <tenantId>.
 # Needs the blueprints SecretDefaultDemoCaptcha and SecretDefaultDemoProbe in the tenant and both data flows deployed.
 # Prints one line per path (PASS/FAIL) and never a response body: a leaked value would end up in the terminal.
@@ -22,13 +23,16 @@ execution_poll_attempts=30
 execution_poll_interval_seconds=2
 
 IFS= read -r -s sentinel || true
-if [[ ${#sentinel} -lt 8 ]]; then
-  echo "No sentinel of at least 8 characters on standard input." >&2
+if [[ ! "$sentinel" =~ ^[A-Za-z0-9._-]{8,}$ ]]; then
+  echo "No sentinel on standard input: at least 8 of A-Z a-z 0-9 . _ -" >&2
   exit 2
 fi
 
 work_dir="$(mktemp -d)"
 trap 'rm -rf "$work_dir"' EXIT
+sentinel_pattern_file="$work_dir/sentinel.pattern"
+printf '%s\n' "$sentinel" >"$sentinel_pattern_file"
+unset sentinel
 failed_paths=0
 
 octo() {
@@ -39,7 +43,7 @@ holds_secret_material() {
   local file
   for file in "$@"; do
     [[ -f "$file" ]] || continue
-    if grep -qF -- "$sentinel" "$file" || grep -qE 'enc:v[0-9]+:' "$file"; then
+    if grep -qFf "$sentinel_pattern_file" "$file" || grep -qE 'enc:v[0-9]+:' "$file"; then
       return 0
     fi
   done
@@ -55,13 +59,20 @@ report() {
 }
 
 last_json_line() {
-  grep -E '^\{' "$1" | tail -n 1
+  grep -E '^[[{]' "$1" | tail -n 1
+}
+
+is_json_payload() {
+  local payload
+  payload=$(last_json_line "$1" || true)
+  [[ -n "$payload" ]] && jq -e . >/dev/null 2>&1 <<<"$payload"
 }
 
 find_secret_default_rt_id() {
   local response_file="$work_dir/read-secret-default.json"
   octo -c GraphQl -tid "$tenant_id" -f "$script_dir/read-secret-default.graphql" >"$response_file"
-  jq -r '[.. | objects | select(has("rtWellKnownName")) | .rtId] | first // empty' "$response_file"
+  last_json_line "$response_file" \
+    | jq -r '[.. | objects | select(has("rtWellKnownName")) | .rtId] | first // empty'
 }
 
 check_typed_value_field() {
@@ -70,8 +81,11 @@ check_typed_value_field() {
     report FAIL "GraphQL typed field value" "the request was answered"
   elif holds_secret_material "$output_file" "$error_file"; then
     report FAIL "GraphQL typed field value" "refused, but the answer holds the value"
-  else
+  elif grep -qiE 'field[^A-Za-z]+value[^A-Za-z]+does not exist|cannot query field[^A-Za-z]+value' \
+    "$output_file" "$error_file"; then
     report PASS "GraphQL typed field value" "refused: the schema has no field value"
+  else
+    report FAIL "GraphQL typed field value" "refused for another reason; nothing was checked"
   fi
 }
 
@@ -81,8 +95,8 @@ check_generic_attributes() {
     report FAIL "GraphQL runtimeEntities, all attributes" "the query failed; nothing was checked"
     return
   fi
-  value_attribute_count=$(jq '[.. | objects | select(has("attributeName")) | .attributeName
-    | ascii_downcase | select(. == "value" or . == "secretdefaultvalue")] | length' "$output_file")
+  value_attribute_count=$(last_json_line "$output_file" | jq '[.. | objects | select(has("attributeName"))
+    | .attributeName | ascii_downcase | select(. == "value" or . == "secretdefaultvalue")] | length')
   if holds_secret_material "$output_file" || [[ "$value_attribute_count" != 0 ]]; then
     report FAIL "GraphQL runtimeEntities, all attributes" "the value attribute is in the answer"
   else
@@ -126,8 +140,14 @@ run_probe_pipeline() {
     fi
     sleep "$execution_poll_interval_seconds"
   done
-  octo -c GetPipelineDebugPoints -id "$pipeline_rt_id" -eid "$execution_id" -j >"$debug_points_file" 2>&1 || true
-  octo -c GetPipelineExecutions -id "$pipeline_rt_id" -j >"$history_file" 2>&1 || true
+  octo -c GetPipelineDebugPoints -id "$pipeline_rt_id" -eid "$execution_id" -j >"$debug_points_file" 2>&1 \
+    && is_json_payload "$debug_points_file" || : >"$debug_points_file.unreadable"
+  octo -c GetPipelineExecutions -id "$pipeline_rt_id" -j >"$history_file" 2>&1 \
+    && is_json_payload "$history_file" || : >"$history_file.unreadable"
+}
+
+traces_unreadable() {
+  [[ -e "$1.debug.unreadable" || -e "$1.history.unreadable" ]]
 }
 
 check_refusing_pipeline() {
@@ -137,6 +157,8 @@ check_refusing_pipeline() {
     report FAIL "$read_path" "the value is in the execution, its debug points or the history"
   elif [[ ! -s "$file_stem.execution" ]]; then
     report FAIL "$read_path" "the execution did not finish; nothing was checked"
+  elif traces_unreadable "$file_stem"; then
+    report FAIL "$read_path" "debug points or history could not be read; nothing was checked"
   elif jq -e '((.Status | tostring) | IN("2", "Failed")) and ((.ErrorMessage // "") | contains("platform-only"))' \
     "$file_stem.execution" >/dev/null; then
     report PASS "$read_path" "refused as platform-only; no value in debug points or history"
@@ -153,10 +175,14 @@ check_verify_captcha_pipeline() {
     | grep -oE '"[a-z]+"$' | tr -d '"' || true)
   if holds_secret_material "$file_stem.execution" "$file_stem.debug" "$file_stem.history"; then
     report FAIL "$read_path" "the value is in the execution, its debug points or the history"
-  elif [[ -z "$verdict_source" ]]; then
-    report FAIL "$read_path" "no verdict in the debug points; nothing was checked"
+  elif [[ ! -s "$file_stem.execution" ]] || traces_unreadable "$file_stem"; then
+    report FAIL "$read_path" "no finished execution or unreadable debug points; nothing was checked"
+  elif ! jq -e '(.Status | tostring) | IN("1", "Completed")' "$file_stem.execution" >/dev/null; then
+    report FAIL "$read_path" "the execution did not complete"
+  elif [[ "$verdict_source" != default ]]; then
+    report FAIL "$read_path" "verdict source=${verdict_source:-none found}, expected default"
   else
-    report PASS "$read_path" "verdict source=$verdict_source; no value in debug points or history"
+    report PASS "$read_path" "verdict source=default; no value in debug points or history"
   fi
 }
 
