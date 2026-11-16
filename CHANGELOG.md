@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- AB#9121 Fix: the deployment-state writes of pipelines and pipeline triggers (`SetPipelineDeploymentStateAsync`,
+  `SetPipelineTriggerDeploymentStateAsync`) repeat a transient MongoDB write conflict (code 112 or
+  `TransientTransactionError`) up to two times with the AB#6435 `StateWriteRetry`, like the communication-state writes.
+  On prod-2 (tenant sbeg, 2026-11-15) tenant setup failed because setting a trigger to `Pending` raced the adapter's
+  re-registration. These writes have no timestamp guard, so a retried write is last-writer-wins and can land after the
+  write that won the conflict (50-300 ms later), as an uncontended write would. Other errors are still not retried.
+
 - AB#9030 Fix: the hub refusal and LogOnly inventory log lines of `/operatorHub`, `/{tenant}/adapterHub` and
   `/adapterPoolHub` now name where the connection came from: request path, remote address, the `X-Forwarded-For`
   chain, the user agent and, for a bearer token that was presented but not accepted, the unverified `client_id`
