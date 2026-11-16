@@ -3467,7 +3467,11 @@ logged (`ExecutionEnvelopeRejection`), never the value.
 `CommunicationController:SealedValueLegacyFormAcceptedUntilUtc` (default 2027-01-01T00:00:00Z) and is refused afterwards
 (`LegacyForm`). Such a value cannot be told apart from a Secret attribute value that carries a valid wrapper, so the
 window covers only executions queued before the upgrade (their seals are refused after `QueuedSealMaxAgeDays` anyway).
-A re-seal writes the bound form. Set the option earlier to close the window sooner.
+A re-seal writes the bound form. Set the option earlier to close the window sooner. **Rollout:** the reader is what
+closes the forgery route; the writer seals the bound form at once. During the rolling update a pod of the previous
+version cannot open a bound value (it reads `Unreadable` and fails that execution at lease grant); with one controller
+replica the overlap is the few seconds of the pod switch. A rollback fails the executions queued with the bound form in
+the same way. Such executions are re-run.
 
 **Rules.**
 
