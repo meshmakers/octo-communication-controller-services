@@ -386,6 +386,16 @@ public class CommunicationControllerOptions
     public int QueuedSealMaxAgeDays { get; set; } = 30;
 
     /// <summary>
+    /// The last moment a sealed execution value in the former form (bound only by its content, not by the associated
+    /// data of the key ring) is still opened. Such a value cannot be told apart from a value produced through a Secret
+    /// attribute, so it is accepted only while executions queued before the upgrade can still be leased (their seals
+    /// are refused after <see cref="QueuedSealMaxAgeDays" /> anyway) and refused afterwards. Set it earlier to refuse
+    /// the former form sooner.
+    /// </summary>
+    public DateTime SealedValueLegacyFormAcceptedUntilUtc { get; set; } =
+        new(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+    /// <summary>
     /// Maximum queue entries read per borrowing adapter per scheduling round. A bound, not a
     /// policy: a queue deeper than this is already saturated and the scale-up signal and the queue
     /// surfaces are both reporting it, so reading further would only make the round slower without

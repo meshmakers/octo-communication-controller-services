@@ -1,7 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.Secrets;
+using Microsoft.Extensions.Options;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -42,7 +44,13 @@ public enum ExecutionEnvelopeRejection
     WrongTenant,
 
     /// <summary>The envelope was sealed for another execution (a copied value).</summary>
-    WrongExecution
+    WrongExecution,
+
+    /// <summary>
+    ///     The value is in the former form (bound only by its content) and the window in which that form is still
+    ///     accepted has ended. A value of a Secret attribute reads like this, too.
+    /// </summary>
+    LegacyForm
 }
 
 /// <summary>
@@ -57,11 +65,18 @@ public enum ExecutionEnvelopeRejection
 ///     </para>
 ///     <para>
 ///         <b>Format.</b> The payload is wrapped into <c>{v, p, t, e, d}</c> (format version, purpose, tenant id,
-///         execution RtId, data) and encrypted with the engine key ring (<c>enc:v2:&lt;kid&gt;</c>, AES-256-GCM).
-///         The key ring authenticates only its own header as associated data, so the binding is part of the
-///         authenticated plaintext and checked after decryption; the effect is the same as associated data: a flipped
-///         bit, a foreign key, another purpose, another tenant or another execution does not open. Key rotation works
-///         as for every <c>enc:v2</c> value.
+///         execution RtId, data) and encrypted with the engine key ring (<c>enc:v2:&lt;kid&gt;</c>, AES-256-GCM)
+///         for the binding purpose + tenant + execution (<see cref="SecretPurpose" />, part of the associated data).
+///         A flipped bit, a foreign key, another purpose, another tenant or another execution does not open, and a
+///         value produced through a Secret attribute (same key ring, no binding) never opens here, nor does a sealed
+///         value open as the value of a Secret attribute. The binding in the content is checked as well. Key
+///         rotation works as for every <c>enc:v2</c> value.
+///     </para>
+///     <para>
+///         <b>Former form.</b> Values sealed before the binding was part of the associated data carry it only in the
+///         content. They open until <see cref="CommunicationControllerOptions.SealedValueLegacyFormAcceptedUntilUtc" />
+///         and are refused afterwards (<see cref="ExecutionEnvelopeRejection.LegacyForm" />); a re-seal writes the
+///         bound form.
 ///     </para>
 ///     <para>
 ///         <b>Fail closed.</b> Every refusal returns <c>false</c> with a reason; the caller treats it as "nothing was
@@ -107,9 +122,18 @@ public static class ExecutionEnvelopePurposes
 }
 
 /// <inheritdoc />
-public sealed class ExecutionEnvelope(ISecretAttributeProtector protector) : IExecutionEnvelope
+public sealed class ExecutionEnvelope(
+    ISecretAttributeProtector protector,
+    IOptions<CommunicationControllerOptions>? options = null,
+    TimeProvider? timeProvider = null) : IExecutionEnvelope
 {
     private const int FormatVersion = 1;
+    private const string BindingPrefix = "octo.communication.execution-envelope";
+
+    private readonly DateTime _legacyFormAcceptedUntilUtc =
+        (options?.Value ?? new CommunicationControllerOptions()).SealedValueLegacyFormAcceptedUntilUtc;
+
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
@@ -140,7 +164,8 @@ public sealed class ExecutionEnvelope(ISecretAttributeProtector protector) : IEx
                 ExecutionRtId = executionRtId.ToString(),
                 Data = JsonSerializer.SerializeToElement(payload, JsonOptions)
             };
-            return protector.Protect(JsonSerializer.Serialize(wrapper, JsonOptions)).Envelope;
+            return protector.Protect(JsonSerializer.Serialize(wrapper, JsonOptions),
+                BuildBinding(purpose, tenantId, executionRtId)).Envelope;
         }
         catch (Exception e) when (e is SecretEncryptionNotConfiguredException or JsonException)
         {
@@ -177,24 +202,22 @@ public sealed class ExecutionEnvelope(ISecretAttributeProtector protector) : IEx
             return false;
         }
 
+        var accessContext = new SecretAccessContext(tenantId, null, "SealedCaller", "CommunicationController");
         string json;
         try
         {
-            json = protector.Unprotect(stored, new SecretAccessContext(tenantId, null, "SealedCaller",
-                "CommunicationController"));
+            json = protector.Unprotect(stored, BuildBinding(purpose, tenantId, executionRtId), accessContext);
         }
-        catch (Exception e) when (e is System.Security.Cryptography.CryptographicException
-                                      or UnknownSecretKeyIdException
-                                      or SecretEncryptionNotConfiguredException
-                                      or LegacyPlaintextSecretRejectedException
-                                      or SecretEnvelopeNotAllowedException)
+        catch (System.Security.Cryptography.CryptographicException)
         {
-            rejection = e switch
+            if (!TryOpenLegacyForm(stored, accessContext, out json, out rejection))
             {
-                SecretEncryptionNotConfiguredException => ExecutionEnvelopeRejection.NoKey,
-                UnknownSecretKeyIdException => ExecutionEnvelopeRejection.UnknownKey,
-                _ => ExecutionEnvelopeRejection.Unreadable
-            };
+                return false;
+            }
+        }
+        catch (Exception e) when (IsUnreadable(e))
+        {
+            rejection = ToRejection(e);
             return false;
         }
 
@@ -268,6 +291,57 @@ public sealed class ExecutionEnvelope(ISecretAttributeProtector protector) : IEx
         }
 
         return Seal(purpose, payload!, tenantId, toExecutionRtId);
+    }
+
+    private bool TryOpenLegacyForm(string stored, SecretAccessContext accessContext, out string json,
+        out ExecutionEnvelopeRejection rejection)
+    {
+        json = string.Empty;
+        try
+        {
+            json = protector.Unprotect(stored, accessContext);
+        }
+        catch (Exception e) when (IsUnreadable(e))
+        {
+            rejection = ToRejection(e);
+            return false;
+        }
+
+        if (_timeProvider.GetUtcNow().UtcDateTime > _legacyFormAcceptedUntilUtc)
+        {
+            json = string.Empty;
+            rejection = ExecutionEnvelopeRejection.LegacyForm;
+            return false;
+        }
+
+        rejection = ExecutionEnvelopeRejection.None;
+        return true;
+    }
+
+    private static SecretPurpose BuildBinding(string purpose, string tenantId, OctoObjectId executionRtId)
+    {
+        var normalizedTenantId = tenantId.ToLowerInvariant();
+        var normalizedExecutionRtId = executionRtId.ToString().ToLowerInvariant();
+        return new SecretPurpose($"{BindingPrefix}/{purpose}/{normalizedTenantId}/{normalizedExecutionRtId}");
+    }
+
+    private static bool IsUnreadable(Exception exception)
+    {
+        return exception is System.Security.Cryptography.CryptographicException
+            or UnknownSecretKeyIdException
+            or SecretEncryptionNotConfiguredException
+            or LegacyPlaintextSecretRejectedException
+            or SecretEnvelopeNotAllowedException;
+    }
+
+    private static ExecutionEnvelopeRejection ToRejection(Exception exception)
+    {
+        return exception switch
+        {
+            SecretEncryptionNotConfiguredException => ExecutionEnvelopeRejection.NoKey,
+            UnknownSecretKeyIdException => ExecutionEnvelopeRejection.UnknownKey,
+            _ => ExecutionEnvelopeRejection.Unreadable
+        };
     }
 
     private sealed class Wrapper

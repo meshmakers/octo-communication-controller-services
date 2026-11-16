@@ -8,6 +8,12 @@
   client id. The `Deprecation` header follows once `restDeprecation.waves.CommunicationWave3.since` is set at the first production
   delivery; there is no `Sunset` header and no sunset date. Response headers only; routes, bodies and status codes are unchanged.
   The endpoints that stay REST and why: `docs/rest-method-facades.md`, "Deprecation".
+- AB#9127 Fix: sealed pipeline-execution values (`ExecutionEnvelope`, `PipelineExecution.SealedCaller`) are bound to
+  purpose, tenant and execution through the associated data of the key ring (engine `ISecretAttributeProtector.Protect /
+  Unprotect` with a `SecretPurpose`). A value produced through a Secret attribute no longer opens as a sealed execution
+  value, and a sealed value does not open as a Secret attribute value. Values sealed in the former form open until
+  `CommunicationController:SealedValueLegacyFormAcceptedUntilUtc` (default 2027-01-01T00:00:00Z), then they are refused
+  (`ExecutionEnvelopeRejection.LegacyForm`). Needs the engine package with `SecretPurpose`.
 
 - AB#9050 New: System.Communication 4.19.0 declares the deployment operations as CK methods - `DeploymentSite.Deploy-1` /
   `Undeploy-1`, `DeployableWorkload.Deploy-1` / `Undeploy-1`, `AdapterPool.Scale-1` and the static

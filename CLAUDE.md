@@ -3455,12 +3455,19 @@ from another execution or written in plain text must not decide who a leased run
 | Token removed at grant | `CommunicationRepository.TryClaimQueuedExecutionAsync` (`QueuedCaller.StripToken`) |
 
 **Format.** The payload is wrapped as `{v, p, t, e, d}` (format version, purpose, tenant id, execution RtId, data)
-and encrypted with the engine key ring (`enc:v2:<kid>`, AES-256-GCM, key rotation as for every `enc:v2` value). The
-key ring authenticates only its own header as associated data, so the binding is part of the authenticated plaintext
-and compared after decryption: another purpose, tenant or execution does not open, nor does a flipped bit, another
-key, plain text, `enc:v1`, or a different `enc:v2` secret copied into the attribute (it decrypts to something that is
-not an envelope; the decrypted content is only compared, never returned or logged). The reason of a refusal is
+and encrypted with the engine key ring (`enc:v2:<kid>`, AES-256-GCM, key rotation as for every `enc:v2` value) **for
+the binding** `octo.communication.execution-envelope/<purpose>/<tenant>/<execution>` (`SecretPurpose`, AB#9127): the
+binding is part of the AES-GCM associated data, so another purpose, tenant or execution does not open (reason
+`Unreadable`), nor does a flipped bit, another key, plain text or `enc:v1`. A value produced through a Secret attribute
+(same key ring, whose envelope a tenant administrator can read in a dump) never opens here, and a sealed value never
+opens as a Secret attribute value. The binding inside the content is checked as well. The reason of a refusal is
 logged (`ExecutionEnvelopeRejection`), never the value.
+
+**Former form (before AB#9127).** A value sealed with the binding only in its content opens until
+`CommunicationController:SealedValueLegacyFormAcceptedUntilUtc` (default 2027-01-01T00:00:00Z) and is refused afterwards
+(`LegacyForm`). Such a value cannot be told apart from a Secret attribute value that carries a valid wrapper, so the
+window covers only executions queued before the upgrade (their seals are refused after `QueuedSealMaxAgeDays` anyway).
+A re-seal writes the bound form. Set the option earlier to close the window sooner.
 
 **Rules.**
 

@@ -18,6 +18,9 @@ internal class ExecutionEnvelopeTests
     private const string Tenant = "acme";
     private const string Purpose = "test-purpose";
 
+    private static readonly FixedTimeProvider InsideTheLegacyFormWindow =
+        new(new DateTime(2026, 12, 1, 0, 0, 0, DateTimeKind.Utc));
+
     private readonly ExecutionEnvelope _sut = TestExecutionEnvelope.Create();
     private readonly OctoObjectId _execution = OctoObjectId.GenerateNewId();
 
@@ -56,9 +59,9 @@ internal class ExecutionEnvelopeTests
     }
 
     [Test]
-    [Arguments("other-purpose", Tenant, false, ExecutionEnvelopeRejection.WrongPurpose)]
-    [Arguments(Purpose, "other-tenant", false, ExecutionEnvelopeRejection.WrongTenant)]
-    [Arguments(Purpose, Tenant, true, ExecutionEnvelopeRejection.WrongExecution)]
+    [Arguments("other-purpose", Tenant, false, ExecutionEnvelopeRejection.Unreadable)]
+    [Arguments(Purpose, "other-tenant", false, ExecutionEnvelopeRejection.Unreadable)]
+    [Arguments(Purpose, Tenant, true, ExecutionEnvelopeRejection.Unreadable)]
     public async Task TheBinding_IsPartOfTheAuthenticatedContent(string purpose, string tenant,
         bool otherExecution, ExecutionEnvelopeRejection expected)
     {
@@ -108,7 +111,7 @@ internal class ExecutionEnvelopeTests
     {
         // not a decryption oracle: whatever it decrypts to is only compared, never returned
         var keys = TestSecretEncryption.Create();
-        var sut = new ExecutionEnvelope(keys.Protector);
+        var sut = new ExecutionEnvelope(keys.Protector, null, InsideTheLegacyFormWindow);
         var copiedSecret = keys.Protector.Protect("a-client-secret").Envelope;
 
         var ok = sut.TryOpen<Data>(Purpose, copiedSecret, Tenant, _execution, out _, out var why);
@@ -224,7 +227,7 @@ internal class ExecutionEnvelopeTests
         // Same key ring, correct binding, but no "d" member: only a holder of the key could produce it, still it
         // must be refused rather than throw.
         var keys = TestSecretEncryption.Create();
-        var sut = new ExecutionEnvelope(keys.Protector);
+        var sut = new ExecutionEnvelope(keys.Protector, null, InsideTheLegacyFormWindow);
         var json = "{\"v\":1,\"p\":\"" + Purpose + "\",\"t\":\"" + Tenant + "\",\"e\":\"" + _execution + "\"}";
         var stored = keys.Protector.Protect(json).Envelope;
 
