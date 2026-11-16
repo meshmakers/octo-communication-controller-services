@@ -19,7 +19,8 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Repositor
 /// <summary>
 /// AB#6435: <see cref="CommunicationRepository"/> repeats a communication-state write once or twice when
 /// MongoDB aborts it with a write conflict (seen on test-2, tenant wwc26, 2026-10-10 16:16:05Z) and does not
-/// repeat any other failure.
+/// repeat any other failure. AB#9121: the deployment-state writes of pipelines and pipeline triggers do the same
+/// (prod-2, tenant sbeg, 2026-11-15: a WriteConflict on a trigger failed the whole tenant setup).
 /// </summary>
 internal class CommunicationStateWriteRetryTests
 {
@@ -125,5 +126,65 @@ internal class CommunicationStateWriteRetryTests
         // otherwise it could overwrite a later Online at the AttributeNewerThanGuard.
         await Assert.That(timestamps.Count).IsEqualTo(2);
         await Assert.That(timestamps[1]).IsEqualTo(timestamps[0]);
+    }
+
+    [Test]
+    public async Task SetPipelineTriggerDeploymentState_WriteConflictOnce_RetriesAndSucceeds()
+    {
+        _tenantRepository
+            .ApplyChangesAsync(Arg.Any<IOctoSession>(), Arg.Any<IReadOnlyList<IEntityUpdateInfo<RtEntity>>>(),
+                Arg.Any<OperationResult>())
+            .Returns(Task.FromException(WriteConflict()), Task.CompletedTask);
+
+        await _sut.SetPipelineTriggerDeploymentStateAsync(TenantId, OctoObjectId.GenerateNewId(),
+            RtDeploymentStateEnum.Pending);
+
+        await Assert.That(ApplyCalls()).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task SetPipelineDeploymentState_WriteConflictOnce_RetriesAndSucceeds()
+    {
+        _tenantRepository
+            .ApplyChangesAsync(Arg.Any<IOctoSession>(), Arg.Any<IReadOnlyList<IEntityUpdateInfo<RtEntity>>>(),
+                Arg.Any<OperationResult>())
+            .Returns(Task.FromException(WriteConflict()), Task.CompletedTask);
+
+        await _sut.SetPipelineDeploymentStateAsync(TenantId,
+            new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, OctoObjectId.GenerateNewId()),
+            RtDeploymentStateEnum.Deployed, null);
+
+        await Assert.That(ApplyCalls()).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task SetPipelineTriggerDeploymentState_PersistentConflict_GivesUpAfterTwoRetries()
+    {
+        _tenantRepository
+            .ApplyChangesAsync(Arg.Any<IOctoSession>(), Arg.Any<IReadOnlyList<IEntityUpdateInfo<RtEntity>>>(),
+                Arg.Any<OperationResult>())
+            .Returns(_ => Task.FromException(WriteConflict()));
+
+        await Assert.ThrowsAsync<CommunicationRepositoryException>(() =>
+            _sut.SetPipelineTriggerDeploymentStateAsync(TenantId, OctoObjectId.GenerateNewId(),
+                RtDeploymentStateEnum.Pending));
+
+        await Assert.That(ApplyCalls()).IsEqualTo(3);
+    }
+
+    [Test]
+    public async Task SetPipelineDeploymentState_NonTransientError_IsNotRetried()
+    {
+        _tenantRepository
+            .ApplyChangesAsync(Arg.Any<IOctoSession>(), Arg.Any<IReadOnlyList<IEntityUpdateInfo<RtEntity>>>(),
+                Arg.Any<OperationResult>())
+            .Returns(_ => Task.FromException(new MongoException("E11000 duplicate key")));
+
+        await Assert.ThrowsAsync<CommunicationRepositoryException>(() =>
+            _sut.SetPipelineDeploymentStateAsync(TenantId,
+                new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, OctoObjectId.GenerateNewId()),
+                RtDeploymentStateEnum.Error, "boom"));
+
+        await Assert.That(ApplyCalls()).IsEqualTo(1);
     }
 }

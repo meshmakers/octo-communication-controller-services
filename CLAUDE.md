@@ -717,8 +717,12 @@ jittered 50-200 ms backoff, with a warning per retry. The logical write timestam
 is taken once before the first attempt and reused by every retry, so a retried stale write cannot overwrite a newer
 state. The last exception surfaces unchanged; every other
 error is not retried. Seen on test-2 (tenant wwc26, 2026-10-10) where a lost Online write healed only when
-the operator re-claimed the site 10 s later. Other writes (deployment state, configuration state) are not
-covered.
+the operator re-claimed the site 10 s later.
+Since AB#9121 `SetPipelineDeploymentStateAsync` and `SetPipelineTriggerDeploymentStateAsync` use the same retry: on
+prod-2 (tenant sbeg, 2026-11-15) tenant setup set a trigger to `Pending` while the adapter re-registered and redeployed
+22 pipelines, and the unretried WriteConflict failed the whole tenant setup. These writes carry no timestamp guard, so
+a retry is last-writer-wins exactly like the first attempt would have been. Other writes (adapter, application and
+pool deployment state, configuration state) are not covered.
 
 ## Development Commands
 

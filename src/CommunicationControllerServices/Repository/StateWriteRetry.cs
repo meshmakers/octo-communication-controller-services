@@ -3,9 +3,10 @@ using MongoDB.Driver;
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 
 /// <summary>
-/// AB#6435: bounded retry for communication-state writes. Two writers can touch the same
-/// deployment site or adapter document in parallel (operator claim, disconnect handling,
-/// reconciliation sweep). MongoDB then aborts one transaction with a WriteConflict
+/// AB#6435: bounded retry for communication-state writes, since AB#9121 also for the deployment-state
+/// writes of pipelines and pipeline triggers. Two writers can touch the same deployment site, adapter,
+/// pipeline or trigger document in parallel (operator claim, disconnect handling, reconciliation sweep,
+/// tenant setup racing an adapter re-registration). MongoDB then aborts one transaction with a WriteConflict
 /// (TransientTransactionError). The write is idempotent and the guard keeps stale values out,
 /// so the controller repeats it instead of leaving the stored state stale until the next claim.
 /// Non-transient errors are never retried.
