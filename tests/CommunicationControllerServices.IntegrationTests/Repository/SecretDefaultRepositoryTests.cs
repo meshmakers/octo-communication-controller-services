@@ -4,6 +4,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Runtime.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Runtime.Contracts.Secrets;
@@ -394,6 +395,138 @@ public class SecretDefaultRepositoryTests(CommunicationControllerFixture fixture
         var deleteOutcome = await repository.DeleteSecretDefaultIfUnchangedAsync(fixture.TestTenantId, listedDefault);
 
         deleteOutcome.Should().Be(SecretDefaultDeleteOutcome.NotFound);
+    }
+
+    private async Task ArchiveSecretDefaultAsync(OctoObjectId rtId)
+    {
+        var tenantRepository = await fixture.GetSystemContext().FindTenantRepositoryAsync(fixture.TestTenantId);
+        using var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+        await tenantRepository.DeleteOneRtEntityByRtIdAsync<RtSecretDefault>(session, rtId, DeleteOptions.Default);
+        await session.CommitTransactionAsync();
+    }
+
+    private async Task<RtSecretDefault?> ReadIncludingArchivedAsync(OctoObjectId rtId)
+    {
+        var tenantRepository = await fixture.GetSystemContext().FindTenantRepositoryAsync(fixture.TestTenantId);
+        using var session = await tenantRepository.GetSessionAsync();
+        return await tenantRepository.GetRtEntityByRtIdAsync<RtSecretDefault>(session, rtId);
+    }
+
+    private async Task<string> ProjectThenArchiveAsync(string sourceWorkloadRtId)
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var key = $"secret-default-{Guid.NewGuid():N}";
+        await repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
+            BuildWrite(key, "zq7245-integration-before-archive", sourceWorkloadRtId));
+        await ArchiveSecretDefaultAsync(SecretDefaultIdentity.RtIdFor(key));
+        return key;
+    }
+
+    [Fact]
+    public async Task UpsertSecretDefaultAsync_ADefaultTheTenantArchived_IsRestoredWithTheProjectedValue()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var sourceWorkloadRtId = OctoObjectId.GenerateNewId().ToString();
+        var key = await ProjectThenArchiveAsync(sourceWorkloadRtId);
+        var listedWhileArchived = (await repository.GetSecretDefaultsAsync(fixture.TestTenantId)).Defaults
+            .Where(storedDefault => storedDefault.Key == key);
+
+        var writeResult = await repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
+            BuildWrite(key, "zq7245-integration-restored", sourceWorkloadRtId));
+
+        listedWhileArchived.Should().BeEmpty();
+        writeResult.Outcome.Should().Be(SecretDefaultWriteOutcome.Created);
+        var stored = (await ReadSecretDefaultsAsync(key)).Should().ContainSingle().Subject;
+        stored.RtId.Should().Be(SecretDefaultIdentity.RtIdFor(key));
+        stored.RtState.Should().NotBe(RtState.Archived);
+        stored.SourceWorkloadRtId.Should().Be(sourceWorkloadRtId);
+        Reveal(stored.Value).Should().Be("zq7245-integration-restored");
+    }
+
+    [Fact]
+    public async Task UpsertSecretDefaultAsync_ARestoredDefault_IsListedSoTheNextReconcileFindsItCurrent()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var sourceWorkloadRtId = OctoObjectId.GenerateNewId().ToString();
+        var key = await ProjectThenArchiveAsync(sourceWorkloadRtId);
+
+        await repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
+            BuildWrite(key, "zq7245-integration-restored", sourceWorkloadRtId));
+        var listedAfterRestore = await ListedDefaultAsync(repository, fixture.TestTenantId, key);
+        var storedIncludingArchived = await ReadIncludingArchivedAsync(SecretDefaultIdentity.RtIdFor(key));
+
+        listedAfterRestore.SourceWorkloadRtId.Should().Be(sourceWorkloadRtId);
+        listedAfterRestore.Name.Should().Be(key);
+        Reveal(listedAfterRestore.Value).Should().Be("zq7245-integration-restored");
+        storedIncludingArchived.Should().NotBeNull();
+        storedIncludingArchived!.RtState.Should().NotBe(RtState.Archived);
+    }
+
+    [Fact]
+    public async Task UpsertSecretDefaultAsync_TwoConcurrentWritesOverAnArchivedDefault_LeaveExactlyOneEntity()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var concreteRepository = repository.Should().BeOfType<CommunicationRepository>().Subject;
+        var key = await ProjectThenArchiveAsync(OctoObjectId.GenerateNewId().ToString());
+        var bothWritersHaveRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var readsOfTheKey = 0;
+        concreteRepository.AfterSecretDefaultUpsertReadAsync = async readKey =>
+        {
+            if (readKey != key)
+            {
+                return;
+            }
+
+            var readNumber = Interlocked.Increment(ref readsOfTheKey);
+            if (readNumber > 2)
+            {
+                return;
+            }
+
+            if (readNumber == 2)
+            {
+                bothWritersHaveRead.TrySetResult();
+            }
+
+            await bothWritersHaveRead.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        };
+
+        SecretDefaultWriteResult[] writeResults;
+        try
+        {
+            writeResults = await Task.WhenAll(
+                Task.Run(() => repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
+                    BuildWrite(key, "zq7245-integration-first-restorer", OctoObjectId.GenerateNewId().ToString()))),
+                Task.Run(() => repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
+                    BuildWrite(key, "zq7245-integration-second-restorer", OctoObjectId.GenerateNewId().ToString()))));
+        }
+        finally
+        {
+            concreteRepository.AfterSecretDefaultUpsertReadAsync = null;
+        }
+
+        writeResults.Select(writeResult => writeResult.Outcome).Should().BeEquivalentTo(
+            [SecretDefaultWriteOutcome.Created, SecretDefaultWriteOutcome.Updated]);
+        var stored = (await ReadSecretDefaultsAsync(key)).Should().ContainSingle().Subject;
+        Reveal(stored.Value).Should().BeOneOf("zq7245-integration-first-restorer",
+            "zq7245-integration-second-restorer");
+    }
+
+    [Fact]
+    public async Task DeleteSecretDefaultIfUnchangedAsync_ADefaultTheTenantArchivedAfterTheRead_IsErasedAndReportedRemoved()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var key = $"secret-default-{Guid.NewGuid():N}";
+        await repository.UpsertSecretDefaultAsync(fixture.TestTenantId,
+            BuildWrite(key, "zq7245-integration-archived-after-read", OctoObjectId.GenerateNewId().ToString()));
+        var listedDefault = await ListedDefaultAsync(repository, fixture.TestTenantId, key);
+        await ArchiveSecretDefaultAsync(listedDefault.RtId);
+
+        var deleteOutcome = await repository.DeleteSecretDefaultIfUnchangedAsync(fixture.TestTenantId, listedDefault);
+
+        deleteOutcome.Should().Be(SecretDefaultDeleteOutcome.NotFound);
+        (await ReadIncludingArchivedAsync(listedDefault.RtId)).Should().BeNull();
     }
 
     [Fact]

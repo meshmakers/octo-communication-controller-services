@@ -743,9 +743,12 @@ internal class CommunicationRepository : ICommunicationRepository
                     keptDefault.SourceTenantId);
             }
 
-            var existing = sameKey.FirstOrDefault() ??
-                           await tenantRepository.GetRtEntityByRtIdAsync<RtSecretDefault>(session,
-                               SecretDefaultIdentity.RtIdFor(write.Key));
+            var identityDefault = sameKey.Count == 0
+                ? await tenantRepository.GetRtEntityByRtIdAsync<RtSecretDefault>(session,
+                    SecretDefaultIdentity.RtIdFor(write.Key))
+                : null;
+            var archivedIdentityDefault = identityDefault?.RtState == RtState.Archived ? identityDefault : null;
+            var existing = sameKey.FirstOrDefault() ?? (archivedIdentityDefault is null ? identityDefault : null);
             if (AfterSecretDefaultUpsertReadAsync is { } afterReadHook)
             {
                 await afterReadHook(write.Key);
@@ -755,6 +758,13 @@ internal class CommunicationRepository : ICommunicationRepository
             {
                 await tenantRepository.DeleteOneRtEntityByRtIdAsync<RtSecretDefault>(session, duplicate.RtId,
                     DeleteOptions.Erase);
+            }
+
+            if (archivedIdentityDefault is not null)
+            {
+                // A tenant's delete only archives the default; erase the tombstone so it is inserted again.
+                await tenantRepository.DeleteOneRtEntityByRtIdAsync<RtSecretDefault>(session,
+                    archivedIdentityDefault.RtId, DeleteOptions.Erase);
             }
 
             var secretDefault = existing ?? await tenantRepository.CreateTransientRtEntityAsync<RtSecretDefault>();
@@ -836,6 +846,14 @@ internal class CommunicationRepository : ICommunicationRepository
         {
             var currentDefault =
                 await tenantRepository.GetRtEntityByRtIdAsync<RtSecretDefault>(session, expectedDefault.RtId);
+            if (currentDefault?.RtState == RtState.Archived)
+            {
+                await tenantRepository.DeleteOneRtEntityByRtIdAsync<RtSecretDefault>(session, currentDefault.RtId,
+                    DeleteOptions.Erase);
+                await session.CommitTransactionAsync();
+                return SecretDefaultDeleteOutcome.NotFound;
+            }
+
             if (currentDefault is null || !SecretDefaultIdentity.IsUnchanged(currentDefault, expectedDefault))
             {
                 await session.CommitTransactionAsync();

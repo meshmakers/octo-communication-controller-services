@@ -175,7 +175,8 @@ public interface ICommunicationRepository
     ///     Creates or overwrites the platform-owned SecretDefault whose well-known name is the write's key in the
     ///     target tenant. Writes nothing else; further SecretDefaults with the same well-known name are erased. An
     ///     existing default whose source is in <see cref="SecretDefaultWrite.ProtectedSourceTenantIds" /> is kept,
-    ///     unless it is still one of the <see cref="SecretDefaultWrite.SupersededDefaults" />.
+    ///     unless it is still one of the <see cref="SecretDefaultWrite.SupersededDefaults" />. A default the tenant
+    ///     deleted (archived) is erased and created again.
     /// </summary>
     /// <param name="targetTenantId">Tenant that receives the default.</param>
     /// <param name="write">Key, value and source of the default.</param>
@@ -192,7 +193,8 @@ public interface ICommunicationRepository
     /// <summary>
     ///     Erases one SecretDefault of a tenant, but only while it is still the entity that was read: same RtId,
     ///     well-known name, source tenant, source workload and projection time. A default a concurrent deploy has
-    ///     written since is kept. A default is derived state the reconcile rebuilds, so no tombstone is kept.
+    ///     written since is kept. A default is derived state the reconcile rebuilds, so no tombstone is kept: one the
+    ///     tenant deleted (archived) since the read is erased and reported as gone already.
     /// </summary>
     /// <param name="tenantId">Tenant that holds the default.</param>
     /// <param name="expectedDefault">The default as read before the decision to remove it.</param>
