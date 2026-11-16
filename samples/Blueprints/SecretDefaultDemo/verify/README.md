@@ -125,8 +125,9 @@ Install the probe blueprint in that tenant and deploy its data flow, then pipe t
 the script as the sentinel. It is read from standard input like in `write-secret.sh`, so it is on no
 command line, and it must be at least 8 characters of `A-Z a-z 0-9 . _ -`, so no JSON or YAML escaping can
 hide it from the search. The script prints one line per read path and never a response body. A random value is the
-stronger sentinel (write it with `write-secret.sh default` and deploy again before the run); the CAPTCHA
-probe then answers `valid: false`, which is expected.
+stronger sentinel (write it with `write-secret.sh default` and deploy again before the run). Turnstile then
+answers HTTP 400 for the unknown secret and the Mesh Adapter logs it as verification unavailable, so the
+CAPTCHA probe's verdict is not valid; its `source` stays `default`, which is what the script checks.
 
 ```bash
 octo-cli --context "${OCTO_CONTEXT_PREFIX}$child_tenant" -c InstallBlueprint -b SecretDefaultDemoProbe-1.0.0
@@ -147,11 +148,20 @@ printf '%s\n' 1x0000000000000000000000000000000AA \
 | `RevealSecret@1`, caller | `ExecutePipeline` of `5ecdef0000000000000000c3` | execution failed, message names the type platform-only |
 | `RevealSecret@1`, service account | `ExecutePipeline` of `5ecdef0000000000000000c4` | as above |
 | `GetPipelineConfigByCkTypeId@1` | `ExecutePipeline` of `5ecdef0000000000000000c5` | as above |
-| `VerifyCaptcha@1` without a route | `ExecutePipeline` of `5ecdef0000000000000000c6` | completed, the debug points carry the verdict and its `source` |
+| `VerifyCaptcha@1` without a route | `ExecutePipeline` of `5ecdef0000000000000000c6` | completed; the verdict and its `source` are the execution's result (`SetPipelineExecutionResult@1`) |
 
-For each pipeline the script turns debug on (`SetPipelineDebug`), waits for the execution and searches
-the execution, its debug points (`GetPipelineDebugPoints`) and the execution history
-(`GetPipelineExecutions`) for the sentinel. Expected output, with the always-pass test secret:
+For each pipeline the script turns debug on (`SetPipelineDebug`) and starts it. It reads the outcome from the
+persisted `System.Communication/PipelineExecution` entity (`read-pipeline-execution.graphql`, by execution id:
+`status`, `errorMessage`, `outputData`) until the status is no longer `QUEUED` or `RUNNING`. It does not use
+`GetLatestPipelineExecution` or `GetPipelineExecutions` for that: while debug is on the controller answers both from
+its in-memory debug cache, which carries no status and no error message. A refusal passes when the status is
+`FAILED` and the error message says platform-only; the CAPTCHA probe passes when the status is `COMPLETED` and the
+result's `source` is `default`.
+
+It then searches the persisted execution, the debug points (`GetPipelineDebugPoints`) and the execution list
+(`GetPipelineExecutions`) for the sentinel and for an `enc:v…:` envelope. The debug-point search covers what
+`octo-cli` fetches, which is the node tree of the execution: the input and output documents of the nodes are not
+part of that answer, so the script does not search them. Expected output, with the always-pass test secret:
 
 ```text
 Tenant sddemo-child, context local_sddemo-child, SecretDefault <rtId>
@@ -210,13 +220,13 @@ Only with that environment's own go. The steps are the same, with these differen
 
 - **No ingress for the adapter.** Where the tenant's Mesh Adapter has no ingress, `call-verify-captcha.sh` cannot
   reach the route. Use the probe pipeline instead: install `SecretDefaultDemoProbe`, deploy its data flow and
-  run it with `ExecutePipeline`; the verdict is in its debug points.
+  run it with `ExecutePipeline`; the verdict is the result of the persisted execution (`outputData`).
 
   ```bash
-  octo-cli --context "${OCTO_CONTEXT_PREFIX}$child_tenant" -c SetPipelineDebug -id 5ecdef0000000000000000c6 -e true
   octo-cli --context "${OCTO_CONTEXT_PREFIX}$child_tenant" -c ExecutePipeline -id 5ecdef0000000000000000c6
-  octo-cli --context "${OCTO_CONTEXT_PREFIX}$child_tenant" -c GetPipelineDebugPoints \
-    -id 5ecdef0000000000000000c6 -eid <executionId>
+  jq -cn --arg executionId <executionId> '{ executionId: $executionId }' \
+    | octo-cli --context "${OCTO_CONTEXT_PREFIX}$child_tenant" -c GraphQl -tid "$child_tenant" \
+      -f "$sample_root/verify/read-pipeline-execution.graphql" -vars @/dev/stdin
   ```
 
   `prove-no-reveal.sh` uses this pipeline anyway, so it needs no ingress.
