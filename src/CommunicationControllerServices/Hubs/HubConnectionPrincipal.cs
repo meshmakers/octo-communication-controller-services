@@ -100,6 +100,8 @@ internal static class HubConnectionPrincipal
                $"scopes '{(string.IsNullOrWhiteSpace(scopes) ? "<none>" : scopes)}'";
     }
 
+    private static readonly string[] KnownAuthorizationSchemes = ["Basic", "Digest", "Negotiate", "NTLM", "Kerberos", "ApiKey"];
+
     private const int MaxLoggedHeaderLength = 200;
     private const int MaxTokenLengthToInspect = 16 * 1024;
 
@@ -133,6 +135,7 @@ internal static class HubConnectionPrincipal
         var path = Sanitize(http.Request.Path.Value);
 
         var origin = $"path '{path}', remote address '{remote}', x-forwarded-for '{forwarded}', " +
+                     (string.IsNullOrEmpty(originalFor) ? "" : $"x-original-for '{Sanitize(originalFor)}', ") +
                      $"user agent '{userAgent}'";
 
         if (user?.Identity is not { IsAuthenticated: true })
@@ -152,8 +155,12 @@ internal static class HubConnectionPrincipal
         {
             if (!header.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             {
+                // Only a well-known scheme name is logged; anything else (a bare credential without a scheme)
+                // is never echoed.
                 var scheme = header.Split(' ', 2)[0];
-                return $", Authorization header with a non-Bearer scheme '{Sanitize(scheme)}'";
+                return KnownAuthorizationSchemes.Contains(scheme, StringComparer.OrdinalIgnoreCase)
+                    ? $", Authorization header with a non-Bearer scheme '{scheme}'"
+                    : ", Authorization header with an unrecognised scheme (value not logged)";
             }
 
             token = header[prefix.Length..].Trim();
@@ -204,7 +211,7 @@ internal static class HubConnectionPrincipal
                 ? value.GetString()
                 : null;
         }
-        catch (Exception e) when (e is FormatException or JsonException or ArgumentException)
+        catch (Exception e) when (e is FormatException or JsonException or ArgumentException or InvalidOperationException)
         {
             return null;
         }

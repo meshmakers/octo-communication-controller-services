@@ -102,6 +102,7 @@ internal class HubRefusalOriginLogTests
             http.Connection.RemoteIpAddress = IPAddress.Parse("10.244.1.7");
             http.Request.Headers["X-Forwarded-For"] = "203.0.113.9, 10.0.0.2";
             http.Request.Headers.UserAgent = "Mozilla/5.0 probe";
+            http.Request.Headers["X-Original-For"] = "198.51.100.4";
         });
 
         using var _ = Assert.Multiple();
@@ -110,6 +111,7 @@ internal class HubRefusalOriginLogTests
         await Assert.That(line).Contains("path '/operatorHub'");
         await Assert.That(line).Contains("remote address '10.244.1.7'");
         await Assert.That(line).Contains("x-forwarded-for '203.0.113.9, 10.0.0.2'");
+        await Assert.That(line).Contains("x-original-for '198.51.100.4'");
         await Assert.That(line).Contains("user agent 'Mozilla/5.0 probe'");
         await Assert.That(line).Contains("no token presented");
         await Assert.That(line).Contains("reason code unauthenticated");
@@ -201,6 +203,24 @@ internal class HubRefusalOriginLogTests
         using var _ = Assert.Multiple();
         await Assert.That(line).Contains("no client_id could be read (length 26, 1 dot-separated segments");
         await Assert.That(line).DoesNotContain("opaque-reference-token-123");
+    }
+
+    [Test]
+    [NotInParallel(nameof(NLog.LogManager))]
+    public async Task OperatorRefusal_BareCredentialInAuthorizationHeader_IsNeverEchoed()
+    {
+        var line = await RefusedLineAsync(http => http.Request.Headers.Authorization = "s3cr3t-bare-credential");
+
+        using var _ = Assert.Multiple();
+        await Assert.That(line).Contains("unrecognised scheme (value not logged)");
+        await Assert.That(line).DoesNotContain("s3cr3t");
+    }
+
+    [Test]
+    public async Task InvalidUnicodeClientId_IsTreatedAsMalformed()
+    {
+        await Assert.That(HubConnectionPrincipal.ReadUnverifiedClientId(FakeJwt("{\"client_id\":\"\\uD800\"}")))
+            .IsNull();
     }
 
     [Test]
