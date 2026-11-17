@@ -3,9 +3,11 @@
 ## Unreleased
 
 - AB#7247 Docs: step 9 of the secret-default verify README (Trace sweep) also sets `Logging__LogLevel__Default=Trace`
-  for the Mesh Adapter and removes it on restore. The adapter host keeps the `appsettings.json` filter
-  (`Default` = `Information`) in front of NLog, so `OCTO_LOG_LEVEL` / `OCTO_LOG_LEVEL_ROOT` alone showed no Debug or
-  Trace line (found on kind). The Communication Operator is not affected: its NLog provider drops those filters.
+  and `Logging__LogLevel__Microsoft.AspNetCore=Trace` for the Mesh Adapter and removes them on restore. The adapter host
+  keeps the `appsettings.json` filters (`Default` = `Information`) in front of NLog, so `OCTO_LOG_LEVEL` /
+  `OCTO_LOG_LEVEL_ROOT` alone showed no Debug or Trace line (found on kind). The Communication Operator is not affected:
+  its NLog provider drops those filters. The restore no longer relies on the next release deploy, which keeps variables
+  the chart does not render.
 
 - AB#7245 Fix: the reconcile endpoint `POST {tenant}/v1/secretDefaults/reconcile` now stores the same Information event
   (`Secret defaults reconciled: n created, n updated, n removed, n kept.`) in every tenant where it wrote or removed a

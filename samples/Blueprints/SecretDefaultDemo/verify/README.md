@@ -255,26 +255,29 @@ To show that no log line carries the sentinel, raise the levels before step 4 (p
   two variables decide alone. Local stack: set both to `Trace` in the service's environment and restart it. kind:
   `kubectl -n <namespace> set env deployment/<name> OCTO_LOG_LEVEL=Trace OCTO_LOG_LEVEL_ROOT=Trace`, restore with
   `kubectl -n <namespace> set env deployment/<name> OCTO_LOG_LEVEL- OCTO_LOG_LEVEL_ROOT-`.
-- **Mesh Adapter** needs a third variable. Its host keeps the `Logging:LogLevel` filters of `appsettings.json`
+- **Mesh Adapter** needs two more variables. Its host keeps the `Logging:LogLevel` filters of `appsettings.json`
   (`Default` = `Information`) in front of NLog, so `OCTO_LOG_LEVEL` and `OCTO_LOG_LEVEL_ROOT` alone still produce no
   Debug or Trace line. The SDK's `OCTO_ADAPTER__MINIMUMLOGLEVEL` does not help either: the `appsettings.json` rule takes
-  precedence over that minimum. Set `Logging__LogLevel__Default=Trace` as well. Local stack: all three to `Trace` in the
-  service's environment, then restart it. kind:
+  precedence over that minimum. Set `Logging__LogLevel__Default=Trace` as well, and
+  `Logging__LogLevel__Microsoft.AspNetCore=Trace`, because `appsettings.json` holds ASP.NET Core's own category at
+  `Warning` and its Debug lines would otherwise escape the sweep. Local stack: all four to `Trace` in the service's
+  environment, then restart it. kind:
 
   ```bash
   kubectl -n <namespace> set env deployment/<name> \
-    OCTO_LOG_LEVEL=Trace OCTO_LOG_LEVEL_ROOT=Trace Logging__LogLevel__Default=Trace
+    OCTO_LOG_LEVEL=Trace OCTO_LOG_LEVEL_ROOT=Trace Logging__LogLevel__Default=Trace \
+    Logging__LogLevel__Microsoft.AspNetCore=Trace
   ```
 
-  Restore all three:
+  Restore all four (the configured defaults apply again):
 
   ```bash
   kubectl -n <namespace> set env deployment/<name> \
-    OCTO_LOG_LEVEL- OCTO_LOG_LEVEL_ROOT- Logging__LogLevel__Default-
+    OCTO_LOG_LEVEL- OCTO_LOG_LEVEL_ROOT- Logging__LogLevel__Default- \
+    Logging__LogLevel__Microsoft.AspNetCore-
   ```
 
-  `Microsoft.AspNetCore` stays at `Warning` from `appsettings.json`; ASP.NET Core's own Debug lines need
-  `Logging__LogLevel__Microsoft.AspNetCore=Trace` too (restore it the same way).
-- On kind, the next deploy of a release renders the chart again and drops these variables for both services as well.
+- On kind, do not count on the next deploy of the release to remove these variables: Helm 3 keeps environment variables
+  its chart does not render. Always run the restore commands above.
 - **Search** the logs for the sentinel with `grep -cF` and report only the count; never print a matching line.
   Then restore every level before you leave the environment.
