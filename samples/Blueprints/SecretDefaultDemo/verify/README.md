@@ -250,10 +250,31 @@ To show that no log line carries the sentinel, raise the levels before step 4 (p
   Restore with the same loop and `-minL Info` (or the level the deployment sets with `OCTO_LOG_LEVEL` /
   `OCTO_LOG_LEVEL_ROOT`). The change lives in memory only: a restart of the service restores the configured level
   as well.
-- **Mesh Adapter and Communication Operator** read their level at start from `OCTO_LOG_LEVEL` (our code) and
-  `OCTO_LOG_LEVEL_ROOT` (frameworks), default `Info`. Local stack: set both to `Trace` in the service's
-  environment and restart it. kind: `kubectl -n <namespace> set env deployment/<name> OCTO_LOG_LEVEL=Trace
-  OCTO_LOG_LEVEL_ROOT=Trace`, restore with `kubectl -n <namespace> set env deployment/<name> OCTO_LOG_LEVEL-
-  OCTO_LOG_LEVEL_ROOT-` (the next deploy of the release renders the chart again and drops them too).
+- **Communication Operator** reads its level at start from `OCTO_LOG_LEVEL` (our code) and `OCTO_LOG_LEVEL_ROOT`
+  (frameworks), default `Info`; its NLog provider drops the `Logging:LogLevel` filters of `appsettings.json`, so these
+  two variables decide alone. Local stack: set both to `Trace` in the service's environment and restart it. kind:
+  `kubectl -n <namespace> set env deployment/<name> OCTO_LOG_LEVEL=Trace OCTO_LOG_LEVEL_ROOT=Trace`, restore with
+  `kubectl -n <namespace> set env deployment/<name> OCTO_LOG_LEVEL- OCTO_LOG_LEVEL_ROOT-`.
+- **Mesh Adapter** needs a third variable. Its host keeps the `Logging:LogLevel` filters of `appsettings.json`
+  (`Default` = `Information`) in front of NLog, so `OCTO_LOG_LEVEL` and `OCTO_LOG_LEVEL_ROOT` alone still produce no
+  Debug or Trace line. The SDK's `OCTO_ADAPTER__MINIMUMLOGLEVEL` does not help either: the `appsettings.json` rule takes
+  precedence over that minimum. Set `Logging__LogLevel__Default=Trace` as well. Local stack: all three to `Trace` in the
+  service's environment, then restart it. kind:
+
+  ```bash
+  kubectl -n <namespace> set env deployment/<name> \
+    OCTO_LOG_LEVEL=Trace OCTO_LOG_LEVEL_ROOT=Trace Logging__LogLevel__Default=Trace
+  ```
+
+  Restore all three:
+
+  ```bash
+  kubectl -n <namespace> set env deployment/<name> \
+    OCTO_LOG_LEVEL- OCTO_LOG_LEVEL_ROOT- Logging__LogLevel__Default-
+  ```
+
+  `Microsoft.AspNetCore` stays at `Warning` from `appsettings.json`; ASP.NET Core's own Debug lines need
+  `Logging__LogLevel__Microsoft.AspNetCore=Trace` too (restore it the same way).
+- On kind, the next deploy of a release renders the chart again and drops these variables for both services as well.
 - **Search** the logs for the sentinel with `grep -cF` and report only the count; never print a matching line.
   Then restore every level before you leave the environment.
