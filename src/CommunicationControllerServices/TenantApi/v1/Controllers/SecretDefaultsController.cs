@@ -37,7 +37,8 @@ public class SecretDefaultsController : ControllerBase
     /// </summary>
     /// <remarks>
     ///     The manual counterpart of the reconcile on every tenant load. Answers with counts per tenant, never a
-    ///     value. Idempotent.
+    ///     value; a tenant where a default was written or removed gets the same Information event as on tenant load.
+    ///     Idempotent.
     /// </remarks>
     [HttpPost("reconcile")]
     [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
@@ -55,8 +56,11 @@ public class SecretDefaultsController : ControllerBase
             HttpContext.RequestAborted);
         _logger.LogInformation(
             "[{TenantId}] Secret defaults reconciled on request: {TenantCount} tenant(s), {Created} created, " +
-            "{Removed} removed, {Failed} failed", tenantId, perTenantResults.Count,
+            "{Updated} updated, {Unchanged} unchanged, {Removed} removed, {Failed} failed", tenantId,
+            perTenantResults.Count,
             perTenantResults.Sum(result => result.DefaultsCreated),
+            perTenantResults.Sum(result => result.DefaultsUpdated),
+            perTenantResults.Sum(result => result.DefaultsUnchanged),
             perTenantResults.Sum(result => result.DefaultsRemoved),
             perTenantResults.Sum(result => result.WritesFailed));
         return Ok(perTenantResults);

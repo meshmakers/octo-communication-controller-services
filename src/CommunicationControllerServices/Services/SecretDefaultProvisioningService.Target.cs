@@ -14,7 +14,9 @@ internal sealed partial class SecretDefaultProvisioningService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetTenantId);
 
-        return (await ReconcileTargetAsync(targetTenantId, cancellationToken)).Result;
+        var result = (await ReconcileTargetAsync(targetTenantId, cancellationToken)).Result;
+        await ReportTargetChangesAsync(result);
+        return result;
     }
 
     private async Task<TargetReconcile> ReconcileTargetAsync(string targetTenantId,
@@ -53,7 +55,7 @@ internal sealed partial class SecretDefaultProvisioningService
 
         var desiredState = await ReadDesiredStateAsync(targetTenantId, inventory, sourceTenants, cancellationToken);
         var writes = await WriteWinningOffersAsync(targetTenantId, inventory, desiredState, cancellationToken);
-        var removal = await RemoveUnprovidedDefaultsAsync(targetTenantId, inventory, desiredState);
+        var removal = await RemoveUnprovidedDefaultsAsync(targetTenantId, inventory, desiredState, writes.WrittenKeys);
 
         var result = new SecretDefaultTargetResult(targetTenantId, SecretDefaultTargetStatus.Reconciled,
             writes.Created, writes.Updated, removal.RemovedRtIds.Count, removal.Kept + writes.Kept,
@@ -245,13 +247,16 @@ internal sealed partial class SecretDefaultProvisioningService
     /// <summary>
     ///     Removes every default no source provides to the tenant any more, also when the write of its replacement
     ///     failed: revocation wins over keeping the old value. A default whose source still reaches the tenant is
-    ///     provided and stays, so a failed replacement of a still-reaching source keeps its old value.
+    ///     provided and stays, so a failed replacement of a still-reaching source keeps its old value. A key the write
+    ///     pass of this run wrote is skipped: the write already replaced or erased every entity of that key.
     /// </summary>
     private async Task<RemovalOutcome> RemoveUnprovidedDefaultsAsync(string targetTenantId,
-        SecretDefaultInventory inventory, DesiredSecretDefaults desiredState)
+        SecretDefaultInventory inventory, DesiredSecretDefaults desiredState, IReadOnlySet<string> writtenKeys)
     {
         var removal = new RemovalOutcome();
-        foreach (var storedDefault in inventory.Defaults)
+        var defaultsNotRewritten = inventory.Defaults
+            .Where(storedDefault => !writtenKeys.Contains(storedDefault.Key));
+        foreach (var storedDefault in defaultsNotRewritten)
         {
             switch (Classify(storedDefault, desiredState))
             {

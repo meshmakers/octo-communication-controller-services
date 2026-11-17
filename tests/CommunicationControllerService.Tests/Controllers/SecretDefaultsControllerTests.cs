@@ -1,10 +1,10 @@
 using System.Reflection;
+using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Methods;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Controllers;
@@ -20,10 +20,11 @@ internal sealed class SecretDefaultsControllerTests
     private readonly ISecretDefaultProvisioningService _provisioningService =
         Substitute.For<ISecretDefaultProvisioningService>();
 
+    private readonly CapturingLogger<SecretDefaultsController> _logger = new();
+
     private SecretDefaultsController CreateSut(string? routeTenantId = TenantId)
     {
-        var controller = new SecretDefaultsController(_provisioningService,
-            NullLogger<SecretDefaultsController>.Instance);
+        var controller = new SecretDefaultsController(_provisioningService, _logger);
         var httpContext = new DefaultHttpContext();
         if (routeTenantId is not null)
         {
@@ -54,6 +55,24 @@ internal sealed class SecretDefaultsControllerTests
         await Assert.That(body!.Select(result => result.TenantId))
             .IsEquivalentTo(new[] { TenantId, "child-c1", "child-c2" });
         await Assert.That(body.Single(result => result.TenantId == "child-c1").DefaultsRemoved).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task Reconcile_LogsTheUpdatedAndUnchangedCountsToo()
+    {
+        IReadOnlyList<SecretDefaultTargetResult> perTenantResults =
+        [
+            new(TenantId, SecretDefaultTargetStatus.Reconciled, 0, 1, 0, 0, 0, 0, DefaultsUnchanged: 2),
+            new("child-c1", SecretDefaultTargetStatus.Reconciled, 1, 0, 0, 0, 0, 0)
+        ];
+        _provisioningService.ReconcileTenantAndSubtreeAsync(TenantId, Arg.Any<CancellationToken>())
+            .Returns(perTenantResults);
+
+        await CreateSut().ReconcileAsync();
+
+        await Assert.That(_logger.Entries).Contains(message =>
+            message.Contains("1 created") && message.Contains("1 updated") && message.Contains("2 unchanged") &&
+            message.Contains("0 removed"));
     }
 
     [Test]
@@ -110,3 +129,4 @@ internal sealed class SecretDefaultsControllerTests
         });
     }
 }
+

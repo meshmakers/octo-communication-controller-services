@@ -262,19 +262,14 @@ internal class DefaultConfigurationCreatorService(
 
     /// <summary>
     /// Reconciles the tenant's SecretDefaults against what its own tenant and its ancestors provide, without ever
-    /// failing tenant startup. A failure is an Error event; the next tenant load or the reconcile endpoint retries.
+    /// failing tenant startup. The service stores the Information event of a change; a failure is an Error event, and
+    /// the next tenant load or the reconcile endpoint retries.
     /// </summary>
     internal async Task EnsureSecretDefaultsAsync(string tenantId)
     {
         try
         {
-            var result = await secretDefaultProvisioningService.ProvisionForTargetAsync(tenantId);
-            if (result.DefaultsWritten > 0 || result.DefaultsRemoved > 0)
-            {
-                await communicationEventService.StoreInformationEventAsync(tenantId,
-                    $"Secret defaults reconciled: {result.DefaultsCreated} created, {result.DefaultsUpdated} " +
-                    $"updated, {result.DefaultsRemoved} removed, {result.DefaultsKept} kept.");
-            }
+            await secretDefaultProvisioningService.ProvisionForTargetAsync(tenantId);
         }
         catch (Exception reconcileFailure)
         {
