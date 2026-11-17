@@ -1,0 +1,18 @@
+# The persisted execution of a probe pipeline: status, error and the result SetPipelineExecutionResult@1 stored.
+# GetLatestPipelineExecution / GetPipelineExecutions read the debug cache while debug is on, which has no status.
+query readPipelineExecution($executionId: SimpleScalar!) {
+  runtime {
+    systemCommunicationPipelineExecution(
+      first: 1
+      fieldFilter: [{ attributePath: "executionId", operator: EQUALS, comparisonValue: $executionId }]
+    ) {
+      items {
+        executionId
+        status
+        failureKind
+        errorMessage
+        outputData
+      }
+    }
+  }
+}

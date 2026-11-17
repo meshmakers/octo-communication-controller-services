@@ -1,0 +1,12 @@
+# Asks the typed root for the projected value. SecretDefault.Value is Hidden (System.Communication
+# 4.16.0 and later), so the schema has no such field and the request must fail validation.
+query probeTypedValue {
+  runtime {
+    systemCommunicationSecretDefault(first: 10) {
+      items {
+        rtId
+        value
+      }
+    }
+  }
+}

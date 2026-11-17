@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- AB#7247 Test: the secret-default sample proves that a tenant admin cannot read a projected default.
+  `verify/prove-no-reveal.sh` tries the typed and the generic GraphQL root, `ExportRtByDeepGraph`, `ExportRtByQuery`,
+  `RevealSecret@1` as caller and as service account, `GetPipelineConfigByCkTypeId@1` and `VerifyCaptcha@1` through
+  `ExecutePipeline`, reads each probe's outcome from the persisted `PipelineExecution` entity (the debug cache has no
+  status) and searches answers, exports, debug points and execution history for the sentinel; the new blueprint
+  `SecretDefaultDemoProbe-1.0.0` seeds the probe query and pipelines (the CAPTCHA probe stores its verdict with
+  `SetPipelineExecutionResult@1`). The verify README gains a
+  shared-environment section (context prefix `OCTO_CONTEXT_PREFIX`, `DeployDeploymentSite`, the route through
+  `ExecutePipeline`) and a Trace log sweep. Unit tests `RestoredSecretDefaultReconcileTests`: a SecretDefault restored
+  into a tenant that no Application of its source reaches, or naming no existing Application, is removed by the next
+  reconcile.
+
 - AB#9121 Fix: the deployment-state writes of pipelines and pipeline triggers (`SetPipelineDeploymentStateAsync`,
   `SetPipelineTriggerDeploymentStateAsync`) repeat a transient MongoDB write conflict (code 112 or
   `TransientTransactionError`) up to two times with the AB#6435 `StateWriteRetry`, like the communication-state writes.

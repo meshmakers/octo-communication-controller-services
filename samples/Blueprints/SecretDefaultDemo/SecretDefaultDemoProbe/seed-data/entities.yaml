@@ -1,0 +1,187 @@
+$schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+
+dependencies:
+  - System.Communication-[4.16,5.0)
+  - SecretDefaultDemo-[1.0,2.0)
+
+entities:
+  - rtId: '5ecdef0000000000000000c1'
+    ckTypeId: System/SimpleRtQuery
+    rtWellKnownName: SecretDefaultDemoProbeQuery
+    attributes:
+      - id: System/Name
+        value: secret-default-demo-probe
+      - id: System/Query.CkTypeId
+        value: System.Communication/SecretDefault
+      - id: System/Query.Columns
+        value:
+          - rtId
+          - rtWellKnownName
+          - sourceTenantId
+          - sourceWorkloadRtId
+          - lastProjectedAt
+      - id: System/Query.Sorting
+        value: []
+      - id: System/Query.FieldFilter
+        value: []
+
+  - rtId: '5ecdef0000000000000000c2'
+    ckTypeId: System.Communication/DataFlow
+    rtWellKnownName: SecretDefaultDemoProbeFlow
+    attributes:
+      - id: System/Name
+        value: Secret Default Demo Probe
+      - id: System/Description
+        value: >-
+          Proof pipelines of the secret-default sample. Each tries to read the projected default and must
+          be refused; verify-captcha-probe uses it through VerifyCaptcha@1 without an HTTP route.
+
+  - rtId: '5ecdef0000000000000000c3'
+    ckTypeId: System.Communication/Pipeline
+    rtWellKnownName: SecretDefaultDemoProbeRevealAsCaller
+    associations:
+      - roleId: System/ParentChild
+        targetRtId: '5ecdef0000000000000000c2'
+        targetCkTypeId: System.Communication/DataFlow
+      - roleId: System.Communication/Executes
+        targetRtId: '670000000000000000000002'
+        targetCkTypeId: System.Communication/Adapter
+    attributes:
+      - id: System/Name
+        value: reveal-as-caller-probe
+      - id: System/Description
+        value: RevealSecret@1 on the projected SecretDefault as the caller; must fail as platform-only.
+      - id: System/Enabled
+        value: true
+      - id: System.Communication/DeploymentState
+        value: 0
+      - id: System.Communication/PipelineDefinition
+        value: |
+          triggers:
+            - type: FromExecutePipelineCommand@1
+          transformations:
+            - type: GetRtEntitiesByType@1
+              ckTypeId: System.Communication/SecretDefault
+              targetPath: $.secretDefaults
+              take: 1
+              fieldFilters:
+                - attributePath: rtWellKnownName
+                  operator: Equals
+                  comparisonValue: demo-captcha-secret
+            - type: RevealSecret@1
+              identity: Caller
+              ckTypeId: System.Communication/SecretDefault
+              rtIdPath: $.secretDefaults.Items[0].RtId
+              attributeName: Value
+              targetPath: $.revealed
+
+  - rtId: '5ecdef0000000000000000c4'
+    ckTypeId: System.Communication/Pipeline
+    rtWellKnownName: SecretDefaultDemoProbeRevealAsServiceAccount
+    associations:
+      - roleId: System/ParentChild
+        targetRtId: '5ecdef0000000000000000c2'
+        targetCkTypeId: System.Communication/DataFlow
+      - roleId: System.Communication/Executes
+        targetRtId: '670000000000000000000002'
+        targetCkTypeId: System.Communication/Adapter
+    attributes:
+      - id: System/Name
+        value: reveal-as-service-account-probe
+      - id: System/Description
+        value: RevealSecret@1 on the projected SecretDefault as the service account; must fail as platform-only.
+      - id: System/Enabled
+        value: true
+      - id: System.Communication/DeploymentState
+        value: 0
+      - id: System.Communication/PipelineDefinition
+        value: |
+          triggers:
+            - type: FromExecutePipelineCommand@1
+          transformations:
+            - type: GetRtEntitiesByType@1
+              ckTypeId: System.Communication/SecretDefault
+              targetPath: $.secretDefaults
+              take: 1
+              fieldFilters:
+                - attributePath: rtWellKnownName
+                  operator: Equals
+                  comparisonValue: demo-captcha-secret
+            - type: RevealSecret@1
+              identity: ServiceAccount
+              ckTypeId: System.Communication/SecretDefault
+              rtIdPath: $.secretDefaults.Items[0].RtId
+              attributeName: Value
+              targetPath: $.revealed
+
+  - rtId: '5ecdef0000000000000000c5'
+    ckTypeId: System.Communication/Pipeline
+    rtWellKnownName: SecretDefaultDemoProbePipelineConfig
+    associations:
+      - roleId: System/ParentChild
+        targetRtId: '5ecdef0000000000000000c2'
+        targetCkTypeId: System.Communication/DataFlow
+      - roleId: System.Communication/Executes
+        targetRtId: '670000000000000000000002'
+        targetCkTypeId: System.Communication/Adapter
+    attributes:
+      - id: System/Name
+        value: pipeline-config-probe
+      - id: System/Description
+        value: GetPipelineConfigByCkTypeId@1 on the SecretDefault type; must fail as platform-only.
+      - id: System/Enabled
+        value: true
+      - id: System.Communication/DeploymentState
+        value: 0
+      - id: System.Communication/PipelineDefinition
+        value: |
+          triggers:
+            - type: FromExecutePipelineCommand@1
+          transformations:
+            - type: GetPipelineConfigByCkTypeId@1
+              ckTypeId: System.Communication/SecretDefault
+              targetPath: $.configuration
+
+  - rtId: '5ecdef0000000000000000c6'
+    ckTypeId: System.Communication/Pipeline
+    rtWellKnownName: SecretDefaultDemoProbeVerifyCaptcha
+    associations:
+      - roleId: System/ParentChild
+        targetRtId: '5ecdef0000000000000000c2'
+        targetCkTypeId: System.Communication/DataFlow
+      - roleId: System.Communication/Executes
+        targetRtId: '670000000000000000000002'
+        targetCkTypeId: System.Communication/Adapter
+    attributes:
+      - id: System/Name
+        value: verify-captcha-probe
+      - id: System/Description
+        value: >-
+          VerifyCaptcha@1 with Cloudflare's dummy token, started with ExecutePipeline; the verdict is the
+          execution's result. For an adapter without an ingress.
+      - id: System/Enabled
+        value: true
+      - id: System.Communication/DeploymentState
+        value: 0
+      - id: System.Communication/PipelineDefinition
+        value: |
+          triggers:
+            - type: FromExecutePipelineCommand@1
+          transformations:
+            - type: SetPrimitiveValue@1
+              value: XXXX.DUMMY.TOKEN.XXXX
+              targetPath: $.captchaToken
+              valueType: String
+            - type: VerifyCaptcha@1
+              provider: Turnstile
+              tokenPath: $.captchaToken
+              tenantSecret:
+                ckTypeId: SecretDefaultDemo/CaptchaConfiguration
+                wellKnownName: CaptchaConfiguration
+                attributeName: CaptchaSecret
+              defaultKey: demo-captcha-secret
+              targetPath: $.verdict
+              timeoutSeconds: 10
+              identity: ServiceAccount
+            - type: SetPipelineExecutionResult@1
+              path: $.verdict
