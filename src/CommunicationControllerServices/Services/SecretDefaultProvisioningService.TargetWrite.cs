@@ -109,9 +109,11 @@ internal sealed partial class SecretDefaultProvisioningService
             {
                 case SecretDefaultWriteOutcome.Created:
                     outcome.Created++;
+                    outcome.WrittenKeys.Add(offer.Key);
                     break;
                 case SecretDefaultWriteOutcome.Updated:
                     outcome.Updated++;
+                    outcome.WrittenKeys.Add(offer.Key);
                     break;
                 default:
                     outcome.Kept++;
@@ -180,5 +182,7 @@ internal sealed partial class SecretDefaultProvisioningService
         public int Unchanged { get; set; }
 
         public int Failed { get; set; }
+
+        public HashSet<string> WrittenKeys { get; } = new(StringComparer.Ordinal);
     }
 }

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- AB#7245 Fix: the reconcile endpoint `POST {tenant}/v1/secretDefaults/reconcile` now stores the same Information event
+  (`Secret defaults reconciled: n created, n updated, n removed, n kept.`) in every tenant where it wrote or removed a
+  default, as the tenant load did. The event moved from the tenant-load hook into `ProvisionForTargetAsync`, so both
+  paths use one implementation and a load stores it once; a failing event store no longer turns a successful reconcile
+  into an Error event. The hand-over of a withdrawal stays without target events (the source's `withdrawn` event reports
+  it). The removal pass of a target reconcile skips the keys its write pass wrote in the same run, so a default whose
+  source fields a tenant edited is restored without a futile conditional delete and the misleading "was written again
+  since it was read" log. The controller log line of the endpoint also names the updated and unchanged counts.
+
 - AB#7247 Test: the secret-default sample proves that a tenant admin cannot read a projected default.
   `verify/prove-no-reveal.sh` tries the typed and the generic GraphQL root, `ExportRtByDeepGraph`, `ExportRtByQuery`,
   `RevealSecret@1` as caller and as service account, `GetPipelineConfigByCkTypeId@1` and `VerifyCaptcha@1` through

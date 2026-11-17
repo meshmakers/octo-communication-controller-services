@@ -5731,8 +5731,8 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
      (`ReconcilePendingWorkloadsAsync`) calls it too. Tests: `DeployWorkloadSecretDefaultsTests`.
   3. **Tenant load** - `DefaultConfigurationCreatorService.EnsureSecretDefaultsAsync` runs `ProvisionForTargetAsync(tenantId)`
      next to the lent-pool mirrors (service start, Enable, `PosUpdateTenant`), so a tenant created or loaded after the deploy
-     receives its defaults without a redeploy. It never fails the load; an Information event only when something was
-     created, updated or removed.
+     receives its defaults without a redeploy. It never fails the load. The Information event of the reconcile (below,
+     "Target events") is stored by the service, not by the hook, so a load stores it once.
   4. **Undeploy** - `DeploymentSiteService.UndeployWorkloadAsync` calls `WithdrawForSourceAsync(tenantId, applicationRtId)`
      after the resting state is set: the source-side sweep of a redeploy without entries, over its own tenant and subtree.
      In every tenant that holds a withdrawn default the target reconcile runs first, so another deployed source takes the
@@ -5742,8 +5742,16 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
      `TenantCommunicationApiReadWritePolicy` like `adapterPool/mirrors/refresh`) runs the target reconcile for the route
      tenant and every tenant of its subtree and answers with one `SecretDefaultTargetResult` per tenant: status
      (`Reconciled`, `TenantUnavailable`, `ModelMissing`, `TreeUnreadable`, `Failed` when the tenant's reconcile threw)
-     and counts (created, updated, unchanged, removed, kept, unreadable sources, failed), never a value. Use it after
-     deleting an Application, which reaches no hook.
+     and counts (created, updated, unchanged, removed, kept, unreadable sources, failed), never a value. Every tenant
+     where it wrote or removed a default gets the same Information event as on tenant load; the controller log line sums
+     created, updated, unchanged, removed and failed. Use it after deleting an Application, which reaches no hook.
+- **Target events.** `ProvisionForTargetAsync`, the per-tenant reconcile behind the tenant load and the reconcile
+  endpoint, stores one Information event `Secret defaults reconciled: <n> created, <n> updated, <n> removed, <n> kept.`
+  in the reconciled tenant when it wrote or removed a default: counts only, no value, no key, no link (a tenant's
+  reconcile can concern several Applications), never `StatusMessage`. A failing event store does not fail the reconcile.
+  The hand-over of a withdrawal or redeploy sweep runs the same reconcile without this event: that change is reported by
+  the source's own Information event on the Application (`withdrawn: n removed, n failed`), so an undeploy stores one
+  event, not one per tenant. Tests: `SecretDefaultTargetEventTests`.
 - **Target set.** The Application's own tenant plus its whole subtree, read through
   `ITenantLendingScopeResolver.ResolveLendableTenantsAsync(source, LendingScope.Descendants)` (the descendant walk with
   the ancestor guard). Never siblings. A non-empty `AllowedTenantIds` intersects that set; a listed tenant outside it is
@@ -5828,7 +5836,7 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   it only while RtId, well-known name, `SourceTenantId`, `SourceWorkloadRtId`, `LastProjectedAt` and `RtVersion` (raised
   by every write, so a rotation within the same tick is seen too) match what was read;
   a default a concurrent deploy wrote meanwhile is kept (`Changed`, a write conflict counts as `Changed`), a gone one is
-  `NotFound`, and one the tenant archived since the read is erased and also `NotFound`; neither is a failure. The target reconcile and the source sweep both use it. An entry that is present but invalid (no value, duplicated key, ...) is never written, and its `AllowedTenantIds` still apply, with no exception for invalid entries: a tenant it allows keeps the default it holds, a tenant it excludes loses it. Of duplicates of one key a tenant keeps the default only while every duplicate allows it, so a tenant any of them excludes loses it (revocation wins when they disagree; `SecretDefaultInvalidEntryRevocationTests`). On deploy the
+  `NotFound`, and one the tenant archived since the read is erased and also `NotFound`; neither is a failure. The target reconcile and the source sweep both use it. The removal pass of a target reconcile skips every key its own write pass wrote (created or updated): that write already replaced or erased each entity of the key, so a default whose source fields a tenant edited is restored and not also tried for removal. An entry that is present but invalid (no value, duplicated key, ...) is never written, and its `AllowedTenantIds` still apply, with no exception for invalid entries: a tenant it allows keeps the default it holds, a tenant it excludes loses it. Of duplicates of one key a tenant keeps the default only while every duplicate allows it, so a tenant any of them excludes loses it (revocation wins when they disagree; `SecretDefaultInvalidEntryRevocationTests`). On deploy the
   source side sweeps its own tenant and subtree for defaults of this Application that it no longer provides; in every
   tenant that holds one it runs the target reconcile, which writes another source's winner first and removes the withdrawn
   default after, so the key has no gap; a failed replacement does not keep the withdrawn default (revocation wins). Only when that reconcile does not
