@@ -7,7 +7,8 @@
   keeps the `appsettings.json` filters (`Default` = `Information`) in front of NLog, so `OCTO_LOG_LEVEL` /
   `OCTO_LOG_LEVEL_ROOT` alone showed no Debug or Trace line (found on kind). The Communication Operator is not affected:
   its NLog provider drops those filters. The restore no longer relies on the next release deploy, which keeps variables
-  the chart does not render.
+  the chart does not render. On kind the sweep waits for the rollout after `set env`, and a value the deployment set
+  before the sweep is noted and restored instead of removed.
 
 - AB#7245 Fix: the reconcile endpoint `POST {tenant}/v1/secretDefaults/reconcile` now stores the same Information event
   (`Secret defaults reconciled: n created, n updated, n removed, n kept.`) in every tenant where it wrote or removed a

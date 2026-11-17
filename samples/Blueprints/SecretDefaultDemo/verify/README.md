@@ -253,7 +253,8 @@ To show that no log line carries the sentinel, raise the levels before step 4 (p
 - **Communication Operator** reads its level at start from `OCTO_LOG_LEVEL` (our code) and `OCTO_LOG_LEVEL_ROOT`
   (frameworks), default `Info`; its NLog provider drops the `Logging:LogLevel` filters of `appsettings.json`, so these
   two variables decide alone. Local stack: set both to `Trace` in the service's environment and restart it. kind:
-  `kubectl -n <namespace> set env deployment/<name> OCTO_LOG_LEVEL=Trace OCTO_LOG_LEVEL_ROOT=Trace`, restore with
+  `kubectl -n <namespace> set env deployment/<name> OCTO_LOG_LEVEL=Trace OCTO_LOG_LEVEL_ROOT=Trace`, then
+  `kubectl -n <namespace> rollout status deployment/<name>`; restore with
   `kubectl -n <namespace> set env deployment/<name> OCTO_LOG_LEVEL- OCTO_LOG_LEVEL_ROOT-`.
 - **Mesh Adapter** needs two more variables. Its host keeps the `Logging:LogLevel` filters of `appsettings.json`
   (`Default` = `Information`) in front of NLog, so `OCTO_LOG_LEVEL` and `OCTO_LOG_LEVEL_ROOT` alone still produce no
@@ -267,6 +268,7 @@ To show that no log line carries the sentinel, raise the levels before step 4 (p
   kubectl -n <namespace> set env deployment/<name> \
     OCTO_LOG_LEVEL=Trace OCTO_LOG_LEVEL_ROOT=Trace Logging__LogLevel__Default=Trace \
     Logging__LogLevel__Microsoft.AspNetCore=Trace
+  kubectl -n <namespace> rollout status deployment/<name>
   ```
 
   Restore all four (the configured defaults apply again):
@@ -277,6 +279,11 @@ To show that no log line carries the sentinel, raise the levels before step 4 (p
     Logging__LogLevel__Microsoft.AspNetCore-
   ```
 
+- On kind, wait for the rollout before step 4: `set env` returns before the new pods run, and an old pod would still
+  log at the old level. The restore commands remove the variables. When the deployment already set one of them,
+  note its value before the sweep
+  (`kubectl -n <namespace> set env deployment/<name> --list | grep -E '^(OCTO_LOG_LEVEL|OCTO_LOG_LEVEL_ROOT|Logging__LogLevel__)'`)
+  and restore that value instead of removing it (`kubectl -n <namespace> set env deployment/<name> <NAME>=<noted value>`).
 - On kind, do not count on the next deploy of the release to remove these variables: Helm 3 keeps environment variables
   its chart does not render. Always run the restore commands above.
 - **Search** the logs for the sentinel with `grep -cF` and report only the count; never print a matching line.
