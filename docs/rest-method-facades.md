@@ -48,6 +48,18 @@ narrowed: a caller with the scope but without `CommunicationManagement` keeps th
 path, measured by `Reason=role-missing`. A follow-up story makes the endpoints require the role once that count is zero.
 The communication types have no data permissions of their own, so neither path checks one.
 
+## The caller inside the handler
+
+A handler runs without an HTTP request (detached on the in-process path, none on the bus). Two services judge "the caller
+of the request" through the ambient HTTP request: the elevation gate of a pipeline deploy (AB#5128: a pipeline with a node
+under `Identity=ServiceAccount` or `System` needs `UserManagement`) and the identity-client lookups (AB#5027, they forward
+the caller's bearer). Without a caller both take their system path (elevation allowed, lookup skipped), which would widen a
+right for every REST call routed through the method. So every handler opens `CommunicationMethodCaller` first, from the
+validated caller of the call (subject, roles) and its forwarded token, and the services read it when there is no HTTP
+request. The facades forward the request's bearer with every method call. Background paths open no scope and stay system
+paths. This also closes the same gap for GraphQL callers of the methods (since AB#8596): an elevated deploy without
+`UserManagement` is refused there too.
+
 ## Parity table
 
 | REST endpoint | Method | Differences (the method wins unless the REST contract changes) |
@@ -71,7 +83,8 @@ The communication types have no data permissions of their own, so neither path c
 On both paths a token whose `tenant_id` does not name the route tenant (or has none) is answered `403` with
 `METHOD_FORBIDDEN` / `tenant-not-allowed` and nothing is called. Platform errors map to the documented status codes of
 `CkMethodFacadeResults` (403, 404, 400, 504 for the method timeout, 503 when no handler serves it, 500 otherwise) with an
-`ErrorResponse` body that names the code, never a parameter value.
+`ErrorResponse` body that names the code, never a parameter value. A call beyond the method's deadline answers `504`
+(`METHOD_TIMEOUT`); REST had no deadline before.
 
 ## Error parameter `reason` (additive)
 

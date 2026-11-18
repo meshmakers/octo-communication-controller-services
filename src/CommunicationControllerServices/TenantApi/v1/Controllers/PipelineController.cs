@@ -107,8 +107,17 @@ public class PipelineController : ControllerBase
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
 
-        using var reader = new StreamReader(Request.Body, Encoding.UTF8);
-        var pipelineDefinition = await reader.ReadToEndAsync();
+        string pipelineDefinition;
+        try
+        {
+            using var reader = new StreamReader(Request.Body, Encoding.UTF8);
+            pipelineDefinition = await reader.ReadToEndAsync();
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Error during deployment of pipeline");
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
+        }
 
         // AB#9049: facade of Pipeline.Deploy-1 (target = the pipeline, adapter and definition as parameters). Ids that are no
         // RtEntityId keep the direct path (it answered 400). The definition is sensitive: the method never logs or echoes it.
@@ -126,10 +135,12 @@ public class PipelineController : ControllerBase
                         PipelineDefinition = string.IsNullOrEmpty(pipelineDefinition) ? null : pipelineDefinition
                     }
                     : null
-            }, User, null,
+            }, User, BearerOf(HttpContext),
             response => response.Success
                 ? NoContent()
-                : response.Error?.Code == CkMethodErrorCodes.MethodValidationFailed
+                : response.Error is { Code: CkMethodErrorCodes.MethodValidationFailed } invalid &&
+                  invalid.Parameters.GetValueOrDefault(CkMethodErrorParameters.Field) == "adapterRtId" &&
+                  invalid.Parameters.GetValueOrDefault(CkMethodErrorParameters.Reason) == "not-found"
                     // the adapter of the query names no adapter of the tenant: REST answered 404 (AdapterServiceException)
                     ? Error(StatusCodes.Status404NotFound, $"Adapter '{adapterRtEntityId}' was not found in tenant '{tenantId}'.")
                     : Failure(response, error => ByReason(error, "The pipeline could not be deployed."),
@@ -182,8 +193,17 @@ public class PipelineController : ControllerBase
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
 
-        using var reader = new StreamReader(Request.Body, Encoding.UTF8);
-        var pipelineInput = await reader.ReadToEndAsync();
+        string pipelineInput;
+        try
+        {
+            using var reader = new StreamReader(Request.Body, Encoding.UTF8);
+            pipelineInput = await reader.ReadToEndAsync();
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Error during execution of pipeline");
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
+        }
         var callerAccessToken = ExtractBearerToken();
 
         // AB#9049: facade of Pipeline.Execute-1. The method starts the execution and answers its id at once; the facade runs it
@@ -321,7 +341,7 @@ public class PipelineController : ControllerBase
                         ? new PipelineMoveToAdapterParameters
                             { TargetAdapterRtId = body.TargetAdapterRtId, Redeploy = body.Redeploy }
                         : null
-                }, User, null,
+                }, User, BearerOf(HttpContext),
                 response => MoveItemOf(pipelineRtIdStr, response),
                 async () => (await MoveOneDirectAsync(tenantId, pipelineRtIdStr, targetAdapterRtId, body.Redeploy), null),
                 answer => answer.Refusal != null ? "REST_403" : answer.Item is { Success: false } ? "REST_ITEM_FAILED" : null);
@@ -448,7 +468,7 @@ public class PipelineController : ControllerBase
             {
                 TargetRtId = pipelineRtId.ToString(),
                 Parameters = new PipelineSetDebuggingParameters { Enabled = body.Enabled }
-            }, User, null,
+            }, User, BearerOf(HttpContext),
             response => ValueOf<RtPipelineDebugResultRecord>(response) is { } debug
                 ? Ok(new SetPipelineDebugResultDto(debug.Enabled, debug.AppliedToRunningAdapter))
                 : Failure(response, error => ByReason(error, "The debug state could not be changed."),

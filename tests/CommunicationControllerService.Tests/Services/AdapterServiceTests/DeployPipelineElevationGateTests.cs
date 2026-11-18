@@ -1,5 +1,7 @@
 using Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
+using Meshmakers.Octo.Services.Methods.Authorization;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
@@ -209,5 +211,64 @@ internal class DeployPipelineElevationGateTests : AdapterServiceTestsBase
 
         await AdapterHubCallbacks.Received(1)
             .AdapterConfigurationUpdatedAsync(TenantId, Arg.Any<AdapterConfigurationDto>());
+    }
+
+    // ---- AB#9048 (Kassandra round 1): a deploy inside a System.Communication method handler has no HttpContext. The gate
+    // judges the method's caller (CommunicationMethodCaller), never "no caller" = the system path.
+
+    [Test]
+    public async Task DeployPipelineAsync_ElevatedNode_MethodCallerWithoutUserManagement_IsRejected()
+    {
+        var (adapter, _, pipeline) = ArrangeDeployablePipeline(ElevatedConfusedDeputyDefinition);
+        using var caller = CommunicationMethodCaller.Begin(
+            new CkMethodPrincipal("method-user", ["CommunicationManagement"], ["octo_api"]), "token");
+
+        var ex = await Assert.ThrowsAsync<Exception>(async () =>
+            await AdapterService.DeployPipelineAsync(TenantId, adapter.ToRtEntityId(), pipeline.ToRtEntityId()));
+
+        await Assert.That(ex!).IsTypeOf<AdapterServiceException>();
+        await Assert.That(ex!.Message).Contains("UserManagement");
+        await AdapterHubCallbacks.DidNotReceiveWithAnyArgs()
+            .AdapterConfigurationUpdatedAsync(Arg.Any<string>(), Arg.Any<AdapterConfigurationDto>());
+    }
+
+    [Test]
+    public async Task DeployPipelineAsync_ElevatedNode_MethodCallerWithUserManagement_Deploys()
+    {
+        var (adapter, _, pipeline) = ArrangeDeployablePipeline(ElevatedConstantTargetDefinition);
+        using var caller = CommunicationMethodCaller.Begin(
+            new CkMethodPrincipal("method-user", ["CommunicationManagement", "UserManagement"], ["octo_api"]), "token");
+
+        await AdapterService.DeployPipelineAsync(TenantId, adapter.ToRtEntityId(), pipeline.ToRtEntityId());
+
+        await AdapterHubCallbacks.Received(1)
+            .AdapterConfigurationUpdatedAsync(TenantId, Arg.Any<AdapterConfigurationDto>());
+    }
+
+    [Test]
+    public async Task DeployDataFlowAsync_ElevatedPipeline_MethodCallerWithoutUserManagement_IsRejected()
+    {
+        var (_, dataFlow, _) = ArrangeDeployablePipeline(ElevatedConfusedDeputyDefinition);
+        using var caller = CommunicationMethodCaller.Begin(
+            new CkMethodPrincipal("method-user", ["CommunicationManagement"], ["octo_api"]), null);
+
+        var ex = await Assert.ThrowsAsync<Exception>(async () =>
+            await AdapterService.DeployDataFlowAsync(TenantId, dataFlow.RtId));
+
+        await Assert.That(ex!).IsTypeOf<AdapterServiceException>();
+        await AdapterHubCallbacks.DidNotReceiveWithAnyArgs()
+            .AdapterConfigurationUpdatedAsync(Arg.Any<string>(), Arg.Any<AdapterConfigurationDto>());
+    }
+
+    [Test]
+    public async Task DeployPipelineAsync_ElevatedNode_MethodCallerWithoutPrincipal_IsRejected_NotTheSystemPath()
+    {
+        var (adapter, _, pipeline) = ArrangeDeployablePipeline(ElevatedConfusedDeputyDefinition);
+        using var caller = CommunicationMethodCaller.Begin(null, null);
+
+        var ex = await Assert.ThrowsAsync<Exception>(async () =>
+            await AdapterService.DeployPipelineAsync(TenantId, adapter.ToRtEntityId(), pipeline.ToRtEntityId()));
+
+        await Assert.That(ex!).IsTypeOf<AdapterServiceException>();
     }
 }

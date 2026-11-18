@@ -324,6 +324,12 @@ the parity table: `docs/rest-method-facades.md`.
   the methods declare `CommunicationManagement`. A caller with the scope but without the role keeps REST on the direct path
   (`Reason=role-missing`, measure it before requiring the role - follow-up story). Do not "fix" this by routing every caller
   through the method: that narrows REST for callers such as CD clients.
+- 🔴 **Caller inside a handler** (Kassandra round 1 of AB#9048). A handler has no `HttpContext`; services that judge "the
+  caller" through `IHttpContextAccessor` (the elevation gate `AdapterService.EnsurePipelineElevationAuthorizedAsync`, AB#5128,
+  and `IdentityClientReader`, AB#5027) would take their system path. Every handler opens `CommunicationMethodCaller.Begin(context)`
+  first and those services fall back to `CommunicationMethodCaller.Current`. A new handler must open it too; a new service
+  that reads `HttpContext.User` or the bearer must fall back to it. Tests: `DeployPipelineElevationGateTests` (method caller),
+  `CommunicationRestFacadeTests.ADeployInsideTheHandler_SeesTheCaller_NotTheSystemPath`.
 - **Registration.** `AddCommunicationCkMethodHost` registers the facade, `AddCkMethodAudit`, the evaluator and the CK-cache
   definition source always (switch off: direct path only) and `AddCkMethodDispatcher` when hosted;
   `AddCommunicationMethodDiscovery` adds the registry feed. A test that builds the host needs an `IDistributionEventHubService`

@@ -83,7 +83,9 @@ public sealed class CommunicationRestFacadeTests(CommunicationControllerFixture 
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Methods:ValidationTenantIds:0"] = TenantId,
-            ["Methods:Token:Authority"] = "https://identity.test/"
+            ["Methods:Token:Authority"] = "https://identity.test/",
+            // bounds every call of this class to 4 s, so a push beyond the deadline is testable (the model declares 90 s)
+            ["Methods:Dispatcher:MaxTimeout"] = "00:00:04"
         }).Build();
         var environment = Substitute.For<IHostEnvironment>();
         environment.EnvironmentName.Returns(Environments.Production);
@@ -314,6 +316,52 @@ public sealed class CommunicationRestFacadeTests(CommunicationControllerFixture 
         timeouts.GetTimeout(TenantId, CommunicationRestFacade.DeployableWorkloadCkTypeId,
                 SystemCommunicationCkIds.DeployableWorkloadWakeMethodId)
             .Should().Be(TimeSpan.FromSeconds(90));
+    }
+
+    [Fact]
+    public async Task DeployUpdate_APushBeyondTheMethodDeadline_Answers504()
+    {
+        var adapter = ArrangeAdapter();
+        _adapterService.DeployAdapterConfigurationAsync(TenantId, adapter.ToRtEntityId())
+            .Returns(async _ => await Task.Delay(TimeSpan.FromSeconds(10)));
+
+        var result = await Adapter(Caller([CommunicationManagement])).DeployUpdate(adapter.ToRtEntityId().ToString());
+
+        StatusOf(result).Should().Be(StatusCodes.Status504GatewayTimeout);
+        ((ErrorResponse)((ObjectResult)result).Value!).ErrorMessage.Should().Contain(CkMethodErrorCodes.MethodTimeout);
+        _audit.Records.Should().ContainSingle().Which.Outcome.Should().Be(CkMethodErrorCodes.MethodTimeout);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ADeployInsideTheHandler_SeesTheCaller_NotTheSystemPath(bool userManagement)
+    {
+        // AB#9048 Kassandra round 1: the elevation gate (AB#5128) and the identity-client lookup (AB#5027) of AdapterService
+        // judge "the caller"; inside a handler there is no HttpContext, so the handler hands them the method's caller.
+        CommunicationMethodCaller? seen = null;
+        var pipeline = ArrangePipeline();
+        var adapter = ArrangeAdapter();
+        _adapterService.DeployPipelineAsync(TenantId, adapter.ToRtEntityId(), Arg.Any<RtEntityId>(), Arg.Any<string?>())
+            .Returns(_ =>
+            {
+                seen = CommunicationMethodCaller.Current;
+                return Task.CompletedTask;
+            });
+        string[] roles = userManagement ? [CommunicationManagement, "UserManagement"] : [CommunicationManagement];
+        var controller = Controller(new PipelineController(NullLogger<PipelineController>.Instance, _trigger,
+            _adapterService, _repository, _events), Caller(roles), "pipelines: []", "the-bearer");
+
+        var result = await controller.DeployPipeline(adapter.ToRtEntityId().ToString(),
+            new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipeline).ToString());
+
+        result.Should().BeOfType<NoContentResult>();
+        _audit.Records.Should().ContainSingle().Which.Transport.Should().Be("in-process");
+        seen.Should().NotBeNull("the deploy ran inside the method handler, which opened the caller scope");
+        seen!.User.HasRole("UserManagement").Should().Be(userManagement);
+        seen.User.FindFirst("sub")!.Value.Should().Be(Subject);
+        seen.AccessToken.Should().Be("the-bearer", "the identity-client lookup forwards the caller's token");
+        CommunicationMethodCaller.Current.Should().BeNull("the scope ends with the handler");
     }
 
     [Theory]

@@ -107,7 +107,7 @@ public class AdapterPoolController : ControllerBase
         // AB#9048: facade of the static AdapterPool.RefreshMirrors-1 (the route tenant is the borrower).
         return await HttpContext.CommunicationFacade().ServeAsync<IActionResult>(tenantId,
             new CommunicationMethodCall(AdapterPoolCkTypeId, SystemCommunicationCkIds.AdapterPoolRefreshMirrorsMethodId,
-                nameof(RefreshMirrorsAsync)) { Parameters = new AdapterPoolRefreshMirrorsParameters() }, User, null,
+                nameof(RefreshMirrorsAsync)) { Parameters = new AdapterPoolRefreshMirrorsParameters() }, User, BearerOf(HttpContext),
             response => ValueOf<RtAdapterPoolMirrorSyncResultRecord>(response) is { } result
                 ? Ok(new AdapterPoolMirrorSyncResult((int)result.TenantsReconciled, (int)result.MirrorsCreatedOrUpdated,
                     (int)result.MirrorsRemoved, (int)result.LendersUnreadable, (int)result.AdaptersRelinked))
@@ -149,7 +149,7 @@ public class AdapterPoolController : ControllerBase
         // AB#9048: facade of the static AdapterPool.PublishMirrors-1 (the route tenant is the lender).
         return await HttpContext.CommunicationFacade().ServeAsync<IActionResult>(tenantId,
             new CommunicationMethodCall(AdapterPoolCkTypeId, SystemCommunicationCkIds.AdapterPoolPublishMirrorsMethodId,
-                nameof(PublishMirrorsAsync)) { Parameters = new AdapterPoolPublishMirrorsParameters() }, User, null,
+                nameof(PublishMirrorsAsync)) { Parameters = new AdapterPoolPublishMirrorsParameters() }, User, BearerOf(HttpContext),
             response => ValueOf<RtAdapterPoolMirrorSyncResultRecord>(response) is { } result
                 ? Ok(new AdapterPoolMirrorSyncResult((int)result.TenantsReconciled, (int)result.MirrorsCreatedOrUpdated,
                     (int)result.MirrorsRemoved, (int)result.LendersUnreadable, (int)result.AdaptersRelinked))
@@ -376,7 +376,7 @@ public class AdapterPoolController : ControllerBase
                         TtlSeconds = body.TtlSeconds
                     }
                     : null
-            }, User, null,
+            }, User, BearerOf(HttpContext),
             response => ValueOf<RtAdapterPoolLeaseResultRecord>(response) is { } result
                 ? Ok(new AdapterPoolLeaseResultDto
                 {
@@ -515,7 +515,7 @@ public class AdapterPoolController : ControllerBase
             {
                 TargetRtId = adapterPoolRtId.ToString(),
                 Parameters = new AdapterPoolCancelQueuedExecutionParameters { ExecutionId = executionId }
-            }, User, null,
+            }, User, BearerOf(HttpContext),
             response => response.Success
                 ? NoContent()
                 : Failure(response, error => error.Code == CommunicationMethodErrors.ExecutionAlreadyLeased

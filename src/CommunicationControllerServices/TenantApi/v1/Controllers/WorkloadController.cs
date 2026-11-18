@@ -107,7 +107,7 @@ public class WorkloadController : ControllerBase
             {
                 TargetRtId = workloadRtId.ToString(),
                 Parameters = new DeployableWorkloadSetChartVersionParameters { ChartVersion = body.ChartVersion }
-            }, User, null,
+            }, User, BearerOf(HttpContext),
             response => response.Success
                 ? NoContent()
                 : response.Error?.Code == Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods.CkMethodErrorCodes

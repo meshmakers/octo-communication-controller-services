@@ -66,7 +66,7 @@ public class DataFlowController : ControllerBase
             {
                 TargetRtId = dataFlowRtId.ToString(),
                 Parameters = new DataFlowDeployParameters()
-            }, User, null,
+            }, User, BearerOf(HttpContext),
             response => response.Success
                 ? NoContent()
                 : Failure(response, error => ByReason(error, "The data flow could not be deployed."),
@@ -119,7 +119,7 @@ public class DataFlowController : ControllerBase
             {
                 TargetRtId = dataFlowRtId.ToString(),
                 Parameters = new DataFlowUndeployParameters()
-            }, User, null,
+            }, User, BearerOf(HttpContext),
             response => response.Success
                 ? NoContent()
                 : Failure(response, error => ByReason(error, "The data flow could not be undeployed."),

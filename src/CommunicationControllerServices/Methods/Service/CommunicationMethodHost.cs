@@ -35,7 +35,8 @@ internal sealed record CommunicationMethodHandlerRegistration(
 ///         The handlers are registered with the typed handler SDK of octo-common-services (<c>AddCkMethodHandlers</c>): one
 ///         shared queue per method, announcement and heartbeat, caller token validation, the declared authorization (roles,
 ///         scope <c>octo_api</c>, tenant of the token) and redaction are the host's. A handler only does the operation, with the
-///         same services as the REST endpoint it mirrors, so the effect is the same. Since AB#9048 the REST endpoints are facades of these methods (<see cref="ICommunicationMethodFacade" />).
+///         same services as the REST endpoint it mirrors and opens the caller scope (<see cref="CommunicationMethodCaller" />), so the
+///         services judge the same caller and the effect is the same. Since AB#9048 the REST endpoints are facades of these methods (<see cref="ICommunicationMethodFacade" />).
 ///     </para>
 ///     <para>
 ///         Independent of the pipeline method handler (<see cref="PipelineMethodHost" />, <c>handler: pipeline</c>): that host

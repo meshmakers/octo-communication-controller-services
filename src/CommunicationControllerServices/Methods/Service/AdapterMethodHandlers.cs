@@ -29,6 +29,8 @@ internal sealed class AdapterDeployUpdateHandler(
     public async Task<CkMethodOutcome> HandleAsync(CkMethodContext<AdapterDeployUpdateParameters> context,
         CancellationToken cancellationToken)
     {
+        // AB#9048: the services below judge this caller, not "no caller" (CommunicationMethodCaller)
+        using var methodCaller = CommunicationMethodCaller.Begin(context);
         if (!TryGetTarget(context, out var adapterRtId) ||
             await FindAdapterAsync(repository, context.TenantId, adapterRtId).ConfigureAwait(false) is not { } adapter)
         {
@@ -64,6 +66,8 @@ internal sealed class DeployableWorkloadWakeHandler(
     public async Task<CkMethodOutcome> HandleAsync(CkMethodContext<DeployableWorkloadWakeParameters> context,
         CancellationToken cancellationToken)
     {
+        // AB#9048: the services below judge this caller, not "no caller" (CommunicationMethodCaller)
+        using var methodCaller = CommunicationMethodCaller.Begin(context);
         if (!TryGetTarget(context, out var workloadRtId))
         {
             return CkMethodOutcome.TargetNotFound();
@@ -106,6 +110,8 @@ internal sealed class AdapterReconcileServiceAccountHandler(
     public async Task<CkMethodOutcome<AdapterReconcileServiceAccountResult>> HandleAsync(
         CkMethodContext<AdapterReconcileServiceAccountParameters> context, CancellationToken cancellationToken)
     {
+        // AB#9048: the services below judge this caller, not "no caller" (CommunicationMethodCaller)
+        using var methodCaller = CommunicationMethodCaller.Begin(context);
         if (!TryGetTarget(context, out var adapterRtId) ||
             await FindAdapterAsync(repository, context.TenantId, adapterRtId).ConfigureAwait(false) is not { } adapter)
         {
@@ -172,6 +178,8 @@ internal sealed class AdapterRotateServiceAccountSecretHandler(
     public async Task<CkMethodOutcome<AdapterRotateServiceAccountSecretResult>> HandleAsync(
         CkMethodContext<AdapterRotateServiceAccountSecretParameters> context, CancellationToken cancellationToken)
     {
+        // AB#9048: the services below judge this caller, not "no caller" (CommunicationMethodCaller)
+        using var methodCaller = CommunicationMethodCaller.Begin(context);
         if (!TryGetTarget(context, out var adapterRtId) ||
             await FindAdapterAsync(repository, context.TenantId, adapterRtId).ConfigureAwait(false) is not { } adapter)
         {

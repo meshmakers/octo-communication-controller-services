@@ -33,6 +33,17 @@ internal static class CommunicationRestFacade
     /// <summary>The declaring type of the DataFlow methods.</summary>
     public const string DataFlowCkTypeId = "System.Communication/DataFlow";
 
+    /// <summary>
+    ///     The bearer token of the request (without the scheme), forwarded with the method call so the handler's services can
+    ///     act for the caller as on the REST path (identity lookups, delegation). Sensitive: never logged.
+    /// </summary>
+    public static string? BearerOf(HttpContext httpContext)
+    {
+        var header = httpContext.Request.Headers.Authorization.ToString();
+        const string prefix = "Bearer ";
+        return header.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? header[prefix.Length..].Trim() : null;
+    }
+
     /// <summary>The facade of the request (registered by <c>AddCommunicationCkMethodHost</c>; a missing one fails the call).</summary>
     public static ICommunicationMethodFacade CommunicationFacade(this HttpContext httpContext) =>
         httpContext.RequestServices.GetRequiredService<ICommunicationMethodFacade>();

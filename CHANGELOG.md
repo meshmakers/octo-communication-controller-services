@@ -15,6 +15,11 @@
   name); a started operation no longer depends on the HTTP request (a client that disconnects does not stop it); the
   method timeout bounds the call (504). The deploy, debug and data-flow method errors carry the additive parameter
   `reason` (`adapter-rejected`, `adapter-service`, `unexpected`). Parity table: `docs/rest-method-facades.md`.
+  Every System.Communication method handler now hands its validated caller and forwarded token to the services it calls
+  (`CommunicationMethodCaller`): the elevation gate of a pipeline deploy (AB#5128) and the identity-client lookups (AB#5027)
+  judge that caller instead of taking the system path. This keeps the REST rule on the method path and also fixes the method
+  calls through GraphQL (since AB#8596): an elevated deploy, data-flow deploy, debug toggle or move with redeploy without
+  `UserManagement` is refused there as over REST.
 
 - AB#7247 Docs: step 9 of the secret-default verify README (Trace sweep) also sets `Logging__LogLevel__Default=Trace`
   and `Logging__LogLevel__Microsoft.AspNetCore=Trace` for the Mesh Adapter and removes them on restore. The adapter host

@@ -34,10 +34,27 @@ internal class IdentityClientReader(
         PropertyNameCaseInsensitive = true
     };
 
+    /// <summary>
+    ///     The bearer of the ambient HTTP request, else the forwarded token of the System.Communication method this lookup runs
+    ///     in (AB#9048: a handler has no HttpContext); <c>null</c> on background paths. Never logged.
+    /// </summary>
+    private string? CallerBearer()
+    {
+        var header = httpContextAccessor.HttpContext?.Request.Headers.Authorization.ToString();
+        if (!string.IsNullOrWhiteSpace(header))
+        {
+            return header;
+        }
+
+        return Methods.Service.CommunicationMethodCaller.Current?.AccessToken is { Length: > 0 } token
+            ? $"Bearer {token}"
+            : null;
+    }
+
     /// <inheritdoc />
     public async Task<IdentityClientLookup> GetClientAsync(string tenantId, string clientId, bool includeRoles)
     {
-        var bearer = httpContextAccessor.HttpContext?.Request.Headers.Authorization.ToString();
+        var bearer = CallerBearer();
         if (string.IsNullOrWhiteSpace(bearer))
         {
             // Background paths (no ambient HTTP request) and anonymous transports end here. By
@@ -100,7 +117,7 @@ internal class IdentityClientReader(
     /// <inheritdoc />
     public async Task<IdentityClientActorsLookup> GetActorClientIdsAsync(string tenantId, string clientId)
     {
-        var bearer = httpContextAccessor.HttpContext?.Request.Headers.Authorization.ToString();
+        var bearer = CallerBearer();
         if (string.IsNullOrWhiteSpace(bearer))
         {
             return IdentityClientActorsLookup.Unavailable(

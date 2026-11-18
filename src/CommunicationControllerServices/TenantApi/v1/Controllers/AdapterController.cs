@@ -262,7 +262,7 @@ public class AdapterController : ControllerBase
             {
                 TargetRtId = adapterRtId,
                 Parameters = adapterRtId == null ? null : new AdapterDeployUpdateParameters()
-            }, User, null,
+            }, User, BearerOf(HttpContext),
             response => response.Success
                 ? NoContent()
                 : Failure(response, error => Error(StatusCodes.Status400BadRequest,
@@ -341,7 +341,7 @@ public class AdapterController : ControllerBase
             {
                 TargetRtId = valid ? workloadObjectId.ToString() : null,
                 Parameters = valid ? new DeployableWorkloadWakeParameters() : null
-            }, User, null,
+            }, User, BearerOf(HttpContext),
             response => response.Success
                 ? NoContent()
                 : Failure(response, error => Error(StatusCodes.Status400BadRequest,
@@ -408,7 +408,7 @@ public class AdapterController : ControllerBase
             {
                 TargetRtId = valid ? parsedRtId.ToString() : null,
                 Parameters = valid ? new AdapterReconcileServiceAccountParameters() : null
-            }, User, null,
+            }, User, BearerOf(HttpContext),
             response => ValueOf<RtServiceAccountReconcileResultRecord>(response) is { } result
                 ? Ok(new ReconcileServiceAccountResultDto(result.Outcome ?? string.Empty, result.ClientId ?? string.Empty,
                     result.ConfigurationWellKnownName ?? string.Empty, result.RoleChangesSkipped,
@@ -632,7 +632,7 @@ public class AdapterController : ControllerBase
             {
                 TargetRtId = valid ? parsedRtId.ToString() : null,
                 Parameters = valid ? new AdapterRotateServiceAccountSecretParameters() : null
-            }, User, null,
+            }, User, BearerOf(HttpContext),
             response => ValueOf<RtServiceAccountSecretRotationResultRecord>(response) is { } result
                 ? Ok(new RotateServiceAccountSecretResultDto(result.ClientId ?? string.Empty,
                     result.ConfigurationWellKnownName ?? string.Empty, result.WasCreated,
