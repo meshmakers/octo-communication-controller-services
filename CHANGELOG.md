@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- AB#7247 Docs: step 9 of the secret-default verify README (Trace sweep) also sets `Logging__LogLevel__Default=Trace`
+  and `Logging__LogLevel__Microsoft.AspNetCore=Trace` for the Mesh Adapter and removes them on restore. The adapter host
+  keeps the `appsettings.json` filters (`Default` = `Information`) in front of NLog, so `OCTO_LOG_LEVEL` /
+  `OCTO_LOG_LEVEL_ROOT` alone showed no Debug or Trace line (found on kind). The Communication Operator is not affected:
+  its NLog provider drops those filters. The restore no longer relies on the next release deploy, which keeps variables
+  the chart does not render. On kind the sweep waits for the rollout after `set env`, and a value the deployment set
+  before the sweep is noted (read one variable at a time, so no other variable of the deployment is printed) and
+  restored instead of removed. That check now comes before the first `set env`, counts the names per service (two for
+  the Operator, four for the Mesh Adapter), and stops for a name the deployment takes from a ConfigMap or Secret
+  (`valueFrom`), so the sweep never overwrites or deletes such a reference. Every `set env` of the sweep and the restore
+  targets the service's container with `-c <container>` (a sidecar never gets the variables), the check reads that
+  container only, and the restore waits for `rollout status --timeout=5m` as the raise does.
+
 - AB#7245 Fix: the reconcile endpoint `POST {tenant}/v1/secretDefaults/reconcile` now stores the same Information event
   (`Secret defaults reconciled: n created, n updated, n removed, n kept.`) in every tenant where it wrote or removed a
   default, as the tenant load did. The event moved from the tenant-load hook into `ProvisionForTargetAsync`, so both
