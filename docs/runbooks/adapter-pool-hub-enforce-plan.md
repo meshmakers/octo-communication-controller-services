@@ -103,6 +103,8 @@ tenant and the origin (path, remote address, forwarded chain, user agent).
 | `LogOnly`, late release | `…CommunicationControllerServices.Services.LeaseService` | `A late release of lease '…' arrives on a connection with a token of tenant '…', but the lease belongs to a pool of tenant '…' and would be refused when AdapterPoolHubAuthorization:Mode is Enforce` |
 | `Enforce`, connect | `…Hubs.AdapterPoolHubAuthorizationFilter` | `Refused a pool-member connection to /adapterPoolHub: …` |
 | `Enforce`, registration | `…Hubs.AdapterPoolHub` | `Refusing a pool-member registration on connection '…': …` |
+| `Enforce`, late release without a tenant-bound token | `…Services.LeaseService` | `Refusing a late release of lease '…': the connection presents no tenant-bound token` |
+| `Enforce`, late release with another tenant's token | `…Services.LeaseService` | `A late release of lease '…' arrives on a connection with a token of tenant '…', but the lease belongs to a pool of tenant '…'; refused` |
 | any, a member connected | `…Hubs.AdapterPoolHub` (`Info`) | `Pool member connected with connection id '…'` (absent where the cluster logs at `Warn`) |
 
 The connect lines carry the structured attribute `HubAuthorizationReason` (`unauthenticated`, `missing_scope`,
@@ -132,12 +134,13 @@ GROUP BY logger, reason, body ORDER BY first_seen LIMIT 200
 -- The same lines by kind, with the token tenant and the client of the connect lines
 SELECT multiIf(body LIKE 'Pool-member connection%', 'connection', body LIKE 'Pool-member registration%', 'registration',
                body LIKE 'A late release%', 'late_release', 'other') AS kind,
-       regexpExtract(body, 'token tenant .([^,]+).') AS token_tenant,
-       regexpExtract(body, '(no token presented|client [^ ,]+)') AS client,
+       regexpExtract(body, 'token (?:of )?tenant ''([^'']*)''') AS token_tenant,
+       regexpExtract(body, 'pool of tenant ''([^'']*)''') AS pool_tenant,
+       regexpExtract(body, '(no token presented|client_id ''[^'']*'')') AS client,
        log_attributes['Reason'] AS registration_reason, count() AS lines, min(timestamp), max(timestamp)
 FROM logs
 WHERE body LIKE '%AdapterPoolHubAuthorization:Mode is Enforce%'
-GROUP BY kind, token_tenant, client, registration_reason ORDER BY kind LIMIT 200
+GROUP BY kind, token_tenant, pool_tenant, client, registration_reason ORDER BY kind LIMIT 200
 
 -- Coverage: controller lines per day (D0QL has no toDate; cut the date from the timestamp)
 SELECT substring(toString(timestamp), 1, 10) AS day, count() AS lines
@@ -153,8 +156,16 @@ the pool gauge instead (PromQL):
 max(max_over_time({otel_metric_name="octo.lease.pool.members"}[7d]))
 ```
 
-D0QL rejects `position()`, `CASE`, `toDate` and `toStartOfDay`; use `LIKE`, `multiIf` and `substring`. After the switch, use the same query with `body LIKE 'Refused a pool-member connection%' OR body
-LIKE 'Refusing a pool-member registration%'`, and the counter query with `octo_hub_authorization_outcome="refused"`.
+D0QL rejects `position()`, `CASE`, `toDate` and `toStartOfDay`; use `LIKE`, `multiIf` and `substring`.
+
+The extracted columns only describe the lines; the `WHERE` clause alone decides which lines are counted, so an extract that does not match leaves a column empty and never hides a line. `token_tenant` is `<none>` for a connection
+without a token; `pool_tenant` is set on registration and late-release lines; `client` is `no token presented` or the
+`client_id '…'` of the caller (marked `unverified` when the token was presented and rejected).
+
+After the switch, use the same query with `body LIKE 'Refused a pool-member connection%' OR body LIKE 'Refusing a
+pool-member registration%' OR body LIKE 'Refusing a late release%' OR body LIKE 'A late release of lease%; refused'`, and
+the counter query with `octo_hub_authorization_outcome="refused"`. A refused late release has no counter series and no
+alert rule: the 1-day watch reads it from this log query.
 
 ## Exact value
 
@@ -196,7 +207,8 @@ next CD run undoes it). The CD rolls the controller pods, so every pool member r
      takes a lease: a pipeline execution on a borrowing tenant runs green. On a cluster without pool members write that down instead.
 
    Remove the test client and its credentials afterwards. Write the evidence into a comment on the security work item.
-6. **1-day watch**: the `Enforce` lines and `OctoMeshHubAuthorizationRefused` name no legitimate pool member. A legitimate
+6. **1-day watch**: the `Enforce` lines (the post-switch log query, which also covers refused late releases) and
+   `OctoMeshHubAuthorizationRefused` name no legitimate pool member. A legitimate
    refusal means: fix the member's credentials or roll back (on staging-1, prod-1 and prod-2 a rollback only with Gerald's
    go), and record it. Then the next cluster may start.
 
