@@ -102,6 +102,11 @@ public sealed partial class CommunicationMethodHostTests(CommunicationController
             .AddSingleton(_scheduler).AddSingleton(_trigger);
 
         services.AddCommunicationCkMethodHost(configuration).Should().BeTrue();
+        // AB#9048: the host now also registers the dispatcher of the REST facades and the method audit; this test calls the
+        // handlers through the invoker and the REST actions through the facade's direct path (DirectRestFacade).
+        services.AddSingleton(Substitute.For<Meshmakers.Octo.Common.DistributionEventHub.Services.IDistributionEventHubService>());
+        services.AddSingleton(Substitute.For<Meshmakers.Octo.Runtime.Contracts.AuditTrails.IAuditEventSink>());
+        services.AddSingleton(Substitute.For<IHostApplicationLifetime>());
         services.AddSingleton<IHttpClientFactory>(new FakeIdentity(this));
         // The test has no broker: drop the bus side of the host (queues, announcement, heartbeat).
         foreach (var descriptor in services.Where(d => d.ImplementationType?.Name is "CkMethodHandlerStartupService"
@@ -547,6 +552,8 @@ public sealed partial class CommunicationMethodHostTests(CommunicationController
         context.Request.RouteValues["tenantId"] = TenantId;
         context.User = new ClaimsPrincipal(new ClaimsIdentity(
             (roles ?? [CommunicationManagement]).Select(r => new Claim("role", r)), "Bearer", "name", "role"));
+        // the REST side of the parity: the endpoint's own code (the facade's guarded direct path, AB#9048)
+        DirectRestFacade.Attach(context, TenantId);
         return context;
     }
 

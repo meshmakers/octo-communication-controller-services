@@ -6,7 +6,10 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Microsoft.AspNetCore.Authorization;
+using static Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service.CommunicationRestFacade;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
@@ -57,24 +60,38 @@ public class DataFlowController : ControllerBase
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
 
-        try
-        {
-            await _adapterService.DeployDataFlowAsync(tenantId, dataFlowRtId);
-            return NoContent();
-        }
-        catch (AdapterHubCallbackException e)
-        {
-            return UnprocessableEntity(new ErrorResponse { ErrorMessage = e.Message});
-        }
-        catch (AdapterServiceException e)
-        {
-            return NotFound(new ErrorResponse { ErrorMessage = e.Message});
-        }
-        catch (Exception e)
-        {
-            _logger.LogError(e, "Failed to deploy data flow '{DataFlowRtId}'", dataFlowRtId);
-            return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
-        }
+        // AB#9049: facade of DataFlow.Deploy-1; 422 / 404 / 400 as before (the reason parameter of the failure).
+        return await HttpContext.CommunicationFacade().ServeAsync<IActionResult>(tenantId,
+            new CommunicationMethodCall(DataFlowCkTypeId, SystemCommunicationCkIds.DataFlowDeployMethodId, nameof(DeployDataFlow))
+            {
+                TargetRtId = dataFlowRtId.ToString(),
+                Parameters = new DataFlowDeployParameters()
+            }, User, null,
+            response => response.Success
+                ? NoContent()
+                : Failure(response, error => ByReason(error, "The data flow could not be deployed."),
+                    $"Data flow '{dataFlowRtId}' was not found in tenant '{tenantId}'."),
+            async () =>
+            {
+                try
+                {
+                    await _adapterService.DeployDataFlowAsync(tenantId, dataFlowRtId);
+                    return NoContent();
+                }
+                catch (AdapterHubCallbackException e)
+                {
+                    return UnprocessableEntity(new ErrorResponse { ErrorMessage = e.Message});
+                }
+                catch (AdapterServiceException e)
+                {
+                    return NotFound(new ErrorResponse { ErrorMessage = e.Message});
+                }
+                catch (Exception e)
+                {
+                    _logger.LogError(e, "Failed to deploy data flow '{DataFlowRtId}'", dataFlowRtId);
+                    return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
+                }
+            }, FailureOf);
     }
 
     /// <summary>
@@ -96,24 +113,38 @@ public class DataFlowController : ControllerBase
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
 
-        try
-        {
-            await _adapterService.UndeployDataFlowAsync(tenantId, dataFlowRtId);
-            return NoContent();
-        }
-        catch (AdapterHubCallbackException e)
-        {
-            return UnprocessableEntity(new ErrorResponse { ErrorMessage = e.Message});
-        }
-        catch (AdapterServiceException e)
-        {
-            return NotFound(new ErrorResponse { ErrorMessage = e.Message});
-        }
-        catch (Exception e)
-        {
-            _logger.LogError(e, "Failed to undeploy data flow '{DataFlowRtId}'", dataFlowRtId);
-            return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
-        }
+        // AB#9049: facade of DataFlow.Undeploy-1; 422 / 404 / 400 as before (the reason parameter of the failure).
+        return await HttpContext.CommunicationFacade().ServeAsync<IActionResult>(tenantId,
+            new CommunicationMethodCall(DataFlowCkTypeId, SystemCommunicationCkIds.DataFlowUndeployMethodId, nameof(UndeployDataFlow))
+            {
+                TargetRtId = dataFlowRtId.ToString(),
+                Parameters = new DataFlowUndeployParameters()
+            }, User, null,
+            response => response.Success
+                ? NoContent()
+                : Failure(response, error => ByReason(error, "The data flow could not be undeployed."),
+                    $"Data flow '{dataFlowRtId}' was not found in tenant '{tenantId}'."),
+            async () =>
+            {
+                try
+                {
+                    await _adapterService.UndeployDataFlowAsync(tenantId, dataFlowRtId);
+                    return NoContent();
+                }
+                catch (AdapterHubCallbackException e)
+                {
+                    return UnprocessableEntity(new ErrorResponse { ErrorMessage = e.Message});
+                }
+                catch (AdapterServiceException e)
+                {
+                    return NotFound(new ErrorResponse { ErrorMessage = e.Message});
+                }
+                catch (Exception e)
+                {
+                    _logger.LogError(e, "Failed to undeploy data flow '{DataFlowRtId}'", dataFlowRtId);
+                    return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
+                }
+            }, FailureOf);
     }
 
     /// <summary>

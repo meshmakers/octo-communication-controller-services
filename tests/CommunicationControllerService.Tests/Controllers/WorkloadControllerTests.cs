@@ -32,6 +32,7 @@ internal class WorkloadControllerTests
         var httpContext = new DefaultHttpContext();
         httpContext.Request.RouteValues["tenantId"] = TenantId;
         sut.ControllerContext = new ControllerContext { HttpContext = httpContext };
+        DirectRestFacade.Attach(httpContext, TenantId);
         return (sut, repo, events);
     }
 

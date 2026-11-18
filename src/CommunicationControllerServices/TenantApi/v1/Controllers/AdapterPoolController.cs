@@ -2,11 +2,14 @@ using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using Duende.IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
+using static Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service.CommunicationRestFacade;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -101,13 +104,24 @@ public class AdapterPoolController : ControllerBase
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
         }
 
-        var result = await _mirrorProvisioningService.ProvisionForBorrowerAsync(tenantId,
-            HttpContext.RequestAborted);
-        _logger.LogInformation(
-            "[{TenantId}] Lent adapter pool mirrors refreshed on request: {Created} present, {Removed} removed, " +
-            "{Relinked} leased adapter(s) re-linked",
-            tenantId, result.MirrorsCreatedOrUpdated, result.MirrorsRemoved, result.AdaptersRelinked);
-        return Ok(result);
+        // AB#9048: facade of the static AdapterPool.RefreshMirrors-1 (the route tenant is the borrower).
+        return await HttpContext.CommunicationFacade().ServeAsync<IActionResult>(tenantId,
+            new CommunicationMethodCall(AdapterPoolCkTypeId, SystemCommunicationCkIds.AdapterPoolRefreshMirrorsMethodId,
+                nameof(RefreshMirrorsAsync)) { Parameters = new AdapterPoolRefreshMirrorsParameters() }, User, null,
+            response => ValueOf<RtAdapterPoolMirrorSyncResultRecord>(response) is { } result
+                ? Ok(new AdapterPoolMirrorSyncResult((int)result.TenantsReconciled, (int)result.MirrorsCreatedOrUpdated,
+                    (int)result.MirrorsRemoved, (int)result.LendersUnreadable, (int)result.AdaptersRelinked))
+                : Failure(response, error => Error(StatusCodes.Status400BadRequest, MessageOf(error) ?? error.Code)),
+            async () =>
+            {
+                var result = await _mirrorProvisioningService.ProvisionForBorrowerAsync(tenantId,
+                    HttpContext.RequestAborted);
+                _logger.LogInformation(
+                    "[{TenantId}] Lent adapter pool mirrors refreshed on request: {Created} present, {Removed} removed, " +
+                    "{Relinked} leased adapter(s) re-linked",
+                    tenantId, result.MirrorsCreatedOrUpdated, result.MirrorsRemoved, result.AdaptersRelinked);
+                return Ok(result);
+            }, FailureOf);
     }
 
     /// <summary>
@@ -132,14 +146,25 @@ public class AdapterPoolController : ControllerBase
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
         }
 
-        var result = await _mirrorProvisioningService.ProvisionForLenderAsync(tenantId,
-            HttpContext.RequestAborted);
-        _logger.LogInformation(
-            "[{TenantId}] Adapter pool mirrors published on request: {Tenants} borrower(s), {Created} present, " +
-            "{Removed} removed, {Relinked} leased adapter(s) re-linked",
-            tenantId, result.TenantsReconciled, result.MirrorsCreatedOrUpdated, result.MirrorsRemoved,
-            result.AdaptersRelinked);
-        return Ok(result);
+        // AB#9048: facade of the static AdapterPool.PublishMirrors-1 (the route tenant is the lender).
+        return await HttpContext.CommunicationFacade().ServeAsync<IActionResult>(tenantId,
+            new CommunicationMethodCall(AdapterPoolCkTypeId, SystemCommunicationCkIds.AdapterPoolPublishMirrorsMethodId,
+                nameof(PublishMirrorsAsync)) { Parameters = new AdapterPoolPublishMirrorsParameters() }, User, null,
+            response => ValueOf<RtAdapterPoolMirrorSyncResultRecord>(response) is { } result
+                ? Ok(new AdapterPoolMirrorSyncResult((int)result.TenantsReconciled, (int)result.MirrorsCreatedOrUpdated,
+                    (int)result.MirrorsRemoved, (int)result.LendersUnreadable, (int)result.AdaptersRelinked))
+                : Failure(response, error => Error(StatusCodes.Status400BadRequest, MessageOf(error) ?? error.Code)),
+            async () =>
+            {
+                var result = await _mirrorProvisioningService.ProvisionForLenderAsync(tenantId,
+                    HttpContext.RequestAborted);
+                _logger.LogInformation(
+                    "[{TenantId}] Adapter pool mirrors published on request: {Tenants} borrower(s), {Created} present, " +
+                    "{Removed} removed, {Relinked} leased adapter(s) re-linked",
+                    tenantId, result.TenantsReconciled, result.MirrorsCreatedOrUpdated, result.MirrorsRemoved,
+                    result.AdaptersRelinked);
+                return Ok(result);
+            }, FailureOf);
     }
 
     /// <summary>
@@ -335,37 +360,67 @@ public class AdapterPoolController : ControllerBase
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
         }
 
-        if (!OctoObjectId.TryParse(body.AdapterRtId, out var adapterRtId))
-        {
-            return BadRequest(new ErrorResponse
+        // AB#9048: facade of AdapterPool.GrantLease-1; an adapter id that is no ObjectId keeps the direct path (400).
+        var routable = OctoObjectId.TryParse(body.AdapterRtId, out _);
+        return await HttpContext.CommunicationFacade().ServeAsync<IActionResult>(tenantId,
+            new CommunicationMethodCall(AdapterPoolCkTypeId, SystemCommunicationCkIds.AdapterPoolGrantLeaseMethodId,
+                nameof(GrantLeaseAsync))
             {
-                ErrorMessage = $"AdapterRtId '{body.AdapterRtId}' must be a 24-character hex ObjectId."
-            });
-        }
+                TargetRtId = adapterPoolRtId.ToString(),
+                Parameters = routable
+                    ? new AdapterPoolGrantLeaseParameters
+                    {
+                        BorrowerTenantId = body.BorrowerTenantId,
+                        AdapterRtId = body.AdapterRtId,
+                        ExecutionId = body.ExecutionId,
+                        TtlSeconds = body.TtlSeconds
+                    }
+                    : null
+            }, User, null,
+            response => ValueOf<RtAdapterPoolLeaseResultRecord>(response) is { } result
+                ? Ok(new AdapterPoolLeaseResultDto
+                {
+                    Granted = result.Granted,
+                    LeaseId = result.LeaseId,
+                    MemberId = result.MemberId,
+                    StatusMessage = result.StatusMessage
+                })
+                : Failure(response, error => Error(StatusCodes.Status400BadRequest, MessageOf(error) ?? error.Code),
+                    $"Adapter pool {adapterPoolRtId} was not found in tenant '{tenantId}'."),
+            async () =>
+            {
+                if (!OctoObjectId.TryParse(body.AdapterRtId, out var adapterRtId))
+                {
+                    return BadRequest(new ErrorResponse
+                    {
+                        ErrorMessage = $"AdapterRtId '{body.AdapterRtId}' must be a 24-character hex ObjectId."
+                    });
+                }
 
-        var result = await _leaseService.GrantLeaseAsync(tenantId, adapterPoolRtId,
-            new LeaseRequest(body.BorrowerTenantId, adapterRtId, body.ExecutionId,
-                body.TtlSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : null),
-            HttpContext.RequestAborted);
+                var result = await _leaseService.GrantLeaseAsync(tenantId, adapterPoolRtId,
+                    new LeaseRequest(body.BorrowerTenantId, adapterRtId, body.ExecutionId,
+                        body.TtlSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : null),
+                    HttpContext.RequestAborted);
 
-        if (!result.Granted)
-        {
-            // 200 with Granted=false rather than a 4xx: "no idle member right now" is a normal
-            // outcome of asking for a lease, not a malformed request, and a caller driving this by
-            // hand needs the reason string more than it needs a status code to branch on.
-            _logger.LogInformation(
-                "Lease of adapter pool {AdapterPoolRtId} in tenant '{TenantId}' to '{BorrowerTenantId}' was not " +
-                "granted: {Reason}",
-                adapterPoolRtId, tenantId, body.BorrowerTenantId, result.StatusMessage);
-        }
+                if (!result.Granted)
+                {
+                    // 200 with Granted=false rather than a 4xx: "no idle member right now" is a normal
+                    // outcome of asking for a lease, not a malformed request, and a caller driving this by
+                    // hand needs the reason string more than it needs a status code to branch on.
+                    _logger.LogInformation(
+                        "Lease of adapter pool {AdapterPoolRtId} in tenant '{TenantId}' to '{BorrowerTenantId}' was not " +
+                        "granted: {Reason}",
+                        adapterPoolRtId, tenantId, body.BorrowerTenantId, result.StatusMessage);
+                }
 
-        return Ok(new AdapterPoolLeaseResultDto
-        {
-            Granted = result.Granted,
-            LeaseId = result.LeaseId,
-            MemberId = result.MemberId,
-            StatusMessage = result.StatusMessage
-        });
+                return Ok(new AdapterPoolLeaseResultDto
+                {
+                    Granted = result.Granted,
+                    LeaseId = result.LeaseId,
+                    MemberId = result.MemberId,
+                    StatusMessage = result.StatusMessage
+                });
+            }, FailureOf);
     }
 
     /// <summary>
@@ -453,35 +508,54 @@ public class AdapterPoolController : ControllerBase
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
         }
 
-        var result = await _leaseScheduler.CancelQueuedExecutionAsync(tenantId, adapterPoolRtId, executionId,
-            HttpContext.RequestAborted);
+        // AB#9048: facade of AdapterPool.CancelQueuedExecution-1: 409 and 404 keep the texts REST always answered.
+        return await HttpContext.CommunicationFacade().ServeAsync<IActionResult>(tenantId,
+            new CommunicationMethodCall(AdapterPoolCkTypeId,
+                SystemCommunicationCkIds.AdapterPoolCancelQueuedExecutionMethodId, nameof(CancelQueuedExecutionAsync))
+            {
+                TargetRtId = adapterPoolRtId.ToString(),
+                Parameters = new AdapterPoolCancelQueuedExecutionParameters { ExecutionId = executionId }
+            }, User, null,
+            response => response.Success
+                ? NoContent()
+                : Failure(response, error => error.Code == CommunicationMethodErrors.ExecutionAlreadyLeased
+                        ? Conflict(new ErrorResponse { ErrorMessage = AlreadyLeasedMessage(executionId) })
+                        : NotFound(new ErrorResponse
+                            { ErrorMessage = QueuedExecutionNotFoundMessage(executionId, adapterPoolRtId, tenantId) }),
+                    QueuedExecutionNotFoundMessage(executionId, adapterPoolRtId, tenantId)),
+            async () =>
+            {
+                var result = await _leaseScheduler.CancelQueuedExecutionAsync(tenantId, adapterPoolRtId, executionId,
+                    HttpContext.RequestAborted);
 
-        switch (result)
-        {
-            case QueueCancellationResult.Cancelled:
-                _logger.LogInformation(
-                    "Cancelled queued execution '{ExecutionId}' of adapter pool {AdapterPoolRtId} in tenant " +
-                    "'{TenantId}'",
-                    executionId, adapterPoolRtId, tenantId);
-                return NoContent();
-
-            case QueueCancellationResult.AlreadyLeased:
-                return Conflict(new ErrorResponse
+                switch (result)
                 {
-                    ErrorMessage =
-                        $"Execution '{executionId}' already holds a lease and is no longer queued. Cancelling it " +
-                        "means interrupting a running pipeline, which is a different operation."
-                });
+                    case QueueCancellationResult.Cancelled:
+                        _logger.LogInformation(
+                            "Cancelled queued execution '{ExecutionId}' of adapter pool {AdapterPoolRtId} in tenant " +
+                            "'{TenantId}'",
+                            executionId, adapterPoolRtId, tenantId);
+                        return NoContent();
 
-            default:
+                    case QueueCancellationResult.AlreadyLeased:
+                return Conflict(new ErrorResponse { ErrorMessage = AlreadyLeasedMessage(executionId) });
+
+                    default:
                 return NotFound(new ErrorResponse
-                {
-                    ErrorMessage =
-                        $"No queued execution '{executionId}' belongs to adapter pool {adapterPoolRtId} of tenant " +
-                        $"'{tenantId}'."
-                });
-        }
+                            { ErrorMessage = QueuedExecutionNotFoundMessage(executionId, adapterPoolRtId, tenantId) });
+                }
+            }, FailureOf);
     }
+
+    /// <summary>The 409 text of a cancel of an execution that already holds a lease (both paths).</summary>
+    internal static string AlreadyLeasedMessage(string executionId) =>
+        $"Execution '{executionId}' already holds a lease and is no longer queued. Cancelling it " +
+        "means interrupting a running pipeline, which is a different operation.";
+
+    /// <summary>The 404 text of a cancel of an execution the pool does not queue (both paths).</summary>
+    internal static string QueuedExecutionNotFoundMessage(string executionId, OctoObjectId adapterPoolRtId,
+        string tenantId) =>
+        $"No queued execution '{executionId}' belongs to adapter pool {adapterPoolRtId} of tenant '{tenantId}'.";
 
     /// <summary>
     ///     Lists the members of this pool that are connected to this controller instance, and what

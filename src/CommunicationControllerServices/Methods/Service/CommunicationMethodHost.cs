@@ -1,6 +1,9 @@
 using Meshmakers.Octo.Common.DistributionEventHub.Configuration;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Services.Methods;
+using Meshmakers.Octo.Services.Methods.Audit;
+using Meshmakers.Octo.Services.Methods.Authorization;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using static Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service.CommunicationMethodHandlerRegistration;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service;
@@ -103,10 +106,23 @@ internal static class CommunicationMethodHost
     public static bool AddCommunicationCkMethodHost(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddOptions<CommunicationMethodsOptions>().BindConfiguration(CommunicationMethodsOptions.SectionName);
+
+        // AB#9048/AB#9049: the REST facades of the endpoints these methods mirror. Registered also with the switch off: then every
+        // call takes the guarded direct path (caller tenant, one audit event, one WARN line), never an unguarded one.
+        services.AddCkMethodAudit();
+        services.AddOptions<CkMethodAuthorizationOptions>().BindConfiguration(CkMethodAuthorizationOptions.SectionName);
+        services.TryAddSingleton<ICkMethodAuthorizationEvaluator, CkMethodAuthorizationEvaluator>();
+        services.TryAddSingleton<ICkMethodAuthorizationDefinitionSource, CkCacheMethodAuthorizationDefinitionSource>();
+        services.TryAddScoped<ICommunicationMethodFacade, CommunicationMethodFacade>();
+
         if (!ReadOptions(configuration).Enabled)
         {
             return false;
         }
+
+        // The facades call the methods through the dispatcher; the handlers are hosted here, so the call runs in this process
+        // (AB#8411) and nothing is sent to the broker. Program.cs adds the registry feed to the event hub.
+        services.AddCkMethodDispatcher();
 
         services.AddCkMethodHandlers(ServiceName, builder =>
         {
@@ -126,6 +142,8 @@ internal static class CommunicationMethodHost
     public static void AddCommunicationMethodDiscovery(this IDistributionEventHubConfiguration configuration)
     {
         configuration.AddCkMethodHandlerDiscovery();
+        // AB#9048: the dispatcher of the REST facades needs the handler registry feed.
+        configuration.AddCkMethodHandlerRegistryFeed();
     }
 }
 

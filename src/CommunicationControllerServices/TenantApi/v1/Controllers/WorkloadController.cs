@@ -7,7 +7,9 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service;
 using Microsoft.AspNetCore.Authorization;
+using static Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service.CommunicationRestFacade;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
@@ -97,41 +99,66 @@ public class WorkloadController : ControllerBase
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
         }
 
-        // An empty / whitespace value is the explicit "use latest chart in the
-        // configured repository" signal — see the doc-comment above. Non-empty
-        // values still have to parse as SemVer so a bad CI input doesn't
-        // silently land in Mongo.
-        var normalisedChartVersion = body.ChartVersion?.Trim() ?? string.Empty;
-        if (normalisedChartVersion.Length > 0 && !IsValidSemVer(normalisedChartVersion))
-        {
-            return BadRequest(new ErrorResponse
+        // AB#9049: facade of DeployableWorkload.SetChartVersion-1 (used by the CD template deploy-workload.yml through the CLI).
+        // An invalid version answers the 400 text REST always answered; a missing workload and a failed write 404, as before.
+        return await HttpContext.CommunicationFacade().ServeAsync<IActionResult>(tenantId,
+            new CommunicationMethodCall(DeployableWorkloadCkTypeId,
+                SystemCommunicationCkIds.DeployableWorkloadSetChartVersionMethodId, nameof(UpdateChartVersion))
             {
-                ErrorMessage =
-                    $"ChartVersion '{body.ChartVersion}' is not a valid SemVer (expected e.g. '1.2.3' or '1.2.3-beta.1'). Leave empty to deploy the latest chart in the configured repository."
-            });
-        }
+                TargetRtId = workloadRtId.ToString(),
+                Parameters = new DeployableWorkloadSetChartVersionParameters { ChartVersion = body.ChartVersion }
+            }, User, null,
+            response => response.Success
+                ? NoContent()
+                : response.Error?.Code == Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods.CkMethodErrorCodes
+                    .MethodValidationFailed
+                    ? BadRequest(new ErrorResponse { ErrorMessage = InvalidChartVersionMessage(body.ChartVersion) })
+                    : Failure(response, _ => NotFound(new ErrorResponse
+                        {
+                            ErrorMessage = $"The chart version of workload '{workloadRtId}' could not be updated in tenant '{tenantId}'."
+                        }),
+                        $"Workload '{workloadRtId}' was not found in tenant '{tenantId}'."),
+            async () =>
+            {
+                // An empty / whitespace value is the explicit "use latest chart in the
+                // configured repository" signal — see the doc-comment above. Non-empty
+                // values still have to parse as SemVer so a bad CI input doesn't
+                // silently land in Mongo.
+                var normalisedChartVersion = body.ChartVersion?.Trim() ?? string.Empty;
+                if (normalisedChartVersion.Length > 0 && !IsValidSemVer(normalisedChartVersion))
+                {
+                    return BadRequest(new ErrorResponse
+                    {
+                        ErrorMessage = InvalidChartVersionMessage(body.ChartVersion)
+                    });
+                }
 
-        try
-        {
-            var previousVersion = await _communicationRepository
-                .UpdateWorkloadChartVersionAsync(tenantId, workloadRtId, normalisedChartVersion);
+                try
+                {
+                    var previousVersion = await _communicationRepository
+                        .UpdateWorkloadChartVersionAsync(tenantId, workloadRtId, normalisedChartVersion);
 
-            // Audit trail: operators inspect this in the event log when a CI
-            // rollout misbehaves. Source tag distinguishes CI/CD-driven changes
-            // from manual Studio edits.
-            var auditMessage = BuildChartVersionAuditMessage(workloadRtId, previousVersion, normalisedChartVersion,
-                "source: CI/CD");
-            await _eventService.StoreInformationEventAsync(tenantId, auditMessage);
+                    // Audit trail: operators inspect this in the event log when a CI
+                    // rollout misbehaves. Source tag distinguishes CI/CD-driven changes
+                    // from manual Studio edits.
+                    var auditMessage = BuildChartVersionAuditMessage(workloadRtId, previousVersion, normalisedChartVersion,
+                        "source: CI/CD");
+                    await _eventService.StoreInformationEventAsync(tenantId, auditMessage);
 
-            return NoContent();
-        }
-        catch (CommunicationRepositoryException e)
-        {
-            _logger.LogError(e, "Failed to update chart version for workload {WorkloadRtId} in tenant {TenantId}",
-                workloadRtId, tenantId);
-            return NotFound(new ErrorResponse { ErrorMessage = e.Message });
-        }
+                    return NoContent();
+                }
+                catch (CommunicationRepositoryException e)
+                {
+                    _logger.LogError(e, "Failed to update chart version for workload {WorkloadRtId} in tenant {TenantId}",
+                        workloadRtId, tenantId);
+                    return NotFound(new ErrorResponse { ErrorMessage = e.Message });
+                }
+            }, FailureOf);
     }
+
+    /// <summary>The 400 text of a chart version that is no SemVer (both paths).</summary>
+    internal static string InvalidChartVersionMessage(string? chartVersion) =>
+        $"ChartVersion '{chartVersion}' is not a valid SemVer (expected e.g. '1.2.3' or '1.2.3-beta.1'). Leave empty to deploy the latest chart in the configured repository.";
 
     /// <summary>
     /// The audit text of a chart version change (shared with the CK method <c>DeployableWorkload.SetChartVersion</c>,

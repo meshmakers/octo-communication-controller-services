@@ -38,6 +38,7 @@ internal class AdapterControllerReconcileServiceAccountTests
         httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
             callerRoles.Select(r => new Claim("role", r)), "TestAuth", "name", "role"));
         sut.ControllerContext = new ControllerContext { HttpContext = httpContext };
+        DirectRestFacade.Attach(httpContext, TenantId);
         return sut;
     }
 

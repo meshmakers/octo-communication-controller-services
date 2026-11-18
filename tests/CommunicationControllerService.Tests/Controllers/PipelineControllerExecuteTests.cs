@@ -40,6 +40,7 @@ internal class PipelineControllerExecuteTests
             "\"ckTypeId\":\"Acme.Assets/Device\",\"pipelineRtId\":\"000000000000000000000001\"}}";
         httpContext.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(body));
         sut.ControllerContext = new ControllerContext { HttpContext = httpContext };
+        DirectRestFacade.Attach(httpContext, TenantId);
         var pipelineRtId = OctoObjectId.GenerateNewId();
 
         var result = await sut.ExecutePipeline(pipelineRtId);
