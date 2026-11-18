@@ -15,6 +15,34 @@ Schedule: Mon 12.10. release train (chart + operator credentials, everything sti
 Cluster order: **test-2 (incl. edge) → staging-1 → prod-2 → prod-1**. Per cluster: **operator hub
 first** (few, known consumers), **adapter hub a day later**.
 
+The operator and adapter hubs run `Enforce` on every cluster since 2026-10-12. `/adapterPoolHub` stayed `LogOnly`
+because the chart had no value for it; its switch has its own plan with gate, smoke test and rollback:
+[adapter-pool-hub-enforce-plan.md](adapter-pool-hub-enforce-plan.md).
+
+## Schedule for `/adapterPoolHub`
+
+Chart value `services.communication.hubAuthorization.adapterPoolMode` (`LogOnly` | `Enforce`, default `LogOnly`), rendered
+as `OCTO_ADAPTERPOOLHUBAUTHORIZATION__MODE` on the controller only. The dates are the earliest possible ones; Gerald
+decides them, and each step waits for the one before it.
+
+| Step | Earliest | Condition |
+|---|---|---|
+| Chart release with the value deployed on the cluster | first release train after 2026-11-18 | octo-mesh chart 3.5.80 or later in the cluster's last octo-mesh CD run |
+| Gate check per cluster (7 days of `LogOnly` evidence, coverage, positive control) | right after the chart is deployed | plan, section "Gate"; the hub rules cover `adapterPoolHub` (plan, P3) |
+| `Enforce` test-2 | 2026-11-23 | gate check clean, go recorded |
+| `Enforce` staging-1 | 2026-11-24 | test-2 ran 1 day without a legitimate refusal; Gerald's go |
+| `Enforce` prod-1 | 2026-11-25 | staging-1 ran 1 day clean; Gerald's go |
+| `Enforce` prod-2 | 2026-11-26 | prod-1 ran 1 day clean; Gerald's go |
+
+Gate query (Dash0, dataset = cluster, last 7 days; `would_refuse` must be 0 apart from the positive control):
+
+```promql
+sum by (octo_hub_authorization_mode, octo_hub_authorization_outcome, octo_hub_authorization_reason) (
+  increase({otel_metric_name="octo.communication.hub.authorization.decisions", octo_hub_name="adapterPoolHub"}[7d]))
+```
+
+The log query, the coverage check and the per-cluster checklist are in the plan.
+
 ## 1. Preconditions (per cluster)
 
 1. **Controller** with the decision counter (this repo, AB#5528 `octo.communication.hub.authorization.decisions`)
