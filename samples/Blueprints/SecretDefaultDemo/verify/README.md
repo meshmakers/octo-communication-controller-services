@@ -281,9 +281,11 @@ To show that no log line carries the sentinel, raise the levels before step 4 (p
 
 - On kind, wait for the rollout before step 4: `set env` returns before the new pods run, and an old pod would still
   log at the old level. The restore commands remove the variables. When the deployment already set one of them,
-  note its value before the sweep
-  (`kubectl -n <namespace> set env deployment/<name> --list | grep -E '^(OCTO_LOG_LEVEL|OCTO_LOG_LEVEL_ROOT|Logging__LogLevel__)'`)
-  and restore that value instead of removing it (`kubectl -n <namespace> set env deployment/<name> <NAME>=<noted value>`).
+  note its value before the sweep, reading each of the four names on its own so that no other variable of the
+  deployment is printed
+  (`kubectl -n <namespace> get deployment/<name> -o jsonpath='{.spec.template.spec.containers[*].env[?(@.name=="<NAME>")].value}'`;
+  an empty answer means the deployment does not set it) and restore that value instead of removing it
+  (`kubectl -n <namespace> set env deployment/<name> <NAME>=<noted value>`).
 - On kind, do not count on the next deploy of the release to remove these variables: Helm 3 keeps environment variables
   its chart does not render. Always run the restore commands above.
 - **Search** the logs for the sentinel with `grep -cF` and report only the count; never print a matching line.
