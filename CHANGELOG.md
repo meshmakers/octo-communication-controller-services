@@ -9,7 +9,9 @@
   its NLog provider drops those filters. The restore no longer relies on the next release deploy, which keeps variables
   the chart does not render. On kind the sweep waits for the rollout after `set env`, and a value the deployment set
   before the sweep is noted (read one variable at a time, so no other variable of the deployment is printed) and
-  restored instead of removed.
+  restored instead of removed. That check now comes before the first `set env`, counts the names per service (two for
+  the Operator, four for the Mesh Adapter), and stops for a name the deployment takes from a ConfigMap or Secret
+  (`valueFrom`) or declares in several containers, so the sweep never overwrites or deletes such a reference.
 
 - AB#7245 Fix: the reconcile endpoint `POST {tenant}/v1/secretDefaults/reconcile` now stores the same Information event
   (`Secret defaults reconciled: n created, n updated, n removed, n kept.`) in every tenant where it wrote or removed a
