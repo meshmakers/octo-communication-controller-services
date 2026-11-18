@@ -86,7 +86,7 @@ Both of these are part of every gate check, on every cluster:
   `would_refuse` / `unauthenticated` +1, and `OctoMeshHubAuthorizationWouldRefuse` must count it. Without that, the result
   is "not checked", not clean.
 
-Then, over the window (the **last 7 days** before the gate check, starting at or after the restart above when that is more
+Then, over the window (the **last 7 days** before the gate check, starting at the restart above when that is more
 recent; at least 72 hours), apart from the positive control: no `would_refuse` decision and no
 "would be refused when AdapterPoolHubAuthorization:Mode is Enforce" line of a legitimate pool member. Every caller found
 (token tenant, client id, reason code, the pool tenant of a registration) is, before the switch, either
@@ -95,12 +95,45 @@ recent; at least 72 hours), apart from the positive control: no `would_refuse` d
    configured with the right tenant), and a fresh `allowed` connection of that member is seen after the fix; or
 2. **declared not legitimate** (the process must not be a pool member; `Enforce` refuses it on purpose), with the reason.
 
-A cluster where the window shows **no pool member at all** passes the gate with that finding written down: `Enforce`
-cannot lock anybody out there, and a pool created later starts under `Enforce` with a correctly provisioned member. "No
-pool member" is proven by the decision counter, not by the gauge: P2 shows the `adapterPoolHub` series are exported, and
-the sum of **all** `adapterPoolHub` decisions (allowed and would-refuse) since the restart above, apart from the positive
-control, is 0, so nothing connected after the restart. A missing `octo.lease.pool.members` series alone is "not
-checked", never "no members"; where the gauge has a series it must agree (0).
+**Every known pool member is accounted for.** The absence of `would_refuse` lines proves nothing about a member that did
+not connect in the window (pod down, crash-looping, scaled to zero): it leaves no decision and no line, and `Enforce`
+refuses it when it comes back. So the gate check lists the **member inventory** of the cluster and accounts for every
+entry:
+
+- **Inventory**: every `AdapterPool` of every tenant on the cluster, **whatever its `DeploymentState`** (the lending
+  tenant's pool, not the `LentAdapterPool` mirrors of the borrowers): a pool in `Pending` or `Error`, or an `Undeployed`
+  pool whose release still exists, can still run members. Per pool: its state, `MinReplicas` / `MaxReplicas`, the client
+  id of its member service account, and the member pods of its release at the gate check (the member id is the pod
+  name; read by the ops agent). A pool that is not `Deployed` always needs a written decision (below), also when it has
+  no pod. Record the inventory (tenant, pool rtId, state, replica range, client id, member ids) in the gate check
+  comment.
+- **Seen with an allowed connection**: a member counts as seen when it holds a registration made after the restart
+  above, shown by `GET {tenantId}/v1/adapterPool/{adapterPoolRtId}/members` of the pool's tenant (the list is per
+  controller instance: read it on every controller replica, or run the gate with one replica), and no
+  `would_refuse` line of the window names its pool's tenant (as pool tenant or token tenant) or the client id of its
+  pool's member service account, except lines fixed under item 1 above. The lines carry the connection id, the client
+  id and the tenants, not the member id, so this tie is by pool: a line that names an inventory pool's tenant or member
+  client id can never be declared not legitimate (item 2 above); it is fixed, or the pool is listed with a decision. A
+  member fixed under item 1 counts only with a registration after its fix. A `would_refuse` line without a token (no
+  tenant, no client id) cannot be tied to a pool: as long as one is unresolved, no member counts as seen.
+- **Not seen**: a member, or a pool with no member pod at the gate check (scaled to zero, down), is listed with a
+  written decision and its reason: **accepted** (for example: the pool is scaled to zero, and its member credential is
+  checked as P4 requires: a client-credentials client of the pool's own tenant with `octo_api`; it is evaluated under
+  `Enforce` when it starts, and step 6 watches for it) or **excluded** (the pool or member is to be removed, or must not
+  be a member; `Enforce` refuses it on purpose).
+
+**Missing data blocks the switch, it never passes it.** The gate check is "not checked" and the cluster is not switched
+when the inventory cannot be read completely (a tenant whose pools cannot be listed, a pool whose member pods, member
+list or member client id cannot be read, a controller replica whose member list was not read), or when one inventory entry is neither seen
+nor listed with a decision.
+
+A cluster where the window shows **no pool member at all** passes the gate only with both proofs written down: the
+inventory, read completely, lists no `AdapterPool` in any state (or only pools with a written decision as above), and the
+decision counter agrees: P2 shows the `adapterPoolHub` series are exported, and the sum of **all** `adapterPoolHub`
+decisions (allowed and would-refuse) since the restart above, apart from the positive control, is 0. `Enforce` cannot
+lock anybody out there, and a pool created later starts under `Enforce` with a correctly provisioned member. A missing
+`octo.lease.pool.members` series alone is "not checked", never "no members"; where the gauge has a series it must agree
+(0).
 
 ### Log lines (exact text)
 
@@ -148,11 +181,12 @@ WHERE body LIKE '%would be refused when AdapterPoolHubAuthorization:Mode is Enfo
 GROUP BY logger, reason, body ORDER BY first_seen
 
 -- The same lines by kind, with the token tenant and the client of the connect lines
-SELECT multiIf(body LIKE 'Pool-member connection%', 'connection', body LIKE 'Pool-member registration%', 'registration',
+SELECT multiIf(body LIKE 'Pool-member connection%' OR body LIKE 'Refused a pool-member connection%', 'connection',
+               body LIKE 'Pool-member registration%' OR body LIKE 'Refusing a pool-member registration%', 'registration',
                body LIKE 'A late release%' OR body LIKE 'Refusing a late release%', 'late_release', 'other') AS kind,
        regexpExtract(body, 'token (?:of )?tenant ''([^'']*)''') AS token_tenant,
        regexpExtract(body, 'pool of tenant ''([^'']*)''') AS pool_tenant,
-       regexpExtract(body, '(no token presented|client_id ''[^'']*'')') AS client,
+       regexpExtract(body, '(no token presented|client_id ''[^'']*''(?: \(unverified)?)') AS client,
        log_attributes['Reason'] AS registration_reason, count() AS lines, min(timestamp), max(timestamp)
 FROM logs
 WHERE body LIKE '%AdapterPoolHubAuthorization:Mode is Enforce%'
@@ -205,7 +239,9 @@ next CD run undoes it). The CD rolls the controller pods, so every pool member r
 
 1. **Gate check**, recorded as a comment on the security work item: P1 to P4, coverage per day, the presence query, the
    positive control (time, and that the log query, the counter and the rule saw it), the queries with their time range,
-   every caller found with token tenant, client id and reason, and for each the fix or the reason it is not legitimate.
+   every caller found with token tenant, client id and reason, and for each the fix or the reason it is not legitimate,
+   the controller restart time, and the member inventory with each member seen or its written decision (accepted or
+   excluded, with the reason).
 2. **Go** for this cluster: on test-2 the approval of the security work item, confirmed by the developer who runs the
    agent; on staging-1, prod-1 and prod-2 Gerald's go, in his own words.
 3. **Change** (ops): PR in `octo-mesh-deployment` that sets the value with the comment above, plus the pre-write impact
@@ -213,7 +249,10 @@ next CD run undoes it). The CD rolls the controller pods, so every pool member r
    communication controller deployment.
 4. **Roll out** with the cluster's octo-mesh CD run. Within 24 hours before the rollout, run the gate queries again
    (counter and log query, window up to the moment of the re-run): the result is empty apart from callers already
-   resolved in step 1. Otherwise repeat the gate check; a go given on an older gate check does not cover new callers.
+   resolved in step 1, and the member inventory read again has no pool that is neither seen nor decided in step 1 (a new
+   pod of a pool whose members were seen counts as seen once it holds a registration after the restart; the pod names
+   change with every restart and scale-up). Otherwise repeat the gate check; a go given on an older gate check does not
+   cover new callers or new pools.
 5. **Smoke test** right after the rollout:
    - a throw-away SignalR client **without a token** is refused at connect ("Adapter pool connection refused"), the
      counter shows `refused` / `unauthenticated` with `octo_hub_authorization_mode="enforce"`, and the `Enforce` line appears;
@@ -249,7 +288,7 @@ cluster runs a release and chart built with the new defaults.
 
 Dates are decided by Gerald; the empty cells are filled at the gate check and the switch.
 
-| Cluster | P1 chart deployed | P3 rules cover the pool hub | Gate check comment (7 days, coverage, positive control) | Go (who, date) | `Enforce` set (values commit) | Smoke test comment | 1-day watch recorded |
+| Cluster | P1 chart deployed | P3 rules cover the pool hub | Gate check comment (7 days, coverage, positive control, member inventory) | Go (who, date) | `Enforce` set (values commit) | Smoke test comment | 1-day watch recorded |
 |---|---|---|---|---|---|---|---|
 | test-2 | | | | security work item approval, confirmed by the developer running the agent | | | |
 | staging-1 | | | | Gerald, own words | | | |

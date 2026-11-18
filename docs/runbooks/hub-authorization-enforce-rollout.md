@@ -28,7 +28,7 @@ decides them, and each step waits for the one before it.
 | Step | Earliest | Condition |
 |---|---|---|
 | Chart release with the value deployed on the cluster | first release train after 2026-11-18 | octo-mesh chart 3.5.80 or later in the cluster's last octo-mesh CD run |
-| Gate check per cluster (`LogOnly` evidence from a controller restart, at least 72 hours, up to 7 days; coverage, positive control) | 72 hours after the chart is deployed (the deploy restarts the controller) | plan, section "Gate"; the hub rules cover `adapterPoolHub` (plan, P3) |
+| Gate check per cluster (`LogOnly` evidence from a controller restart, at least 72 hours, up to 7 days; coverage, positive control, every known pool member seen or decided) | 72 hours after the chart is deployed (the deploy restarts the controller) | plan, section "Gate"; the hub rules cover `adapterPoolHub` (plan, P3) |
 | `Enforce` test-2 | 2026-11-23 | gate check clean, go recorded |
 | `Enforce` staging-1 | 2026-11-24 | test-2 ran 1 day without a legitimate refusal; Gerald's go |
 | `Enforce` prod-1 | 2026-11-25 | staging-1 ran 1 day clean; Gerald's go |
