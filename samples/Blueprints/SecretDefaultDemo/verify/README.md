@@ -250,39 +250,51 @@ To show that no log line carries the sentinel, raise the levels before step 4 (p
   Restore with the same loop and `-minL Info` (or the level the deployment sets with `OCTO_LOG_LEVEL` /
   `OCTO_LOG_LEVEL_ROOT`). The change lives in memory only: a restart of the service restores the configured level
   as well.
-- **On kind, check every variable before the first `set env`.** The Communication Operator uses two names
-  (`OCTO_LOG_LEVEL`, `OCTO_LOG_LEVEL_ROOT`), the Mesh Adapter four (those two plus `Logging__LogLevel__Default` and
-  `Logging__LogLevel__Microsoft.AspNetCore`). Read each name on its own, so that no other variable of the deployment
-  is printed. First ask whether the deployment declares it, and whether it takes it from a reference:
+- **On kind, pick the service's container and check every variable before the first `set env`.** Every `set env`
+  of the sweep and of its restore names that container with `-c <container>`, so a sidecar of the pod never gets a
+  variable it did not have. List the container names (names only, no environment):
 
   ```bash
   kubectl -n <namespace> get deployment/<name> \
-    -o jsonpath='{.spec.template.spec.containers[*].env[?(@.name=="<NAME>")].name}'
-  kubectl -n <namespace> get deployment/<name> \
-    -o jsonpath='{.spec.template.spec.containers[*].env[?(@.name=="<NAME>")].valueFrom}'
+    -o jsonpath='{.spec.template.spec.containers[*].name}'
   ```
 
-  - The first answer is empty: the deployment does not set the name. Raise it and remove it on restore.
+  The Communication Operator uses two names (`OCTO_LOG_LEVEL`, `OCTO_LOG_LEVEL_ROOT`), the Mesh Adapter four (those
+  two plus `Logging__LogLevel__Default` and `Logging__LogLevel__Microsoft.AspNetCore`). Read each name on its own, so
+  that no other variable of the deployment is printed. First ask whether the container declares it, and whether it
+  takes it from a reference:
+
+  ```bash
+  kubectl -n <namespace> get deployment/<name> \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="<container>")].env[?(@.name=="<NAME>")].name}'
+  kubectl -n <namespace> get deployment/<name> \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="<container>")].env[?(@.name=="<NAME>")].valueFrom}'
+  ```
+
+  - The first answer is empty: the container does not set the name. Raise it and remove it on restore.
   - The second answer is not empty: the name comes from a ConfigMap or Secret (`valueFrom`). **Stop for this
     deployment.** Do not run `set env` on it, because that would replace the reference, and the restore would delete
-    it. Tell the operator which name is referenced; they change the level in the referenced ConfigMap or Secret and restart the
-    deployment, or skip the sweep for this service.
-  - The first answer names the variable more than once (several containers declare it): stop as well. `set env`
-    without `-c` writes one value into every container.
-  - Otherwise note the value, and restore exactly that value instead of removing the name:
+    it. Tell the operator which name is referenced; they change the level in the referenced ConfigMap or Secret and
+    restart the deployment, or skip the sweep for this service.
+  - Otherwise note the value. On restore, set exactly that value instead of removing the name (an empty value is
+    restored as `<NAME>=`):
 
     ```bash
     kubectl -n <namespace> get deployment/<name> \
-      -o jsonpath='{.spec.template.spec.containers[*].env[?(@.name=="<NAME>")].value}'
-    kubectl -n <namespace> set env deployment/<name> <NAME>=<noted value>
+      -o jsonpath='{.spec.template.spec.containers[?(@.name=="<container>")].env[?(@.name=="<NAME>")].value}'
+    kubectl -n <namespace> set env deployment/<name> -c <container> <NAME>=<noted value>
     ```
 
 - **Communication Operator** reads its level at start from `OCTO_LOG_LEVEL` (our code) and `OCTO_LOG_LEVEL_ROOT`
   (frameworks), default `Info`; its NLog provider drops the `Logging:LogLevel` filters of `appsettings.json`, so these
   two variables decide alone. Local stack: set both to `Trace` in the service's environment and restart it. kind:
-  `kubectl -n <namespace> set env deployment/<name> OCTO_LOG_LEVEL=Trace OCTO_LOG_LEVEL_ROOT=Trace`, then
-  `kubectl -n <namespace> rollout status deployment/<name>`; restore with
-  `kubectl -n <namespace> set env deployment/<name> OCTO_LOG_LEVEL- OCTO_LOG_LEVEL_ROOT-`.
+
+  ```bash
+  kubectl -n <namespace> set env deployment/<name> -c <container> \
+    OCTO_LOG_LEVEL=Trace OCTO_LOG_LEVEL_ROOT=Trace
+  kubectl -n <namespace> rollout status deployment/<name> --timeout=5m
+  ```
+
 - **Mesh Adapter** needs two more variables. Its host keeps the `Logging:LogLevel` filters of `appsettings.json`
   (`Default` = `Information`) in front of NLog, so `OCTO_LOG_LEVEL` and `OCTO_LOG_LEVEL_ROOT` alone still produce no
   Debug or Trace line. The SDK's `OCTO_ADAPTER__MINIMUMLOGLEVEL` does not help either: the `appsettings.json` rule takes
@@ -292,23 +304,27 @@ To show that no log line carries the sentinel, raise the levels before step 4 (p
   environment, then restart it. kind:
 
   ```bash
-  kubectl -n <namespace> set env deployment/<name> \
+  kubectl -n <namespace> set env deployment/<name> -c <container> \
     OCTO_LOG_LEVEL=Trace OCTO_LOG_LEVEL_ROOT=Trace Logging__LogLevel__Default=Trace \
     Logging__LogLevel__Microsoft.AspNetCore=Trace
-  kubectl -n <namespace> rollout status deployment/<name>
-  ```
-
-  Restore all four (the configured defaults apply again):
-
-  ```bash
-  kubectl -n <namespace> set env deployment/<name> \
-    OCTO_LOG_LEVEL- OCTO_LOG_LEVEL_ROOT- Logging__LogLevel__Default- \
-    Logging__LogLevel__Microsoft.AspNetCore-
+  kubectl -n <namespace> rollout status deployment/<name> --timeout=5m
   ```
 
 - On kind, wait for the rollout before step 4: `set env` returns before the new pods run, and an old pod would still
-  log at the old level. The restore commands remove the variables; a name the deployment set before the sweep gets
-  its noted value back instead (see the check above).
+  log at the old level.
+- **Restore** on kind removes each name the check found unset, and sets each name it noted back to its noted value
+  (`<NAME>=<noted value>`, see the check above) instead of removing it. For the Mesh Adapter, when none of the four
+  was set before (for the Communication Operator, drop the last two names):
+
+  ```bash
+  kubectl -n <namespace> set env deployment/<name> -c <container> \
+    OCTO_LOG_LEVEL- OCTO_LOG_LEVEL_ROOT- Logging__LogLevel__Default- \
+    Logging__LogLevel__Microsoft.AspNetCore-
+  kubectl -n <namespace> rollout status deployment/<name> --timeout=5m
+  ```
+
+  Wait for that rollout as well: until it completes, an old pod still logs at Trace. When it fails or times out, fix
+  the rollout before you leave the environment.
 - On kind, do not count on the next deploy of the release to remove these variables: Helm 3 keeps environment variables
   its chart does not render. Always run the restore commands above.
 - **Search** the logs for the sentinel with `grep -cF` and report only the count; never print a matching line.

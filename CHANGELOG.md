@@ -11,7 +11,9 @@
   before the sweep is noted (read one variable at a time, so no other variable of the deployment is printed) and
   restored instead of removed. That check now comes before the first `set env`, counts the names per service (two for
   the Operator, four for the Mesh Adapter), and stops for a name the deployment takes from a ConfigMap or Secret
-  (`valueFrom`) or declares in several containers, so the sweep never overwrites or deletes such a reference.
+  (`valueFrom`), so the sweep never overwrites or deletes such a reference. Every `set env` of the sweep and the restore
+  targets the service's container with `-c <container>` (a sidecar never gets the variables), the check reads that
+  container only, and the restore waits for `rollout status --timeout=5m` as the raise does.
 
 - AB#7245 Fix: the reconcile endpoint `POST {tenant}/v1/secretDefaults/reconcile` now stores the same Information event
   (`Secret defaults reconciled: n created, n updated, n removed, n kept.`) in every tenant where it wrote or removed a
