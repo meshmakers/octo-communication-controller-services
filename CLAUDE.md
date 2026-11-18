@@ -3466,12 +3466,38 @@ logged (`ExecutionEnvelopeRejection`), never the value.
 **Former form (before AB#9127) is refused at once.** A value sealed with the binding only in its content cannot be told
 apart from a Secret attribute value that carries a valid wrapper, so it is refused like any value that does not open
 (`Unreadable`), with no transition window and no option, and it is never re-sealed. Sealed values live only on
-`PipelineExecution.SealedCaller` for the life of one execution (at most `QueuedSealMaxAgeDays` while queued; a retry
-gets a new seal), so only the executions that are queued, or leased and then interrupted, at the moment of the upgrade
-are affected: they are failed at their grant ("provenance rejected") or re-queued without provenance, and must be run
-again. **Rollout:** during the rolling update a pod of the previous version cannot open a bound value either and fails
-that execution in the same way; with one controller replica the overlap is the few seconds of the pod switch. A
-rollback fails every execution still queued with the bound form. Such executions are re-run.
+`PipelineExecution.SealedCaller` for the life of one execution (a seal the controller can open is refused after
+`QueuedSealMaxAgeDays` while queued; a retry gets a new seal), so only the executions that are queued, or leased and then interrupted, at the moment of the upgrade
+are affected. What happens to them depends on the key id of the value:
+
+- **Queued, and the controller holds that key** (the usual case): the value reads `Unreadable`, the verdict is
+  `Forged`, and the execution is failed at its grant (refusal `QueuedProvenanceInvalid`, borrower event, WARN). It
+  never started.
+- **Queued, and the controller does not hold that key** (a key that was rotated out): the engine reports the unknown
+  key before it checks the binding, so the value reads `UnknownKey`, the verdict is `Unverifiable`, and the execution
+  is **not** failed. It stays `Queued` at the head of its tenant's queue on that adapter pool, and every later queued
+  execution of that borrowing tenant on that pool waits behind it (the scheduler blocks the tenant for the round
+  instead of skipping the item). Every grant attempt logs the WARN "cannot be verified by this controller ... it stays
+  queued" (refusal `QueuedProvenanceUnverifiable`). `QueuedSealMaxAgeDays` does not end this, because the age is read
+  from the opened seal. If the key comes back, the next grant fails it as above. Otherwise the operator of the
+  **lender** tenant (the tenant that owns the adapter pool) removes it with `AdapterPool.CancelQueuedExecution-1`
+  (`DELETE AdapterPool/{adapterPoolRtId}/queue/{executionId}`), which frees the borrower's queue; the borrowing tenant
+  cannot cancel it itself and starts the work again in its own tenant.
+- **Leased and interrupted** (either key case): `Reseal` does not open the value, so the retry is re-queued without a
+  seal and failed at its own grant (`Missing` counts as `Forged`); the WARN "The provenance of interrupted execution
+  '<id>' did not carry onto its retry '<retry id>'" names both. The retry has a new execution id, but the work behind
+  it is the interrupted run.
+
+**Running an affected execution again.** Only an execution that was **queued** at the upgrade (failed at its grant, or
+cancelled while queued) never started; running it again is safe. A failed retry named in the "did not carry onto its
+retry" WARN belongs to an interrupted run, which may already have done part of its work, for example inserts written
+by a method pipeline: check for those effects first (look up what the run should have written), and run it again only
+when nothing was committed, or when the pipeline is idempotent; otherwise reconcile by hand, so no insert is repeated.
+
+**Rollout:** during the rolling update a pod of the previous version cannot open a bound value either and fails
+that execution in the same way; with one controller replica the overlap is the few seconds of the pod switch (longer
+when the Deployment lets both pods run at once). A rollback fails every execution still queued with the bound form;
+those never started and can be run again, while interrupted ones follow the rule above.
 
 **Rules.**
 
