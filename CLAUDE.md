@@ -3463,15 +3463,15 @@ binding is part of the AES-GCM associated data, so another purpose, tenant or ex
 opens as a Secret attribute value. The binding inside the content is checked as well. The reason of a refusal is
 logged (`ExecutionEnvelopeRejection`), never the value.
 
-**Former form (before AB#9127).** A value sealed with the binding only in its content opens until
-`CommunicationController:SealedValueLegacyFormAcceptedUntilUtc` (default 2027-01-01T00:00:00Z) and is refused afterwards
-(`LegacyForm`). Such a value cannot be told apart from a Secret attribute value that carries a valid wrapper, so the
-window covers only executions queued before the upgrade (their seals are refused after `QueuedSealMaxAgeDays` anyway).
-A re-seal writes the bound form. Set the option earlier to close the window sooner. **Rollout:** the reader is what
-closes the forgery route; the writer seals the bound form at once. During the rolling update a pod of the previous
-version cannot open a bound value (it reads `Unreadable` and fails that execution at lease grant); with one controller
-replica the overlap is the few seconds of the pod switch. A rollback fails the executions queued with the bound form in
-the same way. Such executions are re-run.
+**Former form (before AB#9127) is refused at once.** A value sealed with the binding only in its content cannot be told
+apart from a Secret attribute value that carries a valid wrapper, so it is refused like any value that does not open
+(`Unreadable`), with no transition window and no option, and it is never re-sealed. Sealed values live only on
+`PipelineExecution.SealedCaller` for the life of one execution (at most `QueuedSealMaxAgeDays` while queued; a retry
+gets a new seal), so only the executions that are queued, or leased and then interrupted, at the moment of the upgrade
+are affected: they are failed at their grant ("provenance rejected") or re-queued without provenance, and must be run
+again. **Rollout:** during the rolling update a pod of the previous version cannot open a bound value either and fails
+that execution in the same way; with one controller replica the overlap is the few seconds of the pod switch. A
+rollback fails every execution still queued with the bound form. Such executions are re-run.
 
 **Rules.**
 
@@ -3507,8 +3507,8 @@ text, forged JSON, `enc:v1`, other execution / tenant / key / purpose, flipped b
 **Design decision: the marker is one more member of the existing `SealedCaller` payload, not a second attribute.**
 A separate `MethodInvocation` attribute (decision note AB#7120, first draft) would have needed System.Communication
 4.13.0, a second `Seal`/`Open`/`Reseal` pair and a second place that can drift. The envelope already provides what the
-marker needs: AES-GCM with the instance key ring (`enc:v2`), binding to tenant and execution RtId inside the
-authenticated plaintext, no plain-text acceptance, re-seal on requeue, and the provenance gate of AB#7473 (pipeline,
+marker needs: AES-GCM with the instance key ring (`enc:v2`), binding to purpose, tenant and execution RtId in the
+associated data (and in the content), no plain-text acceptance, re-seal on requeue, and the provenance gate of AB#7473 (pipeline,
 adapter, input). System.Communication therefore stays **4.12.0**; the old-instance behaviour is also the safe one (an
 older controller ignores the unknown payload member, so it drops the marker: fail closed).
 

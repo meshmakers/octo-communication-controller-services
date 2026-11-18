@@ -1,9 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Meshmakers.Octo.Backend.CommunicationControllerServices.Options;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.Secrets;
-using Microsoft.Extensions.Options;
 using NLog;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -25,7 +23,11 @@ public enum ExecutionEnvelopeRejection
     /// <summary>The controller has no usable key ring.</summary>
     NoKey,
 
-    /// <summary>The authentication tag does not verify (edited, wrong key).</summary>
+    /// <summary>
+    ///     The authentication tag does not verify: an edited value, a wrong key, a value sealed for another purpose,
+    ///     tenant or execution, a value in the former form (bound only by its content) or a value produced through a
+    ///     Secret attribute.
+    /// </summary>
     Unreadable,
 
     /// <summary>
@@ -37,20 +39,23 @@ public enum ExecutionEnvelopeRejection
     /// <summary>The decrypted content is not a well-formed envelope of this format.</summary>
     Malformed,
 
-    /// <summary>The envelope was sealed for another purpose.</summary>
+    /// <summary>
+    ///     The content names another purpose although the binding verified. A value sealed for another purpose reads
+    ///     <see cref="Unreadable" />, because its binding does not verify.
+    /// </summary>
     WrongPurpose,
 
-    /// <summary>The envelope was sealed for another tenant.</summary>
+    /// <summary>
+    ///     The content names another tenant although the binding verified. A value sealed for another tenant reads
+    ///     <see cref="Unreadable" />.
+    /// </summary>
     WrongTenant,
 
-    /// <summary>The envelope was sealed for another execution (a copied value).</summary>
-    WrongExecution,
-
     /// <summary>
-    ///     The value is in the former form (bound only by its content) and the window in which that form is still
-    ///     accepted has ended. A value of a Secret attribute reads like this, too.
+    ///     The content names another execution although the binding verified. A value copied from another execution
+    ///     reads <see cref="Unreadable" />.
     /// </summary>
-    LegacyForm
+    WrongExecution
 }
 
 /// <summary>
@@ -74,9 +79,9 @@ public enum ExecutionEnvelopeRejection
 ///     </para>
 ///     <para>
 ///         <b>Former form.</b> Values sealed before the binding was part of the associated data carry it only in the
-///         content. They open until <see cref="CommunicationControllerOptions.SealedValueLegacyFormAcceptedUntilUtc" />
-///         and are refused afterwards (<see cref="ExecutionEnvelopeRejection.LegacyForm" />); a re-seal writes the
-///         bound form.
+///         content and cannot be told apart from a Secret attribute value with a valid wrapper. They are refused
+///         (<see cref="ExecutionEnvelopeRejection.Unreadable" />) and never re-sealed; an execution queued with such a
+///         value is refused at its grant and must be run again.
 ///     </para>
 ///     <para>
 ///         <b>Fail closed.</b> Every refusal returns <c>false</c> with a reason; the caller treats it as "nothing was
@@ -122,18 +127,10 @@ public static class ExecutionEnvelopePurposes
 }
 
 /// <inheritdoc />
-public sealed class ExecutionEnvelope(
-    ISecretAttributeProtector protector,
-    IOptions<CommunicationControllerOptions>? options = null,
-    TimeProvider? timeProvider = null) : IExecutionEnvelope
+public sealed class ExecutionEnvelope(ISecretAttributeProtector protector) : IExecutionEnvelope
 {
     private const int FormatVersion = 1;
     private const string BindingPrefix = "octo.communication.execution-envelope";
-
-    private readonly DateTime _legacyFormAcceptedUntilUtc =
-        (options?.Value ?? new CommunicationControllerOptions()).SealedValueLegacyFormAcceptedUntilUtc;
-
-    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
@@ -208,13 +205,6 @@ public sealed class ExecutionEnvelope(
         {
             json = protector.Unprotect(stored, BuildBinding(purpose, tenantId, executionRtId), accessContext);
         }
-        catch (System.Security.Cryptography.CryptographicException)
-        {
-            if (!TryOpenLegacyForm(stored, accessContext, out json, out rejection))
-            {
-                return false;
-            }
-        }
         catch (Exception e) when (IsUnreadable(e))
         {
             rejection = ToRejection(e);
@@ -228,8 +218,7 @@ public sealed class ExecutionEnvelope(
         }
         catch (JsonException)
         {
-            // Some other decrypted secret copied into the attribute (decryption is only ever used to compare, the
-            // content is never returned or logged).
+            // The binding verified but the content is not a wrapper; it is only compared, never returned or logged.
             rejection = ExecutionEnvelopeRejection.Malformed;
             return false;
         }
@@ -293,32 +282,7 @@ public sealed class ExecutionEnvelope(
         return Seal(purpose, payload!, tenantId, toExecutionRtId);
     }
 
-    private bool TryOpenLegacyForm(string stored, SecretAccessContext accessContext, out string json,
-        out ExecutionEnvelopeRejection rejection)
-    {
-        json = string.Empty;
-        try
-        {
-            json = protector.Unprotect(stored, accessContext);
-        }
-        catch (Exception e) when (IsUnreadable(e))
-        {
-            rejection = ToRejection(e);
-            return false;
-        }
-
-        if (_timeProvider.GetUtcNow().UtcDateTime > _legacyFormAcceptedUntilUtc)
-        {
-            json = string.Empty;
-            rejection = ExecutionEnvelopeRejection.LegacyForm;
-            return false;
-        }
-
-        rejection = ExecutionEnvelopeRejection.None;
-        return true;
-    }
-
-    private static SecretPurpose BuildBinding(string purpose, string tenantId, OctoObjectId executionRtId)
+    internal static SecretPurpose BuildBinding(string purpose, string tenantId, OctoObjectId executionRtId)
     {
         var normalizedTenantId = tenantId.ToLowerInvariant();
         var normalizedExecutionRtId = executionRtId.ToString().ToLowerInvariant();

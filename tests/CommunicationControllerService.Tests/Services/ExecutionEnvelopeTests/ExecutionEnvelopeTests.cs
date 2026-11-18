@@ -18,9 +18,6 @@ internal class ExecutionEnvelopeTests
     private const string Tenant = "acme";
     private const string Purpose = "test-purpose";
 
-    private static readonly FixedTimeProvider InsideTheLegacyFormWindow =
-        new(new DateTime(2026, 12, 1, 0, 0, 0, DateTimeKind.Utc));
-
     private readonly ExecutionEnvelope _sut = TestExecutionEnvelope.Create();
     private readonly OctoObjectId _execution = OctoObjectId.GenerateNewId();
 
@@ -107,18 +104,17 @@ internal class ExecutionEnvelopeTests
     }
 
     [Test]
-    public async Task AnotherSecretOfTheSameKeyRing_IsNoEnvelope()
+    public async Task AnotherSecretOfTheSameKeyRing_DoesNotOpen()
     {
-        // not a decryption oracle: whatever it decrypts to is only compared, never returned
         var keys = TestSecretEncryption.Create();
-        var sut = new ExecutionEnvelope(keys.Protector, null, InsideTheLegacyFormWindow);
+        var sut = new ExecutionEnvelope(keys.Protector);
         var copiedSecret = keys.Protector.Protect("a-client-secret").Envelope;
 
         var ok = sut.TryOpen<Data>(Purpose, copiedSecret, Tenant, _execution, out _, out var why);
 
         using var scope = Assert.Multiple();
         await Assert.That(ok).IsFalse();
-        await Assert.That(why).IsEqualTo(ExecutionEnvelopeRejection.Malformed);
+        await Assert.That(why).IsEqualTo(ExecutionEnvelopeRejection.Unreadable);
     }
 
     [Test]
@@ -227,9 +223,10 @@ internal class ExecutionEnvelopeTests
         // Same key ring, correct binding, but no "d" member: only a holder of the key could produce it, still it
         // must be refused rather than throw.
         var keys = TestSecretEncryption.Create();
-        var sut = new ExecutionEnvelope(keys.Protector, null, InsideTheLegacyFormWindow);
+        var sut = new ExecutionEnvelope(keys.Protector);
         var json = "{\"v\":1,\"p\":\"" + Purpose + "\",\"t\":\"" + Tenant + "\",\"e\":\"" + _execution + "\"}";
-        var stored = keys.Protector.Protect(json).Envelope;
+        var binding = ExecutionEnvelope.BuildBinding(Purpose, Tenant, _execution);
+        var stored = keys.Protector.Protect(json, binding).Envelope;
 
         var ok = sut.TryOpen<Data>(Purpose, stored, Tenant, _execution, out _, out var why);
 

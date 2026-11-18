@@ -70,7 +70,8 @@ view is in [Shared Adapter Leasing](shared-adapter-leasing.md) (borrower caller 
 | Attack | Defence |
 |--------|---------|
 | Write a marker (or a caller) into a queued execution through a generic write | The value is encrypted and bound to tenant and execution; plain text, edits and bit flips do not open. The execution is failed, not leased |
-| Copy a valid sealed value from another execution | The execution RtId is part of the authenticated plaintext; it does not open for another execution |
+| Copy a valid sealed value from another execution | Purpose, tenant and execution RtId are part of the associated data of the encryption; it does not open for another execution |
+| Encrypt a forged wrapper through a Secret attribute (or the encrypt-value API) and write that envelope into `SealedCaller` | Such a value carries no binding in the associated data and does not open; values sealed before the binding existed are refused the same way |
 | Create a queued execution by hand | The provenance in the envelope (pipeline, adapter, input hash) is missing; a hand-made item is never leased |
 | Edit the pipeline, adapter or input of a sealed queued execution | These are bound inside the envelope; the item fails the grant |
 | Reset a finished execution to `Queued` to run it again with its old marker | Single-use claim (`ClaimId`) recorded in the controller-owned collection `execution_lease_claims` in the system database; a second grant of the same seal is refused and the execution failed |
