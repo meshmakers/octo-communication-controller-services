@@ -35,7 +35,7 @@ internal sealed record CommunicationMethodHandlerRegistration(
 ///         The handlers are registered with the typed handler SDK of octo-common-services (<c>AddCkMethodHandlers</c>): one
 ///         shared queue per method, announcement and heartbeat, caller token validation, the declared authorization (roles,
 ///         scope <c>octo_api</c>, tenant of the token) and redaction are the host's. A handler only does the operation, with the
-///         same services as the REST endpoint it mirrors, so the effect is the same. The REST endpoints are unchanged.
+///         same services as the REST endpoint it mirrors, so the effect is the same. Since AB#9048 the REST endpoints are facades of these methods (<see cref="ICommunicationMethodFacade" />).
 ///     </para>
 ///     <para>
 ///         Independent of the pipeline method handler (<see cref="PipelineMethodHost" />, <c>handler: pipeline</c>): that host
@@ -138,7 +138,10 @@ internal static class CommunicationMethodHost
         return true;
     }
 
-    /// <summary>Lets the controller answer discovery requests of dispatchers for these handlers (event hub configuration).</summary>
+    /// <summary>
+    ///     Lets the controller answer discovery requests of dispatchers for these handlers, and feeds the handler registry of the
+    ///     dispatcher the REST facades use (AB#9048; event hub configuration).
+    /// </summary>
     public static void AddCommunicationMethodDiscovery(this IDistributionEventHubConfiguration configuration)
     {
         configuration.AddCkMethodHandlerDiscovery();

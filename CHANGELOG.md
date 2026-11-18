@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- AB#9048 / AB#9049 New: the adapter, adapter pool, pipeline, data-flow and workload operation endpoints (15, Feature F5.3
+  AB#5701) are facades of the System.Communication CK methods: a caller with `CommunicationManagement` is served by the
+  method in process (one Method audit event, transport `in-process`, detached from the request); every other caller that
+  passes the REST policy keeps the previous REST code behind the caller-tenant check, with one audit event (transport
+  `fallback`) and a WARN line `Reason=role-missing|scope-missing|switch-off|method-not-declared|input-not-routable`. Routes,
+  bodies and status codes are unchanged; REST is not removed and gets no `Sunset` header. Behaviour changes: a token whose
+  `tenant_id` does not name the route tenant (or has none) is answered 403 `tenant-not-allowed` on every path, also while
+  the HTTP tenant gate only logs; failures of reconcile, rotate, deploy, debug, data flow and execute answer the method's
+  text instead of the text of an unknown exception; `move-to-adapter` with `redeploy` redeploys a no-op move too and writes
+  one audit event per pipeline; the execute caller handed to the pipeline carries subject, tenant and roles (no e-mail or
+  name); a started operation no longer depends on the HTTP request (a client that disconnects does not stop it); the
+  method timeout bounds the call (504). The deploy, debug and data-flow method errors carry the additive parameter
+  `reason` (`adapter-rejected`, `adapter-service`, `unexpected`). Parity table: `docs/rest-method-facades.md`.
+
 - AB#7247 Docs: step 9 of the secret-default verify README (Trace sweep) also sets `Logging__LogLevel__Default=Trace`
   and `Logging__LogLevel__Microsoft.AspNetCore=Trace` for the Mesh Adapter and removes them on restore. The adapter host
   keeps the `appsettings.json` filters (`Default` = `Information`) in front of NLog, so `OCTO_LOG_LEVEL` /

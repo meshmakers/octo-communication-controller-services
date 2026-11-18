@@ -366,7 +366,9 @@ handled by this service (`Adapter.DeployUpdate`, `Adapter.ReconcileServiceAccoun
 `CommunicationManagement`. Since 4.18.0 (AB#8596) the pipeline, data flow and workload chart-version operations follow
 (`Pipeline.Deploy`, `Pipeline.Execute`, `Pipeline.SetDebugging`, `Pipeline.MoveToAdapter`, `DataFlow.Deploy`,
 `DataFlow.Undeploy`, `DeployableWorkload.SetChartVersion`). The tenant-level endpoints of `CommunicationController` stay
-REST. The REST endpoints are unchanged. Details: `CLAUDE.md`, "CK method service handlers".
+REST. Since AB#9048 / AB#9049 these REST endpoints are facades of the methods: same routes, bodies and status codes, one
+Method audit event per call; a caller without `CommunicationManagement` keeps the previous REST behaviour (logged with
+`Reason=role-missing`). Details: `docs/rest-method-facades.md` (parity table) and `CLAUDE.md`, "CK method service handlers".
 
 ## Configuration
 
