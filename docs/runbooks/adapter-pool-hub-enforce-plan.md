@@ -69,6 +69,13 @@ Record P1 to P4 per cluster in a comment on the security work item before the ga
 open: a dataset without controller logs, a controller without the zero baseline, or a changed log text also give zero).
 Both of these are part of every gate check, on every cluster:
 
+- **Every member was evaluated in the window**: a member is evaluated only when it connects, and a long-lived connection
+  that predates the window leaves no decision and no line in it. So the window starts at a **controller restart** (the
+  octo-mesh CD that brought the chart of P1 is one; otherwise roll the controller once, rollout runbook section 2): every
+  member reconnects within minutes and is evaluated. Record the restart time. Read the counter as the raw value since that
+  restart (it restarts at 0 with every pod), and let the window run at least 72 hours after it. A gate check whose window
+  holds no controller restart is "not checked". A controller restart inside the window later on is fine (the members
+  reconnect again); `increase()` handles it.
 - **Coverage**: the cluster's Dash0 dataset holds communication-controller log lines on every day of the 7-day window
   (`log_attributes['logger'] LIKE 'Meshmakers.Octo.Backend.CommunicationControllerServices.%'`, count per day > 0), and the
   presence query of P2 returns `adapterPoolHub`. A day without lines is a gap: extend the window until 7 covered days are
@@ -79,7 +86,8 @@ Both of these are part of every gate check, on every cluster:
   `would_refuse` / `unauthenticated` +1, and `OctoMeshHubAuthorizationWouldRefuse` must count it. Without that, the result
   is "not checked", not clean.
 
-Then, over the **last 7 days** before the gate check, apart from the positive control: no `would_refuse` decision and no
+Then, over the window (the **last 7 days** before the gate check, starting at or after the restart above when that is more
+recent; at least 72 hours), apart from the positive control: no `would_refuse` decision and no
 "would be refused when AdapterPoolHubAuthorization:Mode is Enforce" line of a legitimate pool member. Every caller found
 (token tenant, client id, reason code, the pool tenant of a registration) is, before the switch, either
 
@@ -87,9 +95,12 @@ Then, over the **last 7 days** before the gate check, apart from the positive co
    configured with the right tenant), and a fresh `allowed` connection of that member is seen after the fix; or
 2. **declared not legitimate** (the process must not be a pool member; `Enforce` refuses it on purpose), with the reason.
 
-A cluster where the window shows **no pool member at all** (`octo.lease.pool.members` has no series or stays 0, no
-`allowed` decision and no would-refuse line of `adapterPoolHub`) passes the gate with that finding written down: `Enforce` cannot lock anybody out there, and a pool
-created later starts under `Enforce` with a correctly provisioned member.
+A cluster where the window shows **no pool member at all** passes the gate with that finding written down: `Enforce`
+cannot lock anybody out there, and a pool created later starts under `Enforce` with a correctly provisioned member. "No
+pool member" is proven by the decision counter, not by the gauge: P2 shows the `adapterPoolHub` series are exported, and
+the sum of **all** `adapterPoolHub` decisions (allowed and would-refuse) since the restart above, apart from the positive
+control, is 0, so nothing connected after the restart. A missing `octo.lease.pool.members` series alone is "not
+checked", never "no members"; where the gauge has a series it must agree (0).
 
 ### Log lines (exact text)
 
@@ -119,6 +130,11 @@ The Dash0 dataset is named after the cluster (`k8s.cluster.name` is empty; selec
 # Gate check: decisions of the pool hub over the window, by mode, outcome and reason (would_refuse must be 0)
 sum by (octo_hub_authorization_mode, octo_hub_authorization_outcome, octo_hub_authorization_reason) (
   increase({otel_metric_name="octo.communication.hub.authorization.decisions", octo_hub_name="adapterPoolHub"}[7d]))
+
+# The same as raw values since the controller restart that starts the window (run when no restart followed it);
+# the sum over every outcome is the number of pool-hub connections and registrations evaluated since the restart
+sum by (octo_hub_authorization_mode, octo_hub_authorization_outcome, octo_hub_authorization_reason) (
+  {otel_metric_name="octo.communication.hub.authorization.decisions", octo_hub_name="adapterPoolHub"})
 ```
 
 Logs with D0QL (`sql`):
@@ -129,18 +145,18 @@ SELECT log_attributes['logger'] AS logger, log_attributes['HubAuthorizationReaso
        body, count() AS lines, min(timestamp) AS first_seen, max(timestamp) AS last_seen
 FROM logs
 WHERE body LIKE '%would be refused when AdapterPoolHubAuthorization:Mode is Enforce%'
-GROUP BY logger, reason, body ORDER BY first_seen LIMIT 200
+GROUP BY logger, reason, body ORDER BY first_seen
 
 -- The same lines by kind, with the token tenant and the client of the connect lines
 SELECT multiIf(body LIKE 'Pool-member connection%', 'connection', body LIKE 'Pool-member registration%', 'registration',
-               body LIKE 'A late release%', 'late_release', 'other') AS kind,
+               body LIKE 'A late release%' OR body LIKE 'Refusing a late release%', 'late_release', 'other') AS kind,
        regexpExtract(body, 'token (?:of )?tenant ''([^'']*)''') AS token_tenant,
        regexpExtract(body, 'pool of tenant ''([^'']*)''') AS pool_tenant,
        regexpExtract(body, '(no token presented|client_id ''[^'']*'')') AS client,
        log_attributes['Reason'] AS registration_reason, count() AS lines, min(timestamp), max(timestamp)
 FROM logs
 WHERE body LIKE '%AdapterPoolHubAuthorization:Mode is Enforce%'
-GROUP BY kind, token_tenant, pool_tenant, client, registration_reason ORDER BY kind LIMIT 200
+GROUP BY kind, token_tenant, pool_tenant, client, registration_reason ORDER BY kind
 
 -- Coverage: controller lines per day (D0QL has no toDate; cut the date from the timestamp)
 SELECT substring(toString(timestamp), 1, 10) AS day, count() AS lines
@@ -195,7 +211,9 @@ next CD run undoes it). The CD rolls the controller pods, so every pool member r
 3. **Change** (ops): PR in `octo-mesh-deployment` that sets the value with the comment above, plus the pre-write impact
    list: the rendered diff of the octo-mesh release changes only `OCTO_ADAPTERPOOLHUBAUTHORIZATION__MODE` on the
    communication controller deployment.
-4. **Roll out** with the cluster's octo-mesh CD run.
+4. **Roll out** with the cluster's octo-mesh CD run. Within 24 hours before the rollout, run the gate queries again
+   (counter and log query, window up to the moment of the re-run): the result is empty apart from callers already
+   resolved in step 1. Otherwise repeat the gate check; a go given on an older gate check does not cover new callers.
 5. **Smoke test** right after the rollout:
    - a throw-away SignalR client **without a token** is refused at connect ("Adapter pool connection refused"), the
      counter shows `refused` / `unauthenticated` with `octo_hub_authorization_mode="enforce"`, and the `Enforce` line appears;
@@ -214,7 +232,8 @@ next CD run undoes it). The CD rolls the controller pods, so every pool member r
 
 ## Rollback
 
-Set `adapterPoolMode` back to `LogOnly` (or remove the key) in the cluster values and run the same octo-mesh CD again (go
+Set `adapterPoolMode` back to `LogOnly` in the cluster values (removing the key works only while the chart default is
+`LogOnly`; after the last step below it would keep `Enforce`) and run the same octo-mesh CD again (go
 as in step 2). Refused members retry on their own and are let in on the next attempt; a member still offline after about
 5 minutes: restart its pod. Faster stop-gap through Breakglass or Semaphore, never by asking for RBAC:
 `OCTO_ADAPTERPOOLHUBAUTHORIZATION__MODE=LogOnly` on the controller deployment, always followed by the values change, or the
