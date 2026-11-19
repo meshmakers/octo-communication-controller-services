@@ -3488,16 +3488,29 @@ are affected. What happens to them depends on the key id of the value:
   '<id>' did not carry onto its retry '<retry id>'" names both. The retry has a new execution id, but the work behind
   it is the interrupted run.
 
-**Running an affected execution again.** Only an execution that was **queued** at the upgrade (failed at its grant, or
-cancelled while queued) never started; running it again is safe. A failed retry named in the "did not carry onto its
-retry" WARN belongs to an interrupted run, which may already have done part of its work, for example inserts written
-by a method pipeline: check for those effects first (look up what the run should have written), and run it again only
-when nothing was committed, or when the pipeline is idempotent; otherwise reconcile by hand, so no insert is repeated.
+**Running an affected execution again.** An execution queued at the upgrade (failed at its grant, or cancelled while
+queued) never started, unless it is itself the retry of an interrupted run: a retry that the previous version
+re-queued before the upgrade is also queued at the upgrade, with a new execution id, but its work may already have
+been partly done. Such a retry is named in the INFO "Interrupted leased execution '<id>' and re-queued it as
+'<retry id>'"; a retry the new version re-queues is named in the WARN "The provenance of interrupted execution '<id>'
+did not carry onto its retry '<retry id>'". The logs of a replaced pod may be gone, so the entities count as well: an
+execution of the same pipeline in status `Interrupted` with the same input data marks a queued execution as its
+retry. A queued execution counts as a retry unless the logs or that check rule it out; every other execution queued at
+the upgrade is safe to run again. For an interrupted run and its retry, check for effects first (look up what the run
+should have written, for example inserts of a method pipeline), and run it again only when nothing was committed, or
+when the pipeline is idempotent; otherwise reconcile by hand, so no insert is repeated.
 
-**Rollout:** during the rolling update a pod of the previous version cannot open a bound value either and fails
-that execution in the same way; with one controller replica the overlap is the few seconds of the pod switch (longer
-when the Deployment lets both pods run at once). A rollback fails every execution still queued with the bound form;
-those never started and can be run again, while interrupted ones follow the rule above.
+**Rollout and rollback.** The previous version opens a value without the binding, and its engine also reports a key id
+it does not hold before it checks the tag. So a pod of the previous version, during the rolling update or after a
+rollback, treats a bound value like the new version treats a former-form value: under a key it holds, the value reads
+`Unreadable` and the execution is failed at its grant (`QueuedProvenanceInvalid`); under a key id it does not hold, the
+value reads `UnknownKey` and the execution stays `Queued` (`QueuedProvenanceUnverifiable`) until a controller of the new
+version that holds the key grants it, or until the lender tenant's operator cancels it. A controller of the previous
+version that later gets the key fails it. An interrupted run is re-queued without a seal and its retry is failed. With
+one controller replica the overlap of the rolling update is the few seconds of the pod switch (longer when the
+Deployment lets both pods run at once); a rollback affects every execution still queued with the bound form.
+Executions failed or cancelled this way are run again under the rule above; for a rollback, read "previous" and "new"
+the other way round (the retries the new version re-queued before the rollback are the interrupted work).
 
 **Rules.**
 
