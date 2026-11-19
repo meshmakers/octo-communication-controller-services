@@ -16,6 +16,7 @@ using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Microsoft.AspNetCore.Authorization;
 using static Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service.CommunicationRestFacade;
 using Microsoft.AspNetCore.Mvc;
+using Meshmakers.Octo.Services.RestDeprecation;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
 
@@ -99,6 +100,7 @@ public class PipelineController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status400BadRequest)]
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> DeployPipeline([Required][FromQuery] string adapterRtEntityId, [Required][FromQuery] string pipelineRtEntityId)
     {
         var tenantId = HttpContext.GetTenantId();
@@ -184,6 +186,7 @@ public class PipelineController : ControllerBase
     [Authorize(Constants.TenantCommunicationApiReadOnlyPolicy)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status404NotFound)]
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> ExecutePipeline([Required][FromQuery] OctoObjectId pipelineRtId,
         [FromQuery] bool isDryRun = false)
     {
@@ -303,6 +306,7 @@ public class PipelineController : ControllerBase
     [ProducesResponseType(typeof(MovePipelinesToAdapterResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> MovePipelinesToAdapter(
         [Required] [FromBody] MovePipelinesToAdapterRequestDto body)
     {
@@ -449,6 +453,7 @@ public class PipelineController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> SetPipelineDebugging(
         [Required] OctoObjectId pipelineRtId,
         [Required] [FromBody] SetPipelineDebugRequestDto body)

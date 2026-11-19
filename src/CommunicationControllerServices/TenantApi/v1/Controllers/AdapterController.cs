@@ -13,6 +13,7 @@ using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.Syst
 using static Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service.CommunicationRestFacade;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Meshmakers.Octo.Services.RestDeprecation;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
 
@@ -246,6 +247,7 @@ public class AdapterController : ControllerBase
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> DeployUpdate([Required][FromQuery] string adapterRtEntityId)
     {
         var tenantId = HttpContext.GetTenantId();
@@ -324,6 +326,7 @@ public class AdapterController : ControllerBase
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> Wake([Required] string workloadRtId,
         [FromServices] IWorkloadLifecycleService workloadLifecycleService)
     {
@@ -390,6 +393,7 @@ public class AdapterController : ControllerBase
     [ProducesResponseType(typeof(ReconcileServiceAccountResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> ReconcileServiceAccount([Required] string adapterRtId,
         [FromServices] IPipelineServiceAccountProvisioningService provisioningService,
         [FromServices] ICommunicationEventService eventService)
@@ -613,6 +617,7 @@ public class AdapterController : ControllerBase
     [ProducesResponseType(typeof(RotateServiceAccountSecretResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> RotateServiceAccountSecret([Required] string adapterRtId,
         [FromServices] IPipelineServiceAccountProvisioningService provisioningService,
         [FromServices] ICommunicationEventService eventService)

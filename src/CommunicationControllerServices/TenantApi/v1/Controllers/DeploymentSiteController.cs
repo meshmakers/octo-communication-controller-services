@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Authorization;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Microsoft.AspNetCore.Mvc;
 using static Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service.CommunicationRestFacade;
+using Meshmakers.Octo.Services.RestDeprecation;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
 
@@ -109,6 +110,7 @@ public class DeploymentSiteController : ControllerBase
     // no `poolRtId`, and both endpoints answered every call with HTTP 400 "The poolRtId field is
     // required" - unreachable, and the CLI verb along with them. Found while trying to bring a
     // tenant's deployment site back up on a local kind cluster.
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> DeployDeploymentSiteAsync([Required][FromQuery] OctoObjectId deploymentSiteRtId)
     {
         var tenantId = HttpContext.GetTenantId();
@@ -162,6 +164,7 @@ public class DeploymentSiteController : ControllerBase
     // no `poolRtId`, and both endpoints answered every call with HTTP 400 "The poolRtId field is
     // required" - unreachable, and the CLI verb along with them. Found while trying to bring a
     // tenant's deployment site back up on a local kind cluster.
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> UndeployDeploymentSiteAsync([Required][FromQuery] OctoObjectId deploymentSiteRtId)
     {
         var tenantId = HttpContext.GetTenantId();
@@ -208,6 +211,7 @@ public class DeploymentSiteController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(OperationFailedErrorDto), StatusCodes.Status409Conflict)]
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> DeployWorkloadAsync([Required][FromQuery] OctoObjectId workloadRtId)
     {
         var tenantId = HttpContext.GetTenantId();
@@ -267,6 +271,7 @@ public class DeploymentSiteController : ControllerBase
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> UndeployWorkloadAsync([Required][FromQuery] OctoObjectId workloadRtId)
     {
         var tenantId = HttpContext.GetTenantId();
@@ -312,6 +317,7 @@ public class DeploymentSiteController : ControllerBase
     [ProducesResponseType(typeof(AdapterPoolScaleResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> ScaleAdapterPoolAsync([Required][FromQuery] OctoObjectId workloadRtId,
         [Required][FromQuery] int replicas)
     {

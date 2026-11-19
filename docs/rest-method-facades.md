@@ -119,6 +119,26 @@ On both paths a token whose `tenant_id` does not name the route tenant (or has n
   did, with the same services; the two cross-tenant writes (pool mirrors, secret default projection) are the service's own
   provisioning paths, not widened by the method.
 
+## Deprecation (AB#9051)
+
+The 22 facade endpoints carry `[OctoRestDeprecated(Wave = "CommunicationWave3", Link = <methods page>)]`
+(`TenantApi/v1/CommunicationRestDeprecation.cs`; mechanics: `octo-common-services/docs/rest-deprecation.md`). Every response
+carries `Link: <https://docs.meshmakers.cloud/docs/technologyGuide/communication/methods>; rel="deprecation"`, OpenAPI marks the
+operations `deprecated`, and `octo.rest.deprecated.calls` counts them per endpoint template and client id. The `Deprecation`
+header follows once `RestDeprecation:Waves:CommunicationWave3:Since` is set (Helm `restDeprecation.waves.CommunicationWave3.since`,
+by Ops on the first production delivery of the release); `Sunset` is never configured (to be announced, Gerald decides after the
+F5.x Features). Tests: `IntegrationTests/Api/CommunicationRestDeprecationTests.cs`.
+
+What stays REST, without the attribute:
+
+| Endpoints | Why |
+|---|---|
+| every `GET` (lists, status, debug history, workloads by chart, schemas) | reads: no operation to move; they use GraphQL queries or stay REST |
+| `Communication/validate-expression`, `PipelineDefinition/parse-node`, `parse-all-nodes`, `update-node`, the pipeline schema and node lists, domains, workload variables | stateless tools: no entity, no state change |
+| `Communication/encrypt-value` | deprecated on its own (AB#5537, use `ValueOverride.SecretValue`); takes a secret, gets no new surface |
+| `Communication/enable`, `disable`, `PUT lifecycle` | tenant-level capability and configuration, they install or remove the very model a method would live in |
+| `ServiceAccount/reconcile`, `rotateSecret`, `switchToImpersonation`, `SecretDefaults/reconcile`, `notifications/schedule/sync`, `notifications/subscriptions/{id}/deploy|undeploy`, `signal/channel/*`, `system/v1/Diagnostics/reconfigureLogLevel` | not migrated by F5.3 (open scope question on AB#5701); a later wave may move them |
+
 ## Error parameter `reason` (additive)
 
 The deploy, debug and data-flow failures (`PIPELINE_DEPLOY_REJECTED`, `PIPELINE_DEPLOY_FAILED`,

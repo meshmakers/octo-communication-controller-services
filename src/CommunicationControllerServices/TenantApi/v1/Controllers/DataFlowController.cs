@@ -11,6 +11,7 @@ using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.Syst
 using Microsoft.AspNetCore.Authorization;
 using static Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service.CommunicationRestFacade;
 using Microsoft.AspNetCore.Mvc;
+using Meshmakers.Octo.Services.RestDeprecation;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
 
@@ -52,6 +53,7 @@ public class DataFlowController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> DeployDataFlow([Required][FromQuery] OctoObjectId dataFlowRtId)
     {
         var tenantId = HttpContext.GetTenantId();
@@ -105,6 +107,7 @@ public class DataFlowController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> UndeployDataFlow([Required][FromQuery] OctoObjectId dataFlowRtId)
     {
         var tenantId = HttpContext.GetTenantId();

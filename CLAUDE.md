@@ -346,6 +346,12 @@ the parity table: `docs/rest-method-facades.md`.
   first and those services fall back to `CommunicationMethodCaller.Current`. A new handler must open it too; a new service
   that reads `HttpContext.User` or the bearer must fall back to it. Tests: `DeployPipelineElevationGateTests` (method caller),
   `CommunicationRestFacadeTests.ADeployInsideTheHandler_SeesTheCaller_NotTheSystemPath`.
+- **Deprecation (AB#9051).** The 22 facade endpoints carry `[OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3,
+  Link = CommunicationRestDeprecation.MethodsLink)]` (wave `CommunicationWave3`, `TenantApi/v1/CommunicationRestDeprecation.cs`):
+  `Link` header, OpenAPI `deprecated`, counter `octo.rest.deprecated.calls`; `Deprecation` only once
+  `RestDeprecation:Waves:CommunicationWave3:Since` is set at rollout; never `Sunset` until Gerald decides it. A new facade endpoint
+  gets the attribute and a row in `CommunicationRestDeprecationTests` (it pins exactly the marked routes); an endpoint that stays
+  REST gets none (list with reasons: `docs/rest-method-facades.md`, "Deprecation").
 - **Registration.** `AddCommunicationCkMethodHost` registers the facade, `AddCkMethodAudit`, the evaluator and the CK-cache
   definition source always (switch off: direct path only) and `AddCkMethodDispatcher` when hosted;
   `AddCommunicationMethodDiscovery` adds the registry feed. A test that builds the host needs an `IDistributionEventHubService`

@@ -11,6 +11,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service;
 using Microsoft.AspNetCore.Authorization;
 using static Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service.CommunicationRestFacade;
 using Microsoft.AspNetCore.Mvc;
+using Meshmakers.Octo.Services.RestDeprecation;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
 
@@ -89,6 +90,7 @@ public class WorkloadController : ControllerBase
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> UpdateChartVersion(
         [Required] OctoObjectId workloadRtId,
         [Required][FromBody] UpdateChartVersionDto body)
