@@ -8,6 +8,7 @@ using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.Syst
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using static Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service.CommunicationRestFacade;
+using Meshmakers.Octo.Services.RestDeprecation;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
 
@@ -43,6 +44,7 @@ public class PipelineTriggerController : ControllerBase
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status400BadRequest)]
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> DeployTrigger()
     {
         var tenantId = HttpContext.GetTenantId();
@@ -93,6 +95,7 @@ public class PipelineTriggerController : ControllerBase
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse),StatusCodes.Status400BadRequest)]
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> UndeployTrigger()
     {
         var tenantId = HttpContext.GetTenantId();

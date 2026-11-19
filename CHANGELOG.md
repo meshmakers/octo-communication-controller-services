@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- AB#9051 New: the 22 communication endpoints that are facades of System.Communication methods (AB#9048, AB#9049, AB#9050) are
+  deprecated in wave `CommunicationWave3`: every response carries `Link: <…/technologyGuide/communication/methods>;
+  rel="deprecation"`, the OpenAPI operations are `deprecated`, and `octo.rest.deprecated.calls` counts the calls per endpoint and
+  client id. The `Deprecation` header follows once `restDeprecation.waves.CommunicationWave3.since` is set at the first production
+  delivery; there is no `Sunset` header and no sunset date. Response headers only; routes, bodies and status codes are unchanged.
+  The endpoints that stay REST and why: `docs/rest-method-facades.md`, "Deprecation".
+
 - AB#9050 New: System.Communication 4.19.0 declares the deployment operations as CK methods - `DeploymentSite.Deploy-1` /
   `Undeploy-1`, `DeployableWorkload.Deploy-1` / `Undeploy-1`, `AdapterPool.Scale-1` and the static
   `PipelineTrigger.DeployAll-1` / `UndeployAll-1` (role `CommunicationManagement`) - and the seven endpoints

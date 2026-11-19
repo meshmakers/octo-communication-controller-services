@@ -12,6 +12,7 @@ using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.Syst
 using static Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service.CommunicationRestFacade;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Meshmakers.Octo.Services.RestDeprecation;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
 
@@ -96,6 +97,7 @@ public class AdapterPoolController : ControllerBase
     [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
     [ProducesResponseType(typeof(AdapterPoolMirrorSyncResult), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> RefreshMirrorsAsync()
     {
         var tenantId = HttpContext.GetTenantId();
@@ -138,6 +140,7 @@ public class AdapterPoolController : ControllerBase
     [Authorize(Constants.TenantCommunicationApiReadWritePolicy)]
     [ProducesResponseType(typeof(AdapterPoolMirrorSyncResult), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> PublishMirrorsAsync()
     {
         var tenantId = HttpContext.GetTenantId();
@@ -351,6 +354,7 @@ public class AdapterPoolController : ControllerBase
     [ProducesResponseType(typeof(AdapterPoolLeaseResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> GrantLeaseAsync([Required] OctoObjectId adapterPoolRtId,
         [Required] [FromBody] GrantAdapterPoolLeaseRequestDto body)
     {
@@ -499,6 +503,7 @@ public class AdapterPoolController : ControllerBase
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status409Conflict)]
+    [OctoRestDeprecated(Wave = CommunicationRestDeprecation.Wave3, Link = CommunicationRestDeprecation.MethodsLink)]
     public async Task<IActionResult> CancelQueuedExecutionAsync([Required] OctoObjectId adapterPoolRtId,
         [Required] string executionId)
     {
