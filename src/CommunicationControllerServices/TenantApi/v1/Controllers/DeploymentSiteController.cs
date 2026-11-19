@@ -332,11 +332,15 @@ public class DeploymentSiteController : ControllerBase
             {
                 if (response.Success)
                 {
-                    return Ok(new AdapterPoolScaleResultDto(ValueOf<RtAdapterPoolScaleResultRecord>(response)?.Replicas ?? 0));
+                    // a success without the result record breaks the handler contract: never report a count of 0
+                    return ValueOf<RtAdapterPoolScaleResultRecord>(response) is { } scaled
+                        ? Ok(new AdapterPoolScaleResultDto(scaled.Replicas))
+                        : PlatformError(CkMethodError.Create(CkMethodErrorCodes.MethodHandlerFailed));
                 }
 
-                // the one validation the handler makes is the REST check of a negative count, with the REST text
-                return response.Error?.Code == CkMethodErrorCodes.MethodValidationFailed
+                // the handler's REST check of a negative count answers the REST text; any other validation failure
+                // (e.g. a parameter the host could not bind) keeps its own text
+                return IsNegativeReplicas(response.Error)
                     ? BadRequest(new ErrorResponse { ErrorMessage = NegativeReplicasMessage })
                     : DeploymentFailure(response);
             },
@@ -367,6 +371,13 @@ public class DeploymentSiteController : ControllerBase
 
     /// <summary>The 400 text of a negative member count (both paths).</summary>
     internal const string NegativeReplicasMessage = "Replicas must not be negative.";
+
+    /// <summary><c>true</c> for the handler's validation failure of a negative count (field <c>replicas</c>, reason <c>negative</c>).</summary>
+    private static bool IsNegativeReplicas(CkMethodError? error) =>
+        error?.Code == CkMethodErrorCodes.MethodValidationFailed &&
+        error.Parameters.TryGetValue(CkMethodErrorParameters.Field, out var field) && field == "replicas" &&
+        error.Parameters.TryGetValue(CkMethodErrorParameters.Reason, out var reason) &&
+        reason == AdapterPoolScaleHandler.NegativeReplicas;
 }
 
 /// <summary>

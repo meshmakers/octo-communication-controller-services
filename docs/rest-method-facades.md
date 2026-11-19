@@ -85,7 +85,7 @@ paths. This also closes the same gap for GraphQL callers of the methods (since A
 | `POST DeploymentSite/workloads/deploy?workloadRtId=` | `DeployableWorkload.Deploy-1` | none: 204, or 200 with `warning` (the method result `warning`); 409 / 400 as for the site; timeout 90 s (one service account provisioning of up to 30 s) |
 | `POST DeploymentSite/workloads/undeploy?workloadRtId=` | `DeployableWorkload.Undeploy-1` | none: open while Communication is disabled, 400 with the service's text (`WORKLOAD_UNDEPLOY_FAILED`); timeout 60 s |
 | `POST DeploymentSite/workloads/adapter-pool/scale?workloadRtId=&replicas=` | `AdapterPool.Scale-1` | none: a negative count answers the REST text 400 (method: `METHOD_VALIDATION_FAILED`, field `replicas`), 409 / 400 as for the site, 200 with the effective count; a workload that is no adapter pool is the service's refusal (400) as before; timeout 30 s |
-| `POST PipelineTrigger/deploy` | `PipelineTrigger.DeployAll-1` (static) | a failure answers 400 with the caller-safe text of the method (the controller's own exception text, otherwise a fixed text with the invocation id) instead of any exception text; timeout 120 s |
+| `POST PipelineTrigger/deploy` | `PipelineTrigger.DeployAll-1` (static) | a failure answers 400 with the caller-safe text of the method (the controller's own exception text, otherwise a fixed text; on the method path it names the invocation id) instead of any exception text, on both paths; timeout 120 s |
 | `POST PipelineTrigger/undeploy` | `PipelineTrigger.UndeployAll-1` (static) | as `deploy` |
 
 On both paths a token whose `tenant_id` does not name the route tenant (or has none) is answered `403` with

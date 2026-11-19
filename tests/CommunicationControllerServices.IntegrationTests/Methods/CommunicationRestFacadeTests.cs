@@ -567,6 +567,29 @@ public sealed class CommunicationRestFacadeTests(CommunicationControllerFixture 
     }
 
     /// <summary>
+    ///     A failing trigger deploy or undeploy never answers the text of an unknown exception, on either path (review bot
+    ///     finding 3 on PR #120).
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ATriggerFailure_NeverAnswersAnUnknownExceptionText_OnBothPaths(bool withRole)
+    {
+        _trigger.UpdateScheduleAsync(TenantId)
+            .Returns<Task>(_ => throw new InvalidOperationException("internal detail mongodb://user@host"));
+        _trigger.RemoveScheduleAsync(TenantId)
+            .Returns<Task>(_ => throw new InvalidOperationException("internal detail mongodb://user@host"));
+        var user = Caller(withRole ? [CommunicationManagement] : ["Development"]);
+
+        foreach (var result in new[] { await Trigger(user).DeployTrigger(), await Trigger(user).UndeployTrigger() })
+        {
+            StatusOf(result).Should().Be(StatusCodes.Status400BadRequest);
+            ((ErrorResponse)((ObjectResult)result).Value!).ErrorMessage.Should().NotContain("internal detail")
+                .And.Contain("could not be");
+        }
+    }
+
+    /// <summary>
     ///     Abuse case of AB#9050: a caller with the declared role but a token of another tenant deploys nothing - not in the
     ///     route tenant, not in the token's tenant (every service call names a tenant; none happened).
     /// </summary>

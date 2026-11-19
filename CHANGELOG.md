@@ -12,7 +12,7 @@
   204 / 200 with the warning for a workload deploy, 200 with the effective count for a scale. Behaviour changes: a token
   whose `tenant_id` does not name the route tenant is answered 403 `tenant-not-allowed` on every path; a failing trigger
   deploy or undeploy answers the caller-safe text of the method (the controller's own exception text, otherwise a fixed
-  text with the invocation id) instead of any exception text; an unexpected exception of a site, workload or scale operation
+  text, with the invocation id on the method path) instead of any exception text, on both paths; an unexpected exception of a site, workload or scale operation
   answers 500 without its text as before, now as `METHOD_HANDLER_FAILED`; the method timeout bounds the call (504: deploys
   60/90 s, undeploys 120/60 s, scale 30 s, triggers 120 s); a started operation no longer depends on the HTTP request.
   Parity table: `docs/rest-method-facades.md`.

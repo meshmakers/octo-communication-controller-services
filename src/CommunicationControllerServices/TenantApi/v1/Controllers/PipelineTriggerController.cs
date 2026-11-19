@@ -73,7 +73,13 @@ public class PipelineTriggerController : ControllerBase
                 catch (Exception e)
                 {
                     _logger.LogError(e, "Failed to deploy triggers for tenant");
-                    return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
+                    // AB#9050: the caller-safe text on this path too (the controller's own exception text, never the text
+                    // of an unknown exception), as on the method path
+                    return BadRequest(new ErrorResponse
+                    {
+                        ErrorMessage = CommunicationMethodSupport.CallerSafeMessage(e) ??
+                                       "The pipeline triggers could not be deployed; see the communication controller log."
+                    });
                 }
             }, FailureOf);
     }
@@ -119,7 +125,13 @@ public class PipelineTriggerController : ControllerBase
                 catch (Exception e)
                 {
                     _logger.LogError(e, "Failed to undeploy triggers for tenant");
-                    return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
+                    // AB#9050: the caller-safe text on this path too (the controller's own exception text, never the text
+                    // of an unknown exception), as on the method path
+                    return BadRequest(new ErrorResponse
+                    {
+                        ErrorMessage = CommunicationMethodSupport.CallerSafeMessage(e) ??
+                                       "The pipeline triggers could not be undeployed; see the communication controller log."
+                    });
                 }
             }, FailureOf);
     }
