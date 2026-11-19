@@ -33,6 +33,12 @@ internal static class CommunicationRestFacade
     /// <summary>The declaring type of the DataFlow methods.</summary>
     public const string DataFlowCkTypeId = "System.Communication/DataFlow";
 
+    /// <summary>The declaring type of the DeploymentSite methods (AB#9050).</summary>
+    public const string DeploymentSiteCkTypeId = "System.Communication/DeploymentSite";
+
+    /// <summary>The declaring type of the PipelineTrigger methods (AB#9050).</summary>
+    public const string PipelineTriggerCkTypeId = "System.Communication/PipelineTrigger";
+
     /// <summary>
     ///     The bearer token of the request (without the scheme), forwarded with the method call so the handler's services can
     ///     act for the caller as on the REST path (identity lookups, delegation). Sensitive: never logged.

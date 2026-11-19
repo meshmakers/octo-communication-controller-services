@@ -1,5 +1,33 @@
 # Changelog
 
+## 4.19.0 - 2026-11-19
+
+_Required bump level: minor._
+
+### Added
+
+- Method 'DeploymentSite-1/Deploy-1' added _(minor — purely additive method)_
+- Method 'DeploymentSite-1/Undeploy-1' added _(minor — purely additive method)_
+- Method 'DeployableWorkload-1/Deploy-1' added _(minor — purely additive method)_
+- Method 'DeployableWorkload-1/Undeploy-1' added _(minor — purely additive method)_
+- Method 'AdapterPool-1/Scale-1' added _(minor — purely additive method)_
+- Method 'PipelineTrigger-1/DeployAll-1' added _(minor — purely additive method)_
+- Method 'PipelineTrigger-1/UndeployAll-1' added _(minor — purely additive method)_
+- Attribute 'MethodResultReplicas-1' added _(minor — purely additive element)_
+- Record 'WorkloadDeployResult-1' added _(minor — purely additive element)_
+- Record 'AdapterPoolScaleResult-1' added _(minor — purely additive element)_
+
+The deployment operations of the REST API as CK methods (AB#9050, Feature AB#5701 F5.3), handled by the communication
+controller (`handler: service`); the REST endpoints become facades of them with unchanged routes, bodies and status codes.
+Every method declares `roles: [CommunicationManagement]`. `PipelineTrigger.DeployAll` / `UndeployAll` are static (they act on
+every trigger of the calling tenant); the names leave `Deploy-1` free for a later per-trigger method. `DeploymentSite.Deploy`,
+`DeployableWorkload.Deploy` and `AdapterPool.Scale` refuse with `COMMUNICATION_DISABLED` while Communication is disabled for the
+tenant (REST 409, AB#4255); the undeploys stay open. The undeploys are not idempotent (a repeated call answers "not deployed").
+No parameter or result is sensitive and no method sets `execution.mode`, so `minEngineVersion` stays. The deploys return once
+the operator was told; the rollout it reports in `DeploymentState` takes longer than the accept bound, so
+`DeploymentSite.Deploy` / `Undeploy` and `DeployableWorkload.Deploy` are candidates for `execution.mode: async` once F3.6
+(AB#5694) is available. No access changes and no acknowledgement.
+
 ## 4.18.0 - 2026-11-09
 
 _Required bump level: minor._

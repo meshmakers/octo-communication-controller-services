@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- AB#9050 New: System.Communication 4.19.0 declares the deployment operations as CK methods - `DeploymentSite.Deploy-1` /
+  `Undeploy-1`, `DeployableWorkload.Deploy-1` / `Undeploy-1`, `AdapterPool.Scale-1` and the static
+  `PipelineTrigger.DeployAll-1` / `UndeployAll-1` (role `CommunicationManagement`) - and the seven endpoints
+  `DeploymentSite/deploy`, `undeploy`, `workloads/deploy`, `workloads/undeploy`, `workloads/adapter-pool/scale`,
+  `PipelineTrigger/deploy` and `undeploy` are facades of them, like the 15 of AB#9048 (method path in process, guarded direct
+  path with `Reason=role-missing` etc., one Method audit event per call). Routes, bodies and status codes are unchanged:
+  409 while Communication is disabled (`COMMUNICATION_DISABLED` on the method), 400 with the service's text for a refusal,
+  204 / 200 with the warning for a workload deploy, 200 with the effective count for a scale. Behaviour changes: a token
+  whose `tenant_id` does not name the route tenant is answered 403 `tenant-not-allowed` on every path; a failing trigger
+  deploy or undeploy answers the caller-safe text of the method (the controller's own exception text, otherwise a fixed
+  text with the invocation id) instead of any exception text; an unexpected exception of a site, workload or scale operation
+  answers 500 without its text as before, now as `METHOD_HANDLER_FAILED`; the method timeout bounds the call (504: deploys
+  60/90 s, undeploys 120/60 s, scale 30 s, triggers 120 s); a started operation no longer depends on the HTTP request.
+  Parity table: `docs/rest-method-facades.md`.
+
 - AB#9048 / AB#9049 New: the adapter, adapter pool, pipeline, data-flow and workload operation endpoints (15, Feature F5.3
   AB#5701) are facades of the System.Communication CK methods: a caller with `CommunicationManagement` is served by the
   method in process (one Method audit event, transport `in-process`, detached from the request); every other caller that

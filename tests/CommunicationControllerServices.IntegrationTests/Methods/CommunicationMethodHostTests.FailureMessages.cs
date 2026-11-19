@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
@@ -31,7 +32,15 @@ public sealed partial class CommunicationMethodHostTests
         ["PIPELINE_DEBUG_CHANGE_FAILED"] = SystemCommunicationCkIds.PipelineSetDebuggingMethodId,
         ["PIPELINE_MOVE_FAILED"] = SystemCommunicationCkIds.PipelineMoveToAdapterMethodId,
         ["DATA_FLOW_DEPLOY_FAILED"] = SystemCommunicationCkIds.DataFlowDeployMethodId,
-        ["DATA_FLOW_UNDEPLOY_FAILED"] = SystemCommunicationCkIds.DataFlowUndeployMethodId
+        ["DATA_FLOW_UNDEPLOY_FAILED"] = SystemCommunicationCkIds.DataFlowUndeployMethodId,
+        // AB#9050
+        ["DEPLOYMENT_SITE_DEPLOY_FAILED"] = SystemCommunicationCkIds.DeploymentSiteDeployMethodId,
+        ["DEPLOYMENT_SITE_UNDEPLOY_FAILED"] = SystemCommunicationCkIds.DeploymentSiteUndeployMethodId,
+        ["WORKLOAD_DEPLOY_FAILED"] = SystemCommunicationCkIds.DeployableWorkloadDeployMethodId,
+        ["WORKLOAD_UNDEPLOY_FAILED"] = SystemCommunicationCkIds.DeployableWorkloadUndeployMethodId,
+        ["ADAPTER_POOL_SCALE_FAILED"] = SystemCommunicationCkIds.AdapterPoolScaleMethodId,
+        ["PIPELINE_TRIGGERS_DEPLOY_FAILED"] = SystemCommunicationCkIds.PipelineTriggerDeployAllMethodId,
+        ["PIPELINE_TRIGGERS_UNDEPLOY_FAILED"] = SystemCommunicationCkIds.PipelineTriggerUndeployAllMethodId
     };
 
     public static TheoryData<string> MessageErrorCodes() => new(MessageErrors.Keys);
@@ -61,7 +70,7 @@ public sealed partial class CommunicationMethodHostTests
         var dataFlowRtId = OctoObjectId.GenerateNewId();
         var unexpected = new InvalidOperationException(InternalDetail);
         object? parameters = null;
-        var target = pipeline.RtId.ToString();
+        string? target = pipeline.RtId.ToString();
         switch (code)
         {
             case "PIPELINE_DEPLOY_REJECTED":
@@ -97,6 +106,42 @@ public sealed partial class CommunicationMethodHostTests
                 _adapterService.UndeployDataFlowAsync(TenantId, dataFlowRtId).Throws(unexpected);
                 target = dataFlowRtId.ToString();
                 break;
+            // AB#9050: the deployment handlers let only the service's own refusal (its REST text) become the declared
+            // error; any other exception is METHOD_HANDLER_FAILED (REST 500), see CommunicationMethodHostTests.Deployment.
+            case "DEPLOYMENT_SITE_DEPLOY_FAILED":
+                _deploymentSites.DeployDeploymentSiteAsync(TenantId, dataFlowRtId)
+                    .Throws(DeploymentSiteServiceException.DeploymentSiteNotFound(TenantId, dataFlowRtId));
+                target = dataFlowRtId.ToString();
+                break;
+            case "DEPLOYMENT_SITE_UNDEPLOY_FAILED":
+                _deploymentSites.UndeployDeploymentSiteAsync(TenantId, dataFlowRtId)
+                    .Throws(DeploymentSiteServiceException.DeploymentSiteNotFound(TenantId, dataFlowRtId));
+                target = dataFlowRtId.ToString();
+                break;
+            case "WORKLOAD_DEPLOY_FAILED":
+                _deploymentSites.DeployWorkloadAsync(TenantId, dataFlowRtId)
+                    .Throws(DeploymentSiteServiceException.WorkloadNotInDeploymentSite(TenantId, dataFlowRtId));
+                target = dataFlowRtId.ToString();
+                break;
+            case "WORKLOAD_UNDEPLOY_FAILED":
+                _deploymentSites.UndeployWorkloadAsync(TenantId, dataFlowRtId)
+                    .Throws(DeploymentSiteServiceException.WorkloadNotFound(TenantId, dataFlowRtId));
+                target = dataFlowRtId.ToString();
+                break;
+            case "ADAPTER_POOL_SCALE_FAILED":
+                _deploymentSites.ScaleAdapterPoolAsync(TenantId, dataFlowRtId, 2)
+                    .Throws(DeploymentSiteServiceException.WorkloadIsNotAnAdapterPool(TenantId, dataFlowRtId, "app"));
+                target = dataFlowRtId.ToString();
+                parameters = new { replicas = 2 };
+                break;
+            case "PIPELINE_TRIGGERS_DEPLOY_FAILED":
+                _trigger.UpdateScheduleAsync(TenantId).Throws(unexpected);
+                target = null;
+                break;
+            case "PIPELINE_TRIGGERS_UNDEPLOY_FAILED":
+                _trigger.RemoveScheduleAsync(TenantId).Throws(unexpected);
+                target = null;
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(code), code, "add the failure arrangement");
         }
@@ -108,7 +153,9 @@ public sealed partial class CommunicationMethodHostTests
         method.Error.Parameters.Should().ContainKey("message");
         method.Error.Parameters["message"].Should().NotBeNullOrWhiteSpace();
         JsonSerializer.Serialize(method.Error).Should().NotContain("internal detail");
-        if (code is not ("PIPELINE_DEPLOY_REJECTED" or "PIPELINE_MOVE_FAILED"))
+        if (code is not ("PIPELINE_DEPLOY_REJECTED" or "PIPELINE_MOVE_FAILED" or "DEPLOYMENT_SITE_DEPLOY_FAILED"
+            or "DEPLOYMENT_SITE_UNDEPLOY_FAILED" or "WORKLOAD_DEPLOY_FAILED" or "WORKLOAD_UNDEPLOY_FAILED"
+            or "ADAPTER_POOL_SCALE_FAILED"))
         {
             method.Error.Parameters["message"].Should().EndWith($"(invocation {invocationId}).");
         }

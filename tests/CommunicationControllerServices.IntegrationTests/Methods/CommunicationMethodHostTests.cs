@@ -72,6 +72,13 @@ public sealed partial class CommunicationMethodHostTests(CommunicationController
     private readonly ILeaseService _leases = Substitute.For<ILeaseService>();
     private readonly ILeaseSchedulerService _scheduler = Substitute.For<ILeaseSchedulerService>();
     private readonly ITriggerManagementService _trigger = Substitute.For<ITriggerManagementService>();
+
+    // AB#9050: the deployment site service and the Communication-enabled flag of the deployment methods
+    private readonly IDeploymentSiteService _deploymentSites = Substitute.For<IDeploymentSiteService>();
+
+    private readonly Meshmakers.Octo.Services.Infrastructure.Services.IConfigurationService _communicationConfiguration =
+        Substitute.For<Meshmakers.Octo.Services.Infrastructure.Services.IConfigurationService>();
+
     private ServiceProvider? _provider;
 
     private string TenantId => fixture.TestTenantId;
@@ -99,7 +106,9 @@ public sealed partial class CommunicationMethodHostTests(CommunicationController
             o.AuthorityUrl = Authority);
         services.AddSingleton(_repository).AddSingleton(_adapterService).AddSingleton(_lifecycle)
             .AddSingleton(_provisioning).AddSingleton(_events).AddSingleton(_mirrors).AddSingleton(_leases)
-            .AddSingleton(_scheduler).AddSingleton(_trigger);
+            .AddSingleton(_scheduler).AddSingleton(_trigger).AddSingleton(_deploymentSites)
+            .AddSingleton(_communicationConfiguration);
+        _communicationConfiguration.IsEnabledAsync(Arg.Any<string>()).Returns(true);
 
         services.AddCommunicationCkMethodHost(configuration).Should().BeTrue();
         // AB#9048: the host now also registers the dispatcher of the REST facades and the method audit; this test calls the
@@ -144,7 +153,8 @@ public sealed partial class CommunicationMethodHostTests(CommunicationController
         CommunicationMethodHost.Handlers.Select(h => h.MethodId).Should().OnlyHaveUniqueItems();
 
         var cache = fixture.GetService<ICkCacheService>();
-        var declared = new[] { "Adapter", "DeployableWorkload", "AdapterPool", "Pipeline", "DataFlow" }
+        var declared = new[]
+                { "Adapter", "DeployableWorkload", "AdapterPool", "Pipeline", "DataFlow", "DeploymentSite", "PipelineTrigger" }
             .SelectMany(type => cache.GetRtCkType(TenantId, new RtCkId<CkTypeId>($"System.Communication/{type}"))
                 .DefinedMethods.Select(m => $"System.Communication/{type}.{m.MethodId}"))
             .ToList();
@@ -482,7 +492,7 @@ public sealed partial class CommunicationMethodHostTests(CommunicationController
         foreach (var service in new object[]
                      {
                          _repository, _adapterService, _lifecycle, _provisioning, _events, _mirrors, _leases, _scheduler,
-                         _trigger
+                         _trigger, _deploymentSites, _communicationConfiguration
                      })
         {
             service.ReceivedCalls().Should().BeEmpty($"{service.GetType().Name} must not be called for a refused caller");
@@ -497,6 +507,7 @@ public sealed partial class CommunicationMethodHostTests(CommunicationController
         SystemCommunicationCkIds.PipelineSetDebuggingMethodId => new { enabled = true },
         SystemCommunicationCkIds.PipelineMoveToAdapterMethodId => new
             { targetAdapterRtId = OctoObjectId.GenerateNewId().ToString() },
+        SystemCommunicationCkIds.AdapterPoolScaleMethodId => new { replicas = 2 },
         _ => new { }
     };
 

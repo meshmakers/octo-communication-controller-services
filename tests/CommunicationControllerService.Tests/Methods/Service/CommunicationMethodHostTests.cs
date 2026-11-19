@@ -36,7 +36,15 @@ internal class CommunicationMethodHostTests
         [SystemCommunicationCkIds.PipelineMoveToAdapterMethodId] = (200, true, true),
         [SystemCommunicationCkIds.DataFlowDeployMethodId] = (300, true, true),
         [SystemCommunicationCkIds.DataFlowUndeployMethodId] = (300, true, true),
-        [SystemCommunicationCkIds.DeployableWorkloadSetChartVersionMethodId] = (15, true, true)
+        [SystemCommunicationCkIds.DeployableWorkloadSetChartVersionMethodId] = (15, true, true),
+        // AB#9050: an undeploy repeated after a success answers "not deployed", so it is declared not idempotent
+        [SystemCommunicationCkIds.DeploymentSiteDeployMethodId] = (60, true, true),
+        [SystemCommunicationCkIds.DeploymentSiteUndeployMethodId] = (120, false, true),
+        [SystemCommunicationCkIds.DeployableWorkloadDeployMethodId] = (90, true, true),
+        [SystemCommunicationCkIds.DeployableWorkloadUndeployMethodId] = (60, false, true),
+        [SystemCommunicationCkIds.AdapterPoolScaleMethodId] = (30, true, true),
+        [SystemCommunicationCkIds.PipelineTriggerDeployAllMethodId] = (120, true, false),
+        [SystemCommunicationCkIds.PipelineTriggerUndeployAllMethodId] = (120, true, false)
     };
 
     /// <summary>

@@ -1,8 +1,9 @@
-# REST facades over the System.Communication methods (AB#9048, AB#9049)
+# REST facades over the System.Communication methods (AB#9048, AB#9049, AB#9050)
 
-Feature F5.3 (AB#5701, Epic AB#9221 CK v2). The 15 adapter, pool, pipeline, data-flow and workload operation endpoints
-of the communication controller are facades of the System.Communication CK methods the controller hosts (AB#8595,
-AB#8596). One implementation (the method handler) serves GraphQL and REST; routes, request and response bodies and status
+Feature F5.3 (AB#5701, Epic AB#9221 CK v2). The 22 adapter, pool, pipeline, data-flow, workload, deployment-site and
+pipeline-trigger operation endpoints of the communication controller are facades of the System.Communication CK methods the
+controller hosts (AB#8595, AB#8596; the seven deployment endpoints and their methods since AB#9050, System.Communication
+4.19.0). One implementation (the method handler) serves GraphQL and REST; routes, request and response bodies and status
 codes of REST stay as they were. REST is not removed and has no `Sunset` header.
 
 Code: `src/CommunicationControllerServices/Methods/Service/CommunicationMethodFacade.cs` (the facade),
@@ -79,12 +80,44 @@ paths. This also closes the same gap for GraphQL callers of the methods (since A
 | `POST DataFlow/deploy?dataFlowRtId=` | `DataFlow.Deploy-1` | 422 / 404 / 400 kept through `reason` |
 | `POST DataFlow/undeploy?dataFlowRtId=` | `DataFlow.Undeploy-1` | 422 / 404 / 400 kept through `reason` |
 | `PATCH Workload/{workloadRtId}/chart-version` | `DeployableWorkload.SetChartVersion-1` | an invalid version answers the REST text; the audit event says `source: CI/CD via CK method` |
+| `POST DeploymentSite/deploy?deploymentSiteRtId=` | `DeploymentSite.Deploy-1` | none: 409 while Communication is disabled (`COMMUNICATION_DISABLED`), 400 with the service's text for a refusal (`DEPLOYMENT_SITE_DEPLOY_FAILED`: unknown or Edge site); timeout 60 s |
+| `POST DeploymentSite/undeploy?deploymentSiteRtId=` | `DeploymentSite.Undeploy-1` | none: open while Communication is disabled, 400 with the service's text (`DEPLOYMENT_SITE_UNDEPLOY_FAILED`); timeout 120 s (it uninstalls the hosted workloads first) |
+| `POST DeploymentSite/workloads/deploy?workloadRtId=` | `DeployableWorkload.Deploy-1` | none: 204, or 200 with `warning` (the method result `warning`); 409 / 400 as for the site; timeout 90 s (one service account provisioning of up to 30 s) |
+| `POST DeploymentSite/workloads/undeploy?workloadRtId=` | `DeployableWorkload.Undeploy-1` | none: open while Communication is disabled, 400 with the service's text (`WORKLOAD_UNDEPLOY_FAILED`); timeout 60 s |
+| `POST DeploymentSite/workloads/adapter-pool/scale?workloadRtId=&replicas=` | `AdapterPool.Scale-1` | none: a negative count answers the REST text 400 (method: `METHOD_VALIDATION_FAILED`, field `replicas`), 409 / 400 as for the site, 200 with the effective count; a workload that is no adapter pool is the service's refusal (400) as before; timeout 30 s |
+| `POST PipelineTrigger/deploy` | `PipelineTrigger.DeployAll-1` (static) | a failure answers 400 with the caller-safe text of the method (the controller's own exception text, otherwise a fixed text with the invocation id) instead of any exception text; timeout 120 s |
+| `POST PipelineTrigger/undeploy` | `PipelineTrigger.UndeployAll-1` (static) | as `deploy` |
 
 On both paths a token whose `tenant_id` does not name the route tenant (or has none) is answered `403` with
 `METHOD_FORBIDDEN` / `tenant-not-allowed` and nothing is called. Platform errors map to the documented status codes of
 `CkMethodFacadeResults` (403, 404, 400, 504 for the method timeout, 503 when no handler serves it, 500 otherwise) with an
 `ErrorResponse` body that names the code, never a parameter value. A call beyond the method's deadline answers `504`
 (`METHOD_TIMEOUT`); REST had no deadline before.
+
+## Deployment endpoints (AB#9050)
+
+- **Communication-enabled gate.** `DeploymentSite.Deploy`, `DeployableWorkload.Deploy` and `AdapterPool.Scale` create or change
+  operator-managed cluster resources and refuse while Communication is disabled for the tenant (AB#4255). The gate lives in
+  `CommunicationEnabledGate` and runs in the handler (method path, also for GraphQL callers) and in the REST code (direct
+  path); both answer the same text. The undeploys and the trigger operations stay open, so remediation always works.
+- **Unexpected exceptions.** The site, workload and scale handlers turn only the service's own refusal
+  (`DeploymentSiteServiceException`, the text REST answered) into their declared error; any other exception is
+  `METHOD_HANDLER_FAILED` (REST: 500, as before; the text stays in the log). The trigger handlers turn every failure into
+  their declared error with the caller-safe text (REST answered every failure 400).
+- **Idempotency.** The deploys, the scale and the trigger operations are idempotent. The undeploys are not: a second call
+  after a successful one answers "not deployed".
+- **Async candidates.** The deploys return once the operator was told and the state was written; the operator reports the
+  rollout in `DeploymentState` later. Waiting for that report would exceed the accept bound, so `DeploymentSite.Deploy` /
+  `Undeploy` and `DeployableWorkload.Deploy` are candidates for `execution.mode: async` once F3.6 (AB#5694) is available.
+- **Data beyond the target** (for AB#8420 / AB#7040): `DeploymentSite.Undeploy` undeploys every workload the site hosts;
+  `DeployableWorkload.Deploy` reads the hosting site, the Helm repository configuration, the secret defaults and value
+  overrides, provisions the adapter's pipeline service account (identity client) and the standalone accounts its pipelines
+  use; for an adapter pool it refreshes the `LentAdapterPool` mirrors in the borrowing tenants, for an application it
+  projects the application's secret defaults into the tenants it serves; `AdapterPool.Scale` writes the requested count
+  through the workload lifecycle; `PipelineTrigger.DeployAll` / `UndeployAll` write the deployment state of every trigger
+  of the tenant and the bot service's recurring jobs of the tenant's schedule group. All of it is what the REST endpoints
+  did, with the same services; the two cross-tenant writes (pool mirrors, secret default projection) are the service's own
+  provisioning paths, not widened by the method.
 
 ## Error parameter `reason` (additive)
 

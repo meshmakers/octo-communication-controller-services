@@ -103,3 +103,9 @@ attributes:
     valueType: String
     isRuntimeState: true
     description: "Method result member: a warning about a step after the main operation, e.g. the move is committed but the redeploy on the new adapter failed. Absent when everything succeeded."
+
+  # AB#9050 (4.19.0): member of the result record of AdapterPool.Scale. Same rule as above: answer only, runtime state.
+  - id: MethodResultReplicas
+    valueType: Int
+    isRuntimeState: true
+    description: "Method result member: the member count an adapter pool scale actually requested from the operator (the request clamped to MinReplicas..MaxReplicas)."
