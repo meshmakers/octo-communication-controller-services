@@ -91,3 +91,19 @@ records:
       - id: ${this}/MethodResultWarning
         name: Warning
         isOptional: true
+
+  # AB#9050 (4.19.0): the results of DeployableWorkload.Deploy and AdapterPool.Scale, shaped like DeployWorkloadResultDto and
+  # AdapterPoolScaleResultDto.
+  - recordId: WorkloadDeployResult
+    description: 'Result of DeployableWorkload.Deploy: a warning when an explicit Helm value (ValuesYaml or Values) overrode a typed CPU/memory setting; absent otherwise. The same text is stored in the workload''s LastDeploymentWarning.'
+    isFinal: true
+    attributes:
+      - id: ${this}/MethodResultWarning
+        name: Warning
+        isOptional: true
+  - recordId: AdapterPoolScaleResult
+    description: 'Result of AdapterPool.Scale: the member count actually requested from the operator after the MinReplicas..MaxReplicas range of the pool was applied.'
+    isFinal: true
+    attributes:
+      - id: ${this}/MethodResultReplicas
+        name: Replicas

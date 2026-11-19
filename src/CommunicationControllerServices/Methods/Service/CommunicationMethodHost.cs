@@ -91,7 +91,23 @@ internal static class CommunicationMethodHost
         For<DataFlowUndeployHandler>(SystemCommunicationCkIds.DataFlowUndeployMethodId,
             "POST {tenantId}/v1/DataFlow/undeploy?dataFlowRtId="),
         For<DeployableWorkloadSetChartVersionHandler>(SystemCommunicationCkIds.DeployableWorkloadSetChartVersionMethodId,
-            "PATCH {tenantId}/v1/Workload/{workloadRtId}/chart-version")
+            "PATCH {tenantId}/v1/Workload/{workloadRtId}/chart-version"),
+
+        // AB#9050: deployment sites, workload deploy/undeploy, adapter pool scale and the pipeline trigger schedules.
+        For<DeploymentSiteDeployHandler>(SystemCommunicationCkIds.DeploymentSiteDeployMethodId,
+            "POST {tenantId}/v1/DeploymentSite/deploy?deploymentSiteRtId="),
+        For<DeploymentSiteUndeployHandler>(SystemCommunicationCkIds.DeploymentSiteUndeployMethodId,
+            "POST {tenantId}/v1/DeploymentSite/undeploy?deploymentSiteRtId="),
+        For<DeployableWorkloadDeployHandler>(SystemCommunicationCkIds.DeployableWorkloadDeployMethodId,
+            "POST {tenantId}/v1/DeploymentSite/workloads/deploy?workloadRtId="),
+        For<DeployableWorkloadUndeployHandler>(SystemCommunicationCkIds.DeployableWorkloadUndeployMethodId,
+            "POST {tenantId}/v1/DeploymentSite/workloads/undeploy?workloadRtId="),
+        For<AdapterPoolScaleHandler>(SystemCommunicationCkIds.AdapterPoolScaleMethodId,
+            "POST {tenantId}/v1/DeploymentSite/workloads/adapter-pool/scale?workloadRtId=&replicas="),
+        For<PipelineTriggerDeployAllHandler>(SystemCommunicationCkIds.PipelineTriggerDeployAllMethodId,
+            "POST {tenantId}/v1/PipelineTrigger/deploy"),
+        For<PipelineTriggerUndeployAllHandler>(SystemCommunicationCkIds.PipelineTriggerUndeployAllMethodId,
+            "POST {tenantId}/v1/PipelineTrigger/undeploy")
     ];
 
     /// <summary>Reads the options (the host registration runs before the service provider exists).</summary>

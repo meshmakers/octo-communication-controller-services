@@ -72,6 +72,13 @@ public sealed class CommunicationRestFacadeTests(CommunicationControllerFixture 
     private readonly ILeaseService _leases = Substitute.For<ILeaseService>();
     private readonly ILeaseSchedulerService _scheduler = Substitute.For<ILeaseSchedulerService>();
     private readonly ITriggerManagementService _trigger = Substitute.For<ITriggerManagementService>();
+
+    // AB#9050: the deployment site service and the Communication-enabled flag of the deployment endpoints
+    private readonly IDeploymentSiteService _deploymentSites = Substitute.For<IDeploymentSiteService>();
+
+    private readonly Meshmakers.Octo.Services.Infrastructure.Services.IConfigurationService _communicationConfiguration =
+        Substitute.For<Meshmakers.Octo.Services.Infrastructure.Services.IConfigurationService>();
+
     private readonly IHostApplicationLifetime _lifetime = Substitute.For<IHostApplicationLifetime>();
     private readonly CancellationTokenSource _hostStopping = new();
     private ServiceProvider? _provider;
@@ -101,7 +108,11 @@ public sealed class CommunicationRestFacadeTests(CommunicationControllerFixture 
             o.AuthorityUrl = "https://identity.test/");
         services.AddSingleton(_repository).AddSingleton(_adapterService).AddSingleton(_lifecycle)
             .AddSingleton(_provisioning).AddSingleton(_events).AddSingleton(_mirrors).AddSingleton(_leases)
-            .AddSingleton(_scheduler).AddSingleton(_trigger).AddSingleton(_lifetime);
+            .AddSingleton(_scheduler).AddSingleton(_trigger).AddSingleton(_lifetime).AddSingleton(_deploymentSites)
+            .AddSingleton(_communicationConfiguration);
+        _communicationConfiguration.IsEnabledAsync(Arg.Any<string>()).Returns(true);
+        // AB#9050: the tripwire of the in-process transport, asked at handler entry (RequestStateProbe)
+        services.AddCkInProcessAmbientStateProbe<RequestStateProbe>();
         services.AddSingleton(Substitute.For<Meshmakers.Octo.Common.DistributionEventHub.Services.IDistributionEventHubService>());
         services.AddSingleton<ICkMethodAuditRecorder>(_audit);
 
@@ -150,7 +161,15 @@ public sealed class CommunicationRestFacadeTests(CommunicationControllerFixture 
         { nameof(PipelineController.SetPipelineDebugging), SystemCommunicationCkIds.PipelineSetDebuggingMethodId },
         { nameof(DataFlowController.DeployDataFlow), SystemCommunicationCkIds.DataFlowDeployMethodId },
         { nameof(DataFlowController.UndeployDataFlow), SystemCommunicationCkIds.DataFlowUndeployMethodId },
-        { nameof(WorkloadController.UpdateChartVersion), SystemCommunicationCkIds.DeployableWorkloadSetChartVersionMethodId }
+        { nameof(WorkloadController.UpdateChartVersion), SystemCommunicationCkIds.DeployableWorkloadSetChartVersionMethodId },
+        // AB#9050
+        { nameof(DeploymentSiteController.DeployDeploymentSiteAsync), SystemCommunicationCkIds.DeploymentSiteDeployMethodId },
+        { nameof(DeploymentSiteController.UndeployDeploymentSiteAsync), SystemCommunicationCkIds.DeploymentSiteUndeployMethodId },
+        { nameof(DeploymentSiteController.DeployWorkloadAsync), SystemCommunicationCkIds.DeployableWorkloadDeployMethodId },
+        { nameof(DeploymentSiteController.UndeployWorkloadAsync), SystemCommunicationCkIds.DeployableWorkloadUndeployMethodId },
+        { nameof(DeploymentSiteController.ScaleAdapterPoolAsync), SystemCommunicationCkIds.AdapterPoolScaleMethodId },
+        { nameof(PipelineTriggerController.DeployTrigger), SystemCommunicationCkIds.PipelineTriggerDeployAllMethodId },
+        { nameof(PipelineTriggerController.UndeployTrigger), SystemCommunicationCkIds.PipelineTriggerUndeployAllMethodId }
     };
 
     [Fact]
@@ -243,7 +262,8 @@ public sealed class CommunicationRestFacadeTests(CommunicationControllerFixture 
         // A caller without the octo_api scope is refused by the REST policy before the action runs: the facade changes no
         // policy (the endpoints keep TenantCommunicationApiReadWritePolicy, execute keeps the read-only one).
         var action = new[] { typeof(AdapterController), typeof(AdapterPoolController), typeof(PipelineController),
-                typeof(DataFlowController), typeof(WorkloadController) }
+                typeof(DataFlowController), typeof(WorkloadController), typeof(DeploymentSiteController),
+                typeof(PipelineTriggerController) }
             .Select(t => t.GetMethod(endpoint)).Single(m => m != null)!;
         var policy = action.GetCustomAttributes<AuthorizeAttribute>().Select(a => a.Policy).Single(p => p != null);
         policy.Should().Be(endpoint == nameof(PipelineController.ExecutePipeline)
@@ -442,6 +462,160 @@ public sealed class CommunicationRestFacadeTests(CommunicationControllerFixture 
             .NotContain(n => n.Contains("Secret", StringComparison.OrdinalIgnoreCase) && n != "RequiresPipelineRedeploy");
     }
 
+    // ------------------------------------------------------------------ AB#9050: deployment endpoints
+
+    /// <summary>
+    ///     The facade opens no Mongo session or transaction around the dispatcher call, and the in-process transport runs the
+    ///     handler detached from the request: request-bound state the request holds (here a marker for a request session) is not
+    ///     visible at handler entry, otherwise the tripwire would fail the call before the handler.
+    /// </summary>
+    [Theory]
+    [InlineData(nameof(DeploymentSiteController.DeployDeploymentSiteAsync))]
+    [InlineData(nameof(DeploymentSiteController.DeployWorkloadAsync))]
+    [InlineData(nameof(DeploymentSiteController.ScaleAdapterPoolAsync))]
+    [InlineData(nameof(PipelineTriggerController.DeployTrigger))]
+    public async Task ADeploymentMethod_RunsOutsideTheRequest_NoAmbientSessionAtHandlerEntry(string endpoint)
+    {
+        var asked = RequestStateProbe.Asked;
+        RequestStateProbe.RequestSession.Value = "request-session";
+        IActionResult result;
+        try
+        {
+            result = await CallAsync(endpoint, Caller([CommunicationManagement]));
+        }
+        finally
+        {
+            RequestStateProbe.RequestSession.Value = null;
+        }
+
+        StatusOf(result).Should().BeLessThan(300, "the tripwire saw no request state at handler entry");
+        RequestStateProbe.Asked.Should().BeGreaterThan(asked, "the in-process transport asked the probe at handler entry");
+        ServiceCalls(endpoint).Should().Be(1);
+        _audit.Records.Should().ContainSingle().Which.Transport.Should().Be("in-process");
+    }
+
+    [Theory]
+    [InlineData(nameof(DeploymentSiteController.DeployDeploymentSiteAsync), true)]
+    [InlineData(nameof(DeploymentSiteController.DeployDeploymentSiteAsync), false)]
+    [InlineData(nameof(DeploymentSiteController.DeployWorkloadAsync), true)]
+    [InlineData(nameof(DeploymentSiteController.DeployWorkloadAsync), false)]
+    [InlineData(nameof(DeploymentSiteController.ScaleAdapterPoolAsync), true)]
+    [InlineData(nameof(DeploymentSiteController.ScaleAdapterPoolAsync), false)]
+    public async Task ADeployWhileCommunicationIsDisabled_Answers409_OnBothPaths_AndNothingIsDeployed(string endpoint,
+        bool withRole)
+    {
+        _communicationConfiguration.IsEnabledAsync(TenantId).Returns(false);
+
+        var result = await CallAsync(endpoint, Caller(withRole ? [CommunicationManagement] : ["Development"]));
+
+        var conflict = result.Should().BeOfType<ConflictObjectResult>().Subject;
+        ((Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors.OperationFailedErrorDto)conflict.Value!)
+            .Message.Should().Be(CommunicationEnabledGate.DisabledMessage(TenantId));
+        _deploymentSites.ReceivedCalls().Should().BeEmpty();
+        _audit.Records.Should().ContainSingle().Which.Transport.Should()
+            .Be(withRole ? "in-process" : CommunicationMethodFacade.FallbackTransport);
+    }
+
+    [Fact]
+    public async Task AWorkloadDeployWithAWarning_Answers200WithTheWarning_OnBothPaths()
+    {
+        var workload = OctoObjectId.GenerateNewId();
+        _deploymentSites.DeployWorkloadAsync(TenantId, workload).Returns("ValuesYaml overrides resources.limits.cpu");
+
+        var viaMethod = await Site(Caller([CommunicationManagement])).DeployWorkloadAsync(workload);
+        var direct = await Site(Caller(["Development"])).DeployWorkloadAsync(workload);
+
+        foreach (var result in new[] { viaMethod, direct })
+        {
+            ((OkObjectResult)result).Value.Should().BeOfType<DeployWorkloadResultDto>().Which.Warning.Should()
+                .Be("ValuesYaml overrides resources.limits.cpu");
+        }
+    }
+
+    [Fact]
+    public async Task AScaleWithANegativeCount_AnswersTheRestText_OnBothPaths()
+    {
+        var pool = OctoObjectId.GenerateNewId();
+
+        var viaMethod = await Site(Caller([CommunicationManagement])).ScaleAdapterPoolAsync(pool, -3);
+        var direct = await Site(Caller(["Development"])).ScaleAdapterPoolAsync(pool, -3);
+
+        foreach (var result in new[] { viaMethod, direct })
+        {
+            StatusOf(result).Should().Be(StatusCodes.Status400BadRequest);
+            ((ErrorResponse)((ObjectResult)result).Value!).ErrorMessage.Should()
+                .Be(DeploymentSiteController.NegativeReplicasMessage);
+        }
+
+        _deploymentSites.ReceivedCalls().Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ARefusalOfTheDeploymentService_Answers400WithItsText_OnBothPaths(bool withRole)
+    {
+        var site = OctoObjectId.GenerateNewId();
+        var refusal = DeploymentSiteServiceException.DeploymentSiteNotFound(TenantId, site);
+        _deploymentSites.UndeployDeploymentSiteAsync(TenantId, site).Returns<Task>(_ => throw refusal);
+
+        var result = await Site(Caller(withRole ? [CommunicationManagement] : ["Development"]))
+            .UndeployDeploymentSiteAsync(site);
+
+        StatusOf(result).Should().Be(StatusCodes.Status400BadRequest);
+        ((ErrorResponse)((ObjectResult)result).Value!).ErrorMessage.Should().Be(refusal.Message);
+    }
+
+    /// <summary>
+    ///     A failing trigger deploy or undeploy never answers the text of an unknown exception, on either path (review bot
+    ///     finding 3 on PR #120).
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ATriggerFailure_NeverAnswersAnUnknownExceptionText_OnBothPaths(bool withRole)
+    {
+        _trigger.UpdateScheduleAsync(TenantId)
+            .Returns<Task>(_ => throw new InvalidOperationException("internal detail mongodb://user@host"));
+        _trigger.RemoveScheduleAsync(TenantId)
+            .Returns<Task>(_ => throw new InvalidOperationException("internal detail mongodb://user@host"));
+        var user = Caller(withRole ? [CommunicationManagement] : ["Development"]);
+
+        foreach (var result in new[] { await Trigger(user).DeployTrigger(), await Trigger(user).UndeployTrigger() })
+        {
+            StatusOf(result).Should().Be(StatusCodes.Status400BadRequest);
+            ((ErrorResponse)((ObjectResult)result).Value!).ErrorMessage.Should().NotContain("internal detail")
+                .And.Contain("could not be");
+        }
+    }
+
+    /// <summary>
+    ///     Abuse case of AB#9050: a caller with the declared role but a token of another tenant deploys nothing - not in the
+    ///     route tenant, not in the token's tenant (every service call names a tenant; none happened).
+    /// </summary>
+    [Fact]
+    public async Task ATokenOfAnotherTenant_ChangesNothingInEitherTenant()
+    {
+        foreach (var endpoint in new[]
+                 {
+                     nameof(DeploymentSiteController.DeployDeploymentSiteAsync),
+                     nameof(DeploymentSiteController.UndeployDeploymentSiteAsync),
+                     nameof(DeploymentSiteController.DeployWorkloadAsync),
+                     nameof(DeploymentSiteController.UndeployWorkloadAsync),
+                     nameof(DeploymentSiteController.ScaleAdapterPoolAsync),
+                     nameof(PipelineTriggerController.DeployTrigger),
+                     nameof(PipelineTriggerController.UndeployTrigger)
+                 })
+        {
+            var result = await CallAsync(endpoint, Caller([CommunicationManagement], tenant: "another-tenant"));
+
+            StatusOf(result).Should().Be(StatusCodes.Status403Forbidden, endpoint);
+            _deploymentSites.ReceivedCalls().Should().BeEmpty(endpoint);
+            _trigger.ReceivedCalls().Should().BeEmpty(endpoint);
+            _communicationConfiguration.ReceivedCalls().Should().BeEmpty("not even the flag of a tenant was read");
+        }
+    }
+
     // ------------------------------------------------------------------ calls
 
     private async Task<IActionResult> CallAsync(string endpoint, ClaimsPrincipal user)
@@ -475,6 +649,7 @@ public sealed class CommunicationRestFacadeTests(CommunicationControllerFixture 
         var target = new RtEntityId(SystemCommunicationCkIds.RtCkAdapterTypeId, adapter.RtId);
         _repository.MovePipelineToAdapterAsync(TenantId, pipeline, adapter.RtId)
             .Returns(new PipelineMoveResult(pipeline, target, target));
+        _deploymentSites.ScaleAdapterPoolAsync(TenantId, pool, 2).Returns(2);
         ClearCalls();
 
         return endpoint switch
@@ -503,6 +678,13 @@ public sealed class CommunicationRestFacadeTests(CommunicationControllerFixture 
             nameof(DataFlowController.UndeployDataFlow) => await DataFlow(user).UndeployDataFlow(dataFlow),
             nameof(WorkloadController.UpdateChartVersion) => await Workload(user)
                 .UpdateChartVersion(workload, new UpdateChartVersionDto("1.2.3")),
+            nameof(DeploymentSiteController.DeployDeploymentSiteAsync) => await Site(user).DeployDeploymentSiteAsync(pool),
+            nameof(DeploymentSiteController.UndeployDeploymentSiteAsync) => await Site(user).UndeployDeploymentSiteAsync(pool),
+            nameof(DeploymentSiteController.DeployWorkloadAsync) => await Site(user).DeployWorkloadAsync(workload),
+            nameof(DeploymentSiteController.UndeployWorkloadAsync) => await Site(user).UndeployWorkloadAsync(workload),
+            nameof(DeploymentSiteController.ScaleAdapterPoolAsync) => await Site(user).ScaleAdapterPoolAsync(pool, 2),
+            nameof(PipelineTriggerController.DeployTrigger) => await Trigger(user).DeployTrigger(),
+            nameof(PipelineTriggerController.UndeployTrigger) => await Trigger(user).UndeployTrigger(),
             _ => throw new ArgumentOutOfRangeException(nameof(endpoint), endpoint, null)
         };
     }
@@ -527,6 +709,13 @@ public sealed class CommunicationRestFacadeTests(CommunicationControllerFixture 
             nameof(DataFlowController.DeployDataFlow) => (_adapterService, nameof(IAdapterService.DeployDataFlowAsync)),
             nameof(DataFlowController.UndeployDataFlow) => (_adapterService, nameof(IAdapterService.UndeployDataFlowAsync)),
             nameof(WorkloadController.UpdateChartVersion) => (_repository, nameof(ICommunicationRepository.UpdateWorkloadChartVersionAsync)),
+            nameof(DeploymentSiteController.DeployDeploymentSiteAsync) => (_deploymentSites, nameof(IDeploymentSiteService.DeployDeploymentSiteAsync)),
+            nameof(DeploymentSiteController.UndeployDeploymentSiteAsync) => (_deploymentSites, nameof(IDeploymentSiteService.UndeployDeploymentSiteAsync)),
+            nameof(DeploymentSiteController.DeployWorkloadAsync) => (_deploymentSites, nameof(IDeploymentSiteService.DeployWorkloadAsync)),
+            nameof(DeploymentSiteController.UndeployWorkloadAsync) => (_deploymentSites, nameof(IDeploymentSiteService.UndeployWorkloadAsync)),
+            nameof(DeploymentSiteController.ScaleAdapterPoolAsync) => (_deploymentSites, nameof(IDeploymentSiteService.ScaleAdapterPoolAsync)),
+            nameof(PipelineTriggerController.DeployTrigger) => (_trigger, nameof(ITriggerManagementService.UpdateScheduleAsync)),
+            nameof(PipelineTriggerController.UndeployTrigger) => (_trigger, nameof(ITriggerManagementService.RemoveScheduleAsync)),
             _ => throw new ArgumentOutOfRangeException(nameof(endpoint), endpoint, null)
         };
         return service.ReceivedCalls().Count(c => c.GetMethodInfo().Name == name);
@@ -541,7 +730,8 @@ public sealed class CommunicationRestFacadeTests(CommunicationControllerFixture 
     }
 
     private object[] Services() =>
-        [_repository, _adapterService, _lifecycle, _provisioning, _events, _mirrors, _leases, _scheduler, _trigger];
+        [_repository, _adapterService, _lifecycle, _provisioning, _events, _mirrors, _leases, _scheduler, _trigger,
+            _deploymentSites, _communicationConfiguration];
 
     private void AssertNothingWasCalled()
     {
@@ -621,6 +811,12 @@ public sealed class CommunicationRestFacadeTests(CommunicationControllerFixture 
     private WorkloadController Workload(ClaimsPrincipal user) => Controller(new WorkloadController(
         NullLogger<WorkloadController>.Instance, _repository, _events), user);
 
+    private DeploymentSiteController Site(ClaimsPrincipal user) => Controller(new DeploymentSiteController(
+        NullLogger<DeploymentSiteController>.Instance, _deploymentSites, _communicationConfiguration), user);
+
+    private PipelineTriggerController Trigger(ClaimsPrincipal user) => Controller(new PipelineTriggerController(
+        NullLogger<PipelineTriggerController>.Instance, _trigger), user);
+
     private static int StatusOf(IActionResult result) =>
         result is IStatusCodeActionResult { StatusCode: { } status } ? status : StatusCodes.Status200OK;
 
@@ -632,6 +828,26 @@ public sealed class CommunicationRestFacadeTests(CommunicationControllerFixture 
     private static Exception CommunicationRepositoryFailure(string message) =>
         (Exception)Activator.CreateInstance(typeof(CommunicationRepositoryException),
             BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public, null, [message], null)!;
+
+    /// <summary>
+    ///     AB#9050: stands for request-bound state a request could open around the facade call (a Mongo request session, a
+    ///     request principal scope). The in-process transport asks it at handler entry, in the handler's flow; detached from the
+    ///     request it must never see the value the test sets around the REST call.
+    /// </summary>
+    private sealed class RequestStateProbe : ICkInProcessAmbientStateProbe
+    {
+        public static readonly AsyncLocal<string?> RequestSession = new();
+        private static int _asked;
+
+        public static int Asked => Volatile.Read(ref _asked);
+
+        public bool IsRequestStateVisible(IServiceProvider handlerServices)
+        {
+            Interlocked.Increment(ref _asked);
+            return RequestSession.Value != null ||
+                   handlerServices.GetService<IHttpContextAccessor>()?.HttpContext != null;
+        }
+    }
 
     private sealed class CapturingAudit : ICkMethodAuditRecorder
     {

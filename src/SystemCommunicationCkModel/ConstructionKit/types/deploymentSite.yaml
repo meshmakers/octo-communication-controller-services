@@ -33,3 +33,30 @@ types:
     isOptional: true
   - id: ${this}/Environment
     name: Environment
+
+  # AB#9050 (4.19.0, Feature AB#5701 F5.3): deploy and undeploy of the REST DeploymentSiteController as CK methods, handled by
+  # the communication controller (handler: service). Roles as on Adapter (types/adapter.yaml). The call returns once the
+  # operator was told and the state was written; the operator provisions or removes the site afterwards and reports it in
+  # DeploymentState. Waiting for that report would exceed the accept bound, so both are candidates for execution.mode async
+  # once F3.6 (AB#5694) is available (a Major per method, Deploy-2).
+  methods:
+  - methodId: Deploy-1
+    description: "Deploys the deployment site (REST POST DeploymentSite/deploy?deploymentSiteRtId=): a Cloud site asks the central Communication Operator to provision the site (DeploymentSite CR, broker secret) and is set Deployed. An Edge site is refused. Workloads are not deployed; deploy them one by one afterwards."
+    errors:
+    - { code: COMMUNICATION_DISABLED, description: "Communication is disabled for the tenant; enable it first (REST 409). Nothing was changed." }
+    - { code: DEPLOYMENT_SITE_DEPLOY_FAILED, description: "The deployment site could not be deployed, e.g. it is an Edge site. Parameter message names the cause." }
+    authorization:
+      roles: [ CommunicationManagement ]
+    execution:
+      timeoutSeconds: 60
+      idempotent: true
+  - methodId: Undeploy-1
+    description: "Undeploys the deployment site (REST POST DeploymentSite/undeploy?deploymentSiteRtId=): uninstalls every workload it hosts, asks the operator to remove the site and sets it Undeployed (Edge: Disabled). Allowed while Communication is disabled, so remediation always works."
+    errors:
+    - { code: DEPLOYMENT_SITE_UNDEPLOY_FAILED, description: "The deployment site could not be undeployed, e.g. it is not deployed. Parameter message names the cause." }
+    authorization:
+      roles: [ CommunicationManagement ]
+    execution:
+      timeoutSeconds: 120
+      # a second call after a successful one answers DEPLOYMENT_SITE_UNDEPLOY_FAILED (not deployed): not safe to repeat blindly
+      idempotent: false

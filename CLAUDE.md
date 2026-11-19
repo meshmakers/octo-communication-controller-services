@@ -209,10 +209,11 @@ execute command that reports the execution like the adapter hub does - the pipel
 this repository). The sample pipeline `Methods/SamplePipelines/Device.UpdateFirmware-1.pipeline.yaml` is the one printed
 in the guide and is the pipeline definition of the integration tests.
 
-### CK method service handlers (AB#8595 / AB#8596, System.Communication 4.17.0 / 4.18.0)
+### CK method service handlers (AB#8595 / AB#8596 / AB#9050, System.Communication 4.17.0 / 4.18.0 / 4.19.0)
 
 System.Communication 4.17.0 declares the adapter, workload and adapter pool operations of the REST API as CK methods, 4.18.0
-the pipeline, data flow and workload chart-version operations
+the pipeline, data flow and workload chart-version operations, 4.19.0 (AB#9050) the deployment site, workload deploy /
+undeploy, adapter pool scale and pipeline trigger schedule operations
 (`handler: service`), and the controller handles them with the typed handler SDK of octo-common-services
 (`AddCkMethodHandlers`): one shared queue per method, announcement, heartbeat, caller token validation, the declared
 authorization and redaction are the host's. Since AB#9048 / AB#9049 the REST endpoints are facades of these methods (next
@@ -237,12 +238,27 @@ Code: `src/CommunicationControllerServices/Methods/Service/`. User guide: `octo-
 | `DataFlow.Deploy-1` | instance | `POST DataFlow/deploy?dataFlowRtId=` | `DataFlowDeployHandler` | 300 s / yes |
 | `DataFlow.Undeploy-1` | instance | `POST DataFlow/undeploy?dataFlowRtId=` | `DataFlowUndeployHandler` | 300 s / yes |
 | `DeployableWorkload.SetChartVersion-1` | instance (adapter, application, pool) | `PATCH Workload/{workloadRtId}/chart-version` | `DeployableWorkloadSetChartVersionHandler` | 15 s / yes |
+| `DeploymentSite.Deploy-1` (AB#9050) | instance | `POST DeploymentSite/deploy?deploymentSiteRtId=` | `DeploymentSiteDeployHandler` | 60 s / yes |
+| `DeploymentSite.Undeploy-1` (AB#9050) | instance | `POST DeploymentSite/undeploy?deploymentSiteRtId=` | `DeploymentSiteUndeployHandler` | 120 s / no |
+| `DeployableWorkload.Deploy-1` (AB#9050) | instance (adapter, application, pool) | `POST DeploymentSite/workloads/deploy?workloadRtId=` | `DeployableWorkloadDeployHandler` | 90 s / yes |
+| `DeployableWorkload.Undeploy-1` (AB#9050) | instance (adapter, application, pool) | `POST DeploymentSite/workloads/undeploy?workloadRtId=` | `DeployableWorkloadUndeployHandler` | 60 s / no |
+| `AdapterPool.Scale-1` (AB#9050) | instance | `POST DeploymentSite/workloads/adapter-pool/scale?workloadRtId=&replicas=` | `AdapterPoolScaleHandler` | 30 s / yes |
+| `PipelineTrigger.DeployAll-1` (AB#9050) | static | `POST PipelineTrigger/deploy` | `PipelineTriggerDeployAllHandler` | 120 s / yes |
+| `PipelineTrigger.UndeployAll-1` (AB#9050) | static | `POST PipelineTrigger/undeploy` | `PipelineTriggerUndeployAllHandler` | 120 s / yes |
 
 - **Adding a method (AB#8596 and later).** Declare it in the model (`handler: service` is the default), add a handler class in
   `Methods/Service/` that calls the same service as the REST endpoint, and add one row to `CommunicationMethodHost.Handlers`.
   The unit test `Methods/Service/CommunicationMethodHostTests` fails until every declared method of the three types has a row
   and its contract (role, timeout, idempotency) is listed; extend its `Expected` table and the integration test
   `Methods/CommunicationMethodHostTests` (REST vs. method on the same substitutes).
+- **Deployment methods (AB#9050).** `DeploymentSite.Deploy`, `DeployableWorkload.Deploy` and `AdapterPool.Scale` run the
+  Communication-enabled gate of AB#4255 (`CommunicationEnabledGate`, shared with the REST code) and answer
+  `COMMUNICATION_DISABLED` (REST 409) while Communication is disabled; the undeploys and the trigger methods stay open. Only
+  the service's own refusal (`DeploymentSiteServiceException`) becomes the declared error with the REST text; any other
+  exception is `METHOD_HANDLER_FAILED` (REST 500 as before). The undeploys are declared not idempotent (a repeated call
+  answers "not deployed"). `PipelineTrigger.DeployAll` / `UndeployAll` are static (every trigger of the calling tenant) and
+  leave `Deploy-1` free for a later per-trigger method. The deploys are async candidates for F3.6 (the operator reports the
+  rollout later in `DeploymentState`). Data beyond the target: `docs/rest-method-facades.md`, "Deployment endpoints".
 - **Roles.** The REST policies ask only for the scope `octo_api`. A method without `roles` admits administrators only
   (default-deny of `CkMethodAuthorizationEvaluator`), so every method declares `roles: [CommunicationManagement]` - the role of
   the Studio's integration section and of every pipeline service account. Widening the list later is a Minor, narrowing it a
@@ -309,7 +325,7 @@ Code: `src/CommunicationControllerServices/Methods/Service/`. User guide: `octo-
 
 ### REST facades over the methods (AB#9048 / AB#9049, F5.3 AB#5701)
 
-The 15 endpoints of the table above call their method through `ICommunicationMethodFacade.ServeAsync`
+The 22 endpoints of the table above (15 since AB#9048 / AB#9049, 7 since AB#9050) call their method through `ICommunicationMethodFacade.ServeAsync`
 (`Methods/Service/CommunicationMethodFacade.cs`; envelope to REST answer: `CommunicationRestFacade.cs`). Full description and
 the parity table: `docs/rest-method-facades.md`.
 

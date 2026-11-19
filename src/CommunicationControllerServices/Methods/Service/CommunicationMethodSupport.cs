@@ -55,6 +55,33 @@ internal static class CommunicationMethodErrors
     /// <summary><c>DeployableWorkload.SetChartVersion</c>: the workload exists but the write failed (REST 404).</summary>
     public const string WorkloadChartVersionUpdateFailed = "WORKLOAD_CHART_VERSION_UPDATE_FAILED";
 
+    /// <summary>
+    ///     <c>DeploymentSite.Deploy</c>, <c>DeployableWorkload.Deploy</c>, <c>AdapterPool.Scale</c>: Communication is disabled for
+    ///     the tenant (AB#9050, REST 409 <c>OperationFailedErrorDto</c>).
+    /// </summary>
+    public const string CommunicationDisabled = "COMMUNICATION_DISABLED";
+
+    /// <summary><c>DeploymentSite.Deploy</c>: the service refused the deploy (AB#9050, REST 400).</summary>
+    public const string DeploymentSiteDeployFailed = "DEPLOYMENT_SITE_DEPLOY_FAILED";
+
+    /// <summary><c>DeploymentSite.Undeploy</c>: the service refused the undeploy (AB#9050, REST 400).</summary>
+    public const string DeploymentSiteUndeployFailed = "DEPLOYMENT_SITE_UNDEPLOY_FAILED";
+
+    /// <summary><c>DeployableWorkload.Deploy</c>: the service refused the deploy (AB#9050, REST 400).</summary>
+    public const string WorkloadDeployFailed = "WORKLOAD_DEPLOY_FAILED";
+
+    /// <summary><c>DeployableWorkload.Undeploy</c>: the service refused the undeploy (AB#9050, REST 400).</summary>
+    public const string WorkloadUndeployFailed = "WORKLOAD_UNDEPLOY_FAILED";
+
+    /// <summary><c>AdapterPool.Scale</c>: the service refused the scale (AB#9050, REST 400).</summary>
+    public const string AdapterPoolScaleFailed = "ADAPTER_POOL_SCALE_FAILED";
+
+    /// <summary><c>PipelineTrigger.DeployAll</c>: the schedules could not be deployed (AB#9050, REST 400).</summary>
+    public const string PipelineTriggersDeployFailed = "PIPELINE_TRIGGERS_DEPLOY_FAILED";
+
+    /// <summary><c>PipelineTrigger.UndeployAll</c>: the schedules could not be removed (AB#9050, REST 400).</summary>
+    public const string PipelineTriggersUndeployFailed = "PIPELINE_TRIGGERS_UNDEPLOY_FAILED";
+
     /// <summary>Error parameter with the service's message, as the REST error body carries it. Never contains a secret.</summary>
     public const string MessageParameter = "message";
 }

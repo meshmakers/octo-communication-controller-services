@@ -31,14 +31,15 @@ internal class SystemCommunicationCkLanguage2Tests
     }
 
     [Test]
-    public async Task EmbeddedModel_IsSystemCommunication_4_18_0_OnCkLanguage2_WithTheCkV2MinEngineVersion()
+    public async Task EmbeddedModel_IsSystemCommunication_4_19_0_OnCkLanguage2_WithTheCkV2MinEngineVersion()
     {
         var root = await LoadEmbeddedSystemCommunicationAsync();
 
         // AB#8595: 4.17.0 adds the Adapter / DeployableWorkload / AdapterPool methods, AB#8596: 4.18.0 the Pipeline /
-        // DataFlow / chart-version methods (Minor each). Sensitive parameters, no sensitive result, no execution.mode and
-        // no dataAccess, so the minimum engine version stays.
-        await Assert.That(root.ModelId.ToString()).IsEqualTo("System.Communication-4.18.0");
+        // DataFlow / chart-version methods, AB#9050: 4.19.0 the deployment site / workload deploy / pool scale / trigger
+        // methods (Minor each). Sensitive parameters, no sensitive result, no execution.mode and no dataAccess, so the
+        // minimum engine version stays.
+        await Assert.That(root.ModelId.ToString()).IsEqualTo("System.Communication-4.19.0");
         await Assert.That(root.CkLanguage).IsEqualTo(2);
         // The compiler stamps minEngineVersion for a ckLanguage 2 model; the sources never set it. It is the maximum of
         // the model's own features and of its dependencies (CatalogModelResolver). System.Communication itself needs
@@ -59,7 +60,9 @@ internal class SystemCommunicationCkLanguage2Tests
     private static readonly string[] MethodResultRecords =
     [
         "ServiceAccountReconcileResult", "ServiceAccountSecretRotationResult", "AdapterPoolMirrorSyncResult",
-        "AdapterPoolLeaseResult", "PipelineExecutionStartResult", "PipelineDebugResult", "PipelineMoveResult"
+        "AdapterPoolLeaseResult", "PipelineExecutionStartResult", "PipelineDebugResult", "PipelineMoveResult",
+        // AB#9050, 4.19.0
+        "WorkloadDeployResult", "AdapterPoolScaleResult"
     ];
 
     [Test]
@@ -70,7 +73,7 @@ internal class SystemCommunicationCkLanguage2Tests
         var records = root.Records ?? [];
 
         await Assert.That(types.Count).IsEqualTo(32);
-        // AB#8595 (4.17.0) adds four, AB#8596 (4.18.0) three method result records; they are answers, not extension points, and keep the
+        // AB#8595 (4.17.0) adds four, AB#8596 (4.18.0) three, AB#9050 (4.19.0) two method result records; they are answers, not extension points, and keep the
         // ckLanguage 2 default derivable: Model. Every record that existed before 4.17.0 stays derivable everywhere.
         await Assert.That(records.Count).IsEqualTo(8 + MethodResultRecords.Length);
         var newRecords = records.Where(r => MethodResultRecords.Contains(r.RecordId.Name)).ToList();
@@ -143,7 +146,7 @@ internal class SystemCommunicationCkLanguage2Tests
     }
 
     /// <summary>
-    ///     4.17.0 and 4.18.0 carry no acknowledgement (AB#8595, AB#8596): the SecretDefault.Value tightening was released and acknowledged in
+    ///     4.17.0, 4.18.0 and 4.19.0 carry no acknowledgement (AB#8595, AB#8596, AB#9050): the SecretDefault.Value tightening was released and acknowledged in
     ///     the published 4.16.0, and an acknowledgement is valid for one release only - keeping it fails the compile gate
     ///     with OCTO-CK204 against the published baseline. A new acknowledgement is a deliberate decision that updates this test.
     /// </summary>

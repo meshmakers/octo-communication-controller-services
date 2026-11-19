@@ -1,10 +1,13 @@
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using Duende.IdentityModel;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using static Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service.CommunicationRestFacade;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
 
@@ -47,17 +50,38 @@ public class PipelineTriggerController : ControllerBase
         {
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
-        
-        try
-        {
-            await _triggerManagementService.UpdateScheduleAsync(tenantId);
-            return NoContent();
-        }
-        catch (Exception e)
-        {
-            _logger.LogError(e, "Failed to deploy triggers for tenant");
-            return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
-        }
+
+        // AB#9050: facade of the static PipelineTrigger.DeployAll-1 (docs/rest-method-facades.md). A failure answers 400 as
+        // before, with the method's caller-safe text.
+        return await HttpContext.CommunicationFacade().ServeAsync<IActionResult>(tenantId,
+            new CommunicationMethodCall(PipelineTriggerCkTypeId, SystemCommunicationCkIds.PipelineTriggerDeployAllMethodId,
+                nameof(DeployTrigger)) { Parameters = new PipelineTriggerDeployAllParameters() },
+            User, BearerOf(HttpContext),
+            response => response.Success
+                ? NoContent()
+                : Failure(response, error => BadRequest(new ErrorResponse
+                {
+                    ErrorMessage = MessageOf(error) ?? "The pipeline triggers could not be deployed."
+                })),
+            async () =>
+            {
+                try
+                {
+                    await _triggerManagementService.UpdateScheduleAsync(tenantId);
+                    return NoContent();
+                }
+                catch (Exception e)
+                {
+                    _logger.LogError(e, "Failed to deploy triggers for tenant");
+                    // AB#9050: the caller-safe text on this path too (the controller's own exception text, never the text
+                    // of an unknown exception), as on the method path
+                    return BadRequest(new ErrorResponse
+                    {
+                        ErrorMessage = CommunicationMethodSupport.CallerSafeMessage(e) ??
+                                       "The pipeline triggers could not be deployed; see the communication controller log."
+                    });
+                }
+            }, FailureOf);
     }
 
     /// <summary>
@@ -76,16 +100,39 @@ public class PipelineTriggerController : ControllerBase
         {
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
-        
-        try
-        {
-            await _triggerManagementService.RemoveScheduleAsync(tenantId);
-            return NoContent();
-        }
-        catch (Exception e)
-        {
-            _logger.LogError(e, "Failed to undeploy triggers for tenant");
-            return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
-        }
+
+        // AB#9050: facade of the static PipelineTrigger.UndeployAll-1 (docs/rest-method-facades.md).
+        return await HttpContext.CommunicationFacade().ServeAsync<IActionResult>(tenantId,
+            new CommunicationMethodCall(PipelineTriggerCkTypeId,
+                SystemCommunicationCkIds.PipelineTriggerUndeployAllMethodId, nameof(UndeployTrigger))
+            {
+                Parameters = new PipelineTriggerUndeployAllParameters()
+            },
+            User, BearerOf(HttpContext),
+            response => response.Success
+                ? NoContent()
+                : Failure(response, error => BadRequest(new ErrorResponse
+                {
+                    ErrorMessage = MessageOf(error) ?? "The pipeline triggers could not be undeployed."
+                })),
+            async () =>
+            {
+                try
+                {
+                    await _triggerManagementService.RemoveScheduleAsync(tenantId);
+                    return NoContent();
+                }
+                catch (Exception e)
+                {
+                    _logger.LogError(e, "Failed to undeploy triggers for tenant");
+                    // AB#9050: the caller-safe text on this path too (the controller's own exception text, never the text
+                    // of an unknown exception), as on the method path
+                    return BadRequest(new ErrorResponse
+                    {
+                        ErrorMessage = CommunicationMethodSupport.CallerSafeMessage(e) ??
+                                       "The pipeline triggers could not be undeployed; see the communication controller log."
+                    });
+                }
+            }, FailureOf);
     }
 }

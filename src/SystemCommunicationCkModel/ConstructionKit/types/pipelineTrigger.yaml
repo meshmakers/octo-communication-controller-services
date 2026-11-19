@@ -20,3 +20,28 @@ types:
         targetCkTypeId: ${this}/DataFlow
       - id: ${this}/Triggers
         targetCkTypeId: ${this}/Pipeline
+
+    # AB#9050 (4.19.0, Feature AB#5701 F5.3): REST POST PipelineTrigger/deploy and /undeploy act on every trigger of the
+    # tenant, not on one, so they are static methods. Named DeployAll / UndeployAll so that a later per-trigger Deploy-1 does
+    # not collide with them. Handled by the communication controller; roles as on Adapter (types/adapter.yaml).
+    methods:
+      - methodId: DeployAll-1
+        kind: Static
+        description: "Deploys the schedules of every pipeline trigger of the calling tenant (REST POST PipelineTrigger/deploy): removes the tenant's schedules, then schedules each trigger with its pipelines. A trigger without pipelines is set to Error and skipped."
+        errors:
+          - { code: PIPELINE_TRIGGERS_DEPLOY_FAILED, description: "The schedules could not be deployed, e.g. the bot service did not answer. Parameter message names the cause." }
+        authorization:
+          roles: [ CommunicationManagement ]
+        execution:
+          timeoutSeconds: 120
+          idempotent: true
+      - methodId: UndeployAll-1
+        kind: Static
+        description: "Removes the schedules of every pipeline trigger of the calling tenant and sets the triggers Pending (REST POST PipelineTrigger/undeploy)."
+        errors:
+          - { code: PIPELINE_TRIGGERS_UNDEPLOY_FAILED, description: "The schedules could not be removed, e.g. the bot service did not answer. Parameter message names the cause." }
+        authorization:
+          roles: [ CommunicationManagement ]
+        execution:
+          timeoutSeconds: 120
+          idempotent: true

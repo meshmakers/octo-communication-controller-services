@@ -29,6 +29,9 @@ internal class PoolControllerDeployGateTests
         var sut = new DeploymentSiteController(NullLogger<DeploymentSiteController>.Instance, pools, configuration);
         var httpContext = new DefaultHttpContext();
         httpContext.Request.RouteValues["tenantId"] = TenantId;
+        // AB#9050: the endpoints are facades of the DeploymentSite / DeployableWorkload / AdapterPool methods; this test checks
+        // the REST code itself, on the facade's guarded direct path
+        DirectRestFacade.Attach(httpContext, TenantId);
         sut.ControllerContext = new ControllerContext { HttpContext = httpContext };
         return (sut, pools, configuration);
     }

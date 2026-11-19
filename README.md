@@ -365,8 +365,10 @@ handled by this service (`Adapter.DeployUpdate`, `Adapter.ReconcileServiceAccoun
 `AdapterPool.CancelQueuedExecution`), callable as typed GraphQL mutations through the asset repository with the role
 `CommunicationManagement`. Since 4.18.0 (AB#8596) the pipeline, data flow and workload chart-version operations follow
 (`Pipeline.Deploy`, `Pipeline.Execute`, `Pipeline.SetDebugging`, `Pipeline.MoveToAdapter`, `DataFlow.Deploy`,
-`DataFlow.Undeploy`, `DeployableWorkload.SetChartVersion`). The tenant-level endpoints of `CommunicationController` stay
-REST. Since AB#9048 / AB#9049 these REST endpoints are facades of the methods: same routes, bodies and status codes, one
+`DataFlow.Undeploy`, `DeployableWorkload.SetChartVersion`), since 4.19.0 (AB#9050) the deployment operations
+(`DeploymentSite.Deploy`, `DeploymentSite.Undeploy`, `DeployableWorkload.Deploy`, `DeployableWorkload.Undeploy`,
+`AdapterPool.Scale`, static `PipelineTrigger.DeployAll` / `UndeployAll`). The tenant-level endpoints of
+`CommunicationController` stay REST. Since AB#9048 / AB#9049 (AB#9050 for the deployment endpoints) these REST endpoints are facades of the methods: same routes, bodies and status codes, one
 Method audit event per call; a caller without `CommunicationManagement` keeps the previous REST behaviour (logged with
 `Reason=role-missing`). Details: `docs/rest-method-facades.md` (parity table) and `CLAUDE.md`, "CK method service handlers".
 
