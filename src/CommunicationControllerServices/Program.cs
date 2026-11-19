@@ -163,7 +163,7 @@ try
     // starts the pipeline whose well-known name equals the method id and maps its result to the method envelope.
     builder.Services.AddPipelineMethodHandler(builder.Configuration);
     // AB#8595: the controller is also the handler (`handler: service`) of the Adapter, DeployableWorkload and
-    // AdapterPool methods of System.Communication; the REST endpoints stay unchanged. Methods:Communication:Enabled
+    // AdapterPool methods of System.Communication; since AB#9048 the REST endpoints are facades of them. Methods:Communication:Enabled
     // switches the host off (the REST endpoints keep working).
     var communicationMethodsHosted = builder.Services.AddCommunicationCkMethodHost(builder.Configuration);
     builder.Services.AddSingleton<INotificationRepository, NotificationRepository>();

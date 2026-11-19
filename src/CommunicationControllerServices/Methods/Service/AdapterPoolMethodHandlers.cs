@@ -33,6 +33,8 @@ internal sealed class AdapterPoolRefreshMirrorsHandler(
     public async Task<CkMethodOutcome<AdapterPoolRefreshMirrorsResult>> HandleAsync(
         CkMethodContext<AdapterPoolRefreshMirrorsParameters> context, CancellationToken cancellationToken)
     {
+        // AB#9048: the services below judge this caller, not "no caller" (CommunicationMethodCaller)
+        using var methodCaller = CommunicationMethodCaller.Begin(context);
         var result = await mirrorProvisioningService.ProvisionForBorrowerAsync(context.TenantId, cancellationToken)
             .ConfigureAwait(false);
         logger.LogInformation(
@@ -56,6 +58,8 @@ internal sealed class AdapterPoolPublishMirrorsHandler(
     public async Task<CkMethodOutcome<AdapterPoolPublishMirrorsResult>> HandleAsync(
         CkMethodContext<AdapterPoolPublishMirrorsParameters> context, CancellationToken cancellationToken)
     {
+        // AB#9048: the services below judge this caller, not "no caller" (CommunicationMethodCaller)
+        using var methodCaller = CommunicationMethodCaller.Begin(context);
         var result = await mirrorProvisioningService.ProvisionForLenderAsync(context.TenantId, cancellationToken)
             .ConfigureAwait(false);
         logger.LogInformation(
@@ -87,6 +91,8 @@ internal sealed class AdapterPoolGrantLeaseHandler(
     public async Task<CkMethodOutcome<AdapterPoolGrantLeaseResult>> HandleAsync(
         CkMethodContext<AdapterPoolGrantLeaseParameters> context, CancellationToken cancellationToken)
     {
+        // AB#9048: the services below judge this caller, not "no caller" (CommunicationMethodCaller)
+        using var methodCaller = CommunicationMethodCaller.Begin(context);
         if (!TryGetTarget(context, out var poolRtId))
         {
             return CkMethodOutcome<AdapterPoolGrantLeaseResult>.TargetNotFound();
@@ -148,6 +154,8 @@ internal sealed class AdapterPoolCancelQueuedExecutionHandler(
     public async Task<CkMethodOutcome> HandleAsync(CkMethodContext<AdapterPoolCancelQueuedExecutionParameters> context,
         CancellationToken cancellationToken)
     {
+        // AB#9048: the services below judge this caller, not "no caller" (CommunicationMethodCaller)
+        using var methodCaller = CommunicationMethodCaller.Begin(context);
         if (!TryGetTarget(context, out var poolRtId))
         {
             return CkMethodOutcome.TargetNotFound();

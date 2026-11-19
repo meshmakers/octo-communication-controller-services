@@ -1670,7 +1670,10 @@ internal class AdapterService(
         // Blocking authorization (gated). The lint below still runs when this is disabled.
         if (serviceAccountGuardOptions.Value.CheckElevation)
         {
-            var caller = httpContextAccessor.HttpContext?.User;
+            // The caller of the HTTP request, else the caller of the System.Communication method this deploy runs in (a
+            // REST facade or GraphQL call, AB#9048): a handler has no HttpContext, and "no caller" is the system path.
+            var caller = httpContextAccessor.HttpContext?.User ??
+                         Methods.Service.CommunicationMethodCaller.Current?.User;
             if (caller == null)
             {
                 // System-initiated deploy: no HTTP caller principal to authorize (e.g. the

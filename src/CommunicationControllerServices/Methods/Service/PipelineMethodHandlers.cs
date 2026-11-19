@@ -36,6 +36,8 @@ internal sealed class PipelineDeployHandler(
     public async Task<CkMethodOutcome> HandleAsync(CkMethodContext<PipelineDeployParameters> context,
         CancellationToken cancellationToken)
     {
+        // AB#9048: the services below judge this caller, not "no caller" (CommunicationMethodCaller)
+        using var methodCaller = CommunicationMethodCaller.Begin(context);
         if (!TryGetTarget(context, out var pipelineRtId))
         {
             return CkMethodOutcome.TargetNotFound();
@@ -84,7 +86,7 @@ internal sealed class PipelineDeployHandler(
             return CkMethodOutcome.Fail(e is AdapterHubCallbackException
                     ? CommunicationMethodErrors.PipelineDeployRejected
                     : CommunicationMethodErrors.PipelineDeployFailed,
-                MessageParameters(FailureMessage(e, "The pipeline could not be deployed", context, definition,
+                FailureParameters(e, FailureMessage(e, "The pipeline could not be deployed", context, definition,
                     context.CallerAccessToken)));
         }
     }
@@ -115,6 +117,8 @@ internal sealed class PipelineExecuteHandler(
     public async Task<CkMethodOutcome<PipelineExecuteResult>> HandleAsync(
         CkMethodContext<PipelineExecuteParameters> context, CancellationToken cancellationToken)
     {
+        // AB#9048: the services below judge this caller, not "no caller" (CommunicationMethodCaller)
+        using var methodCaller = CommunicationMethodCaller.Begin(context);
         if (!TryGetTarget(context, out var pipelineRtId) ||
             await repository.GetPipelineAsync(context.TenantId,
                 new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipelineRtId)).ConfigureAwait(false) is null)
@@ -168,6 +172,8 @@ internal sealed class PipelineSetDebuggingHandler(
     public async Task<CkMethodOutcome<PipelineSetDebuggingResult>> HandleAsync(
         CkMethodContext<PipelineSetDebuggingParameters> context, CancellationToken cancellationToken)
     {
+        // AB#9048: the services below judge this caller, not "no caller" (CommunicationMethodCaller)
+        using var methodCaller = CommunicationMethodCaller.Begin(context);
         if (!TryGetTarget(context, out var pipelineRtId))
         {
             return CkMethodOutcome<PipelineSetDebuggingResult>.TargetNotFound();
@@ -191,7 +197,7 @@ internal sealed class PipelineSetDebuggingHandler(
             logger.LogError(e, "Setting debugging of pipeline '{PipelineRtId}' failed (CK method, invocation {InvocationId})",
                 pipelineRtId, context.InvocationId);
             return CkMethodOutcome<PipelineSetDebuggingResult>.Fail(CommunicationMethodErrors.PipelineDebugChangeFailed,
-                MessageParameters(FailureMessage(e, "The debug state could not be changed", context)));
+                FailureParameters(e, FailureMessage(e, "The debug state could not be changed", context)));
         }
 
         // The flag is persisted: a failing event store must not report the change as failed.
@@ -230,6 +236,8 @@ internal sealed class PipelineMoveToAdapterHandler(
     public async Task<CkMethodOutcome<PipelineMoveToAdapterResult>> HandleAsync(
         CkMethodContext<PipelineMoveToAdapterParameters> context, CancellationToken cancellationToken)
     {
+        // AB#9048: the services below judge this caller, not "no caller" (CommunicationMethodCaller)
+        using var methodCaller = CommunicationMethodCaller.Begin(context);
         if (!TryGetTarget(context, out var pipelineRtId))
         {
             return CkMethodOutcome<PipelineMoveToAdapterResult>.TargetNotFound();
@@ -303,6 +311,8 @@ internal sealed class DataFlowDeployHandler(
     public async Task<CkMethodOutcome> HandleAsync(CkMethodContext<DataFlowDeployParameters> context,
         CancellationToken cancellationToken)
     {
+        // AB#9048: the services below judge this caller, not "no caller" (CommunicationMethodCaller)
+        using var methodCaller = CommunicationMethodCaller.Begin(context);
         if (!TryGetTarget(context, out var dataFlowRtId))
         {
             return CkMethodOutcome.TargetNotFound();
@@ -318,7 +328,7 @@ internal sealed class DataFlowDeployHandler(
             logger.LogError(e, "Failed to deploy data flow '{DataFlowRtId}' (CK method, invocation {InvocationId})",
                 dataFlowRtId, context.InvocationId);
             return CkMethodOutcome.Fail(CommunicationMethodErrors.DataFlowDeployFailed,
-                MessageParameters(FailureMessage(e, "The data flow could not be deployed", context)));
+                FailureParameters(e, FailureMessage(e, "The data flow could not be deployed", context)));
         }
     }
 }
@@ -334,6 +344,8 @@ internal sealed class DataFlowUndeployHandler(
     public async Task<CkMethodOutcome> HandleAsync(CkMethodContext<DataFlowUndeployParameters> context,
         CancellationToken cancellationToken)
     {
+        // AB#9048: the services below judge this caller, not "no caller" (CommunicationMethodCaller)
+        using var methodCaller = CommunicationMethodCaller.Begin(context);
         if (!TryGetTarget(context, out var dataFlowRtId))
         {
             return CkMethodOutcome.TargetNotFound();
@@ -349,7 +361,7 @@ internal sealed class DataFlowUndeployHandler(
             logger.LogError(e, "Failed to undeploy data flow '{DataFlowRtId}' (CK method, invocation {InvocationId})",
                 dataFlowRtId, context.InvocationId);
             return CkMethodOutcome.Fail(CommunicationMethodErrors.DataFlowUndeployFailed,
-                MessageParameters(FailureMessage(e, "The data flow could not be undeployed", context)));
+                FailureParameters(e, FailureMessage(e, "The data flow could not be undeployed", context)));
         }
     }
 }
@@ -376,6 +388,8 @@ internal sealed class DeployableWorkloadSetChartVersionHandler(
     public async Task<CkMethodOutcome> HandleAsync(CkMethodContext<DeployableWorkloadSetChartVersionParameters> context,
         CancellationToken cancellationToken)
     {
+        // AB#9048: the services below judge this caller, not "no caller" (CommunicationMethodCaller)
+        using var methodCaller = CommunicationMethodCaller.Begin(context);
         if (!TryGetTarget(context, out var workloadRtId))
         {
             return CkMethodOutcome.TargetNotFound();

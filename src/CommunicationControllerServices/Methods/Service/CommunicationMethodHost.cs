@@ -1,6 +1,9 @@
 using Meshmakers.Octo.Common.DistributionEventHub.Configuration;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
 using Meshmakers.Octo.Services.Methods;
+using Meshmakers.Octo.Services.Methods.Audit;
+using Meshmakers.Octo.Services.Methods.Authorization;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using static Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service.CommunicationMethodHandlerRegistration;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service;
@@ -32,7 +35,8 @@ internal sealed record CommunicationMethodHandlerRegistration(
 ///         The handlers are registered with the typed handler SDK of octo-common-services (<c>AddCkMethodHandlers</c>): one
 ///         shared queue per method, announcement and heartbeat, caller token validation, the declared authorization (roles,
 ///         scope <c>octo_api</c>, tenant of the token) and redaction are the host's. A handler only does the operation, with the
-///         same services as the REST endpoint it mirrors, so the effect is the same. The REST endpoints are unchanged.
+///         same services as the REST endpoint it mirrors and opens the caller scope (<see cref="CommunicationMethodCaller" />), so the
+///         services judge the same caller and the effect is the same. Since AB#9048 the REST endpoints are facades of these methods (<see cref="ICommunicationMethodFacade" />).
 ///     </para>
 ///     <para>
 ///         Independent of the pipeline method handler (<see cref="PipelineMethodHost" />, <c>handler: pipeline</c>): that host
@@ -103,10 +107,23 @@ internal static class CommunicationMethodHost
     public static bool AddCommunicationCkMethodHost(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddOptions<CommunicationMethodsOptions>().BindConfiguration(CommunicationMethodsOptions.SectionName);
+
+        // AB#9048/AB#9049: the REST facades of the endpoints these methods mirror. Registered also with the switch off: then every
+        // call takes the guarded direct path (caller tenant, one audit event, one WARN line), never an unguarded one.
+        services.AddCkMethodAudit();
+        services.AddOptions<CkMethodAuthorizationOptions>().BindConfiguration(CkMethodAuthorizationOptions.SectionName);
+        services.TryAddSingleton<ICkMethodAuthorizationEvaluator, CkMethodAuthorizationEvaluator>();
+        services.TryAddSingleton<ICkMethodAuthorizationDefinitionSource, CkCacheMethodAuthorizationDefinitionSource>();
+        services.TryAddScoped<ICommunicationMethodFacade, CommunicationMethodFacade>();
+
         if (!ReadOptions(configuration).Enabled)
         {
             return false;
         }
+
+        // The facades call the methods through the dispatcher; the handlers are hosted here, so the call runs in this process
+        // (AB#8411) and nothing is sent to the broker. Program.cs adds the registry feed to the event hub.
+        services.AddCkMethodDispatcher();
 
         services.AddCkMethodHandlers(ServiceName, builder =>
         {
@@ -122,10 +139,15 @@ internal static class CommunicationMethodHost
         return true;
     }
 
-    /// <summary>Lets the controller answer discovery requests of dispatchers for these handlers (event hub configuration).</summary>
+    /// <summary>
+    ///     Lets the controller answer discovery requests of dispatchers for these handlers, and feeds the handler registry of the
+    ///     dispatcher the REST facades use (AB#9048; event hub configuration).
+    /// </summary>
     public static void AddCommunicationMethodDiscovery(this IDistributionEventHubConfiguration configuration)
     {
         configuration.AddCkMethodHandlerDiscovery();
+        // AB#9048: the dispatcher of the REST facades needs the handler registry feed.
+        configuration.AddCkMethodHandlerRegistryFeed();
     }
 }
 

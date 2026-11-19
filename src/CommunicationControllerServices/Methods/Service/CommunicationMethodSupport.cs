@@ -167,6 +167,17 @@ internal static class CommunicationMethodSupport
     public static (string Name, string Value)[] MessageParameters(string message) =>
         [(CommunicationMethodErrors.MessageParameter, message)];
 
+    /// <summary>
+    ///     The failure parameters of a deploy, debug or data-flow failure (AB#9049): the message parameter and the kind of the
+    ///     service failure (<see cref="CommunicationRestFacade.ReasonParameter" />), so the REST facade keeps the status code REST
+    ///     answered for it (422 / 404 / 400). The kind is a fixed token, never text of the exception.
+    /// </summary>
+    public static (string Name, string Value)[] FailureParameters(Exception exception, string message) =>
+    [
+        (CommunicationMethodErrors.MessageParameter, message),
+        (CommunicationRestFacade.ReasonParameter, CommunicationRestFacade.FailureReason(exception))
+    ];
+
     /// <summary>The placeholder of a redacted value.</summary>
     public const string Masked = "***";
 

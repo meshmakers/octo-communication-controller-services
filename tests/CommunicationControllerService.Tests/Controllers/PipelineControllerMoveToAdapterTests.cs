@@ -39,6 +39,7 @@ internal class PipelineControllerMoveToAdapterTests
         var httpContext = new DefaultHttpContext();
         httpContext.Request.RouteValues["tenantId"] = TenantId;
         sut.ControllerContext = new ControllerContext { HttpContext = httpContext };
+        DirectRestFacade.Attach(httpContext, TenantId);
         return (sut, repo, adapters, events);
     }
 

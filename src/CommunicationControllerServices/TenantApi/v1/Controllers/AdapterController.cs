@@ -2,12 +2,15 @@ using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using Duende.IdentityModel;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
+using static Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service.CommunicationRestFacade;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -251,23 +254,59 @@ public class AdapterController : ControllerBase
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
         
+        // AB#9048: facade of Adapter.DeployUpdate-1. An id that is no RtEntityId keeps the direct path (it answered 400).
+        var adapterRtId = TryParseRtEntityId(adapterRtEntityId)?.RtId.ToString();
+        return await HttpContext.CommunicationFacade().ServeAsync<IActionResult>(tenantId,
+            new CommunicationMethodCall(AdapterCkTypeId,
+                SystemCommunicationCkIds.AdapterDeployUpdateMethodId, nameof(DeployUpdate))
+            {
+                TargetRtId = adapterRtId,
+                Parameters = adapterRtId == null ? null : new AdapterDeployUpdateParameters()
+            }, User, BearerOf(HttpContext),
+            response => response.Success
+                ? NoContent()
+                : Failure(response, error => Error(StatusCodes.Status400BadRequest,
+                        MessageOf(error) ?? "The adapter configuration could not be deployed."),
+                    $"Adapter '{adapterRtEntityId}' is not loaded in tenant '{tenantId}'.",
+                    StatusCodes.Status400BadRequest),
+            async () =>
+            {
+                try
+                {
+                    await _adapterService.DeployAdapterConfigurationAsync(tenantId, adapterRtEntityId);
+                    return NoContent();
+                }
+                catch (AdapterServiceException e)
+                {
+                    // Includes AdapterNotLoaded (adapter pod not deployed/connected),
+                    // PipelineNotFound, etc. Surface the specific service message to the
+                    // client so the Studio can show the real cause instead of a generic 500.
+                    _logger.LogError(e, "Error deploying adapter configuration");
+                    return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
+                }
+                catch (AdapterHubCallbackException e)
+                {
+                    _logger.LogError(e, "Error deploying adapter configuration");
+                    return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
+                }
+            }, FailureOf);
+    }
+
+    /// <summary>The RtEntityId of a REST query value, or <c>null</c> when it is none (the direct path answers it as before).</summary>
+    internal static RtEntityId? TryParseRtEntityId(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
         try
         {
-            await _adapterService.DeployAdapterConfigurationAsync(tenantId, adapterRtEntityId);
-            return NoContent();
+            return new RtEntityId(value);
         }
-        catch (AdapterServiceException e)
+        catch (Exception)
         {
-            // Includes AdapterNotLoaded (adapter pod not deployed/connected),
-            // PipelineNotFound, etc. Surface the specific service message to the
-            // client so the Studio can show the real cause instead of a generic 500.
-            _logger.LogError(e, "Error deploying adapter configuration");
-            return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
-        }
-        catch (AdapterHubCallbackException e)
-        {
-            _logger.LogError(e, "Error deploying adapter configuration");
-            return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
+            return null;
         }
     }
 
@@ -294,22 +333,38 @@ public class AdapterController : ControllerBase
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
         }
 
-        if (!OctoObjectId.TryParse(workloadRtId, out var workloadObjectId))
-        {
-            return BadRequest(new ErrorResponse
-                { ErrorMessage = $"Invalid workloadRtId '{workloadRtId}': must be a 24-character hex ObjectId." });
-        }
+        // AB#9048: facade of DeployableWorkload.Wake-1; a malformed id keeps the direct path (400 as before).
+        var valid = OctoObjectId.TryParse(workloadRtId, out var workloadObjectId);
+        return await HttpContext.CommunicationFacade().ServeAsync<IActionResult>(tenantId,
+            new CommunicationMethodCall(DeployableWorkloadCkTypeId,
+                SystemCommunicationCkIds.DeployableWorkloadWakeMethodId, nameof(Wake))
+            {
+                TargetRtId = valid ? workloadObjectId.ToString() : null,
+                Parameters = valid ? new DeployableWorkloadWakeParameters() : null
+            }, User, BearerOf(HttpContext),
+            response => response.Success
+                ? NoContent()
+                : Failure(response, error => Error(StatusCodes.Status400BadRequest,
+                    MessageOf(error) ?? "The workload could not be woken.")),
+            async () =>
+            {
+                if (!valid)
+                {
+                    return BadRequest(new ErrorResponse
+                        { ErrorMessage = $"Invalid workloadRtId '{workloadRtId}': must be a 24-character hex ObjectId." });
+                }
 
-        try
-        {
-            await workloadLifecycleService.EnsureWorkloadRunningAsync(tenantId, workloadObjectId);
-            return NoContent();
-        }
-        catch (WorkloadLifecycleServiceException e)
-        {
-            _logger.LogWarning(e, "Wake of workload '{WorkloadRtId}' failed", workloadRtId);
-            return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
-        }
+                try
+                {
+                    await workloadLifecycleService.EnsureWorkloadRunningAsync(tenantId, workloadObjectId);
+                    return NoContent();
+                }
+                catch (WorkloadLifecycleServiceException e)
+                {
+                    _logger.LogWarning(e, "Wake of workload '{WorkloadRtId}' failed", workloadRtId);
+                    return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
+                }
+            }, FailureOf);
     }
 
     /// <summary>
@@ -345,46 +400,67 @@ public class AdapterController : ControllerBase
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
         }
 
-        if (!OctoObjectId.TryParse(adapterRtId, out var adapterObjectId))
-        {
-            return BadRequest(new ErrorResponse
-                { ErrorMessage = $"Invalid adapterRtId '{adapterRtId}': must be a 24-character hex ObjectId." });
-        }
+        // AB#9048: facade of Adapter.ReconcileServiceAccount-1; a malformed id keeps the direct path (400 as before).
+        var valid = OctoObjectId.TryParse(adapterRtId, out var parsedRtId);
+        return await HttpContext.CommunicationFacade().ServeAsync<IActionResult>(tenantId,
+            new CommunicationMethodCall(AdapterCkTypeId, SystemCommunicationCkIds.AdapterReconcileServiceAccountMethodId,
+                nameof(ReconcileServiceAccount))
+            {
+                TargetRtId = valid ? parsedRtId.ToString() : null,
+                Parameters = valid ? new AdapterReconcileServiceAccountParameters() : null
+            }, User, BearerOf(HttpContext),
+            response => ValueOf<RtServiceAccountReconcileResultRecord>(response) is { } result
+                ? Ok(new ReconcileServiceAccountResultDto(result.Outcome ?? string.Empty, result.ClientId ?? string.Empty,
+                    result.ConfigurationWellKnownName ?? string.Empty, result.RoleChangesSkipped,
+                    result.Message ?? string.Empty))
+                : Failure(response, _ => Error(StatusCodes.Status400BadRequest,
+                        "Reconciling the pipeline service account failed; see the communication controller log " +
+                        $"(invocation {response.InvocationId})."),
+                    $"Adapter '{adapterRtId}' was not found in tenant '{tenantId}'."),
+            async () =>
+            {
+                if (!OctoObjectId.TryParse(adapterRtId, out var adapterObjectId))
+                {
+                    return BadRequest(new ErrorResponse
+                        { ErrorMessage = $"Invalid adapterRtId '{adapterRtId}': must be a 24-character hex ObjectId." });
+                }
 
-        // Same resolution as the rotate endpoint below: Adapter is polymorphic, so the tenant's
-        // adapter list is the caller-friendly lookup.
-        var adapters = await _communicationRepository.GetAdaptersAsync(tenantId);
-        var adapter = adapters.FirstOrDefault(a => a.RtId == adapterObjectId);
-        if (adapter == null)
-        {
-            return NotFound(new ErrorResponse
-                { ErrorMessage = $"Adapter '{adapterRtId}' was not found in tenant '{tenantId}'." });
-        }
+                // Same resolution as the rotate endpoint below: Adapter is polymorphic, so the tenant's
+                // adapter list is the caller-friendly lookup.
+                var adapters = await _communicationRepository.GetAdaptersAsync(tenantId);
+                var adapter = adapters.FirstOrDefault(a => a.RtId == adapterObjectId);
+                if (adapter == null)
+                {
+                    return NotFound(new ErrorResponse
+                        { ErrorMessage = $"Adapter '{adapterRtId}' was not found in tenant '{tenantId}'." });
+                }
 
-        try
-        {
-            var result = await provisioningService.ReconcileAdapterAsync(tenantId, adapter,
-                ServiceAccountReconcileContext.User(User.HasRole(CommonConstants.UserManagementRole)));
+                try
+                {
+                    var result = await provisioningService.ReconcileAdapterAsync(tenantId, adapter,
+                        ServiceAccountReconcileContext.User(User.HasRole(CommonConstants.UserManagementRole)));
 
-            var dto = ServiceAccountController.BuildReconcileDto(result);
+                    var dto = ServiceAccountController.BuildReconcileDto(result);
 
-            await eventService.StoreInformationEventAsync(tenantId,
-                $"Pipeline service account '{result.WellKnownName}' (client '{result.ClientId}') of adapter " +
-                $"'{adapter.Name ?? adapterRtId}' ({adapterRtId}) reconciled (source: User): {result.Outcome}." +
-                $"{(result.RoleChangesSkipped ? " Declared roles were skipped." : string.Empty)}");
+                    await eventService.StoreInformationEventAsync(tenantId,
+                        $"Pipeline service account '{result.WellKnownName}' (client '{result.ClientId}') of adapter " +
+                        $"'{adapter.Name ?? adapterRtId}' ({adapterRtId}) reconciled (source: User): {result.Outcome}." +
+                        $"{(result.RoleChangesSkipped ? " Declared roles were skipped." : string.Empty)}");
 
-            return Ok(dto);
-        }
-        catch (Exception e)
-        {
-            // Deliberately broad, mirroring the rotate endpoint: the reconcile spans the identity
-            // bus and the tenant repository, and the caller must learn that it did NOT complete.
-            // The message never contains a secret.
-            _logger.LogError(e, "Reconciling the pipeline service account of adapter '{AdapterRtId}' failed",
-                adapterRtId);
-            return BadRequest(new ErrorResponse
-                { ErrorMessage = $"Reconciling the pipeline service account failed: {e.Message}" });
-        }
+                    return Ok(dto);
+                }
+                catch (Exception e)
+                {
+                    // Deliberately broad, mirroring the rotate endpoint: the reconcile spans the identity
+                    // bus and the tenant repository, and the caller must learn that it did NOT complete.
+                    // The message never contains a secret.
+                    _logger.LogError(e, "Reconciling the pipeline service account of adapter '{AdapterRtId}' failed",
+                        adapterRtId);
+                    return BadRequest(new ErrorResponse
+                        { ErrorMessage = $"Reconciling the pipeline service account failed: {e.Message}" });
+                }
+    
+            }, FailureOf);
     }
 
     /// <summary>
@@ -547,68 +623,89 @@ public class AdapterController : ControllerBase
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty" });
         }
 
-        if (!OctoObjectId.TryParse(adapterRtId, out var adapterObjectId))
-        {
-            return BadRequest(new ErrorResponse
-                { ErrorMessage = $"Invalid adapterRtId '{adapterRtId}': must be a 24-character hex ObjectId." });
-        }
-
-        // Resolved through the tenant's adapter list rather than by RtEntityId: Adapter is
-        // polymorphic (RtMeshAdapter and friends), so the caller would have to know the concrete
-        // CkTypeId to build an RtEntityId. A tenant has a handful of adapters.
-        var adapters = await _communicationRepository.GetAdaptersAsync(tenantId);
-        var adapter = adapters.FirstOrDefault(a => a.RtId == adapterObjectId);
-        if (adapter == null)
-        {
-            return NotFound(new ErrorResponse
-                { ErrorMessage = $"Adapter '{adapterRtId}' was not found in tenant '{tenantId}'." });
-        }
-
-        try
-        {
-            var result = await provisioningService.RotateAdapterSecretAsync(tenantId, adapter);
-
-            var message = BuildRotationMessage(result, adapter.Name ?? adapterRtId);
-
-            await eventService.StoreInformationEventAsync(tenantId,
-                $"Pipeline service account secret rotated for adapter '{adapter.Name ?? adapterRtId}' " +
-                $"({adapterRtId}), client '{result.ClientId}' (source: User). {message}");
-
-            // The shape lives in Communication.Contracts so the service and every client speak the
-            // same one; a controller-local copy drifted from it the moment the SDK gained its own.
-            return Ok(new RotateServiceAccountSecretResultDto(
-                result.ClientId,
-                result.WellKnownName,
-                result.WasCreated,
-                result.RequiresPipelineRedeploy,
-                message));
-        }
-        catch (Exception e)
-        {
-            // Deliberately broad: the rotation spans the identity bus and the tenant repository, and
-            // whatever went wrong the caller must learn that the rotation did NOT happen rather than
-            // be left guessing whether the old secret is still valid. The message never contains a
-            // secret — neither the service nor DistClientDto.ToString() emits one.
-            _logger.LogError(e, "Rotating the pipeline service account secret of adapter '{AdapterRtId}' failed",
-                adapterRtId);
-
-            try
+        // AB#9048: facade of Adapter.RotateServiceAccountSecret-1; a malformed id keeps the direct path (400 as before).
+        // The result carries no secret on either path (adapter.yaml, AB#5032).
+        var valid = OctoObjectId.TryParse(adapterRtId, out var parsedRtId);
+        return await HttpContext.CommunicationFacade().ServeAsync<IActionResult>(tenantId,
+            new CommunicationMethodCall(AdapterCkTypeId, SystemCommunicationCkIds.AdapterRotateServiceAccountSecretMethodId,
+                nameof(RotateServiceAccountSecret))
             {
-                await eventService.StoreErrorEventAsync(tenantId,
-                    $"Rotating the pipeline service account secret of adapter '{adapter.Name ?? adapterRtId}' " +
-                    $"({adapterRtId}) failed: {e.Message}. The previous secret remains in effect.");
-            }
-            catch (Exception eventException)
+                TargetRtId = valid ? parsedRtId.ToString() : null,
+                Parameters = valid ? new AdapterRotateServiceAccountSecretParameters() : null
+            }, User, BearerOf(HttpContext),
+            response => ValueOf<RtServiceAccountSecretRotationResultRecord>(response) is { } result
+                ? Ok(new RotateServiceAccountSecretResultDto(result.ClientId ?? string.Empty,
+                    result.ConfigurationWellKnownName ?? string.Empty, result.WasCreated,
+                    result.RequiresPipelineRedeploy, result.Message ?? string.Empty))
+                : Failure(response, _ => Error(StatusCodes.Status400BadRequest,
+                        "Rotating the pipeline service account secret failed. The previous secret remains in effect."),
+                    $"Adapter '{adapterRtId}' was not found in tenant '{tenantId}'."),
+            async () =>
             {
-                _logger.LogWarning(eventException, "Could not store the rotation failure event");
-            }
+                if (!OctoObjectId.TryParse(adapterRtId, out var adapterObjectId))
+                {
+                    return BadRequest(new ErrorResponse
+                        { ErrorMessage = $"Invalid adapterRtId '{adapterRtId}': must be a 24-character hex ObjectId." });
+                }
 
-            return BadRequest(new ErrorResponse
-            {
-                ErrorMessage = $"Rotating the pipeline service account secret failed: {e.Message}. " +
-                               "The previous secret remains in effect."
-            });
-        }
+                // Resolved through the tenant's adapter list rather than by RtEntityId: Adapter is
+                // polymorphic (RtMeshAdapter and friends), so the caller would have to know the concrete
+                // CkTypeId to build an RtEntityId. A tenant has a handful of adapters.
+                var adapters = await _communicationRepository.GetAdaptersAsync(tenantId);
+                var adapter = adapters.FirstOrDefault(a => a.RtId == adapterObjectId);
+                if (adapter == null)
+                {
+                    return NotFound(new ErrorResponse
+                        { ErrorMessage = $"Adapter '{adapterRtId}' was not found in tenant '{tenantId}'." });
+                }
+
+                try
+                {
+                    var result = await provisioningService.RotateAdapterSecretAsync(tenantId, adapter);
+
+                    var message = BuildRotationMessage(result, adapter.Name ?? adapterRtId);
+
+                    await eventService.StoreInformationEventAsync(tenantId,
+                        $"Pipeline service account secret rotated for adapter '{adapter.Name ?? adapterRtId}' " +
+                        $"({adapterRtId}), client '{result.ClientId}' (source: User). {message}");
+
+                    // The shape lives in Communication.Contracts so the service and every client speak the
+                    // same one; a controller-local copy drifted from it the moment the SDK gained its own.
+                    return Ok(new RotateServiceAccountSecretResultDto(
+                        result.ClientId,
+                        result.WellKnownName,
+                        result.WasCreated,
+                        result.RequiresPipelineRedeploy,
+                        message));
+                }
+                catch (Exception e)
+                {
+                    // Deliberately broad: the rotation spans the identity bus and the tenant repository, and
+                    // whatever went wrong the caller must learn that the rotation did NOT happen rather than
+                    // be left guessing whether the old secret is still valid. The message never contains a
+                    // secret — neither the service nor DistClientDto.ToString() emits one.
+                    _logger.LogError(e, "Rotating the pipeline service account secret of adapter '{AdapterRtId}' failed",
+                        adapterRtId);
+
+                    try
+                    {
+                        await eventService.StoreErrorEventAsync(tenantId,
+                            $"Rotating the pipeline service account secret of adapter '{adapter.Name ?? adapterRtId}' " +
+                            $"({adapterRtId}) failed: {e.Message}. The previous secret remains in effect.");
+                    }
+                    catch (Exception eventException)
+                    {
+                        _logger.LogWarning(eventException, "Could not store the rotation failure event");
+                    }
+
+                    return BadRequest(new ErrorResponse
+                    {
+                        ErrorMessage = $"Rotating the pipeline service account secret failed: {e.Message}. " +
+                                       "The previous secret remains in effect."
+                    });
+                }
+    
+            }, FailureOf);
     }
 
     /// <summary>

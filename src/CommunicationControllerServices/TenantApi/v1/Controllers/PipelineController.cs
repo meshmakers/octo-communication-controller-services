@@ -5,13 +5,16 @@ using Asp.Versioning;
 using Duende.IdentityModel;
 using Meshmakers.Octo.Communication.Contracts.MessageObjects;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
+using Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Microsoft.AspNetCore.Authorization;
+using static Meshmakers.Octo.Backend.CommunicationControllerServices.Methods.Service.CommunicationRestFacade;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.TenantApi.v1.Controllers;
@@ -82,8 +85,8 @@ public class PipelineController : ControllerBase
             return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
         }
     }
-    
-    
+
+
     /// <summary>
     /// Deploys the pipeline definition at the corresponding adapter
     /// </summary>
@@ -103,33 +106,71 @@ public class PipelineController : ControllerBase
         {
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
-        
+
+        string pipelineDefinition;
         try
         {
             using var reader = new StreamReader(Request.Body, Encoding.UTF8);
-            
-            var pipelineDefinition = await reader.ReadToEndAsync();
-            await _adapterService.DeployPipelineAsync(tenantId, adapterRtEntityId, pipelineRtEntityId,
-                pipelineDefinition);
-            return NoContent();
-        }
-        catch (AdapterHubCallbackException e)
-        {
-            _logger.LogError(e, "Pipeline deployment failed (UnprocessableEntity)");
-            return UnprocessableEntity(new ErrorResponse { ErrorMessage = e.Message});
-        }
-        catch (AdapterServiceException e)
-        {
-            _logger.LogError(e, "Pipeline deployment failed (NotFound)");
-            return NotFound(new ErrorResponse { ErrorMessage = e.Message});
+            pipelineDefinition = await reader.ReadToEndAsync();
         }
         catch (Exception e)
         {
             _logger.LogError(e, "Error during deployment of pipeline");
-            return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
         }
+
+        // AB#9049: facade of Pipeline.Deploy-1 (target = the pipeline, adapter and definition as parameters). Ids that are no
+        // RtEntityId keep the direct path (it answered 400). The definition is sensitive: the method never logs or echoes it.
+        var adapter = AdapterController.TryParseRtEntityId(adapterRtEntityId);
+        var pipeline = AdapterController.TryParseRtEntityId(pipelineRtEntityId);
+        return await HttpContext.CommunicationFacade().ServeAsync<IActionResult>(tenantId,
+            new CommunicationMethodCall(PipelineCkTypeId, SystemCommunicationCkIds.PipelineDeployMethodId,
+                nameof(DeployPipeline))
+            {
+                TargetRtId = pipeline?.RtId.ToString(),
+                Parameters = adapter != null && pipeline != null
+                    ? new PipelineDeployParameters
+                    {
+                        AdapterRtId = adapter.Value.RtId.ToString(),
+                        PipelineDefinition = string.IsNullOrEmpty(pipelineDefinition) ? null : pipelineDefinition
+                    }
+                    : null
+            }, User, BearerOf(HttpContext),
+            response => response.Success
+                ? NoContent()
+                : response.Error is { Code: CkMethodErrorCodes.MethodValidationFailed } invalid &&
+                  invalid.Parameters.GetValueOrDefault(CkMethodErrorParameters.Field) == "adapterRtId" &&
+                  invalid.Parameters.GetValueOrDefault(CkMethodErrorParameters.Reason) == "not-found"
+                    // the adapter of the query names no adapter of the tenant: REST answered 404 (AdapterServiceException)
+                    ? Error(StatusCodes.Status404NotFound, $"Adapter '{adapterRtEntityId}' was not found in tenant '{tenantId}'.")
+                    : Failure(response, error => ByReason(error, "The pipeline could not be deployed."),
+                        $"Pipeline '{pipelineRtEntityId}' was not found in tenant '{tenantId}'."),
+            async () =>
+            {
+                try
+                {
+                    await _adapterService.DeployPipelineAsync(tenantId, adapterRtEntityId, pipelineRtEntityId,
+                        pipelineDefinition);
+                    return NoContent();
+                }
+                catch (AdapterHubCallbackException e)
+                {
+                    _logger.LogError(e, "Pipeline deployment failed (UnprocessableEntity)");
+                    return UnprocessableEntity(new ErrorResponse { ErrorMessage = e.Message });
+                }
+                catch (AdapterServiceException e)
+                {
+                    _logger.LogError(e, "Pipeline deployment failed (NotFound)");
+                    return NotFound(new ErrorResponse { ErrorMessage = e.Message });
+                }
+                catch (Exception e)
+                {
+                    _logger.LogError(e, "Error during deployment of pipeline");
+                    return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
+                }
+            }, FailureOf);
     }
-    
+
     /// <summary>
     /// Deploys the pipeline definition at the corresponding adapter
     /// </summary>
@@ -152,27 +193,53 @@ public class PipelineController : ControllerBase
             return NotFound(new ErrorResponse { ErrorMessage = "TenantId is null or empty"});
         }
 
+        string pipelineInput;
         try
         {
             using var reader = new StreamReader(Request.Body, Encoding.UTF8);
-
-            var pipelineInput = await reader.ReadToEndAsync();
-
-            // AB#5126: this endpoint is invoked by an authenticated user, so carry them through as
-            // the caller of the FromExecutePipelineCommand pipeline. The route requires a bearer
-            // (see [Authorize] above), so a resolved invoker is strongly authenticated (trust=2).
-            var caller = BuildExecutePipelineCaller();
-            var callerAccessToken = ExtractBearerToken();
-
-            var pipelineExecutionId = await _triggerManagementService.StartExecutePipelineAsync(tenantId, pipelineRtId,
-                pipelineInput, isDryRun, caller, callerAccessToken);
-            return Ok(pipelineExecutionId);
+            pipelineInput = await reader.ReadToEndAsync();
         }
         catch (Exception e)
         {
             _logger.LogError(e, "Error during execution of pipeline");
-            return BadRequest(new ErrorResponse { ErrorMessage = e.Message});
+            return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
         }
+        var callerAccessToken = ExtractBearerToken();
+
+        // AB#9049: facade of Pipeline.Execute-1. The method starts the execution and answers its id at once; the facade runs it
+        // under the host's lifetime, so a client that disconnects never stops the run. The input is sensitive.
+        return await HttpContext.CommunicationFacade().ServeAsync<IActionResult>(tenantId,
+            new CommunicationMethodCall(PipelineCkTypeId, SystemCommunicationCkIds.PipelineExecuteMethodId,
+                nameof(ExecutePipeline))
+            {
+                TargetRtId = pipelineRtId.ToString(),
+                Parameters = new PipelineExecuteParameters { Input = pipelineInput, IsDryRun = isDryRun }
+            }, User, callerAccessToken,
+            response => ValueOf<RtPipelineExecutionStartResultRecord>(response) is { } started &&
+                        Guid.TryParse(started.ExecutionId, out var executionId)
+                ? Ok(new PipelineExecutionDataDto { Id = executionId, DateTime = started.StartedAt })
+                : Failure(response, error => Error(StatusCodes.Status400BadRequest,
+                        MessageOf(error) ?? "The execution could not be started."),
+                    $"Pipeline '{pipelineRtId}' was not found in tenant '{tenantId}'.", StatusCodes.Status400BadRequest),
+            async () =>
+            {
+                try
+                {
+                    // AB#5126: this endpoint is invoked by an authenticated user, so carry them through as
+                    // the caller of the FromExecutePipelineCommand pipeline. The route requires a bearer
+                    // (see [Authorize] above), so a resolved invoker is strongly authenticated (trust=2).
+                    var caller = BuildExecutePipelineCaller();
+
+                    var pipelineExecutionId = await _triggerManagementService.StartExecutePipelineAsync(tenantId,
+                        pipelineRtId, pipelineInput, isDryRun, caller, callerAccessToken);
+                    return Ok(pipelineExecutionId);
+                }
+                catch (Exception e)
+                {
+                    _logger.LogError(e, "Error during execution of pipeline");
+                    return BadRequest(new ErrorResponse { ErrorMessage = e.Message });
+                }
+            }, FailureOf);
     }
 
     /// <summary>
@@ -257,67 +324,117 @@ public class PipelineController : ControllerBase
                 { ErrorMessage = $"TargetAdapterRtId '{body.TargetAdapterRtId}' is not a valid id" });
         }
 
+        // AB#9049: Pipeline.MoveToAdapter-1 is an instance method on one pipeline, so the list is one method call per pipeline
+        // (each one audited); the answer is the per-item list as before. A refusal of the caller (another tenant) answers 403
+        // for the whole call before anything moved: it is decided by the caller, so the first item already gets it.
+        var facade = HttpContext.CommunicationFacade();
         var results = new List<MovePipelineResultDto>(body.PipelineRtIds.Count);
-
         foreach (var pipelineRtIdStr in body.PipelineRtIds)
         {
-            if (!OctoObjectId.TryParse(pipelineRtIdStr, out var pipelineRtId))
-            {
-                results.Add(new MovePipelineResultDto(pipelineRtIdStr, false, null, null,
-                    $"PipelineRtId '{pipelineRtIdStr}' is not a valid id"));
-                continue;
-            }
-
-            try
-            {
-                var moveResult = await _communicationRepository.MovePipelineToAdapterAsync(
-                    tenantId, pipelineRtId, targetAdapterRtId);
-
-                // Redeploy is best-effort: a failure here does NOT roll the
-                // move back. The pipeline already points at the new adapter
-                // — the operator can hit "Deploy" manually once the adapter
-                // is reachable again.
-                string? warnMessage = null;
-                var movedToDifferentAdapter =
-                    !moveResult.OldAdapterRtEntityId.Equals(moveResult.NewAdapterRtEntityId);
-                if (body.Redeploy && movedToDifferentAdapter)
+            var valid = OctoObjectId.TryParse(pipelineRtIdStr, out var pipelineRtId);
+            var (item, refusal) = await facade.ServeAsync<(MovePipelineResultDto? Item, IActionResult? Refusal)>(tenantId,
+                new CommunicationMethodCall(PipelineCkTypeId, SystemCommunicationCkIds.PipelineMoveToAdapterMethodId,
+                    nameof(MovePipelinesToAdapter))
                 {
-                    try
-                    {
-                        var pipelineRtEntityId =
-                            new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipelineRtId);
-                        await _adapterService.DeployPipelineAsync(tenantId,
-                            moveResult.NewAdapterRtEntityId, pipelineRtEntityId);
-                    }
-                    catch (Exception e)
-                    {
-                        _logger.LogWarning(e,
-                            "Pipeline {PipelineRtId} moved to {Adapter} but redeploy failed",
-                            pipelineRtId, moveResult.NewAdapterRtEntityId);
-                        warnMessage = $"Move OK; redeploy on new adapter failed: {e.Message}";
-                    }
-                }
-
-                var auditMessage = BuildMoveAuditMessage(pipelineRtId, moveResult, "source: User");
-                await _eventService.StoreInformationEventAsync(tenantId, auditMessage);
-
-                results.Add(new MovePipelineResultDto(
-                    pipelineRtIdStr,
-                    true,
-                    moveResult.OldAdapterRtEntityId.RtId.ToString(),
-                    moveResult.NewAdapterRtEntityId.RtId.ToString(),
-                    warnMessage));
-            }
-            catch (CommunicationRepositoryException e)
+                    TargetRtId = valid ? pipelineRtId.ToString() : null,
+                    Parameters = valid
+                        ? new PipelineMoveToAdapterParameters
+                            { TargetAdapterRtId = body.TargetAdapterRtId, Redeploy = body.Redeploy }
+                        : null
+                }, User, BearerOf(HttpContext),
+                response => MoveItemOf(pipelineRtIdStr, response),
+                async () => (await MoveOneDirectAsync(tenantId, pipelineRtIdStr, targetAdapterRtId, body.Redeploy), null),
+                answer => answer.Refusal != null ? "REST_403" : answer.Item is { Success: false } ? "REST_ITEM_FAILED" : null);
+            if (refusal != null)
             {
-                _logger.LogWarning(e,
-                    "Failed to move pipeline {PipelineRtId} to adapter {TargetAdapterRtId} in tenant {TenantId}",
-                    pipelineRtId, targetAdapterRtId, tenantId);
-                results.Add(new MovePipelineResultDto(pipelineRtIdStr, false, null, null, e.Message));
+                return refusal;
             }
+
+            results.Add(item!);
         }
 
         return Ok(new MovePipelinesToAdapterResponseDto(results));
+    }
+
+    /// <summary>The answer of one pipeline of a move through the method (AB#9049); a caller refusal ends the whole call.</summary>
+    private static (MovePipelineResultDto? Item, IActionResult? Refusal) MoveItemOf(string pipelineRtIdStr,
+        CkMethodResponse response)
+    {
+        if (ValueOf<RtPipelineMoveResultRecord>(response) is { } moved)
+        {
+            return (new MovePipelineResultDto(pipelineRtIdStr, true, moved.OldAdapterRtId, moved.NewAdapterRtId,
+                moved.Warning), null);
+        }
+
+        var error = response.Error ?? CkMethodError.Create(CkMethodErrorCodes.MethodHandlerFailed);
+        if (error.Code == CkMethodErrorCodes.MethodForbidden)
+        {
+            return (null, PlatformError(error));
+        }
+
+        return (new MovePipelineResultDto(pipelineRtIdStr, false, null, null,
+            MessageOf(error) ?? (error.Code == CkMethodErrorCodes.MethodTargetNotFound
+                ? $"Pipeline '{pipelineRtIdStr}' was not found"
+                : $"The pipeline could not be moved ({error.Code})")), null);
+    }
+
+    /// <summary>The move of one pipeline on the guarded direct path: the REST behaviour before AB#9049, unchanged.</summary>
+    private async Task<MovePipelineResultDto> MoveOneDirectAsync(string tenantId, string pipelineRtIdStr,
+        OctoObjectId targetAdapterRtId, bool redeploy)
+    {
+        if (!OctoObjectId.TryParse(pipelineRtIdStr, out var pipelineRtId))
+        {
+            return new MovePipelineResultDto(pipelineRtIdStr, false, null, null,
+                $"PipelineRtId '{pipelineRtIdStr}' is not a valid id");
+        }
+
+        try
+        {
+            var moveResult = await _communicationRepository.MovePipelineToAdapterAsync(
+                tenantId, pipelineRtId, targetAdapterRtId);
+
+            // Redeploy is best-effort: a failure here does NOT roll the
+            // move back. The pipeline already points at the new adapter
+            // — the operator can hit "Deploy" manually once the adapter
+            // is reachable again.
+            string? warnMessage = null;
+            var movedToDifferentAdapter =
+                !moveResult.OldAdapterRtEntityId.Equals(moveResult.NewAdapterRtEntityId);
+            if (redeploy && movedToDifferentAdapter)
+            {
+                try
+                {
+                    var pipelineRtEntityId =
+                        new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipelineRtId);
+                    await _adapterService.DeployPipelineAsync(tenantId,
+                        moveResult.NewAdapterRtEntityId, pipelineRtEntityId);
+                }
+                catch (Exception e)
+                {
+                    _logger.LogWarning(e,
+                        "Pipeline {PipelineRtId} moved to {Adapter} but redeploy failed",
+                        pipelineRtId, moveResult.NewAdapterRtEntityId);
+                    warnMessage = $"Move OK; redeploy on new adapter failed: {e.Message}";
+                }
+            }
+
+            var auditMessage = BuildMoveAuditMessage(pipelineRtId, moveResult, "source: User");
+            await _eventService.StoreInformationEventAsync(tenantId, auditMessage);
+
+            return new MovePipelineResultDto(
+                pipelineRtIdStr,
+                true,
+                moveResult.OldAdapterRtEntityId.RtId.ToString(),
+                moveResult.NewAdapterRtEntityId.RtId.ToString(),
+                warnMessage);
+        }
+        catch (CommunicationRepositoryException e)
+        {
+            _logger.LogWarning(e,
+                "Failed to move pipeline {PipelineRtId} to adapter {TargetAdapterRtId} in tenant {TenantId}",
+                pipelineRtId, targetAdapterRtId, tenantId);
+            return new MovePipelineResultDto(pipelineRtIdStr, false, null, null, e.Message);
+        }
     }
 
     /// <summary>
@@ -344,6 +461,26 @@ public class PipelineController : ControllerBase
 
         var pipelineRtEntityId = new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipelineRtId);
 
+        // AB#9049: facade of Pipeline.SetDebugging-1; 422 / 404 / 400 as before (the reason parameter of the failure).
+        return await HttpContext.CommunicationFacade().ServeAsync<IActionResult>(tenantId,
+            new CommunicationMethodCall(PipelineCkTypeId, SystemCommunicationCkIds.PipelineSetDebuggingMethodId,
+                nameof(SetPipelineDebugging))
+            {
+                TargetRtId = pipelineRtId.ToString(),
+                Parameters = new PipelineSetDebuggingParameters { Enabled = body.Enabled }
+            }, User, BearerOf(HttpContext),
+            response => ValueOf<RtPipelineDebugResultRecord>(response) is { } debug
+                ? Ok(new SetPipelineDebugResultDto(debug.Enabled, debug.AppliedToRunningAdapter))
+                : Failure(response, error => ByReason(error, "The debug state could not be changed."),
+                    $"Pipeline '{pipelineRtId}' not found"),
+            () => SetPipelineDebuggingDirectAsync(tenantId, pipelineRtId, pipelineRtEntityId, body.Enabled), FailureOf);
+    }
+
+    /// <summary>The debug toggle on the guarded direct path: the REST behaviour before AB#9049, unchanged.</summary>
+    private async Task<IActionResult> SetPipelineDebuggingDirectAsync(string tenantId, OctoObjectId pipelineRtId,
+        RtEntityId pipelineRtEntityId, bool enabled)
+    {
+        var body = new SetPipelineDebugRequestDto(enabled);
         try
         {
             var appliedToRunningAdapter =

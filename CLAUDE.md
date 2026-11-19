@@ -215,7 +215,8 @@ System.Communication 4.17.0 declares the adapter, workload and adapter pool oper
 the pipeline, data flow and workload chart-version operations
 (`handler: service`), and the controller handles them with the typed handler SDK of octo-common-services
 (`AddCkMethodHandlers`): one shared queue per method, announcement, heartbeat, caller token validation, the declared
-authorization and redaction are the host's. The REST endpoints are unchanged (client switch and deprecation: F5.3, AB#5701).
+authorization and redaction are the host's. Since AB#9048 / AB#9049 the REST endpoints are facades of these methods (next
+section); routes, bodies and status codes are unchanged.
 Code: `src/CommunicationControllerServices/Methods/Service/`. User guide: `octo-documentation` ->
 `technologyGuide/communication/methods.md` (en + de).
 
@@ -304,7 +305,40 @@ Code: `src/CommunicationControllerServices/Methods/Service/`. User guide: `octo-
   default configuration at order 10, which applies the System.Communication blueprint to it). A system tenant without
   System.Communication fails the startup naming the method. Switch: `Methods:Communication:Enabled=false`
   (`OCTO_METHODS__COMMUNICATION__ENABLED`) - no handler, no queue; the REST endpoints keep working and calls answer
-  `METHOD_HANDLER_NOT_AVAILABLE`.
+  `METHOD_HANDLER_NOT_AVAILABLE`. Since AB#9048 the REST endpoints then take the guarded direct path (next section).
+
+### REST facades over the methods (AB#9048 / AB#9049, F5.3 AB#5701)
+
+The 15 endpoints of the table above call their method through `ICommunicationMethodFacade.ServeAsync`
+(`Methods/Service/CommunicationMethodFacade.cs`; envelope to REST answer: `CommunicationRestFacade.cs`). Full description and
+the parity table: `docs/rest-method-facades.md`.
+
+- **Method path.** Hosted + declared in the tenant's model + the caller passes the declared authorization (evaluated with the
+  pipeline's own `ICkMethodAuthorizationEvaluator`): `ICkMethodDispatcher` -> in-process transport (AB#8411), detached from the
+  request, one Method audit event (transport `in-process`). Cancellation token = `IHostApplicationLifetime.ApplicationStopping`,
+  never `RequestAborted`: a client that disconnects never stops a started operation (execute, deploy).
+- **Guarded direct path** (`Reason=role-missing|scope-missing|switch-off|method-not-declared|input-not-routable`): the endpoint's
+  previous code behind `CkMethodCallerTenantCheck`, one audit event (transport `fallback`, outcome `SUCCESS` or
+  `REST_<status>`) and one WARN line without target id. There is no unguarded direct path; no principal is refused.
+- 🔴 **Rights (decision B, Odin 2026-11-18).** REST authorizes on the scope only (`TenantCommunicationApiReadWritePolicy`);
+  the methods declare `CommunicationManagement`. A caller with the scope but without the role keeps REST on the direct path
+  (`Reason=role-missing`, measure it before requiring the role - follow-up story). Do not "fix" this by routing every caller
+  through the method: that narrows REST for callers such as CD clients.
+- 🔴 **Caller inside a handler** (Kassandra round 1 of AB#9048). A handler has no `HttpContext`; services that judge "the
+  caller" through `IHttpContextAccessor` (the elevation gate `AdapterService.EnsurePipelineElevationAuthorizedAsync`, AB#5128,
+  and `IdentityClientReader`, AB#5027) would take their system path. Every handler opens `CommunicationMethodCaller.Begin(context)`
+  first and those services fall back to `CommunicationMethodCaller.Current`. A new handler must open it too; a new service
+  that reads `HttpContext.User` or the bearer must fall back to it. Tests: `DeployPipelineElevationGateTests` (method caller),
+  `CommunicationRestFacadeTests.ADeployInsideTheHandler_SeesTheCaller_NotTheSystemPath`.
+- **Registration.** `AddCommunicationCkMethodHost` registers the facade, `AddCkMethodAudit`, the evaluator and the CK-cache
+  definition source always (switch off: direct path only) and `AddCkMethodDispatcher` when hosted;
+  `AddCommunicationMethodDiscovery` adds the registry feed. A test that builds the host needs an `IDistributionEventHubService`
+  (the dispatcher's startup service) - see `CommunicationRestFacadeTests`.
+- **Status codes.** The deploy / debug / data-flow failures carry the additive error parameter `reason`
+  (`adapter-rejected` 422, `adapter-service` 404, `unexpected` 400, `CommunicationMethodSupport.FailureParameters`), so the
+  facade keeps the REST status codes. A move list is one method call per pipeline; a refusal of the caller ends it with 403.
+- **Controller unit tests** attach the real facade with the switch off (`DirectRestFacade.Attach`, both test projects), so they
+  keep testing the REST code itself; `CommunicationMethodHostTests` compares that REST code with the method.
 
 ### Multi-Tenancy
 

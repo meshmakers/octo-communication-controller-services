@@ -503,6 +503,7 @@ public sealed partial class CommunicationMethodHostTests
                     new System.Security.Claims.Claim("sub", Subject),
                     new System.Security.Claims.Claim("role", CommunicationManagement)
                 ], "Bearer", "name", "role"));
+            DirectRestFacade.Attach(context, TenantId);
         }
 
         controller.ControllerContext = new ControllerContext { HttpContext = context };
