@@ -24,9 +24,8 @@ public enum ExecutionEnvelopeRejection
     NoKey,
 
     /// <summary>
-    ///     The authentication tag does not verify: an edited value, a wrong key, a value sealed for another purpose,
-    ///     tenant or execution, a value in the former form (bound only by its content) or a value produced through a
-    ///     Secret attribute.
+    ///     The authentication tag does not verify: edited, wrong key, or not sealed for this purpose, tenant and
+    ///     execution (for example a Secret attribute value).
     /// </summary>
     Unreadable,
 
@@ -39,22 +38,13 @@ public enum ExecutionEnvelopeRejection
     /// <summary>The decrypted content is not a well-formed envelope of this format.</summary>
     Malformed,
 
-    /// <summary>
-    ///     The content names another purpose although the binding verified. A value sealed for another purpose reads
-    ///     <see cref="Unreadable" />, because its binding does not verify.
-    /// </summary>
+    /// <summary>The content names another purpose although the binding verified.</summary>
     WrongPurpose,
 
-    /// <summary>
-    ///     The content names another tenant although the binding verified. A value sealed for another tenant reads
-    ///     <see cref="Unreadable" />.
-    /// </summary>
+    /// <summary>The content names another tenant although the binding verified.</summary>
     WrongTenant,
 
-    /// <summary>
-    ///     The content names another execution although the binding verified. A value copied from another execution
-    ///     reads <see cref="Unreadable" />.
-    /// </summary>
+    /// <summary>The content names another execution although the binding verified.</summary>
     WrongExecution
 }
 
@@ -73,15 +63,12 @@ public enum ExecutionEnvelopeRejection
 ///         execution RtId, data) and encrypted with the engine key ring (<c>enc:v2:&lt;kid&gt;</c>, AES-256-GCM)
 ///         for the binding purpose + tenant + execution (<see cref="SecretPurpose" />, part of the associated data).
 ///         A flipped bit, a foreign key, another purpose, another tenant or another execution does not open, and a
-///         value produced through a Secret attribute (same key ring, no binding) never opens here, nor does a sealed
-///         value open as the value of a Secret attribute. The binding in the content is checked as well. Key
-///         rotation works as for every <c>enc:v2</c> value.
+///         value produced through a Secret attribute (same key ring, no binding) never opens here. The binding in the
+///         content is checked as well.
 ///     </para>
 ///     <para>
-///         <b>Former form.</b> Values sealed before the binding was part of the associated data carry it only in the
-///         content and cannot be told apart from a Secret attribute value with a valid wrapper. They are refused
-///         (<see cref="ExecutionEnvelopeRejection.Unreadable" />) and never re-sealed; an execution queued with such a
-///         value is refused at its grant and must be run again.
+///         <b>Former form.</b> A value bound only by its content is refused and never re-sealed; it cannot be told
+///         apart from a Secret attribute value.
 ///     </para>
 ///     <para>
 ///         <b>Fail closed.</b> Every refusal returns <c>false</c> with a reason; the caller treats it as "nothing was

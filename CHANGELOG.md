@@ -12,7 +12,7 @@
   purpose, tenant and execution through the associated data of the key ring (engine `ISecretAttributeProtector.Protect /
   Unprotect` with a `SecretPurpose`). A value produced through a Secret attribute no longer opens as a sealed execution
   value, and a sealed value does not open as a Secret attribute value. Values sealed in the former form (binding only
-  in the content) are refused at once (`Unreadable`) and never re-sealed (AB#9228): executions queued, or leased and
+  in the content) are refused at once (`Unreadable`) and never re-sealed: executions queued, or leased and
   interrupted, at the time of the upgrade are failed at their grant and must be run again. Needs the engine package
   with `SecretPurpose`.
 

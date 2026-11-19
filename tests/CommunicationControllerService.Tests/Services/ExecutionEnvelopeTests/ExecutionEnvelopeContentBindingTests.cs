@@ -8,7 +8,7 @@ using TUnit.Core;
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.ExecutionEnvelopeTests;
 
 /// <summary>
-///     AB#9228: the binding inside the content stays checked after the binding moved into the associated data. Only a
+///     The binding inside the content stays checked after the binding moved into the associated data. Only a
 ///     holder of the key ring that passes a binding of its own choice can produce a value whose associated data
 ///     verifies while its content names something else, so these values are built with the protector directly. The
 ///     second layer is defence in depth for exactly that case, and for two bindings that read alike: the binding joins

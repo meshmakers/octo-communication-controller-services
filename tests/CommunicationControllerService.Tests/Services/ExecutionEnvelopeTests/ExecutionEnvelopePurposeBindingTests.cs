@@ -10,11 +10,8 @@ using TUnit.Core;
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.ExecutionEnvelopeTests;
 
 /// <summary>
-///     A sealed execution value is bound to its purpose, tenant and execution by the associated data of the key ring,
-///     not only by the content it carries. A value produced through a Secret attribute (whose envelope a tenant
-///     administrator can read in a dump) therefore never opens as a sealed execution value, and a sealed execution
-///     value never opens as the value of a Secret attribute. A value in the former form (bound only by its content)
-///     is refused like any other value that does not open: it cannot be told apart from a Secret attribute value.
+///     A sealed execution value is bound to its purpose, tenant and execution by the associated data, so it never opens
+///     as a Secret attribute value and a Secret attribute value never opens as a sealed execution value.
 /// </summary>
 internal class ExecutionEnvelopePurposeBindingTests
 {
@@ -77,39 +74,6 @@ internal class ExecutionEnvelopePurposeBindingTests
     }
 
     [Test]
-    public async Task ASealedValue_OpensForItsBinding()
-    {
-        var envelope = CreateEnvelope();
-        var sealedValue = envelope.Seal(Purpose, new Data("x", 1), Tenant, _execution);
-
-        var opened = envelope.TryOpen<Data>(Purpose, sealedValue, Tenant, _execution, out var data,
-            out var rejection);
-
-        using var scope = Assert.Multiple();
-        await Assert.That(opened).IsTrue();
-        await Assert.That(rejection).IsEqualTo(ExecutionEnvelopeRejection.None);
-        await Assert.That(data).IsEqualTo(new Data("x", 1));
-    }
-
-    [Test]
-    [Arguments("other-purpose", Tenant, false)]
-    [Arguments(Purpose, "other-tenant", false)]
-    [Arguments(Purpose, Tenant, true)]
-    public async Task ASealedValue_DoesNotOpenForAnotherBinding(string purpose, string tenant, bool otherExecution)
-    {
-        var envelope = CreateEnvelope();
-        var sealedValue = envelope.Seal(Purpose, new Data("x", 1), Tenant, _execution);
-
-        var opened = envelope.TryOpen<Data>(purpose, sealedValue, tenant,
-            otherExecution ? OctoObjectId.GenerateNewId() : _execution, out var data, out var rejection);
-
-        using var scope = Assert.Multiple();
-        await Assert.That(opened).IsFalse();
-        await Assert.That(data).IsNull();
-        await Assert.That(rejection).IsEqualTo(ExecutionEnvelopeRejection.Unreadable);
-    }
-
-    [Test]
     public async Task TheTenantOfTheBinding_IsComparedCaseInsensitively()
     {
         var envelope = CreateEnvelope();
@@ -120,25 +84,5 @@ internal class ExecutionEnvelopePurposeBindingTests
         using var scope = Assert.Multiple();
         await Assert.That(opened).IsTrue();
         await Assert.That(rejection).IsEqualTo(ExecutionEnvelopeRejection.None);
-    }
-
-    [Test]
-    public async Task Reseal_OfASealedValue_OpensForTheNextExecutionOnly()
-    {
-        var envelope = CreateEnvelope();
-        var sealedValue = envelope.Seal(Purpose, new Data("x", 1), Tenant, _execution);
-        var nextExecution = OctoObjectId.GenerateNewId();
-
-        var resealed = envelope.Reseal<Data>(Purpose, sealedValue, Tenant, _execution, nextExecution);
-
-        var openedForTheNextExecution = envelope.TryOpen<Data>(Purpose, resealed, Tenant, nextExecution, out _,
-            out var nextRejection);
-        var openedForTheFormerExecution = envelope.TryOpen<Data>(Purpose, resealed, Tenant, _execution, out _,
-            out var formerRejection);
-        using var scope = Assert.Multiple();
-        await Assert.That(openedForTheNextExecution).IsTrue();
-        await Assert.That(nextRejection).IsEqualTo(ExecutionEnvelopeRejection.None);
-        await Assert.That(openedForTheFormerExecution).IsFalse();
-        await Assert.That(formerRejection).IsEqualTo(ExecutionEnvelopeRejection.Unreadable);
     }
 }

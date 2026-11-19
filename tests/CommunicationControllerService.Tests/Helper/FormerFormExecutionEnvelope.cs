@@ -7,7 +7,7 @@ using Meshmakers.Octo.Runtime.Contracts.Secrets;
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Helper;
 
 /// <summary>
-///     Seals exactly as the controller did before AB#9127: the same wrapper, encrypted with the plain
+///     Seals exactly as the controller did before the purpose binding: the same wrapper, encrypted with the plain
 ///     <see cref="ISecretAttributeProtector.Protect(string)" /> (no purpose in the associated data), i.e. the call that
 ///     encrypts every Secret attribute. Produces the values that executions queued before the upgrade carry.
 /// </summary>

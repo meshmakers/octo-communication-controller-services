@@ -3460,15 +3460,14 @@ the binding** `octo.communication.execution-envelope/<purpose>/<tenant>/<executi
 binding is part of the AES-GCM associated data, so another purpose, tenant or execution does not open (reason
 `Unreadable`), nor does a flipped bit, another key, plain text or `enc:v1`. A value produced through a Secret attribute
 (same key ring, whose envelope a tenant administrator can read in a dump) never opens here, and a sealed value never
-opens as a Secret attribute value. The binding inside the content is checked as well. The reason of a refusal is
-logged (`ExecutionEnvelopeRejection`), never the value.
+opens as a Secret attribute value. The reason of a refusal is logged (`ExecutionEnvelopeRejection`), never the value.
 
 **Former form (before AB#9127) is refused at once.** A value sealed with the binding only in its content cannot be told
 apart from a Secret attribute value that carries a valid wrapper, so it is refused like any value that does not open
-(`Unreadable`), with no transition window and no option, and it is never re-sealed. Sealed values live only on
-`PipelineExecution.SealedCaller` for the life of one execution (a seal the controller can open is refused after
-`QueuedSealMaxAgeDays` while queued; a retry gets a new seal), so only the executions that are queued, or leased and then interrupted, at the moment of the upgrade
-are affected. What happens to them depends on the key id of the value:
+(`Unreadable`) and never re-sealed. Sealed values live only on `PipelineExecution.SealedCaller` for the life of one
+execution (a seal the controller can open is refused after `QueuedSealMaxAgeDays` while queued; a retry gets a new
+seal), so only the executions that are queued, or leased and then interrupted, at the moment of the upgrade are
+affected. What happens to them depends on the key id of the value:
 
 - **Queued, and the controller holds that key** (the usual case): the value reads `Unreadable`, the verdict is
   `Forged`, and the execution is failed at its grant (refusal `QueuedProvenanceInvalid`, borrower event, WARN). It
@@ -3495,19 +3494,14 @@ been partly done. Such a retry is named in the INFO "Interrupted leased executio
 '<retry id>'"; a retry the new version re-queues is named in the WARN "The provenance of interrupted execution '<id>'
 did not carry onto its retry '<retry id>'". The logs of a replaced pod may be gone, so the entities count as well: an
 execution of the same pipeline in status `Interrupted` with the same input data marks a queued execution as its
-retry. A queued execution counts as a retry unless the logs or that check rule it out; every other execution queued at
-the upgrade is safe to run again. For an interrupted run and its retry, check for effects first (look up what the run
+retry. A queued execution counts as a retry unless the logs rule it out; a missing `Interrupted` entity does not. An
+execution queued at the upgrade that the logs rule out as a retry is safe to run again. For an interrupted run and its retry, check for effects first (look up what the run
 should have written, for example inserts of a method pipeline), and run it again only when nothing was committed, or
 when the pipeline is idempotent; otherwise reconcile by hand, so no insert is repeated.
 
-**Rollout and rollback.** The previous version opens a value without the binding, and its engine also reports a key id
-it does not hold before it checks the tag. So a pod of the previous version, during the rolling update or after a
-rollback, treats a bound value like the new version treats a former-form value: under a key it holds, the value reads
-`Unreadable` and the execution is failed at its grant (`QueuedProvenanceInvalid`); under a key id it does not hold, the
-value reads `UnknownKey` and the execution stays `Queued` (`QueuedProvenanceUnverifiable`) until a controller of the new
-version that holds the key grants it, or until the lender tenant's operator cancels it. A controller of the previous
-version that later gets the key fails it. An interrupted run is re-queued without a seal and its retry is failed. With
-one controller replica the overlap of the rolling update is the few seconds of the pod switch (longer when the
+**Rollout and rollback.** The previous version opens a value without the binding, so a pod of the previous version,
+during the rolling update or after a rollback, treats a bound value as the new one treats a former-form value (see
+above). With one controller replica the overlap of the rolling update is the few seconds of the pod switch (longer when the
 Deployment lets both pods run at once); a rollback affects every execution still queued with the bound form.
 Executions failed or cancelled this way are run again under the rule above; for a rollback, read "previous" and "new"
 the other way round (the retries the new version re-queued before the rollback are the interrupted work).

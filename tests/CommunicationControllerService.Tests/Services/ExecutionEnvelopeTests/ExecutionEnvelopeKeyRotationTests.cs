@@ -13,7 +13,7 @@ using TUnit.Core;
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.ExecutionEnvelopeTests;
 
 /// <summary>
-///     AB#9228: the purpose binding survives a key rotation. A value sealed under the former active key opens after the
+///     The purpose binding survives a key rotation. A value sealed under the former active key opens after the
 ///     rotation while that key stays in the ring, new values are sealed under the new key, and the binding still keeps
 ///     a sealed value and a Secret attribute value apart under either key.
 /// </summary>

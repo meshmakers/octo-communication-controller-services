@@ -104,20 +104,6 @@ internal class ExecutionEnvelopeTests
     }
 
     [Test]
-    public async Task AnotherSecretOfTheSameKeyRing_DoesNotOpen()
-    {
-        var keys = TestSecretEncryption.Create();
-        var sut = new ExecutionEnvelope(keys.Protector);
-        var copiedSecret = keys.Protector.Protect("a-client-secret").Envelope;
-
-        var ok = sut.TryOpen<Data>(Purpose, copiedSecret, Tenant, _execution, out _, out var why);
-
-        using var scope = Assert.Multiple();
-        await Assert.That(ok).IsFalse();
-        await Assert.That(why).IsEqualTo(ExecutionEnvelopeRejection.Unreadable);
-    }
-
-    [Test]
     public async Task AValueOfAnotherKeyRing_DoesNotOpen()
     {
         var stored = TestExecutionEnvelope.Create().Seal(Purpose, new Data("x", 1), Tenant, _execution);
@@ -169,7 +155,9 @@ internal class ExecutionEnvelopeTests
         await Assert.That(resealed).IsNotEqualTo(stored);
         await Assert.That(_sut.TryOpen<Data>(Purpose, resealed, Tenant, next, out var data, out _)).IsTrue();
         await Assert.That(data).IsEqualTo(new Data("x", 3));
-        await Assert.That(_sut.TryOpen<Data>(Purpose, resealed, Tenant, _execution, out _, out _)).IsFalse();
+        await Assert.That(_sut.TryOpen<Data>(Purpose, resealed, Tenant, _execution, out _, out var formerRejection))
+            .IsFalse();
+        await Assert.That(formerRejection).IsEqualTo(ExecutionEnvelopeRejection.Unreadable);
     }
 
     [Test]

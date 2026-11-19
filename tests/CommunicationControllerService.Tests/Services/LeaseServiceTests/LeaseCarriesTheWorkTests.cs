@@ -386,7 +386,7 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
             default!);
     }
 
-    // ---- AB#9228: values sealed in the former form (binding only in the content) --------------------------------
+    // ---- Values sealed in the former form (binding only in the content) ----------------------------------------
 
     private LeaseService ALeaseServiceOver(IExecutionEnvelope envelope) => new(ConnectionManager,
         CommunicationRepository, EventService, EncryptionService, envelope, HubContext, LendingScopeResolver,

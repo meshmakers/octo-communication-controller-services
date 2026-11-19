@@ -812,7 +812,7 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
     }
 
     /// <summary>
-    ///     AB#9228: an execution queued by the controller before the purpose binding (value sealed in the former form,
+    ///     An execution queued by the controller before the purpose binding (value sealed in the former form,
     ///     under the key ring the controller holds) is refused at its grant and ends Failed, it does not stay Queued.
     /// </summary>
     [Fact]
@@ -858,7 +858,7 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
         }
     }
 
-    /// <summary>The value the controller wrote before AB#9127: the same wrapper, plain Protect, no binding.</summary>
+    /// <summary>The former form: the same wrapper, plain Protect, no binding.</summary>
     private string ResealInTheFormerForm(string? sealedCaller, OctoObjectId executionRtId)
     {
         Envelope.TryOpen<QueuedCaller.Payload>(ExecutionEnvelopePurposes.QueuedCaller, sealedCaller,
