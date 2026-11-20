@@ -184,3 +184,11 @@ attributes:
     valueType: String
     isRuntimeState: true
     description: 'URL of the OctoMesh MCP server for AI tool use (e.g. https://localhost:5017). The tenant ID is appended automatically.'
+  # Optional endpoint of the AI provider. Environment-specific and set by the operator per
+  # tenant (nothing a blueprint seed can know), so, like McpServerUrl, it survives a re-apply:
+  # losing it would silently send the ApiKey to the provider default instead of the endpoint
+  # the key was issued for.
+  - id: BaseUrl
+    valueType: String
+    isRuntimeState: true
+    description: 'Optional base URL of the AI provider endpoint (e.g. Claude via Microsoft Foundry: https://<resource>.services.ai.azure.com/anthropic). Empty means the provider default. The ApiKey is sent only to this endpoint. https only; http is accepted for loopback addresses only.'

@@ -37,9 +37,9 @@ internal class SystemCommunicationCkLanguage2Tests
 
         // AB#8595: 4.17.0 adds the Adapter / DeployableWorkload / AdapterPool methods, AB#8596: 4.18.0 the Pipeline /
         // DataFlow / chart-version methods, AB#9050: 4.19.0 the deployment site / workload deploy / pool scale / trigger
-        // methods (Minor each). Sensitive parameters, no sensitive result, no execution.mode and no dataAccess, so the
+        // methods (Minor each), AB#9308: 4.20.0 the optional AiConfiguration.BaseUrl. Sensitive parameters, no sensitive result, no execution.mode and no dataAccess, so the
         // minimum engine version stays.
-        await Assert.That(root.ModelId.ToString()).IsEqualTo("System.Communication-4.19.0");
+        await Assert.That(root.ModelId.ToString()).IsEqualTo("System.Communication-4.20.0");
         await Assert.That(root.CkLanguage).IsEqualTo(2);
         // The compiler stamps minEngineVersion for a ckLanguage 2 model; the sources never set it. It is the maximum of
         // the model's own features and of its dependencies (CatalogModelResolver). System.Communication itself needs
@@ -157,5 +157,22 @@ internal class SystemCommunicationCkLanguage2Tests
 
         var acknowledged = root.Compatibility?.Acknowledge?.Select(a => a.Change).ToList() ?? [];
         await Assert.That(acknowledged).IsEmpty();
+    }
+
+    /// <summary>
+    ///     AB#9308, 4.20.0: <c>AiConfiguration.BaseUrl</c> is an optional String, so existing AiConfigurations stay valid and an
+    ///     empty value keeps the provider default. It is not a Secret and is kept on a blueprint re-apply like McpServerUrl.
+    /// </summary>
+    [Test]
+    public async Task AiConfiguration_DeclaresOptionalBaseUrl()
+    {
+        var root = await LoadEmbeddedSystemCommunicationAsync();
+
+        var aiConfiguration = (root.Types ?? []).Single(t => t.TypeId.Name == "AiConfiguration");
+        var baseUrl = (aiConfiguration.Attributes ?? []).Single(a => a.AttributeName == "BaseUrl");
+        await Assert.That(baseUrl.IsOptional).IsTrue();
+
+        var definition = (root.Attributes ?? []).Single(a => a.AttributeId.Name == "BaseUrl");
+        await Assert.That(definition.SecuritySensitive).IsNotEqualTo(true);
     }
 }

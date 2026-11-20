@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- AB#9308 New: System.Communication 4.20.0 adds the optional String attribute `AiConfiguration.BaseUrl`, the base URL of the AI
+  provider endpoint (for example Claude via Microsoft Foundry, `https://<resource>.services.ai.azure.com/anthropic`). Empty means
+  the provider default; the `ApiKey` is sent only to this endpoint; https only, http for loopback addresses only. Additive (a
+  Minor against 4.19.0), no access changes, no migration. Like `McpServerUrl` it is kept on a blueprint re-apply. JSON key of
+  the entity attribute: `baseUrl`.
+
 - AB#9051 New: the 22 communication endpoints that are facades of System.Communication methods (AB#9048, AB#9049, AB#9050) are
   deprecated in wave `CommunicationWave3`: every response carries `Link: <…/technologyGuide/communication/methods>;
   rel="deprecation"`, the OpenAPI operations are `deprecated`, and `octo.rest.deprecated.calls` counts the calls per endpoint and
