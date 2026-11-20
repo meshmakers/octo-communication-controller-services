@@ -56,9 +56,9 @@ internal class ExecutionEnvelopeTests
     }
 
     [Test]
-    [Arguments("other-purpose", Tenant, false, ExecutionEnvelopeRejection.WrongPurpose)]
-    [Arguments(Purpose, "other-tenant", false, ExecutionEnvelopeRejection.WrongTenant)]
-    [Arguments(Purpose, Tenant, true, ExecutionEnvelopeRejection.WrongExecution)]
+    [Arguments("other-purpose", Tenant, false, ExecutionEnvelopeRejection.Unreadable)]
+    [Arguments(Purpose, "other-tenant", false, ExecutionEnvelopeRejection.Unreadable)]
+    [Arguments(Purpose, Tenant, true, ExecutionEnvelopeRejection.Unreadable)]
     public async Task TheBinding_IsPartOfTheAuthenticatedContent(string purpose, string tenant,
         bool otherExecution, ExecutionEnvelopeRejection expected)
     {
@@ -101,21 +101,6 @@ internal class ExecutionEnvelopeTests
         using var scope = Assert.Multiple();
         await Assert.That(ok).IsFalse();
         await Assert.That(why).IsEqualTo(ExecutionEnvelopeRejection.Unreadable);
-    }
-
-    [Test]
-    public async Task AnotherSecretOfTheSameKeyRing_IsNoEnvelope()
-    {
-        // not a decryption oracle: whatever it decrypts to is only compared, never returned
-        var keys = TestSecretEncryption.Create();
-        var sut = new ExecutionEnvelope(keys.Protector);
-        var copiedSecret = keys.Protector.Protect("a-client-secret").Envelope;
-
-        var ok = sut.TryOpen<Data>(Purpose, copiedSecret, Tenant, _execution, out _, out var why);
-
-        using var scope = Assert.Multiple();
-        await Assert.That(ok).IsFalse();
-        await Assert.That(why).IsEqualTo(ExecutionEnvelopeRejection.Malformed);
     }
 
     [Test]
@@ -170,7 +155,9 @@ internal class ExecutionEnvelopeTests
         await Assert.That(resealed).IsNotEqualTo(stored);
         await Assert.That(_sut.TryOpen<Data>(Purpose, resealed, Tenant, next, out var data, out _)).IsTrue();
         await Assert.That(data).IsEqualTo(new Data("x", 3));
-        await Assert.That(_sut.TryOpen<Data>(Purpose, resealed, Tenant, _execution, out _, out _)).IsFalse();
+        await Assert.That(_sut.TryOpen<Data>(Purpose, resealed, Tenant, _execution, out _, out var formerRejection))
+            .IsFalse();
+        await Assert.That(formerRejection).IsEqualTo(ExecutionEnvelopeRejection.Unreadable);
     }
 
     [Test]
@@ -226,7 +213,8 @@ internal class ExecutionEnvelopeTests
         var keys = TestSecretEncryption.Create();
         var sut = new ExecutionEnvelope(keys.Protector);
         var json = "{\"v\":1,\"p\":\"" + Purpose + "\",\"t\":\"" + Tenant + "\",\"e\":\"" + _execution + "\"}";
-        var stored = keys.Protector.Protect(json).Envelope;
+        var binding = ExecutionEnvelope.BuildBinding(Purpose, Tenant, _execution);
+        var stored = keys.Protector.Protect(json, binding).Envelope;
 
         var ok = sut.TryOpen<Data>(Purpose, stored, Tenant, _execution, out _, out var why);
 

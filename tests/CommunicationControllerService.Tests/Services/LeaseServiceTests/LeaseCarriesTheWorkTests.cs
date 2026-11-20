@@ -6,6 +6,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Hubs;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.Secrets;
 using Microsoft.AspNetCore.SignalR;
 using NSubstitute;
 
@@ -384,6 +385,68 @@ internal class LeaseCarriesTheWorkTests : LeaseServiceTestsBase
         await CommunicationRepository.DidNotReceiveWithAnyArgs().TryFailQueuedExecutionAsync(default!, default,
             default!);
     }
+
+    // ---- Values sealed in the former form (binding only in the content) ----------------------------------------
+
+    private LeaseService ALeaseServiceOver(IExecutionEnvelope envelope) => new(ConnectionManager,
+        CommunicationRepository, EventService, EncryptionService, envelope, HubContext, LendingScopeResolver,
+        ServiceAccountResolver, DatabaseCredentialResolver, AdapterService, LifecycleConfiguration, WakeSignal,
+        ClaimStore);
+
+    private string? SealedInTheFormerForm(string? token, ISecretAttributeProtector protector)
+    {
+        var execution = new RtPipelineExecution { RtId = ExecutionRtId, InputData = PipelineInput };
+        QueuedCaller.Apply(execution, BorrowerTenantId, PipelineRtId, BorrowerAdapterRtId, ACaller(), token,
+            new FormerFormExecutionEnvelope(protector));
+        return execution.SealedCaller;
+    }
+
+    [Test]
+    public async Task AValueSealedInTheCurrentForm_UnderTheSameKeyRing_IsGranted()
+    {
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+        var service = ALeaseServiceOver(new ExecutionEnvelope(SecretEncryption.Protector));
+        var execution = new RtPipelineExecution { RtId = ExecutionRtId, InputData = PipelineInput };
+        QueuedCaller.Apply(execution, BorrowerTenantId, PipelineRtId, BorrowerAdapterRtId, ACaller(), null,
+            new ExecutionEnvelope(SecretEncryption.Protector));
+
+        var result = await service.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId,
+            AWorkRequestFrom(execution.SealedCaller));
+
+        await Assert.That(result.Granted).IsTrue();
+    }
+
+    [Test]
+    public async Task AValueSealedInTheFormerForm_UnderTheControllersOwnKey_IsFailedAtItsGrant()
+    {
+        // Everything else is genuine: provenance marker, pipeline, adapter and input as queued, same key ring.
+        var formerFormValue = SealedInTheFormerForm(AJwtExpiringAt(DateTimeOffset.UtcNow.AddMinutes(30)),
+            SecretEncryption.Protector);
+
+        await AssertRefusedAndFailedAsync(formerFormValue,
+            service: ALeaseServiceOver(new ExecutionEnvelope(SecretEncryption.Protector)));
+    }
+
+    [Test]
+    public async Task AValueSealedInTheFormerForm_UnderAKeyIdThisControllerDoesNotHold_StaysQueued_NotFailed()
+    {
+        var formerFormValue = SealedInTheFormerForm("t", TestSecretEncryption.Create(keyId: "k-other").Protector);
+        ArrangeGrantableLease();
+        ArrangeProjectablePipeline();
+
+        var result = await LeaseService.GrantLeaseAsync(LenderTenantId, AdapterPoolRtId,
+            AWorkRequestFrom(formerFormValue));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.Granted).IsFalse();
+        await Assert.That(result.Reason).IsEqualTo(LeaseRefusalReason.QueuedProvenanceUnverifiable);
+        await CommunicationRepository.DidNotReceiveWithAnyArgs().TryFailQueuedExecutionAsync(default!, default,
+            default!);
+    }
+
+    [Test]
+    public Task AnEmptySealedValue_AsARestoreLeavesIt_IsNotLeased() => AssertRefusedAndFailedAsync(string.Empty);
 
     // ---- B1: the hand-driven endpoint goes through the same gate ------------------------------------------------
 

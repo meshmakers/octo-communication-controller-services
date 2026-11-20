@@ -23,7 +23,10 @@ public enum ExecutionEnvelopeRejection
     /// <summary>The controller has no usable key ring.</summary>
     NoKey,
 
-    /// <summary>The authentication tag does not verify (edited, wrong key).</summary>
+    /// <summary>
+    ///     The authentication tag does not verify: edited, wrong key, or not sealed for this purpose, tenant and
+    ///     execution (for example a Secret attribute value).
+    /// </summary>
     Unreadable,
 
     /// <summary>
@@ -35,13 +38,13 @@ public enum ExecutionEnvelopeRejection
     /// <summary>The decrypted content is not a well-formed envelope of this format.</summary>
     Malformed,
 
-    /// <summary>The envelope was sealed for another purpose.</summary>
+    /// <summary>The content names another purpose although the binding verified.</summary>
     WrongPurpose,
 
-    /// <summary>The envelope was sealed for another tenant.</summary>
+    /// <summary>The content names another tenant although the binding verified.</summary>
     WrongTenant,
 
-    /// <summary>The envelope was sealed for another execution (a copied value).</summary>
+    /// <summary>The content names another execution although the binding verified.</summary>
     WrongExecution
 }
 
@@ -57,11 +60,15 @@ public enum ExecutionEnvelopeRejection
 ///     </para>
 ///     <para>
 ///         <b>Format.</b> The payload is wrapped into <c>{v, p, t, e, d}</c> (format version, purpose, tenant id,
-///         execution RtId, data) and encrypted with the engine key ring (<c>enc:v2:&lt;kid&gt;</c>, AES-256-GCM).
-///         The key ring authenticates only its own header as associated data, so the binding is part of the
-///         authenticated plaintext and checked after decryption; the effect is the same as associated data: a flipped
-///         bit, a foreign key, another purpose, another tenant or another execution does not open. Key rotation works
-///         as for every <c>enc:v2</c> value.
+///         execution RtId, data) and encrypted with the engine key ring (<c>enc:v2:&lt;kid&gt;</c>, AES-256-GCM)
+///         for the binding purpose + tenant + execution (<see cref="SecretPurpose" />, part of the associated data).
+///         A flipped bit, a foreign key, another purpose, another tenant or another execution does not open, and a
+///         value produced through a Secret attribute (same key ring, no binding) never opens here. The binding in the
+///         content is checked as well.
+///     </para>
+///     <para>
+///         <b>Former form.</b> A value bound only by its content is refused and never re-sealed; it cannot be told
+///         apart from a Secret attribute value.
 ///     </para>
 ///     <para>
 ///         <b>Fail closed.</b> Every refusal returns <c>false</c> with a reason; the caller treats it as "nothing was
@@ -110,6 +117,7 @@ public static class ExecutionEnvelopePurposes
 public sealed class ExecutionEnvelope(ISecretAttributeProtector protector) : IExecutionEnvelope
 {
     private const int FormatVersion = 1;
+    private const string BindingPrefix = "octo.communication.execution-envelope";
 
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
@@ -140,7 +148,8 @@ public sealed class ExecutionEnvelope(ISecretAttributeProtector protector) : IEx
                 ExecutionRtId = executionRtId.ToString(),
                 Data = JsonSerializer.SerializeToElement(payload, JsonOptions)
             };
-            return protector.Protect(JsonSerializer.Serialize(wrapper, JsonOptions)).Envelope;
+            return protector.Protect(JsonSerializer.Serialize(wrapper, JsonOptions),
+                BuildBinding(purpose, tenantId, executionRtId)).Envelope;
         }
         catch (Exception e) when (e is SecretEncryptionNotConfiguredException or JsonException)
         {
@@ -177,24 +186,15 @@ public sealed class ExecutionEnvelope(ISecretAttributeProtector protector) : IEx
             return false;
         }
 
+        var accessContext = new SecretAccessContext(tenantId, null, "SealedCaller", "CommunicationController");
         string json;
         try
         {
-            json = protector.Unprotect(stored, new SecretAccessContext(tenantId, null, "SealedCaller",
-                "CommunicationController"));
+            json = protector.Unprotect(stored, BuildBinding(purpose, tenantId, executionRtId), accessContext);
         }
-        catch (Exception e) when (e is System.Security.Cryptography.CryptographicException
-                                      or UnknownSecretKeyIdException
-                                      or SecretEncryptionNotConfiguredException
-                                      or LegacyPlaintextSecretRejectedException
-                                      or SecretEnvelopeNotAllowedException)
+        catch (Exception e) when (IsUnreadable(e))
         {
-            rejection = e switch
-            {
-                SecretEncryptionNotConfiguredException => ExecutionEnvelopeRejection.NoKey,
-                UnknownSecretKeyIdException => ExecutionEnvelopeRejection.UnknownKey,
-                _ => ExecutionEnvelopeRejection.Unreadable
-            };
+            rejection = ToRejection(e);
             return false;
         }
 
@@ -205,8 +205,7 @@ public sealed class ExecutionEnvelope(ISecretAttributeProtector protector) : IEx
         }
         catch (JsonException)
         {
-            // Some other decrypted secret copied into the attribute (decryption is only ever used to compare, the
-            // content is never returned or logged).
+            // The binding verified but the content is not a wrapper; it is only compared, never returned or logged.
             rejection = ExecutionEnvelopeRejection.Malformed;
             return false;
         }
@@ -268,6 +267,32 @@ public sealed class ExecutionEnvelope(ISecretAttributeProtector protector) : IEx
         }
 
         return Seal(purpose, payload!, tenantId, toExecutionRtId);
+    }
+
+    internal static SecretPurpose BuildBinding(string purpose, string tenantId, OctoObjectId executionRtId)
+    {
+        var normalizedTenantId = tenantId.ToLowerInvariant();
+        var normalizedExecutionRtId = executionRtId.ToString().ToLowerInvariant();
+        return new SecretPurpose($"{BindingPrefix}/{purpose}/{normalizedTenantId}/{normalizedExecutionRtId}");
+    }
+
+    private static bool IsUnreadable(Exception exception)
+    {
+        return exception is System.Security.Cryptography.CryptographicException
+            or UnknownSecretKeyIdException
+            or SecretEncryptionNotConfiguredException
+            or LegacyPlaintextSecretRejectedException
+            or SecretEnvelopeNotAllowedException;
+    }
+
+    private static ExecutionEnvelopeRejection ToRejection(Exception exception)
+    {
+        return exception switch
+        {
+            SecretEncryptionNotConfiguredException => ExecutionEnvelopeRejection.NoKey,
+            UnknownSecretKeyIdException => ExecutionEnvelopeRejection.UnknownKey,
+            _ => ExecutionEnvelopeRejection.Unreadable
+        };
     }
 
     private sealed class Wrapper
