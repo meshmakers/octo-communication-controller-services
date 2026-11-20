@@ -1,5 +1,19 @@
 # Changelog
 
+## 4.20.0 - 2026-11-20
+
+_Required bump level: minor._
+
+### Added
+
+- Attribute 'BaseUrl-1' added _(minor — purely additive element)_
+- Type 'AiConfiguration-1': optional attribute 'BaseUrl' added _(minor — optional attribute)_
+
+Optional base URL of the AI provider endpoint on `AiConfiguration` (for example Claude via Microsoft Foundry,
+`https://<resource>.services.ai.azure.com/anthropic`). Empty means the provider default; the `ApiKey` is sent only to this
+endpoint; https only, http for loopback addresses only. Runtime state like `McpServerUrl`, so a blueprint re-apply keeps it.
+No access changes, no acknowledgement, no migration.
+
 ## 4.19.0 - 2026-11-19
 
 _Required bump level: minor._
