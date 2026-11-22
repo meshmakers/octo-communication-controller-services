@@ -2,6 +2,7 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Common.DistributionEventHub.Consumers;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Meshmakers.Octo.Services.Infrastructure.Blueprints;
+using Microsoft.Extensions.Hosting;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 
@@ -52,15 +53,17 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 /// <c>EnableCommunication</c> call. That step runs first, so the reconcile below already sees an enabled tenant, and it
 /// is guarded by <see cref="IBlueprintCapabilityReconciler"/> (tenant resolved, blueprint installed in that version, no
 /// dependency information = nothing; it never throws and never disables). It also runs for an event that changed no
-/// entity: a re-apply of a blueprint that still needs Communication enables it again after a manual disable (logged as a
-/// warning).
+/// entity: a re-apply of a blueprint that still needs Communication enables it again after a manual disable (logged at
+/// Information like every automatic enable). A refused event holds this consumer for up to the reconciler's lookup time
+/// (60 s by default) before the reconcile below runs; the wait is cancelled when the host stops.
 /// </para>
 /// </summary>
 internal class BlueprintAppliedConsumer(
     ILogger<BlueprintAppliedConsumer> logger,
     IPipelineServiceAccountProvisioningService serviceAccountProvisioningService,
     IAdapterService adapterService,
-    IBlueprintCapabilityReconciler capabilityReconciler)
+    IBlueprintCapabilityReconciler capabilityReconciler,
+    IHostApplicationLifetime lifetime)
     : IDistributedConsumer<BlueprintApplied>, IDistributedConsumer<BlueprintUpdated>
 {
     public async Task ConsumeAsync(IDistributedContext<BlueprintApplied> context)
@@ -83,7 +86,14 @@ internal class BlueprintAppliedConsumer(
     {
         try
         {
-            await capabilityReconciler.ReconcileAsync(request, BlueprintCapability.Communication);
+            await capabilityReconciler.ReconcileAsync(request, BlueprintCapability.Communication,
+                lifetime.ApplicationStopping);
+        }
+        catch (OperationCanceledException) when (lifetime.ApplicationStopping.IsCancellationRequested)
+        {
+            logger.LogInformation(
+                "Enabling Communication after blueprint '{BlueprintId}' on tenant '{TenantId}' was stopped by the host shutdown",
+                request.BlueprintId, request.TenantId);
         }
         catch (Exception e)
         {

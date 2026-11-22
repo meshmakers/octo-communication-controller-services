@@ -8,6 +8,7 @@ using Meshmakers.Octo.Services.Infrastructure.Blueprints;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
+using Microsoft.Extensions.Hosting;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Consumers;
 
@@ -31,7 +32,7 @@ internal class BlueprintAppliedConsumerTests
     private BlueprintAppliedConsumer CreateSut()
     {
         return new BlueprintAppliedConsumer(NullLogger<BlueprintAppliedConsumer>.Instance, _provisioning,
-            _adapterService, _capabilities);
+            _adapterService, _capabilities, Substitute.For<IHostApplicationLifetime>());
     }
 
     private static IDistributedContext<BlueprintUpdated> UpdatedContext(int added, int updated, int deleted = 0)
@@ -231,7 +232,7 @@ internal class BlueprintAppliedConsumerTests
     {
         return new BlueprintAppliedConsumer(NullLogger<BlueprintAppliedConsumer>.Instance,
             fixture.CreateProvisioningService(), Substitute.For<IAdapterService>(),
-            Substitute.For<IBlueprintCapabilityReconciler>());
+            Substitute.For<IBlueprintCapabilityReconciler>(), Substitute.For<IHostApplicationLifetime>());
     }
 
     private static IDistributedContext<T> ContextFor<T>(T message) where T : class
