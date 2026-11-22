@@ -1,6 +1,7 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Common.DistributionEventHub.Consumers;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
+using Meshmakers.Octo.Services.Infrastructure.Blueprints;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 
@@ -44,25 +45,53 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Consumers;
 /// Both messages are handled here — <c>BlueprintApplied</c> for an install or force re-apply,
 /// <c>BlueprintUpdated</c> for <c>UpdateBlueprint</c>.
 /// </para>
+///
+/// <para>
+/// AB#9578 — a blueprint that needs Communication (its CK model dependencies, as the event reports them, contain
+/// <c>System.Communication</c> or <c>System.Ai</c>) has Communication enabled for its tenant by the platform, without an
+/// <c>EnableCommunication</c> call. That step runs first, so the reconcile below already sees an enabled tenant, and it
+/// is guarded by <see cref="IBlueprintCapabilityReconciler"/> (tenant resolved, blueprint installed in that version, no
+/// dependency information = nothing; it never throws and never disables). It also runs for an event that changed no
+/// entity: a re-apply of a blueprint that still needs Communication enables it again after a manual disable (logged as a
+/// warning).
+/// </para>
 /// </summary>
 internal class BlueprintAppliedConsumer(
     ILogger<BlueprintAppliedConsumer> logger,
     IPipelineServiceAccountProvisioningService serviceAccountProvisioningService,
-    IAdapterService adapterService)
+    IAdapterService adapterService,
+    IBlueprintCapabilityReconciler capabilityReconciler)
     : IDistributedConsumer<BlueprintApplied>, IDistributedConsumer<BlueprintUpdated>
 {
-    public Task ConsumeAsync(IDistributedContext<BlueprintApplied> context)
+    public async Task ConsumeAsync(IDistributedContext<BlueprintApplied> context)
     {
         var message = context.Message;
-        return ReconcileAsync(message.TenantId, message.BlueprintId, message.EntitiesAdded,
+        await EnableCommunicationIfNeededAsync(BlueprintCapabilityRequest.From(message));
+        await ReconcileAsync(message.TenantId, message.BlueprintId, message.EntitiesAdded,
             message.EntitiesUpdated, message.EntitiesDeleted);
     }
 
-    public Task ConsumeAsync(IDistributedContext<BlueprintUpdated> context)
+    public async Task ConsumeAsync(IDistributedContext<BlueprintUpdated> context)
     {
         var message = context.Message;
-        return ReconcileAsync(message.TenantId, message.BlueprintId, message.EntitiesAdded,
+        await EnableCommunicationIfNeededAsync(BlueprintCapabilityRequest.From(message));
+        await ReconcileAsync(message.TenantId, message.BlueprintId, message.EntitiesAdded,
             message.EntitiesUpdated, message.EntitiesDeleted);
+    }
+
+    private async Task EnableCommunicationIfNeededAsync(BlueprintCapabilityRequest request)
+    {
+        try
+        {
+            await capabilityReconciler.ReconcileAsync(request, BlueprintCapability.Communication);
+        }
+        catch (Exception e)
+        {
+            // The reconciler does not throw; a broadcast consumer must never fault the bus over one tenant anyway.
+            logger.LogError(e,
+                "Enabling Communication after blueprint '{BlueprintId}' on tenant '{TenantId}' failed",
+                request.BlueprintId, request.TenantId);
+        }
     }
 
     private async Task ReconcileAsync(string tenantId, string blueprintId, int entitiesAdded, int entitiesUpdated,

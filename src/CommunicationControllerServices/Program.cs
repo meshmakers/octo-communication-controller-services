@@ -28,6 +28,7 @@ using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Authorization;
+using Meshmakers.Octo.Services.Infrastructure.Blueprints;
 using Meshmakers.Octo.Services.Infrastructure.Configuration;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
@@ -328,6 +329,9 @@ try
                 c.AddCommunicationMethodDiscovery();
             }
         });
+
+    // AB#9578: BlueprintAppliedConsumer enables Communication for a tenant whose installed blueprint needs it.
+    builder.Services.AddBlueprintCapabilityReconciler(builder.Configuration);
 
     builder.Services.AddRuntimeEngine()
         .AddMongoDbRuntimeRepository()

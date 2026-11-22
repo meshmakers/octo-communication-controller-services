@@ -4,6 +4,7 @@ using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Common.DistributionEventHub.Consumers;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
+using Meshmakers.Octo.Services.Infrastructure.Blueprints;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
@@ -25,10 +26,12 @@ internal class BlueprintAppliedConsumerTests
 
     private readonly IAdapterService _adapterService = Substitute.For<IAdapterService>();
 
+    private readonly IBlueprintCapabilityReconciler _capabilities = Substitute.For<IBlueprintCapabilityReconciler>();
+
     private BlueprintAppliedConsumer CreateSut()
     {
         return new BlueprintAppliedConsumer(NullLogger<BlueprintAppliedConsumer>.Instance, _provisioning,
-            _adapterService);
+            _adapterService, _capabilities);
     }
 
     private static IDistributedContext<BlueprintUpdated> UpdatedContext(int added, int updated, int deleted = 0)
@@ -45,6 +48,70 @@ internal class BlueprintAppliedConsumerTests
         context.Message.Returns(new BlueprintApplied(TenantId, "Acme.App-1.0.0", "Initial",
             added, updated, deleted, Guid.NewGuid(), DateTime.UtcNow));
         return context;
+    }
+
+    // ---- AB#9578: Communication enabled by the platform --------------------------------------------
+
+    [Test]
+    public async Task Applied_AsksTheReconcilerForCommunication_WithTheReportedDependencies_BeforeTheSweep()
+    {
+        var context = Substitute.For<IDistributedContext<BlueprintApplied>>();
+        context.Message.Returns(new BlueprintApplied(TenantId, "Acme.App-1.0.0", "Initial", 3, 0, 0, Guid.NewGuid(),
+            DateTime.UtcNow) { CkModelDependencies = ["System.Ai", "System.Communication"] });
+        _provisioning.EnsureTenantProvisionedAsync(TenantId)
+            .Returns(new PipelineServiceAccountProvisioningReport(0, 0, 0, []));
+
+        await CreateSut().ConsumeAsync(context);
+
+        Received.InOrder(() =>
+        {
+            _capabilities.ReconcileAsync(
+                Arg.Is<BlueprintCapabilityRequest>(r => r.TenantId == TenantId && r.BlueprintId == "Acme.App-1.0.0" &&
+                                                        r.Trigger == nameof(BlueprintApplied) &&
+                                                        r.CkModelDependencies!.SequenceEqual(new[]
+                                                            { "System.Ai", "System.Communication" })),
+                BlueprintCapability.Communication, Arg.Any<CancellationToken>());
+            _provisioning.EnsureTenantProvisionedAsync(TenantId);
+        });
+    }
+
+    [Test]
+    public async Task Updated_AsksTheReconcilerForCommunication()
+    {
+        var context = UpdatedContext(added: 0, updated: 1);
+
+        await CreateSut().ConsumeAsync(context);
+
+        await _capabilities.Received(1).ReconcileAsync(
+            Arg.Is<BlueprintCapabilityRequest>(r => r.TenantId == TenantId && r.Trigger == nameof(BlueprintUpdated)),
+            BlueprintCapability.Communication, Arg.Any<CancellationToken>());
+        await _capabilities.DidNotReceive().ReconcileAsync(Arg.Any<BlueprintCapabilityRequest>(),
+            BlueprintCapability.Ai, Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task EventThatChangedNoEntity_StillReconcilesTheCapability()
+    {
+        // A re-apply of a blueprint that still needs Communication enables it again after a manual disable.
+        await CreateSut().ConsumeAsync(Context(added: 0, updated: 0));
+
+        await _capabilities.Received(1).ReconcileAsync(Arg.Any<BlueprintCapabilityRequest>(),
+            BlueprintCapability.Communication, Arg.Any<CancellationToken>());
+        await _provisioning.DidNotReceiveWithAnyArgs().EnsureTenantProvisionedAsync(default!);
+    }
+
+    [Test]
+    public async Task ReconcilerFailure_NeitherFaultsTheBusNorSkipsTheSweep()
+    {
+        _capabilities.ReconcileAsync(Arg.Any<BlueprintCapabilityRequest>(), Arg.Any<BlueprintCapability>(),
+                Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("unexpected"));
+        _provisioning.EnsureTenantProvisionedAsync(TenantId)
+            .Returns(new PipelineServiceAccountProvisioningReport(0, 0, 0, []));
+
+        await Assert.That(async () => await CreateSut().ConsumeAsync(Context(added: 1, updated: 0)))
+            .ThrowsNothing();
+        await _provisioning.Received(1).EnsureTenantProvisionedAsync(TenantId);
     }
 
     [Test]
@@ -163,7 +230,8 @@ internal class BlueprintAppliedConsumerTests
     private static BlueprintAppliedConsumer CreateSutWithRealProvisioning(UsesLinkedServiceAccountFixture fixture)
     {
         return new BlueprintAppliedConsumer(NullLogger<BlueprintAppliedConsumer>.Instance,
-            fixture.CreateProvisioningService(), Substitute.For<IAdapterService>());
+            fixture.CreateProvisioningService(), Substitute.For<IAdapterService>(),
+            Substitute.For<IBlueprintCapabilityReconciler>());
     }
 
     private static IDistributedContext<T> ContextFor<T>(T message) where T : class

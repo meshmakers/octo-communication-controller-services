@@ -1819,6 +1819,23 @@ only the pipelines whose definition changed). Deliberate limits:
 
 Tests: `Services/AdapterServiceTests/RefreshDeployedPipelinesAsyncTests`, `Consumers/BlueprintAppliedConsumerTests`.
 
+### A blueprint that needs Communication enables it (AB#9578)
+
+`BlueprintAppliedConsumer` first asks `IBlueprintCapabilityReconciler` (octo-common-services,
+`docs/blueprint-capabilities.md`, registered in `Program.cs` with `AddBlueprintCapabilityReconciler`) for
+`BlueprintCapability.Communication`, then runs the sweep and the refresh above. The reconciler enables Communication
+(`IConfigurationService.EnableAsync`, the same path as `POST communication/enable`) only when the event reports CK model
+dependencies that contain `System.Communication` or `System.Ai`, the tenant resolves (never the system tenant) and the
+named blueprint is installed there in exactly that version; an event of an older asset repository (no dependencies)
+enables nothing. It retries the tenant lookup because a tenant created with a blueprint publishes the event before the
+registry commits, never disables, never throws, and logs every automatic enable at Information (only a failure to
+enable is a warning or error). The step runs also for an event that
+changed no entity, so a re-apply of a blueprint that still needs Communication enables it again after a manual disable
+(decided). Enabling first means a tenant created with a starter blueprint gets its Mesh Adapter registered after the
+seed, so registration hands it the seeded Deployed pipelines. The AI service enables AI from the same event after
+Communication is on. Tests: `Consumers/BlueprintAppliedConsumerTests` (`Applied_AsksTheReconciler…`,
+`EventThatChangedNoEntity_…`, `ReconcilerFailure_…`); the guard: `BlueprintCapabilityReconcilerTests` in octo-common-services.
+
 ### Blueprint-seeded pipelines are pushed (AB#6632)
 
 A blueprint seeds `Pipeline` entities with `DeploymentState: Deployed` (the install path writes entities, it never
