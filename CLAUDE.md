@@ -4301,7 +4301,14 @@ resolves the client per call from a fresh scope (the `CommunicationEventService`
 Constructor-injecting it fails DI validation at startup.
 
 **What the client looks like:** `AllowedGrantTypes = [client_credentials, on-behalf-of URN]`,
-`AllowedScopes = [octo_api]`, `RequireClientSecret = true`, `AllowOfflineAccess = false`. The
+`AllowedScopes = [octo_api, ai.llm.invoke]`, `RequireClientSecret = true`, `AllowOfflineAccess = false`.
+`ai.llm.invoke` (AB#9639, `Constants.LlmGatewayInvokeScope`) is the scope of the AI service's central-key LLM gateway: the
+mesh adapter calls the gateway with the account's token, and a token carries the scope only when the adapter asks for it.
+It does not open the gateway by itself: the gateway still refuses every tenant without `KeySource=CentralKey`, a monthly
+cap and the central key in its configuration. No user-facing client gets the scope (identity's
+`System.Identity.Bootstrap` 1.10.0 registers it and grants it to none of its clients). The list is re-sent on every
+reconcile, so existing accounts get it on the next tenant start; the order towards identity does not matter (a scope
+identity does not know yet only fails a request that asks for it). The
 delegation URN (`Constants.OnBehalfOfGrantType`) is seeded **now** even though AB#5031 is not live:
 Duende gates its extension-grant validators on the client's own `AllowedGrantTypes`, so adding it
 later would mean touching every already-provisioned tenant.
