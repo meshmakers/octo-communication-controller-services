@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- AB#9599 Chore: NuGet dependencies raised within the .NET 10 line: NLog.Web.AspNetCore 6.3.0 and the test packages (Microsoft.NET.Test.Sdk 18.12.0, xunit.v3 4.0.3, xunit.runner.visualstudio 4.0.1, coverlet.collector 10.1.1, FluentAssertions 8.11.0, Testcontainers.MongoDb 4.17.0). TUnit stays on 1.65.68 (1.87.12 makes the NLog-capturing tests flaky); the 11.0.0 runtime-aligned packages move with AB#9580.
+
 - AB#9051 New: the 22 communication endpoints that are facades of System.Communication methods (AB#9048, AB#9049, AB#9050) are
   deprecated in wave `CommunicationWave3`: every response carries `Link: <…/technologyGuide/communication/methods>;
   rel="deprecation"`, the OpenAPI operations are `deprecated`, and `octo.rest.deprecated.calls` counts the calls per endpoint and
