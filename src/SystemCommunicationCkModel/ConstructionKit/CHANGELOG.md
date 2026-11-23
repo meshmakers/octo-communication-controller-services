@@ -1,5 +1,24 @@
 # Changelog
 
+## 4.20.0 - 2026-11-20
+
+_Required bump level: minor._
+
+### Added
+
+- Attribute 'ProviderEndpoint-1' added _(minor — purely additive element)_
+- Type 'AiConfiguration-1': optional attribute 'ProviderEndpoint' added _(minor — optional attribute)_
+
+Optional AI provider endpoint on `AiConfiguration` (for example Claude via Microsoft Foundry) together with the key issued for it,
+as ONE Secret value (JSON `{"baseUrl": "...", "apiKey": "..."}`, `apiKey` optional for keyless endpoints such as a local Ollama or
+vLLM). Because the URL and the key are one sealed value, the URL cannot be changed without supplying the key in the same write.
+Set either `ApiKey` (provider default endpoint) or `ProviderEndpoint`. If both are set, a consumer that reads `ProviderEndpoint`
+uses only the key inside it and never sends `ApiKey` to its `baseUrl`. `ProviderEndpoint` is read by `LlmQuery@1` from the
+octo-mesh-adapter release that contains the matching adapter change on; `AnthropicAiQuery@1` and older adapters read only
+`ApiKey`; keep `ApiKey` only while an `AnthropicAiQuery@1` pipeline or an older adapter uses this AiConfiguration (they ignore `ProviderEndpoint` and call the provider default endpoint), otherwise leave `ApiKey` empty - if both are set and `ProviderEndpoint` cannot be read, `LlmQuery@1` falls back to `ApiKey` and the default endpoint. Ownership `Secret`: kept on a blueprint re-apply, left out
+of ExportRt, shown as `{ isSet }`; seeds and blueprints must omit it. Consumers accept https only (http for loopback addresses
+only). No access changes, no acknowledgement, no migration.
+
 ## 4.19.0 - 2026-11-19
 
 _Required bump level: minor._

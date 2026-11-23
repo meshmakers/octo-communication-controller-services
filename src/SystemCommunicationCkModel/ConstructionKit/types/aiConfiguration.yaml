@@ -20,3 +20,6 @@ types:
       - id: ${this}/McpServerUrl
         name: McpServerUrl
         isOptional: true
+      - id: ${this}/ProviderEndpoint
+        name: ProviderEndpoint
+        isOptional: true

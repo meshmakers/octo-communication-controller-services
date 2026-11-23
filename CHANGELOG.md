@@ -4,6 +4,17 @@
 
 - AB#9599 Chore: NuGet dependencies raised within the .NET 10 line: NLog.Web.AspNetCore 6.3.0 and the test packages (Microsoft.NET.Test.Sdk 18.12.0, xunit.v3 4.0.3, xunit.runner.visualstudio 4.0.1, coverlet.collector 10.1.1, FluentAssertions 8.11.0, Testcontainers.MongoDb 4.17.0). TUnit stays on 1.65.68 (1.87.12 makes the NLog-capturing tests flaky); the 11.0.0 runtime-aligned packages move with AB#9580.
 
+- AB#9308 New: System.Communication 4.20.0 adds the optional Secret attribute `AiConfiguration.ProviderEndpoint`: the AI provider
+  endpoint (for example Claude via Microsoft Foundry) and the key issued for it as ONE sealed JSON value
+  `{"baseUrl": "https://...", "apiKey": "..."}`; `apiKey` may be omitted or empty for keyless endpoints (local Ollama, vLLM).
+  The URL cannot change without the key being supplied in the same write, so a writer who cannot read the key cannot redirect it.
+  Set either `ApiKey` (provider default endpoint) or `ProviderEndpoint`. If both are set, a consumer that reads `ProviderEndpoint`
+  uses only the key inside it and never sends `ApiKey` to its `baseUrl`. `ProviderEndpoint` is read by `LlmQuery@1` from the
+  octo-mesh-adapter release that contains the matching adapter change on; `AnthropicAiQuery@1` and older adapters read only
+  `ApiKey`; keep `ApiKey` only while an `AnthropicAiQuery@1` pipeline or an older adapter uses this AiConfiguration (they ignore `ProviderEndpoint` and call the provider default endpoint), otherwise leave `ApiKey` empty - if both are set and `ProviderEndpoint` cannot be read, `LlmQuery@1` falls back to `ApiKey` and the default endpoint. Ownership `Secret` (kept on re-apply, not exported;
+  seeds and blueprints must omit it). Additive (a Minor against 4.19.0), no access changes, no migration. JSON key of the
+  entity attribute: `providerEndpoint`.
+
 - AB#9051 New: the 22 communication endpoints that are facades of System.Communication methods (AB#9048, AB#9049, AB#9050) are
   deprecated in wave `CommunicationWave3`: every response carries `Link: <…/technologyGuide/communication/methods>;
   rel="deprecation"`, the OpenAPI operations are `deprecated`, and `octo.rest.deprecated.calls` counts the calls per endpoint and
