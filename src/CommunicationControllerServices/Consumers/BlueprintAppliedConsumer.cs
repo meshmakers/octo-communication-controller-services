@@ -91,8 +91,10 @@ internal class BlueprintAppliedConsumer(
         }
         catch (OperationCanceledException) when (lifetime.ApplicationStopping.IsCancellationRequested)
         {
-            logger.LogInformation(
-                "Enabling Communication after blueprint '{BlueprintId}' on tenant '{TenantId}' was stopped by the host shutdown",
+            // The broadcast event is not delivered again: Communication stays off until the next blueprint operation
+            // or EnableCommunication.
+            logger.LogWarning(
+                "Enabling Communication after blueprint '{BlueprintId}' on tenant '{TenantId}' was stopped by the host shutdown; Communication stays off for the tenant until the blueprint is applied again or EnableCommunication is run",
                 request.BlueprintId, request.TenantId);
         }
         catch (Exception e)

@@ -5,7 +5,9 @@ using Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 using Meshmakers.Octo.Common.DistributionEventHub.Consumers;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Meshmakers.Octo.Services.Infrastructure.Blueprints;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging.Testing;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Microsoft.Extensions.Hosting;
@@ -113,6 +115,36 @@ internal class BlueprintAppliedConsumerTests
         await Assert.That(async () => await CreateSut().ConsumeAsync(Context(added: 1, updated: 0)))
             .ThrowsNothing();
         await _provisioning.Received(1).EnsureTenantProvisionedAsync(TenantId);
+    }
+
+    [Test]
+    public async Task HostShutdown_CancelsTheCapabilityWaitAndStillRunsTheSweep()
+    {
+        using var stopping = new CancellationTokenSource();
+        var lifetime = Substitute.For<IHostApplicationLifetime>();
+        lifetime.ApplicationStopping.Returns(stopping.Token);
+        _capabilities.ReconcileAsync(Arg.Any<BlueprintCapabilityRequest>(), Arg.Any<BlueprintCapability>(),
+                stopping.Token)
+            .Returns(async call =>
+            {
+                await stopping.CancelAsync();
+                call.Arg<CancellationToken>().ThrowIfCancellationRequested();
+                return BlueprintCapabilityOutcome.Enabled;
+            });
+        _provisioning.EnsureTenantProvisionedAsync(TenantId)
+            .Returns(new PipelineServiceAccountProvisioningReport(0, 0, 0, []));
+        var logger = new FakeLogger<BlueprintAppliedConsumer>();
+        var sut = new BlueprintAppliedConsumer(logger, _provisioning, _adapterService, _capabilities, lifetime);
+
+        await Assert.That(async () => await sut.ConsumeAsync(Context(added: 1, updated: 0))).ThrowsNothing();
+
+        await _capabilities.Received(1).ReconcileAsync(Arg.Any<BlueprintCapabilityRequest>(),
+            BlueprintCapability.Communication, stopping.Token);
+        await _provisioning.Received(1).EnsureTenantProvisionedAsync(TenantId);
+        var records = logger.Collector.GetSnapshot();
+        await Assert.That(records.Count(r => r.Level == LogLevel.Warning && r.Message.Contains("EnableCommunication")))
+            .IsEqualTo(1);
+        await Assert.That(records.Any(r => r.Level == LogLevel.Error)).IsFalse();
     }
 
     [Test]
