@@ -25,7 +25,7 @@
         <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.15" />
         <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.15" />
         <PackageReference Include="NJsonSchema" Version="11.6.2" />
-        <PackageReference Include="NLog.Web.AspNetCore" Version="6.2.0" />
+        <PackageReference Include="NLog.Web.AspNetCore" Version="6.3.0" />
         <!-- Still used directly by PipelineDefinitionService and CommunicationRepository. -->
         <PackageReference Include="YamlDotNet" Version="18.1.0" />
     </ItemGroup>
