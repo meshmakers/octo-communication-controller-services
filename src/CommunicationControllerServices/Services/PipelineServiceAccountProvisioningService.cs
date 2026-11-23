@@ -1405,11 +1405,15 @@ internal class PipelineServiceAccountProvisioningService(
                     RedirectUris = [],
                     PostLogoutRedirectUris = [],
                     AllowedCorsOrigins = [],
-                    // Exactly the API scope, nothing else. The consumer writes AllowedScopes verbatim
-                    // (unlike ClientsController, which unions in OctoDefaultScopes), and the delegation
-                    // grant deliberately refuses offline_access — the role intersection is computed at
-                    // issuance, so a refresh token would freeze it.
-                    AllowedScopes = [CommonConstants.OctoApiFullAccess],
+                    // Exactly the API scope plus the LLM gateway scope, nothing else. The consumer writes
+                    // AllowedScopes verbatim (unlike ClientsController, which unions in OctoDefaultScopes),
+                    // and the delegation grant deliberately refuses offline_access — the role intersection
+                    // is computed at issuance, so a refresh token would freeze it.
+                    // ai.llm.invoke lets the mesh adapter call the AI service's central-key LLM
+                    // gateway with this account's token. A token carries it only when the adapter asks for
+                    // it; the gateway still refuses every tenant without KeySource=CentralKey and a cap.
+                    // Re-sent on every reconcile, so existing accounts get it on the next tenant start.
+                    AllowedScopes = [CommonConstants.OctoApiFullAccess, Constants.LlmGatewayInvokeScope],
                     AllowOfflineAccess = false,
                     ClientSecret = secret,
                     RequireClientSecret = true,

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- AB#9639 New: every pipeline service account (`octo-pipeline-sa-*`) is allowed the API scope `ai.llm.invoke`, so the mesh
+  adapter can call the AI service's central-key LLM gateway with the account's token. The scope list is re-sent on every
+  reconcile, so existing accounts get it on the next tenant start. The scope alone opens nothing: the gateway also needs
+  the tenant's `KeySource=CentralKey`, a monthly cap and the central key; no user-facing client gets the scope. Identity
+  registers the scope with System.Identity.Bootstrap 1.10.0; either may roll out first.
+
 - AB#9599 Chore: NuGet dependencies raised within the .NET 10 line: NLog.Web.AspNetCore 6.3.0 and the test packages (Microsoft.NET.Test.Sdk 18.12.0, xunit.v3 4.0.3, xunit.runner.visualstudio 4.0.1, coverlet.collector 10.1.1, FluentAssertions 8.11.0, Testcontainers.MongoDb 4.17.0). TUnit stays on 1.65.68 (1.87.12 makes the NLog-capturing tests flaky); the 11.0.0 runtime-aligned packages move with AB#9580.
 
 - AB#9308 New: System.Communication 4.20.0 adds the optional Secret attribute `AiConfiguration.ProviderEndpoint`: the AI provider

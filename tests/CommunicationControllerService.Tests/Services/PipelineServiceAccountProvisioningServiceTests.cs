@@ -150,7 +150,9 @@ internal class PipelineServiceAccountProvisioningServiceTests
         // AB#5114: the impersonation grant is part of the reconciled baseline — the MayActAs edge,
         // not this permission, authorizes a concrete actor/target pairing.
         await Assert.That(client.AllowedGrantTypes).Contains(Constants.ImpersonationGrantType);
-        await Assert.That(client.AllowedScopes).IsEquivalentTo(new[] { CommonConstants.OctoApiFullAccess });
+        // Plus the LLM gateway scope, and nothing else.
+        await Assert.That(client.AllowedScopes)
+            .IsEquivalentTo(new[] { CommonConstants.OctoApiFullAccess, "ai.llm.invoke" });
         await Assert.That(client.RequireClientSecret).IsTrue();
         await Assert.That(client.ClientSecret).IsNotNull();
         await Assert.That(client.AllowOfflineAccess).IsFalse();
@@ -231,6 +233,22 @@ internal class PipelineServiceAccountProvisioningServiceTests
         // value identity-side — so nothing rotates and no duplicate client is created.
         await Assert.That(CapturedIdentityRequest().Clients!.Single().ClientSecret)
             .IsEqualTo(SecretTestValues.Plain(existing.ClientSecret));
+    }
+
+    [Test]
+    public async Task Provision_AlreadyProvisionedAccount_IsSentTheLlmGatewayScope()
+    {
+        // An account provisioned before the scope existed converges on the next reconcile (tenant start,
+        // workload deploy): the client is re-sent with the full scope list although the entity is untouched.
+        var adapter = RtEntityCreator.CreateAdapter();
+        ArrangeProvisionedAdapter(adapter);
+
+        var outcome = await _sut.EnsureAdapterProvisionedAsync(TenantId, adapter);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(outcome).IsEqualTo(PipelineServiceAccountProvisioningOutcome.AlreadyProvisioned);
+        await Assert.That(CapturedIdentityRequest().Clients!.Single().AllowedScopes)
+            .IsEquivalentTo(new[] { CommonConstants.OctoApiFullAccess, "ai.llm.invoke" });
     }
 
     [Test]

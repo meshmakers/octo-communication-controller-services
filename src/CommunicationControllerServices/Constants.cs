@@ -54,6 +54,15 @@ internal static class Constants
     ///     what actually authorizes a concrete pairing).
     /// </summary>
     public const string ImpersonationGrantType = "urn:meshmakers:params:oauth:grant-type:impersonate";
+
+    /// <summary>
+    ///     API scope of the AI service's central-key LLM gateway. Every pipeline service account is allowed it,
+    ///     so the mesh adapter can call the gateway with the account's token (the gateway takes the tenant from the
+    ///     token). Registered by the identity service (System.Identity.Bootstrap 1.10.0); the literal is duplicated from
+    ///     the AI service's <c>LlmGatewayConstants.InvokeScope</c>. The scope alone opens nothing: the gateway also needs
+    ///     the tenant's <c>KeySource=CentralKey</c>, a monthly cap and the central key.
+    /// </summary>
+    public const string LlmGatewayInvokeScope = "ai.llm.invoke";
     
     /// <summary>
     ///     Policy for system api authorization
