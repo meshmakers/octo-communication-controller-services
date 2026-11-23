@@ -184,3 +184,14 @@ attributes:
     valueType: String
     isRuntimeState: true
     description: 'URL of the OctoMesh MCP server for AI tool use (e.g. https://localhost:5017). The tenant ID is appended automatically.'
+  # Optional endpoint of the AI provider TOGETHER with the key issued for it, sealed as ONE Secret
+  # value (JSON). A plain URL attribute would let a writer who may update the configuration but
+  # cannot read the ApiKey point the URL at a host of their own and have the stored key sent there.
+  # As one Secret value the URL cannot change without the key being supplied in the same write, and
+  # the value is preserved on a blueprint re-apply, left out of ExportRt and shown as { isSet } only,
+  # like ApiKey. The key is optional inside the value for endpoints that need none (local Ollama, vLLM).
+  - id: ProviderEndpoint
+    valueType: Secret
+    ownership: Secret
+    securitySensitive: true
+    description: 'Optional AI provider endpoint and the key issued for it as one sealed value, a JSON string {"baseUrl":"https://<resource>.services.ai.azure.com/anthropic","apiKey":"..."} (e.g. Claude via Microsoft Foundry). "apiKey" may be omitted or empty for an endpoint that needs no key (e.g. a local Ollama or vLLM). Whoever changes the URL must supply the key in the same value. Set either ApiKey (the provider''s default endpoint) or ProviderEndpoint, not both. A consumer that reads ProviderEndpoint never sends ApiKey to its baseUrl. If only ProviderEndpoint is set and it cannot be read, LlmQuery@1 fails because no key is available; it never falls back to another endpoint. AnthropicAiQuery@1 and older adapters read only ApiKey. Consumers accept https only (http for loopback addresses only) and send the key only to the baseUrl of this value. In YAML the JSON must be quoted. Blueprints and seeds must omit it: it is a secret and is not exported.'

@@ -31,15 +31,15 @@ internal class SystemCommunicationCkLanguage2Tests
     }
 
     [Test]
-    public async Task EmbeddedModel_IsSystemCommunication_4_19_0_OnCkLanguage2_WithTheCkV2MinEngineVersion()
+    public async Task EmbeddedModel_IsSystemCommunication_4_20_0_OnCkLanguage2_WithTheCkV2MinEngineVersion()
     {
         var root = await LoadEmbeddedSystemCommunicationAsync();
 
         // AB#8595: 4.17.0 adds the Adapter / DeployableWorkload / AdapterPool methods, AB#8596: 4.18.0 the Pipeline /
         // DataFlow / chart-version methods, AB#9050: 4.19.0 the deployment site / workload deploy / pool scale / trigger
-        // methods (Minor each). Sensitive parameters, no sensitive result, no execution.mode and no dataAccess, so the
+        // methods (Minor each), AB#9308: 4.20.0 the optional Secret AiConfiguration.ProviderEndpoint. Sensitive parameters, no sensitive result, no execution.mode and no dataAccess, so the
         // minimum engine version stays.
-        await Assert.That(root.ModelId.ToString()).IsEqualTo("System.Communication-4.19.0");
+        await Assert.That(root.ModelId.ToString()).IsEqualTo("System.Communication-4.20.0");
         await Assert.That(root.CkLanguage).IsEqualTo(2);
         // The compiler stamps minEngineVersion for a ckLanguage 2 model; the sources never set it. It is the maximum of
         // the model's own features and of its dependencies (CatalogModelResolver). System.Communication itself needs
@@ -142,7 +142,9 @@ internal class SystemCommunicationCkLanguage2Tests
 
         var sensitive = (root.Attributes ?? []).Where(a => a.SecuritySensitive == true)
             .Select(a => a.AttributeId.Name).ToList();
-        await Assert.That(sensitive).IsEquivalentTo(new[] { "SecretDefaultValue" });
+        // AB#9308: ProviderEndpoint (AiConfiguration, 4.20.0) carries the marker from its first published version on,
+        // so a later tightening is not a MAJOR (row T7a).
+        await Assert.That(sensitive).IsEquivalentTo(new[] { "SecretDefaultValue", "ProviderEndpoint" });
     }
 
     /// <summary>
@@ -157,5 +159,29 @@ internal class SystemCommunicationCkLanguage2Tests
 
         var acknowledged = root.Compatibility?.Acknowledge?.Select(a => a.Change).ToList() ?? [];
         await Assert.That(acknowledged).IsEmpty();
+    }
+
+    /// <summary>
+    ///     AB#9308, 4.20.0: <c>AiConfiguration.ProviderEndpoint</c> is an optional Secret that seals the provider URL and the key
+    ///     issued for it as one value, so existing AiConfigurations stay valid and the URL cannot be changed without the key
+    ///     being supplied in the same write. AiConfiguration declares exactly the listed attributes: a plain provider-URL
+    ///     attribute next to it would let a writer who cannot read the ApiKey point it at a host of their own, so a new
+    ///     attribute on this type is a deliberate decision that must update this list.
+    /// </summary>
+    [Test]
+    public async Task AiConfiguration_DeclaresTheOptionalSecretProviderEndpoint_AndNothingElseNew()
+    {
+        var root = await LoadEmbeddedSystemCommunicationAsync();
+
+        var aiConfiguration = (root.Types ?? []).Single(t => t.TypeId.Name == "AiConfiguration");
+        var names = (aiConfiguration.Attributes ?? []).Select(a => a.AttributeName).ToList();
+        await Assert.That(names).IsEquivalentTo(new[]
+            { "ApiKey", "AiModel", "MaxTokens", "Temperature", "McpServerUrl", "ProviderEndpoint" });
+        var providerEndpoint = (aiConfiguration.Attributes ?? []).Single(a => a.AttributeName == "ProviderEndpoint");
+        await Assert.That(providerEndpoint.IsOptional).IsTrue();
+
+        var definition = (root.Attributes ?? []).Single(a => a.AttributeId.Name == "ProviderEndpoint");
+        await Assert.That(definition.ValueType).IsEqualTo(AttributeValueTypesDto.Secret);
+        await Assert.That(definition.SecuritySensitive).IsTrue();
     }
 }
