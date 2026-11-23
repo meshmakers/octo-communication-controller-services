@@ -8,10 +8,11 @@
   endpoint (for example Claude via Microsoft Foundry) and the key issued for it as ONE sealed JSON value
   `{"baseUrl": "https://...", "apiKey": "..."}`; `apiKey` may be omitted or empty for keyless endpoints (local Ollama, vLLM).
   The URL cannot change without the key being supplied in the same write, so a writer who cannot read the key cannot redirect it.
-  Set either `ApiKey` (provider default endpoint) or `ProviderEndpoint`. If both are set, a consumer that reads `ProviderEndpoint`
-  uses only the key inside it and never sends `ApiKey` to its `baseUrl`. `ProviderEndpoint` is read by `LlmQuery@1` from the
-  octo-mesh-adapter release that contains the matching adapter change on; `AnthropicAiQuery@1` and older adapters read only
-  `ApiKey`; keep `ApiKey` only while an `AnthropicAiQuery@1` pipeline or an older adapter uses this AiConfiguration (they ignore `ProviderEndpoint` and call the provider default endpoint), otherwise leave `ApiKey` empty - if both are set and `ProviderEndpoint` cannot be read, `LlmQuery@1` falls back to `ApiKey` and the default endpoint. Ownership `Secret` (kept on re-apply, not exported;
+  Set either `ApiKey` (the provider's default endpoint) or `ProviderEndpoint`, not both. A consumer that reads `ProviderEndpoint`
+  never sends `ApiKey` to its `baseUrl`. If only `ProviderEndpoint` is set and it cannot be read, `LlmQuery@1` fails because no key
+  is available; it never falls back to another endpoint. `AnthropicAiQuery@1` and older adapters read only `ApiKey`.
+  `ProviderEndpoint` is read by `LlmQuery@1` from the octo-mesh-adapter release that contains the matching adapter change on.
+  Ownership `Secret` (kept on re-apply, not exported;
   seeds and blueprints must omit it). Additive (a Minor against 4.19.0), no access changes, no migration. JSON key of the
   entity attribute: `providerEndpoint`.
 
