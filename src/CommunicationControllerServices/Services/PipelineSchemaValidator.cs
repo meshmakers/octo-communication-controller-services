@@ -1,5 +1,8 @@
+using System.Text.Json.Nodes;
 using Meshmakers.Octo.Communication.Contracts.Serialization;
+using Newtonsoft.Json;
 using NJsonSchema;
+using NJsonSchema.Validation;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
@@ -17,19 +20,36 @@ internal interface IPipelineSchemaValidator
     IReadOnlyList<string> Validate(string pipelineDefinition, string pipelineSchemaJson);
 }
 
+/// <remarks>
+///     The definition comes from the caller of a deploy, so the validation is bounded (AB#9667): the length is checked
+///     before parsing, the YAML conversion refuses alias bombs and deep documents (<see cref="YamlToJsonConverter" />),
+///     the converted document is checked against <see cref="PipelineDefinitionLimits" /> before the schema evaluation,
+///     and the number of findings is capped. Every refusal is a finding, never an exception, so a hostile definition
+///     costs one rejected deploy and nothing else.
+/// </remarks>
 internal class PipelineSchemaValidator : IPipelineSchemaValidator
 {
     /// <inheritdoc />
     public IReadOnlyList<string> Validate(string pipelineDefinition, string pipelineSchemaJson)
     {
-        string jsonString;
+        if (PipelineDefinitionLimits.CheckLength(pipelineDefinition) is { } tooLong)
+        {
+            return [tooLong];
+        }
+
+        JsonNode? definition;
         try
         {
             // Shared with the MCP server's validate_pipeline_definition tool, so a definition gets
             // the same verdict here and there. The previous local conversion deserialized YAML
             // untyped, which turned every scalar into a string and failed the schema's number /
             // integer / boolean types on any definition carrying one (AB#5240).
-            jsonString = YamlToJsonConverter.ToJsonNodeAutoDetect(pipelineDefinition)?.ToJsonString() ?? "null";
+            definition = YamlToJsonConverter.ToJsonNodeAutoDetect(pipelineDefinition);
+        }
+        catch (YamlDocumentLimitExceededException limit)
+        {
+            // The converter's message names the limit and never quotes the document.
+            return [PipelineDefinitionLimits.Refusal(limit.Message)];
         }
         catch (Exception e)
         {
@@ -41,10 +61,34 @@ internal class PipelineSchemaValidator : IPipelineSchemaValidator
             return [ParseFailureMessage(e)];
         }
 
-        var schema = JsonSchema.FromJsonAsync(pipelineSchemaJson).GetAwaiter().GetResult();
-        var validationErrors = schema.Validate(jsonString);
+        if (PipelineDefinitionLimits.CheckNodes(definition) is { } tooLarge)
+        {
+            return [tooLarge];
+        }
 
-        return validationErrors.Select(e => e.ToString()).ToList();
+        var jsonString = definition?.ToJsonString() ?? "null";
+        var schema = JsonSchema.FromJsonAsync(pipelineSchemaJson).GetAwaiter().GetResult();
+        ICollection<ValidationError> validationErrors;
+        try
+        {
+            validationErrors = schema.Validate(jsonString);
+        }
+        catch (JsonReaderException)
+        {
+            // Defensive: CheckNodes keeps the document within the reader's depth limit, so this is not expected.
+            return [PipelineDefinitionLimits.Refusal(
+                $"The definition nests more than {PipelineDefinitionLimits.MaxJsonDepth} levels deep; the limit is " +
+                $"{PipelineDefinitionLimits.MaxJsonDepth}.")];
+        }
+
+        var findings = validationErrors.Take(PipelineDefinitionLimits.MaxFindings).Select(e => e.ToString()).ToList();
+        if (validationErrors.Count > PipelineDefinitionLimits.MaxFindings)
+        {
+            findings.Add($"... and {validationErrors.Count - PipelineDefinitionLimits.MaxFindings} more findings " +
+                         $"(only the first {PipelineDefinitionLimits.MaxFindings} are listed).");
+        }
+
+        return findings;
     }
 
     /// <summary>The finding of a definition that does not parse: a fixed text plus the position, never the parser's text.</summary>
