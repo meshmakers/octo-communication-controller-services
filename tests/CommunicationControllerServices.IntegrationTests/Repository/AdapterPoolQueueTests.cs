@@ -812,6 +812,70 @@ public class AdapterPoolQueueTests(CommunicationControllerFixture fixture)
     }
 
     /// <summary>
+    ///     An execution queued by the controller before the purpose binding (value sealed in the former form,
+    ///     under the key ring the controller holds) is refused at its grant and ends Failed, it does not stay Queued.
+    /// </summary>
+    [Fact]
+    public async Task AnExecutionQueuedWithAFormerFormSeal_IsNeverLeased_AndEndsFailedWithAReason()
+    {
+        var repository = fixture.GetService<ICommunicationRepository>();
+        var data = new TestData();
+
+        try
+        {
+            var (pipeline, adapter) = await CreateWorkAsync(data);
+            var execution = new RtPipelineExecution
+            {
+                RtId = OctoObjectId.GenerateNewId(),
+                ExecutionId = Guid.NewGuid().ToString(),
+                TriggerType = RtPipelineTriggerTypeEnum.Scheduled,
+                InputData = "{\"x\":1}"
+            };
+            QueuedCaller.Apply(execution, fixture.TestTenantId, pipeline.RtId, adapter.RtId,
+                new ExecutePipelineCaller { SubjectId = "user-42", TrustLevel = 2 }, null, Envelope);
+            execution.SealedCaller = ResealInTheFormerForm(execution.SealedCaller, execution.RtId);
+            await repository.EnqueueExecutionAsync(fixture.TestTenantId, execution, pipeline, adapter,
+                DateTime.UtcNow.AddMinutes(-1));
+            data.Executions.Add(new RtEntityId(SystemCommunicationCkIds.RtCkPipelineExecutionTypeId, execution.RtId));
+            var queued = await repository.GetExecutionQueueEntryAsync(fixture.TestTenantId, execution.ExecutionId);
+
+            await WithLeasingEnabledAsync(async () =>
+            {
+                var result = await GrantAsync(RequestFor(queued!, adapter));
+
+                result.Granted.Should().BeFalse();
+                result.Reason.Should().Be(LeaseRefusalReason.QueuedProvenanceInvalid);
+            });
+
+            var loaded = await repository.GetPipelineExecutionAsync(fixture.TestTenantId, execution.ExecutionId);
+            loaded!.Status.Should().Be(RtPipelineExecutionStatusEnum.Failed);
+            loaded.ErrorMessage.Should().Contain("not queued by the controller");
+            loaded.LeasedOnMemberId.Should().BeNull();
+        }
+        finally
+        {
+            await CleanupAsync(data);
+        }
+    }
+
+    /// <summary>The former form: the same wrapper, plain Protect, no binding.</summary>
+    private string ResealInTheFormerForm(string? sealedCaller, OctoObjectId executionRtId)
+    {
+        Envelope.TryOpen<QueuedCaller.Payload>(ExecutionEnvelopePurposes.QueuedCaller, sealedCaller,
+            fixture.TestTenantId, executionRtId, out var payload, out _).Should().BeTrue();
+        var wrapper = new
+        {
+            v = 1,
+            p = ExecutionEnvelopePurposes.QueuedCaller,
+            t = fixture.TestTenantId,
+            e = executionRtId.ToString(),
+            d = payload
+        };
+        var wrapperJson = System.Text.Json.JsonSerializer.Serialize(wrapper);
+        return fixture.GetService<ISecretAttributeProtector>().Protect(wrapperJson).Envelope!;
+    }
+
+    /// <summary>
     ///     The controller's own executions (a cron tick has no invoker) pass the provenance gate: the grant goes on and
     ///     is refused for the NEXT reason in the chain (the fixture adapter names no lender), and the
     ///     entity is untouched. A full member grant needs a connected pool member, which this fixture does not run.

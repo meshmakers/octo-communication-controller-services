@@ -3472,12 +3472,56 @@ from another execution or written in plain text must not decide who a leased run
 | Token removed at grant | `CommunicationRepository.TryClaimQueuedExecutionAsync` (`QueuedCaller.StripToken`) |
 
 **Format.** The payload is wrapped as `{v, p, t, e, d}` (format version, purpose, tenant id, execution RtId, data)
-and encrypted with the engine key ring (`enc:v2:<kid>`, AES-256-GCM, key rotation as for every `enc:v2` value). The
-key ring authenticates only its own header as associated data, so the binding is part of the authenticated plaintext
-and compared after decryption: another purpose, tenant or execution does not open, nor does a flipped bit, another
-key, plain text, `enc:v1`, or a different `enc:v2` secret copied into the attribute (it decrypts to something that is
-not an envelope; the decrypted content is only compared, never returned or logged). The reason of a refusal is
-logged (`ExecutionEnvelopeRejection`), never the value.
+and encrypted with the engine key ring (`enc:v2:<kid>`, AES-256-GCM, key rotation as for every `enc:v2` value) **for
+the binding** `octo.communication.execution-envelope/<purpose>/<tenant>/<execution>` (`SecretPurpose`, AB#9127): the
+binding is part of the AES-GCM associated data, so another purpose, tenant or execution does not open (reason
+`Unreadable`), nor does a flipped bit, another key, plain text or `enc:v1`. A value produced through a Secret attribute
+(same key ring, whose envelope a tenant administrator can read in a dump) never opens here, and a sealed value never
+opens as a Secret attribute value. The reason of a refusal is logged (`ExecutionEnvelopeRejection`), never the value.
+
+**Former form (before AB#9127) is refused at once.** A value sealed with the binding only in its content cannot be told
+apart from a Secret attribute value that carries a valid wrapper, so it is refused like any value that does not open
+(`Unreadable`) and never re-sealed. Sealed values live only on `PipelineExecution.SealedCaller` for the life of one
+execution (a seal the controller can open is refused after `QueuedSealMaxAgeDays` while queued; a retry gets a new
+seal), so only the executions that are queued, or leased and then interrupted, at the moment of the upgrade are
+affected. What happens to them depends on the key id of the value:
+
+- **Queued, and the controller holds that key** (the usual case): the value reads `Unreadable`, the verdict is
+  `Forged`, and the execution is failed at its grant (refusal `QueuedProvenanceInvalid`, borrower event, WARN). It
+  never started.
+- **Queued, and the controller does not hold that key** (a key that was rotated out): the engine reports the unknown
+  key before it checks the binding, so the value reads `UnknownKey`, the verdict is `Unverifiable`, and the execution
+  is **not** failed. It stays `Queued` at the head of its tenant's queue on that adapter pool, and every later queued
+  execution of that borrowing tenant on that pool waits behind it (the scheduler blocks the tenant for the round
+  instead of skipping the item). Every grant attempt logs the WARN "cannot be verified by this controller ... it stays
+  queued" (refusal `QueuedProvenanceUnverifiable`). `QueuedSealMaxAgeDays` does not end this, because the age is read
+  from the opened seal. If the key comes back, the next grant fails it as above. Otherwise the operator of the
+  **lender** tenant (the tenant that owns the adapter pool) removes it with `AdapterPool.CancelQueuedExecution-1`
+  (`DELETE AdapterPool/{adapterPoolRtId}/queue/{executionId}`), which frees the borrower's queue; the borrowing tenant
+  cannot cancel it itself and starts the work again in its own tenant.
+- **Leased and interrupted** (either key case): `Reseal` does not open the value, so the retry is re-queued without a
+  seal and failed at its own grant (`Missing` counts as `Forged`); the WARN "The provenance of interrupted execution
+  '<id>' did not carry onto its retry '<retry id>'" names both. The retry has a new execution id, but the work behind
+  it is the interrupted run.
+
+**Running an affected execution again.** An execution queued at the upgrade (failed at its grant, or cancelled while
+queued) never started, unless it is itself the retry of an interrupted run: a retry that the previous version
+re-queued before the upgrade is also queued at the upgrade, with a new execution id, but its work may already have
+been partly done. Such a retry is named in the INFO "Interrupted leased execution '<id>' and re-queued it as
+'<retry id>'"; a retry the new version re-queues is named in the WARN "The provenance of interrupted execution '<id>'
+did not carry onto its retry '<retry id>'". The logs of a replaced pod may be gone, so the entities count as well: an
+execution of the same pipeline in status `Interrupted` with the same input data marks a queued execution as its
+retry. A queued execution counts as a retry unless the logs rule it out; a missing `Interrupted` entity does not. An
+execution queued at the upgrade that the logs rule out as a retry is safe to run again. For an interrupted run and its retry, check for effects first (look up what the run
+should have written, for example inserts of a method pipeline), and run it again only when nothing was committed, or
+when the pipeline is idempotent; otherwise reconcile by hand, so no insert is repeated.
+
+**Rollout and rollback.** The previous version opens a value without the binding, so a pod of the previous version,
+during the rolling update or after a rollback, treats a bound value as the new one treats a former-form value (see
+above). With one controller replica the overlap of the rolling update is the few seconds of the pod switch (longer when the
+Deployment lets both pods run at once); a rollback affects every execution still queued with the bound form.
+Executions failed or cancelled this way are run again under the rule above; for a rollback, read "previous" and "new"
+the other way round (the retries the new version re-queued before the rollback are the interrupted work).
 
 **Rules.**
 
@@ -3513,8 +3557,8 @@ text, forged JSON, `enc:v1`, other execution / tenant / key / purpose, flipped b
 **Design decision: the marker is one more member of the existing `SealedCaller` payload, not a second attribute.**
 A separate `MethodInvocation` attribute (decision note AB#7120, first draft) would have needed System.Communication
 4.13.0, a second `Seal`/`Open`/`Reseal` pair and a second place that can drift. The envelope already provides what the
-marker needs: AES-GCM with the instance key ring (`enc:v2`), binding to tenant and execution RtId inside the
-authenticated plaintext, no plain-text acceptance, re-seal on requeue, and the provenance gate of AB#7473 (pipeline,
+marker needs: AES-GCM with the instance key ring (`enc:v2`), binding to purpose, tenant and execution RtId in the
+associated data (and in the content), no plain-text acceptance, re-seal on requeue, and the provenance gate of AB#7473 (pipeline,
 adapter, input). System.Communication therefore stays **4.12.0**; the old-instance behaviour is also the safe one (an
 older controller ignores the unknown payload member, so it drops the marker: fail closed).
 
