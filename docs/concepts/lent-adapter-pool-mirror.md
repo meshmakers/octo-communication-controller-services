@@ -1,3 +1,8 @@
+---
+description: "Concept: mirroring lent adapter pools into the borrower tenant"
+applies_to: **/Services/*PoolMirror*.cs
+---
+
 # Mirroring lent adapter pools into the borrower tenant (AB#5271)
 
 ## 1. The problem, stated precisely

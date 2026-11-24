@@ -1,3 +1,8 @@
+---
+description: Hand-run of shared adapter leasing against the local stack
+background: true
+---
+
 # Shared adapter leasing — trying it locally
 
 A hand-run of AB#4924 against `Start-Octo`, end to end: one lending tenant with a pool, one

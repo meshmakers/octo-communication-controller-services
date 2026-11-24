@@ -1,3 +1,8 @@
+---
+description: "Secret attributes in the controller: ciphertext handling and the System.Communication model change"
+applies_to: **/Services/ConfigurationSecretSerializer.cs
+---
+
 # Secret attributes in the Communication Controller (AB#5528 / AB#5537)
 
 Concept: `octo-construction-kit-engine/docs/concept-secret-attribute-type.md`. This page covers what

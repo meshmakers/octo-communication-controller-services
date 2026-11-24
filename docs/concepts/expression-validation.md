@@ -1,3 +1,8 @@
+---
+description: "Concept: backend expression validation and the shared formula engine"
+applies_to: **/Services/ExpressionValidationService.cs
+---
+
 # Expression Validation Concept
 
 > **Status: implemented (AB#4189).** The backend authoritative validation and the *shared

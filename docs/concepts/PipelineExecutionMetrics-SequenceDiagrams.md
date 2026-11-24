@@ -1,3 +1,8 @@
+---
+description: Sequence diagrams of the pipeline execution tracking flows (German)
+background: true
+---
+
 # Pipeline Execution Metrics - Sequenzdiagramme
 
 Diese Datei enthält Mermaid-Sequenzdiagramme für die verschiedenen Abläufe des Pipeline Execution Tracking Features.

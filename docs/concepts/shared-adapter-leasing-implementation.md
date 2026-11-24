@@ -1,3 +1,8 @@
+---
+description: Implementation plan of shared adapter leasing, increment by increment
+background: true
+---
+
 # Shared Adapter Leasing — Implementation Plan
 
 **Epic:** AB#4914 · **Work item:** AB#4924 · **Design:** [`shared-adapter-leasing.md`](shared-adapter-leasing.md)
@@ -302,10 +307,10 @@ not live pins. They go stale rather than break.)
 Category A, by repo: `octo-communication-controller-services` 3 (2 service-managed + 1 dead
 sample), `octo-construction-kit` 4 (`Samples.Photovoltaics`, `Samples.PipelineBasics`,
 `Samples.Simulator.Energy`, `Samples.Simulator.EnergyCommunity`), `octo-office-integration` 1
-(`Office.ExcelImport`), `meshmakers-app` 2 (`MeshmakersAccounting`, `…​.Tesla`).
+(`Office.ExcelImport`), `meshmakers-app` 2 (`MeshmakersAccounting`, `….Tesla`).
 
 Category B is dominated by `meshmakers-app`: 28 files under `MeshmakersAccounting-1.0.0/seed-data/`
-plus 2 under `…​.Tesla-1.0.0/`, then `octo-construction-kit` 5 and `octo-office-integration` 1.
+plus 2 under `….Tesla-1.0.0/`, then `octo-construction-kit` 5 and `octo-office-integration` 1.
 
 🔴 **Plan 1.0 said "no blueprint bump — the floors are satisfiability floors only". That was
 true for a minor bump and is flatly wrong for a major one.** `[3.22.0,4.0)` does not merely

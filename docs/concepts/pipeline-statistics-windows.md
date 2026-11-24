@@ -1,3 +1,8 @@
+---
+description: Pipeline statistics windows, source and classification
+applies_to: **/Services/PipelineStatisticsFolder.cs
+---
+
 # Pipeline statistics: windows, source and classification (AB#5583)
 
 `RtPipelineStatistics` carries window counters (`LastHour*`, `Last12Hours*`, `Last24Hours*`,

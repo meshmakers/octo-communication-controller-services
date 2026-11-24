@@ -1,3 +1,8 @@
+---
+description: "Runbook: Enforce on the adapter, operator and adapter-pool hubs"
+applies_to: **/Hubs/*Authorization*.cs
+---
+
 # Rollout: `Enforce` on the adapter, operator and adapter-pool hubs (AB#5063, AB#5059, AB#6088, AB#5528 phase 3)
 
 The controller gates both SignalR hubs with a staged check (`CLAUDE.md` § "The SignalR hubs are not

@@ -1,3 +1,8 @@
+---
+description: "Concept: pipeline execution metrics, requirements and design (German)"
+background: true
+---
+
 # Konzept: Pipeline Execution Metrics
 
 ## Zusammenfassung der Anforderungen

@@ -1,3 +1,8 @@
+---
+description: "Testing strategy: unit tests, integration tests with MongoDB Testcontainers, HTTP API tests"
+applies_to: tests/CommunicationControllerServices.IntegrationTests/Fixtures/**
+---
+
 # Testing Strategy - Communication Controller Services
 
 This document describes the testing strategy for the Communication Controller Services, including unit tests, integration tests with MongoDB Testcontainers, and HTTP API tests.

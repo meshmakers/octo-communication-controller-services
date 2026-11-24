@@ -1,3 +1,8 @@
+---
+description: "Concept (RFC): multi-tenant client credentials and CI/CD workload deployment"
+background: true
+---
+
 # Multi-Tenant Client Credentials + CI/CD Workload Deployment
 
 Status: **Draft / RFC** — design only, no code changes yet.

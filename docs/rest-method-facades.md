@@ -1,3 +1,8 @@
+---
+description: "REST facades over the System.Communication methods: endpoint mapping and deprecation"
+applies_to: **/Methods/Service/**
+---
+
 # REST facades over the System.Communication methods (AB#9048, AB#9049, AB#9050)
 
 Feature F5.3 (AB#5701, Epic AB#9221 CK v2). The 22 adapter, pool, pipeline, data-flow, workload, deployment-site and

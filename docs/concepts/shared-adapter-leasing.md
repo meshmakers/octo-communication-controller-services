@@ -1,3 +1,8 @@
+---
+description: Design of shared adapter leasing (parent-tenant adapter pool)
+background: true
+---
+
 # Shared Adapter Leasing (Parent-Tenant Adapter Pool)
 
 **Epic:** AB#4914 (On-Demand Adapter Lifecycle) · **Supersedes the approach sketched in** AB#4924 · **Status:** Design draft 1.0 (2026-09-13)

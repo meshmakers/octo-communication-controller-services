@@ -1,3 +1,8 @@
+---
+description: "Concept: on-demand adapter lifecycle (scale-to-zero), state machine and design"
+applies_to: **/Services/WorkloadLifecycle*.cs
+---
+
 # On-Demand Adapter Lifecycle (Scale-to-Zero)
 
 **Epic:** AB#4914 · **Status:** Design draft 1.0 (2026-08-27) · **Issues:** AB#4915–AB#4924

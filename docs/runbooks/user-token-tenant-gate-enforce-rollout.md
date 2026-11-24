@@ -1,3 +1,8 @@
+---
+description: "Runbook: Enforce on the user-token tenant gate of asset repository and controller"
+background: true
+---
+
 # Rollout: `Enforce` on the user-token tenant gate of asset-repo and communication-controller (AB#6728, AB#6833)
 
 Both services run `UseOctoTenantAuthorization()` (octo-common-services). It compares the `tenant_id`

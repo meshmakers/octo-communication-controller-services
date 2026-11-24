@@ -1,3 +1,8 @@
+---
+description: "Runbook: switching the adapter pool hub gate to Enforce per cluster"
+applies_to: **/Hubs/AdapterPoolHub*.cs
+---
+
 # Switching the `/adapterPoolHub` gate to `Enforce` per cluster
 
 This is the operator plan for the last hub gate of the communication controller that still runs `LogOnly`: the adapter

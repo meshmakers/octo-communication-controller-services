@@ -1,3 +1,8 @@
+---
+description: "Runbook: E2E smoke test of the CI/CD workload rollout"
+background: true
+---
+
 # E2E Smoke Test — CI/CD Workload Rollout
 
 This runbook validates the full Epic 3054 pipeline end-to-end on the

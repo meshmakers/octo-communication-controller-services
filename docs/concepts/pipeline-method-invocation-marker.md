@@ -1,3 +1,8 @@
+---
+description: "Concept: method-invocation marker that replaces generic create in pipeline runs"
+applies_to: **/Methods/**
+---
+
 # Method-Invocation Marker: Replaced Generic Create in Pipeline Runs
 
 A CK method with `replacesGenericCreate: true` replaces the generic create of its type (CK language 2,

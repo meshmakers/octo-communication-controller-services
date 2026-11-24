@@ -1,3 +1,8 @@
+---
+description: "Runbook: recover MeshAdapter DeploymentState after the blueprint re-apply regression"
+background: true
+---
+
 # Runbook — Recover MeshAdapter `DeploymentState` after blueprint re-apply regression
 
 ## When to run
