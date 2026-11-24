@@ -21,41 +21,10 @@ multi-tenant environment.
      members; grants and releases leases. Not a variant of `AdapterHub`: a pool member
      belongs to no tenant, so it cannot use a tenant-addressed route.
    - `PoolHub` at `/{tenantId}/poolHub` - manages pool operator connections
-4. **Caches**: In-memory synchronized state for Adapters and Pools across service nodes
-5. **Repository Layer**: `CommunicationRepository` - abstracts MongoDB persistence via Octo Runtime Engine
-6. **Construction Kit Model**: YAML-based model definitions in `SystemCommunicationCkModel` that generate C# types
-
-### Service Architecture
-
-The service follows a layered architecture:
-- **Hubs Layer** (`src/CommunicationControllerServices/Hubs/`) - SignalR hubs for real-time communication
-- **Service Layer** (`src/CommunicationControllerServices/Services/`) - Core business logic (`AdapterService`,
-  `DeploymentSiteService`, `PipelineDebugService`, `TriggerManagementService`, `PipelineExecutionService`,
-  `CommunicationEventService`)
-- **Repository Layer** (`src/CommunicationControllerServices/Repository/`) - Data access via MongoDB Runtime Engine
-- **Cache Layer** (`src/CommunicationControllerServices/Caches/`) - In-memory state synchronized across nodes via hub
-  callbacks
-- **Consumers** (`src/CommunicationControllerServices/Consumers/`) - Message bus event consumers for tenant lifecycle
-  management
-- **Background Services** (`src/CommunicationControllerServices/BackgroundServices/`) - Periodic maintenance tasks
-
-### Project Structure Notes
-
-- Main service: `src/CommunicationControllerServices/`
-- Construction Kit model: `src/SystemCommunicationCkModel/`
-- Resource strings: `src/CommunicationControllerServices.Resources/`
-- Unit tests (TUnit): `tests/CommunicationControllerService.Tests/`
-- Integration tests (xUnit): `tests/CommunicationControllerServices.IntegrationTests/`
-- CI/CD: `azure-pipelines.yml` (root; uses shared `octo-pipeline-templates`)
-- Output directory: `bin/$(Configuration)/`
-
-### Configuration Notes
-
-- `InternalsVisibleTo` configured for tests and DynamicProxy (for NSubstitute proxy generation)
-- Target framework: .NET 10.0
-- NLog configuration in `src/CommunicationControllerServices/nlog.config`
-- SignalR configured with 100MB max message size
-- Three build configurations: `Debug`, `Release`, `DebugL` (local development with version 999.0.0)
+Caches, the repository layer, the Construction Kit model, the project layout and the output directory:
+`docs/service-conventions.md`. Source `src/CommunicationControllerServices/`, tests in
+`tests/CommunicationControllerService.Tests/` (TUnit) and `tests/CommunicationControllerServices.IntegrationTests/`
+(xUnit).
 
 ## Read before you change
 
@@ -101,69 +70,16 @@ The service follows a layered architecture:
 
 ## Build & test
 
-### Build & Test
-
 ```bash
-# Restore packages
 dotnet restore Octo.CommunicationController.sln
-
-# Build solution
 dotnet build Octo.CommunicationController.sln --configuration Release
-
-# Run all tests (unit + integration). global.json selects the Microsoft.Testing.Platform
-# runner, so VSTest-only switches (--logger, --collect) are not available.
-dotnet test --configuration Release
-
-# Run a specific unit test class. TUnit only understands the MTP tree-node filter
-# (/assembly/namespace/class/method, '*' wildcards); a VSTest --filter selects zero tests.
-dotnet test --project tests/CommunicationControllerService.Tests/CommunicationControllerService.Tests.csproj \
-  --treenode-filter "/*/*/ReportAdapterMetricsAsyncTests/*"
-
-# Run a specific unit test method
-dotnet test --project tests/CommunicationControllerService.Tests/CommunicationControllerService.Tests.csproj \
-  --treenode-filter "/*/*/ReportAdapterMetricsAsyncTests/ReportAdapterMetricsAsync_ServiceThrows_Swallowed"
-```
-
-The xUnit integration tests additionally accept `--filter` (VSTest syntax) and
-`--filter-class` / `--filter-method`; see "Running Integration Tests" below.
-
-🔴 **`dotnet test` and `-p:BaseOutputPath` do not mix here — it reports "no tests ran", exit code 5,
-not an error.** Both test projects land in the same `<base>/DebugL/net10.0` folder, and the MTP
-runner then discovers nothing at all: no filter, still zero tests, green-looking log. It is a false
-negative in the direction that hides work. Build with the scratch output path and **run the built
-assembly directly** instead:
-
-```bash
-dotnet build tests/CommunicationControllerService.Tests/CommunicationControllerService.Tests.csproj \
-  -c DebugL -p:BaseOutputPath=$SCRATCH/bo-unit/ -nodeReuse:false
-cd $SCRATCH/bo-unit/DebugL/net10.0
-dotnet Meshmakers.Octo.Backend.CommunicationControllerService.Tests.dll --treenode-filter "/*/*/FairnessTests/*"
-
-# the xUnit integration assembly takes -class / -method, NOT --filter
-dotnet CommControllerServices.IntegrationTests.dll -class "*AdapterPoolQueueTests"
-```
-
-Give each test project its **own** `BaseOutputPath` (`bo-unit`, `bo-int`) — sharing one flattens two
-different runners' assemblies into one directory.
-
-### Run the Service
-
-```bash
-# Run locally (uses appsettings.Development.json)
+dotnet test --configuration Release   # unit (TUnit) + integration (xUnit), Microsoft.Testing.Platform runner
 dotnet run --project src/CommunicationControllerServices/CommunicationControllerServices.csproj
-
-# Run with specific configuration
-dotnet run --project src/CommunicationControllerServices/CommunicationControllerServices.csproj --configuration Debug
 ```
 
-Integration test setup: `docs/testing-and-integration-tests.md`. Building the CK model: `docs/ck-model-build.md`.
-
-### Docker
-
-```bash
-# Build Docker image
-docker build -f src/CommunicationControllerServices/Dockerfile -t octo-communication-controller .
-```
+TUnit filters, the `-p:BaseOutputPath` "no tests ran" trap, running the built assembly directly, the integration test
+setup and the Docker image build: `docs/testing-and-integration-tests.md`. Building the CK model:
+`docs/ck-model-build.md`.
 
 ## Before you commit
 
@@ -188,5 +104,42 @@ docker build -f src/CommunicationControllerServices/Dockerfile -t octo-communica
 
 ## Rules
 
-The rules of this repository are the sections of the routed docs; read the matching file before you change code it
-covers.
+These rules bind new and changed code. Known exceptions in existing code are named in the linked docs.
+
+- **This repository is public.** No work item ids, internal hostnames, customer or tenant names, or secrets in docs and
+  in new or changed code comments and test names (work item ids stay in `CHANGELOG.md` entries); remove an existing one
+  when you touch its line.
+- **A SignalR hub gets its own staged `IHubFilter` gate** with its own options section and `Mode` (`LogOnly` default,
+  `Enforce`); REST policies never cover a hub. `/operatorHub` checks `SystemCommunicationApiPolicy`,
+  `/{tenantId}/adapterHub` the read-write policy plus the route tenant, `/adapterPoolHub` binds the token's tenant; all
+  three ship in `LogOnly`. `docs/hub-authorization-gates.md`; test `AdapterHubAuthorizationFilterTests`.
+- **One configurator owns the JWT scheme:** `Program.cs` calls `AddJwtBearer()` without a delegate. Read subject, name,
+  e-mail and roles only through `PrincipalClaimExtensions`, and build test principals in the mapped claim shape.
+  `docs/tenant-authorization-gate.md`; tests `TenantAuthorizationWiringTests`, `PrincipalClaimExtensionsTests`.
+- **A tenant route keeps the `{tenantId:tenantId}` constraint and gets no `IAllowParentTenantAdministration`;**
+  user-token enforcement is staged in `Program.cs` (`LogOnly`), not flipped in code.
+  `docs/tenant-authorization-gate.md`; test `TenantGateProgramPinTests`.
+- **A CK method handler opens `CommunicationMethodCaller.Begin(context)` first**, a service reading `HttpContext.User`
+  falls back to `CommunicationMethodCaller.Current`, a method declares `roles: [CommunicationManagement]`, and its
+  cancellation is `ApplicationStopping`. Exception: REST callers without the role stay on the guarded direct path.
+  `docs/ck-method-service-handlers.md`; test `DeployPipelineElevationGateTests`.
+- **A reader of a caller-supplied pipeline definition calls `PipelineDefinitionLimits.CheckDefinition` before it
+  parses.** `docs/ck-method-service-handlers.md`; test `PipelineDefinitionServiceLimitsTests`.
+- **No client secret or token in a log line, result or `ToString`** (`LeaseDto` overrides it for that reason).
+  `docs/adapter-pool-hub-gate-and-leases.md`; tests `LeaseSecretLogTargetTests`,
+  `RotateServiceAccountSecretMethodRedactionTests`.
+- **A lease takes the borrower's credential from the lease alone, read after both lending checks:** the pool's
+  `SharingMode` and allow-list (`ITenantLendingScopeResolver`) and the adapter's own `LentFromTenantId`. A pool member
+  registers only into a pool of its token's tenant. `docs/adapter-pool-hub-gate-and-leases.md`; test
+  `LeaseServiceTests`.
+- **A pipeline deploy path calls `EnsurePipelineHasServiceAccountAsync` before its first state write**, and ships with
+  its provisioning. Exception: `DeploymentSiteService.DeployWorkloadAsync` is unguarded on purpose.
+  `docs/pipeline-service-account-identity.md`; test `DeployPipelineServiceAccountGateTests`.
+- **A workload deploy or undeploy notification for an operator-less pool is queued, never dropped**
+  (`OperatorConnectionManager`), and a progress report writes `Pending` only, never `Deployed` or `Error`.
+  `docs/helm-workload-deploy.md`; test `OperatorConnectionManagerTests`.
+- **Endpoints that create operator-managed resources check `IConfigurationService.IsEnabledAsync`** and answer 409 on a
+  disabled tenant; undeploy stays open and a failed state read propagates. Exception: the `UseOctoTenants()` gate is not
+  registered here. `docs/tenant-enable-disable.md`; test `PoolControllerDeployGateTests`.
+- **Notification scheduling decides when, never what:** a scheduling failure is stored as an error event and never stops
+  tenant start. `docs/notification-subscriptions.md`; test `NotificationScheduleServiceTests`.

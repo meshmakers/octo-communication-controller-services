@@ -139,3 +139,68 @@ Services.AddRuntimeEngine()
 **Common Error:** If you see `InvalidCastException: Unable to cast object of type 'RtEntity' to type 'RtPool'` (or similar), it typically means:
 1. CK models were registered after MongoDB repository initialization, OR
 2. The CK cache was not properly loaded for the tenant
+
+### Build and test commands
+
+```bash
+# Restore packages
+dotnet restore Octo.CommunicationController.sln
+
+# Build solution
+dotnet build Octo.CommunicationController.sln --configuration Release
+
+# Run all tests (unit + integration). global.json selects the Microsoft.Testing.Platform
+# runner, so VSTest-only switches (--logger, --collect) are not available.
+dotnet test --configuration Release
+
+# Run a specific unit test class. TUnit only understands the MTP tree-node filter
+# (/assembly/namespace/class/method, '*' wildcards); a VSTest --filter selects zero tests.
+dotnet test --project tests/CommunicationControllerService.Tests/CommunicationControllerService.Tests.csproj \
+  --treenode-filter "/*/*/ReportAdapterMetricsAsyncTests/*"
+
+# Run a specific unit test method
+dotnet test --project tests/CommunicationControllerService.Tests/CommunicationControllerService.Tests.csproj \
+  --treenode-filter "/*/*/ReportAdapterMetricsAsyncTests/ReportAdapterMetricsAsync_ServiceThrows_Swallowed"
+```
+
+The xUnit integration tests additionally accept `--filter` (VSTest syntax) and
+`--filter-class` / `--filter-method`; see "Running Integration Tests".
+
+🔴 **`dotnet test` and `-p:BaseOutputPath` do not mix here — it reports "no tests ran", exit code 5,
+not an error.** Both test projects land in the same `<base>/DebugL/net10.0` folder, and the MTP
+runner then discovers nothing at all: no filter, still zero tests, green-looking log. It is a false
+negative in the direction that hides work. Build with the scratch output path and **run the built
+assembly directly** instead:
+
+```bash
+dotnet build tests/CommunicationControllerService.Tests/CommunicationControllerService.Tests.csproj \
+  -c DebugL -p:BaseOutputPath=$SCRATCH/bo-unit/ -nodeReuse:false
+cd $SCRATCH/bo-unit/DebugL/net10.0
+dotnet Meshmakers.Octo.Backend.CommunicationControllerService.Tests.dll --treenode-filter "/*/*/FairnessTests/*"
+
+# the xUnit integration assembly takes -class / -method, NOT --filter
+dotnet CommControllerServices.IntegrationTests.dll -class "*AdapterPoolQueueTests"
+```
+
+Give each test project its **own** `BaseOutputPath` (`bo-unit`, `bo-int`) — sharing one flattens two
+different runners' assemblies into one directory.
+
+
+### Run the service and build the Docker image
+
+```bash
+# Run locally (uses appsettings.Development.json)
+dotnet run --project src/CommunicationControllerServices/CommunicationControllerServices.csproj
+
+# Run with specific configuration
+dotnet run --project src/CommunicationControllerServices/CommunicationControllerServices.csproj --configuration Debug
+```
+
+Integration test setup: `docs/testing-and-integration-tests.md`. Building the CK model: `docs/ck-model-build.md`.
+
+### Docker
+
+```bash
+# Build Docker image
+docker build -f src/CommunicationControllerServices/Dockerfile -t octo-communication-controller .
+```

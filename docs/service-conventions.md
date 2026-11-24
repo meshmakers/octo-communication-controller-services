@@ -115,3 +115,42 @@ Tenant enable/disable lives **only** on the Tenant API:
 - `{tenantId}/v1/communication/enable` / `.../disable` (tenant read from route)
 - The legacy `system/v1/communication/enable?tenantId=X` variant no longer exists.
   The SDK dropped its `system/v1` fallback and now requires a tenant on the client options.
+
+### Service Architecture
+
+The service follows a layered architecture:
+- **Hubs Layer** (`src/CommunicationControllerServices/Hubs/`) - SignalR hubs for real-time communication
+- **Service Layer** (`src/CommunicationControllerServices/Services/`) - Core business logic (`AdapterService`,
+  `DeploymentSiteService`, `PipelineDebugService`, `TriggerManagementService`, `PipelineExecutionService`,
+  `CommunicationEventService`)
+- **Repository Layer** (`src/CommunicationControllerServices/Repository/`) - Data access via MongoDB Runtime Engine
+- **Cache Layer** (`src/CommunicationControllerServices/Caches/`) - In-memory state synchronized across nodes via hub
+  callbacks
+- **Consumers** (`src/CommunicationControllerServices/Consumers/`) - Message bus event consumers for tenant lifecycle
+  management
+- **Background Services** (`src/CommunicationControllerServices/BackgroundServices/`) - Periodic maintenance tasks
+
+
+### Configuration Notes
+
+- `InternalsVisibleTo` configured for tests and DynamicProxy (for NSubstitute proxy generation)
+- Target framework: .NET 10.0
+- NLog configuration in `src/CommunicationControllerServices/nlog.config`
+- SignalR configured with 100MB max message size
+- Three build configurations: `Debug`, `Release`, `DebugL` (local development with version 999.0.0)
+
+### Components and project layout
+
+4. **Caches**: In-memory synchronized state for Adapters and Pools across service nodes
+5. **Repository Layer**: `CommunicationRepository` - abstracts MongoDB persistence via Octo Runtime Engine
+6. **Construction Kit Model**: YAML-based model definitions in `SystemCommunicationCkModel` that generate C# types
+
+#### Project structure notes
+
+- Main service: `src/CommunicationControllerServices/`
+- Construction Kit model: `src/SystemCommunicationCkModel/`
+- Resource strings: `src/CommunicationControllerServices.Resources/`
+- Unit tests (TUnit): `tests/CommunicationControllerService.Tests/`
+- Integration tests (xUnit): `tests/CommunicationControllerServices.IntegrationTests/`
+- CI/CD: `azure-pipelines.yml` (root; uses shared `octo-pipeline-templates`)
+- Output directory: `bin/$(Configuration)/`
