@@ -1,6 +1,6 @@
 ---
 description: Offline reconciliation of adapters and deployment sites, and the offline-write rule
-applies_to: **/BackgroundServices/*OfflineReconciliation*.cs
+applies_to: "**/BackgroundServices/*OfflineReconciliation*.cs"
 ---
 
 ### Adapter Offline Reconciliation

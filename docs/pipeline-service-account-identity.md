@@ -1,6 +1,6 @@
 ---
 description: "Pipeline service account: mandatory execution identity, provisioning, roles and deliberate secret rotation"
-applies_to: **/Services/PipelineServiceAccount*.cs, **/Options/ServiceAccount*.cs
+applies_to: "**/Services/PipelineServiceAccount*.cs, **/Options/ServiceAccount*.cs"
 ---
 
 ## Pipeline Service Account — mandatory execution identity (phases 1 + 2)

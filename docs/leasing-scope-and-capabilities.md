@@ -1,6 +1,6 @@
 ---
 description: "Leasing: lending scope, deploy guards, execution class, deploying to a Leased adapter and node capabilities"
-applies_to: **/Services/TenantLendingScopeResolver.cs, **/Services/PipelineExecutionClassService.cs, **/Services/AdapterNodeCapabilityService.cs
+applies_to: "**/Services/TenantLendingScopeResolver.cs, **/Services/PipelineExecutionClassService.cs, **/Services/AdapterNodeCapabilityService.cs"
 ---
 
 ## Leasing: lending scope and execution class (increments 2 + 4)

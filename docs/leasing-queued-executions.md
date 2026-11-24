@@ -1,6 +1,6 @@
 ---
 description: "Leasing: only controller-queued executions are leased, a sealed execution is leased at most once, the lease carries the work"
-applies_to: **/Services/LeaseService.cs, **/Repository/Queued*.cs, **/Consumers/LeaseTriggerConsumer.cs
+applies_to: "**/Services/LeaseService.cs, **/Repository/Queued*.cs, **/Consumers/LeaseTriggerConsumer.cs"
 ---
 
 ### Only executions the controller queued are leased

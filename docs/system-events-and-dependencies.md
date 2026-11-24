@@ -1,6 +1,6 @@
 ---
 description: Multi-tenancy, external dependencies and the system events the controller publishes and consumes
-applies_to: **/Consumers/**, **/Services/CommunicationEventService.cs
+applies_to: "**/Consumers/**, **/Services/CommunicationEventService.cs"
 ---
 
 ### Multi-Tenancy

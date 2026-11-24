@@ -1,6 +1,6 @@
 ---
 description: "Adapter connection lifecycle: cache invalidation, pool states, shutdown race guard, reconnect races, config push on registration"
-applies_to: **/Hubs/AdapterHub*.cs, **/Caches/Adapters/**, **/Services/AdapterConnectionTracker.cs
+applies_to: "**/Hubs/AdapterHub*.cs, **/Caches/Adapters/**, **/Services/AdapterConnectionTracker.cs"
 ---
 
 ### Adapter CK Cache Invalidation

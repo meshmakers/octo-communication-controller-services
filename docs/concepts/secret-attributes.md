@@ -1,6 +1,6 @@
 ---
 description: "Secret attributes in the controller: ciphertext handling and the System.Communication model change"
-applies_to: **/Services/ConfigurationSecretSerializer.cs
+applies_to: "**/Services/ConfigurationSecretSerializer.cs"
 ---
 
 # Secret attributes in the Communication Controller

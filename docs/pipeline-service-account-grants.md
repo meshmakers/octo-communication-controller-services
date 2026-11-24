@@ -1,6 +1,6 @@
 ---
 description: "Pipeline service account: installation defaults, MayActAs, StreamDataReader baseline, role grants and Uses-linked accounts"
-applies_to: **/Services/ServiceAccountImpersonationSwitchService.cs, **/Services/UsesLinkedServiceAccountLookup.cs, **/Controllers/ServiceAccountController.cs
+applies_to: "**/Services/ServiceAccountImpersonationSwitchService.cs, **/Services/UsesLinkedServiceAccountLookup.cs, **/Controllers/ServiceAccountController.cs"
 ---
 
 ### Phase 7 — installation defaults and MayActAs materialisation

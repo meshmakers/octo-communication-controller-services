@@ -1,6 +1,6 @@
 ---
 description: "Authentication and authorization: tenant gate, the staged SignalR hub gates and the adapter hub gate"
-applies_to: **/Hubs/**, **/Options/*HubAuthorizationOptions.cs
+applies_to: "**/Hubs/**, **/Options/*HubAuthorizationOptions.cs"
 ---
 
 ### Authentication & Authorization

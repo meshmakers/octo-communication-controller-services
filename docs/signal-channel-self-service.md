@@ -1,6 +1,6 @@
 ---
 description: "Signal channel self-service: registration, verification, history and the signal bridge client"
-applies_to: **/SignalChannel*.cs, **/SignalBridge*.cs
+applies_to: "**/SignalChannel*.cs, **/SignalBridge*.cs"
 ---
 
 ### Signal Channel Self-Service

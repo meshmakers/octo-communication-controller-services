@@ -1,6 +1,6 @@
 ---
 description: "On-demand adapter lifecycle (scale-to-zero): lifecycle metrics and the HTTP activator"
-applies_to: **/Services/*Lifecycle*.cs, **/BackgroundServices/WorkloadLifecycleWatchdog*.cs, **/Middleware/**, **/Consumers/LifecycleWakeConsumer.cs
+applies_to: "**/Services/*Lifecycle*.cs, **/BackgroundServices/WorkloadLifecycleWatchdog*.cs, **/Middleware/**, **/Consumers/LifecycleWakeConsumer.cs"
 ---
 
 ## On-Demand Adapter Lifecycle — Scale-to-Zero

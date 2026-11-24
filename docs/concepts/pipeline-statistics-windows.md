@@ -1,6 +1,6 @@
 ---
 description: Pipeline statistics windows, source and classification
-applies_to: **/Services/PipelineStatisticsFolder.cs
+applies_to: "**/Services/PipelineStatisticsFolder.cs"
 ---
 
 # Pipeline statistics: windows, source and classification

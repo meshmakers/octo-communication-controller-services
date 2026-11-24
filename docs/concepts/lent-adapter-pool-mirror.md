@@ -1,6 +1,6 @@
 ---
 description: "Concept: mirroring lent adapter pools into the borrower tenant"
-applies_to: **/Services/*PoolMirror*.cs
+applies_to: "**/Services/*PoolMirror*.cs"
 ---
 
 # Mirroring lent adapter pools into the borrower tenant

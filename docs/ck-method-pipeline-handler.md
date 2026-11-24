@@ -1,6 +1,6 @@
 ---
 description: "CK method pipeline handler: how a System.Communication method is served by a pipeline, invocation, result mapping"
-applies_to: **/Methods/**
+applies_to: "**/Methods/**"
 ---
 
 ### CK method pipeline handler

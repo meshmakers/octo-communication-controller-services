@@ -1,6 +1,6 @@
 ---
 description: "Secret defaults and platform-only secrets: a SecretDefault never reaches an adapter, provisioning and removal"
-applies_to: **/Services/SecretDefault*.cs, **/Controllers/SecretDefaultsController.cs
+applies_to: "**/Services/SecretDefault*.cs, **/Controllers/SecretDefaultsController.cs"
 ---
 
 ## Platform-only secrets: a SecretDefault never reaches an adapter

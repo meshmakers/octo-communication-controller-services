@@ -1,6 +1,6 @@
 ---
 description: "Notification subscriptions: schedule, first run, cron and the notification engine"
-applies_to: **/Notification*.cs
+applies_to: "**/Notification*.cs"
 ---
 
 ### Notification Subscriptions — schedule and engine

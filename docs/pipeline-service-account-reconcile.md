@@ -1,6 +1,6 @@
 ---
 description: "Pipeline service account: credentials reaching the adapter pod, declarative reconcile, identity health and rights analysis"
-applies_to: **/Services/ServiceAccount*Service.cs, **/BackgroundServices/PipelineServiceAccountProvisioningRetry*.cs
+applies_to: "**/Services/ServiceAccount*Service.cs, **/BackgroundServices/PipelineServiceAccountProvisioningRetry*.cs"
 ---
 
 ### Phase 4 — the credentials reach the adapter pod

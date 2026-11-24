@@ -1,6 +1,6 @@
 ---
 description: "Service conventions: registration, error handling, configuration, exception pattern, caches, HTTP context, API structure"
-applies_to: **/Caches/**, **/Program.cs, **/Services/*ServiceException.cs
+applies_to: "**/Caches/**, **/Program.cs, **/Services/*ServiceException.cs, **/Repository/CommunicationRepository.cs"
 ---
 
 ### Service Registration
@@ -141,9 +141,9 @@ The service follows a layered architecture:
 
 ### Components and project layout
 
-4. **Caches**: In-memory synchronized state for Adapters and Pools across service nodes
-5. **Repository Layer**: `CommunicationRepository` - abstracts MongoDB persistence via Octo Runtime Engine
-6. **Construction Kit Model**: YAML-based model definitions in `SystemCommunicationCkModel` that generate C# types
+1. **Caches**: In-memory synchronized state for Adapters and Pools across service nodes
+2. **Repository Layer**: `CommunicationRepository` - abstracts MongoDB persistence via Octo Runtime Engine
+3. **Construction Kit Model**: YAML-based model definitions in `SystemCommunicationCkModel` that generate C# types
 
 #### Project structure notes
 

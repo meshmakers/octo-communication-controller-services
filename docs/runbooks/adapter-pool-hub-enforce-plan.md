@@ -1,6 +1,6 @@
 ---
 description: "Runbook: switching the adapter pool hub gate to Enforce per cluster"
-applies_to: **/Hubs/AdapterPoolHub*.cs
+applies_to: "**/Hubs/AdapterPoolHub*.cs"
 ---
 
 # Switching the `/adapterPoolHub` gate to `Enforce` per cluster

@@ -1,6 +1,6 @@
 ---
 description: "REST facades over the System.Communication methods: endpoint mapping and deprecation"
-applies_to: **/Methods/Service/**
+applies_to: "**/Methods/Service/**"
 ---
 
 # REST facades over the System.Communication methods

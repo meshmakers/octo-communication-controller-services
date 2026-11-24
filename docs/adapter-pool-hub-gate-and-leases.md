@@ -1,6 +1,6 @@
 ---
 description: Adapter pool hub gate, member recovery, leases surviving a restart, contract test and the gate decision counter
-applies_to: **/Hubs/AdapterPool*.cs, **/Services/Lease*.cs
+applies_to: "**/Hubs/AdapterPool*.cs, **/Services/Lease*.cs"
 ---
 
 #### The adapter **pool** hub — a third gate, and why it is not one of the other two
@@ -207,3 +207,8 @@ failures, so the metric can cost a measurement, never a connection. Rollout proc
 Tests: `Hubs/HubAuthorizationMetricsTests` (including the pool hub: allowed, would_refuse, refused, registration tenant mismatch; every reason × outcome through a real `MeterListener`
 scoped to the test's own `IMeterFactory`, exactly four attributes, connection unaffected without the
 registration, registration pinned at the `Program.cs` source).
+
+## Rules that bind new code
+
+- **Secrets stay out of output.** No client secret or token in a log line, a REST or method result, an event or a `ToString` (`LeaseDto` overrides it). The credential reaches only the workload that uses it: through the lease to the pool member, the Helm secret value and the adapter's pipeline configuration. Tests: `LeaseSecretLogTargetTests`, `RotateServiceAccountSecretMethodRedactionTests`.
+- **Hub callbacks use `nameof`.** Every hub send takes its method name from `nameof(I...HubCallbacks.X)`; a new callback interface is added to `CallbackInterfaces` in `HubCallbackContractTests`.

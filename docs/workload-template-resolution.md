@@ -1,6 +1,6 @@
 ---
 description: Workload template resolution, Helm repository resolution and the CI/CD workload rollout pointers
-applies_to: **/Services/WorkloadTemplateResolver.cs, **/Services/WorkloadResource*.cs
+applies_to: "**/Services/WorkloadTemplateResolver.cs, **/Services/WorkloadResource*.cs"
 ---
 
 ### Workload Template Resolution

@@ -1,6 +1,6 @@
 ---
 description: "Concept: on-demand adapter lifecycle (scale-to-zero), state machine and design"
-applies_to: **/Services/WorkloadLifecycle*.cs
+applies_to: "**/Services/WorkloadLifecycle*.cs"
 ---
 
 # On-Demand Adapter Lifecycle (Scale-to-Zero)
@@ -89,7 +89,7 @@ sequenceDiagram
 
 When `LifecycleState ∈ {Draining, Hibernated}`: offline writers still record `Offline` but suppress error-audit events; `MarkExecutionsAsInterruptedAsync` should find nothing (log a warning if it does); the execution reaper is unchanged. Studio renders Hibernated/Waking distinctly and offers "wake now". Metrics: wake count, wake duration (scale-request → Configured), hibernated gauge, replayed-trigger count. Dash0 alerts fire only on `Offline && LifecycleState=Running`.
 
-**These instruments are published only for tenants that opted in** via `System/TenantModeConfiguration.PublishWorkloadObservability` — one per-tenant flag governs the whole workload and pipeline observability surface, not just the workload-state gauges. A tenant without the flag emits no lifecycle series at all; see CLAUDE.md → "The per-tenant observability switch".
+**These instruments are published only for tenants that opted in** via `System/TenantModeConfiguration.PublishWorkloadObservability` — one per-tenant flag governs the whole workload and pipeline observability surface, not just the workload-state gauges. A tenant without the flag emits no lifecycle series at all; see [The per-tenant observability switch](../observability-switch-and-workload-metrics.md).
 
 ## 4. Activation & rollout (per-tenant testing)
 

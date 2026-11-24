@@ -1,6 +1,6 @@
 ---
 description: Tenant gate history, inbound claim mapping and staged tenant authorization for user and service tokens
-applies_to: **/Configuration/ConfigureJwtBearerOptions.cs, **/Controllers/PrincipalClaimExtensions.cs
+applies_to: "**/Configuration/ConfigureJwtBearerOptions.cs, **/Controllers/PrincipalClaimExtensions.cs"
 ---
 
 ### The tenant gate only started working after a fix
@@ -55,9 +55,9 @@ Effects: audit and billing name the OAuth client instead of the person, anything
 satisfied and nothing complains.
 
 The counter-example sat in the same folder the whole time: `PrincipalRoleExtensions` exists
-for this reason and says *"always probe the mapped and the raw claim type together"*, citing the finding on the MCP side. Every caller read now goes through `PrincipalClaimExtensions`
+for this reason and says *"always probe the mapped and the raw claim type together"*, citing the finding on the MCP side. A new caller read goes through `PrincipalClaimExtensions`
 (`SubjectId()`, `DisplayName()`, `Email()`, `RoleValues()`), which probes both spellings and
-de-duplicates roles; `client_id` stays as the **last** resort, which is the honest answer for a
+de-duplicates roles (a role check uses `PrincipalRoleExtensions.HasRole`, a hub caller `HubConnectionPrincipal`). Known raw reads that predate it: `SignalChannelController` and `CommunicationMethodFacade` (`FindFirst` on `client_id`, `name`, `sub`); `client_id` stays as the **last** resort, which is the honest answer for a
 client-credentials token.
 
 🔴 **Why the tests did not catch it, and the rule that follows:** they build principals with

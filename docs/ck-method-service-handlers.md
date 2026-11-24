@@ -1,6 +1,6 @@
 ---
 description: CK method service handlers and the REST facades over the methods hosted by the controller
-applies_to: **/Methods/Service/**, **/TenantApi/v1/Controllers/**
+applies_to: "**/Methods/Service/**, **/TenantApi/v1/Controllers/**, **/Services/PipelineDefinition*.cs"
 ---
 
 ### CK method service handlers (System.Communication 4.17.0 / 4.18.0 / 4.19.0)

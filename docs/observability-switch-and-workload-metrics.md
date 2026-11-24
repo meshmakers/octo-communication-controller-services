@@ -1,6 +1,6 @@
 ---
 description: Per-tenant observability switch and the OTel metrics for workload states, including the alerting contract
-applies_to: **/Services/Workload*Metrics.cs, **/Services/WorkloadObservabilityOptIn.cs, **/BackgroundServices/WorkloadStateMetrics*.cs
+applies_to: "**/Services/Workload*Metrics.cs, **/Services/WorkloadObservabilityOptIn.cs, **/BackgroundServices/WorkloadStateMetrics*.cs"
 ---
 
 ## The per-tenant observability switch

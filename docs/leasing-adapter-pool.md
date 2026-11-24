@@ -1,6 +1,6 @@
 ---
 description: "Leasing: AdapterPool deployment, scaling, the idle watchdog exclusion, member sizing and the activator index"
-applies_to: **/Services/AdapterPool*.cs, **/Controllers/AdapterPoolController.cs
+applies_to: "**/Services/AdapterPool*.cs, **/Controllers/AdapterPoolController.cs"
 ---
 
 ## Leasing: `AdapterPool` deployment, scaling and the watchdog exclusion (increment 5)

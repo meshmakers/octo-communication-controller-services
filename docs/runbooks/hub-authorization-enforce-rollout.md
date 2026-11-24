@@ -1,6 +1,6 @@
 ---
 description: "Runbook: Enforce on the adapter, operator and adapter-pool hubs"
-applies_to: **/Hubs/*Authorization*.cs
+applies_to: "**/Hubs/*Authorization*.cs"
 ---
 
 # Rollout: `Enforce` on the adapter, operator and adapter-pool hubs

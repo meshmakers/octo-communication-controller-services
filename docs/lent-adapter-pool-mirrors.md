@@ -1,6 +1,6 @@
 ---
 description: "Lent adapter pool mirrors: the borrower's view of leasable pools, sync service, re-link and detail view"
-applies_to: **/Services/*PoolMirror*.cs, **/Services/Lent*.cs
+applies_to: "**/Services/*PoolMirror*.cs, **/Services/Lent*.cs"
 ---
 
 ## Lent adapter pool mirrors — the borrower's view of what it may lease

@@ -1,6 +1,6 @@
 ---
 description: Disable refusal while pools or workloads are deployed, enable and disable authorization, retry of failed tenant setup
-applies_to: **/Consumers/TenantManagementConsumer.cs, **/Services/AdapterService.cs
+applies_to: "**/Consumers/TenantManagementConsumer.cs, **/Services/AdapterService.cs, **/Methods/Service/DeploymentMethodHandlers.cs"
 ---
 
 ## Disable Refuses While Pools or Workloads Are Deployed — or AI Services Is Enabled

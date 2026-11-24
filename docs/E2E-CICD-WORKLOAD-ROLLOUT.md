@@ -67,7 +67,7 @@ export ADAPTER_CHART=octo-mesh-adapter
 export APP_CHART=customer-app
 export TENANTS_WITH_ADAPTER=(acme beta)        # both use the adapter
 export TENANTS_WITH_APP=(acme)                  # only acme uses the app
-export CONTROLLER_URL="https://comm.<cluster-domain>"   # adjust if different
+export CONTROLLER_URL="https://comm.<cluster-domain>"   # <cluster-domain>: set per cluster
 ```
 
 ## Step 1 — Adapter chart rollout (full happy path)

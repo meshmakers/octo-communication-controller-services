@@ -1,6 +1,6 @@
 ---
 description: "Leasing: metrics, alerts and rollout operability"
-applies_to: **/Services/AdapterLeasingMetrics.cs
+applies_to: "**/Services/AdapterLeasingMetrics.cs"
 ---
 
 ## Leasing: metrics, alerts and rollout operability (increment 9)

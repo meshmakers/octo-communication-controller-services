@@ -1,6 +1,6 @@
 ---
 description: "Concept: method-invocation marker that replaces generic create in pipeline runs"
-applies_to: **/Methods/**
+applies_to: "**/Methods/**"
 ---
 
 # Method-Invocation Marker: Replaced Generic Create in Pipeline Runs

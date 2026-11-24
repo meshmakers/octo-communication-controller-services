@@ -1,6 +1,6 @@
 ---
 description: "Helm workload deploy: chart versions, cloud pool deploy tracking, pending-workload reconcile, operator reverse-sync, chart management"
-applies_to: **/Services/Workload*.cs, **/Hubs/OperatorHub*.cs, **/Controllers/WorkloadController.cs
+applies_to: "**/Services/Workload*.cs, **/Hubs/OperatorHub*.cs, **/Controllers/WorkloadController.cs, **/Services/DeploymentSiteService.cs"
 ---
 
 ### Empty ChartVersion ("use latest")

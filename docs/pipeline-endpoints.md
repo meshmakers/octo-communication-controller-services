@@ -1,6 +1,6 @@
 ---
 description: "Pipeline endpoints: reassignment to another adapter, debug toggle and the execute-pipeline endpoint key"
-applies_to: **/Controllers/PipelineController.cs, **/Controllers/PipelineDebugController.cs, **/Services/PipelineDebugService.cs
+applies_to: "**/Controllers/PipelineController.cs, **/Controllers/PipelineDebugController.cs, **/Services/PipelineDebugService.cs"
 ---
 
 ## Pipeline Reassignment (`PATCH /pipeline/move-to-adapter`)

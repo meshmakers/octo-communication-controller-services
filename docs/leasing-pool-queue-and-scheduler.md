@@ -1,6 +1,6 @@
 ---
 description: "Leasing: the pool queue and its scheduler, sweeps, tick, drained release, scale-up and scale-down"
-applies_to: **/Services/LeaseScheduler*.cs, **/BackgroundServices/LeaseScheduler*.cs, **/Repository/ExecutionLeaseClaimStore.cs
+applies_to: "**/Services/LeaseScheduler*.cs, **/BackgroundServices/LeaseScheduler*.cs, **/Repository/ExecutionLeaseClaimStore.cs"
 ---
 
 ## Leasing: the pool queue and its scheduler (increment 7)

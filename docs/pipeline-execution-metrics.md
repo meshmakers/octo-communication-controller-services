@@ -1,6 +1,6 @@
 ---
 description: "Pipeline execution metrics: entities, hub methods, durability across adapter restart, hourly buckets, OTel metrics"
-applies_to: **/Services/PipelineExecution*.cs, **/BackgroundServices/ExecutionCleanup*.cs, **/Services/PipelineStatisticsFolder.cs
+applies_to: "**/Services/PipelineExecution*.cs, **/BackgroundServices/ExecutionCleanup*.cs, **/Services/PipelineStatisticsFolder.cs"
 ---
 
 ## Pipeline Execution Metrics

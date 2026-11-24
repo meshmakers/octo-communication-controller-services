@@ -1,6 +1,6 @@
 ---
 description: Blueprint update against live adapter routes, Communication enablement and pushing blueprint-seeded pipelines
-applies_to: **/Consumers/BlueprintAppliedConsumer.cs, **/Consumers/ComControllerAdapterUpdateConsumer.cs
+applies_to: "**/Consumers/BlueprintAppliedConsumer.cs, **/Consumers/ComControllerAdapterUpdateConsumer.cs"
 ---
 
 ### Blueprint update vs. the routes a live adapter serves
