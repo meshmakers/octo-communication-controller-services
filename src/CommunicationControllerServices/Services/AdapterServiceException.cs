@@ -132,6 +132,10 @@ internal class AdapterServiceException : Exception
         RtEntityId adapterRtEntityId, IReadOnlyList<string> errors) =>
         new($"[{tenantId}] Pipeline schema validation failed for adapter '{adapterRtEntityId}': {string.Join("; ", errors)}");
 
+    internal static AdapterServiceException PipelineDefinitionLimitExceeded(string tenantId,
+        RtEntityId pipelineRtEntityId, string refusal) =>
+        new($"[{tenantId}] Cannot deploy pipeline '{pipelineRtEntityId}': {refusal}");
+
     internal static AdapterServiceException PipelineNotOnDemandCompatible(string tenantId,
         RtEntityId pipelineRtEntityId, string? workloadName, IReadOnlyList<string> processBoundNodes) =>
         new($"[{tenantId}] Cannot deploy pipeline '{pipelineRtEntityId}' to workload '{workloadName}': " +

@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Meshmakers.Octo.Communication.Contracts.Serialization;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 
@@ -29,9 +30,11 @@ internal static class PipelineDefinitionLimits
 
     /// <summary>
     ///     Maximum nesting depth of node lists: a root-level node has depth 1, a node in the <c>transformations</c> of a
-    ///     root-level control node depth 2, and so on. Each node level adds two JSON levels (the list and the node), so
-    ///     this is below <see cref="MaxJsonDepth" />: a definition that nests too many control nodes gets this finding,
-    ///     not the generic depth one.
+    ///     root-level control node depth 2, and so on. A level of If, ForEach or Group adds two JSON levels (the list and
+    ///     the node), so for them this is below <see cref="MaxJsonDepth" /> and a definition that nests too many of them
+    ///     gets this finding. A level of Switch adds four JSON levels (<c>cases</c>, the case, its <c>transformations</c>
+    ///     and the node), so about 16 nested Switch nodes already get the generic <see cref="MaxJsonDepth" /> finding
+    ///     first; both refuse the definition.
     /// </summary>
     public const int MaxNestingDepth = 24;
 
@@ -79,6 +82,48 @@ internal static class PipelineDefinitionLimits
             ? Refusal($"The definition has more than {MaxPipelineNodes} nodes; the limit is {MaxPipelineNodes}. Split " +
                       "the pipeline into several pipelines of a data flow.")
             : null;
+    }
+
+    /// <summary>
+    ///     The limit check every reader of a caller-supplied definition runs before it parses it with its own YAML
+    ///     deserializer (AB#9667): the length, the shared converter's alias and depth budget, then
+    ///     <see cref="CheckNodes" />. It does not depend on <c>EnablePipelineSchemaValidation</c> or on an adapter
+    ///     schema, so the deploy path, the elevation guard and the REST parse endpoints are bounded in every
+    ///     configuration.
+    /// </summary>
+    /// <returns>
+    ///     The refusal finding, or null when the definition is within the limits. A definition the converter cannot
+    ///     parse for another reason (malformed YAML) also returns null: whether that is an error is the caller's
+    ///     decision, as before, and its own parser fails on the same syntax error.
+    /// </returns>
+    public static string? CheckDefinition(string? definition)
+    {
+        if (string.IsNullOrEmpty(definition))
+        {
+            return null;
+        }
+
+        if (CheckLength(definition) is { } tooLong)
+        {
+            return tooLong;
+        }
+
+        JsonNode? converted;
+        try
+        {
+            converted = YamlToJsonConverter.ToJsonNodeAutoDetect(definition);
+        }
+        catch (YamlDocumentLimitExceededException limit)
+        {
+            // The converter's message names the limit and never quotes the document.
+            return Refusal(limit.Message);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        return CheckNodes(converted);
     }
 
     /// <summary>Prefixes <paramref name="message" /> with <see cref="RefusedCode" />.</summary>
@@ -197,3 +242,9 @@ internal static class PipelineDefinitionLimits
     private static IEnumerable<JsonNode?> Properties(JsonObject obj, string name) =>
         obj.Where(p => string.Equals(p.Key, name, StringComparison.OrdinalIgnoreCase)).Select(p => p.Value);
 }
+
+/// <summary>
+///     A caller-supplied pipeline definition is above a <see cref="PipelineDefinitionLimits" /> limit (AB#9667). The
+///     message is the refusal finding: it names the limit and never quotes the definition.
+/// </summary>
+internal sealed class PipelineDefinitionLimitExceededException(string finding) : Exception(finding);

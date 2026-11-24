@@ -1263,6 +1263,13 @@ internal class AdapterService(
             throw AdapterServiceException.DataFlowNotFound(tenantId, pipelineRtEntityId);
         }
 
+        // AB#9667: a deploy without a supplied definition runs the gates below on the stored one, which
+        // ValidatePipelineDefinition above did not see; it gets the same size limits.
+        if (pipelineDefinition == null)
+        {
+            EnsurePipelineDefinitionWithinLimits(tenantId, pipelineRtEntityId, pipeline.PipelineDefinition);
+        }
+
         // AB#4984: deploying a process-bound-trigger pipeline to an OnDemand workload
         // is rejected — hibernation would silently stop the trigger (explicit beats silent).
         // AB#4924 extends the same gate to Leased, where the argument is strictly stronger.
@@ -1409,6 +1416,11 @@ internal class AdapterService(
                             }
                         }
                     }
+
+                    // AB#9667: the size limits before the first gate that parses the stored definition — the
+                    // leased branch above gets them in ValidateAndPersistPipelineAsync.
+                    EnsurePipelineDefinitionWithinLimits(tenantId, rtDeployPipeline.ToRtEntityId(),
+                        rtDeployPipeline.PipelineDefinition);
 
                     // AB#4984: reject process-bound-trigger pipelines on OnDemand workloads
                     EnsurePipelineIsOnDemandCompatible(tenantId, rtAdapter, adapter.NodeDescriptors,
@@ -1653,6 +1665,11 @@ internal class AdapterService(
         {
             return;
         }
+
+        // AB#9667: fail closed. A definition above a size limit makes TryGetAllNodes answer "unparsable" below,
+        // which this guard reads as "nothing to authorize", although the adapter could still parse it, elevated
+        // nodes included. Every deploy path refuses such a definition earlier; this keeps the guard safe on its own.
+        EnsurePipelineDefinitionWithinLimits(tenantId, pipelineRtEntityId, pipelineDefinition);
 
         // A definition that does not parse is not this guard's concern — schema validation and the
         // AB#5113 rights analysis report it. Treat "unparsable" as "nothing to authorize".
@@ -2670,9 +2687,21 @@ internal class AdapterService(
     ///     pipeline used to be validated against no schema at all, which is strictly worse than
     ///     validating it against the pool's — the pool is the process that has to parse it.
     /// </summary>
+    /// <remarks>
+    ///     The size limits run first and unconditionally (AB#9667): the gates after this one parse the same definition
+    ///     with YamlDotNet and walk its nodes recursively, whether or not schema validation is enabled or the adapter
+    ///     reported a schema.
+    /// </remarks>
     private void ValidatePipelineDefinition(string tenantId, RtEntityId adapterRtEntityId,
         AdapterNodeCapabilities capabilities, string pipelineDefinition)
     {
+        if (PipelineDefinitionLimits.CheckDefinition(pipelineDefinition) is { } refusal)
+        {
+            Logger.Warn("[{TenantId}] Pipeline definition refused for adapter '{AdapterRtId}': {Refusal}",
+                tenantId, adapterRtEntityId, refusal);
+            throw AdapterServiceException.PipelineSchemaValidationFailed(tenantId, adapterRtEntityId, [refusal]);
+        }
+
         if (!communicationControllerOptions.Value.EnablePipelineSchemaValidation) return;
         if (capabilities.PipelineSchemaJson == null) return;
 
@@ -2682,6 +2711,21 @@ internal class AdapterService(
             Logger.Warn("[{TenantId}] Pipeline schema validation failed for adapter '{AdapterRtId}': {Errors}",
                 tenantId, adapterRtEntityId, string.Join("; ", errors));
             throw AdapterServiceException.PipelineSchemaValidationFailed(tenantId, adapterRtEntityId, errors);
+        }
+    }
+
+    /// <summary>
+    ///     Refuses a stored or supplied definition above a <see cref="PipelineDefinitionLimits" /> limit (AB#9667), in
+    ///     every configuration, before a gate parses it.
+    /// </summary>
+    private static void EnsurePipelineDefinitionWithinLimits(string tenantId, RtEntityId pipelineRtEntityId,
+        string? pipelineDefinition)
+    {
+        if (PipelineDefinitionLimits.CheckDefinition(pipelineDefinition) is { } refusal)
+        {
+            Logger.Warn("[{TenantId}] Pipeline definition of '{PipelineRtId}' refused: {Refusal}",
+                tenantId, pipelineRtEntityId, refusal);
+            throw AdapterServiceException.PipelineDefinitionLimitExceeded(tenantId, pipelineRtEntityId, refusal);
         }
     }
 

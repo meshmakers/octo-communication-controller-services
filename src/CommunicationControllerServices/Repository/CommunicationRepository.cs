@@ -2724,6 +2724,10 @@ internal class CommunicationRepository : ICommunicationRepository
         if (string.IsNullOrWhiteSpace(pipelineDefinition))
             return result;
 
+        // AB#9667: a definition above a size limit is never parsed here (the deploy refuses it before this point).
+        if (Services.PipelineDefinitionLimits.CheckDefinition(pipelineDefinition) != null)
+            return result;
+
         try
         {
             var deserializer = new YamlDotNet.Serialization.DeserializerBuilder().Build();
