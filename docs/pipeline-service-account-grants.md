@@ -15,9 +15,12 @@ empty/`<placeholder>` `ClientSecret` = "no secret — impersonate instead". The 
 **creates new accounts with issuer and tenant EMPTY** and converges the two historic installation
 spellings to empty — the `{{service.authority}}` token (case-insensitive) and this installation's
 concrete `AuthorityUrl` (trailing-slash-insensitive), plus a `TenantId` naming the current tenant.
-Any **other** concrete issuer/tenant is a **deliberate foreign target and is left alone** (this
-*inverts* the earlier "converge foreign issuers onto the token" rule and retires the
-"always rewrite TenantId" rule). Shared helpers on `PipelineServiceAccountProvisioningService`:
+Any **other** concrete issuer/tenant is left alone by the reconcile (this *inverts* the earlier
+"converge foreign issuers onto the token" rule and retires the "always rewrite TenantId"
+rule) — but since **AB#9776 (own issuer only, Reimar 2026-11-24)** it is no longer a supported
+target: the mesh adapter sends service-account grants only to its own identity service and refuses
+a foreign issuer or a tenant other than the pipeline's on every execution, the deploy guard refuses
+such a pipeline and health reports it as a violation (below). Shared helpers on `PipelineServiceAccountProvisioningService`:
 `IsInstallationIssuer` (replaces `IsIssuerUriHealthy`), `ConvergeIssuerUri`, `ConvergeTenantId`,
 `IsSecretUsable` (byte-for-byte the adapter's rule: empty or leading `<` = no secret). The
 projection passes an empty `IssuerUri` through EMPTY; token resolution remains only for legacy
@@ -44,23 +47,31 @@ identity token endpoint consults it (`ClientImpersonationStore`). The `secret` c
 credential-aware: empty is a `Violation` (`secret-missing`) **only when no impersonation is
 possible**; with a capable actor it is `Healthy` with a message naming that actor. `issuerUri` /
 `tenant` report `Healthy` with "installation default" when empty; the token/own-authority/current
-tenant spellings stay healthy as legacy (message says the next reconcile empties them); a foreign
-issuer is a healthy deliberate target (the `issuer-uri-drift` violation is retired), and a
-foreign *tenant* is only a `tenant-mismatch` violation while the issuer resolves to *this*
-installation — paired with a foreign issuer it is a healthy foreign pairing.
+tenant spellings stay healthy as legacy (message says the next reconcile empties them). **AB#9776:**
+any other issuer is a violation `issuer-foreign` (the `issuer-uri-drift` code stays retired), and any
+tenant other than the current one (case and surrounding blanks ignored) is a `tenant-mismatch`
+violation, whatever the issuer — there is no healthy foreign pairing any more.
 
 **Deploy guard** — refuses `PipelineServiceAccountSecretMissing` only when the account has
 neither a usable secret NOR a capable impersonation actor (adapter default with usable secret,
 different client) — both local facts; the edge itself stays best-effort exactly like the
 client-existence check (identity unreachable never blocks), and the refusal message names both
-repairs.
+repairs. **AB#9776 (own issuer only)**, checked first: `PipelineServiceAccountForeignIssuer` when
+`IssuerUri` is not empty, not the `{{service.authority}}` token (any case and spacing) and not an own
+name (`AuthorityUrl` or what `{{service.authority}}` resolves to via `ServiceUrls`), compared after
+normalisation (`ServiceAccountOwnIssuer`: scheme/host case, default port, trailing slash; user info,
+query, fragment and non-http schemes never match); `PipelineServiceAccountForeignTenant` when
+`TenantId` is not empty and not the pipeline's tenant. The adapter enforces the same rule at run time
+(`OwnIssuerPolicy` in octo-mesh-adapter), so this is the explicit message, not the only barrier.
 
 Phase 7 tests: `Services/PipelineServiceAccountReconcileTests` (+ `…ProvisioningServiceTests`,
 `…RotationTests`) — create-with-empty, the full convergence matrix (token incl. case, own
 authority incl. trailing slash, current tenant → empty; foreign issuer/tenant untouched incl.
 no-write), MayActAs on the wire (adapter path null, standalone actors deduplicated, unused
 standalone null); `Services/ServiceAccountHealthTests` — installation-default messages,
-credential-aware secret, all four impersonation states, foreign pairing, placeholder secret;
+credential-aware secret, all four impersonation states, foreign issuer/tenant as violations (AB#9776),
+placeholder secret; `…/DeployPipelineServiceAccountOwnIssuerTests` — AB#9776 foreign issuer and
+look-alikes, foreign tenant refused before any state write, own spellings still deploy;
 `Services/AdapterServiceTests/DeployPipelineServiceAccountHardenedGuardTests` — the
 matrix (capable actor deploys incl. placeholder target secret, no/incapable actor refused with
 remedy, identity-down non-blocking); `…/PipelineServiceAccountProjectionTests` — empty issuer

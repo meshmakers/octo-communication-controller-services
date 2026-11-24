@@ -1564,6 +1564,24 @@ internal class AdapterService(
         var serviceAccountClientId = serviceAccount.GetAttributeValueOrDefault(
             nameof(RtServiceAccountConfiguration.ClientId)) as string;
 
+        // AB#9776 (own issuer only): checked before the credential checks — a foreign target is refused whatever
+        // credentials the entity holds, because the adapter refuses it on every execution.
+        var issuerUri = serviceAccount.GetAttributeValueOrDefault(
+            nameof(RtServiceAccountConfiguration.IssuerUri)) as string;
+        if (!ServiceAccountOwnIssuer.IsOwnIssuer(issuerUri, OwnIssuerNames(tenantId)))
+        {
+            throw AdapterServiceException.PipelineServiceAccountForeignIssuer(tenantId, pipelineRtEntityId,
+                wellKnownName, issuerUri!);
+        }
+
+        var configuredTenantId = serviceAccount.GetAttributeValueOrDefault(
+            nameof(RtServiceAccountConfiguration.TenantId)) as string;
+        if (!ServiceAccountOwnIssuer.IsOwnTenant(configuredTenantId, tenantId))
+        {
+            throw AdapterServiceException.PipelineServiceAccountForeignTenant(tenantId, pipelineRtEntityId,
+                wellKnownName, configuredTenantId!);
+        }
+
         // AB#5114 credential-aware refusal: a configuration without a usable secret (empty, a legacy
         // clear-text seed placeholder, or unreadable here) is refused ONLY when impersonation cannot stand in — the
         // adapter's own client (AB#5072: its default pipeline service account, whose credentials
@@ -2346,6 +2364,20 @@ internal class AdapterService(
     {
         return configuration is RtServiceAccountConfiguration ||
                SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId.Equals(configuration.CkTypeId);
+    }
+
+    /// <summary>
+    /// AB#9776: the concrete names of this installation's identity service — this instance's <c>AuthorityUrl</c> and
+    /// what <c>{{service.authority}}</c> resolves to for the tenant (the value the projection hands the adapter).
+    /// </summary>
+    private IEnumerable<string?> OwnIssuerNames(string tenantId)
+    {
+        yield return communicationControllerOptions.Value.AuthorityUrl;
+        if (templateResolver.TryResolve(PipelineServiceAccountProvisioningService.IssuerUriToken,
+                new WorkloadTemplateContext(tenantId), out var resolved, out _))
+        {
+            yield return resolved;
+        }
     }
 
     private void ResolveServiceAccountIssuerUri(string tenantId, RtConfiguration serviceAccount)

@@ -525,23 +525,50 @@ internal class ServiceAccountHealthTests
     }
 
     [Test]
-    public async Task GetConfigurationHealth_ForeignIssuer_IsAHealthyDeliberateTarget()
+    [Arguments("https://identity.of-some-other-cluster.example.com")]
+    [Arguments("http://localhost:5003")] // scheme of the own authority changed
+    [Arguments("https://localhost:5004")] // port changed
+    [Arguments("https://attacker@localhost:5003")] // user info
+    [Arguments("https://localhost:5003.evil.example.net")]
+    [Arguments("https://localhost:5003/other")]
+    [Arguments("{{service.identity}}")]
+    public async Task GetConfigurationHealth_ForeignIssuer_IsAViolation(string issuerUri)
     {
-        // AB#5115: a concrete URL that is not this installation stopped being "drift" — it is a
-        // deliberate foreign identity target the reconcile leaves alone, and health agrees.
+        // AB#9776 (own issuer only): there is no healthy foreign target any more — the adapter refuses it and
+        // the deploy guard refuses pipelines using it.
         var sut = CreateSut();
         var configuration = CreateHealthyConfiguration();
-        configuration.IssuerUri = "https://identity.of-some-other-cluster.example.com";
+        configuration.IssuerUri = issuerUri;
         ArrangeMatchingIdentityClient();
 
         var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
 
         using var _ = Assert.Multiple();
-        await Assert.That(dto.OverallStatus).IsEqualTo("Healthy");
+        await Assert.That(dto.OverallStatus).IsEqualTo("Unhealthy");
         var issuer = Check(dto, "issuerUri");
-        await Assert.That(issuer.Status).IsEqualTo("Healthy");
-        await Assert.That(issuer.Message!).Contains("of-some-other-cluster");
-        await Assert.That(issuer.Message!).Contains("foreign");
+        await Assert.That(issuer.Status).IsEqualTo("Violation");
+        await Assert.That(issuer.Code).IsEqualTo("issuer-foreign");
+        await Assert.That(issuer.Message!).Contains("AB#9776");
+    }
+
+    [Test]
+    public async Task GetConfigurationHealth_TheOwnAuthorityIsHealthyInEveryEquivalentSpelling()
+    {
+        var sut = CreateSut();
+        ArrangeMatchingIdentityClient();
+
+        foreach (var healthyIssuer in new[]
+                 {
+                     "https://LOCALHOST:5003", "https://localhost:5003//", " https://localhost:5003 "
+                 })
+        {
+            var configuration = CreateHealthyConfiguration();
+            configuration.IssuerUri = healthyIssuer;
+
+            var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
+
+            await Assert.That(Check(dto, "issuerUri").Status).IsEqualTo("Healthy");
+        }
     }
 
     [Test]
@@ -562,8 +589,9 @@ internal class ServiceAccountHealthTests
     }
 
     [Test]
-    public async Task GetConfigurationHealth_ForeignTenantWithForeignIssuer_IsAHealthyPairing()
+    public async Task GetConfigurationHealth_ForeignTenantWithForeignIssuer_IsUnhealthy()
     {
+        // AB#9776: the former "deliberate foreign pairing" is no longer healthy — both halves are violations.
         var sut = CreateSut();
         var configuration = CreateHealthyConfiguration();
         configuration.IssuerUri = "https://identity.of-some-other-cluster.example.com";
@@ -573,10 +601,22 @@ internal class ServiceAccountHealthTests
         var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
 
         using var _ = Assert.Multiple();
-        // The foreign tenant belongs to the foreign issuer — a deliberate pairing, not a mismatch.
-        await Assert.That(dto.OverallStatus).IsEqualTo("Healthy");
+        await Assert.That(dto.OverallStatus).IsEqualTo("Unhealthy");
+        await Assert.That(Check(dto, "tenant").Code).IsEqualTo("tenant-mismatch");
+        await Assert.That(Check(dto, "issuerUri").Code).IsEqualTo("issuer-foreign");
+    }
+
+    [Test]
+    public async Task GetConfigurationHealth_TheCurrentTenantInAnotherCaseIsHealthy()
+    {
+        var sut = CreateSut();
+        var configuration = CreateHealthyConfiguration();
+        configuration.TenantId = " " + TenantId.ToUpperInvariant() + " ";
+        ArrangeMatchingIdentityClient();
+
+        var dto = await sut.GetConfigurationHealthAsync(TenantId, configuration);
+
         await Assert.That(Check(dto, "tenant").Status).IsEqualTo("Healthy");
-        await Assert.That(Check(dto, "tenant").Message!).Contains("energyiq");
     }
 
     // ---------------------------------------------------------------- AB#5114 impersonation
