@@ -406,7 +406,11 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
             .DeserializeCompiledModelRootAsync(botJson, "ck-system.bot-3.4.0.json", botResult);
         botResult.HasErrors.Should().BeFalse(botResult.GetMessages());
         bot.ModelId.Should().Be(new CkModelId("System.Bot", "3.4.0"));
-        await tenantContext.ImportCkModelAsync(bot);
+        // Service-managed models reach a tenant only through the service path (a caller import is refused with
+        // CK_SERVICE_MANAGED_MODEL), so the historic models come from the test catalog.
+        botResult = await fixture.TestCkModelCatalog.ImportThroughServicePathAsync(tenantContext, bot);
+        botResult.HasErrors.Should().BeFalse(botResult.GetMessages());
+        (await tenantContext.IsCkModelExistingAsync(bot.ModelId)).Should().BeTrue();
 
         // The published model of this version, or the published 3.40.0 re-labelled to it.
         var json = RepinSystem(PublishedModels.TryGetValue(version, out var published)
@@ -419,7 +423,8 @@ public class SystemCommunication4MigrationTests(CommunicationControllerFixture f
         deserializeResult.HasErrors.Should().BeFalse(deserializeResult.GetMessages());
         model.ModelId.Should().Be(new CkModelId(ModelName, version));
 
-        await tenantContext.ImportCkModelAsync(model);
+        var modelResult = await fixture.TestCkModelCatalog.ImportThroughServicePathAsync(tenantContext, model);
+        modelResult.HasErrors.Should().BeFalse(modelResult.GetMessages());
         (await tenantContext.IsCkModelExistingAsync(model.ModelId)).Should().BeTrue();
 
         // Seed the 3.x shape the blueprint left on every main tenant.

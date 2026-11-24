@@ -1,3 +1,4 @@
+using Meshmakers.Octo.ConstructionKit.Contracts.ModelCatalogs;
 using Meshmakers.Octo.Runtime.Engine.Secrets;
 using Meshmakers.Octo.Sdk.Common.Encryption;
 using MartinCostello.Logging.XUnit;
@@ -33,6 +34,9 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
 {
     private bool _isInitialized;
 
+    /// <summary>In-memory CK catalog for models a test installs through the service path.</summary>
+    public TestCkModelCatalog TestCkModelCatalog { get; } = new();
+
     protected ServiceCollectionFixture()
     {
         Services = new ServiceCollection();
@@ -51,6 +55,12 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         // Add runtime engine with MongoDB AFTER CK models
         Services.AddRuntimeEngine()
             .AddMongoDbRuntimeRepository();
+
+        // Historic or published System models (System.Bot 3.4.0, System.Communication 3.x / 4.10.0) are installed
+        // through the service path from this in-memory catalog: the caller overload of ImportCkModelAsync refuses
+        // service-managed models.
+        Services.AddSingleton(TestCkModelCatalog);
+        Services.AddSingleton<ICatalog>(TestCkModelCatalog);
 
         // AB#5537: a generated key ring (per fixture, never fixed key material) — the engine
         // encrypts Secret attributes on write and the controller reveals them for adapters and

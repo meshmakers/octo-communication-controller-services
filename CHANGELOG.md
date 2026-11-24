@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- AB#9325 Test: the System.Communication migration and dependents tests install their historic and published
+  System models (System.Bot 3.4.0, System.Communication 3.x / 4.10.0, System.Ai 4.6.0) through the service path
+  (`ImportCkModelAsync(CkModelId)` from the in-memory test catalog `TestCkModelCatalog`) instead of the caller
+  import, which the engine will refuse for every `System`/`System.*` model (`CK_SERVICE_MANAGED_MODEL`). Test code
+  only; it passes with the current and the refusing engine.
+
 - AB#9639 New: every pipeline service account (`octo-pipeline-sa-*`) is allowed the API scope `ai.llm.invoke`, so the mesh
   adapter can call the AI service's central-key LLM gateway with the account's token. The scope list is re-sent on every
   reconcile, so existing accounts get it on the next tenant start. The scope alone opens nothing: the gateway also needs
