@@ -293,6 +293,36 @@ Code: `src/CommunicationControllerServices/Methods/Service/`. User guide: `octo-
 - **Parse failures (AB#8596).** `PipelineSchemaValidator` reports a definition that does not parse with a fixed text plus
   line/column (`ParseFailureMessage`), never the parser's text: a duplicate key or broken scalar could quote a credential into
   the logs, the REST answer and the method error. This also changes the REST error text of that case (position kept).
+- **Bounded validation (AB#9667).** The definition of a deploy is caller-supplied, so `PipelineSchemaValidator` refuses what
+  is too large with one finding `PIPELINE_DEFINITION_LIMIT_EXCEEDED: <limit>` instead of evaluating it
+  (`PipelineDefinitionLimits`, the same limits as the MCP tool of AB#9666): more than 1,000,000 characters (before parsing),
+  a YAML document the shared `YamlToJsonConverter` refuses (`YamlDocumentLimitExceededException`: more than 200,000 nodes
+  once aliases are expanded, more than 256 levels, a recursive or forward alias - checked before the recursive YAML load,
+  so a deep document cannot overflow the stack), JSON deeper than 64 levels (Newtonsoft's reader limit inside NJsonSchema,
+  which threw into the deploy path before), node lists nested deeper than 24 levels, more than 2,000 nodes. At most 50
+  schema findings are returned plus a "... and n more" line. The messages name the limit and never quote the definition.
+  A level of If, ForEach or Group adds two JSON levels, a level of Switch four (`cases`, case, `transformations`, node),
+  so about 16 nested Switch nodes get the JSON-depth finding before the node-list one; both refuse.
+  🔴 **The limits do not depend on `EnablePipelineSchemaValidation` or on an adapter schema** (Kassandra round 1 of
+  AB#9667): the flag defaults to false and no deployment sets it, and the gates after the schema validation parse the
+  same definition with YamlDotNet, which binds an alias to the shared instance, and walk its nodes recursively (a small
+  document of nested aliases means an exponential walk). So `PipelineDefinitionLimits.CheckDefinition` (length,
+  converter budget, node checks; malformed YAML is left to the caller) runs unconditionally: first in
+  `AdapterService.ValidatePipelineDefinition` (finding as `PipelineSchemaValidationFailed`), on the stored definition
+  of a deploy without a supplied one and of every pipeline of a data-flow deploy (`PipelineDefinitionLimitExceeded`),
+  fail-closed in the elevation gate (a refused definition must not read as "nothing to authorize"), in
+  `PipelineDefinitionService` before every YamlDotNet parse (a refused definition answers like an unparsable one, which
+  bounds the REST endpoints `parse-node` and `parse-all-nodes`; `update-node` edits lines and parses no definition), and in
+  `CommunicationRepository.ParseTargetPipelineRtIds`. A new reader of a caller-supplied definition calls it first.
+  Tests: `Services/AdapterServiceTests/DeployPipelineDefinitionLimitsTests` (flag off, flag on without schema, stored
+  definition, data-flow deploy, too many nodes) and `Services/PipelineDefinitionServiceLimitsTests`.
+  🔴 **NJsonSchema 11 does not follow the nested `transformations` reference of the generator's schema** (`$defs`, draft
+  2020-12): a node inside a control node is not validated at deploy, only root-level nodes are. That is why the
+  evaluation is linear here while JsonSchema.Net in the MCP grew about tenfold per nesting level; a validator that starts
+  following the reference must use the MCP's dispatch on `type` (`PipelineSchemaCompiler.Discriminate`) and keep
+  `PipelineSchemaValidatorBoundsTests` (4 and 8 nested If@1, time and allocation budget) green. Tests:
+  `Services/PipelineSchemaValidatorBoundsTests` (generator-shaped schema in `GeneratorShapedPipelineSchema`, copied from
+  the MCP tests).
 - **Move retries (AB#8596).** `MoveToAdapter` with `redeploy: true` redeploys also when the move is a no-op (REST skips it),
   so a retry after a timed-out first call does not report success without the deploy. Tests:
   `CommunicationMethodHostTests.Pipeline` (integration, `AssertNeverEchoed`), `PipelineMethodSupportTests` (unit).

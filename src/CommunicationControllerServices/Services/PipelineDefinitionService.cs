@@ -72,7 +72,7 @@ internal class PipelineDefinitionService : IPipelineDefinitionService
         Dictionary<object, object>? root;
         try
         {
-            root = _deserializer.Deserialize<Dictionary<object, object>>(pipelineDefinition);
+            root = DeserializeWithinLimits(pipelineDefinition);
         }
         catch
         {
@@ -97,7 +97,7 @@ internal class PipelineDefinitionService : IPipelineDefinitionService
         Dictionary<object, object>? root;
         try
         {
-            root = _deserializer.Deserialize<Dictionary<object, object>>(pipelineDefinition);
+            root = DeserializeWithinLimits(pipelineDefinition);
         }
         catch
         {
@@ -143,12 +143,29 @@ internal class PipelineDefinitionService : IPipelineDefinitionService
     {
         try
         {
-            return _deserializer.Deserialize<Dictionary<object, object>>(pipelineDefinition);
+            return DeserializeWithinLimits(pipelineDefinition);
         }
         catch
         {
             return null;
         }
+    }
+
+    /// <summary>
+    ///     Deserializes a caller-supplied definition only when it is within <see cref="PipelineDefinitionLimits" />
+    ///     (AB#9667). YamlDotNet binds an alias to the shared instance, so a small document of nested aliases parses
+    ///     quickly but makes the recursive node walk visit an exponential number of nodes; the converter behind
+    ///     <see cref="PipelineDefinitionLimits.CheckDefinition" /> counts that expansion and refuses it first.
+    /// </summary>
+    /// <exception cref="PipelineDefinitionLimitExceededException">The definition is above a limit.</exception>
+    private Dictionary<object, object>? DeserializeWithinLimits(string pipelineDefinition)
+    {
+        if (PipelineDefinitionLimits.CheckDefinition(pipelineDefinition) is { } refusal)
+        {
+            throw new PipelineDefinitionLimitExceededException(refusal);
+        }
+
+        return _deserializer.Deserialize<Dictionary<object, object>>(pipelineDefinition);
     }
 
     /// <summary>
