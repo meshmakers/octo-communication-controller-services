@@ -148,8 +148,21 @@ public class SystemCommunication411DependentsTests(CommunicationControllerFixtur
             .DeserializeCompiledModelRootAsync(json, resource, result);
         result.HasErrors.Should().BeFalse(result.GetMessages());
         model.ModelId.FullName.Should().Be(expectedId);
+        if (IsServiceManaged(model.ModelId.Name))
+        {
+            // System.Communication and System.Ai are service-managed: a caller import refuses them, so they come
+            // through the service path from the test catalog, as a service installs them.
+            var importResult = await fixture.TestCkModelCatalog.ImportThroughServicePathAsync(tenant, model);
+            importResult.HasErrors.Should().BeFalse(importResult.GetMessages());
+            (await tenant.IsCkModelExistingAsync(model.ModelId)).Should().BeTrue();
+            return;
+        }
+
         await tenant.ImportCkModelAsync(model);
     }
+
+    private static bool IsServiceManaged(string modelName) =>
+        modelName == "System" || modelName.StartsWith("System.", StringComparison.Ordinal);
 
     private static async Task<string> ReadResourceAsync(string suffix)
     {
