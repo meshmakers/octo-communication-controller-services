@@ -46,6 +46,14 @@ internal static class PipelineElevationInspector
     private const string ServiceAccountIdentity = "ServiceAccount";
     private const string SystemIdentity = "System";
 
+    // Labels of the non-elevated identity in cross-tenant findings (decision 2 of AB#8673).
+    private const string CallerIdentity = "Caller";
+    private const string CallerWithServiceAccountFallback = "Caller, service-account fallback";
+
+    // The only trigger that admits a verified caller only (unless allowAnonymous is set).
+    private const string VerifiedCallerHttpTrigger = "FromHttpRequest@2";
+    private const string AllowAnonymousKey = "allowAnonymous";
+
     /// <summary>
     /// The caller-controlled DataContext roots the <c>FromHttpRequest@2</c> trigger writes
     /// (<c>HttpRequestService</c>): the request body, query string, uploaded files and headers.
@@ -176,6 +184,115 @@ internal static class PipelineElevationInspector
     }
 
     /// <summary>
+    /// Nodes whose target tenant comes from a caller-controlled path (<c>targetTenant(s).tenantIdPath</c> into
+    /// <c>$.body</c>/<c>$.query</c>/<c>$.files</c>/<c>$.headers</c>) and that would act in that tenant with an identity
+    /// other than the caller's own: <c>identity: ServiceAccount</c>, or <c>Caller</c> (also absent) in a pipeline that can
+    /// run without a verified caller and therefore falls back to the pipeline's service account. Such a pipeline is
+    /// refused at deploy time (decision 2 of AB#8673): the caller would choose the tenant a service account acts in.
+    /// <c>System</c> nodes are left to <see cref="FindSystemCrossTenantNodes" />, which refuses every target setting.
+    /// </summary>
+    /// <param name="nodes">All nodes of the definition (triggers and transformations).</param>
+    /// <param name="triggers">The nodes of the definition's <c>triggers:</c> section only.</param>
+    public static IReadOnlyList<ConfusedDeputyFinding> FindRefusedCallerSteeredTargetTenants(
+        IReadOnlyList<PipelineNodeProperties> nodes, IReadOnlyList<PipelineNodeProperties> triggers) =>
+        FindCallerSteeredTargetTenants(nodes, triggers, refused: true);
+
+    /// <summary>
+    /// Nodes that run as the pure caller (<c>identity: Caller</c> or absent, in a pipeline whose every trigger requires
+    /// a verified caller) and take their target tenant from a caller-controlled path. Allowed, but reported as a
+    /// deploy warning: the caller steers the tenant, and the mesh adapter's guard proves the caller's own right there
+    /// (token exchange) before anything is read or written, so the caller gains no right it does not hold.
+    /// </summary>
+    /// <param name="nodes">All nodes of the definition (triggers and transformations).</param>
+    /// <param name="triggers">The nodes of the definition's <c>triggers:</c> section only.</param>
+    public static IReadOnlyList<ConfusedDeputyFinding> FindCallerSteeredTargetTenantWarnings(
+        IReadOnlyList<PipelineNodeProperties> nodes, IReadOnlyList<PipelineNodeProperties> triggers) =>
+        FindCallerSteeredTargetTenants(nodes, triggers, refused: false);
+
+    private static List<ConfusedDeputyFinding> FindCallerSteeredTargetTenants(
+        IReadOnlyList<PipelineNodeProperties> nodes, IReadOnlyList<PipelineNodeProperties> triggers, bool refused)
+    {
+        var callerAlwaysVerified = EveryTriggerRequiresVerifiedCaller(triggers);
+        var findings = new List<ConfusedDeputyFinding>();
+        foreach (var node in nodes)
+        {
+            var elevated = ReadElevatedIdentity(node);
+            if (elevated == SystemIdentity)
+            {
+                continue;
+            }
+
+            string identity;
+            bool isRefused;
+            if (elevated == ServiceAccountIdentity)
+            {
+                identity = ServiceAccountIdentity;
+                isRefused = true;
+            }
+            else if (callerAlwaysVerified)
+            {
+                identity = CallerIdentity;
+                isRefused = false;
+            }
+            else
+            {
+                identity = CallerWithServiceAccountFallback;
+                isRefused = true;
+            }
+
+            if (isRefused == refused)
+            {
+                CollectTargetTenantHazards(node, identity, findings);
+            }
+        }
+
+        return findings;
+    }
+
+    /// <summary>
+    /// Whether every trigger of the pipeline admits only a verified caller, so that a <c>Caller</c> node never falls
+    /// back to the pipeline's service account. True only when there is at least one trigger and every trigger is
+    /// <c>FromHttpRequest@2</c> without <c>allowAnonymous: true</c>. Every other trigger fails closed: schedules,
+    /// watches and events run without a caller, <c>FromHttpRequest@1</c> and <c>FromTeamsBot@1</c> publish anonymous
+    /// routes, and an unreadable <c>allowAnonymous</c> value counts as anonymous.
+    /// </summary>
+    private static bool EveryTriggerRequiresVerifiedCaller(IReadOnlyList<PipelineNodeProperties> triggers)
+    {
+        if (triggers.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var trigger in triggers)
+        {
+            if (!string.Equals(trigger.NodeType.Trim(), VerifiedCallerHttpTrigger, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var anonymous = trigger.Properties
+                .FirstOrDefault(p => string.Equals(p.Key, AllowAnonymousKey, StringComparison.OrdinalIgnoreCase));
+            if (anonymous.Key == null || anonymous.Value == null)
+            {
+                continue;
+            }
+
+            var isFalse = anonymous.Value switch
+            {
+                bool b => !b,
+                string s => string.Equals(s.Trim(), "false", StringComparison.OrdinalIgnoreCase),
+                _ => false
+            };
+            if (!isFalse)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Whether a node carries a target-tenant setting. Checked by key presence: an empty or malformed setting still
     /// declares the intent to cross a tenant, and the deploy rule fails closed on it.
     /// </summary>
@@ -187,21 +304,42 @@ internal static class PipelineElevationInspector
     {
         foreach (var kvp in node.Properties)
         {
-            if (!TargetTenantKeys.Contains(kvp.Key, StringComparer.OrdinalIgnoreCase) ||
-                kvp.Value is not Dictionary<object, object> setting)
+            if (!TargetTenantKeys.Contains(kvp.Key, StringComparer.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            foreach (var member in setting)
+            switch (kvp.Value)
             {
-                var key = member.Key.ToString();
-                if (key != null && TargetTenantPathProperties.Contains(key) &&
-                    TryGetCallerControlledPath(member.Value, out var path))
-                {
-                    findings.Add(new ConfusedDeputyFinding(node.NodeType, node.NodeIndex, identity,
-                        $"{kvp.Key}.{key}", path!));
-                }
+                case Dictionary<object, object> setting:
+                    CollectTargetTenantPathHazards(node, identity, kvp.Key, setting, findings);
+                    break;
+                // A set of targets written as a list of target settings: every entry is inspected.
+                case List<object> settings:
+                    for (var i = 0; i < settings.Count; i++)
+                    {
+                        if (settings[i] is Dictionary<object, object> entry)
+                        {
+                            CollectTargetTenantPathHazards(node, identity, $"{kvp.Key}[{i}]", entry, findings);
+                        }
+                    }
+
+                    break;
+            }
+        }
+    }
+
+    private static void CollectTargetTenantPathHazards(PipelineNodeProperties node, string identity, string label,
+        Dictionary<object, object> setting, List<ConfusedDeputyFinding> findings)
+    {
+        foreach (var member in setting)
+        {
+            var key = member.Key.ToString();
+            if (key != null && TargetTenantPathProperties.Contains(key) &&
+                TryGetCallerControlledPath(member.Value, out var path))
+            {
+                findings.Add(new ConfusedDeputyFinding(node.NodeType, node.NodeIndex, identity, $"{label}.{key}",
+                    path!));
             }
         }
     }

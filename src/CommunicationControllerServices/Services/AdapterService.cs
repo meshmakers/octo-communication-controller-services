@@ -1696,6 +1696,8 @@ internal class AdapterService(
             return;
         }
 
+        await EnsureCrossTenantNodesAllowedAsync(tenantId, pipelineRtEntityId, pipelineDefinition, nodes);
+
         var elevatedNodes = PipelineElevationInspector.FindElevatedNodes(nodes);
         if (elevatedNodes.Count == 0)
         {
@@ -1737,6 +1739,76 @@ internal class AdapterService(
         }
 
         await LintElevationConfusedDeputyAsync(tenantId, pipelineRtEntityId, nodes);
+    }
+
+    /// <summary>
+    /// AB#9767 deploy-time rules for the mesh adapter's cross-tenant nodes (decisions 2 and 3 of AB#8673), independent
+    /// of <see cref="ServiceAccountGuardOptions.CheckElevation" /> and of the caller's roles: a refusal here is about the
+    /// pipeline, not about who deploys it.
+    /// <list type="bullet">
+    ///   <item>A node with <c>identity: System</c> and a target tenant is refused.</item>
+    ///   <item>
+    ///     A node whose target tenant comes from a caller-controlled path is refused when it would act there with the
+    ///     pipeline's service account (<c>ServiceAccount</c>, or <c>Caller</c> in a pipeline that can run without a
+    ///     verified caller); as the pure verified caller it is allowed and reported as a warning.
+    ///   </item>
+    /// </list>
+    /// The adapter's cross-tenant guard enforces the same at run time; this reports it before anything is stored.
+    /// </summary>
+    private async Task EnsureCrossTenantNodesAllowedAsync(string tenantId, RtEntityId pipelineRtEntityId,
+        string pipelineDefinition, IReadOnlyList<PipelineNodeProperties> nodes)
+    {
+        var systemNodes = PipelineElevationInspector.FindSystemCrossTenantNodes(nodes);
+        if (systemNodes.Count > 0)
+        {
+            Logger.Warn(
+                "[{TenantId}] Refusing to deploy pipeline '{PipelineRtEntityId}': node(s) {Nodes} run as the system context with a target tenant (AB#9767)",
+                tenantId, pipelineRtEntityId, string.Join(", ", systemNodes.Select(n => n.Label)));
+            throw AdapterServiceException.PipelineSystemCrossTenantAccess(tenantId, pipelineRtEntityId,
+                systemNodes.Select(n => n.Label).ToList());
+        }
+
+        // Fail closed: without a readable trigger section no trigger is known to require a verified caller.
+        if (!pipelineDefinitionService.TryGetTriggerNodes(pipelineDefinition, out var triggers))
+        {
+            triggers = [];
+        }
+
+        var refused = PipelineElevationInspector.FindRefusedCallerSteeredTargetTenants(nodes, triggers);
+        if (refused.Count > 0)
+        {
+            var descriptions = refused.Select(f =>
+                $"node '{f.NodeLabel}' takes its target tenant from the caller-controlled path " +
+                $"'{f.CallerControlledPath}' (property '{f.PropertyName}')").ToList();
+            Logger.Warn(
+                "[{TenantId}] Refusing to deploy pipeline '{PipelineRtEntityId}': caller-steered target tenant in {Findings} (AB#9767)",
+                tenantId, pipelineRtEntityId, string.Join("; ", descriptions));
+            throw AdapterServiceException.PipelineCallerSteeredTargetTenant(tenantId, pipelineRtEntityId,
+                descriptions);
+        }
+
+        try
+        {
+            foreach (var finding in PipelineElevationInspector.FindCallerSteeredTargetTenantWarnings(nodes, triggers))
+            {
+                var message =
+                    $"Node '{finding.NodeLabel}' takes its target tenant from the caller-controlled path " +
+                    $"'{finding.CallerControlledPath}' (property '{finding.PropertyName}'). The caller chooses the " +
+                    "tenant; the mesh adapter proves the caller's own right there before it reads or writes. If this " +
+                    "is intentional, ignore this warning; otherwise take the target tenant from data the pipeline controls.";
+                Logger.Warn(
+                    "[{TenantId}] Pipeline '{PipelineRtEntityId}' node '{NodeLabel}' takes its target tenant from caller-controlled path '{Path}' (AB#9767)",
+                    tenantId, pipelineRtEntityId, finding.NodeLabel, finding.CallerControlledPath);
+                await eventService.StoreWarningEventAsync(tenantId, message, pipelineRtEntityId);
+            }
+        }
+        catch (Exception e)
+        {
+            // Advisory, like the confused-deputy lint: a failure to store the warning never fails the deploy.
+            Logger.Warn(e,
+                "[{TenantId}] Failed to report caller-steered target tenants for pipeline '{PipelineRtEntityId}'",
+                tenantId, pipelineRtEntityId);
+        }
     }
 
     /// <summary>

@@ -227,8 +227,130 @@ internal class PipelineElevationInspectorTests
 
         var findings = PipelineElevationInspector.FindConfusedDeputyHazards(nodes);
 
-        // A path the pipeline computed is not caller-steered; a Caller node is never a confused deputy (it acts with
-        // the caller's own rights in the target).
+        // A path the pipeline computed is not caller-steered; a Caller node is not elevated, so this lint skips it (the
+        // cross-tenant rules below judge a caller-steered target tenant of a Caller node).
         await Assert.That(findings.Count).IsEqualTo(0);
+    }
+
+    // AB#9767 decision 2: which identity acts in a caller-steered target tenant decides between refusal and warning.
+    private static (IReadOnlyList<ConfusedDeputyFinding> Refused, IReadOnlyList<ConfusedDeputyFinding> Warned)
+        ClassifyCallerSteeredTargets(string yaml)
+    {
+        Parser.TryGetAllNodes(yaml, out var nodes);
+        Parser.TryGetTriggerNodes(yaml, out var triggers);
+        return (PipelineElevationInspector.FindRefusedCallerSteeredTargetTenants(nodes, triggers),
+            PipelineElevationInspector.FindCallerSteeredTargetTenantWarnings(nodes, triggers));
+    }
+
+    private static string CallerSteered(string triggers, string identityLine) =>
+        triggers + "\n" +
+        $"""
+         transformations:
+           - type: ApplyChanges@2
+             {identityLine}
+             entityUpdatesPath: $.updates
+             targetTenant:
+               relation: Child
+               tenantIdPath: $.body.tenant
+         """;
+
+    private const string VerifiedTrigger =
+        """
+        triggers:
+          - type: FromHttpRequest@2
+            method: Post
+            path: /x
+            allowAnonymous: false
+        """;
+
+    [Test]
+    public async Task CallerSteeredTargetTenant_ServiceAccount_IsRefused()
+    {
+        var (refused, warned) = ClassifyCallerSteeredTargets(CallerSteered(VerifiedTrigger, "identity: ServiceAccount"));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(refused.Count).IsEqualTo(1);
+        await Assert.That(refused[0].Identity).IsEqualTo("ServiceAccount");
+        await Assert.That(refused[0].PropertyName).IsEqualTo("targetTenant.tenantIdPath");
+        await Assert.That(warned.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task CallerSteeredTargetTenant_PureCaller_IsOnlyWarned_AlsoWithoutIdentityProperty()
+    {
+        var (refused, warned) = ClassifyCallerSteeredTargets(CallerSteered(VerifiedTrigger, "identity: Caller") + "\n" +
+            """
+              - type: ApplyChanges@2
+                entityUpdatesPath: $.updates
+                targetTenant:
+                  relation: Sibling
+                  tenantIdPath: $.headers.x-tenant
+            """);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(refused.Count).IsEqualTo(0);
+        await Assert.That(warned.Count).IsEqualTo(2);
+        await Assert.That(warned[0].Identity).IsEqualTo("Caller");
+    }
+
+    // Every trigger that can run without a verified caller makes a Caller node fall back to the service account.
+    [Test]
+    [Arguments("triggers:\n  - type: FromHttpRequest@2\n    method: Post\n    path: /x\n    allowAnonymous: true")]
+    [Arguments("triggers:\n  - type: FromHttpRequest@2\n    method: Post\n    path: /x\n    allowAnonymous: yes-please")]
+    [Arguments("triggers:\n  - type: FromHttpRequest@1\n    method: Post\n    path: /x")]
+    [Arguments("triggers:\n  - type: FromHttpRequest@2\n    method: Post\n    path: /x\n  - type: FromPipelineTriggerEvent@1")]
+    [Arguments("triggers: []")]
+    public async Task CallerSteeredTargetTenant_CallerWithServiceAccountFallback_IsRefused(string triggers)
+    {
+        var (refused, warned) = ClassifyCallerSteeredTargets(CallerSteered(triggers, "identity: Caller"));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(refused.Count).IsEqualTo(1);
+        await Assert.That(refused[0].Identity).IsEqualTo("Caller, service-account fallback");
+        await Assert.That(warned.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task CallerSteeredTargetTenant_SystemAndPipelineControlledPaths_AreNeitherRefusedNorWarnedHere()
+    {
+        var (refused, warned) = ClassifyCallerSteeredTargets(VerifiedTrigger + "\n" +
+            """
+            transformations:
+              - type: GetRtEntitiesByType@1
+                identity: System
+                targetTenant:
+                  relation: Child
+                  tenantIdPath: $.body.tenant
+              - type: ApplyChanges@2
+                identity: ServiceAccount
+                targetTenant:
+                  relation: Child
+                  tenantIdPath: $.invoice.tenant
+            """);
+
+        // System is refused by FindSystemCrossTenantNodes; a pipeline-controlled path is checked by the guard at run time.
+        using var _ = Assert.Multiple();
+        await Assert.That(refused.Count).IsEqualTo(0);
+        await Assert.That(warned.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task CallerSteeredTargetTenant_ListOfTargets_EveryEntryIsInspected()
+    {
+        var (refused, _) = ClassifyCallerSteeredTargets(VerifiedTrigger + "\n" +
+            """
+            transformations:
+              - type: ApplyChanges@2
+                identity: ServiceAccount
+                targetTenants:
+                  - relation: Child
+                    tenantId: child-a
+                  - relation: Child
+                    tenantIdPath: $.full.query.tenant
+            """);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(refused.Count).IsEqualTo(1);
+        await Assert.That(refused[0].PropertyName).IsEqualTo("targetTenants[1].tenantIdPath");
     }
 }

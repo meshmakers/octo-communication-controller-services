@@ -252,6 +252,31 @@ internal class AdapterServiceException : Exception
             "hold. Either have an authorized operator deploy it, or set the offending node(s) back to " +
             "Identity=Caller (the safe default) so the pipeline runs within the caller's own permissions.");
 
+    /// <summary>
+    /// AB#9767 (decision 3 of AB#8673): a node runs as the system context and names a target tenant. The system context
+    /// is never accepted for another tenant, there is no exception; the mesh adapter's guard refuses it again at run time.
+    /// </summary>
+    internal static AdapterServiceException PipelineSystemCrossTenantAccess(string tenantId,
+        RtEntityId pipelineRtEntityId, IReadOnlyList<string> nodes) =>
+        new($"[{tenantId}] Cannot deploy pipeline '{pipelineRtEntityId}': the node(s) " +
+            $"{string.Join(", ", nodes.Select(n => $"'{n}'"))} run as the system context (Identity=System) and name " +
+            "a target tenant (targetTenant/targetTenants). The system context never acts in another tenant (AB#9767). " +
+            "Set the node(s) to Identity=Caller or Identity=ServiceAccount, whose right in the target tenant is " +
+            "proven by the identity service, or remove the target setting.");
+
+    /// <summary>
+    /// AB#9767 (decision 2 of AB#8673): a node takes its target tenant from caller input and would act there with the
+    /// pipeline's service account (Identity=ServiceAccount, or Caller in a pipeline that can run without a verified
+    /// caller): the caller would choose the tenant a service account acts in.
+    /// </summary>
+    internal static AdapterServiceException PipelineCallerSteeredTargetTenant(string tenantId,
+        RtEntityId pipelineRtEntityId, IReadOnlyList<string> findings) =>
+        new($"[{tenantId}] Cannot deploy pipeline '{pipelineRtEntityId}': {string.Join("; ", findings)}. The caller " +
+            "of the pipeline would choose the tenant the pipeline's service account acts in (AB#9767). Take the " +
+            "target tenant from data the pipeline controls (not $.body, $.query, $.files or $.headers), or run the " +
+            "node as the verified caller: Identity=Caller with only FromHttpRequest@2 triggers that do not allow " +
+            "anonymous callers.");
+
     internal static AdapterServiceException PipelineServiceAccountClientMissing(string tenantId,
         RtEntityId pipelineRtEntityId, string wellKnownName, string? clientId, OctoObjectId adapterRtId,
         string? adapterName) =>
