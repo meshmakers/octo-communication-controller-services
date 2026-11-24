@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- AB#9767 New: deploy-time rules for the mesh adapter's cross-tenant nodes in `PipelineElevationInspector`:
+  `FindSystemCrossTenantNodes` names every node with `identity: System` and a `targetTenant`/`targetTenants` setting
+  (the system identity never reaches another tenant), and the confused-deputy lint now treats
+  `targetTenant(s).tenantIdPath` as target-selecting, so an elevated node whose target tenant comes from
+  `$.body`/`$.query`/`$.files`/`$.headers` is reported. The refusal at deploy is wired in the elevation gate
+  separately; the adapter's guard refuses both at run time either way.
 - AB#9325 Test: the System.Communication migration and dependents tests install their historic and published
   System models (System.Bot 3.4.0, System.Communication 3.x / 4.10.0, System.Ai 4.6.0) through the service path
   (`ImportCkModelAsync(CkModelId)` from the in-memory test catalog `TestCkModelCatalog`) instead of the caller

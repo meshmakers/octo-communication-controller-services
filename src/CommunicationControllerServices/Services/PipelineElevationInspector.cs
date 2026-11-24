@@ -75,6 +75,21 @@ internal static class PipelineElevationInspector
         "inputPath", "candidateAssociationsInputPath"
     };
 
+    /// <summary>
+    /// The target-tenant settings of the mesh adapter's cross-tenant nodes: <c>targetTenant</c> (one target) and
+    /// <c>targetTenants</c> (a set). A node that carries one reaches another tenant of the pipeline's subtree.
+    /// </summary>
+    private static readonly string[] TargetTenantKeys = ["targetTenant", "targetTenants"];
+
+    /// <summary>
+    /// Members of a target-tenant setting that select the target from the data context. A caller-controlled path
+    /// there lets the caller steer which tenant an elevated node acts in.
+    /// </summary>
+    private static readonly HashSet<string> TargetTenantPathProperties = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "tenantIdPath", "tenantIdsPath"
+    };
+
     // Field-filter item properties whose value is a caller-supplied JSONPath steering which
     // entities match (and thus which the elevated op touches). "fieldFilters" is the array key.
     private const string FieldFiltersKey = "fieldFilters";
@@ -133,9 +148,62 @@ internal static class PipelineElevationInspector
             {
                 CollectFieldFilterHazards(node, identity, filtersValue, findings);
             }
+
+            // A data-driven target tenant is target-selecting too: it decides which tenant the node acts in.
+            CollectTargetTenantHazards(node, identity, findings);
         }
 
         return findings;
+    }
+
+    /// <summary>
+    /// Nodes that request the <c>System</c> identity <b>and</b> carry a target-tenant setting. The system context is
+    /// never accepted for another tenant (no exception), so such a pipeline is refused at deploy time. The mesh
+    /// adapter's cross-tenant guard refuses it again at run time; this rule only reports it early.
+    /// </summary>
+    public static IReadOnlyList<ElevatedNode> FindSystemCrossTenantNodes(IReadOnlyList<PipelineNodeProperties> nodes)
+    {
+        var result = new List<ElevatedNode>();
+        foreach (var node in nodes)
+        {
+            if (ReadElevatedIdentity(node) == SystemIdentity && HasTargetTenantSetting(node))
+            {
+                result.Add(new ElevatedNode(node.NodeType, node.NodeIndex, SystemIdentity));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Whether a node carries a target-tenant setting. Checked by key presence: an empty or malformed setting still
+    /// declares the intent to cross a tenant, and the deploy rule fails closed on it.
+    /// </summary>
+    private static bool HasTargetTenantSetting(PipelineNodeProperties node) =>
+        node.Properties.Keys.Any(key => TargetTenantKeys.Contains(key, StringComparer.OrdinalIgnoreCase));
+
+    private static void CollectTargetTenantHazards(PipelineNodeProperties node, string identity,
+        List<ConfusedDeputyFinding> findings)
+    {
+        foreach (var kvp in node.Properties)
+        {
+            if (!TargetTenantKeys.Contains(kvp.Key, StringComparer.OrdinalIgnoreCase) ||
+                kvp.Value is not Dictionary<object, object> setting)
+            {
+                continue;
+            }
+
+            foreach (var member in setting)
+            {
+                var key = member.Key.ToString();
+                if (key != null && TargetTenantPathProperties.Contains(key) &&
+                    TryGetCallerControlledPath(member.Value, out var path))
+                {
+                    findings.Add(new ConfusedDeputyFinding(node.NodeType, node.NodeIndex, identity,
+                        $"{kvp.Key}.{key}", path!));
+                }
+            }
+        }
     }
 
     private static void CollectFieldFilterHazards(PipelineNodeProperties node, string identity, object? filtersValue,
