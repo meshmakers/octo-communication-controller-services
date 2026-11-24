@@ -5,13 +5,13 @@ applies_to: **/Services/ExpressionValidationService.cs
 
 # Expression Validation Concept
 
-> **Status: implemented (AB#4189).** The backend authoritative validation and the *shared
+> **Status: implemented.** The backend authoritative validation and the *shared
 > formula engine* this document originally proposed have shipped. The historical proposal is
 > kept below for context; **the authoritative current state is the section directly under this
 > banner.** User-facing formula-language reference lives in the public docs:
 > *Tech Guide → Communication → Formula Expressions*.
 
-## Current Implementation (AB#4189)
+## Current Implementation
 
 The mXparser glue is now a single shared component, not duplicated per consumer:
 
@@ -38,7 +38,7 @@ Consumers are now thin callers:
 The supported formula syntax (operators, `if` / ternary, built-in functions, the `now` /
 `startOfDay` / `null` extensions, null/NaN handling) is documented once in the public
 **Formula Expressions** page and reused by every feature, including the forthcoming archive
-*computed columns* (AB#4189 epic).
+*computed columns* epic.
 
 ---
 
@@ -403,7 +403,7 @@ User types expression
 
 **Effort:** ~2 days
 
-**Dependencies:** *(resolved in AB#4189 — see "Current Implementation" above)*
+**Dependencies:** *(resolved by the computed-columns work — see "Current Implementation" above)*
 - ~~`OctoExpression` class accessible from Communication Controller (via `Runtime.Engine.MongoDb` package)~~ → now `IFormulaEngine` from the `Runtime.Engine.Formulas` package
 - ~~`ConvertTernaryToIf` logic needs to be extracted to a shared location or duplicated~~ → extracted into the shared `FormulaEngine`
 

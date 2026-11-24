@@ -3,20 +3,20 @@ description: "Leasing: only controller-queued executions are leased, a sealed ex
 applies_to: **/Services/LeaseService.cs, **/Repository/Queued*.cs, **/Consumers/LeaseTriggerConsumer.cs
 ---
 
-### Only executions the controller queued are leased (AB#7473)
+### Only executions the controller queued are leased
 
 The lease queue used to trust any entity with `Status = Queued` and the pipeline/adapter associations, whoever wrote
 it; the generic runtime write path (GraphQL create, MCP) can create one. Now the controller leases only what it
 sealed itself.
 
-**Design (no new attribute, no CK bump).** The `SealedCaller` envelope of AB#7472 is also the provenance of the work
+**Design (no new attribute, no CK bump).** The `SealedCaller` envelope of is also the provenance of the work
 item. `QueuedCaller.Apply(execution, tenantId, pipelineRtId, adapterRtId, caller, token, envelope)` is called for
 **every** execution the controller queues (`TriggerManagementService`: REST execute, method invoker, cron via
 `LeaseTriggerConsumer`; `LeaseService.InterruptAndEnqueueAsync`: retry) and seals it even when there is no caller
 (`SubjectId` null). Payload additions: a provenance marker, the pipeline RtId, the adapter RtId and a SHA-256 of the
 input, so an execution that is controller-queued but whose pipeline or adapter association or input was edited
 afterwards does not open either. The binding to tenant and execution RtId is the one of `IExecutionEnvelope`.
-System.Communication stays 4.12.0 (AB#7461 needs no bump either, it rides in the same envelope). (A queued item whose pipeline is
+System.Communication stays 4.12.0 (the method-invocation marker needs no bump either, it rides in the same envelope). (A queued item whose pipeline is
 moved to another adapter while it waits fails the adapter binding; re-run it.)
 
 **Gate.** `LeaseService.GrantLeaseAsync` runs `CheckProvenanceAsync` after the leasing kill switch and the borrower
@@ -51,7 +51,7 @@ leases unsealed items, roll out like this: (1) switch the leasing kill switch of
 false`; it holds the queue), (2) let the queued leased items drain or cancel them, (3) roll **all** controller
 instances, (4) switch leasing back on. Retries created by an old pod during the window are covered by step 2.
 
-**Known residual risk (closed by AB#7476).** Provenance proves who queued an execution, not that the entity is still in
+**Known residual risk (closed by the single-lease rule).** Provenance proves who queued an execution, not that the entity is still in
 the state it was queued in: a writable status/timestamp could reset an execution that already ran so that it was leased
 once more. The controller-owned single-use claim below closes this.
 
@@ -65,7 +65,7 @@ hand-driven lease gated, retry keeps provenance. The integration fixture resolve
 and credential resolvers substituted); a full member grant needs a connected pool member, which the fixture does not
 run, so the positive case asserts the specific downstream refusal reason.
 
-### A sealed execution is leased at most once (AB#7476)
+### A sealed execution is leased at most once
 
 The status and the lease timestamps of a `PipelineExecution` are ordinary attributes: a writer on a generic surface
 (GraphQL update, MCP) can put a finished execution back to `Queued` and clear the lease latch
@@ -149,7 +149,7 @@ controller before this change) is refused like a forged one ("queued before the 
 Adopting such a value would mean accepting a seal that can never be claimed, which is exactly the hole this change
 closes. The retry of an interrupted pre-upgrade attempt is sealed anew by `Reseal` and is fine.
 
-**Rollout.** The train already requires the leasing sequence of AB#7473: (1) leasing kill switch off, (2) let queued
+**Rollout.** The train already requires the leasing sequence of the queued-provenance envelope: (1) leasing kill switch off, (2) let queued
 leased items drain or cancel them (any still queued are failed at the first round of the new controller) **and let the
 in-flight leases granted by old controller pods finish or cancel them: they have no claim record, so after the roll they
 are not requeued when they expire or are lost, and the stuck-execution reaper fails them after about 30 minutes**, (3) roll all

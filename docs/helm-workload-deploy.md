@@ -148,9 +148,9 @@ entity, leaving a stray release on the wrong cluster while the Studio
 showed `DeploymentState=Deployed`. The routing fix scopes workload
 events to the one operator that actually owns the target pool.
 
-**Pending workload notifications (AB#4371).** When `GetConnectionsForPool`
+**Pending workload notifications.** When `GetConnectionsForPool`
 returns no owner, the workload deploy/undeploy notification is **queued**,
-not dropped. Dropping it caused the prod-1 incident where an undeploy fired
+not dropped. Dropping it caused the production incident where an undeploy fired
 while the pool was transiently orphaned (the operator's `RegisterDeploymentSiteAsync`
 had been rejected during a parallel-startup CkCache race and the operator
 never retried — fixed operator-side by its registration retry loop): the
@@ -211,35 +211,34 @@ Tests:
 - `Services/PoolServiceTests/UndeployAllCloudPoolsAsyncTests` — extended
   with workload-cascade tests.
 
-### Pending-Workload Reconcile on Pool Registration (AB#4894)
+### Pending-Workload Reconcile on Pool Registration
 
 A workload deploy notification is fire-and-forget SignalR; one sent while the operator pod was
 being replaced (e.g. an operator CD mid-rollout) lands on the dying connection and is lost —
-the entity stays `Pending` forever, and neither the AB#4371 pending queue (the pool HAD a
+the entity stays `Pending` forever, and neither the pending queue (the pool HAD a
 registered owner at send time) nor the reverse-sync (restores state, never re-dispatches)
 covers it. `OperatorHub.RegisterDeploymentSiteAsync` therefore calls
-`DeploymentSiteService.ReconcilePendingWorkloadsAsync` after the AB#4371 flush: every workload of the
+`DeploymentSiteService.ReconcilePendingWorkloadsAsync` after the flush: every workload of the
 pool still in `DeploymentState=Pending` gets its deploy re-dispatched through the normal
 `DeployWorkloadAsync` path. Best effort — lookup or per-workload failures are logged and never
 fail the registration. Tests: `Services/PoolServiceTests/ReconcilePendingWorkloadsAsyncTests`.
 
-**The re-dispatch is idempotent on the operator side (AB#6471).** The controller cannot tell a lost dispatch
+**The re-dispatch is idempotent on the operator side.** The controller cannot tell a lost dispatch
 from one the operator is still running or has finished with the report lost into a dead connection, so the
 re-dispatch of a *genuinely in-flight* deploy is NOT safe by itself: the operator's SignalR queue is serial only
-per connection, and a deploy started on the old connection keeps running across the reconnect. On test-2 (CD run
-52427, 2026-10-10) that produced a second Helm revision per workload (mrotest v39/v40, energytest v38/v39,
-meshtest v104/v105, handelsdemo v52/v53) and `Error` reports for releases Helm had deployed. The fix lives in the
+per connection, and a deploy started on the old connection keeps running across the reconnect. On the test environment (CD run
+52427, 2026-10-10) that produced a second Helm revision per workload (tenant A v39/v40, tenant B v38/v39, tenant C v104/v105, tenant D v52/v53) and `Error` reports for releases Helm had deployed. The fix lives in the
 operator (`WorkloadReconciler`: single-flight per release, desired-state fingerprint stamped as helm
 `--description`, a reconciliation whose release already runs that state does no helm run and reports success — see
 the operator's CLAUDE.md "Idempotent Dispatch After a Controller Restart"). No hub-contract change; an operator
 that pre-dates it keeps the old behaviour (duplicate revision, possible `Error`), so edge operators should be rolled
 before relying on this on a pool that is re-registered often.
 
-**A reconcile is not a release decision (AB#4955).** The re-dispatch above fires on events that
+**A reconcile is not a release decision.** The re-dispatch above fires on events that
 have nothing to do with releasing software — an operator restart, a blueprint re-apply, a CK-model
 update, `EnableCommunication` — because all of them re-register the tenant's pools via
 `PreUpdateTenantAsync`. A workload with an empty `ChartVersion` means "newest in the repository",
-resolved by the operator at `helm upgrade` time, so those events silently moved six prod-1
+resolved by the operator at `helm upgrade` time, so those events silently moved six production
 accounting workloads from chart 1.0.71 to 1.0.72 with nobody deploying them. Two things close it:
 
 - `DeployWorkloadAsync(tenantId, workloadRtId, isReconciliation)` puts
@@ -301,7 +300,7 @@ Tests:
   malformed rtId silently skipped.
 
 
-## Workload Chart Management (Phase 2 — Epic 3054 / #4052)
+## Workload Chart Management (Phase 2)
 
 `TenantApi/v1/Controllers/WorkloadController.cs` exposes two endpoints used
 by the CI/CD rollout flow described in

@@ -3,7 +3,7 @@ description: "Adapter connection lifecycle: cache invalidation, pool states, shu
 applies_to: **/Hubs/AdapterHub*.cs, **/Caches/Adapters/**, **/Services/AdapterConnectionTracker.cs
 ---
 
-### Adapter CK Cache Invalidation (AB#4456)
+### Adapter CK Cache Invalidation
 
 Adapters cache the tenant's CK model in-process (engine `CkCacheService`, populated
 load-once per tenant). After a CK model import (`ImportCk`) or `ClearCache`, that cache
@@ -35,12 +35,12 @@ Flow:
 Old adapter builds without the hub handler just log an unbound-method warning — the
 `PreUpdateTenantAsync` restart relay remains their (gated) fallback.
 
-**Update scope (AB#4895).** `PreUpdateTenant`/`PosUpdateTenant` carry an optional
+**Update scope.** `PreUpdateTenant`/`PosUpdateTenant` carry an optional
 `TenantUpdateScope` (default `Full`; older publishers deserialize to `Full`). When a completed
 pair is `CacheOnly` — e.g. the nightly `AttributeValueAggregatorJob`, which only rewrites
 `AutoCompleteValues` on CK attributes — the consumer broadcasts the CK cache flush but
 **skips the adapter restart relay** entirely. The fleet-wide midnight restart this relay used
-to cause was the trigger window for AB#4876. A mixed pair is treated as `Full` (defensive).
+to cause was the trigger window of the tenant-update scope. A mixed pair is treated as `Full` (defensive).
 Tests: `CacheOnlyPair_NotifiesCkModelChangedButSkipsRestartRelay`,
 `MixedScopePair_FullWins_RunsRestartRelay`.
 
@@ -48,10 +48,10 @@ Tests: `CacheOnlyPair_NotifiesCkModelChangedButSkipsRestartRelay`,
 **scoped**, so MassTransit creates a new `TenantManagementConsumer` per message — an
 instance-level pair dictionary can never match Pre with Pos, and the paired branch
 (restart relay + CK flush) silently never runs. This was the second root cause of
-AB#4456: the relay had been dead in production. Any consumer that keeps cross-message
+the dead restart relay in production. Any consumer that keeps cross-message
 state must hold it in a static field or a singleton service, never an instance field.
 
-**The "old message" filter compares against an eagerly captured start (AB#5866).**
+**The "old message" filter compares against an eagerly captured start.**
 `ControllerStartTime` is created as the first statement of `Program` and registered as a
 singleton; consumers inject it. It replaced `Constants.StartTime`, a lazily initialised
 `static readonly … = DateTime.UtcNow` (beforefieldinit) that only the consumers read — the
@@ -91,7 +91,7 @@ The intra-process stale-disconnect guard above only works **within one
 controller pod**. During a Kubernetes rolling upgrade two pods overlap for
 a few seconds, and the old pod's `OperatorHub.OnDisconnectedAsync` /
 `AdapterHub.OnDisconnectedAsync` handlers fire as the operator and adapters
-reconnect to the new pod. Observed sequence on `test-2`:
+reconnect to the new pod. Observed sequence on a test environment:
 
 1. New controller pod starts, `RegisterDeploymentSiteAsync` from the reconnected
    operator writes `Online` at T+0.
@@ -131,9 +131,9 @@ Tests:
   even if the `HttpContext` has already been torn down (and so the test
   doesn't need to mock one).
 
-### Adapter Reconnect Remove Race (AB#4594, completed)
+### Adapter Reconnect Remove Race (completed)
 
-The first AB#4594 fix (`f43e2bc`) refreshed the cached `ConnectionId` in
+The first fix of the reconcile-on-registration problem (`f43e2bc`) refreshed the cached `ConnectionId` in
 `RegisterAdapterInternalAsync` and added stale-connection early-return guards to
 `UnregisterAsync` / `SetAdapterCommunicationStateOfflineAsync`. Those guards only
 cover the case where the adapter has **already** reconnected *before* the
@@ -168,12 +168,12 @@ newer-connection no-op for both primitives) and
 `Services/AdapterServiceTests/UnregisterAsyncTests.UnregisterAsync_ReconnectDuringUnregister_DoesNotRemoveFreshConnection`
 (the reconnect-mid-await interleaving that the old code failed).
 
-### Reconcile Config Push on Registration (AB#4594 recurrence #2)
+### Reconcile Config Push on Registration
 
 The two fixes above only cover the *connection-cache* races (stale ConnectionId,
 TOCTOU remove). They do **not** guarantee the freshly (re-)registered adapter
-actually ends up running its deployed pipelines. Recurrence #2 (prod-1 /
-salzburgdev, 2026-08-06): a coordinated rollout restarted the Communication
+actually ends up running its deployed pipelines. Recurrence #2 (production /
+borrowerdev, 2026-08-06): a coordinated rollout restarted the Communication
 Controller (07:59) and then the mesh adapter (08:09) within minutes; the adapter
 came up `Online` with **zero pipeline routes registered** — every
 `FromHttpRequest` endpoint (`/exportHandover`, `/processDocuments`,
@@ -213,10 +213,10 @@ the empty-config no-op). The `AdapterServiceTestsBase` mock already simulates th
 adapter's deploy ack, so the existing register tests exercise the ack path too.
 
 
-### Registration vs. tenant pre/post-update — the deaf adapter (AB#5827)
+### Registration vs. tenant pre/post-update — the deaf adapter
 
-Reproduced on test-2-dev: two `ClearCache` 8.6 s apart left a dedicated adapter connected, "registered"
-and deaf — metrics endpoint 404, every push lost, pod `1/1`, readiness green, AB#5409 watchdog disarmed.
+Reproduced on a test environment: two `ClearCache` 8.6 s apart left a dedicated adapter connected, "registered"
+and deaf — metrics endpoint 404, every push lost, pod `1/1`, readiness green, watchdog disarmed.
 
 **Cause (lost update).** `RegisterAdapterInternalAsync` took the tenant's `AdapterTenant`, then read the
 adapter configuration from the repository (seconds under load) and wrote the adapter into **that**

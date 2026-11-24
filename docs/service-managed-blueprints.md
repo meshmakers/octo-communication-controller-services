@@ -47,9 +47,9 @@ The `System.` name prefix tells Refinery Studio (`BlueprintIdExtensions.IsServic
 
 The optional `HelloCommunication-1.0.0` demo blueprint lives in `samples/Blueprints/` (not embedded). It's admin-installable: drop the folder into a `LocalFileSystemBlueprintCatalog` root or publish it via a GitHub catalog. Its `blueprintDependencies` reference `System.Communication-[1.0,2.0)` so it can be applied on top of the service-managed baseline.
 
-`samples/Blueprints/SecretDefaultDemo/` is the secret-default sample (AB#7252): two blueprints (`SecretDefaultDemo` with
+`samples/Blueprints/SecretDefaultDemo/` is the secret-default sample: two blueprints (`SecretDefaultDemo` with
 the Application, whose `SecretDefaults` entry the operator adds after the install, `SecretDefaultDemoCaptcha` with a tenant override and a `VerifyCaptcha@1`
-route), a small CK model and the `verify/` commands. See "Secret defaults (AB#7219)".
+route), a small CK model and the `verify/` commands. See "Secret defaults".
 
 #### Runtime-State Attributes (do NOT reset on blueprint re-apply)
 
@@ -57,8 +57,7 @@ route), a small CK model and the `verify/` commands. See "Secret defaults (AB#72
 `System.Communication.Release-1.5.0` and `System.Communication.MainLatest-1.4.0`)
 marks the volatile state attributes on `Adapter` / `Pool` as
 `isRuntimeState: true` in `attributes.yaml`. The blueprint engine reads
-that marker (see `octo-construction-kit-engine/CLAUDE.md` → "Runtime-State
-Preservation on Re-Apply") and preserves the existing runtime value when
+that marker (see `octo-construction-kit-engine/docs/runtime-state-preservation.md`) and preserves the existing runtime value when
 the blueprint is re-applied for a version bump — instead of overwriting
 it with whatever the seed YAML happens to declare as the
 fresh-tenant default.
@@ -85,27 +84,26 @@ in `docs/runbooks/recover-mesh-adapter-state.md`. Any future
 service-managed-blueprint bump on 3.22.0+ should not need a runbook
 companion for this class of failure.
 
-**Operator-managed workload deploy attributes are runtime-state too
-(3.28.0, AB#4706).** `Hostname`, `IngressEnabled`, `ChartVersion`,
+**Operator-managed workload deploy attributes are runtime-state too.** `Hostname`, `IngressEnabled`, `ChartVersion`,
 `ValuesYaml` and `Values` on the deployable-workload attribute set
 (`attributes/helmDeployment.yaml`, shared by `Adapter` and `Application`)
 carry `isRuntimeState: true`. These fields are written at run time — the
-productive hostname (e.g. `<tenant>.meshmakers.cloud`) and per-tenant
+productive hostname (e.g. `<tenant>.<customer-domain>`) and per-tenant
 `ValueOverride`s (publicUri, clientId, …) by operators, `ChartVersion` by
 the CD pipeline's `UpdateWorkloadChartVersion` — and an app blueprint that
 seeds defaults (e.g. `EnergyCommunity.Base`'s Application entity) reset
 all of them on every `InstallBlueprint -f`, silently breaking the deployed
-ingress/DNS and OIDC configuration (observed live on prod-2/energydemo,
+ingress/DNS and OIDC configuration (observed live on a production demo tenant,
 2026-08-04). Seeds now only apply on fresh installs. Consequence for
 blueprint authors: a blueprint update can no longer ship CHANGED default
 values for these five attributes to existing tenants — by design; document
 new defaults in release notes instead. Note the association side (e.g. an
 Application's `HelmRepository` edge) has no preserve mechanism — blueprints
 must own their referenced `HelmRepositoryConfiguration` entity instead of
-pinning foreign per-environment rtIds (the EC Base blueprint does this
+pinning foreign per-environment rtIds (a solution Base blueprint does this
 since 2.2.5).
 
-**`Pipeline.IsDebuggingEnabled` is runtime-state too (3.23.0, AB#4273).**
+**`Pipeline.IsDebuggingEnabled` is runtime-state too.**
 Debugging is an operational toggle (`SetPipelineDebug` / the Studio debug
 button), not part of a pipeline's portable definition — so
 `RtEntityToTcDtoConverter` skips it on export and it never round-trips
@@ -114,7 +112,7 @@ marker was added to `IsDebuggingEnabled` in `attributes.yaml` back in commit
 `e54c749` but **in place on 3.22.0 without a version bump** (the 3.21.0→3.22.0
 bump `0b31271` had already been cut ~46 min earlier), so a same-version
 re-import is a no-op and the marker never reached tenants already on 3.22.0 —
-which is why an imported pipeline (e.g. the voest simulator shipping
+which is why an imported pipeline (e.g. a customer simulator shipping
 `IsDebuggingEnabled: true`) could still silently enable debugging. `3.23.0`
 is the bump that actually propagates the marker on upgrade. No migration
 script (`migration-meta.yaml` stays at 3.1.1 — schema-ahead-of-history; the
@@ -122,16 +120,16 @@ change is additive metadata, existing attribute values are untouched).
 Note the flag only stops debug shipping via *export*; a hand-authored rt-model
 that explicitly sets a runtime-state attribute still writes it on import, so
 authored YAMLs must simply not declare `IsDebuggingEnabled` (fixed for the
-simulator under AB#4274).
+simulator).
 
-**`Configuration.ClientSecret` is runtime-state too (3.31.0, AB#5027).** The shared
+**`Configuration.ClientSecret` is runtime-state too.** The shared
 `ClientSecret` attribute definition (used by `ServiceAccountConfiguration`,
 `FinApiConfiguration` and `MicrosoftGraphConfiguration`) carries `isRuntimeState: true`
 so a blueprint re-apply can no longer overwrite a live secret with the seeded
 placeholder. Details, blast radius and the first-install semantics: see
 "Pipeline Service Account — mandatory execution identity" below.
 
-**The last seed-owned `EnergyCommunityConfiguration` values are tenant-owned (3.39.0, AB#5359).**
+**The last seed-owned `EnergyCommunityConfiguration` values are tenant-owned.**
 `BillingReportName`, `BillingReportFilePrefix`, `BillingMailServerConfiguration` and
 `ConsumptionRecordRequestDelay` moved from `isRuntimeState: false` to `ownership: TenantOwned`,
 and the type's `${System}/Name` assignment carries a per-assignment `ownership: TenantOwned`
@@ -143,28 +141,27 @@ every re-apply emptied what the community had configured, and billing lost its r
 to carry — preserved on re-apply, still part of `ExportRt`. Consequence for blueprint authors: a
 changed default for these values reaches existing communities only through a CK migration.
 
-**`Adapter.AdapterConfiguration` is `ownership: Secret` (4.7.0, AB#6312, incident AB#6310).** The
+**`Adapter.AdapterConfiguration` is `ownership: Secret` (4.7.0).** The
 JSON a tenant types into an adapter (for the EDA adapter the Ponton host, user and password) was
 seed-owned, and a blueprint seed can only carry the empty skeleton, so every blueprint update
 (`EnergyCommunity.EdaIntegration`, `Base`) replaced the stored value through the Upsert's full
-ReplaceOne — three prod-2 communities lost their EDA credentials on 2026-10-08. Now a re-apply keeps the
+ReplaceOne — three production communities lost their EDA credentials on 2026-10-08. Now a re-apply keeps the
 stored value (also when the seed omits the attribute) and an `ExportRt` leaves it out. `Secret`
 rather than `TenantOwned` because the JSON holds a password and must not travel in an export file;
 for a `String` attribute `Secret` ownership changes exactly two things — preserve on upsert and
 exclude from export — so the read path (`GetAdapterAsync`, `AdapterService`, the SignalR push to the
 adapter) and the Studio edit path (`systemCommunicationAdapters.update` with `item.configuration`)
-are untouched. It is **not** the `valueType: Secret` of AB#5528 (no encryption, no is-set read
+are untouched. It is **not** the `valueType: Secret` of (no encryption, no is-set read
 state). Consequences: a fresh adapter still gets the seed value; a blueprint can no longer *change*
 the configuration of an existing adapter (use a CK migration step or a documented manual step); an
 exported adapter re-imported elsewhere starts without its configuration. Regression test:
 `IntegrationTests/Repository/AdapterConfigurationOwnershipTests` (empty-skeleton seed, seed that omits
 the attribute, fresh adapter, compiled ownership) against real MongoDB. It drives
 `IImportRtModelCommand` with `Upsert`, the choke point of every blueprint apply; the orchestration
-above it (Update/Merge modes, preview) is covered by the engine stories and the test-2 verification.
-The long-term replacement is a dedicated configuration type with real `Secret` fields (AB#5360).
+above it (Update/Merge modes, preview) is covered by the engine stories and the test-environment verification.
+The long-term replacement is a dedicated configuration type with real `Secret` fields.
 
-**Typed workload sizing: `CpuRequest`, `CpuLimit`, `MemoryRequest`, `MemoryLimit`, `LastDeploymentWarning`
-(4.10.0, AB#7426, Feature AB#7417).** Five optional `String` attributes on the abstract `DeployableWorkload`
+**Typed workload sizing: `CpuRequest`, `CpuLimit`, `MemoryRequest`, `MemoryLimit`, `LastDeploymentWarning`.** Five optional `String` attributes on the abstract `DeployableWorkload`
 (`attributes/workloadResources.yaml`), inherited by `Adapter`, `Application` and `AdapterPool`, all
 `isRuntimeState: true`. The four sizing attributes carry Kubernetes quantity strings (`250m`, `512Mi`);
 `LastDeploymentWarning` is written by the controller (a later story of the Feature: an explicit Helm value
@@ -172,15 +169,15 @@ overrides a typed setting) and was added now so the Feature needs one CK Minor o
 `PoolMemberCpuRequest` … `PoolMemberMemoryLimit` (`isRuntimeState: false`, the pool author's declaration):
 operators set the sizing on live tenants, so a blueprint re-apply must keep it — also against a seed that
 ships its own non-empty default (omitted / empty seed values are already guarded for seed-owned attributes
-since AB#6313, a *different non-empty* one is not). Additive Minor (ck-semver rule T1), no migration entry,
-existing workloads have all five empty. The attributes reach the Helm release since AB#7428 (see
+in the meantime, a *different non-empty* one is not). Additive Minor (ck-semver rule T1), no migration entry,
+existing workloads have all five empty. The attributes reach the Helm release (see
 "Typed sizing reaches Helm" below); a workload that sets none of them renders exactly what it rendered on 4.9.0.
 Tests: unit `DeploymentSiteServiceTests/DeployWorkloadResourceAttributesTests` (schema on all three kinds,
 unchanged `ValuesYaml` / `Values` for Adapter and Application) and integration
 `Repository/WorkloadResourceAttributesReapplyTests` (compiled ownership on all three kinds; Upsert with an
 omitted, empty and a different `MemoryRequest` keeps the operator's `512Mi`) against real MongoDB.
 
-**Typed sizing is validated at deploy (AB#7427).** Workload entities have no write hook (they are written
+**Typed sizing is validated at deploy.** Workload entities have no write hook (they are written
 through the asset repository), so `DeploymentSiteService.EnsureWorkloadIsHelmDeployableAsync` validates
 the four sizing attributes via `WorkloadResourceSettingsValidator` right after the leasing check and before
 any operator call: every non-blank value must be a Kubernetes quantity (`KubernetesQuantity`: `m`/`n`/`u`,
@@ -190,10 +187,10 @@ rejected), and a request must not exceed its limit on the parsed values (`1024Mi
 sizing path per pool). A rejection throws a `DeploymentSiteServiceException` naming the attribute and the
 value and, best effort, writes `DeploymentState` Error + `LastDeploymentError` (Studio shows it at the
 field). Unit tests: `KubernetesQuantityTests`, `DeploymentSiteServiceTests/DeployWorkloadResourceValidationTests`.
-The AB#5838 memory-limit rule for `ExecuteCSharp` on leased adapters must read the *effective* memory limit
+The memory-limit rule for `ExecuteCSharp` on leased adapters must read the *effective* memory limit
 (typed value, else explicit Helm value, else chart default).
 
-**Typed sizing reaches Helm, explicit values win (AB#7428).** Precedence: **chart default < typed attributes
+**Typed sizing reaches Helm, explicit values win.** Precedence: **chart default < typed attributes
 < explicit `ValuesYaml` < explicit `Values[]`** (then the `replicaCount` pin of a pool, unchanged). It is
 built in the controller, in `WorkloadResourceOverrides.Apply`, called from
 `BuildWorkloadDeployedDtoAsync` — *not* in the operator: a new values layer would need a
@@ -213,11 +210,11 @@ success status). A conflict-free deploy clears the attribute; it is written only
 deploy DTO goes through it — manual deploy, `ReconcilePendingWorkloadsAsync` (`IsReconciliation`), the
 deploymentSite fan-out — so the typed values survive a controller restart and a pool re-registration. An
 `AdapterPool` is untouched: it keeps `PoolMember*` (`AppendAdapterPoolMemberOverrides`); merging both sets
-is a Major for CK v2 (AB#5584). Tests: `DeploymentSiteServiceTests/DeployWorkloadResourcePrecedenceTests`,
+is a Major for CK v2. Tests: `DeploymentSiteServiceTests/DeployWorkloadResourcePrecedenceTests`,
 `Controllers/PoolControllerDeployGateTests`.
 
-**`DataPoint.ExternalId` is seed-owned again (4.11.0, AB#7446).** `ExternalId` carried `isRuntimeState: true` since
-AB#5187, which was meant for the `MappingTargets` RecordArray (`MappingTarget.ExternalId`). `DataPoint` is the record
+**`DataPoint.ExternalId` is seed-owned again.** `ExternalId` carried `isRuntimeState: true` since
+an earlier change, which was meant for the `MappingTargets` RecordArray (`MappingTarget.ExternalId`). `DataPoint` is the record
 of seed-owned RecordArrays too - `Loxone/Control.States` and `SubControl.States` - and the export evaluates record
 **members** one by one (`RtEntityToTcDtoConverter` re-enters `ConvertAttributes` for each record), so every exported
 data point lost its `ExternalId`: its identity and a required member, the key the "Store Control States" pipeline
@@ -226,7 +223,7 @@ matches States by (`ExportRtByDeepGraph` / `ExportRtByQuery` of a Control export
 file still carries no live values. No side effect on `MappingTargets`: it is runtime state as a whole and is skipped
 as one unit by export and by re-apply (preservation inspects top-level type attributes only). MINOR
 (`ck-semver-rules`: "Attribute ownership changed"), `octo-ckc ValidateVersion` VALID against the published 4.10.0, no
-migration entry, no blueprint bump. The model is **not** published by the merge (AB#7432: run the CI pipeline with
+migration entry, no blueprint bump. The model is **not** published by the merge (run the CI pipeline with
 `publishSystemCkModels=true`). Dependents: `Loxone-5.4.0` and `System.Ai-4.6.0` are range-retaining
 (`System.Communication-[4.5,5.0)` / `[4.0,5.0)`; the `usedSurface` is a list of element ids, not content) and keep
 resolving; a *classic* exact-pin dependent would go `ResolveFailed` on any minor and has to be re-pinned. Data written
@@ -239,11 +236,11 @@ byte for byte from the public catalog, then the build's 4.11.0: all stay `Availa
 without its persisted ranges goes `ResolveFailed`). The export/import round trip of a record array with this ownership
 layout is `Jobs.IntegrationTests/DataPointRoundTripTests` in octo-bot-services.
 
-**`PipelineExecution.SealedCaller` (4.12.0, AB#7472).** One optional `String` attribute, `isRuntimeState: true`, holding the
+**`PipelineExecution.SealedCaller`.** One optional `String` attribute, `isRuntimeState: true`, holding the
 sealed envelope of the queued invoker (see "The queued invoker is sealed"). Additive MINOR; the seven `Caller*`
 attributes stay but are deprecated (neither written nor read). **Rollout:** the embedded-import guard brings 4.12.0 with
 the restarted controller; the controller needs `SecretEncryption` (key ring) to store an invoker. A work item that was
-queued before the upgrade has no valid `SealedCaller`: since AB#7473 it is **failed at lease grant** ("not queued by
+queued before the upgrade has no valid `SealedCaller`: it is **failed at lease grant** ("not queued by
 the controller"), not leased (see "Only executions the controller queued are leased"). Such items are rare (they wait
 only for a pool member); a re-run restores them, and no migration is possible because nothing proves an old value was
 written by the controller.

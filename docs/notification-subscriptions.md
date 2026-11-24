@@ -3,11 +3,11 @@ description: "Notification subscriptions: schedule, first run, cron and the noti
 applies_to: **/Notification*.cs
 ---
 
-### Notification Subscriptions — schedule and engine (AB#2585)
+### Notification Subscriptions — schedule and engine
 
 A `System.Notification/NotificationSubscription` (a SimpleRtQuery + a template, `Enabled` = Deployed) has one
 `NotificationPreference` per recipient (cron, time zone, Onwards / Catch up). This service owns WHEN; the
-mesh adapter's engine pipeline decides WHAT (see octo-mesh-adapter CLAUDE.md, `PrepareNotification@1`).
+mesh adapter's engine pipeline decides WHAT (see octo-mesh-adapter `AGENTS.md`, `PrepareNotification@1`).
 
 | Route | Policy | Behaviour |
 |---|---|---|
@@ -72,7 +72,7 @@ be scheduled; the rest are) → 503 plus one error event naming them (the tenant
 - SMTP follows the EnergyCommunity pattern: the pipeline names `serverConfiguration: EmailSender`, and an
   operator associates (`Uses`) the tenant's EMailSenderConfiguration of that name, then redeploys the DataFlow.
 - **Not routed through leases (yet).** Ticks go straight to the engine pipeline's queue, the way manual
-  adapters receive them. If an operator switches the default adapter to `LifecycleMode=Leased` (AB#4924),
+  adapters receive them. If an operator switches the default adapter to `LifecycleMode=Leased`,
   it has no process of its own and the ticks are not consumed - `TriggerManagementService` routes cron
   triggers of leased adapters through the lease queue, the notification schedule does not.
 

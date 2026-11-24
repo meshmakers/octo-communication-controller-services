@@ -3,9 +3,9 @@ description: "Pipeline service account: mandatory execution identity, provisioni
 applies_to: **/Services/PipelineServiceAccount*.cs, **/Options/ServiceAccount*.cs
 ---
 
-## Pipeline Service Account — mandatory execution identity (Epic AB#4979; AB#5027 phases 1 + 2)
+## Pipeline Service Account — mandatory execution identity (phases 1 + 2)
 
-**Background retry of failed provisioning (AB#8145).** The startup sweep (`EnsureTenantProvisionedAsync`) stays
+**Background retry of failed provisioning.** The startup sweep (`EnsureTenantProvisionedAsync`) stays
 single-shot: one `CreateIdentityDataCommandRequest` per adapter with a 30 s timeout. When identity restarts at the
 same time as the controller (a release) that request times out or has no route, and there is no further tenant load
 to repair it. `PipelineServiceAccountProvisioningService` (singleton) therefore remembers adapters that failed with
@@ -88,17 +88,15 @@ No SDK/wire change and no new DTO shape, hence no adapter/controller version ske
 **The adapter caches `GlobalConfiguration` at pipeline registration — changing the linked
 service account only takes effect after the pipeline / data flow is redeployed.**
 
-**Deploy guard** (`AdapterService.EnsurePipelineHasServiceAccountAsync`, modelled on the
-AB#4984 gate): called from `DeployPipelineAsync` and `DeployDataFlowAsync`, in both cases
+**Deploy guard** (`AdapterService.EnsurePipelineHasServiceAccountAsync`, modelled on the gate): called from `DeployPipelineAsync` and `DeployDataFlowAsync`, in both cases
 **before the first state write**, so a rejected deploy leaves nothing half-applied. It
 throws `AdapterServiceException.PipelineHasNoServiceAccount` — deliberately the same
-exception family as the AB#4984 gate (→ HTTP 404 in `PipelineController`, not 400): both
+exception family as the gate (→ HTTP 404 in `PipelineController`, not 400): both
 gates must surface identically in the Studio, which renders `ErrorResponse.ErrorMessage`
 regardless of status. The message names cause, work item, pipeline, adapter and **both**
 ways out (link the account on the adapter, or set a per-pipeline override).
 
-**Not guarded in `DeploymentSiteService.DeployWorkloadAsync`** (documented in place next to the
-AB#4984 lifecycle validation): that method also validates `Application`s, which execute no
+**Not guarded in `DeploymentSiteService.DeployWorkloadAsync`** (documented in place next to the lifecycle validation): that method also validates `Application`s, which execute no
 pipelines; the helm deploy of the adapter pod is the step that must succeed *before* a
 service account can be provisioned onto it, so gating it would be circular and would make
 every existing tenant's adapter undeployable ahead of the provisioning phase; and an
@@ -121,7 +119,7 @@ suites keep testing what they were written for; gate tests re-stub the repositor
 
 ### Phase 2 — provisioning (must ship together with phase 1)
 
-🔴 **Phase 1 alone bricks every tenant.** Before AB#5027 nothing on the platform created a client
+🔴 **Phase 1 alone bricks every tenant.** Before this work nothing on the platform created a client
 *secret*: dynamic client registration deliberately produces public clients
 (`RequireClientSecret=false`), the operator's `CreateSecret` paths are Kubernetes secrets, and client
 mirroring only copies. So without phase 2 the deploy guard refuses **every** pipeline deploy in
@@ -164,14 +162,14 @@ Constructor-injecting it fails DI validation at startup.
 
 **What the client looks like:** `AllowedGrantTypes = [client_credentials, on-behalf-of URN]`,
 `AllowedScopes = [octo_api, ai.llm.invoke]`, `RequireClientSecret = true`, `AllowOfflineAccess = false`.
-`ai.llm.invoke` (AB#9639, `Constants.LlmGatewayInvokeScope`) is the scope of the AI service's central-key LLM gateway: the
+`ai.llm.invoke` (`Constants.LlmGatewayInvokeScope`) is the scope of the AI service's central-key LLM gateway: the
 mesh adapter calls the gateway with the account's token, and a token carries the scope only when the adapter asks for it.
 It does not open the gateway by itself: the gateway still refuses every tenant without `KeySource=CentralKey`, a monthly
 cap and the central key in its configuration. No user-facing client gets the scope (identity's
 `System.Identity.Bootstrap` 1.10.0 registers it and grants it to none of its clients). The list is re-sent on every
 reconcile, so existing accounts get it on the next tenant start; the order towards identity does not matter (a scope
 identity does not know yet only fails a request that asks for it). The
-delegation URN (`Constants.OnBehalfOfGrantType`) is seeded **now** even though AB#5031 is not live:
+delegation URN (`Constants.OnBehalfOfGrantType`) is seeded **now** even though the delegation flow is not live:
 Duende gates its extension-grant validators on the client's own `AllowedGrantTypes`, so adding it
 later would mean touching every already-provisioned tenant.
 
@@ -196,7 +194,7 @@ The controller's own endpoints authorize on the **`octo_api` scope**, not on a r
 for the deploy calls a pipeline makes back into this service. It is granted anyway, because of what
 comes next.
 
-For the delegation case (AB#5031) the issued token carries the **intersection** of the service
+For the delegation case the issued token carries the **intersection** of the service
 account's roles and the calling user's roles. A service account without the tenant's *business* roles
 (e.g. the Accounting roles) therefore produces an **empty intersection** — and identity treats an
 empty intersection as a **success**, not an error: the token is issued, it simply carries no `role`
@@ -206,7 +204,7 @@ that returns nothing, a pipeline that "does nothing" — with **no error anywher
 So when you set up delegation for a tenant, grant the pipeline service account
 (`octo-pipeline-sa-{adapterRtId}`, one per adapter) the fachliche roles its pipelines must act
 under, on top of `CommunicationManagement` (and `StreamDataReader`, which the reconcile adds to every
-declarative account since AB#8563, see phase 8):
+declarative account, see phase 8):
 
 ```
 octo-cli AddClientToRole --clientId octo-pipeline-sa-<adapterRtId> --roleName <Role> --context <tenant>
@@ -235,7 +233,7 @@ event only when something changed, never throws), integration
 keeps exactly one edge despite the ZeroOrOne multiplicity, a different account replaces the edge).
 
 
-### Phase 3 — deliberate secret rotation (AB#5032)
+### Phase 3 — deliberate secret rotation
 
 Everything above is built to **never** rotate: a convergence pass re-sends the plaintext it already
 holds, because a service restart that invalidated every adapter's credential would be a

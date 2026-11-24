@@ -3,7 +3,7 @@ description: "Secret attributes in the controller: ciphertext handling and the S
 applies_to: **/Services/ConfigurationSecretSerializer.cs
 ---
 
-# Secret attributes in the Communication Controller (AB#5528 / AB#5537)
+# Secret attributes in the Communication Controller
 
 Concept: `octo-construction-kit-engine/docs/concept-secret-attribute-type.md`. This page covers what
 the controller does with `Secret` attributes (WP7): phase 2 (consumers handle ciphertext) and the
@@ -95,7 +95,7 @@ adapter authenticates with it. `IsSecretUsable(string?)` on a revealed value onl
 The impersonation-actor check additionally reveals a `LegacyPlaintext` value (strict mode rejecting
 legacy clear text makes it "not usable").
 
-## Service accounts and impersonation (decision 7, AB#5114)
+## Service accounts and impersonation
 
 * Reconcile reveals the stored secret before re-sending it. If it cannot be decrypted — no key
   ring, tampered, or its key id is not in the ring (`KeyMissing`, logged as an error naming the key
@@ -108,7 +108,7 @@ legacy clear text makes it "not usable").
   and a different client — the same strict check the switch uses. Then the reconcile issues no
   secret for it and the identity client receives a throwaway secret that is stored nowhere (a
   legacy clear-text seed placeholder reads as not set and is never sent as the client secret). If a single using adapter
-  cannot act as it, the reconcile issues and stores a fresh secret, as before AB#5114.
+  cannot act as it, the reconcile issues and stores a fresh secret, as before the grants model.
 * `POST {tenantId}/v1/serviceAccount/switchToImpersonation?apply=false&redeployDataFlows=true`
   (`IServiceAccountImpersonationSwitchService`): dry run by default, reports per account
   `WouldSwitch`, `Switched`, `SwitchedPendingInvalidation`, `AlreadyImpersonating`,
@@ -146,7 +146,7 @@ flag `OCTO_SERVICEACCOUNTIMPERSONATION__ALLOWSECRETCLEARING=true`, which is off 
 it the server answers 409.
 
 **What is missing for adapter-own accounts.** The adapter's own account (the `PipelineServiceAccount`
-edge) is the identity the pod logs in with (AB#5072: client id and secret travel in the Helm
+edge) is the identity the pod logs in with (client id and secret travel in the Helm
 values), and it is the actor of every impersonation. Clearing its secret would leave the adapter
 without any credential. Impersonation for these accounts needs an installation-level adapter
 credential that is not stored per tenant entity (for example an operator-issued or workload-identity
@@ -159,7 +159,7 @@ communication SDK or identity provides that today, so the switch skips these acc
 Minor version on the 4.x line (concept decision 2; 4.7.0 → 4.8.0), dependency `System-[2.5,3.0)`
 (decision 12). The switch was first prepared as 3.42.0; that version was never released (it exists
 on local tenants only) — the SECRET switch ships on the 4.x line as the next free minor after 4.7.0
-(4.6.0 carried the DeploymentSite line's status history, 4.7.0 is the AB#6312 `ownership: Secret` on
+(4.6.0 carried the DeploymentSite line's status history, 4.7.0 is the `ownership: Secret` on
 `Adapter.AdapterConfiguration`); at the time of writing that is 4.8.0 — `ckModel.yaml` is authoritative.
 
 | Attribute definition | Used by | Change |
@@ -185,7 +185,7 @@ it needs it. Mandatory → optional only relaxes the schema; no migration script
 holds the non-secret overrides (image tags, `publicUri`, `{{service.*}}` templates) that app
 blueprints seed and the Studio shows and edits. As a Secret they would be hidden, and the seed lint
 would reject the blueprints that seed them (MeshmakersAccounting.Host, EnergyCommunity.App,
-SmartMeterInsights.Base, voest-app). So `Value` stays String (now optional) and secret entries keep
+SmartMeterInsights.Base, a customer app). So `Value` stays String (now optional) and secret entries keep
 their value in `SecretValue`. `DeploymentSiteService` takes `SecretValue` for `IsSecret` entries and falls back
 to a legacy `Value` (`enc:v1` written through `encrypt-value`, deprecated), so existing entries keep
 deploying. `Path` is the record key (carry-over of an omitted `SecretValue` on update/replace): the

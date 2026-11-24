@@ -3,7 +3,7 @@ description: Offline reconciliation of adapters and deployment sites, and the of
 applies_to: **/BackgroundServices/*OfflineReconciliation*.cs
 ---
 
-### Adapter Offline Reconciliation (AB#4699)
+### Adapter Offline Reconciliation
 
 The rolling-upgrade race guard in `AdapterHub.OnDisconnectedAsync` skips the Offline
 write during the controller pod's own shutdown, on the premise that the adapter
@@ -44,7 +44,7 @@ on the state timestamp rejects a stale Offline that raced past a concurrent Onli
 Config: `CommunicationControllerOptions.AdapterOfflineReconciliationIntervalMinutes`
 (default 5) is the sweep cadence and the length of the quiet period after the last adapter
 connection (`Services/ReconciliationGrace`, cap 3 intervals from the start). A fixed delay from the
-controller start was too short on test-2 (AB#6418: cloud adapters reconnected 72 s after it) and wrote
+controller start was too short on a test environment (cloud adapters reconnected 72 s after it) and wrote
 live adapters Offline.
 
 Tests: `Services/AdapterConnectionTrackerTests` (track / compare-and-remove /
@@ -53,10 +53,10 @@ stale-disconnect-keeps-live / reconnect-then-stale-disconnect) and
 Online → Offline, live connection kept, non-Online skipped, missing CkTypeId skipped,
 mixed fleet, and the real Online-write-populates-tracker path).
 
-### Offline-write rule: prove it is gone — and heal a wrong Offline (AB#7056)
+### Offline-write rule: prove it is gone — and heal a wrong Offline
 
 **A pod writes Offline only for connections it can prove are gone, never for connections it merely does
-not hold.** "Single replica" is not "single pod": when a node is partitioned (NotReady, no SIGTERM, prod-1
+not hold.** "Single replica" is not "single pod": when a node is partitioned (NotReady, no SIGTERM, production
 2026-10-19) the Deployment starts a replacement while the old pod keeps running and sweeping. The adapters
 reconnect to the replacement and write Online there; the old pod's tracker no longer holds them, so its sweep
 (startup grace long over, `IShutdownState` never set) wrote Offline with the newer timestamp, which wins at
@@ -67,7 +67,7 @@ per new connection. A tracker / connection-manager miss means "not mine", not "g
   `DeploymentSiteService.ReconcileOrphanedOnlineDeploymentSitesAsync`): besides the miss, the persisted
   `CommunicationStateTimestamp` must be older than this process's start (no timestamp counts as old). An
   Online written before this process started has a writer that is gone, and every adapter that came back to
-  this pod has since written a newer one (AB#4699 / AB#6418 behaviour, grace and tests unchanged). An Online
+  this pod has since written a newer one (behaviour, grace and tests unchanged). An Online
   written while this pod was running belongs to another pod and is left alone (Debug log). No owner field in
   the model is needed. Limit: an Online written by a previous pod *after* this process started whose
   adapter then never reconnects anywhere cannot be proven from here and stays Online until it connects again.
@@ -96,7 +96,7 @@ interval after a start: its first snapshot follows once no adapter has connected
 registered for 30 s (`IsStartupSettled`), at the latest after the interval. Before, the workload-state
 alerts were blind for 5 minutes after every controller restart (they resolved because no data arrived).
 
-### Deployment Site Offline Reconciliation (AB#6418)
+### Deployment Site Offline Reconciliation
 
 Same problem, same fix as for adapters, for `DeploymentSite` entities. Operator ownership of a site
 lives only in memory (`OperatorConnectionManager._poolsByConnection`), the `CommunicationState` in
@@ -118,7 +118,7 @@ down, also in the middle of a sweep. A site that is claimed later turns `Online`
 
 Cloud sites after a controller restart: the central operator reconnects, `RegisterOperatorAsync`
 returns the deployed Cloud sites, the operator re-creates/keeps its CRs and re-claims them. **Do not
-assume this happens "within seconds"**: on test-2 (2026-10-10) both operators connected 6 minutes after
+assume this happens "within seconds"**: on a test environment (2026-10-10) both operators connected 6 minutes after
 the controller start (SignalR reconnect backoff) and the claims of 19 tenants took another 70 s. The first
 version of this sweep used a fixed 5 minute delay from the start and therefore wrote every Cloud site
 (and, through the adapter sweep, every Cloud Mesh Adapter) Offline shortly before its owner claimed it
@@ -142,7 +142,7 @@ edge operator (`AutoManageDeploymentSites=false`) gets an empty list — it neve
 list carries tenant ids and site rtIds of other tenants.
 
 Tests: `Services/DeploymentSiteServiceTests/ReconcileOrphanedOnlineDeploymentSitesAsyncTests`,
-`BackgroundServices/DeploymentSiteOfflineReconciliationTests` (the test-2 timeline: operator registers
+`BackgroundServices/DeploymentSiteOfflineReconciliationTests` (the test-environment timeline: operator registers
 372 s after the start, ticks before the quiet period is over do not write),
 `BackgroundServices/AdapterOfflineReconciliationTests`, `Services/ReconciliationGraceTests`,
 `Hubs/OperatorConnectionManagerTests`, `Hubs/OperatorHubTests/RegisterOperatorAsyncTests`.

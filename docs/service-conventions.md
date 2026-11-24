@@ -24,14 +24,14 @@ Configuration is bound to strongly-typed options classes:
 ```csharp
 // CommunicationControllerOptions
 public int PipelineExecutionRetentionDays { get; set; } = 3;     // Orphan hard-cap: unconditional delete (executions whose pipeline is gone)
-public int PipelineExecutionRetentionHours { get; set; } = 1;    // AB#4370: hours before terminal executions are folded into buckets + erased
+public int PipelineExecutionRetentionHours { get; set; } = 1;    // hours before terminal executions are folded into buckets + erased
 public int StatisticsUpdateIntervalMinutes { get; set; } = 60;   // Statistics aggregation interval
 public bool StoreInputData { get; set; } = false;                // Whether to store pipeline input data
 public int MaxInputDataLength { get; set; } = 10000;             // Max length of stored input data
 public int PipelineExecutionTimeoutHours { get; set; } = 24;     // Legacy connection-unaware timeout (no longer used by the reaper)
-public int PipelineExecutionStuckGraceMinutes { get; set; } = 15;         // AB#4280 grace before a stuck execution is failed
-public int PipelineExecutionStuckCheckIntervalMinutes { get; set; } = 5;  // AB#4280 reaper cadence
-public int WorkloadStateMetricsIntervalMinutes { get; set; } = 5;         // AB#5432 workload-state metrics sweep + startup grace
+public int PipelineExecutionStuckGraceMinutes { get; set; } = 15;         // grace before a stuck execution is failed
+public int PipelineExecutionStuckCheckIntervalMinutes { get; set; } = 5;  // reaper cadence
+public int WorkloadStateMetricsIntervalMinutes { get; set; } = 5;         // workload-state metrics sweep + startup grace
 ```
 
 ### Deployment State Management
@@ -105,7 +105,7 @@ Access tenant and adapter info from request context via extension methods in `Co
 Controllers are split by scope:
 - **System API** (`SystemApi/v1/Controllers/`): System-level, non-tenant operations. The
   `CommunicationController` here now only exposes `ping`; its `enable`/`disable` actions were
-  **removed (AB#4287)** — tenant enable/disable is tenant-scoped only. `DiagnosticsController`
+  **removed** — tenant enable/disable is tenant-scoped only. `DiagnosticsController`
   (system-scoped) still uses `SystemCommunicationApiPolicy`.
 - **Tenant API** (`TenantApi/v1/Controllers/`): Tenant-scoped operations for adapters, pools, pipelines, and tenant enable/disable
 
@@ -113,5 +113,5 @@ Routes follow pattern: `{tenantId:tenantId}/v{version:apiVersion}/[controller]`
 
 Tenant enable/disable lives **only** on the Tenant API:
 - `{tenantId}/v1/communication/enable` / `.../disable` (tenant read from route)
-- The legacy `system/v1/communication/enable?tenantId=X` variant no longer exists (AB#4287).
+- The legacy `system/v1/communication/enable?tenantId=X` variant no longer exists.
   The SDK dropped its `system/v1` fallback and now requires a tenant on the client options.

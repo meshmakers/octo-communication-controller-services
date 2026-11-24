@@ -5,8 +5,8 @@ background: true
 
 # E2E Smoke Test — CI/CD Workload Rollout
 
-This runbook validates the full Epic 3054 pipeline end-to-end on the
-`test-2` cluster — one adapter chart and one app chart rolled to every
+This runbook validates the full workload CI/CD rollout pipeline end-to-end on the
+the test cluster — one adapter chart and one app chart rolled to every
 tenant that uses them, plus a deliberate failure to confirm the per-
 workload isolation. **Manual**, not wired into CI. Run after non-trivial
 changes in any of the touched repos (controller `WorkloadController`,
@@ -49,25 +49,25 @@ mirror provisioning).
 
 | What | How to check |
 |---|---|
-| Epic 3054 Phase 1 (#4042–#4051) deployed on test-2 | Identity service version ≥ `0.1.<this-release>`; `RtClient.AutoProvisionInChildTenants` schema present (schema version 16) |
-| Epic 3054 Phase 2 (#4052) deployed | Communication Controller version with `WorkloadController` (`GET /workload?chartName=…` returns 200 / empty array, not 404) |
-| CI deploy client mirrored in every test-2 sub-tenant | `octo-cli -c GetClientMirrors -id ci-deploy-test-2` lists all expected sub-tenants |
-| Vault entries | `secret/meshmakers/test-2/octomesh` has `ci_deploy_client_id` + `ci_deploy_client_secret` |
-| ADO variable group `OctoWorkloadRollout` | Has `IDENTITY_URL_test-2` / `ASSET_URL_test-2` / `COMM_URL_test-2` |
+| Workload rollout Phase 1 deployed on a test environment | Identity service version ≥ `0.1.<this-release>`; `RtClient.AutoProvisionInChildTenants` schema present (schema version 16) |
+| Workload rollout Phase 2 deployed | Communication Controller version with `WorkloadController` (`GET /workload?chartName=…` returns 200 / empty array, not 404) |
+| CI deploy client mirrored in every test-environment sub-tenant | `octo-cli -c GetClientMirrors -id ci-deploy-<env>` lists all expected sub-tenants |
+| Vault entries | `secret/<org>/<env>/octomesh` has `ci_deploy_client_id` + `ci_deploy_client_secret` |
+| ADO variable group `OctoWorkloadRollout` | Has `IDENTITY_URL_<env>` / `ASSET_URL_<env>` / `COMM_URL_<env>` |
 | `octo-cli-CI` pipeline artifact `octo-cli-linux-x64` | Latest run on `main` published the zip (the deploy-workload template downloads from there) |
-| Per-chart wrappers imported in ADO | `deploy-adapter-chart-octo-mesh-adapter` and `deploy-app-energy-community` exist as ADO pipelines and have completed one successful manual run (required for ADO to activate resource triggers) |
-| At least one Adapter using `octo-mesh-adapter` chart in `acme` and `voest` test tenants | Studio: open each tenant → Adapters → confirm `ChartName=octo-mesh-adapter` |
-| At least one Application using `energy-community-app` chart in `acme` only | Studio: open `acme` → Applications → confirm `ChartName=energy-community-app`, `voest` has none |
+| Per-chart wrappers imported in ADO | `deploy-adapter-chart-octo-mesh-adapter` and `deploy-app-customer-app` exist as ADO pipelines and have completed one successful manual run (required for ADO to activate resource triggers) |
+| At least one Adapter using `octo-mesh-adapter` chart in `acme` and `beta` test tenants | Studio: open each tenant → Adapters → confirm `ChartName=octo-mesh-adapter` |
+| At least one Application using `customer-app` chart in `acme` only | Studio: open `acme` → Applications → confirm `ChartName=customer-app`, `beta` has none |
 
 ## Variables for this run
 
 ```bash
-export CLUSTER=test-2
+export CLUSTER=<env>
 export ADAPTER_CHART=octo-mesh-adapter
-export APP_CHART=energy-community-app
-export TENANTS_WITH_ADAPTER=(acme voest)        # both use the adapter
+export APP_CHART=customer-app
+export TENANTS_WITH_ADAPTER=(acme beta)        # both use the adapter
 export TENANTS_WITH_APP=(acme)                  # only acme uses the app
-export CONTROLLER_URL="https://comm.${CLUSTER}.mm.cloud"   # adjust if different
+export CONTROLLER_URL="https://comm.<cluster-domain>"   # adjust if different
 ```
 
 ## Step 1 — Adapter chart rollout (full happy path)
@@ -75,8 +75,8 @@ export CONTROLLER_URL="https://comm.${CLUSTER}.mm.cloud"   # adjust if different
 ### 1.1 — Snapshot the pre-state
 
 ```bash
-# kubectl context for test-2
-export KUBECONFIG=/path/to/test-2/kubeconfig
+# kubectl context for the target cluster
+export KUBECONFIG=/path/to/<env>/kubeconfig
 
 # Helm releases for the adapter chart, per tenant. Note the chart version.
 for t in ${TENANTS_WITH_ADAPTER[@]}; do
@@ -85,7 +85,7 @@ done
 ```
 
 Expect to see one release per tenant, e.g. `acme-mesh-adapter` and
-`voest-mesh-adapter`, each pinned to the **current** chart version. Note
+`beta-mesh-adapter`, each pinned to the **current** chart version. Note
 that version — it's the "before" baseline.
 
 ### 1.2 — Trigger the CI build
@@ -98,7 +98,7 @@ the chart version bump to appear in the Helm registry.
 
 In ADO open `deploy-adapter-chart-octo-mesh-adapter`. A new run should
 appear within ~30 s of `octo-mesh-adapter-CI` finishing (resource-pipeline
-trigger). On test-2 there's no approval gate — the rollout runs through
+trigger). On the test environment there's no approval gate — the rollout runs through
 automatically.
 
 In the run log, scroll to the `Roll octo-mesh-adapter -> …` step. Look for:
@@ -106,8 +106,8 @@ In the run log, scroll to the `Roll octo-mesh-adapter -> …` step. Look for:
 ```
 === Tenant: acme ===
   OK   acme / <rtId> -> <newVersion>
-=== Tenant: voest ===
-  OK   voest / <rtId> -> <newVersion>
+=== Tenant: beta ===
+  OK   beta / <rtId> -> <newVersion>
 === Tenant: octosystem ===
   no workloads for octo-mesh-adapter — skip
 ...
@@ -115,7 +115,7 @@ In the run log, scroll to the `Roll octo-mesh-adapter -> …` step. Look for:
 === Rollout summary ===
 Chart:    octo-mesh-adapter
 Version:  <newVersion>
-Cluster:  test-2
+Cluster:  <env>
 Rolled:   2 / 2
 ```
 
@@ -165,12 +165,12 @@ from the pre-rollout digest noted in 1.1.
 
 ### 2.1 — Trigger the CI build
 
-Re-queue `energy-community-CI` or push a no-op commit to its `main`. Wait
+Re-queue `customer-app-CI` or push a no-op commit to its `main`. Wait
 for the chart artifact.
 
 ### 2.2 — Watch the rolling pipeline
 
-ADO → `deploy-app-energy-community` → newest run. The summary should
+ADO → `deploy-app-customer-app` → newest run. The summary should
 report **only `acme` rolled**, every other tenant `no workloads … — skip`:
 
 ```
@@ -212,13 +212,13 @@ check is Helm's job at deploy time). The pipeline then fails at the
 ```
 === Tenant: acme ===
   FAIL acme / <rtId>
-=== Tenant: voest ===
-  FAIL voest / <rtId>
+=== Tenant: beta ===
+  FAIL beta / <rtId>
 
 === Rollout summary ===
 Rolled:   0 / 2
-Failed:   acme/<rtId> voest/<rtId>
-##vso[task.logissue type=error]2 workload(s) failed: acme/<rtId> voest/<rtId>
+Failed:   acme/<rtId> beta/<rtId>
+##vso[task.logissue type=error]2 workload(s) failed: acme/<rtId> beta/<rtId>
 ```
 
 The job exits 1, the ADO run is red. Crucially: **both tenants are
@@ -242,9 +242,9 @@ done
 ## Step 4 — Confirm Studio sees what CI did
 
 This is a sanity check that the source-of-truth-is-controller-DB decision
-(Epic 3054 concept doc) actually holds:
+(workload rollout concept doc) actually holds:
 
-1. Open Studio at `https://studio.test-2.mm.cloud/{tenant}/communication/adapters`
+1. Open Studio at `https://<studio-host>/{tenant}/communication/adapters`
 2. For an adapter that just got rolled: open it. The `Chart Version` field
    should match the version the pipeline rolled to.
 3. The event log under `repository/events` shows the `(source: CI/CD)`
@@ -274,13 +274,13 @@ octo-cli -c DeployWorkload -id <rtId>
 
 ## Sign-off
 
-The test passes when **all** of the following are true on test-2:
+The test passes when **all** of the following are true on a test environment:
 
 - [ ] Step 1 adapter rollout: ADO run green, both tenants `OK`, pod digests changed, event log entries present.
 - [ ] Step 2 app rollout: ADO run green, only `acme` rolled, others skipped silently.
 - [ ] Step 3 failure isolation: ADO run red with two `FAIL` lines but **both** tenants attempted; recovery roll afterwards succeeds.
 - [ ] Step 4 Studio shows the post-roll chart version on every affected workload.
 
-Save the ADO run URLs + a short note ("CI rollout E2E on test-2,
+Save the ADO run URLs + a short note ("CI rollout E2E on a test environment,
 <date>, passed") in `project-multi-tenant-client-credentials.md` memory
 so the next reviewer can see when this was last validated.

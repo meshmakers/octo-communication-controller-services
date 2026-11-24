@@ -5,7 +5,7 @@ background: true
 
 # Shared Adapter Leasing — Implementation Plan
 
-**Epic:** AB#4914 · **Work item:** AB#4924 · **Design:** [`shared-adapter-leasing.md`](shared-adapter-leasing.md)
+**Design:** [`shared-adapter-leasing.md`](shared-adapter-leasing.md)
 · **Status:** plan 2.0 (2026-09-14), increment 1 implemented against the reworked design
 
 This breaks the leasing design into increments that each ship and are each verifiable on
@@ -28,7 +28,7 @@ Repositories involved, all on `test/0.2-dev`:
 | `octo-mcp-service` | queue surface #3 |
 | `octo-ai-services`, `octo-adapter-loxone` | forced along by the major bump (§3) |
 | `octo-construction-kit-engine` + `-mongodb` | the `RenameAssociationRole` migration transform the role rename needs (§3.10) — **must ship first** |
-| `octo-construction-kit`, `meshmakers-app`, `demo-energy-iq` | seed/runtime data carrying the renamed `roleId` (§3.9) |
+| `octo-construction-kit`, the accounting app, `demo-energy-iq` | seed/runtime data carrying the renamed `roleId` (§3.9) |
 | `meshmakers-infrastructure` | the Dash0 check rules of increment 9 (§11.5) — alerting is Ansible-managed `PrometheusRule` CRDs, not application code |
 
 ### What changed between plan 1.0 and 2.0
@@ -150,7 +150,7 @@ data and the API, which is a worse comprehension trap than the one being fixed.
 
 | Element | File | Meaning |
 |---|---|---|
-| `LifecycleMode` `3 Leased` | `enums/lifecycleMode.yaml` | the **borrower's** mode and only ever that. `2 Auto` stays reserved (AB#4984). |
+| `LifecycleMode` `3 Leased` | `enums/lifecycleMode.yaml` | the **borrower's** mode and only ever that. `2 Auto` stays reserved. |
 | `PipelineExecutionStatus` `5 Queued` | `enums/pipelineExecutionStatus.yaml` | appended, never inserted — the keys are persisted on every entity. |
 | `AdapterSharingMode` (`NotShared` / `Descendants` / `DescendantsAndSiblings`) | `enums/adapterSharingMode.yaml` | on `AdapterPool.SharingMode`. Q10 kept `DescendantsAndSiblings` a distinct mode. |
 | `PoolScaleUpPolicy` (`QueueDepthOrWaitSeconds` / `QueueDepth` / `QueueWaitSeconds`) | `enums/poolScaleUpPolicy.yaml` *(new)* | Q14. Queue-driven, never CPU-driven. |
@@ -165,8 +165,7 @@ data and the API, which is a worse comprehension trap than the one being fixed.
 
 **`StartedAt` relaxed to optional** (Q5), with `LeaseGrantedAt` and `LeaseReleasedAt` added
 beside it. The alternatives were both worse: stamping `StartedAt` at enqueue makes it lie for
-the whole queue wait and gets the entry reaped, because it is the **age key** of both the
-AB#4280 stuck reaper and the AB#4280 orphan resolver; a separate queue entity contradicts
+the whole queue wait and gets the entry reaped, because it is the **age key** of both the stuck reaper and the orphan resolver; a separate queue entity contradicts
 §5's "one execution is one entity". Relaxation is only a *minor* change on its own — it is
 riding in 4.0.0 because the rename is what forces the major.
 
@@ -207,7 +206,7 @@ errors while `RtPool` still resolved.
 - CK model, clean: **0 warnings, 0 errors**; the compiled artifact carries `AdapterPool`, `DeploymentSite`, the `Hosts` role and `modelId: System.Communication-4.0.0`.
 - `Octo.CommunicationController.sln` (all projects incl. both test projects), clean: **0 warnings, 0 errors**.
 - `CommunicationControllerService.Tests`: **917 / 917 passed**, 0 skipped.
-- The AB#5187 ownership lint passes (it is a build warning source, and the build is warning-free).
+- The ownership lint passes (it is a build warning source, and the build is warning-free).
 - CK engine, the three changed projects built individually: **0 warnings, 0 errors**.
 
 🔴 **One caveat, stated rather than smoothed over.** The model build above was run with the
@@ -307,9 +306,9 @@ not live pins. They go stale rather than break.)
 Category A, by repo: `octo-communication-controller-services` 3 (2 service-managed + 1 dead
 sample), `octo-construction-kit` 4 (`Samples.Photovoltaics`, `Samples.PipelineBasics`,
 `Samples.Simulator.Energy`, `Samples.Simulator.EnergyCommunity`), `octo-office-integration` 1
-(`Office.ExcelImport`), `meshmakers-app` 2 (`MeshmakersAccounting`, `….Tesla`).
+(`Office.ExcelImport`), the accounting app 2 (`MeshmakersAccounting`, `….Tesla`).
 
-Category B is dominated by `meshmakers-app`: 28 files under `MeshmakersAccounting-1.0.0/seed-data/`
+Category B is dominated by the accounting app: 28 files under `MeshmakersAccounting-1.0.0/seed-data/`
 plus 2 under `….Tesla-1.0.0/`, then `octo-construction-kit` 5 and `octo-office-integration` 1.
 
 🔴 **Plan 1.0 said "no blueprint bump — the floors are satisfiability floors only". That was
@@ -363,14 +362,14 @@ There is also a NuGet-level coupling that fails in the same breath:
 `SystemAiCkModel.csproj:22` references `Meshmakers.Octo.ConstructionKit.Models.System.Communication`.
 
 **Loxone is the frozen-pin trap and it must move with the bump, not after it.** The pin was
-narrowed to exactly `[3.31,3.32)` by `499e55d "AB#5196 Fix: Pin Loxone-4.3.1 to
-System.Communication 3.31.0 for prod-1"`, reverting an earlier widening. It resolves to
+narrowed to exactly `[3.31,3.32)` by `499e55d "Fix: Pin Loxone-4.3.1 to
+System.Communication 3.31.0 for production"`, reverting an earlier widening. It resolves to
 3.31.0 today and is therefore *unaffected* by a 3.x bump — which is precisely what makes it
 dangerous here. `CkModelId` is name + version and `CkModelMigrationService` refuses to
 migrate across model names, so **one tenant holds exactly one version of `System.Communication`**.
-A prod-1 tenant running Loxone therefore cannot take 4.0.0 at all while the pin stands: the
+A production tenant running Loxone therefore cannot take 4.0.0 at all while the pin stands: the
 install compares versions exactly and finds 3.31.0 against 4.0.0. That is the same failure as
-AB#4696 / AB#4999 / AB#5196, for the third and fourth time.
+in earlier incidents, for the third and fourth time.
 
 Loxone's only structural coupling is one line —
 `ConstructionKit/attributes/control.yaml`, `valueCkRecordId: ${System.Communication}/DataPoint`
@@ -403,7 +402,7 @@ Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Com
 
 All of the above except the `octo-sdk` and operator halves has been applied in this pass and
 the repo builds and tests green. The `octo-sdk` / operator halves are left for their own
-increments because they need NuGet propagation and each repo's `CLAUDE.md` read first.
+increments because they need NuGet propagation and each repo's `AGENTS.md` read first.
 
 🔴 **`CommunicationCkTypeIds.Pool` is the one that will not announce itself.** Everything else
 is a compile error; this is a `const string` whose *value* is stale. Grep for it explicitly.
@@ -477,7 +476,7 @@ Measured 2026-09-14 across the whole checkout, the same way §3.1 was.
 | `octo-communication-controller-services` | blueprint seed-data `roleId:` | 2 | 2 |
 | `octo-communication-controller-services` | C# — **`CommunicationRepository.cs` only** | 1 | 4 |
 | `octo-construction-kit` | blueprint seed-data (`Samples.Photovoltaics/seed-data/adapters/modbus-edge.yaml`) | 1 | 1 |
-| `meshmakers-app` | blueprint seed-data (`MeshmakersAccounting-1.0.0/seed-data/configurations/adapter-and-app.yaml`) | 1 | 2 |
+| the accounting app | blueprint seed-data (`MeshmakersAccounting-1.0.0/seed-data/configurations/adapter-and-app.yaml`) | 1 | 2 |
 | `demo-energy-iq` | runtime-data YAML, octo-cli applied (`data/_general/rt-adapters-loxone.yaml`) | 1 | 1 |
 | `octo-frontend-refinery-studio` | hand-written `.graphql` queries | 5 | 6 |
 | `octo-frontend-refinery-studio` | hand-written TS components | 6 | 17 |
@@ -496,7 +495,7 @@ assumed:
 - **C# is one file.** `SystemCommunicationCkIds` is source-generated, so the rename produces exactly 4 compile errors, all in `CommunicationRepository.cs` (lines 43, 72, 232, 1180). ~35 other files match `Manages` in doc-comment prose ("Manages the …") and must be left alone.
 - **C# tests are zero.** No test references the role id; `RtEntityCreator` never wires the edge.
 
-`meshmakers-app`, `octo-frontend-libraries` and `octo-office-integration` have **no hand-written
+the accounting app, `octo-frontend-libraries` and `octo-office-integration` have **no hand-written
 consumers** — their hits are 100 % codegen. Only the Studio actually queries the association.
 
 ⚠️ Two pre-existing defects surface on the exact lines this rename touches. All four Studio
@@ -587,13 +586,13 @@ readability and leaves `roleId: …/Manages` in the data as a hidden alias.
 - **`rtWellKnownName: CommunicationPool` on the seeded entity stays.** It is identity, not display text: the service-managed blueprint re-applies against it, and renaming it would create a *second* deployment site on every provisioned tenant and orphan the adapters attached to the first.
 - **Documentation follows separately.** 66 genuine markdown files in `octo-documentation` (45 EN + 28 DE, ~15 of them generated from the CK model or CLI metadata), including the doc folder `docs/technologyGuide/communication/pools/` whose URL would need a redirect.
 - **The public REST route `{tenantId}/v1/pool`** comes from `[controller]` on `PoolController`. If the C# class is ever renamed, pin `[Route("pool")]` explicitly or accept a breaking API change. The same applies to the `octo-cli` commands `GetPools` / `DeployPool` / `UndeployPool` and the MCP tools `get_pools` / `undeploy_pool`, all user-facing.
-- **The GraphQL type renames itself.** `SystemDeploymentSite` is derived from the CkTypeId, so publishing 4.0.0 breaks ~66 frontend files across `octo-frontend-refinery-studio` (59), `octo-frontend-libraries` (5) and `meshmakers-app` (2) **without anyone editing the frontend**. Codegen must be re-run in the same train. This is the largest downstream surface in the whole rename and it is invisible from this repo.
+- **The GraphQL type renames itself.** `SystemDeploymentSite` is derived from the CkTypeId, so publishing 4.0.0 breaks ~66 frontend files across `octo-frontend-refinery-studio` (59), `octo-frontend-libraries` (5) and the accounting app (2) **without anyone editing the frontend**. Codegen must be re-run in the same train. This is the largest downstream surface in the whole rename and it is invisible from this repo.
   🔴 **Correction after doing it (§11a.2a):** "codegen must be re-run" understates the coupling.
   `octo-frontend-libraries` is not a parallel item, it is a **prerequisite** — the Studio's codegen
   imports its base types from `@meshmakers/octo-services`, and the library's `dist/` (not its
   sources) is what the Studio compiles against, so the library must be refreshed *and rebuilt*
   before the Studio compiles at all. Both repos must also be introspected from the **same** tenant.
-  `meshmakers-app` (2 files) is untouched so far and will break the same way.
+  the accounting app (2 files) is untouched so far and will break the same way.
 
 ---
 
@@ -616,7 +615,7 @@ Task<IReadOnlyCollection<string>> ResolveLendableTenantsAsync(string lenderTenan
 has no `Sdk.ServiceClient` reference and a background scheduler has no caller token to
 forward. It re-implements the same breadth-first walk in process over `ISystemContext` /
 `ITenantContext.GetDirectChildTenantsAsync(session)` + `TryGetChildTenantContextAsync`,
-copying the AB#5151 rules **verbatim**: a `visited` set seeded with the root (cycle guard),
+copying the rules **verbatim**: a `visited` set seeded with the root (cycle guard),
 and a child whose context cannot be resolved is listed but its subtree is not walked.
 Reference implementation to mirror: `octo-asset-repo-services/src/AssetRepositoryServices/
 TenantApi/v1/Controllers/TenantsController.cs`, `GetDescendants()`.
@@ -635,7 +634,7 @@ child listed but not walked, TTL cache invalidation.
 
 ### 4.2 Deploy validation
 
-`Services/PoolService.cs` → `EnsureWorkloadIsHelmDeployableAsync`, next to the AB#4984
+`Services/PoolService.cs` → `EnsureWorkloadIsHelmDeployableAsync`, next to the
 `LifecycleMode` block at line ~535:
 
 - `LifecycleMode == Leased` on a non-`RtAdapter` → reject (`WorkloadOnDemandNotSupportedForType` sibling).
@@ -651,7 +650,7 @@ child listed but not walked, TTL cache invalidation.
 
 New `PoolServiceException` factory methods, following the existing naming.
 
-`Services/AdapterService.cs` → the reverse direction, next to the AB#4984 pipeline gate in
+`Services/AdapterService.cs` → the reverse direction, next to the pipeline gate in
 `DeployPipelineAsync` / `DeployDataFlowAsync`: deploying a **process-bound** trigger to a
 `Leased` adapter is refused, exactly as it is for `OnDemand`
 (`Services/OnDemandCapabilityService` already classifies this; reuse it, do not duplicate
@@ -664,8 +663,8 @@ beats a workload that deploys and then never executes.
 ### 4.3 Read surface
 
 - `TenantApi/v1/Controllers/AdapterPoolController.cs` — CRUD over `AdapterPool`, mirroring `PoolController`'s shape.
-- `AdapterController`: `GET {tenantId}/v1/adapter/{adapterRtId}/lending` → the resolved lendable tenant list + effective mode + cap, `TenantCommunicationApiReadOnlyPolicy`. Mirrors the `serviceAccount/health` shape (AB#5112) so the surfaces have one pattern.
-- CLAUDE.md section.
+- `AdapterController`: `GET {tenantId}/v1/adapter/{adapterRtId}/lending` → the resolved lendable tenant list + effective mode + cap, `TenantCommunicationApiReadOnlyPolicy`. Mirrors the `serviceAccount/health` shape so the surfaces have one pattern.
+- AGENTS.md section.
 
 **Tests:** `Services/PoolServiceTests/DeployWorkloadLeasingValidationTests`,
 `Services/AdapterServiceTests/DeployPipelineLeasedGateTests`,
@@ -728,7 +727,7 @@ process-global tenant reads found in the dev checkout:
 | 1 | `octo-communication-sdk/src/Sdk.Adapters/AdapterOptions.cs` | 15, 44 | the property itself, defaulted to `"meshTest"` |
 | 2 | `octo-communication-sdk/src/Sdk.Adapters/AdapterBuilder.cs` | 158 | `AdapterHubClientOptions.TenantId` |
 | 3 | `octo-communication-sdk/src/Sdk.Common.Web/Sockets/WebAdapterBuilder.cs` | 112 | same, web host |
-| 4 | `octo-communication-sdk/src/Sdk.Adapters/ConfigureAdapterAuthenticatorOptions.cs` | 48 | `acr_values=tenant:{TenantId}` on the adapter's own token (AB#5072) |
+| 4 | `octo-communication-sdk/src/Sdk.Adapters/ConfigureAdapterAuthenticatorOptions.cs` | 48 | `acr_values=tenant:{TenantId}` on the adapter's own token |
 | 5 | `octo-communication-sdk/src/Sdk.Adapters/AdapterExecutionService.cs` | 124, 343, 503, 598, 643 | foreign-tenant callback filter, register/unregister, shutdown |
 | 6 | `octo-sdk/src/Sdk.ServiceClient/SignalRClient.cs` | 477–482 | **the hub URI itself**: `{endpoint}/{TenantId}/adapterHub`, and it throws when the tenant is blank |
 | 7 | `octo-mesh-adapter/src/MeshAdapter.Sdk/Configuration/DependencyInjection/ServiceCollectionExtensions.cs` | 160 | `CommunicationServiceClientOptions.TenantId` (the `DeployPipeline@1` node's client) |
@@ -754,7 +753,7 @@ Plus two singletons that hold tenant-derived *values* rather than the tenant id:
 3. 🔴 **Corrected during increment 6.** The method is `SignalRClient.BuildServiceUri()`, not
    `GetHubUri()`, and it is **already `protected virtual`** with a doc comment inviting exactly
    this override ("Override in subclasses to customize URL construction (e.g., for non-tenant-scoped
-   hubs)") — `OperatorHubClient` has overridden it for the tenant-free `/operatorHub` since AB#5059.
+   hubs)") — `OperatorHubClient` has overridden it for the tenant-free `/operatorHub` since the hub gates were added.
    So `octo-sdk`'s core needed no tenant-free variant at all: `AdapterPoolHubClient` overrides
    `BuildServiceUri` and the dedicated path keeps today's URI unchanged.
 4. **Per-lease scope**: a lease opens a DI scope; everything tenant-derived resolves from it.
@@ -797,7 +796,7 @@ A defect here is silent by nature, so verification cannot rest on review.
    `MemoryTarget`, run an interleave, assert the **rendered** output of tenant B's execution
    contains no occurrence of tenant A's id.
 8. **Identity assertion.** Assert the token presented during B's lease carries
-   `tenant_id=B` — not merely that a token exists. The AB#5077 failure mode (a token without
+   `tenant_id=B` — not merely that a token exists. The failure mode (a token without
    `acr_values` silently issued for the system tenant) is a 403 if you are lucky and a
    cross-tenant read if you are not.
 9. **Staged rollout.** Ship this increment with `IsPoolMember` always false, i.e. the entire
@@ -915,7 +914,7 @@ increment, not a follow-up.
 
 Concept §5, Q17. Two classes, `Interactive` before `Batch`, **within a tenant's turn only**.
 
-- **The descriptor contract gains a second capability.** `RequiresRunningProcess` (AB#4914 §5)
+- **The descriptor contract gains a second capability.** `RequiresRunningProcess` (on-demand lifecycle concept §5)
   is the precedent and the pattern: a property on the trigger-node descriptor, set by the SDK
   trigger-node implementations and picked up automatically by the reflection-based descriptor
   scan. No controller-side list of node names — future and third-party nodes self-describe.
@@ -983,11 +982,11 @@ So `PipelineExecutionClassService` carries `KnownInteractiveTriggerNames`, knowi
 descriptor always wins over it, and drift degrades to "classified Batch" — never to a wrong
 `Interactive`.
 
-⚠️ **The AB#4984 list it mirrors has a live gap.** `octo-adapter-loxone`'s `LoxonePollTrigger@1` is
+⚠️ **The list it mirrors has a live gap.** `octo-adapter-loxone`'s `LoxonePollTrigger@1` is
 process-bound, carries no `[NodeRequiresRunningProcess]` attribute, and is **absent from
 `KnownProcessBoundTriggerNames`** — so a workload whose only trigger is that node is currently
 classified on-demand capable and would be hibernated. `FromLoxoneStateChange` is in the list;
-`LoxonePollTrigger` was missed. That is an existing AB#4984 defect, not one this increment
+`LoxonePollTrigger` was missed. That is an existing defect of the process-bound trigger list, not one this increment
 introduces, and it deserves its own work item.
 
 ### 6.4 Where the class is *not* resolved
@@ -1085,7 +1084,7 @@ the rest of the wire contract — was available and rejected as more disruptive 
 
 Because an `AdapterPool` is **one workload with a replica range** (§13.2), the operator's
 1:1 workload ↔ helm release ↔ `RtDeployableWorkload` model is *preserved*. `MinReplicas` /
-`MaxReplicas` map to a replica count on one release, and the AB#4917 `ScaleWorkloadDto` verb
+`MaxReplicas` map to a replica count on one release, and the `ScaleWorkloadDto` verb
 that already exists is the scaling mechanism — no new deployment concept, and KEDA stays
 rejected for the same reasons as on the on-demand path (per-pipeline queue names churn, edge
 clusters would need KEDA installs).
@@ -1118,7 +1117,7 @@ to every replica, which is exactly Q15's "one sizing per pool".
 | Idle-watchdog exclusion | `WorkloadLifecycleWatchdogBackgroundService.SweepTenantAsync` |
 | Activator index scoping | `WorkloadHostnameIndex.RefreshAsync` |
 
-🔴 **The AB#4918 idle watchdog must not see pool members.** It drains a workload from *its own*
+🔴 **The idle watchdog must not see pool members.** It drains a workload from *its own*
 pipelines' `LastExecutionAt`, and a pool has no pipelines of its own — every pipeline it runs
 belongs to a borrower in a different tenant database. Left alone it would drain a healthy pool to
 zero, and the failure would look like a correctly working idle timeout. `AdapterPool` is excluded
@@ -1126,7 +1125,7 @@ explicitly, before the `LifecycleMode` filter, at every mode; `MinReplicas` + `I
 queue pressure own the lifecycle instead (concept §4a). This closes plan 1.0's Q7. See §7.5 for the
 `Waking` path, which that exclusion turned out to be the *only* thing guarding.
 
-🔴 **The `IdleTimeoutMinutes` half of that sentence was aspirational until AB#5256 (2026-09-28).**
+🔴 **The `IdleTimeoutMinutes` half of that sentence was aspirational until the idle-shrink window was implemented (2026-09-28).**
 Nothing read the attribute for a pool, so the exclusion left the pool with no shrink at all and a pool
 only ever grew — measured on the local kind cluster, two members days after the burst that created the
 second one, against an empty queue. It now lives in `LeaseSchedulerService.TryShrinkIdlePoolAsync`
@@ -1256,7 +1255,7 @@ lives.
   `IAdapterPoolHubCallbacks` (controller → adapter: `LeaseAsync(LeaseDto)`, `DrainAsync`).
   New DTOs under `DataTransferObjects/`.
 - 🔴 **A new hub, not `AdapterHub`.** `/{tenantId:tenantId}/adapterHub` (`Program.cs:371`) is
-  tenant-addressed, and `AdapterHubAuthorizationFilter` (AB#5063) exists precisely to bind a
+  tenant-addressed, and `AdapterHubAuthorizationFilter` exists precisely to bind a
   connection to its route tenant. A tenant-free adapter connection cannot use that route and
   must not weaken that filter. Mount `/adapterPoolHub` next to `/operatorHub`
   (`Program.cs:372`) with its own `AdapterPoolHubAuthorizationFilter`, staged
@@ -1266,14 +1265,14 @@ lives.
   lease, never from the connection. `SystemCommunicationApiPolicy` was rejected as too much
   authority for the job.
 - **Borrower identity — Q6 decided (b):** the lease carries the **borrower's own
-  `PipelineServiceAccount` credential** (AB#5027), scoped to the lease TTL and never persisted
+  `PipelineServiceAccount` credential**, scoped to the lease TTL and never persisted
   by the member. The member logs in and acts exactly as the borrower's own adapter would.
   RFC 8693 token exchange does **not** cover this case — see §13.5, which is unchanged and is
   what drove the decision.
 
   Concretely this means: the controller already holds these secrets (it provisions the account
   in `DeployWorkloadAsync`), so no new secret store is needed; the `LeaseDto` carries
-  `clientId` + `clientSecret`; and the AB#5027
+  `clientId` + `clientSecret`; and the
   `DeployWorkloadAsync_NeverWritesTheClientSecretToAnyLogTarget` pattern must be extended to
   the lease path, because a secret now travels over the hub as well as over the deploy path.
 - Controller: `Hubs/AdapterPoolHub.cs`, `Services/LeaseService` with a manual
@@ -1290,12 +1289,12 @@ of these exist, because each of them can only be written once a lease can be gra
 - a DI sweep on the **`octo-mesh-adapter`** side — the SDK-side sweep cannot see the adapter repo's own singletons, and that is where the caches are;
 - `EtlDataOrchestrator`'s `GetService` tolerance for a missing `IAdapterTenantScope` replaced by `GetRequiredService`.
 
-Skew rule, as for AB#4917: controller + `octo-sdk` + adapter SDK ship together, and both
+Skew rule, as for the scale verb: controller + `octo-sdk` + adapter SDK ship together, and both
 directions use the once-only `HubException` degrade pattern.
 
 **Tests:** `Hubs/AdapterPoolHubTests` (register, lease routed to the right connection, release,
 disconnect mid-lease, `IShutdownState` guard), `Hubs/AdapterPoolHubAuthorizationFilterTests`
-(the AB#5063 matrix), SDK-side lease/release scope tests, and a log-target test that the
+(the matrix), SDK-side lease/release scope tests, and a log-target test that the
 borrower credential never reaches a log.
 
 ### 8.1 What was actually built
@@ -1336,7 +1335,7 @@ becomes a question a test can answer by enumerating participants.
 
 1. **`SignalRClient.GetHubUri()` does not exist.** The method is `BuildServiceUri()`, it is already
    `protected virtual`, and its own doc comment invites this exact override — `OperatorHubClient`
-   has used it for the tenant-free `/operatorHub` since AB#5059. `octo-sdk`'s core therefore needed
+   has used it for the tenant-free `/operatorHub` since the hub gates were added. `octo-sdk`'s core therefore needed
    no change at all for the tenant-free URI. §5.2 item 3 and §13.6 are corrected.
 2. **The section lists three repos; the entry criteria require four.** The DI sweep is named for
    `octo-mesh-adapter`, and so are the CK-cache unload, the token holder and the pipeline registry —
@@ -1394,12 +1393,12 @@ would fail nowhere and enforce no lease at all.
 
 ## 8a. Increment 6b — the lease carries the borrower's DATABASE credential ✅ implemented
 
-**AB#4924.** Increment 6 gave the member the borrower's *identity*. It did not give it the
+Increment 6 gave the member the borrower's *identity*. It did not give it the
 borrower's *data*, and the gap was invisible because of how it was first exercised.
 
 **The evidence.** A mesh adapter opens MongoDB directly — `AddMongoDbRuntimeRepository()` in
 `MeshAdapter.Sdk`'s DI — and the first end-to-end lease run measured **128 MongoDB commands against
-`$db:"salzburgdev"`** during one lease. Meanwhile
+`$db:"borrowerdev"`** during one lease. Meanwhile
 `WorkloadReconciler.AppendClusterSecrets` refuses a pool the cluster's shared data-store
 credentials outright (`if (workloadType == WorkloadTypeDto.AdapterPool) receivesClusterSecrets =
 false;`), with the reasoning *"tenant-scoped data access arrives with the lease and leaves with
@@ -1425,7 +1424,7 @@ installation-wide today. The *authorisation* already is per tenant: `TenantConte
   come from the controller because the member cannot resolve `tenantId → database` without already
   holding the credential it is trying to install (see §8a.5). Carrying it is what lets the
   credential be installed for **one** database rather than for the process.
-- **AB#5255** is the follow-up that gives each database its own password. It changes only *where the
+- **The per-database-password follow-up** is the change that gives each database its own password. It changes only *where the
   password comes from* — one line in `TenantDatabaseCredentialResolver` — never the wire and never
   the member. Nothing on either side derives one value from the other, and
   `TenantDatabaseCredentialResolverTests` is what says so.
@@ -1437,7 +1436,7 @@ installation-wide today. The *authorisation* already is per tenant: `TenantConte
 | `octo-sdk/…/DataTransferObjects/LeaseDto.cs` | `DatabaseName`, `DatabaseUser`, `DatabasePassword`. `ToString` prints the two identities and **neither secret** — the `ClientSecret` precedent, extended rather than assumed to cover the new field. |
 | `octo-construction-kit-engine-mongodb/…/Configuration/ITenantDatabaseCredentialSource.cs` | The seam: *"the credential for **this** database, if you have one"*. Optional — `UserMongoRepositoryClient` resolves it with `GetService`, so every host that registers none is byte-for-byte unchanged. |
 | `…/Repositories/MongoDb/Generic/UserMongoRepositoryClient.cs` | Consults the source before falling back to `DatabaseUser`/`DatabaseUserPassword`. |
-| `octo-communication-controller-services/…/Services/TenantDatabaseCredentialResolver.cs` | Tenant record → database name; installation configuration → user format + password. The one line AB#5255 changes, and it says so at the assignment. |
+| `octo-communication-controller-services/…/Services/TenantDatabaseCredentialResolver.cs` | Tenant record → database name; installation configuration → user format + password. The one line that follow-up changes, and it says so at the assignment. |
 | `…/Services/LeaseService.cs` | Resolves the borrower's credential **after** the two consent checks (order of least trust) and fills the three fields. |
 | `…/Services/AdapterLeasingMetrics.cs` | `LeaseRefusalReason.BorrowerDatabaseCredentialUnresolvable` + its metric label. Distinct from `BorrowerCredentialMissing`: one is identity, the other is data access, and a dashboard that conflated them would send an operator to the wrong half of the system. |
 | `octo-mesh-adapter/…/Leasing/LeasedDatabaseCredentialSource.cs` | Holds one lease's credential, answers **only** for the database the lease named. |
@@ -1494,7 +1493,7 @@ rather than papered over:
 
 - it is why the lease carries the database **name** (the member cannot look it up without already
   holding the credential it is installing);
-- it is the second thing **AB#5255** makes separable — once each database has its own password, a
+- it is the second thing **the per-database-password follow-up** makes separable — once each database has its own password, a
   member can hold the *system* database's password without thereby holding every tenant's;
 - until then the honest statement is: **the lease now supplies all tenant *data* access; registry
   access is still installation-scoped.**
@@ -1512,7 +1511,7 @@ removed for Mongo.
 Consequence, accepted deliberately: **a leased pipeline that writes an archive fails to connect
 rather than reaching another tenant's schema.** That is the correct direction for the failure.
 Archive-writing pipelines stay on dedicated adapters until a per-tenant CrateDB user exists — the
-stream-data sibling of AB#5255. The seam is shaped so that adding it later touches
+stream-data sibling of the per-database-password follow-up. The seam is shaped so that adding it later touches
 `TenantDatabaseCredentialResolver`, two more lease fields and one more member-side participant, and
 nothing else. Recorded in three places so it cannot be rediscovered by accident: here, in the
 resolver's remarks, and in the `CrateDbConnectionAccess` entry of the mesh adapter's singleton
@@ -1545,7 +1544,7 @@ datasource user's password** to a value the member is not configured with. The m
 the installation-wide password — it needs it for the registry — so the *only* way its execution can
 read that tenant's marker is the credential the lease carried. Without the rotation the positive
 test would pass on a member that ignored the lease entirely, on every installation where the two
-values coincide, which is every installation today. It is also a live preview of AB#5255.
+values coincide, which is every installation today. It is also a live preview of the per-database-password follow-up.
 
 ---
 
@@ -1588,7 +1587,7 @@ second number is the scheduler's rotation cursor and exists only server-side —
 - Lease TTL + re-queue; on TTL expiry the previous attempt becomes `Interrupted` (existing status) and the member is **drained and restarted, not re-used**, because its post-lease cleanliness is unproven (concept §6).
 - `Repository/CommunicationRepository.cs` — `EnqueueExecutionAsync`, queue reads by `(tenant, status = Queued)` ordered by `QueuedAt` (the new index), and a per-tenant position query.
 - `BackgroundServices/` — a lease reaper on the `ExecutionCleanupBackgroundService` cadence.
-- 🔴 A `Queued` execution must be invisible to the AB#4280 stuck reaper (which fails stale non-`Online` work) and must not fold into `RtPipelineStatistics` before it runs. Both filters are `ExecutionStatus`-based and both need `Queued` named **explicitly**. The statistics half is already done (§3.5); the reaper half is this increment's. — 🔴 **Both halves of that sentence turned out to be wrong about the code; see §9.8.**
+- 🔴 A `Queued` execution must be invisible to the stuck reaper (which fails stale non-`Online` work) and must not fold into `RtPipelineStatistics` before it runs. Both filters are `ExecutionStatus`-based and both need `Queued` named **explicitly**. The statistics half is already done (§3.5); the reaper half is this increment's. — 🔴 **Both halves of that sentence turned out to be wrong about the code; see §9.8.**
 
 ### 9.4 Scale-up
 
@@ -1617,15 +1616,15 @@ pool exhaustion grows the queue rather than dropping work, `LeaseWaitMs` arithme
 |---|---|
 | `Services/LeaseSchedulerService` + `ILeaseSchedulerService` | one queue per pool, round-robin rotation with a per-pool cursor, `Interactive`-before-`Batch` inside a turn, `LendingMaxConcurrentLeasesPerTenant`, TTL reaper, queue-driven scale-up, the queue projection and the cancel verb |
 | `BackgroundServices/LeaseSchedulerBackgroundService` | the scheduling round, on `LeaseSchedulerIntervalSeconds` (default **5 s**) |
-| `BackgroundServices/ExecutionCleanupBackgroundService` | the **lease reaper**, on that service's existing cadence, next to the AB#4280 stuck reaper |
+| `BackgroundServices/ExecutionCleanupBackgroundService` | the **lease reaper**, on that service's existing cadence, next to the stuck reaper |
 | `Services/TriggerManagementService.StartExecutePipelineAsync` | a `Leased` adapter's work is created `Queued` with `QueuedAt` instead of being sent to the execute queue |
-| `Services/TriggerManagementService.UpdateScheduleAsync` + `Consumers/LeaseTriggerConsumer` | **AB#5278**: a cron trigger of a pipeline on a `Leased` adapter is scheduled onto the controller's durable `octo::com-controller::lease-trigger` queue (`LeaseTriggerMessage`) instead of the adapter's per-pipeline queue; the consumer turns every tick into a queued work item through `StartExecutePipelineAsync`, coalescing a tick whose previous run is still `Queued`. No adapter-side schedule and no co-wake for such pipelines. |
-| `Repository/QueuedCaller` + `Services/ExecutionEnvelope` + `Services/JwtExpiry` + `LeaseService.ResolveCaller` | **AB#5279** (sealed since AB#7472, model 4.12.0 — see the controller `CLAUDE.md`): the invoker of a queued work item is persisted on the `PipelineExecution` (seven optional runtime-state attributes, model 4.2.0), projected onto `QueuedExecution` / `LeaseRequest` / `LeaseDto`, token encrypted at rest and dropped at grant when expired; the mesh adapter's `LeaseCallerCarryThrough` applies it under the pipeline's `CallerBinding` rule. **AB#7473**: the same envelope is the provenance of the work item (sealed for every queued execution, also without a caller; pipeline and input are bound); `LeaseService.GrantLeaseAsync` fails an execution whose envelope does not open instead of leasing it |
-| `Services/WorkloadOnDemandCapabilityService.EvaluateForLeaseAsync` | **AB#5278**: the `Leased` gate — process-bound triggers plus the adapter-bound ones that cannot produce a lease (`FromHttpRequest` → AB#5258, `FromPipelineDataEvent` → AB#5231); used by `DeploymentSiteService` (workload deploy) and `AdapterService` (pipeline deploy) |
+| `Services/TriggerManagementService.UpdateScheduleAsync` + `Consumers/LeaseTriggerConsumer` | **Leased cron triggers**: a cron trigger of a pipeline on a `Leased` adapter is scheduled onto the controller's durable `octo::com-controller::lease-trigger` queue (`LeaseTriggerMessage`) instead of the adapter's per-pipeline queue; the consumer turns every tick into a queued work item through `StartExecutePipelineAsync`, coalescing a tick whose previous run is still `Queued`. No adapter-side schedule and no co-wake for such pipelines. |
+| `Repository/QueuedCaller` + `Services/ExecutionEnvelope` + `Services/JwtExpiry` + `LeaseService.ResolveCaller` | **Caller provenance** (sealed since model 4.12.0 — see the [queued invoker](../leasing-queued-invoker.md)): the invoker of a queued work item is persisted on the `PipelineExecution` (seven optional runtime-state attributes, model 4.2.0), projected onto `QueuedExecution` / `LeaseRequest` / `LeaseDto`, token encrypted at rest and dropped at grant when expired; the mesh adapter's `LeaseCallerCarryThrough` applies it under the pipeline's `CallerBinding` rule. **Queued provenance**: the same envelope is the provenance of the work item (sealed for every queued execution, also without a caller; pipeline and input are bound); `LeaseService.GrantLeaseAsync` fails an execution whose envelope does not open instead of leasing it |
+| `Services/WorkloadOnDemandCapabilityService.EvaluateForLeaseAsync` | **Leased gate**: the `Leased` gate — process-bound triggers plus the adapter-bound ones that cannot produce a lease (`FromHttpRequest`, `FromPipelineDataEvent`); used by `DeploymentSiteService` (workload deploy) and `AdapterService` (pipeline deploy) |
 | `Services/LeaseService` | `ApplyLeaseOutcomeAsync` (stamps `LeaseReleasedAt`, completes a still-`Running` execution), `InterruptAndRequeueAsync`, `DrainMemberAsync`, and the **admission gate** parameter on `GrantLeaseAsync` |
 | `Repository/CommunicationRepository` | `EnqueueExecutionAsync`, `GetQueuedExecutionsForAdapterAsync`, `GetQueuedExecutionPositionAsync`, `TryClaimQueuedExecutionAsync`, `TryCancelQueuedExecutionAsync`, `StampLeaseReleasedAsync`, `TryInterruptLeasedExecutionAsync`, `GetExecutionQueueEntryAsync` |
 | `TenantApi/v1/Controllers/AdapterPoolController` | `GET {tenantId}/v1/adapterPool/{id}/queue` and `DELETE …/queue/{executionId}` — the shared contract §10 asks for, built here |
-| `Options/CommunicationControllerOptions` | `LeaseSchedulerIntervalSeconds`, `LeaseTopologyRefreshSeconds`, `LeaseTtlMinutes`, `LeaseQueueReadLimitPerAdapter`, `LeaseScaleUpAveragingWindowSeconds`, `LeaseIdleShrinkWindowSeconds` (**AB#5256**, 0 = use the pool's own `IdleTimeoutMinutes`) |
+| `Options/CommunicationControllerOptions` | `LeaseSchedulerIntervalSeconds`, `LeaseTopologyRefreshSeconds`, `LeaseTtlMinutes`, `LeaseQueueReadLimitPerAdapter`, `LeaseScaleUpAveragingWindowSeconds`, `LeaseIdleShrinkWindowSeconds` (0 = use the pool's own `IdleTimeoutMinutes`) |
 
 **The admission gate is the shape of the increment.** `GrantLeaseAsync` gained an optional
 callback that runs **after** an idle member is reserved and **before** the lease is pushed to it.
@@ -1704,8 +1703,8 @@ step, two billing spans (concept §4b) and a queue history that no longer joins 
 
 **Why the configuration travels on the lease and is not pulled.** The projection
 (`AdapterService.CreatePipelineConfigurationAsync`) injects the adapter's default pipeline service
-account (AB#5027), projects the tenant's Signal channel (AB#5145) and resolves the deploy-time
-`{{service.authority}}` token (AB#5111). A member rebuilding that from the borrower's entities would
+account, projects the tenant's Signal channel and resolves the deploy-time
+`{{service.authority}}` token. A member rebuilding that from the borrower's entities would
 be a second implementation of a projection that already exists, free to drift from it silently.
 
 **What the work item does, and what it deliberately does not.** It resolves the tenant from
@@ -1721,7 +1720,7 @@ could not report one anyway — both report verbs take their tenant and adapter 
 connection*, and a pool member holds a tenant-free management channel instead.
 
 It also **awaits** the run rather than detaching it. A dedicated adapter detaches so the RabbitMQ ack
-is not held for the pipeline's duration (AB#4279); a lease is the opposite contract — the member holds
+is not held for the pipeline's duration; a lease is the opposite contract — the member holds
 the tenant until the work is done, and releasing while the pipeline still ran would hand the process
 to another tenant mid-execution.
 
@@ -1777,7 +1776,7 @@ limit was introduced, because there is no measurement yet that would justify pic
 | **M-M3** a lease naming a pipeline it does not carry succeeds quietly | `ALeaseNamingAPipelineItDoesNotCarryFailsRatherThanDoingNothing` |
 | **M-M4** the work item does not read the pipeline output | 2 work-item tests |
 | **M-M5** the work item is registered AFTER `AddAdapterPoolMember()` | 4 of the 5 work-item tests |
-| adding `LeasedPipelineWorkItem` without clearing it | both mesh-adapter DI sweeps — the AB#4924 sweep did its job unprompted |
+| adding `LeasedPipelineWorkItem` without clearing it | both mesh-adapter DI sweeps — the sweep did its job unprompted |
 
 ---
 
@@ -1953,7 +1952,7 @@ One static class, `Services/AdapterLeasingMetrics`, mirroring `WorkloadLifecycle
 through the scheduler, the lease service, the trigger service and the reaper would add wiring without
 adding a seam worth having.
 
-**Meter: `Meshmakers.Octo.Communication`** — the same meter AB#4919 uses, and therefore *already*
+**Meter: `Meshmakers.Octo.Communication`** — the same meter the workload lifecycle metrics use, and therefore *already*
 registered in octo-common-services' `ObservabilityBuilder`. Nothing had to be wired up for these to
 reach Prometheus, which is the whole reason for reusing it rather than opening a second meter.
 
@@ -1988,7 +1987,7 @@ with 1 as a single "201", which is precisely the displacement the design exists 
 this pool's own `ScaleUpQueueWaitSeconds`" and "the pool is already at `MaxReplicas`" live in two
 different places, and an alert rule joining them would be a second implementation of a judgement
 `EvaluateScaleUpAsync` already makes every round. Same shape, and the same reason, as
-`octo.workload.offline_unexpected` in AB#4919.
+`octo.workload.offline_unexpected` in the workload lifecycle metrics.
 
 **In-rate and out-rate, not just depth.** A depth gauge shows the level but not which way it is
 moving. `octo.lease.enqueued.count` against `octo.lease.granted.count` is the honest answer to "is
@@ -2000,7 +1999,7 @@ the two.
 Every series carries `octo.tenant.id` (the **borrowing** tenant, i.e. whose work it is),
 `octo.pool.tenant_id`, `octo.pool.rt_id` and `octo.pool.name`. Tenants are dozens per cluster and
 pools are a handful per lender, so the product is small and bounded. The borrower keeps the
-`octo.tenant.id` name the AB#4919 instruments already use, so a dashboard can put leasing and
+`octo.tenant.id` name the instruments already use, so a dashboard can put leasing and
 lifecycle side by side without a relabel.
 
 Deliberately **not** labels:
@@ -2065,7 +2064,7 @@ exceptional**:
 **They do not live in this repository, and they should not.** Alerting for this estate is Dash0 check
 rules managed as code: `PrometheusRule` CRDs (`monitoring.coreos.com/v1`) rendered from Jinja
 templates by Ansible in **`meshmakers-infrastructure`**, applied into the `octo` namespace and synced
-to the cluster's Dash0 dataset by the Dash0 operator. There is an exact precedent — AB#4919's
+to the cluster's Dash0 dataset by the Dash0 operator. There is an exact precedent — the workload lifecycle metrics'
 `octomesh-workload-lifecycle-rules.yaml.j2` thresholds application metrics from this very controller
 on this very meter.
 
@@ -2119,7 +2118,7 @@ CkCache-free path, because after a rename the source type no longer exists in th
 **fails**; treating "I could not check" as "it is fine" is the behaviour being removed.
 
 🔴 **A dry run reported nothing.** §14 wave 2 says to dry-run the migration against a copy of a
-prod-1 tenant database "asserting that entity counts survive", against output that carried no counts:
+production tenant database "asserting that entity counts survive", against output that carried no counts:
 `ExecuteScriptStepAsync` short-circuited to `(true, 0, 0, 0, null)` and logged "Would execute step X
 with action Y". It now reads the entities the step targets and logs how many it would affect. The
 result counters stay **zero** on purpose — they mean "entities this run changed", and filling them
@@ -2265,7 +2264,7 @@ waits; everything reading a controller REST endpoint does not.
 
 | What | Endpoint | Why it matters |
 |---|---|---|
-| Per-tenant **communication lifecycle** surface: scale-to-zero (AB#4914) *and* leasing (AB#4924), read and write | `GET` / `PUT {tenantId}/v1/communication/lifecycle` | This screen does **not exist today in any form** — scale-to-zero has never had one either. Both are the per-tenant emergency stops, and an emergency stop that lives only in `octo-cli` is not one when it is needed. The PUT replaces the whole record, so the UI must read-modify-write; sending one flag alone silently resets the other, which is the trap `octo-cli` already had to fix. |
+| Per-tenant **communication lifecycle** surface: scale-to-zero *and* leasing, read and write | `GET` / `PUT {tenantId}/v1/communication/lifecycle` | This screen does **not exist today in any form** — scale-to-zero has never had one either. Both are the per-tenant emergency stops, and an emergency stop that lives only in `octo-cli` is not one when it is needed. The PUT replaces the whole record, so the UI must read-modify-write; sending one flag alone silently resets the other, which is the trap `octo-cli` already had to fix. |
 | **Pool members** of an adapter pool | `GET {tenantId}/v1/adapterPool/{id}/members` | Which members exist, which is draining, which holds a lease. The queue panel shows work; this shows the capacity serving it, and the two questions are asked together. |
 
 Part A must also state, in the UI itself, that leasing needs the flag on **both** the lending and
@@ -2322,7 +2321,7 @@ second pool-ish concept appeared.
 
 **Schema refresh is the whole prerequisite, and it needs a live 4.0.0 tenant.** `codegen.yml` reads
 `schema: - schema.graphql`, a checked-in *generated* file, so `npm run codegen` needs no server — but
-the schema file does. It was refreshed by introspecting `https://localhost:5001/tenants/meshtest/graphQL`
+the schema file does. It was refreshed by introspecting `https://localhost:5001/tenants/<tenant>/graphQL`
 on a `Start-Octo` stack from the `dev` checkout, verified first with
 `{ runtime { systemCommunicationDeploymentSite { totalCount } } }` (answered; `systemDeploymentSite`
 answered HTTP 400, i.e. the field no longer exists). Counts in the Studio's `schema.graphql`:
@@ -2407,8 +2406,8 @@ holding an open `/{tenantId}/adapterHub` connection. A leased adapter never has 
 ### 11b.1 🔴 The 404 was the symptom; the missing gates were the defect
 
 Look at what the method does *before* it pushes anything, in order: `ValidatePipelineDefinition`,
-`EnsurePipelineIsOnDemandCompatible` (AB#4984), `EnsurePipelineHasServiceAccountAsync` (AB#5027),
-`EnsurePipelineElevationAuthorizedAsync` (AB#5128 — authorizes privilege elevation), then
+`EnsurePipelineIsOnDemandCompatible`, `EnsurePipelineHasServiceAccountAsync`,
+`EnsurePipelineElevationAuthorizedAsync` (authorizes privilege elevation), then
 `SetPipelineDefinitionAsync` with the resolved `ExecutionClass`, the `SendsDataTo` sync and the
 deprecated-node warnings.
 
@@ -2442,7 +2441,7 @@ channel would create a second source of truth for no gain.
 
 ### 11b.3 The three judgement calls, answered explicitly
 
-**The AB#4918 wake gate is skipped, deliberately.** `EnsureWorkloadRunningAsync` was already a no-op
+**The wake gate is skipped, deliberately.** `EnsureWorkloadRunningAsync` was already a no-op
 for a leased adapter — but only *by accident*, because `Leased != OnDemand`. That is a coincidence of
 a mode check, not a decision. It is now an explicit branch with a reason: a `Leased` adapter has no
 workload of its own to wake, and the pool it borrows from is a **different tenant's** workload. Waking
@@ -2542,9 +2541,9 @@ Every test below was watched go red under the named mutation and green again aft
 | Mutation | Tests it turns red |
 |---|---|
 | **M-D1** `AdapterNodeCapabilityService` drops the `Leased` branch (falls through to the adapter cache) | `PersistsTheDefinitionAndThePoolResolvedExecutionClass`, `RedeployWithoutADefinition_ReResolvesTheClassFromThePool`, `ValidatesTheDefinitionAgainstThePoolsSchema`, `IgnoresAStaleAdapterCacheEntryOfItsOwn` |
-| **M-D2** the AB#5128 elevation gate is removed from the shared half | `ElevatedNode_UnauthorizedCaller_IsRejectedBeforeAnyWrite` |
+| **M-D2** the elevation gate is removed from the shared half | `ElevatedNode_UnauthorizedCaller_IsRejectedBeforeAnyWrite` |
 | **M-D2b** the elevation gate refuses *everything* | `ElevatedNode_AuthorizedCaller_IsAccepted` |
-| **M-D3** the AB#5027 service-account gate is removed | `WithoutAServiceAccount_IsRejected` |
+| **M-D3** the service-account gate is removed | `WithoutAServiceAccount_IsRejected` |
 | **M-D4** the process-bound gate goes back to `OnDemand` only | `WithAProcessBoundTrigger_IsRejected` |
 | **M-D5** the leased branch pushes a configuration anyway | `PushesNothing`, `IgnoresAStaleAdapterCacheEntryOfItsOwn` |
 | **M-D6** every adapter is treated as leased | `DedicatedAdapter_StillPushes`, `DedicatedAdapter_StillRunsTheWakeGate` |
@@ -2637,7 +2636,7 @@ trigger context would report an execution start, and that path inserts rather th
 §14 put `LeasingEnabled` under Rollout and increment 9 owned "per-tenant enablement". With increment 7
 merged, a tenant that owns an `AdapterPool` and a `Leased` adapter starts being scheduled the moment
 the controller rolls out, with no way to stop it short of a redeploy — and a kill switch that arrives
-after the thing it switches off is not a kill switch. Built on the existing AB#4914
+after the thing it switches off is not a kill switch. Built on the existing on-demand lifecycle
 `communicationLifecycle` record rather than as a second mechanism. See §14.
 
 ---
@@ -2684,16 +2683,16 @@ members are **replicas of it**, not separate `Adapter` entities:
 
 - `Leased` stays unambiguously the **borrower's** mode, set on `Adapter`, exactly as §2 defines it.
 - `MinReplicas` / `MaxReplicas` are a replica range of one Helm release, which the operator already supports (§7.2) — so the concept's claim that the operator's model must break is only *half* true: the 1:1 workload↔release assumption survives, and only the one-workload-per-tenant-namespace assumption from §4b actually has to break.
-- Members need no author configuration, no entity and no lifecycle of their own, which is what §4a wanted in the first place ("the pool owns its members' lifecycle, not the AB#4918 idle watchdog").
+- Members need no author configuration, no entity and no lifecycle of their own, which is what §4a wanted in the first place ("the pool owns its members' lifecycle, not the idle watchdog").
 
 §4a's sentence should be corrected in the concept rather than reinterpreted by each reader.
 
 ### 13.3 "resolved through the existing `GET /tenants/descendants`" (§3) — the controller cannot call it
 
 `CommunicationControllerServices.csproj` has no `Meshmakers.Octo.Sdk.ServiceClient` reference
-(deliberately — see the AB#5027 phase-2 rationale in CLAUDE.md), and the endpoint is
+(deliberately — see the phase-2 rationale in AGENTS.md), and the endpoint is
 `Authorize`d with the asset repository's tenant read-only policy, so a call needs a bearer
-token. The AB#5112 precedent (`IIdentityClientReader`) forwards the *caller's* token — a
+token. The precedent (`IIdentityClientReader`) forwards the *caller's* token — a
 lease scheduler has no caller.
 
 It does not need the HTTP call. `GetDescendants()` is a pure `ITenantContext` walk over
@@ -2712,7 +2711,7 @@ line 2554). There is no repository cache to make lease-scoped.
 
 What *is* process-wide:
 
-- **`ICkCacheService`** — the CK model cache, keyed by tenant, shared across the process. It is **isolation-safe by construction** (a lookup is by tenant id), so the risk is memory, not leakage: a pool member that leases 30 tenants holds 30 tenant models. The AB#4920 eager warm-up is per tenant and cannot stay warm across leases. `ICkCacheService.Unload(tenantId)` on release is the lever, and `MeshAdapterService` already calls it on `CkModelChanged`, so the mechanism exists.
+- **`ICkCacheService`** — the CK model cache, keyed by tenant, shared across the process. It is **isolation-safe by construction** (a lookup is by tenant id), so the risk is memory, not leakage: a pool member that leases 30 tenants holds 30 tenant models. The eager warm-up is per tenant and cannot stay warm across leases. `ICkCacheService.Unload(tenantId)` on release is the lever, and `MeshAdapterService` already calls it on `CkModelChanged`, so the mechanism exists.
 - Three `static ConcurrentDictionary` guards in `TenantContext` (`_serviceManagedCkModelsAttempted`, `_ownershipStampAttempted`, `_streamDataAutoImportAttempted`) — all keyed by tenant, so again safe but unbounded.
 
 So the concept's conclusion ("that cache must become lease-scoped or be dropped on release")
@@ -2723,7 +2722,7 @@ invariant is already satisfied.
 ### 13.5 The token exchange originally named in §7 does not cover a service identity
 
 The concept has since been corrected in §4 and Q6, but §7's bullet list still says
-"AB#4338 RFC 8693 token exchange — the mechanism for acquiring the target-tenant token", which
+"RFC 8693 token exchange — the mechanism for acquiring the target-tenant token", which
 is now stale and contradicts §4 two pages earlier.
 
 The finding stands: RFC 8693 exchange **is** live in identity
@@ -2741,7 +2740,7 @@ credential) is the right resolution; §7's bullet should be updated to match.
 `GetHubUri` in earlier drafts of this plan, corrected during increment 6), which
 *throws* `ServiceConfigurationMissingException` when `Options.TenantId` is blank, both make a
 tenant-free adapter connection impossible on the existing route — and
-`AdapterHubAuthorizationFilter` (AB#5063) exists to enforce exactly that binding. §4's "one
+`AdapterHubAuthorizationFilter` exists to enforce exactly that binding. §4's "one
 management connection per adapter process, not bound to a tenant" therefore means a **new
 hub**, which is more work than the sentence suggests. Q4 has since decided its policy; the
 structural point is unchanged.
@@ -2750,15 +2749,15 @@ structural point is unchanged.
 
 - "The node layer is already prepared" — confirmed. `MeshContextCreatorService` resolves per registration, `PipelineRegistryService` is keyed `(tenantId, …)`, `ServiceAccountTokenService`'s token cache is keyed `(TenantId, ClientId)`, and every `CallerBinding` lookup takes a tenant parameter.
 - "`AdapterOptions.TenantId` must be **removed**, not ignored" — confirmed as the only workable approach; the nine sites in §5.1 are exactly what the compiler will surface.
-- The warm-up-cost argument for keeping both modes — confirmed by the AB#4920 measurement already in the on-demand concept (adapter boot 13 s → 4.2 s, warm-up ~1.5 s): per-lease that is real, at 4089 executions/h it is prohibitive.
-- Q5's reasoning about `StartedAt` — confirmed against the code. It really is the age key of both AB#4280 reapers, and stamping it at enqueue really would get a long-waiting queue entry reaped.
+- The warm-up-cost argument for keeping both modes — confirmed by the measurement already in the on-demand concept (adapter boot 13 s → 4.2 s, warm-up ~1.5 s): per-lease that is real, at 4089 executions/h it is prohibitive.
+- Q5's reasoning about `StartedAt` — confirmed against the code. It really is the age key of both reapers (stuck reaper and orphan resolver), and stamping it at enqueue really would get a long-waiting queue entry reaped.
 - Q16's judgement that two things called "Pool" is a hazard — confirmed the moment `AdapterPool` was added next to `Pool` in the same model.
 
 ---
 
 ## 14. Rollout
 
-Leasing is gated the same way scale-to-zero is (AB#4916): the per-tenant `communicationLifecycle`
+Leasing is gated the same way scale-to-zero is: the per-tenant `communicationLifecycle`
 configuration record read through `ILifecycleConfigurationService`, extended with `LeasingEnabled`
 (default **false**), so an emergency stop stays an octo-cli one-liner per tenant and no release is
 needed to turn it off. Both the lender and the borrower tenant must have it on.
@@ -2771,14 +2770,14 @@ that owns an `AdapterPool` and a `Leased` adapter starts being scheduled the mom
 rolls out — and the only way to stop it would have been a redeploy. A kill switch that arrives after
 the thing it switches off is not a kill switch.
 
-It extends the **existing** AB#4914 mechanism rather than adding a second one: the same tenant
+It extends the **existing** on-demand lifecycle mechanism rather than adding a second one: the same tenant
 key-value record under `Constants.CommunicationLifecycleConfigurationKey`, the same
 `ILifecycleConfigurationService` with its 30 s TTL and its invalidate-on-write, the same
 `GET`/`PUT {tenantId}/v1/communication/lifecycle`, the same `octo-cli` verbs.
 
 | Where | What |
 |---|---|
-| `CommunicationLifecycleConfiguration` | `LeasingEnabled`, default **false**; a record written before AB#4924 deserializes to false, so the estate stays off without a migration |
+| `CommunicationLifecycleConfiguration` | `LeasingEnabled`, default **false**; a record written before leasing existed deserializes to false, so the estate stays off without a migration |
 | `ILifecycleConfigurationService` | `IsLeasingEnabledAsync(tenantId)`, mirroring `IsScaleToZeroEnabledAsync` |
 | `CommunicationLifecycleDto` | second positional parameter, **defaulted**, so the five existing construction sites keep compiling |
 | `octo-cli` | `SetCommunicationLifecycle -le <true\|false>`, `GetCommunicationLifecycle` prints both |
@@ -2814,7 +2813,7 @@ than to whoever flipped the switch. Holding is the only one of the three that is
 
 **One caveat, inherited rather than introduced:** the read is cached for 30 s, so a switch flipped off
 stops granting within half a minute rather than instantly. That is the same window scale-to-zero has
-lived with since AB#4916, and a lease already granted was always going to run to its end.
+lived with since the lifecycle mode was introduced, and a lease already granted was always going to run to its end.
 
 **The mutations that prove it:** **M-C2** (grant gate removed → 3 `LeasingEnabledGateTests`),
 **M-C4b** (enqueue gate always passes → `LeasedAdapterEnqueueTests`), **M-C5** (`LeasingEnabled`
@@ -2825,11 +2824,11 @@ two "leaves the other flag untouched" tests), **M-L2** (the empty command line w
 **Wave order:**
 
 1. **The CK engine change first** (§3.10), through the core-libs train. Nothing else in increment 1 compiles until it is published.
-2. **Increment 1 as its own train.** The major bump moves 8 repos and every blueprint in the estate; it must not be entangled with feature work. Validate after `git clean -xfd` (§3.7), and dry-run the migration against a **copy** of a prod-1 tenant database before the train, asserting that entity counts survive, that no `Pool` entity remains, and — the one nothing validates automatically — that the number of `Hosts` edges after equals the number of `Manages` edges before.
+2. **Increment 1 as its own train.** The major bump moves 8 repos and every blueprint in the estate; it must not be entangled with feature work. Validate after `git clean -xfd` (§3.7), and dry-run the migration against a **copy** of a production tenant database before the train, asserting that entity counts survive, that no `Pool` entity remains, and — the one nothing validates automatically — that the number of `Hosts` edges after equals the number of `Manages` edges before.
 3. **Increment 3 alone for one release across the whole fleet** — single-tenant, proves the refactor.
 4. Increments 2, 4, 5, 6 in dependency order.
-5. A `meshdev` two-tenant lease on test-2.
-6. One low-traffic prod-1 tenant pair.
+5. A two-tenant lease on a test environment.
+6. One low-traffic production tenant pair.
 
 `energyiq` never participates: 4089 executions/h is exactly the load the dedicated mode exists
 for.

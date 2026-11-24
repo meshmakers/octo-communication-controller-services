@@ -24,7 +24,7 @@ Adapters report execution lifecycle via SignalR:
 - `ReportInterruptedExecutionResultAsync(PipelineExecutionEndDto)` - Reports final status after reconnect
 - `GetInterruptedExecutionIdsAsync()` - Gets IDs of executions interrupted by disconnect
 - `ReportPipelineStatusAsync(PipelineStatusReportDto)` - Writes the status line a trigger node
-  reported after a poll (AB#5385) to that pipeline's live `StatusMessage` — and ONLY that
+  reported after a poll to that pipeline's live `StatusMessage` — and ONLY that
   attribute: `AdapterService.ReportPipelineStatusAsync` → `CommunicationRepository.
   SetPipelineStatusMessageAsync`, deliberately not `SetPipelineDeploymentStateAsync`, whose
   `ApplyDeploymentErrorTracking` would clear a `LastDeploymentError` the operator is still looking
@@ -45,7 +45,7 @@ When an adapter disconnects unexpectedly:
 2. On reconnect, adapter can query interrupted execution IDs
 3. Adapter reports final status via `ReportInterruptedExecutionResultAsync`
 
-### Execution Durability Across Adapter Restart (AB#4280)
+### Execution Durability Across Adapter Restart
 
 A pipeline execution runs as an in-memory `Task.Run` inside the adapter runtime
 (`AdapterTriggerContext.StartExecutePipelineAsync`, octo-communication-sdk); its state is
@@ -60,7 +60,7 @@ mechanisms guarantee this:
    `IShutdownState.IsShuttingDown` guard deliberately skips this during a **controller**
    rolling-upgrade: there the adapter is not gone, it is reconnecting to a surviving controller
    pod with its live tasks intact, so marking its executions `Interrupted` would be a false
-   positive. (This is why AB#4280 does **not** touch the shutdown guard.)
+   positive. (This is why the stuck reaper does **not** touch the shutdown guard.)
 
 2. **Fresh-startup orphan resolution** (`IAdapterHub.FailOrphanedExecutionsAsync(processStartUtc)`
    → `PipelineExecutionService.FailOrphanedExecutionsForAdapterAsync` →
@@ -86,7 +86,7 @@ SDK safety net: `AdapterExecutionService.GetLocalExecutionStatus` returns `Faile
 optimistic `Completed`) when an interrupted execution cannot be found in the local registry — an
 execution interrupted mid-flight must never be recorded as a success.
 
-#### 🔴 A LEASED execution is exempt from the reaper while its lease can be live (AB#5326)
+#### 🔴 A LEASED execution is exempt from the reaper while its lease can be live
 
 Mechanism 3 spares a `Running` execution only while its adapter is `Online`, and the comment beside
 it says why: *"a long-running pipeline on a connected adapter must never be failed by the reaper,
@@ -121,11 +121,10 @@ iteration (stuck reaper first, lease reaper second).
 
 Integration coverage lives in
 `tests/CommunicationControllerServices.IntegrationTests/Repository/FailStuckAndOrphanedExecutionsTests.cs`
-(connection-aware sparing of live long-runners; adapter-scoped pre-start orphan resolution; the
-AB#5326 leased exemption, arranged so both executions hang off a non-Online adapter and only the age
+(connection-aware sparing of live long-runners; adapter-scoped pre-start orphan resolution; the leased exemption, arranged so both executions hang off a non-Online adapter and only the age
 of the lease separates them; and that a finished execution is never overwritten).
 
-### Hourly Statistics Buckets + Execution Fold (AB#4370)
+### Hourly Statistics Buckets + Execution Fold
 
 Per-execution entities do not scale for high-frequency event pipelines (a Loxone
 state-change pipeline produced ~300k executions/day; the 3-day retention window held
@@ -143,7 +142,7 @@ data-flow page). Executions are telemetry — `RtPipelineStatistics` is the dura
   (`DeleteExecutionsAsync`, `DeleteOptions.Erase`). Fold set == delete set, so nothing is
   double-counted or lost; a crash between upsert and delete double-counts at most one
   batch. Running executions are never drained regardless of age (protects long-running
-  ETL pipelines — same contract as the AB#4280 reaper).
+  ETL pipelines — same contract as the reaper).
 - **Window recompute** (`UpdateStatisticsAsync`): sliding windows (1h/12h/24h/30d) =
   bucket sums (`PipelineStatisticsFolder.SumBuckets`) + a live scan over the still-retained
   executions. The two sources are disjoint by construction. Buckets older than 30 days are
@@ -159,8 +158,8 @@ data-flow page). Executions are telemetry — `RtPipelineStatistics` is the dura
 | Service | Interval | Description |
 |---------|----------|-------------|
 | `PipelineExecutionReportProcessor` | Continuous | Drains execution reports from Channel in batches, bulk-inserts starts and bulk-updates completions |
-| `ExecutionCleanupBackgroundService` | `PipelineExecutionStuckCheckIntervalMinutes` (default 5 min) | Per iteration: (1) connection-aware stuck reaper (AB#4280); (2) **execution fold** (AB#4370) — terminal executions older than `PipelineExecutionRetentionHours` (default 1h) are folded into the hourly buckets on `RtPipelineStatistics` and then **erased**, and the sliding-window counters are refreshed for every pipeline; (3) daily orphan sweep erasing executions older than `PipelineExecutionRetentionDays` unconditionally (safety net for executions whose pipeline no longer exists). All deletes use `DeleteOptions.Erase` (AB#4363) — the engine default `DeleteStrategies.Archive` only set `rtState=Archived` and let the collection grow unbounded (1M+ docs per tenant). The former hourly `PipelineStatisticsBackgroundService` was removed — folding owns statistics freshness. |
-| `WorkloadStateMetricsBackgroundService` | `WorkloadStateMetricsIntervalMinutes` (default 5 min, also the startup grace) | AB#5432: publishes the `DeploymentState` / `CommunicationState` / `ConfigurationState` severity of every adapter, application and pool of every tenant that opted in via `System/TenantModeConfiguration.PublishWorkloadObservability`, plus the per-tenant `octo.workload.sweep.*` sign of life. A tenant that did not opt in is skipped silently. It is also the process's **single reader of that flag**: the verdict is published into `WorkloadObservabilityOptIn`, which gates the pipeline and lifecycle instruments too, and a tenant that drops out is forgotten in all three families here. See "The per-tenant observability switch" and "OTel metrics for workload states". |
+| `ExecutionCleanupBackgroundService` | `PipelineExecutionStuckCheckIntervalMinutes` (default 5 min) | Per iteration: (1) connection-aware stuck reaper; (2) **execution fold** — terminal executions older than `PipelineExecutionRetentionHours` (default 1h) are folded into the hourly buckets on `RtPipelineStatistics` and then **erased**, and the sliding-window counters are refreshed for every pipeline; (3) daily orphan sweep erasing executions older than `PipelineExecutionRetentionDays` unconditionally (safety net for executions whose pipeline no longer exists). All deletes use `DeleteOptions.Erase` — the engine default `DeleteStrategies.Archive` only set `rtState=Archived` and let the collection grow unbounded (1M+ docs per tenant). The former hourly `PipelineStatisticsBackgroundService` was removed — folding owns statistics freshness. |
+| `WorkloadStateMetricsBackgroundService` | `WorkloadStateMetricsIntervalMinutes` (default 5 min, also the startup grace) | Per-tenant observability switch: publishes the `DeploymentState` / `CommunicationState` / `ConfigurationState` severity of every adapter, application and pool of every tenant that opted in via `System/TenantModeConfiguration.PublishWorkloadObservability`, plus the per-tenant `octo.workload.sweep.*` sign of life. A tenant that did not opt in is skipped silently. It is also the process's **single reader of that flag**: the verdict is published into `WorkloadObservabilityOptIn`, which gates the pipeline and lifecycle instruments too, and a tenant that drops out is forgotten in all three families here. See "The per-tenant observability switch" and "OTel metrics for workload states". |
 
 ### Service Methods
 
@@ -175,29 +174,29 @@ Task UpdateStatisticsAsync(string tenantId, RtEntityId pipelineRtEntityId);
 Task UpdateAllStatisticsAsync(string tenantId);
 Task<int> CleanupOldExecutionsAsync(string tenantId, int retentionDays);
 Task<int> TimeoutStaleExecutionsAsync(string tenantId, int timeoutHours);       // legacy, connection-unaware
-Task<int> FailStuckExecutionsAsync(string tenantId, int graceMinutes);          // AB#4280 connection-aware reaper, AB#5326 leased exemption
-Task<int> FailOrphanedExecutionsForAdapterAsync(string tenantId, RtEntityId adapterRtEntityId, DateTime beforeUtc); // AB#4280
+Task<int> FailStuckExecutionsAsync(string tenantId, int graceMinutes);          // connection-aware reaper, leased exemption
+Task<int> FailOrphanedExecutionsForAdapterAsync(string tenantId, RtEntityId adapterRtEntityId, DateTime beforeUtc); // connection-aware reaper
 ```
 
-### OTel metrics for pipeline executions (AB#5425)
+### OTel metrics for pipeline executions
 
 Before this, a pipeline execution existed **only as unstructured log text**
 (`PipelineExecutionService.BatchStartExecutionsAsync|[tenant] Batch started N executions …`).
 Log bodies are not a dimension of the `dash0.logs` metric and the inferred
 `dash0.log.attribute.*` keys do not attach to it, so every rate grouped by them is 0 — there was
 no way to alert on a failing or a stalled pipeline at all. On 2026-09-29 the `Monitoring.CkHealth`
-pipeline on test-2 stopped after two runs (12:19, 13:19 UTC) and nobody noticed for four hours.
+pipeline on a test environment stopped after two runs (12:19, 13:19 UTC) and nobody noticed for four hours.
 
 `PipelineExecutionMetrics` (static, mirroring `WorkloadLifecycleMetrics`) emits four instruments on
 the **same meter `Meshmakers.Octo.Communication`** that octo-common-services' `ObservabilityBuilder`
 already registers — so no observability wiring changed.
 
-🔴 **Gated by the per-tenant opt-in since 2026-09-30 (AB#5432).** These instruments shipped
-unconditional (175 series from test-2 while nobody had opted in); they now answer to
+🔴 **Gated by the per-tenant opt-in since 2026-09-30.** These instruments shipped
+unconditional (175 series from the test environment while nobody had opted in); they now answer to
 `System/TenantModeConfiguration.PublishWorkloadObservability` like the workload-state family. The
 counter is gated where it is recorded, the three gauges inside their collection callbacks — so the
 statistics sweep still does its persistence work for a non-opted-in tenant and only its publication
-stops. Details and reasoning: "The per-tenant observability switch (AB#5432)".
+stops. Details and reasoning: "The per-tenant observability switch".
 
 | Instrument | Kind | Tags | Meaning |
 |---|---|---|---|

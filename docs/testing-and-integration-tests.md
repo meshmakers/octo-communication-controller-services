@@ -95,7 +95,7 @@ await tenantRepository.LoadCacheForTenantAsync(ckCacheService);
 
 **Why this matters:** `LoadCacheForTenantAsync` internally creates a new MongoDB session (via `TenantRepository.RefreshCkCacheServiceAsync`) that cannot see uncommitted data from other transactions. If the cache is loaded before the import transaction commits, newly imported models (like System.Communication) will be silently missing from the cache. Additionally, `ModelLoaderService.LoadAsync` has an `IsTenantLoaded` guard that skips loading if the tenant is already cached, so any stale cache must be unloaded first.
 
-**Embedded version or newer (CK v2 F1.0, AB#5900):** each model goes through
+**Embedded version or newer:** each model goes through
 `TenantInitializationExtensions.EnsureCkModelAsync(tenantContext, embeddedId)`, which imports only when
 `ITenantContext.IsCkModelSatisfiedAsync(embeddedId)` is false — the tenant has neither the embedded version nor a
 newer one. Never check `IsCkModelExistingAsync` (exact) for the service's own embedded models: since the engine's

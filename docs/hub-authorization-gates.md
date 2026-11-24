@@ -12,14 +12,14 @@ applies_to: **/Hubs/**, **/Options/*HubAuthorizationOptions.cs
   - `TenantCommunicationApiReadOnlyPolicy` - tenant read-only
 - Scopes defined in `CommonConstants` from the Contracts library
 
-#### The SignalR hubs are not covered by any of that (AB#5059, AB#5063)
+#### The SignalR hubs are not covered by any of that
 
 `app.MapHub<AdapterHub>` / `app.MapHub<OperatorHub>` carry **no** `RequireAuthorization()`, neither hub
 class has an `[Authorize]` attribute, and the service registers no `FallbackPolicy`. The policies above
 apply to the controller routes only. Both gaps are now closed by **staged** `IHubFilter` gates —
 `/operatorHub` (the tenant-crossing control plane where an operator claims pools and acknowledges
-workload deploy / scale outcomes) under AB#5059, `/{tenantId}/adapterHub` (the adapter data plane)
-under AB#5063. Same shape, one mode switch each, both defaulting to `LogOnly`.
+workload deploy / scale outcomes) as the operator-hub gate, `/{tenantId}/adapterHub` (the adapter data plane)
+as the adapter-hub gate. Same shape, one mode switch each, both defaulting to `LogOnly`.
 
 `Hubs/OperatorHubAuthorizationFilter` is an `IHubFilter` registered per hub via
 `AddSignalR().AddHubOptions<OperatorHub>(o => o.AddFilter<OperatorHubAuthorizationFilter>())`. On every
@@ -29,25 +29,24 @@ everything it does is a system-level write.
 
 | `OperatorHubAuthorization:Mode` | Behaviour |
 |---|---|
-| `LogOnly` (**default**, and the enum's zero value) | Connection outcomes identical to no gate at all, but every connection an enforcing run would refuse is logged as a warning naming connection id, `client_id`, `sub` and scopes. That log **is** the consumer inventory. Since AB#9030 every refusal/inventory line (all three hubs) also carries the request path, remote address, `X-Forwarded-For`, user agent and, for a rejected bearer token, its unverified `client_id` (`HubConnectionPrincipal.DescribeOrigin`; control characters stripped, 200-char cap, never the token). |
+| `LogOnly` (**default**, and the enum's zero value) | Connection outcomes identical to no gate at all, but every connection an enforcing run would refuse is logged as a warning naming connection id, `client_id`, `sub` and scopes. That log **is** the consumer inventory. Every refusal/inventory line (all three hubs) also carries the request path, remote address, `X-Forwarded-For`, user agent and, for a rejected bearer token, its unverified `client_id` (`HubConnectionPrincipal.DescribeOrigin`; control characters stripped, 200-char cap, never the token). |
 | `Enforce` | A connection that does not satisfy the policy is refused with a `HubException`. |
 
 🔴 **It shipped on `LogOnly` because the operator had no credential — a precondition outside this
-repo, not a knob to flip.** When AB#5059 was written, the connection was built by
+repo, not a knob to flip.** When the operator-hub gate was written, the connection was built by
 `SignalRClient.CreateHubConnection` in **octo-sdk** (`src/Sdk.ServiceClient/SignalRClient.cs`), which
 contained a literal `options.Headers["Authorization"] = "Bearer your-access-token"` under a
 `// TODO: Handle authentication`, and **octo-communication-operator**'s `OperatorHubClientFactory`
 handed the client a freshly constructed, never-populated `ServiceClientAccessToken`. Arming `Enforce`
 then would have 401'd **every** operator in the estate, central and edge alike.
 
-**That has since changed (AB#5062, octo-sdk `1197b9a`).** The placeholder header is gone; the SDK now
+**That has since changed (octo-sdk `1197b9a`).** The placeholder header is gone; the SDK now
 sets `options.AccessTokenProvider = () => ClientAccessToken.AccessToken` (returning `null` for a blank
 token, i.e. sending *no* credential rather than a malformed one), and the operator got an
 `OperatorAccessTokenService` that performs a client-credentials login and fills the holder. Whether
-`/operatorHub` can now be armed is AB#5062's question — read an environment's `LogOnly` inventory
+`/operatorHub` can now be armed is the enforce-rollout question — read an environment's `LogOnly` inventory
 before answering it. Bind it per environment with `OCTO_OPERATORHUBAUTHORIZATION__MODE=Enforce`; no
-release needed. The staging shape is the same one `TenantAuthorizationOptions` uses (AB#5032 /
-AB#5054) on purpose.
+release needed. The staging shape is the same one `TenantAuthorizationOptions` uses on purpose.
 
 `ConfigureJwtBearerOptions` also gained `OnMessageReceived`, which accepts the token from
 `?access_token=` **on the hub paths only** (`/operatorHub`, `/{tenantId}/adapterHub`, and their
@@ -63,7 +62,7 @@ Tests: `tests/CommunicationControllerService.Tests/Hubs/OperatorHubAuthorization
 `Configuration/OperatorHubAuthorizationWiringTests.cs` (query token accepted on hub paths, ignored on
 REST paths, filter registration pinned at the `Program.cs` source, mode operator-settable).
 
-#### The adapter hub, and why its gate has a second half (AB#5063)
+#### The adapter hub, and why its gate has a second half
 
 `Hubs/AdapterHubAuthorizationFilter`, registered via
 `AddHubOptions<AdapterHub>(o => o.AddFilter<AdapterHubAuthorizationFilter>())`, checks **two** things
@@ -84,17 +83,17 @@ check happens in the filter and nowhere else. Its **rules are the middleware's**
 `tenant_id` match against the route tenant (case-insensitive), fail closed when the claim is absent,
 and a cross-tenant exemption read from the *same* `TenantAuthorizationOptions.CrossTenantServiceClientIds`
 list the HTTP gate uses, so one allow-list governs the whole service. The **parent-tenant
-administration rule (AB#5060) deliberately does not apply**: it is scoped to *user* tokens on endpoints
+administration rule deliberately does not apply**: it is scoped to *user* tokens on endpoints
 marked `IAllowParentTenantAdministration`, a hub is not such an endpoint, and a service token's
 `tenant_id` proves much less (mirrored clients share the parent's secret; a token minted without
 `acr_values` falls back to the system tenant, the root of the hierarchy).
 
 🔴 **`Enforce` is blocked, and the blocker is not the transport any more — it is that the adapter
-never logs in.** AB#5062 replaced the SDK's placeholder header with an `AccessTokenProvider` reading
+never logs in.** The enforce rollout replaced the SDK's placeholder header with an `AccessTokenProvider` reading
 the injected `IServiceClientAccessToken`, so the plumbing is in place and is re-read on every
 reconnect. But `AdapterBuilder` / `WebAdapterBuilder` (octo-communication-sdk) register a bare mutable
 `ServiceClientAccessToken` holder, `AdapterOptions` carries no client id / secret / authority to log in
-with, and the **only** writer is the mesh adapter's `ServiceAccountTokenService` (AB#5027), whose only
+with, and the **only** writer is the mesh adapter's `ServiceAccountTokenService`, whose only
 callers are two *pipeline nodes at execution time* (`DeployPipeline@1`, `AnthropicAiQuery@1`). At
 connect time the holder is empty and the provider returns `null` — no header, no query parameter. An
 adapter therefore identifies itself with the unauthenticated `adapter-rtId` / `adapter-ckTypeId`
@@ -118,7 +117,7 @@ Two consequences of the second row worth remembering: an adapter's credential st
 inventory is not evidence that an adapter authenticates** — it may simply not have reconnected.
 
 `ConfigureJwtBearerOptions`' `OnMessageReceived` already covers `/{tenantId}/adapterHub` and its
-`/negotiate` sub-path (AB#5059 wrote it for both hubs), which is what makes the inventory meaningful
+`/negotiate` sub-path (written for both hubs), which is what makes the inventory meaningful
 once a client does send a token — verified by the parameterised cases in
 `OperatorHubAuthorizationWiringTests`.
 

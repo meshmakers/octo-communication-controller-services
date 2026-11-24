@@ -62,29 +62,29 @@ Tests:
 
 **Implementation:** `IAdapterService.SetPipelineDebuggingAsync` persists via
 `ICommunicationRepository.SetPipelineDebuggingEnabledAsync`, then re-pushes the
-owning data flow with `DeployDataFlowAsync`. (Historic note: before AB#4364,
+owning data flow with `DeployDataFlowAsync`. (Historic note: before the persisted-flag change,
 `DeployPipelineAsync` force-enabled debug, which is why this path avoided it;
-since AB#4364 all deploy paths preserve the persisted flag as-is.)
+since then all deploy paths preserve the persisted flag as-is.)
 If the adapter is offline, `DeployDataFlowAsync` throws `AdapterServiceException`
 (`AdapterNotLoaded`); the service swallows it, leaving the flag persisted
 (`AppliedToRunningAdapter = false`, applies on next deploy). An `Information`
 audit event tagged `(source: User)` is written per toggle.
 
-**Deploy never touches debug (AB#4364).** `POST /pipeline/deploy` used to
+**Deploy never touches debug.** `POST /pipeline/deploy` used to
 force-enable `IsDebuggingEnabled` on every call — so the Studio editor's routine
 "Deploy" (e.g. right after importing a pipeline) and the move-to-adapter redeploy
-silently switched debug capture on, permanently. Observed on prod-1: the Loxone
-event pipeline ran with debug for months. Since AB#4364, deploying pushes the
+silently switched debug capture on, permanently. Observed on production: the Loxone
+event pipeline ran with debug for months. Since the persisted-flag change, deploying pushes the
 persisted `IsDebuggingEnabled` as-is: a pipeline in debug stays in debug across
 redeploys, a pipeline without debug stays clean. Debug is toggled exclusively via
 this PATCH endpoint / `SetPipelineDebuggingAsync`; the Studio's Enable/Disable
 Debug buttons call it directly (frontend-libraries
 `CommunicationService.setPipelineDebugging`).
 
-**Debug-enabled pipelines are surfaced on every push (AB#4662).** A lingering
+**Debug-enabled pipelines are surfaced on every push.** A lingering
 debug flag on a compute-heavy pipeline OOM-killed the FDA adapter without anyone
 knowing debug capture was active (debug retains per-iteration snapshots — memory
-bounds fixed SDK-side under the same AB#). `SendConfigurationAndWaitForResultAsync`
+bounds fixed SDK-side). `SendConfigurationAndWaitForResultAsync`
 — the single choke point for every configuration push (adapter config, pipeline
 deploy, data-flow deploy) — now writes a Warning audit event + NLog warning for
 each pipeline in the pushed configuration whose `IsDebuggingEnabled` is true, so
@@ -96,7 +96,7 @@ enable/disable, offline persist-only, not-found paths),
 debug-enabled push, silence otherwise) and
 `Controllers/PipelineControllerDebugTests`.
 
-## Execute-Pipeline Endpoint Key (AB#4312)
+## Execute-Pipeline Endpoint Key
 
 `FromExecutePipelineCommand@1` registers a distribution-event-hub receive endpoint whose
 address **must be keyed by the pipeline rtId**, not the DataFlow rtId. Both sides of the bus
@@ -110,7 +110,7 @@ build the address and must stay in sync:
 The address format is
 `{PipelineQueueNames.ExecutePipelineCommand}-{tenantId}-pipeline-{pipelineRtId}` (lower-cased).
 
-Historically the key was `…-data-flow-{dataFlowRtId}` (since AB#1586). That collided when a
+Historically the key was `…-data-flow-{dataFlowRtId}` (the original key). That collided when a
 single DataFlow held more than one `FromExecutePipelineCommand@1` pipeline — MassTransit
 rejected the duplicate (`A receive endpoint with the same key was already added`), so only the
 first pipeline deployed and the rest went to `DeploymentState = Error`. It was also

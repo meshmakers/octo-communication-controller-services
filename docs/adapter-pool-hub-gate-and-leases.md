@@ -3,7 +3,7 @@ description: Adapter pool hub gate, member recovery, leases surviving a restart,
 applies_to: **/Hubs/AdapterPool*.cs, **/Services/Lease*.cs
 ---
 
-#### The adapter **pool** hub — a third gate, and why it is not one of the other two (AB#4924)
+#### The adapter **pool** hub — a third gate, and why it is not one of the other two
 
 `/adapterPoolHub` (`Hubs/AdapterPoolHub`) is the management channel of **adapter pool members**:
 processes that belong to **no tenant** and are handed one per lease (shared adapter leasing, see
@@ -25,7 +25,7 @@ The binding is completed in **two places**, on purpose:
    It fails closed when there is no tenant to store. The filter cannot do more: it runs before any hub
    method, so no pool has been declared yet.
 2. `AdapterPoolHub.RegisterPoolMemberAsync` refuses a registration whose declared `PoolTenantId` is a
-   different tenant. **No parent/ancestor allowance**, same stance as AB#5063 — a member registered
+   different tenant. **No parent/ancestor allowance**, same stance as the other two hub gates — a member registered
    into another tenant's pool would receive leases carrying a *third* tenant's service-account secret.
 
 Staged exactly like the other two: `OCTO_ADAPTERPOOLHUBAUTHORIZATION__MODE`, `LogOnly` default,
@@ -33,7 +33,7 @@ Staged exactly like the other two: `OCTO_ADAPTERPOOLHUBAUTHORIZATION__MODE`, `Lo
 be armed independently — pinned by `AdapterPoolHubWiringTests.TheThreeHubGates_HaveDistinctSections`.
 
 🔴 **Authorization for a *borrower* never comes from this connection.** It arrives on the lease as the
-borrower's own `PipelineServiceAccount` credential (AB#5027, concept §8 Q6) and dies with the lease.
+borrower's own `PipelineServiceAccount` credential (concept §8 Q6) and dies with the lease.
 That is what keeps a pool member from being a standing cross-tenant credential.
 
 `Services/LeaseService` grants and releases. **Lending is consensual in both directions**: the pool's
@@ -55,7 +55,7 @@ production path. They exist so the whole mechanism is exercisable end to end on 
 one increment before the scheduler. The member list is **per controller instance** — a member's SignalR
 connection lives on one pod — which is the same property `IOperatorConnectionManager` has.
 
-🔴 **A client secret now travels over the hub as well as over the deploy path.** The AB#5027 guard
+🔴 **A client secret now travels over the hub as well as over the deploy path.** The guard
 `DeployWorkloadAsync_NeverWritesTheClientSecretToAnyLogTarget` is mirrored for the lease path in
 `Services/LeaseServiceTests/LeaseSecretLogTargetTests` — same shape (NLog `MemoryTarget`, real path,
 assertions on the **rendered** output, neither the value nor an eight-character prefix), plus a second
@@ -64,7 +64,7 @@ for exactly that reason: a record's generated one prints every property, so the 
 `logger.LogDebug("… {Lease}", lease)` would leak the secret without anybody noticing.
 
 🔴 **Every test that swaps `NLog.LogManager.Configuration` carries
-`[NotInParallel(nameof(NLog.LogManager))]`** (AB#5256). The configuration is process-wide and each of
+`[NotInParallel(nameof(NLog.LogManager))]`**. The configuration is process-wide and each of
 these probes *replaces* it, so two of them in different classes steal each other's lines — and the "the
 run logged something" assertion that keeps such a probe from being vacuous is exactly the one that then
 fails, for a reason that has nothing to do with the secret. It happened the first time a sixth class
@@ -73,11 +73,10 @@ opened one. The key names the shared resource, not the test, the same way
 own class name as the key were changed to it. A probe that asserts *absence* of output should filter
 the target to its own subject as well — concurrent tests write into it.
 
-#### Member recovery on the registry side (AB#4924 AP-I5)
+#### Member recovery on the registry side
 
-The member half lives in comm-sdk (`AdapterPoolMemberService`, see its CLAUDE.md "Pool member
-recovery"); it re-registers whenever it believes the controller holds no registration for it, and — since
-AB#5826 — registers **with** a lease that is still running (`ResumePoolMemberAsync`, below), deferring
+The member half lives in comm-sdk (`AdapterPoolMemberService`, see `octo-communication-sdk/docs/pool-member-recovery.md`); it re-registers whenever it believes the controller holds no registration for it, and — since
+the lease-resume change — registers **with** a lease that is still running (`ResumePoolMemberAsync`, below), deferring
 only against a controller that does not support that. Three registry properties make that safe:
 
 - **Re-registration on the same connection keeps `ActiveLease` and `IsDraining`.** An invoke that timed
@@ -95,10 +94,10 @@ only against a controller that does not support that. Three registry properties 
 
 Tests: `Hubs/AdapterPoolHubTests/MemberRecoveryTests`.
 
-#### A lease survives a controller restart and a dropped connection (AB#5826)
+#### A lease survives a controller restart and a dropped connection
 
 Leases live only in this process's memory (`AdapterPoolConnectionManager`). Two failures followed from
-that, both reproduced on test-2-dev on 2026-10-07:
+that, both reproduced on a test environment on 2026-10-07:
 
 - **Controller process restart mid-lease (F1).** The new process knew neither member nor lease; the
   member's release on its new connection was dropped **without a log line**; the execution stayed
@@ -123,7 +122,7 @@ What changed — the persisted execution (`LeaseGrantedAt`, `LeasedOnMemberId`, 
 ignores unknown members, so a lease announced on `RegisterPoolMemberAsync` would register the busy
 member as idle and the next grant would be refused (failing that borrower's execution). The new method
 makes such a controller answer "unknown hub method", and the member falls back to deferring its
-registration — the behaviour before AB#5826. `RegisterPoolMemberAsync` therefore never honours
+registration — the behaviour before the lease-resume change. `RegisterPoolMemberAsync` therefore never honours
 `ActiveLease`.
 
 **Proof, and its limits.** A lease id is a random 128-bit value sent to one member, so the two in-memory
@@ -149,21 +148,21 @@ integration `FailStuckExecutionsAsync_NamesALostLeaseAsSuch_AndKeepsTheAdapterMe
 Tests: `Hubs/AdapterPoolHubTests/` (registration + the tenant-binding matrix in both modes, the
 `IShutdownState` refusal, lease routing to a member, a second lease never landing on a claimed member,
 release, stale release, disconnect mid-lease, draining, heartbeat),
-`Hubs/AdapterPoolHubAuthorizationFilterTests.cs` (the AB#5063 matrix for this gate, plus that the
+`Hubs/AdapterPoolHubAuthorizationFilterTests.cs` (the matrix for this gate, plus that the
 connection tenant is recorded in **both** modes), `Services/LeaseServiceTests/` (grant, the consent
 matrix, the credential, TTL, the no-idle-member refusal, a failed push undoing the claim, release and
 disconnect) and `Configuration/AdapterPoolHubWiringTests.cs` (mount, filter, section binding, the route
 carrying no tenant, and that the **adapter** hub keeps its own gate and its route tenant).
 
-#### 🔴 Controller → client sends are not type-checked — the contract test is (AB#5876)
+#### 🔴 Controller → client sends are not type-checked — the contract test is
 
 All three hubs are untyped (`IHubContext<THub>`), so `SendAsync(nameof(I…HubCallbacks.X), args…)`
 compiles with any argument list, while the clients (octo-sdk `AdapterHubClient`, `AdapterPoolHubClient`,
 `OperatorHubClient`) register `On<T1,…,Tn>` from the same interface. A send whose arguments do not bind
 is **dropped on the client with no error on either side**. `LeaseService.DrainMemberAsync` sent
-`DrainAsync` without its `reason` for the whole life of AB#4924: no controller drain (idle shrink, lease
+`DrainAsync` without its `reason` for the whole life of the leasing feature: no controller drain (idle shrink, lease
 TTL) ever reached a member, the member stayed Ready and never exited, and the controller logged
-"Told pool member … to drain" (N8, test-2-dev 2026-10-08).
+"Told pool member … to drain" (N8, a test environment 2026-10-08).
 
 `Hubs/HubCallbackContractTests` holds every send to the interface: runtime tests drive the real senders
 (`AdapterHubCallbacks`, `OperatorConnectionManager` incl. the replay that picks its method name at
@@ -173,7 +172,7 @@ count and types by reflection (`Helper/HubCallbackContract`); a source sweep cou
 taken from an interface (justified exceptions are listed in `NotAHubCallbackSend`). Adding a send means
 nothing to do if it uses `nameof`; a new callback interface must be added to `CallbackInterfaces`.
 
-#### Decision counter of the three hub gates (AB#5528 phase 3, AB#6088)
+#### Decision counter of the three hub gates
 
 All three gates (`/{tenantId}/adapterHub`, `/operatorHub`, `/adapterPoolHub`) count every decision on `octo.communication.hub.authorization.decisions` (counter,
 `{decision}`, meter `Meshmakers.Octo.Communication`) — `Hubs/HubAuthorizationMetrics`, registered as
@@ -181,7 +180,7 @@ a singleton (`AddHubAuthorizationMetrics()` in `Program.cs`) created through `IM
 baseline for every hub × mode × outcome × reason series (30: adapter 14, operator 6, adapterPoolHub 10) is
 written by `HubAuthorizationMetricsBaselineService` (`IHostedService`), **not** by the constructor and never
 by code between `builder.Build()` and the host start: the OpenTelemetry `MeterProvider` is built at host start
-and an `Add(0)` without a listener is dropped (AB#6740 — on 3.5.23 no zero series, and so no `adapterPoolHub`,
+and an `Add(0)` without a listener is dropped (on 3.5.23 no zero series, and so no `adapterPoolHub`,
 ever reached Dash0). The service resolves `MeterProvider` first, then calls `EmitBaseline()`. The baseline
 matters because PromQL's `increase()` does not count the first point of a new cumulative series — without it a
 single anonymous connection after a restart would read as "no increase". Proof query for a rollout (must return

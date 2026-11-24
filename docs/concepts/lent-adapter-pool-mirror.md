@@ -3,7 +3,7 @@ description: "Concept: mirroring lent adapter pools into the borrower tenant"
 applies_to: **/Services/*PoolMirror*.cs
 ---
 
-# Mirroring lent adapter pools into the borrower tenant (AB#5271)
+# Mirroring lent adapter pools into the borrower tenant
 
 ## 1. The problem, stated precisely
 
@@ -25,7 +25,7 @@ LentFromAdapterPoolRtId = "6aab…"
 ```
 
 🔴 Those are **plain strings, and deliberately so**: a CK association cannot cross a tenant
-database, so AB#4924 had no other way to express the reference. Everything that follows from that
+database, so the leasing design had no other way to express the reference. Everything that follows from that
 choice is the cost this work item pays off — no navigation, no filtering, no display name, nothing
 for backup to carry, and no validation beyond "is this 24 hex characters".
 
@@ -82,7 +82,7 @@ Consequence for the implementation: nothing in `LeaseService`, `LeaseSchedulerSe
 
 The entity must be marked `isRuntimeState`. A blueprint re-apply resets non-runtime attributes to
 their seeded values, which for a mirror means wiping or recreating it — this is the mechanism
-behind the prod-1 redirect-URI outage and the fix in AB#5210. A mirror is by definition not
+behind the production redirect-URI outage and its fix. A mirror is by definition not
 authored, so it is runtime state.
 
 ## 6. Lifecycle
@@ -100,7 +100,7 @@ authored, so it is runtime state.
 All operations idempotent, so the startup re-check and the backfill are the same code path.
 
 🔴 **Removal must not cascade into the borrower's adapters.** A narrowed scope leaves adapters
-pointing at a pool they may no longer use; that is already a defined state (AB#4924 concept §6,
+pointing at a pool they may no longer use; that is already a defined state (shared-adapter-leasing concept §6,
 "parent tenant deleted while lending") and it surfaces as a refused deploy with a named reason.
 Deleting the borrower's adapters because the lender changed its mind would be a far worse failure
 than a blocked deploy.
@@ -141,7 +141,7 @@ someone has to remember. And a mirror has exactly one lender, so an array would 
 multiplicity that cannot occur.
 
 🔴 Single-valued also avoids the array traps this estate has already been bitten by: the
-polymorphic `{"_v":[…]}` wrapper that poisoned array attributes (AB#5160) and the flat-shape
+polymorphic `{"_v":[…]}` wrapper that poisoned array attributes and the flat-shape
 surprise of `RecordArray` values. `valueType: Record` is supported and in use in this very model
 (`attributes/energyCommunityConfiguration.yaml`).
 
@@ -177,7 +177,7 @@ to have run") was rejected: it would have left the blueprint unable to express t
 
 2. **Who may see it** — the mirror is an ordinary entity in the borrower's own database, so it is
    read by whoever may read that tenant's `System.Communication` entities. No new permission surface,
-   which was half the point of §2. The parent-tenant administration boundary (AB#5060/5068/5070) has
+   which was half the point of §2. The parent-tenant administration boundary has
    nothing to say here: it governs a **parent acting inside a child**, and this is the opposite
    direction — a child displaying a name and a replica range that its own administrator already had
    to be told in order to configure the borrower at all. What the mirror must never do is let the
@@ -207,7 +207,7 @@ untouched. Treating a tenant that is mid-update as "lends nothing" would delete 
 mirrors — and with the association leading, that breaks every adapter borrowing from it. A transient
 read failure must not become an outage.
 
-### 7.6 ✅ Resolved (AB#5349) — the run also re-links the adapter
+### 7.6 ✅ Resolved — the run also re-links the adapter
 
 §7.1 states that the association replaces the two attributes, and `migration-meta.yaml` states why
 no CK migration can convert them: the association's target is a mirror this service provisions at
@@ -217,13 +217,13 @@ half had no implementation. The sync provisioned the mirror; nothing linked the 
 the association leading (§7.3), that is the outage §7.3 warns about, and it was silent in every
 direction:
 
-| observed on tenant `salzburgdev`, 2026-09-24 | |
+| observed on tenant `borrowerdev`, 2026-09-24 | |
 |---|---|
 | the mirror | correct and DEPLOYED — `Lender` = `accounting` / `49240000000000000000aa01` |
 | the leased adapter | `lentFrom.totalCount = 0` |
 | `POST {tenant}/v1/adapterPool/mirrors/refresh` | `{"isNoOp": true}` — correct, and useless: the backfill had no opinion about the adapter's edge |
 | the adapter's own health fields | `statusMessage` null, `lastDeploymentError` null |
-| the execute call | 200, then `Queued` forever (this is what AB#5329 later turned into a named refusal) |
+| the execute call | 200, then `Queued` forever (later turned into a named refusal) |
 
 **The re-link is scriptable because the old data is still there.** The attribute removal rode the
 engine's post-chain schema-only bridge, which upgrades the schema and does **not** delete attribute
@@ -242,7 +242,7 @@ Four rules make it a repair rather than a second place where lending is decided:
    transaction. Running it twice changes nothing.
 2. 🔴 **It never invents an edge.** No leftovers, half of them, or a pair no mirror carries ⇒ the
    adapter is left alone. An adapter pointing at nothing is a defined, reported state (§6) and since
-   AB#5329 a named refusal at the enqueue; an adapter pointing at a pool nobody lent it would send
+   a named refusal at the enqueue; an adapter pointing at a pool nobody lent it would send
    lease requests to a lender that never agreed. An adapter already pointing at a *different* mirror
    is not re-pointed either — that pointer is somebody's decision, and the leftovers are by
    definition the older statement of the two.

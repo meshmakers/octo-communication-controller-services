@@ -3,7 +3,7 @@ description: "Leasing: lending scope, deploy guards, execution class, deploying 
 applies_to: **/Services/TenantLendingScopeResolver.cs, **/Services/PipelineExecutionClassService.cs, **/Services/AdapterNodeCapabilityService.cs
 ---
 
-## Leasing: lending scope and execution class (AB#4924 increments 2 + 4)
+## Leasing: lending scope and execution class (increments 2 + 4)
 
 Plan: `docs/concepts/shared-adapter-leasing-implementation.md` §4 and §6.
 
@@ -31,7 +31,7 @@ siblings, and `LendingAllowedTenantIds` intersects — it can never widen past t
 
 ### Deploy guards (`DeploymentSiteService.EnsureLeasingConfigurationIsValidAsync`)
 
-Same enforcement rationale as the AB#4984 `LifecycleMode` block: all of this is plain CK author
+Same enforcement rationale as the `LifecycleMode` block: all of this is plain CK author
 configuration with no service-layer hook, so the deploy is the net. `Leased` requires
 `OnDemandCapable` (reusing `IWorkloadOnDemandCapabilityService`, never a duplicated trigger list);
 `LentFromTenantId`/`LentFromPoolRtId` are validated as a pair and against the resolver;
@@ -40,12 +40,12 @@ the workload borrows a process when it runs its own; an `AdapterPool` may never 
 
 Read surface: `GET {tenantId}/v1/adapter/lending?adapterPoolRtId=…` → `AdapterLendingScopeDto`.
 
-🔴 **It runs FIRST in `EnsureWorkloadIsHelmDeployableAsync`, and the order is the fix (AB#5327).** It
+🔴 **It runs FIRST in `EnsureWorkloadIsHelmDeployableAsync`, and the order is the fix.** It
 used to sit at the bottom of that method, behind the chart-name and Helm-repository checks — and a
 canonical leased adapter has **no chart name on purpose** (the borrower sample says so outright: chart
 fields "would make it look deployable"). So every deploy of one stopped at *"the 'Chart Name' field is
 empty … set a Helm chart name"*, advice that is wrong for a workload which must never have one, and
-this gate — including the AB#5278 trigger half — was unreachable for exactly the shape it judges: an
+this gate — including the trigger half — was unreachable for exactly the shape it judges: an
 `FromHttpRequest@2` pipeline could be attached to a leased adapter without a word and then never run.
 Proved by the message changing shape: the same adapter with the same pipelines, with nothing altered
 but `ChartName`, answered with the intended refusal instead.
@@ -60,16 +60,16 @@ instead" — rather than sending the operator to fill in a field that must stay 
 cache, i.e. a live SignalR connection, which a leased adapter never has, so it answered *"The adapter
 pod must be deployed and online before its pipeline configuration can be pushed"* — an instruction
 that cannot be followed — and `ValidateAndPersistPipelineAsync`'s per-pipeline arm never ran either.
-It now takes the same route the single-pipeline path has had since AB#4924
-(`DeployLeasedPipelineAsync`: validate, persist, no push), placed **before** the AB#4918 wake gate for
+It now takes the same route the single-pipeline path has had since leasing
+(`DeployLeasedPipelineAsync`: validate, persist, no push), placed **before** the wake gate for
 the reason given there — a borrower must not be able to start the lender's capacity by pressing Deploy.
 
 ⚠️ **Deliberately unchanged: the capability evaluation ignores `System/Enabled`.** A disabled pipeline
 still blocks the deploy and is still named in the refusal. That is shared with the OnDemand
 evaluation (`EvaluateAsync` enumerates the same unfiltered pipeline set), so changing it for leasing
-alone would let the two modes drift — and it would silently weaken a gate that prod-1 adapters
+alone would let the two modes drift — and it would silently weaken a gate that production adapters
 currently rely on. Note the data-flow *deploy loop* does skip disabled pipelines, so the two read the
-pipeline set differently; that asymmetry is known and is not what AB#5327 changed.
+pipeline set differently; that asymmetry is known and is not what the descendant-scope change touched.
 
 Tests: `Services/DeploymentSiteServiceTests/DeployWorkloadLeasedGateOrderTests` — 🔴 a separate suite
 from `DeployWorkloadLifecycleValidationTests`, which covers the gate's CONTENT and cannot catch this:
@@ -98,7 +98,7 @@ adapter that has not registered in this process, so `KnownInteractiveTriggerName
 `KnownProcessBoundTriggerNames`. Bounded: two entries, a descriptor always wins, and drift degrades
 to `Batch`, never to a wrong `Interactive`.
 
-⚠️ **Pre-existing AB#4984 defect found while doing this:** `octo-adapter-loxone`'s
+⚠️ **Pre-existing defect of the process-bound trigger list found while doing this:** `octo-adapter-loxone`'s
 `LoxonePollTrigger@1` is process-bound but carries no `[NodeRequiresRunningProcess]` and is **missing
 from `KnownProcessBoundTriggerNames`** — a workload whose only trigger is that node is classified
 on-demand capable and would be hibernated. `FromLoxoneStateChange` is listed; this one was missed.
@@ -107,7 +107,7 @@ Needs its own work item.
 ⚠️ A pipeline edited to a different trigger changes class **on save**, so every surface must read the
 current value rather than cache it — the same caveat `OnDemandCapable` carries.
 
-## Deploying a pipeline to a `Leased` adapter (AB#4924)
+## Deploying a pipeline to a `Leased` adapter
 
 🔴 **`DeployPipelineAsync` has two named halves, and only the first is universal.**
 
@@ -124,13 +124,13 @@ unless it is genuinely about pushing bytes to a pod.
 `adapterTenant.AdapterById.TryGetValue(...)`, which is only populated for adapters holding an open
 `/{tenantId}/adapterHub` connection. A `Leased` adapter never has one, so every leased deploy
 answered 404 — and, far worse, **none of the four gates ever ran** on that path
-(schema validation, AB#4984 process-bound triggers, AB#5027 mandatory service account, AB#5128
+(schema validation, process-bound triggers, mandatory service account,
 elevation authorization). The pipeline was then executed by a borrowed process that had checked
 none of them.
 
 **Three deliberate differences on the leased path:**
 
-- **No AB#4918 wake gate.** It was already a no-op, but only because `Leased != OnDemand` — a
+- **No idle wake gate.** It was already a no-op, but only because `Leased != OnDemand` — a
   coincidence, not a decision. Now an explicit branch: a leased adapter has no workload of its own,
   and the pool is a *different tenant's* workload. A borrower must not be able to scale the lender
   by pressing Deploy.

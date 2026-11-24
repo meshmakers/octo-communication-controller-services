@@ -3,7 +3,7 @@ description: "Signal channel self-service: registration, verification, history a
 applies_to: **/SignalChannel*.cs, **/SignalBridge*.cs
 ---
 
-### Signal Channel Self-Service (AB#5143)
+### Signal Channel Self-Service
 
 Tenant self-service activation of a Signal phone number against the cluster-shared
 `signal-cli-rest-api` bridge (bbernhard/signal-cli-rest-api, multi-account). The bridge API is
@@ -29,7 +29,7 @@ Pieces:
   `RegistrationHistory` (RecordArray of `SignalRegistrationEvent`, see below). No migration script
   (additive — schema-ahead-of-history, `migration-meta.yaml` stays at 3.1.1) and no blueprint bump
   (no seed; a plain CK model bump rolls out via `IServiceManagedCkModelDescriptor`).
-- **Registration audit trail (WI rev 4)** — `RegistrationHistory` holds `SignalRegistrationEvent`
+- **Registration audit trail (rev 4)** — `RegistrationHistory` holds `SignalRegistrationEvent`
   records `{At (UTC), User, Action, Detail?}` with enum `SignalRegistrationAction`
   (0 RegisterRequested, 1 RegisterFailed, 2 CodeVerified, 3 VerifyFailed, 4 Deleted,
   5 DeleteFailed, 6 Adopted, 7 ProfileUpdated). The service appends server-side for EVERY register/verify/delete
@@ -79,7 +79,7 @@ Pieces:
   dedicated `displayName` endpoint (row above) is where push failures DO surface; clearing the
   name there never touches the bridge profile.
 - **`CommunicationControllerOptions.SignalBridgeApiUrl`** is the instance default ApiUrl
-  (`http://signal-cli-rest-api.signal-bridge.svc.cluster.local:8080`); a register request may
+  (`<signal-cli-service-url>`); a register request may
   override per tenant, and an existing definition's ApiUrl wins over the default.
 - Deletes use `DeleteOptions.Erase` — the stored definitions are the instance-wide number-claim
   registry, and an archive tombstone must not keep a number blocked.
@@ -92,7 +92,7 @@ bridge failure, newest-first ordering, the 50-cap trim, the GET projection and t
 formatting; `RegisterAdoptionTests` pinning the adopt-existing-bridge-account flow and that
 every guard runs before adoption).
 
-#### SignalChannel projection into every pipeline configuration (AB#5145)
+#### SignalChannel projection into every pipeline configuration
 
 The tenant's SignalChannel singleton is **always** mixed into every pipeline's projected
 configuration list — no `Uses` association required — by

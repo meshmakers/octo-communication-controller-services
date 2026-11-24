@@ -1,12 +1,12 @@
 ---
 description: "Pipeline service account: credentials reaching the adapter pod, declarative reconcile, identity health and rights analysis"
-applies_to: **/Services/ServiceAccountHealthService.cs, **/Services/ServiceAccountRightsAnalysisService.cs, **/BackgroundServices/PipelineServiceAccountProvisioningRetry*.cs
+applies_to: **/Services/ServiceAccount*Service.cs, **/BackgroundServices/PipelineServiceAccountProvisioningRetry*.cs
 ---
 
-### Phase 4 — the credentials reach the adapter pod (AB#5072)
+### Phase 4 — the credentials reach the adapter pod
 
-Everything above provisions and rotates a credential the adapter had no way of *receiving*. AB#5072
-delivers it: `octo-communication-sdk` gained `AdapterOptions.IssuerUri` / `ClientId` / `ClientSecret`
+Everything above provisions and rotates a credential the adapter had no way of *receiving*. The credential delivery
+change delivers it: `octo-communication-sdk` gained `AdapterOptions.IssuerUri` / `ClientId` / `ClientSecret`
 plus an `AdapterAccessTokenService` that logs in **before** the hub client connects, and this service
 supplies the two values through the `ValueOverride[]` that already goes to the operator at deploy
 time.
@@ -55,13 +55,13 @@ one pipeline's execution.
 
 #### 🔴 The ordering: provisioning moved BEFORE the deploy notification
 
-AB#5027 phase 2 provisions the adapter's account in `DeployWorkloadAsync` **after** the deploy
+Phase 2 of the mandatory-identity work provisions the adapter's account in `DeployWorkloadAsync` **after** the deploy
 notification ("best effort, so the identity round trip cannot delay the helm rollout"), while
 `BuildWorkloadDeployedDtoAsync` runs before it. That was free while the account was only ever read
 back by a *later* pipeline deploy. It is not free any more: the deploy notification now carries the
 credentials, and the DTO is built from what exists at that moment — so the **first** deploy of every
 freshly created adapter would ship none, the pod would come up anonymous, and nothing would
-re-deploy it. Once the adapter-hub gate (AB#5063) is armed, such a pod never gets online at all.
+re-deploy it. Once the adapter-hub gate is armed, such a pod never gets online at all.
 
 Provisioning therefore now runs **before** `BuildWorkloadDeployedDtoAsync`, immediately after
 `EnsureWorkloadIsHelmDeployableAsync`. The two rejected alternatives: triggering a second deploy after
@@ -73,7 +73,7 @@ rollout starts rather than during it, so a slow identity service delays a deploy
 half-configuring one. The best-effort contract is unchanged: a provisioning failure is still
 swallowed and the workload still deploys, just without credentials.
 
-The former pool fan-out `DeployManagedWorkloadsAsync` had no live caller and was removed with AB#7245; every workload
+The former pool fan-out `DeployManagedWorkloadsAsync` had no live caller and was removed with the secret-defaults change; every workload
 deploy goes through `DeployWorkloadAsync`.
 
 Phase 4 tests: `Services/PoolServiceTests/DeployWorkloadServiceAccountCredentialsTests` (both paths
@@ -84,9 +84,9 @@ decrypted, no secret in any NLog target, and a literal assertion that the two va
 chart) plus `DeployWorkloadAsync_ProvisionsBeforeItBuildsTheDeployNotification` in
 `DeployWorkloadServiceAccountProvisioningTests`.
 
-### Phase 5 — declarative reconcile (AB#5111) and identity health + hardened guard (AB#5112)
+### Phase 5 — declarative reconcile and identity health + hardened guard
 
-**AB#5111** made the account declarative: `ServiceAccountConfiguration` (CK 3.32.0, additive)
+**The declarative-account change** made the account declarative: `ServiceAccountConfiguration` (CK 3.32.0, additive)
 carries `AssignedRoleNames` (null = legacy, roles unmanaged) and `AllowDelegation`, the backfill
 became an idempotent reconcile (`ReconcileAdapterAsync` / `ReconcileConfigurationAsync` — never
 rotates an existing secret), `IssuerUri` defaults to the portable `{{service.authority}}` token
@@ -97,7 +97,7 @@ resolved at projection time by the workload-template machinery, and REST endpoin
 reconcile only materialises roles when the caller holds `UserManagement`. See the XML docs on
 `IPipelineServiceAccountProvisioningService` for the full contract.
 
-**AB#5112** adds the read side and hardens the deploy guard.
+**The read-side change** adds the read side and hardens the deploy guard.
 
 **Identity-health aggregate** — `IServiceAccountHealthService` / `ServiceAccountHealthService`:
 
@@ -106,7 +106,7 @@ GET {tenantId}/v1/adapter/{adapterRtId}/serviceAccount/health        (adapter-sc
 GET {tenantId}/v1/serviceAccount/{configurationRtId}/health          (configuration-bound)
   → 200 ServiceAccountHealthDto { OverallStatus, ConfigurationRtId,
                                   ConfigurationWellKnownName, ClientId, Checks[],
-                                  LinkedConfigurations[] (adapter variant, AB#8982) }
+                                  LinkedConfigurations[] }
 ```
 
 Both `TenantCommunicationApiReadOnlyPolicy`. One check per concern, each with a machine-readable
@@ -134,13 +134,12 @@ exactly the `octo_api` scope family the controller's own policies require. No am
 request, 401/403/5xx, timeout → `IdentityClientLookupStatus.Unavailable`, which every consumer
 treats as "unknown", never as "missing". Named `HttpClient` with a 10 s timeout (Program.cs).
 
-**Hardened deploy guard** (`EnsurePipelineHasServiceAccountAsync`, both deploy paths): after the
-AB#5027 resolution check, (a) an account without a **client secret** is refused unconditionally —
+**Hardened deploy guard** (`EnsurePipelineHasServiceAccountAsync`, both deploy paths): after the resolution check, (a) an account without a **client secret** is refused unconditionally —
 a local fact, `AdapterServiceException.PipelineServiceAccountSecretMissing`; (b) the **identity
 client's existence** is verified through the reader —
 `AdapterServiceException.PipelineServiceAccountClientMissing` on an authoritative NotFound (or a
 configuration naming no `ClientId` at all). Both messages name the reconcile endpoints and Studio
-as the fix, AB#5027-style. Check (b) is gated by `ServiceAccountGuardOptions`
+as the fix, in the style of the mandatory-identity work. Check (b) is gated by `ServiceAccountGuardOptions`
 (`ServiceAccountGuard:CheckIdentityClient`, **default `true`**;
 `OCTO_SERVICEACCOUNTGUARD__CHECKIDENTITYCLIENT=false` loosens an environment without a release —
 the switch turns the whole identity round trip off, not just the refusal). 🔴 An **unreachable**
@@ -158,7 +157,7 @@ pass-through), `Controllers/ServiceAccountHealthEndpointTests` (routing, 404/400
 integration fixture substitutes the reader with an `Unavailable` answer — it runs no identity
 service, and the guard is non-blocking by contract.
 
-### Phase 6 — rights analysis: touched types × data permissions (AB#5113)
+### Phase 6 — rights analysis: touched types × data permissions
 
 **`IServiceAccountRightsAnalysisService` / `ServiceAccountRightsAnalysisService`** answers "which
 roles does this pipeline service account need?" — read-only, side-effect free, entirely from
@@ -182,7 +181,7 @@ Both `TenantCommunicationApiReadOnlyPolicy`. Three data sources are joined:
    nesting (`ForEach@1`, `If@1`, …) is already handled by the parser's `transformations`
    recursion. A `*ckTypeIdPath` property or a non-literal value (template token, JSONPath) lands
    in `DynamicTypeUsages` — **reported as not statically analyzable, never silently dropped**.
-2. **Data policies/permissions** (Epic AB#4969) — untyped `RtEntity` reads through the tenant
+2. **Data policies/permissions** — untyped `RtEntity` reads through the tenant
    repository: `GetDataPoliciesAsync` (all `System.Identity/DataPolicy`),
    `GetDataPermissionsForPoliciesAsync` (outbound `PolicyPermission`),
    `GetGrantingRolesForDataPermissionsAsync` (inbound `GrantsPermission` → `Role`). The
@@ -190,10 +189,10 @@ Both `TenantCommunicationApiReadOnlyPolicy`. Three data sources are joined:
    `Repository/SystemIdentityCkIds`. Type matching is on the `Model/Type` name part,
    **version-insensitively** (pipeline YAML is unversioned, policy targets are canonical
    `SemanticVersionedFullName` and may carry an element version — `NormalizeCkTypeId` strips it).
-3. **The declaration** — `AssignedRoleNames` (AB#5111); `null` = legacy → recommendation without
+3. **The declaration** — `AssignedRoleNames`; `null` = legacy → recommendation without
    a delta.
 
-Pipeline-set semantics follow the AB#5027 resolver: adapter-scoped = executing pipelines minus
+Pipeline-set semantics follow the resolver: adapter-scoped = executing pipelines minus
 those with their own override; configuration-bound = the adapter-default pipelines resolving to
 it plus pipelines overriding **to** it (new reverse read `GetPipelinesUsingServiceAccountAsync`,
 inbound over `Uses`; the resolver still decides which link is effective). Unprotected touched
@@ -203,7 +202,7 @@ types are **dropped** (no policy targets them → no role needed). `ProtectedTyp
 owner-scoped grants is called out as blind in the summary. Delta: `MissingRoles` = full-scope
 granting roles of uncovered types; `SuperfluousRoles` = declared roles granting nothing for any
 touched type — except the provisioning baseline (`CommunicationManagement`,
-`PipelineServiceAccountProvisioningService.DefaultAssignedRoleNames`, and since AB#8563
+`PipelineServiceAccountProvisioningService.DefaultAssignedRoleNames`, and since the declarative-account change
 `StreamDataReader`, `…BaselineRoleNames`), which lands in
 `BaselineRoles` instead (it grants no data access and every pipeline SA needs it). Robustness:
 unparsable/empty definitions become `Warnings` entries, an empty pipeline set returns an
@@ -213,5 +212,5 @@ Phase 6 tests: `Services/ServiceAccountRightsAnalysisTests` (extraction incl. ne
 list/record recursion, dynamic-path and templated-id reporting, unprotected drop, versioned-target
 matching, role join, owner-scope flag + blind-type handling, delta with baseline, legacy null
 declaration, unparsable-YAML warning, empty set, both pipeline-set resolutions),
-`Controllers/ServiceAccountRightsAnalysisEndpointTests` (routing, 404/400 mapping — AB#5112
-pattern).
+`Controllers/ServiceAccountRightsAnalysisEndpointTests` (routing, 404/400 mapping — same
+pattern as the read side).

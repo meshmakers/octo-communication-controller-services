@@ -5,16 +5,20 @@ code it covers.
 
 ## What this repo is
 
-This is the **Octo Communication Controller Services** - an ASP.NET Core web service that manages communication adapters and pools for data ingress and egress in an Octo Mesh instance. The service acts as a central hub for coordinating communication between external adapters (data pipeline executors) and pools (device groups) in a multi-tenant environment.
+This is the **Octo Communication Controller Services** - an ASP.NET Core web service that manages communication
+adapters and pools for data ingress and egress in an Octo Mesh instance. The service acts as a central hub for
+coordinating communication between external adapters (data pipeline executors) and pools (device groups) in a
+multi-tenant environment.
 
 ### Core Components
 
-1. **Adapters**: External clients that execute data pipelines. They connect via SignalR and receive pipeline configurations from the service.
+1. **Adapters**: External clients that execute data pipelines. They connect via SignalR and receive pipeline
+   configurations from the service.
 2. **Pools**: Groups of managed devices/entities. Pool operators register via SignalR to handle device communication.
 3. **SignalR Hubs**: Real-time bidirectional communication channels:
    - `AdapterHub` at `/{tenantId}/adapterHub` - manages adapter lifecycle and pipeline debugging
    - `AdapterPoolHub` at `/adapterPoolHub` - **tenant-free** management channel of adapter pool
-     members; grants and releases leases (AB#4924). Not a variant of `AdapterHub`: a pool member
+     members; grants and releases leases. Not a variant of `AdapterHub`: a pool member
      belongs to no tenant, so it cannot use a tenant-addressed route.
    - `PoolHub` at `/{tenantId}/poolHub` - manages pool operator connections
 4. **Caches**: In-memory synchronized state for Adapters and Pools across service nodes
@@ -25,10 +29,14 @@ This is the **Octo Communication Controller Services** - an ASP.NET Core web ser
 
 The service follows a layered architecture:
 - **Hubs Layer** (`src/CommunicationControllerServices/Hubs/`) - SignalR hubs for real-time communication
-- **Service Layer** (`src/CommunicationControllerServices/Services/`) - Core business logic (`AdapterService`, `DeploymentSiteService`, `PipelineDebugService`, `TriggerManagementService`, `PipelineExecutionService`, `CommunicationEventService`)
+- **Service Layer** (`src/CommunicationControllerServices/Services/`) - Core business logic (`AdapterService`,
+  `DeploymentSiteService`, `PipelineDebugService`, `TriggerManagementService`, `PipelineExecutionService`,
+  `CommunicationEventService`)
 - **Repository Layer** (`src/CommunicationControllerServices/Repository/`) - Data access via MongoDB Runtime Engine
-- **Cache Layer** (`src/CommunicationControllerServices/Caches/`) - In-memory state synchronized across nodes via hub callbacks
-- **Consumers** (`src/CommunicationControllerServices/Consumers/`) - Message bus event consumers for tenant lifecycle management
+- **Cache Layer** (`src/CommunicationControllerServices/Caches/`) - In-memory state synchronized across nodes via hub
+  callbacks
+- **Consumers** (`src/CommunicationControllerServices/Consumers/`) - Message bus event consumers for tenant lifecycle
+  management
 - **Background Services** (`src/CommunicationControllerServices/BackgroundServices/`) - Periodic maintenance tasks
 
 ### Project Structure Notes
@@ -78,7 +86,7 @@ The service follows a layered architecture:
 | `**/Services/PipelineExecution*.cs`, `**/BackgroundServices/ExecutionCleanup*.cs`, `**/Services/PipelineStatisticsFolder.cs` | `docs/pipeline-execution-metrics.md` |
 | `**/Services/ServiceAccountImpersonationSwitchService.cs`, `**/Services/UsesLinkedServiceAccountLookup.cs`, `**/Controllers/ServiceAccountController.cs` | `docs/pipeline-service-account-grants.md` |
 | `**/Services/PipelineServiceAccount*.cs`, `**/Options/ServiceAccount*.cs` | `docs/pipeline-service-account-identity.md` |
-| `**/Services/ServiceAccountHealthService.cs`, `**/Services/ServiceAccountRightsAnalysisService.cs`, `**/BackgroundServices/PipelineServiceAccountProvisioningRetry*.cs` | `docs/pipeline-service-account-reconcile.md` |
+| `**/Services/ServiceAccount*Service.cs`, `**/BackgroundServices/PipelineServiceAccountProvisioningRetry*.cs` | `docs/pipeline-service-account-reconcile.md` |
 | `**/Methods/Service/**` | `docs/rest-method-facades.md` |
 | `**/Services/SecretDefault*.cs`, `**/Controllers/SecretDefaultsController.cs` | `docs/secret-defaults.md` |
 | `**/Caches/**`, `**/Program.cs`, `**/Services/*ServiceException.cs` | `docs/service-conventions.md` |
@@ -108,10 +116,12 @@ dotnet test --configuration Release
 
 # Run a specific unit test class. TUnit only understands the MTP tree-node filter
 # (/assembly/namespace/class/method, '*' wildcards); a VSTest --filter selects zero tests.
-dotnet test --project tests/CommunicationControllerService.Tests/CommunicationControllerService.Tests.csproj --treenode-filter "/*/*/ReportAdapterMetricsAsyncTests/*"
+dotnet test --project tests/CommunicationControllerService.Tests/CommunicationControllerService.Tests.csproj \
+  --treenode-filter "/*/*/ReportAdapterMetricsAsyncTests/*"
 
 # Run a specific unit test method
-dotnet test --project tests/CommunicationControllerService.Tests/CommunicationControllerService.Tests.csproj --treenode-filter "/*/*/ReportAdapterMetricsAsyncTests/ReportAdapterMetricsAsync_ServiceThrows_Swallowed"
+dotnet test --project tests/CommunicationControllerService.Tests/CommunicationControllerService.Tests.csproj \
+  --treenode-filter "/*/*/ReportAdapterMetricsAsyncTests/ReportAdapterMetricsAsync_ServiceThrows_Swallowed"
 ```
 
 The xUnit integration tests additionally accept `--filter` (VSTest syntax) and
@@ -159,19 +169,24 @@ docker build -f src/CommunicationControllerServices/Dockerfile -t octo-communica
 
 **MANDATORY for all code changes:**
 
-1. **Unit Tests Required**: Every new feature, bug fix, or code change must include corresponding unit tests in `tests/CommunicationControllerService.Tests/`. Use TUnit framework with NSubstitute for mocking.
+1. **Unit Tests Required**: Every new feature, bug fix, or code change must include corresponding unit tests in
+   `tests/CommunicationControllerService.Tests/`. Use TUnit framework with NSubstitute for mocking.
 
-2. **Integration Tests Required**: Changes affecting repository operations, database interactions, or multi-component workflows must include integration tests in `tests/CommunicationControllerServices.IntegrationTests/`. Use xUnit framework with FluentAssertions.
+2. **Integration Tests Required**: Changes affecting repository operations, database interactions, or multi-component
+   workflows must include integration tests in `tests/CommunicationControllerServices.IntegrationTests/`. Use xUnit
+   framework with FluentAssertions.
 
-3. **Documentation Updates Required**: This developer documentation (CLAUDE.md) must be updated when:
+3. **Documentation Updates Required**: This developer documentation (AGENTS.md) must be updated when:
    - Adding new architectural patterns or components
    - Introducing new services, repositories, or significant classes
    - Changing test infrastructure or fixtures
    - Adding new configuration options
    - Modifying API structures or authentication/authorization
 
-4. **All Tests Must Pass**: Before completing any task, run both unit tests (`dotnet test`) and integration tests to ensure all tests pass.
+4. **All Tests Must Pass**: Before completing any task, run both unit tests (`dotnet test`) and integration tests to
+   ensure all tests pass.
 
 ## Rules
 
-The rules of this repository are the sections of the routed docs; read the matching file before you change code it covers.
+The rules of this repository are the sections of the routed docs; read the matching file before you change code it
+covers.

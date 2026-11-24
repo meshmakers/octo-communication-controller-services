@@ -5,11 +5,11 @@ background: true
 
 # Shared adapter leasing — trying it locally
 
-A hand-run of AB#4924 against `Start-Octo`, end to end: one lending tenant with a pool, one
+A hand-run of against `Start-Octo`, end to end: one lending tenant with a pool, one
 borrowing tenant with a `Leased` adapter, one member process, one pipeline execution that gets
 queued, leased, run and released.
 
-✅ **Status: WALKED END TO END, 2026-09-15**, lender `accounting` → borrower `salzburgdev`, on the
+✅ **Status: WALKED END TO END, 2026-09-15**, lender `accounting` → borrower `borrowerdev`, on the
 `dev` checkout in `DebugL`. Every step below is now an observation rather than a hypothesis, and the
 observations disagreed with the previous version of this document in six places. They are marked
 🔴 **CORRECTED**.
@@ -131,7 +131,7 @@ second one is what lending actually uses:
 mongosh "mongodb://octo-system-admin:OctoAdmin1@localhost:27017/admin" --quiet --eval '
   db.getSiblingDB("octosystem").RtEntity_SystemTenant.find({},{attributes:1})
     .forEach(x => print(JSON.stringify(x.attributes)));'
-# -> {"tenantId":"salzburgdev","parentTenantId":"accounting","databaseName":"salzburgdev"}
+# -> {"tenantId":"borrowerdev","parentTenantId":"accounting","databaseName":"borrowerdev"}
 
 mongosh "mongodb://octo-system-admin:OctoAdmin1@localhost:27017/admin" --quiet --eval '
   db.getSiblingDB("accounting").RtEntity_SystemTenant.find({},{attributes:1})
@@ -148,26 +148,26 @@ A stored `local_<tenant>` context whose refresh token has expired cannot be repa
 `LogIn` falls back to a device flow. Two ways round it, both used in this walk:
 
 1. **An ancestor admin's token already works on the descendant's routes.** The `local_accounting`
-   user token carries `allowed_tenants: [accounting, …, salzburgdev, …]`, and both
-   `POST https://localhost:5001/tenants/salzburgdev/graphQl` and
-   `GET https://localhost:5015/salzburgdev/v1/...` accept it (HTTP 200). Good enough for every read
+   user token carries `allowed_tenants: [accounting, …, borrowerdev, …]`, and both
+   `POST https://localhost:5001/tenants/borrowerdev/graphQl` and
+   `GET https://localhost:5015/borrowerdev/v1/...` accept it (HTTP 200). Good enough for every read
    and for the controller REST endpoints; `octo-cli` itself still wants a context per tenant.
 2. **A client-credentials context**, which is additive and removable:
 
 ```bash
-octo-cli -c AddContext -n ab4924_salzburgdev \
+octo-cli -c AddContext -n lease_borrower \
   -isu https://localhost:5003/ -asu https://localhost:5001/ -csu https://localhost:5015/ \
-  -bsu https://localhost:5009/ -aisu https://localhost:5019/ -tid salzburgdev
+  -bsu https://localhost:5009/ -aisu https://localhost:5019/ -tid borrowerdev
 # Never pass the secret with -s (deprecated): a value on the command line ends up in the shell
 # history and the process list. Either pipe it in with --secret-stdin ...
-: "${SECRET:?SECRET is not set}" && printf '%s' "$SECRET" | octo-cli --context ab4924_salzburgdev -c LogInClientCredentials -id claude-agent --secret-stdin
+: "${SECRET:?SECRET is not set}" && printf '%s' "$SECRET" | octo-cli --context lease_borrower -c LogInClientCredentials -id claude-agent --secret-stdin
 # ... or export OCTO_CLI_CLIENT_SECRET and leave --secret-stdin out (it reads only standard input):
-# octo-cli --context ab4924_salzburgdev -c LogInClientCredentials -id claude-agent
+# octo-cli --context lease_borrower -c LogInClientCredentials -id claude-agent
 # ... and afterwards
-octo-cli -c RemoveContext -n ab4924_salzburgdev
+octo-cli -c RemoveContext -n lease_borrower
 ```
 
-The token it issues carries `tenant_id: salzburgdev` and `scope: octo_api`, which is all the
+The token it issues carries `tenant_id: borrowerdev` and `scope: octo_api`, which is all the
 controller's `SystemCommunicationApiReadWritePolicy` requires (`Program.cs` only asserts the scope
 claim — **no role is checked** on that policy). `ImportRt`, `DeployPipeline`, `ExecutePipeline`,
 `GetCommunicationLifecycle` and `SetCommunicationLifecycle` all worked with it.
@@ -222,7 +222,7 @@ There is no `CreateAdapterPool` CLI verb.
 - ✅ **`octo-cli -c ImportRt`** — what this walk used, verbatim and working:
 
 ```yaml
-# rt-ab4924-pool-accounting.yaml  — import as the LENDER
+# rt-lease-pool-accounting.yaml  — import as the LENDER
 $schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
 dependencies:
   - System.Communication-[4.0,5.0)
@@ -230,7 +230,7 @@ entities:
   - rtId: 49240000000000000000aa01
     ckTypeId: System.Communication/AdapterPool
     attributes:
-      - { id: System/Name,        value: AB4924 Test Pool }
+      - { id: System/Name,        value: Leasing Test Pool }
       - { id: System/Description, value: Hand-run pool for the first end-to-end leasing walk. }
       - { id: System.Communication/MinReplicas,                         value: 1 }
       - { id: System.Communication/MaxReplicas,                         value: 2 }
@@ -250,7 +250,7 @@ entities:
 ```
 
 ```bash
-octo-cli --context local_accounting -c ImportRt -f rt-ab4924-pool-accounting.yaml -w
+octo-cli --context local_accounting -c ImportRt -f rt-lease-pool-accounting.yaml -w
 ```
 
 🔴 **`AdapterSharingMode` must not be left at its default.** The default is `0` = `NotShared`, and
@@ -268,7 +268,7 @@ Verify, and take the rtId from here rather than from the file:
 ```bash
 curl -sk -X POST https://localhost:5001/tenants/accounting/graphQl -H "Authorization: Bearer $TOK" \
   -H 'Content-Type: application/json' -d '{"query":"{ runtime { systemCommunicationAdapterPool { items { rtId name sharingMode minReplicas maxReplicas } } } }"}'
-# {"rtId":"49240000000000000000aa01","name":"AB4924 Test Pool","sharingMode":"DESCENDANTS","minReplicas":1,"maxReplicas":2}
+# {"rtId":"49240000000000000000aa01","name":"Leasing Test Pool","sharingMode":"DESCENDANTS","minReplicas":1,"maxReplicas":2}
 ```
 
 **Do not deploy the pool.** `DeployWorkload` on it goes to the Communication Operator, which locally
@@ -277,7 +277,7 @@ means kind. Running the member by hand (§6) is the honest instrument anyway.
 ## 5. A `Leased` adapter and one pipeline in the borrower
 
 ```yaml
-# rt-ab4924-borrower-salzburgdev.yaml — import as the BORROWER
+# rt-lease-borrower.yaml — import as the BORROWER
 $schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
 dependencies:
   - System.Communication-[4.0,5.0)
@@ -285,7 +285,7 @@ entities:
   - rtId: 49240000000000000000bb01
     ckTypeId: System.Communication/Adapter
     attributes:
-      - { id: System/Name, value: AB4924 Leased Adapter }
+      - { id: System/Name, value: Leased Adapter }
       - { id: System.Communication/LifecycleMode,    value: 3 }        # 🔴 3 = Leased
       - { id: System.Communication/LentFromTenantId, value: accounting }
       - { id: System.Communication/LentFromPoolRtId, value: 49240000000000000000aa01 }
@@ -296,14 +296,14 @@ entities:
   - rtId: 49240000000000000000bb02
     ckTypeId: System.Communication/DataFlow
     attributes:
-      - { id: System/Name, value: AB4924 Leasing Walk }
+      - { id: System/Name, value: Leasing Walk }
   - rtId: 49240000000000000000bb03
     ckTypeId: System.Communication/Pipeline
     associations:
       - { roleId: System/ParentChild,            targetRtId: 49240000000000000000bb02, targetCkTypeId: System.Communication/DataFlow }
       - { roleId: System.Communication/Executes, targetRtId: 49240000000000000000bb01, targetCkTypeId: System.Communication/Adapter }
     attributes:
-      - { id: System/Name,    value: AB4924 Leasing Probe }
+      - { id: System/Name,    value: Leasing Probe }
       - { id: System/Enabled, value: true }
       - { id: System.Communication/DeploymentState, value: 0 }
       - id: System.Communication/PipelineDefinition
@@ -314,7 +314,7 @@ entities:
             - type: SetPrimitiveValue@1
               targetPath: $.marker
               valueType: String
-              value: AB4924-LEASED-PROBE-OK
+              value: LEASED-PROBE-OK
             - type: GetRtEntitiesByType@1
               description: Read the adapters of WHICHEVER tenant database this actually runs against
               ckTypeId: System.Communication/Adapter
@@ -327,7 +327,7 @@ entities:
 
 **Make the pipeline's output prove *which tenant database* it ran against**, not just that it ran.
 A `GetRtEntitiesByType@1` over a type whose population differs between the two tenants is the
-cheapest such probe: `accounting` has 1 adapter, `salzburgdev` has 3, so the output alone settles
+cheapest such probe: `accounting` has 1 adapter, `borrowerdev` has 3, so the output alone settles
 the isolation question (§8, evidence 6).
 
 ### 5.1 🔴 NEW — the borrower's `PipelineServiceAccount` has to be provisioned by hand
@@ -338,7 +338,7 @@ use the idempotent controller endpoint directly:
 
 ```bash
 curl -sk -X POST -H "Authorization: Bearer $TOK" -H 'Content-Length: 0' \
-  https://localhost:5015/salzburgdev/v1/adapter/49240000000000000000bb01/serviceAccount/reconcile
+  https://localhost:5015/borrowerdev/v1/adapter/49240000000000000000bb01/serviceAccount/reconcile
 # {"outcome":"Provisioned","clientId":"octo-pipeline-sa-49240000000000000000bb01",
 #  "configurationWellKnownName":"pipeline-service-account-49240000000000000000bb01","roleChangesSkipped":false, ...}
 ```
@@ -350,7 +350,7 @@ The client is created in the **borrower's** identity database with grant types
 
 ```
 $ octo-cli --context <borrower> -c DeployPipeline -aid 49240000000000000000bb01 -pid 49240000000000000000bb03 -f probe.yaml
-NotFound: {"errorMessage":"[salzburgdev] Adapter 'System.Communication/Adapter@49240000000000000000bb01' has no
+NotFound: {"errorMessage":"[borrowerdev] Adapter 'System.Communication/Adapter@49240000000000000000bb01' has no
 live SignalR connection. The adapter pod must be deployed and online before its pipeline configuration can be
 pushed. Deploy the adapter first via the 'Deploy Adapter' action (or 'Pool → Deploy Workload' on the API), then
 retry 'Update Configuration'."
@@ -382,7 +382,7 @@ a parent `DataFlow`. It never looks at `DeploymentState`. The `ImportRt` above s
 
 ```bash
 octo-cli --context local_accounting     -c SetCommunicationLifecycle -le true   # lender
-octo-cli --context ab4924_salzburgdev   -c SetCommunicationLifecycle -le true   # borrower
+octo-cli --context lease_borrower   -c SetCommunicationLifecycle -le true   # borrower
 octo-cli --context local_accounting     -c GetCommunicationLifecycle
 # Communication lifecycle for tenant 'accounting': ScaleToZeroEnabled=False, LeasingEnabled=True
 ```
@@ -419,7 +419,7 @@ Pick ports that are free; 5020/5021 belong to `Start-Octo`'s own mesh-adapter jo
 first said *"There is deliberately **no** `DedicatedTenantId` here"* and left the member with the
 constructor default `"meshTest"`: `ConfigureAdapterAuthenticatorOptions` is the only place that fills
 `AuthenticatorOptions.TenantId`, which is the only thing that puts `acr_values=tenant:{id}` on the
-member's own client-credentials request, so the management token carried `tenant_id: meshtest` and
+member's own client-credentials request, so the management token carried `tenant_id: <tenant>` and
 `AdapterPoolHub.CheckConnectionTenantBinding` refused the registration — or, on the default
 `AdapterPoolHubAuthorizationMode.LogOnly`, accepted it silently and only logged what an enforcing run
 would have refused. The second version fixed the symptom by telling the operator to set the key to
@@ -453,7 +453,7 @@ export OCTO_SYSTEM__DATABASEUSERPASSWORD=OctoUser1
 export OCTO_SYSTEM__USEDIRECTCONNECTION=true
 
 # 🔴 The property name repeats the section, and the short spelling binds NOTHING — it was the
-# chart's bug (AB#5303 item 5, fixed in octo-mesh-adapter 75b14a2). Since that item's second half,
+# chart's bug (fixed in octo-mesh-adapter 75b14a2). Since that item's second half,
 # a process whose AdapterPool section is set and does not bind REFUSES TO START rather than coming
 # up as an ordinary adapter, so a typo here is now an error message instead of a silent nothing.
 export OCTO_ADAPTERPOOL__ADAPTERPOOLTENANTID=accounting
@@ -609,7 +609,7 @@ A second member is just a second process with a different `MEMBERID`.
 ## 8. Give the borrower some work, and watch it
 
 ```bash
-octo-cli --context ab4924_salzburgdev -c ExecutePipeline -id 49240000000000000000bb03
+octo-cli --context lease_borrower -c ExecutePipeline -id 49240000000000000000bb03
 # {"id":"71592b0d-1a0b-4e84-9b2f-cb676382b337","dateTime":"2026-09-15T07:48:11.236387Z","status":null, ...}
 ```
 
@@ -632,12 +632,12 @@ GraphQL, not from a log:
 ```
 $ octo-cli --context local_accounting -c GetAdapterPoolQueue -id 49240000000000000000aa01
 Adapter pool '49240000000000000000aa01': 0 leased, 1 waiting.
-  WAITING 71592b0d-…  tenant=salzburgdev  pipeline=AB4924 Leasing Probe  class=Batch
+  WAITING 71592b0d-…  tenant=borrowerdev  pipeline=Leasing Probe  class=Batch
           queuedAt=2026-09-15T07:48:11.2360000Z  position=1 in its tenant, 0 tenant(s) ahead in the rotation
 
 $ octo-cli --context local_accounting -c GetAdapterPoolQueue -id 49240000000000000000aa01 -j
-[{"ExecutionId":"cc50af16-…","BorrowerTenantId":"salzburgdev","PipelineRtId":"49240000000000000000bb03",
-  "PipelineName":"AB4924 Leasing Probe","ExecutionClass":1,"QueuedAtUtc":"2026-09-15T07:51:05.654Z",
+[{"ExecutionId":"cc50af16-…","BorrowerTenantId":"borrowerdev","PipelineRtId":"49240000000000000000bb03",
+  "PipelineName":"Leasing Probe","ExecutionClass":1,"QueuedAtUtc":"2026-09-15T07:51:05.654Z",
   "PositionInTenant":1,"TenantsAheadInRotation":0,"LeasedOnMemberId":null,"LeaseExpiresAtUtc":null,"IsLeased":false}]
 ```
 
@@ -645,7 +645,7 @@ $ octo-cli --context local_accounting -c GetAdapterPoolQueue -id 492400000000000
 
 ```
 | INFO|LeaseService.GrantLeaseAsync|Granted lease 'a2299f4b18d94dd7b1e84ce795d7a85d' of pool 49240000000000000000aa01
-       (tenant 'accounting') to tenant 'salzburgdev' on member 'octo-pool-0', expires 2026-09-15T08:03:13.7351640Z
+       (tenant 'accounting') to tenant 'borrowerdev' on member 'octo-pool-0', expires 2026-09-15T08:03:13.7351640Z
 | INFO|LeaseSchedulerService.ScheduleForPoolAsync|Adapter pool … granted 1 lease(s) across 1 borrowing tenant(s);
        0 work item(s) still queued
 ```
@@ -670,13 +670,13 @@ is what makes `LeaseReleasedAt − LeaseGrantedAt` minus the pipeline's own run 
 **4 — the member really runs the borrower's pipeline.**
 
 ```
-| INFO|Taking lease 'a2299f4b…' for tenant 'salzburgdev' from pool 49240000000000000000aa01 of tenant 'accounting', expires …
-| INFO|This pool member now acts as client 'octo-pipeline-sa-49240000000000000000bb01' of leased tenant 'salzburgdev'
-|DEBUG|CK model cache warmed for leased tenant 'salzburgdev'
-| INFO|Registering multiple pipelines for tenant salzburgdev. Pipeline count: 1
-| INFO|Running leased pipeline System.Communication/Pipeline@49240000000000000000bb03 for tenant 'salzburgdev'
+| INFO|Taking lease 'a2299f4b…' for tenant 'borrowerdev' from pool 49240000000000000000aa01 of tenant 'accounting', expires …
+| INFO|This pool member now acts as client 'octo-pipeline-sa-49240000000000000000bb01' of leased tenant 'borrowerdev'
+|DEBUG|CK model cache warmed for leased tenant 'borrowerdev'
+| INFO|Registering multiple pipelines for tenant borrowerdev. Pipeline count: 1
+| INFO|Running leased pipeline System.Communication/Pipeline@49240000000000000000bb03 for tenant 'borrowerdev'
        as execution '71592b0d-…' under lease 'a2299f4b…'
-| INFO|Resolved service account identity for client octo-pipeline-sa-49240000000000000000bb01 in tenant 'salzburgdev':
+| INFO|Resolved service account identity for client octo-pipeline-sa-49240000000000000000bb01 in tenant 'borrowerdev':
        subject octo-pipeline-sa-49240000000000000000bb01 with 1 role(s)
 | INFO|PipelineExecution/SetPipelineExecutionResult@1: Pipeline execution result set (3877 characters)
 | INFO|PipelineExecution: Pipeline completed
@@ -687,25 +687,25 @@ is what makes `LeaseReleasedAt − LeaseGrantedAt` minus the pipeline's own run 
 ```
 |DEBUG|Received hub invocation: ReleaseLeaseAsync [ LeaseResultDto { LeaseId = a2299f4b…, Reason = Completed,
        Success = True, StatusMessage = Executed pipeline 49240000000000000000bb03 as execution '71592b0d-…'.,
-       OutputData = {"marker":"AB4924-LEASED-PROBE-OK", …}, WorkDurationMs = 817, ReleasedAtUtc = … } ]
-| INFO|LeaseService.ReleaseLeaseAsync|Lease 'a2299f4b…' of tenant 'salzburgdev' released by its member: Completed, success=true
+       OutputData = {"marker":"LEASED-PROBE-OK", …}, WorkDurationMs = 817, ReleasedAtUtc = … } ]
+| INFO|LeaseService.ReleaseLeaseAsync|Lease 'a2299f4b…' of tenant 'borrowerdev' released by its member: Completed, success=true
 ```
 
 then, on the member, in this order — and the order is the isolation invariant, not housekeeping:
 
 ```
-|DEBUG|Pipeline registrations dropped for released tenant 'salzburgdev'
-|DEBUG|CK model cache unloaded for released tenant 'salzburgdev'
-|DEBUG|Borrower identity dropped after releasing tenant 'salzburgdev'
+|DEBUG|Pipeline registrations dropped for released tenant 'borrowerdev'
+|DEBUG|CK model cache unloaded for released tenant 'borrowerdev'
+|DEBUG|Borrower identity dropped after releasing tenant 'borrowerdev'
 ```
 
 **6 — 🔴 the isolation claim, checked rather than assumed.** Four independent observations, none of
 them "no errors appeared":
 
 - *The token.* `IdentityServices.log` carries the request and the issued JWT verbatim. Request:
-  `{"acr_values": "tenant:salzburgdev", "grant_type": "client_credentials", "scope": "octo_api",
+  `{"acr_values": "tenant:borrowerdev", "grant_type": "client_credentials", "scope": "octo_api",
   "client_id": "octo-pipeline-sa-49240000000000000000bb01"}`. Decoding the JWT the log prints gives
-  exactly: `{"iss":"https://localhost:5003/", "scope":"octo_api", "tenant_id":"salzburgdev",
+  exactly: `{"iss":"https://localhost:5003/", "scope":"octo_api", "tenant_id":"borrowerdev",
   "role":"CommunicationManagement", "client_id":"octo-pipeline-sa-49240000000000000000bb01"}` —
   **no `accounting` anywhere in it**, and `OctoAccessTokenShapeHandler` strips `sub`, as designed.
 - *The member's log for that execution.* Across the whole process log, `tenant 'accounting'` appears
@@ -713,14 +713,14 @@ them "no errors appeared":
   its "Registered as member…", and the lease-grant line that names the **lending** tenant. It never
   appears as the executing tenant. Inside the lease window the other 78 hits on the string
   "accounting" are all CK model ids (`Basic.Accounting-1.6.0`, `Meshmakers.Accounting.Tesla-1.1.0`)
-  read *out of `$db: "salzburgdev"`*.
+  read *out of `$db: "borrowerdev"`*.
 - *The database the member actually talked to.* Counting `"$db"` in the rendered Mongo commands
-  inside the lease window: `salzburgdev` 128, `octosystem` 69 (the tenant registry), `admin` 9
+  inside the lease window: `borrowerdev` 128, `octosystem` 69 (the tenant registry), `admin` 9
   (transaction control), **`accounting` 0**. Across the entire member process log,
   `"$db":"accounting"` occurs **zero** times.
 - *The pipeline's own output.* `SetPipelineExecutionResult@1` returned
-  `{"marker":"AB4924-LEASED-PROBE-OK","adaptersSeen":{"TotalCount":3,"Items":[… "Mesh Adapter" …,
-  "FinAPI Adapter" …, "AB4924 Leased Adapter" …]}}`. Those are **salzburgdev's** three adapters;
+  `{"marker":"LEASED-PROBE-OK","adaptersSeen":{"TotalCount":3,"Items":[… "Mesh Adapter" …,
+  "FinAPI Adapter" …, "Leased Adapter" …]}}`. Those are **borrowerdev's** three adapters;
   `accounting` has exactly one. The run read the borrower's data, not the lender's.
 
 **7 — the kill switch holds the queue, and the refusal is named.** With `-le false` on the **lender**
@@ -728,7 +728,7 @@ only, the work item is still enqueued (that half is the borrower's switch) and t
 round, verbatim:
 
 ```
-|DEBUG|LeaseSchedulerService.TryGrantAsync|No lease granted for execution 'cc50af16-…' of tenant 'salzburgdev'
+|DEBUG|LeaseSchedulerService.TryGrantAsync|No lease granted for execution 'cc50af16-…' of tenant 'borrowerdev'
        on pool 49240000000000000000aa01: Adapter pool leasing is disabled for the lending tenant 'accounting'.
        Enable it with octo-cli SetCommunicationLifecycle -le true.
 ```
@@ -748,7 +748,7 @@ Same pipeline, same member, two consecutive leases:
 |---|---|---|
 | `durationMs` | 5418 | **405** |
 | CK-model warm-up | 4.1 s | 0.14 s |
-| Mongo reads on `salzburgdev` | 128 | 125 |
+| Mongo reads on `borrowerdev` | 128 | 125 |
 | Mongo reads on `octosystem` | 69 | **6** |
 
 The borrower's own data is fully re-read every lease (128 → 125); what survives is the
@@ -859,14 +859,14 @@ tenants in sequence. All three were answered, and two new defects fell out.
 
 ### 11.1 What was set up
 
-The locally deployed accounting application (`meshmakers-app`) is wired to tenant `salzburgdev`
-(`config.json`: login tenant `accounting`, mesh adapter `salzburgdev-670000000000000000000002`), and
+The locally deployed accounting application (the accounting app) is wired to tenant `borrowerdev`
+(`config.json`: login tenant `accounting`, mesh adapter `borrowerdev-670000000000000000000002`), and
 `meshmakers` is a second child of `accounting` carrying the same blueprint. Both borrowed from the
-`AB4924 Test Pool` of §4.
+`Leasing Test Pool` of §4.
 
 | Tenant | `Leased` adapter | DataFlow | Pipeline (clone of `Match Transactions`, byte-identical definition) |
 |---|---|---|---|
-| `salzburgdev` | `…bb01` (from §5) | `…bb02` | `…bb11` |
+| `borrowerdev` | `…bb01` (from §5) | `…bb02` | `…bb11` |
 | `meshmakers` | `…cc01` | `…cc02` | `…cc11` |
 
 🔴 **A clone, not a re-pointed original.** The real pipeline keeps its `Executes` edge to the
@@ -889,7 +889,7 @@ thing its nightly cron means.
 
 ### 11.3 The real pipeline ran, and the evidence is entity data
 
-`POST salzburgdev/v1/pipeline/execute?pipelineRtId=…bb11`:
+`POST borrowerdev/v1/pipeline/execute?pipelineRtId=…bb11`:
 
 ```
 leaseWaitMs = 1002   durationMs = 2640   status = Completed   errorMessage = null
@@ -897,7 +897,7 @@ leasedFromTenantId = accounting   leasedOnMemberId = octo-pool-0
 ```
 
 From the member's log, counted rather than eyeballed: **808 Mongo commands against
-`"$db":"salzburgdev"`, zero against `accounting`** — 323 on `BankTransaction`, 321 on
+`"$db":"borrowerdev"`, zero against `accounting`** — 323 on `BankTransaction`, 321 on
 `AccountingDocument`, 150 on `NamedEntity`, 37 on `PaymentOrder`, plus reads of
 `SystemIdentityDataPolicy` and `SystemIdentityDataPermission`. That last pair is the part worth
 keeping: the run evaluated **data permissions under the borrower's identity**, so it was not quietly
@@ -914,19 +914,19 @@ opposite of what one would expect.
 
 Enqueue **all three of one tenant first**, then all three of the other. Interleaving them proves
 nothing, because FIFO and rotation produce the same sequence. Six executions in 320 ms, three of
-`salzburgdev` (`…bb11`) then three of `meshmakers` (`…cc11`):
+`borrowerdev` (`…bb11`) then three of `meshmakers` (`…cc11`):
 
 | # | | tenant | granted | waitMs | durMs |
 |---|---|---|---|---|---|
 | 1 | M1 | meshmakers | 20:51:52.465 | 4384 | 799 |
-| 2 | S1 | salzburgdev | 20:51:57.601 | 9716 | 1360 |
+| 2 | S1 | borrowerdev | 20:51:57.601 | 9716 | 1360 |
 | 3 | M2 | meshmakers | 20:52:02.716 | 14575 | 426 |
-| 4 | S2 | salzburgdev | 20:52:07.828 | 19877 | 1284 |
+| 4 | S2 | borrowerdev | 20:52:07.828 | 19877 | 1284 |
 | 5 | M3 | meshmakers | 20:52:12.944 | 24743 | 463 |
-| 6 | S3 | salzburgdev | 20:52:18.068 | 30052 | 1320 |
+| 6 | S3 | borrowerdev | 20:52:18.068 | 30052 | 1320 |
 
 Strictly alternating; FIFO would have given S,S,S,M,M,M. 🔴 **The rotation carries state across
-leases**: the first grant went to `meshmakers` although `salzburgdev` had queued first — `salzburgdev`
+leases**: the first grant went to `meshmakers` although `borrowerdev` had queued first — `borrowerdev`
 had been served last, five minutes earlier. `GetAdapterPoolQueue` shows it honestly, with `ahead=1`
 moving between the tenants between rounds.
 
@@ -937,7 +937,7 @@ Counting every Mongo command in each lease window from the member's log:
 | Lease | leased tenant | own database | `octosystem` | `admin` | **another borrower's database** |
 |---|---|---|---|---|---|
 | M1 / M2 / M3 | meshmakers | 243 / 236 / 236 | 6 | 126 | **none** |
-| S1 / S2 / S3 | salzburgdev | 808 / 801 / 801 | 6 | 691 | **none** |
+| S1 / S2 / S3 | borrowerdev | 808 / 801 / 801 | 6 | 691 | **none** |
 
 No command against the other borrower's database in any window, and none outside the windows at all.
 Both tenants' data was identical before and after (the pipeline found nothing to match), checked
@@ -953,7 +953,7 @@ one.
 Registering the borrower's pipeline for the lease also registers its **bus triggers**. Observed:
 
 ```
-Connect receive endpoint: …::bot::pipeline-trigger-salzburgdev-49240000000000000000bb11
+Connect receive endpoint: …::bot::pipeline-trigger-borrowerdev-49240000000000000000bb11
 Declare queue: … durable      Bind exchange: source: …:PipelineTriggerSchedule (fanout)
 Consumer Ok → 1.9 s → Consumer Cancel Ok … 0 received
 ```
@@ -967,7 +967,7 @@ in RabbitMQ afterwards (queue present, 0 consumers). Two consequences, neither y
 2. Between leases the trigger events accumulate in that queue and arrive as a **burst** at the next
    lease. A neighbouring queue in the same estate was holding 14 such messages.
 
-**Half of this is closed by AB#5278 (2026-09-21):** a cron trigger of a pipeline on a `Leased`
+**Half of this is closed by the Leased cron-trigger scheduling (2026-09-21):** a cron trigger of a pipeline on a `Leased`
 adapter is no longer scheduled onto the adapter's queue at all — the controller schedules it onto
 its own `octo::com-controller::lease-trigger` queue and enqueues a lease per tick (concept §2c).
 After the next `DeployTriggers` the queue observed above receives nothing; consequence 1 and 2 need
@@ -1041,7 +1041,7 @@ first — engine work, its own work item.
 
 ### 12.2 The chart version must be pinned, and the reason is upside down
 
-0.2-lane charts publish as SemVer **prereleases** (AB#4948) so that an *unpinned* `ChartVersion` keeps
+0.2-lane charts publish as SemVer **prereleases** so that an *unpinned* `ChartVersion` keeps
 resolving main's newest **stable** chart. That contract — which `System.Communication.MainLatest`
 depends on — means an empty value hands a 0.2 tenant a **0.1** chart, which knows nothing about
 `adapterPool` and silently renders a dedicated adapter with no tenant. Pin it, and verify the pin by
@@ -1055,12 +1055,12 @@ every entry in `index.yaml` carries the *rebuild* time, not its own.
    `Manages` rather than `DeploymentSite` and `Hosts`. Nothing reported this until an install was
    attempted.
 2. **The in-cluster operator was three weeks old** (`0.2.2608.28006-dev`, before the AdapterPool
-   support). It dropped the deploy notification **silently** — the same shape as the AB#4917
+   support). It dropped the deploy notification **silently** — the same shape as the
    scale-status blocker: SignalR discards a method the client does not implement, without an error on
    either side. Check the operator's image before concluding anything about a deploy that "did
    nothing".
 3. **The lender had no `DeploymentSite` CR.** Its `Default Cloud` site had never been deployed, so
-   no operator owned it and the workload notification went into the AB#4371 pending queue instead of
+   no operator owned it and the workload notification went into the pending queue instead of
    to a recipient. `DeployPool` on the lender first, then the workload.
 4. **The chart demanded cluster secrets a pool must not get.** First `secrets.databaseUser`, then —
    once that was fixed — `secrets.streamDataPassword`. Both are `octo-mesh.secretEnv`, which fails on

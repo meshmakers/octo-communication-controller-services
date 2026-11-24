@@ -3,20 +3,20 @@ description: "Pipeline service account: installation defaults, MayActAs, StreamD
 applies_to: **/Services/ServiceAccountImpersonationSwitchService.cs, **/Services/UsesLinkedServiceAccountLookup.cs, **/Controllers/ServiceAccountController.cs
 ---
 
-### Phase 7 — installation defaults (AB#5115) and MayActAs materialisation (AB#5114 v1)
+### Phase 7 — installation defaults and MayActAs materialisation
 
-**AB#5115** (CK **3.33.0**, minor): `IssuerUri`, `TenantId` and `ClientSecret` on
+**Issuer fields** (CK **3.33.0**, minor): `IssuerUri`, `TenantId` and `ClientSecret` on
 `ServiceAccountConfiguration` became **optional** — `isOptional` sits on the type's attribute
 *references*, so the shared definitions (`ClientId`/`ClientSecret` with FinApi/MicrosoftGraph,
 `${System}/TenantId` platform-wide) stay mandatory everywhere else. Empty now MEANS something,
 mirrored by the adapter (octo-mesh-adapter `ServiceAccountTokenService`, commit acff5ac): empty
 `IssuerUri` = the adapter's own installation, empty `TenantId` = the tenant the adapter runs for,
-empty/`<placeholder>` `ClientSecret` = "no secret — impersonate instead" (AB#5114). The reconcile
+empty/`<placeholder>` `ClientSecret` = "no secret — impersonate instead". The reconcile
 **creates new accounts with issuer and tenant EMPTY** and converges the two historic installation
 spellings to empty — the `{{service.authority}}` token (case-insensitive) and this installation's
 concrete `AuthorityUrl` (trailing-slash-insensitive), plus a `TenantId` naming the current tenant.
 Any **other** concrete issuer/tenant is a **deliberate foreign target and is left alone** (this
-*inverts* the AB#5111 "converge foreign issuers onto the token" rule and retires the AB#5111
+*inverts* the earlier "converge foreign issuers onto the token" rule and retires the
 "always rewrite TenantId" rule). Shared helpers on `PipelineServiceAccountProvisioningService`:
 `IsInstallationIssuer` (replaces `IsIssuerUriHealthy`), `ConvergeIssuerUri`, `ConvergeTenantId`,
 `IsSecretUsable` (byte-for-byte the adapter's rule: empty or leading `<` = no secret). The
@@ -24,11 +24,10 @@ projection passes an empty `IssuerUri` through EMPTY; token resolution remains o
 entities that still carry it. The secret transition stays dual-path: the reconcile still issues a
 secret where none exists — an impersonation-only account is authored, never generated.
 
-**AB#5114 v1** — the controller declares which clients may impersonate a pipeline service
+**v1** — the controller declares which clients may impersonate a pipeline service
 account: `DistClientDto.MayActAsClientIds` (octo-common-services; additive + idempotent
 identity-side, unknown actors skipped with a warning, `null` = no edge changes, removal stays a
-v1 non-goal). The **adapter's own client** is the adapter-default account's client — exactly the
-AB#5072 credentials in the pod's Helm values — so the adapter path never declares actors (a
+v1 non-goal). The **adapter's own client** is the adapter-default account's client — exactly the credentials in the pod's Helm values — so the adapter path never declares actors (a
 self-edge authorizes nothing); the **standalone** branch of `ReconcileConfigurationAsync` resolves
 its actors via `GetPipelinesUsingServiceAccountAsync` → `GetAdapterByPipelineAsync` → the adapter
 defaults' `ClientId`s (deduplicated, sorted, self excluded; no actor resolvable → `null` + info
@@ -62,16 +61,16 @@ authority incl. trailing slash, current tenant → empty; foreign issuer/tenant 
 no-write), MayActAs on the wire (adapter path null, standalone actors deduplicated, unused
 standalone null); `Services/ServiceAccountHealthTests` — installation-default messages,
 credential-aware secret, all four impersonation states, foreign pairing, placeholder secret;
-`Services/AdapterServiceTests/DeployPipelineServiceAccountHardenedGuardTests` — the AB#5114
+`Services/AdapterServiceTests/DeployPipelineServiceAccountHardenedGuardTests` — the
 matrix (capable actor deploys incl. placeholder target secret, no/incapable actor refused with
 remedy, identity-down non-blocking); `…/PipelineServiceAccountProjectionTests` — empty issuer
 passes through empty.
 
-### Phase 8 — `StreamDataReader` baseline (AB#8563)
+### Phase 8 — `StreamDataReader` baseline
 
 The asset repository gates stream-data reads on `StreamDataReader`, `StreamDataWriter` or
-`StreamDataAdmin` (AB#8559, `StreamDataReadAuthorization:RoleEnforcement` Off / Warn / **Enforce**,
-error code `StreamDataReadRoleRequired`). Pipelines that read archives (EC allocation, billing,
+`StreamDataAdmin` (`StreamDataReadAuthorization:RoleEnforcement` Off / Warn / **Enforce**,
+error code `StreamDataReadRoleRequired`). Pipelines that read archives (allocation, billing,
 simulation) run as the adapter's pipeline service account, which held only `CommunicationManagement`
 — under `Enforce` they were refused.
 
@@ -88,14 +87,13 @@ Rules:
   `StreamDataReader` itself sends it once. An empty declaration still carries the baseline — the
   baseline cannot be removed through the declaration.
 - **Same security gate.** A user-initiated reconcile without `UserManagement` sends no roles at all,
-  baseline included (AB#5111).
+  baseline included.
 - **Legacy accounts are not covered.** An account without `AssignedRoleNames` (pre-CK 3.32.0) keeps
   `null` on the wire, so identity leaves its role edges alone — grant `StreamDataReader` by hand
   (`octo-cli AddClientToRole --clientId octo-pipeline-sa-<adapterRtId> --roleName StreamDataReader`)
   or opt the account into declarative management, before the asset repository goes to `Enforce`.
 - **Identity side.** The roles travel over the bus (`CreateIdentityDataCommandRequest`); its consumer
-  syncs the declared list for `octo-pipeline-sa-` clients and does not run the HTTP `RoleChangeGuard`
-  (AB#7914 / AB#5859), so the controller's own roles do not limit what it can assign here.
+  syncs the declared list for `octo-pipeline-sa-` clients and does not run the HTTP `RoleChangeGuard`, so the controller's own roles do not limit what it can assign here.
 - **Read side follows.** The health check expects declared ∪ baseline (a missing `StreamDataReader`
   edge is `roles-drift` until the next reconcile); the rights analysis counts the baseline as
   coverage and reports a declared `StreamDataReader` under `BaselineRoles`, never as superfluous.
@@ -108,10 +106,10 @@ baseline, unprivileged user sends no roles, `EffectiveRoleNames`),
 `Services/ServiceAccountRightsAnalysisTests` (`…DeclaredStreamDataReader_IsBaselineNotSuperfluous`,
 `…TypeGrantedByTheBaseline_IsNotMissing`).
 
-### Phase 9 — roles identity grants by design (AB#8582)
+### Phase 9 — roles identity grants by design
 
 The identity service grants `FileManagement` to every `octo-pipeline-sa-*` client on its own
-(AB#6467: `CreateIdentityDataCommandRequestConsumer` adds the edge on every identity-data command and
+(`CreateIdentityDataCommandRequestConsumer` adds the edge on every identity-data command and
 treats it as implicitly declared, `PipelineServiceAccountFileRoleGrant` adds it at every tenant setup;
 `octo-identity-services/docs/persistence.md`). Phase 8's health check did not know this, so every
 adapter account showed `roles-drift` with `FileManagement` superfluous.
@@ -139,9 +137,9 @@ Tests: `Services/ServiceAccountHealthTests` (`…PipelineAccountWithIdentityGran
 `…TypeGrantedByIdentityGrantedFileManagement_IsNotMissing`, `…CustomClientIdDeclaringFileManagement_IsSuperfluous`),
 `Services/PipelineServiceAccountReconcileTests.IdentityGrantedRoleNamesFor_PrefixedOrDerivedClient_IsFileManagementAndNeverSynced`.
 
-### Phase 10 — Uses-linked accounts are reconciled automatically (AB#8982)
+### Phase 10 — Uses-linked accounts are reconciled automatically
 
-Until AB#8982 the automatic paths reconciled only the adapters' own accounts. Standalone
+Until the standalone-account change the automatic paths reconciled only the adapters' own accounts. Standalone
 `ServiceAccountConfiguration`s that pipelines link via `Uses` (per-pipeline overrides a blueprint ships, e.g.
 `accounting-ai-prompt`, `accounting-pipeline-reader`) were reconciled only by
 `POST {tenantId}/v1/serviceAccount/reconcile?configurationRtId=…`. A blueprint ships them without a client id, so
@@ -161,23 +159,22 @@ and the adapter health still answered `Healthy`.
   account in the process (`SemaphoreSlim` per tenant and rtId) and the account is re-read under the guard
   (`GetServiceAccountByRtIdAsync`), so overlapping passes reuse a secret the previous one saved; across controller
   instances the next pass heals a lost race, because it re-sends the stored secret; (b) an account with a foreign
-  `IssuerUri` or `TenantId` (AB#5115) is skipped, because its client lives in another installation or tenant;
-  (c) **the automatic paths never re-key an account that already declares a `ClientId`** (decision on PR #110,
-  Odin 2026-11-15). An account without a stored secret that is on impersonation, that declares a `ClientId`, or whose
+  `IssuerUri` or `TenantId` is skipped, because its client lives in another installation or tenant;
+  (c) **the automatic paths never re-key an account that already declares a `ClientId`** (decided 2026-11-15). An account without a stored secret that is on impersonation, that declares a `ClientId`, or whose
   impersonation actors could not be looked up this pass (`ResolveImpersonationActorClientIdsAsync` failed, or
   `IsImpersonationCapableAsync` answered `null`) is sent with **no** secret, so identity keeps the one it has
   (`CreateIdentityDataCommandRequestConsumer` keeps the existing secret when none arrives). Reason: a pending
   impersonation switch is not persisted, so "client waiting for `InvalidateSwitchedSecretAsync`" cannot be told apart
   from "client never created", and cutting a running credential short is the worse failure. Only an account without
   a `ClientId` (the blueprint shape) that cannot impersonate gets a fresh stored secret; every other fresh secret
-  comes from the manual reconcile (AB#5114 behaviour: throwaway secret, a failed lookup counts as not capable) or the
+  comes from the manual reconcile (v1 behaviour: throwaway secret, a failed lookup counts as not capable) or the
   rotate endpoint. A `CommunicationRepositoryException` with an inner exception from `GetAdapterByPipelineAsync` is a
   failed query, not "pipeline not assigned": the actor lookups propagate it (verdict unknown), only the plain refusal
   counts as no adapter.
   `EnsureTenantProvisionedAsync` calls it **after** the adapter sweep (the adapters' own clients are the accounts'
   `MayActAs` actors) and adds its counts to the report, so blueprint apply (`BlueprintAppliedConsumer`) and tenant load (`DefaultConfigurationCreatorService`) cover them without code of their
   own; the early "no adapters" exit is gone. `DeploymentSiteService.DeployWorkloadAsync` calls it for the deployed
-  adapter right after `EnsureAdapterProvisionedAsync`. No background retry (AB#8145 is per adapter): a transient
+  adapter right after `EnsureAdapterProvisionedAsync`. No background retry: a transient
   identity failure is healed by the next tenant load, blueprint apply or workload deploy, or by the manual endpoint.
 - **Health** — the adapter-scoped `GET …/adapter/{adapterRtId}/serviceAccount/health` evaluates each Uses-linked
   account of the adapter's pipelines like the configuration-bound variant, but with **this** adapter's own client as

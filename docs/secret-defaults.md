@@ -3,9 +3,9 @@ description: "Secret defaults and platform-only secrets: a SecretDefault never r
 applies_to: **/Services/SecretDefault*.cs, **/Controllers/SecretDefaultsController.cs
 ---
 
-## Platform-only secrets: a SecretDefault never reaches an adapter (AB#7246, Feature AB#7219)
+## Platform-only secrets: a SecretDefault never reaches an adapter
 
-A secret default an Application declares (`SecretDefaults`, System.Communication 4.15.0, AB#7243) and the controller
+A secret default an Application declares (`SecretDefaults`, System.Communication 4.15.0) and the controller
 projects into every served tenant as `System.Communication/SecretDefault` is **platform-only**: it may be used only inside
 platform building blocks that return a result and never the value. No tenant pipeline, user or role, tenant admins
 included, may obtain it. The rule is enforced **by type, in code**, in two repositories; there is no CK or engine change.
@@ -19,23 +19,23 @@ included, may obtain it. The rule is enforced **by type, in code**, in two repos
   type (it derives from `System/Entity`), so no `Uses` association can bring it in by itself; the exclusion makes that a
   rule instead of a property of the model. Test: `SecretDefaultExclusionTests`. A new platform-only type is one line in
   `PlatformOnlyConfigurationTypes` plus a case in that test.
-- **In the mesh adapter** (octo-mesh-adapter, AB#7246): `RevealSecret@1` and `GetPipelineConfigByCkTypeId@1` refuse the
+- **In the mesh adapter**: `RevealSecret@1` and `GetPipelineConfigByCkTypeId@1` refuse the
   type (and the `SecretDefaults` record array of the Application) before they read, for every identity, and an
   architecture test lists every `Unprotect` call site against an allow-list. `PlatformOnlySecrets` there is the shared
   predicate. `GetPipelineConfigByCkTypeId@1` lives in the mesh adapter, not in this repository, so its test is there.
   The SDK node `GetPipelineConfigByWellKnownName@1` (octo-communication-sdk) reads the same list and needs no rule of
   its own: the list never contains a SecretDefault.
-- The projection (AB#7244, AB#7245) writes `SecretDefault` entities only through the child tenant context and must never
-  add one to a configuration list. The platform's own consumer (the CAPTCHA verify node, AB#7251) is the only reader.
+- The projection writes `SecretDefault` entities only through the child tenant context and must never
+  add one to a configuration list. The platform's own consumer is the only reader.
 
-## Secret defaults (AB#7219)
+## Secret defaults
 
 An Application's `SecretDefaults` (System.Communication 4.15.0) are projected by the controller into the platform-owned
-`System.Communication/SecretDefault` of every tenant the Application serves (AB#7244). Nothing else is written, so a
+`System.Communication/SecretDefault` of every tenant the Application serves. Nothing else is written, so a
 tenant's own secret of the same purpose (e.g. `RegistrationCaptchaSecret`) is never touched; the platform node that
-consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tenant's value and falls back to it.
+consumes the default (`VerifyCaptcha@1`, mesh adapter) prefers the tenant's value and falls back to it.
 
-- **The deploy is the release; a running release keeps its defaults (AB#7245, decision 3a, refined by decision 2 ii).**
+- **The deploy is the release; a running release keeps its defaults (decision 3a, refined by decision 2 ii).**
   `IsSourceFor(application, sourceTenant, targetInventory)` decides per target tenant. Pending and Deployed are sources.
   **Error** (a deploy the guard refused, or a Helm rollout that failed) is a source only in a tenant where the Application
   still holds a default it projected: a refused or failed redeploy leaves the previous Helm release running
@@ -52,13 +52,13 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   is the signal because neither the Application (`DeploymentState`, `LastDeploymentError`) nor the operator's status
   report (`WorkloadDeploymentStatusDto`: success and message only) records whether a release is running; the error text
   is not parsed, so `LastDeploymentError` keeps the form the Studio's field marks read
-  (`[tenant] Cannot deploy workload 'x': <sentence>`, AB#7422), and Applications refused before this rule need no
+  (`[tenant] Cannot deploy workload 'x': <sentence>`), and Applications refused before this rule need no
   migration. Known limit: a first install whose rollout failed was Pending when it projected, so it keeps its defaults
   although Helm removed the release, until it is undeployed or deployed successfully. A guard check that throws without
   recording (e.g. a missing chart name) leaves the previous state. **Undeploying an Application withdraws its
-  defaults**, also one in Error: e.g. undeploying the EC app removes the CAPTCHA default from every community without its
+  defaults**, also one in Error: e.g. undeploying a customer app removes the CAPTCHA default from every community without its
   own key pair; the next deploy projects it again.
-- **Triggers (AB#7245).** The controller writes SecretDefaults on five paths, all through
+- **Triggers.** The controller writes SecretDefaults on five paths, all through
   `ISecretDefaultProvisioningService`, all best effort (a failure is an Error event, never a failed deploy, undeploy or tenant load):
   1. **Deploy** - `DeploymentSiteService.DeployWorkloadAsync` calls `ProvisionForSourceAsync(tenantId, applicationRtId)`
      after the Helm notification for **every** `RtApplication`, also one without entries, so a redeploy removes what it no
@@ -70,7 +70,7 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
      also while the value cannot be revealed. A failure of the whole projection (e.g. tenant tree unreadable) is an Error event on the Application; once the cause
      is fixed, a deploy or the reconcile endpoint repeats it (a redeploy alone does not help while the cause persists).
   2. **Deployment-site deploy** - `DeployDeploymentSiteAsync` deploys no workload (decoupled in f2f8bbd; the unused
-     `DeployManagedWorkloadsAsync` fan-out was removed with AB#7245), so every Application reaches Helm through
+     `DeployManagedWorkloadsAsync` fan-out was removed earlier), so every Application reaches Helm through
      `DeployWorkloadAsync` and its validation and projection; the re-dispatch of a Pending workload on site registration
      (`ReconcilePendingWorkloadsAsync`) calls it too. Tests: `DeployWorkloadSecretDefaultsTests`.
   3. **Tenant load** - `DefaultConfigurationCreatorService.EnsureSecretDefaultsAsync` runs `ProvisionForTargetAsync(tenantId)`
@@ -105,14 +105,14 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   in the target. A redeploy overwrites (rotation). An unreadable value (empty, or a reveal that throws because the host
   has no key ring or strict mode refuses clear text) writes nothing for that key and is an Error event; it never stops
   the other keys, on the deploy or on the reconcile.
-- **Supplying the value (AB#7252, pattern of EC AB#8254).** A blueprint seeds the Application **without** a
+- **Supplying the value (blueprint-supplied value).** A blueprint seeds the Application **without** a
   `SecretDefaults` entry: the engine's secret seed lint allows only an empty or omitted Secret in a seed (a value, a
   `<...>` / `TODO_SET_*` placeholder and a `${...}` variable are all refused), blueprints have no install-time
   parameters, and an entry without `SecretValue` would make the deploy guard below refuse the Application. An operator
   adds the entry after the install through the asset repository: Studio (Application -> Further attributes ->
   `SecretDefaults`: `Key`, `SecretValue`, optional `AllowedTenantIds` and `Description` -> Save -> Deploy), or
   `systemCommunicationApplications.update` with the whole `secretDefaults` list and the value passed as a GraphQL
-  variable, never inline; or a CD that reads it from Vault (EC on test-2). A re-apply or blueprint update keeps it
+  variable, never inline; or a CD that reads it from Vault (a solution on a test environment). A re-apply or blueprint update keeps it
   (`SecretDefaults` is TenantOwned, a Secret record member is carried over by record key). Never as a `ValueOverride`,
   `ValuesYaml` or Helm value. Since `SecretDefault.Value` is Hidden (4.16.0), a projected entity in the target tenant is
   the "set" signal. Worked sample with a tenant override and `VerifyCaptcha@1`: `samples/Blueprints/SecretDefaultDemo/`
@@ -140,14 +140,14 @@ consumes the default (`VerifyCaptcha@1`, mesh adapter, AB#7251) prefers the tena
   `^[A-Za-z0-9][A-Za-z0-9._-]*$` (at most 128 characters), a key declared twice, or an entry without `SecretValue` (an
   export/import drops it). Each message names the Application and the key, never the value.
 - **The service validates on its own.** `ProvisionForSourceAsync` runs the same checks (`SecretDefaultDeclarationValidator.Check`)
-  on the entries it reads, because it is also called outside the deploy (AB#7245). It skips every invalid entry, all entries of
+  on the entries it reads, because it is also called outside the deploy. It skips every invalid entry, all entries of
   a duplicated key included, with an Error event, and writes the valid ones. The key is read raw
   (`GetAttributeValueOrDefault`): the generated `Key` getter throws on a null value.
 - **Platform-only.** SecretDefaults never reach the `WorkloadDeployedDto`: no Helm value, no `ValuesYaml`, no
   `{release}-octo-secrets`. The plaintext appears in no log line, event, exception message or workload status
   (`ProvisionForSourceAsyncTests.ThePlaintext_ReachesNoLogLineAndNoEvent`, `DeployWorkloadSecretDefaultsTests`). See
-  also "Platform-only secrets" above (AB#7246): a SecretDefault is never part of an adapter's configuration list.
-- **Target reconcile (AB#7245).** `ProvisionForTargetAsync(target)` brings one tenant to the desired state. Sources are the
+  also "Platform-only secrets" above: a SecretDefault is never part of an adapter's configuration list.
+- **Target reconcile.** `ProvisionForTargetAsync(target)` brings one tenant to the desired state. Sources are the
   tenant itself and all its ancestors (`ResolveAncestorTenantsAsync`, complete tree required; never siblings); every
   Application of a source whose valid entry reaches the target (`AllowedTenantIds` empty or naming it) is an offer. Per key
   the offer of the source closest to the root wins (same precedence as the deploy); between Applications of one tenant the

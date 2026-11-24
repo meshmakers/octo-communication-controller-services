@@ -3,11 +3,11 @@ description: "REST facades over the System.Communication methods: endpoint mappi
 applies_to: **/Methods/Service/**
 ---
 
-# REST facades over the System.Communication methods (AB#9048, AB#9049, AB#9050)
+# REST facades over the System.Communication methods
 
-Feature F5.3 (AB#5701, Epic AB#9221 CK v2). The 22 adapter, pool, pipeline, data-flow, workload, deployment-site and
+Feature F5.3 (CK v2). The 22 adapter, pool, pipeline, data-flow, workload, deployment-site and
 pipeline-trigger operation endpoints of the communication controller are facades of the System.Communication CK methods the
-controller hosts (AB#8595, AB#8596; the seven deployment endpoints and their methods since AB#9050, System.Communication
+controller hosts (the seven deployment endpoints and their methods, System.Communication
 4.19.0). One implementation (the method handler) serves GraphQL and REST; routes, request and response bodies and status
 codes of REST stay as they were. REST is not removed and has no `Sunset` header.
 
@@ -23,7 +23,7 @@ method envelope to its REST answer, and its previous direct code.
 1. **Method path.** When the handlers are hosted (`Methods:Communication:Enabled`, default true), the tenant's CK model
    declares the method and the caller passes the method's declared authorization (role `CommunicationManagement`, scope
    `octo_api`), the call is one CK method call through `ICkMethodDispatcher`. The handler is hosted by this service, so
-   the call runs in this process (in-process transport, AB#8411), detached from the HTTP request (no request state reaches
+   the call runs in this process, detached from the HTTP request (no request state reaches
    the handler), through the invocation pipeline: caller tenant (`CkMethodCallerTenantFilter`), declared authorization,
    redaction, **exactly one Method audit event** (transport `in-process`). The call runs under the host's lifetime, not the
    request: a client that disconnects never stops an operation that has started; the method's declared timeout bounds it.
@@ -49,7 +49,7 @@ method envelope to its REST answer, and its previous direct code.
    The audit outcome of a direct answer is `SUCCESS` below status 400, otherwise `REST_<status>` (`REST_ITEM_FAILED` for a
    failed pipeline of a move list).
 
-**Rights (decision B, Odin 2026-11-18).** The REST policy (`octo_api` scope) is not changed and no right is widened or
+**Rights (decision B, 2026-11-18).** The REST policy (`octo_api` scope) is not changed and no right is widened or
 narrowed: a caller with the scope but without `CommunicationManagement` keeps the REST behaviour on the guarded direct
 path, measured by `Reason=role-missing`. A follow-up story makes the endpoints require the role once that count is zero.
 The communication types have no data permissions of their own, so neither path checks one.
@@ -57,13 +57,13 @@ The communication types have no data permissions of their own, so neither path c
 ## The caller inside the handler
 
 A handler runs without an HTTP request (detached on the in-process path, none on the bus). Two services judge "the caller
-of the request" through the ambient HTTP request: the elevation gate of a pipeline deploy (AB#5128: a pipeline with a node
-under `Identity=ServiceAccount` or `System` needs `UserManagement`) and the identity-client lookups (AB#5027, they forward
+of the request" through the ambient HTTP request: the elevation gate of a pipeline deploy (a pipeline with a node
+under `Identity=ServiceAccount` or `System` needs `UserManagement`) and the identity-client lookups (they forward
 the caller's bearer). Without a caller both take their system path (elevation allowed, lookup skipped), which would widen a
 right for every REST call routed through the method. So every handler opens `CommunicationMethodCaller` first, from the
 validated caller of the call (subject, roles) and its forwarded token, and the services read it when there is no HTTP
 request. The facades forward the request's bearer with every method call. Background paths open no scope and stay system
-paths. This also closes the same gap for GraphQL callers of the methods (since AB#8596): an elevated deploy without
+paths. This also closes the same gap for GraphQL callers of the methods: an elevated deploy without
 `UserManagement` is refused there too.
 
 ## Parity table
@@ -99,10 +99,10 @@ On both paths a token whose `tenant_id` does not name the route tenant (or has n
 `ErrorResponse` body that names the code, never a parameter value. A call beyond the method's deadline answers `504`
 (`METHOD_TIMEOUT`); REST had no deadline before.
 
-## Deployment endpoints (AB#9050)
+## Deployment endpoints
 
 - **Communication-enabled gate.** `DeploymentSite.Deploy`, `DeployableWorkload.Deploy` and `AdapterPool.Scale` create or change
-  operator-managed cluster resources and refuse while Communication is disabled for the tenant (AB#4255). The gate lives in
+  operator-managed cluster resources and refuse while Communication is disabled for the tenant. The gate lives in
   `CommunicationEnabledGate` and runs in the handler (method path, also for GraphQL callers) and in the REST code (direct
   path); both answer the same text. The undeploys and the trigger operations stay open, so remediation always works.
 - **Unexpected exceptions.** The site, workload and scale handlers turn only the service's own refusal
@@ -113,8 +113,8 @@ On both paths a token whose `tenant_id` does not name the route tenant (or has n
   after a successful one answers "not deployed".
 - **Async candidates.** The deploys return once the operator was told and the state was written; the operator reports the
   rollout in `DeploymentState` later. Waiting for that report would exceed the accept bound, so `DeploymentSite.Deploy` /
-  `Undeploy` and `DeployableWorkload.Deploy` are candidates for `execution.mode: async` once F3.6 (AB#5694) is available.
-- **Data beyond the target** (for AB#8420 / AB#7040): `DeploymentSite.Undeploy` undeploys every workload the site hosts;
+  `Undeploy` and `DeployableWorkload.Deploy` are candidates for `execution.mode: async` once F3.6 is available.
+- **Data beyond the target** (`Undeploy` side effects): `DeploymentSite.Undeploy` undeploys every workload the site hosts;
   `DeployableWorkload.Deploy` reads the hosting site, the Helm repository configuration, the secret defaults and value
   overrides, provisions the adapter's pipeline service account (identity client) and the standalone accounts its pipelines
   use; for an adapter pool it refreshes the `LentAdapterPool` mirrors in the borrowing tenants, for an application it
@@ -124,7 +124,7 @@ On both paths a token whose `tenant_id` does not name the route tenant (or has n
   did, with the same services; the two cross-tenant writes (pool mirrors, secret default projection) are the service's own
   provisioning paths, not widened by the method.
 
-## Deprecation (AB#9051)
+## Deprecation
 
 The 22 facade endpoints carry `[OctoRestDeprecated(Wave = "CommunicationWave3", Link = <methods page>)]`
 (`TenantApi/v1/CommunicationRestDeprecation.cs`; mechanics: `octo-common-services/docs/rest-deprecation.md`). Every response
@@ -140,9 +140,9 @@ What stays REST, without the attribute:
 |---|---|
 | every `GET` (lists, status, debug history, workloads by chart, schemas) | reads: no operation to move; they use GraphQL queries or stay REST |
 | `Communication/validate-expression`, `PipelineDefinition/parse-node`, `parse-all-nodes`, `update-node`, the pipeline schema and node lists, domains, workload variables | stateless tools: no entity, no state change |
-| `Communication/encrypt-value` | deprecated on its own (AB#5537, use `ValueOverride.SecretValue`); takes a secret, gets no new surface |
+| `Communication/encrypt-value` | deprecated on its own (use `ValueOverride.SecretValue`); takes a secret, gets no new surface |
 | `Communication/enable`, `disable`, `PUT lifecycle` | tenant-level capability and configuration, they install or remove the very model a method would live in |
-| `ServiceAccount/reconcile`, `rotateSecret`, `switchToImpersonation`, `SecretDefaults/reconcile`, `notifications/schedule/sync`, `notifications/subscriptions/{id}/deploy|undeploy`, `signal/channel/*`, `system/v1/Diagnostics/reconfigureLogLevel` | not migrated by F5.3 (open scope question on AB#5701); a later wave may move them |
+| `ServiceAccount/reconcile`, `rotateSecret`, `switchToImpersonation`, `SecretDefaults/reconcile`, `notifications/schedule/sync`, `notifications/subscriptions/{id}/deploy|undeploy`, `signal/channel/*`, `system/v1/Diagnostics/reconfigureLogLevel` | not migrated by F5.3 (open scope question); a later wave may move them |
 
 ## Error parameter `reason` (additive)
 

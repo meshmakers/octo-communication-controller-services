@@ -46,11 +46,11 @@ The service uses the Octo Notification system to log important business events f
 | PipelineExecutionService | Pipeline execution cancelled | Information | Adapter reports cancelled execution |
 | PipelineExecutionService | Old executions cleaned up | Information | Retention cleanup completed |
 | TenantManagementConsumer | Tenant update failed | Error | Errors during tenant lifecycle |
-| TenantManagementConsumer | CK model change notification failed | Error | Adapter CK-cache flush broadcast failed (AB#4456) |
+| TenantManagementConsumer | CK model change notification failed | Error | Adapter CK-cache flush broadcast failed |
 | Hubs | Operation failed | Error | Hub operation errors |
-| SignalChannelService | Registration started / verified / adopted / deleted | Information | Signal channel self-service transitions (AB#5143), incl. adopting an account the bridge already holds |
+| SignalChannelService | Registration started / verified / adopted / deleted | Information | Signal channel self-service transitions, incl. adopting an account the bridge already holds |
 | SignalChannelService | Registration / verification / deletion failed | Error | Bridge rejected a register or verify call, or the repository delete failed |
-| NotificationScheduleService | Notification subscription deployed / undeployed | Information | `Notification subscription '<name>' deployed.` / `... undeployed.`, linked to the subscription; the rtId stands in for a missing name. Deploy records it right after `Enabled=true` is written, before the schedule and engine steps, so a deploy that fails half-way still shows (AB#2585) |
+| NotificationScheduleService | Notification subscription deployed / undeployed | Information | `Notification subscription '<name>' deployed.` / `... undeployed.`, linked to the subscription; the rtId stands in for a missing name. Deploy records it right after `Enabled=true` is written, before the schedule and engine steps, so a deploy that fails half-way still shows |
 
 **Usage in Services:**
 ```csharp
@@ -68,17 +68,17 @@ public class MyService(ICommunicationEventService eventService)
 }
 ```
 
-**Communication-state write retry (AB#6435).** `SetDeploymentSiteCommunicationStateAsync` and
+**Communication-state write retry.** `SetDeploymentSiteCommunicationStateAsync` and
 `SetAdapterCommunicationStateAsync` run through `StateWriteRetry.ExecuteAsync`: when MongoDB aborts the
 transaction with a `TransientTransactionError` label or a `WriteConflict` (code 112) — found anywhere in the
 exception chain — the whole write (new session and transaction) is repeated, at most 2 times, after a
 jittered 50-200 ms backoff, with a warning per retry. The logical write timestamp (entity + `AttributeNewerThanGuard`)
 is taken once before the first attempt and reused by every retry, so a retried stale write cannot overwrite a newer
 state. The last exception surfaces unchanged; every other
-error is not retried. Seen on test-2 (tenant wwc26, 2026-10-10) where a lost Online write healed only when
+error is not retried. Seen on a test environment (a customer tenant, 2026-10-10) where a lost Online write healed only when
 the operator re-claimed the site 10 s later.
-Since AB#9121 `SetPipelineDeploymentStateAsync` and `SetPipelineTriggerDeploymentStateAsync` use the same retry: on
-prod-2 (tenant sbeg, 2026-11-15) tenant setup set a trigger to `Pending` while the adapter re-registered and redeployed
+`SetPipelineDeploymentStateAsync` and `SetPipelineTriggerDeploymentStateAsync` use the same retry: on
+production (a customer tenant, 2026-11-15) tenant setup set a trigger to `Pending` while the adapter re-registered and redeployed
 22 pipelines, and the unretried WriteConflict failed the whole tenant setup. These writes carry no timestamp guard, so
 a retry is last-writer-wins exactly like the first attempt would have been. Other writes (adapter, application and
 pool deployment state, configuration state) are not covered.

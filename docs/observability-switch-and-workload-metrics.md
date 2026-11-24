@@ -3,7 +3,7 @@ description: Per-tenant observability switch and the OTel metrics for workload s
 applies_to: **/Services/Workload*Metrics.cs, **/Services/WorkloadObservabilityOptIn.cs, **/BackgroundServices/WorkloadStateMetrics*.cs
 ---
 
-## The per-tenant observability switch (AB#5432)
+## The per-tenant observability switch
 
 🔴 **One flag decides whether a tenant's workload and pipeline observability is published at all.**
 That flag is `System/TenantModeConfiguration.PublishWorkloadObservability` (`System-2.3.0`, optional
@@ -20,8 +20,8 @@ of almost every tenant, and a log line per tenant per interval is how a log beco
 | `octo.workload.hibernated`, `.offline_unexpected` | `Services/WorkloadLifecycleMetrics` | Gated inside the gauge collection callbacks |
 
 Until 2026-09-30 only the first row honoured the flag. The other two families predate it
-(`WorkloadLifecycleMetrics` is AB#4919, `PipelineExecutionMetrics` AB#5425) and were unconditional —
-test-2 carried **175 pipeline series and 20 lifecycle series while no tenant had opted in**. Two
+(`WorkloadLifecycleMetrics`, `PipelineExecutionMetrics`) and were unconditional —
+The test environment carried **175 pipeline series and 20 lifecycle series while no tenant had opted in**. Two
 generations of gating means a tenant that opted out still pays for most of it, so there is now exactly
 one switch.
 
@@ -99,32 +99,31 @@ the other two families, an opt-out forgets their state as well, and an opt-in re
 the tenant opted out without costing the next tenant in the list its observability).
 
 
-## OTel metrics for workload states (AB#5432, item 3)
+## OTel metrics for workload states (item 3)
 
 `GetAdapters` and `GetPools` have always returned three states — `DeploymentState`,
 `CommunicationState`, `ConfigurationState` — and none of them was ever spoken as a metric, so an
 adapter stuck at a deployment error, a pool that quietly fell offline, or the **configuration error**
-this work item was asked for by name were visible in Studio and nowhere a check rule could reach.
+were visible in Studio and nowhere a check rule could reach.
 `WorkloadStateMetrics` + `WorkloadStateMetricsBackgroundService` publish them.
 
 🔴 **`WorkloadLifecycleMetrics` keeps its own class and its own instruments.** Its two gauges
-(`octo.workload.hibernated`, `octo.workload.offline_unexpected`) are live — verified on test-2 on
+(`octo.workload.hibernated`, `octo.workload.offline_unexpected`) are live — verified on a test environment on
 2026-09-30, 20 series each, all zero — and their names and meanings are load-bearing. The state
 instruments live in a **separate** static class on the **same meter**, because the two families differ
-in every dimension but one: AB#4919 is event-driven, written at the moment of a transition, and covers
+in every dimension but one: the workload lifecycle metrics are event-driven, written at the moment of a transition, and covers
 workloads only; this one is sweep-driven, derived from persisted state, and covers pools as well.
 
 The dimension they no longer differ in is the **opt-in**. When this section was first written the
 lifecycle family was ungated and the gate lived only here, on the argument that folding it into a class
 holding two live series is how one of them gets switched off by accident. That argument lost: two
 generations of gating means a tenant that opted out still pays for most of its observability. Since
-2026-09-30 all three families answer to the one flag — see "The per-tenant observability switch
-(AB#5432)" above for where each gate sits and why the verdict is a cached synchronous flag rather than
+2026-09-30 all three families answer to the one flag — see "The per-tenant observability switch" above for where each gate sits and why the verdict is a cached synchronous flag rather than
 a repository read.
 
 (Historical note worth keeping: those two series were missing for months and three investigations
 each landed on a different wrong cause — a stale build, no lifecycle transitions, no on-demand
-workloads. The real cause was AB#5430: **service** metrics had no OTLP exporter and never left the
+workloads. The real cause: **service** metrics had no OTLP exporter and never left the
 process. Since octo-common-services `db5dd04` they flow. There is no instrumentation problem left —
 only instruments that do not exist yet, which is what this section adds.)
 
@@ -152,7 +151,7 @@ the family and is told apart by `octo.workload.kind` rather than by a parallel `
 contract nobody would remember to alert on.
 
 🔴 **`ConfigurationState` has four values, not two** — `Unconfigured` / `Pending` / `Configured` /
-**`Error`**. `Error` is the configuration error the work item is about.
+**`Error`**. `Error` is the configuration error state.
 
 ### The value is the severity
 
@@ -214,7 +213,7 @@ the state of almost every tenant and a per-sweep info line for each is how a log
 
 The same flag governs the pipeline and lifecycle families, and this sweep is the **only reader of it in
 the process** — it publishes the verdict into `WorkloadObservabilityOptIn` for the emitters that cannot
-await a repository. See "The per-tenant observability switch (AB#5432)" above.
+await a repository. See "The per-tenant observability switch" above.
 
 🔴 **The flag is read untyped** (`RtEntity.GetAttributeValueOrStandard<bool>("PublishWorkloadObservability")`,
 via `ICommunicationRepository.IsWorkloadObservabilityEnabledAsync`). The generated
@@ -244,7 +243,7 @@ whose stuck `Error` has to be alertable.
 ### Cardinality
 
 Three series per adapter and per pool, one per application, two per tenant. Bounded by
-operator-authored entities (tens per tenant): ~70 series for test-2's ~20 workloads plus its pools,
+operator-authored entities (tens per tenant): ~70 series for the test environment's ~20 workloads plus its pools,
 a few hundred on prod.
 
 Deliberately **not** one gauge per aspect with the state as the distinguishing tag and a constant
@@ -274,7 +273,7 @@ max by (octo_tenant_id, octo_workload_rt_id, octo_workload_name, octo_workload_k
 max by (octo_tenant_id, octo_workload_rt_id, octo_workload_name, octo_workload_kind, octo_workload_state)
   ({otel_metric_name="octo.workload.communication_state", otel_metric_type="gauge"}) >= 2
 
-# CRITICAL — configuration error (the state this work item was asked for)
+# CRITICAL — configuration error (the configuration error state)
 max by (octo_tenant_id, octo_workload_rt_id, octo_workload_name, octo_workload_kind, octo_workload_state)
   ({otel_metric_name="octo.workload.configuration_state", otel_metric_type="gauge"}) >= 2
 

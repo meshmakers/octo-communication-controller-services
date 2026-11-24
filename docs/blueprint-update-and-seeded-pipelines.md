@@ -3,7 +3,7 @@ description: Blueprint update against live adapter routes, Communication enablem
 applies_to: **/Consumers/BlueprintAppliedConsumer.cs, **/Consumers/ComControllerAdapterUpdateConsumer.cs
 ---
 
-### Blueprint update vs. the routes a live adapter serves (AB#6631)
+### Blueprint update vs. the routes a live adapter serves
 
 A blueprint update (`UpdateBlueprint`) or a force re-apply replaces `Pipeline` entities **in place**; `DeploymentState`
 stays `Deployed`. The adapter builds the route of a `FromHttpRequest@2` trigger — path, `allowAnonymous`,
@@ -19,8 +19,8 @@ the adapter **already runs** from the repository and, if any differs from what w
 through `UpdateAdapterConfigurationAsync` (same path as `DeployDataFlow`; the adapter's selective update re-registers
 only the pipelines whose definition changed). Deliberate limits:
 
-- a changed definition replaces the running one (AB#6631); what the repository holds as Deployed/Pending but the
-  adapter does not run yet is added (AB#6632, see below);
+- a changed definition replaces the running one; what the repository holds as Deployed/Pending but the
+  adapter does not run yet is added (see below);
 - the adapter's own configuration string is kept: an update resets it to the seed (EDA credentials) and the operator
   restores it afterwards, a push in between would hand the live adapter the reset values;
 - a pipeline the adapter runs that the repository no longer lists for it (deleted, disabled, no definition, moved to
@@ -30,7 +30,7 @@ only the pipelines whose definition changed). Deliberate limits:
 
 Tests: `Services/AdapterServiceTests/RefreshDeployedPipelinesAsyncTests`, `Consumers/BlueprintAppliedConsumerTests`.
 
-### A blueprint that needs Communication enables it (AB#9578)
+### A blueprint that needs Communication enables it
 
 `BlueprintAppliedConsumer` first asks `IBlueprintCapabilityReconciler` (octo-common-services,
 `octo-common-services/docs/blueprint-capabilities.md`, registered in `Program.cs` with `AddBlueprintCapabilityReconciler`) for
@@ -47,14 +47,14 @@ seed, so registration hands it the seeded Deployed pipelines. The AI service ena
 Communication is on. Tests: `Consumers/BlueprintAppliedConsumerTests` (`Applied_AsksTheReconciler…`,
 `EventThatChangedNoEntity_…`, `ReconcilerFailure_…`); the guard: `BlueprintCapabilityReconcilerTests` in octo-common-services.
 
-### Blueprint-seeded pipelines are pushed (AB#6632)
+### Blueprint-seeded pipelines are pushed
 
 A blueprint seeds `Pipeline` entities with `DeploymentState: Deployed` (the install path writes entities, it never
 deploys). `RegisterAdapterAsync` hands an adapter the pipelines persisted as Deployed/Pending *at registration*; the
 Mesh Adapter registers when the tenant's communication is enabled, i.e. BEFORE the blueprint installs. The seeded
 pipelines were therefore Deployed on paper and unknown to the adapter: their `FromHttpRequest` routes answered 404
-until `DeployDataFlow` was run by hand (energy-community `register-metering-point`, `meter-readings`,
-`community-balance`, ...). The same refresh as AB#6631 closes it: after `BlueprintApplied`/`BlueprintUpdated`
+until `DeployDataFlow` was run by hand (a customer blueprint: `register-metering-point`, `meter-readings`,
+`community-balance`, ...). The same refresh as for a changed definition closes it: after `BlueprintApplied`/`BlueprintUpdated`
 `RefreshDeployedPipelinesAsync` makes each connected adapter converge to the persisted Deployed/Pending set (add,
 replace, drop). An adapter that (re)connects later still gets that set from registration. Pipelines in other states
 (Undeployed, Error) are never added.

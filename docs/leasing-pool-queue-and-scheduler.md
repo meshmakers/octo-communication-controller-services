@@ -3,26 +3,26 @@ description: "Leasing: the pool queue and its scheduler, sweeps, tick, drained r
 applies_to: **/Services/LeaseScheduler*.cs, **/BackgroundServices/LeaseScheduler*.cs, **/Repository/ExecutionLeaseClaimStore.cs
 ---
 
-## Leasing: the pool queue and its scheduler (AB#4924 increment 7)
+## Leasing: the pool queue and its scheduler (increment 7)
 
 Plan: `docs/concepts/shared-adapter-leasing-implementation.md` §9.
 
 | Piece | Where |
 |---|---|
-| One queue per pool, rotation, priority, cap, TTL reaper, scale-up, **idle scale-down (AB#5256)**, queue projection, cancel | `Services/LeaseSchedulerService.cs` |
+| One queue per pool, rotation, priority, cap, TTL reaper, scale-up, **idle scale-down**, queue projection, cancel | `Services/LeaseSchedulerService.cs` |
 | Scheduling round (default every **5 s**) | `BackgroundServices/LeaseSchedulerBackgroundService.cs` |
-| Lease reaper (on the cleanup service's cadence, next to the AB#4280 stuck reaper) | `BackgroundServices/ExecutionCleanupBackgroundService.cs` |
+| Lease reaper (on the cleanup service's cadence, next to the stuck reaper) | `BackgroundServices/ExecutionCleanupBackgroundService.cs` |
 | `Queued` is written here and nowhere else | `TriggerManagementService.StartExecutePipelineAsync` → `CommunicationRepository.EnqueueExecutionAsync` |
 | `LeaseReleasedAt`, terminal-state fallback, interrupt + re-queue, drain | `Services/LeaseService.cs` |
 | `GET/DELETE {tenantId}/v1/adapterPool/{id}/queue` — the shared contract all three surfaces consume | `TenantApi/v1/Controllers/AdapterPoolController.cs` |
 
 🔴 **A `Leased` adapter never reaches the execute queue.** `StartExecutePipelineAsync` branches
-*before* the AB#4918 wake gate: there is no workload to wake, and the per-pipeline execute queue has
+*before* the wake gate: there is no workload to wake, and the per-pipeline execute queue has
 no consumer, so a send would be a message nobody reads. A **dry run** deliberately does not queue —
 it is a synchronous answer to a caller holding the request open, and parking it behind a rotation
 would turn "validate this pipeline" into something that returns minutes later.
 
-🔴 **A borrower that names no pool is refused at the enqueue, not queued (AB#5329).** The code here
+🔴 **A borrower that names no pool is refused at the enqueue, not queued.** The code here
 used to say the lease would refuse it "with a named reason". It does not:
 `LeaseSchedulerService.GetTopologyAsync` drops a leased adapter whose `LentFrom` mirror is missing or
 unusable out of the topology, so nothing downstream ever reaches `GrantLeaseAsync` and no refusal is
@@ -37,7 +37,7 @@ repairs (link it in the Studio, or `POST {tenantId}/v1/adapterPool/mirrors/refre
 `LeaseRefusalReason.BorrowerNamesNoPool` at the `Enqueue` stage.
 
 The scheduler's own warning about that adapter now fires on the **transition** only (WARN once, DEBUG
-on repeat) — the AB#4924 §9.8 rule, which this line had not been given: it warned on every scheduling
+on repeat) — the leasing design §9.8 rule, which this line had not been given: it warned on every scheduling
 round, i.e. once a minute per broken adapter for as long as it stayed broken, which is how a warning
 stops being read.
 
@@ -96,7 +96,7 @@ date in BSON *ordering*. Removing either explicit `Queued` exclusion leaves
 `FailStuckAndOrphanedExecutionsTests.AQueuedExecutionIsInvisibleToEveryReaperAndSweep` green. They
 are kept so the invisibility is a property of the query rather than of the storage engine.
 
-### 🔴 The tick is a floor, not the cadence (AB#4924 §9.6)
+### 🔴 The tick is a floor, not the cadence (leasing design §9.6)
 
 `LeaseSchedulerIntervalSeconds` used to be both, and that made it the throughput ceiling. Measured on
 the second local walk: grants came **5.11–5.14 s apart for runs of 0.43–1.36 s**, so the member was
@@ -133,13 +133,13 @@ Three properties, each load-bearing:
 
 🔴 **A `Drained` release wakes nobody — unless it handed work back.** A draining member takes no
 further work (concept §6 drains and restarts a member whose post-lease cleanliness is unproven), so a
-round on its account would read every borrower's queue and grant nothing. Since AB#5864 a Drained
+round on its account would read every borrower's queue and grant nothing. Since the member-drain change a Drained
 release that never ran its work item re-queues it, and then a round IS requested: another member may
 be idle right now.
 
-### 🔴 A `Drained` release marks the member draining and re-queues refused work (AB#5864)
+### 🔴 A `Drained` release marks the member draining and re-queues refused work
 
-Reproduced on test-2-dev (2026-10-07): a lease participant failed to leave, the member drained itself
+Reproduced on a test environment (2026-10-07): a lease participant failed to leave, the member drained itself
 and released with `Reason=Drained` — and the controller only logged it. The registry kept the member
 available, the next round granted it the next lease, the member refused it in < 400 ms, and
 `ApplyLeaseOutcomeAsync` set the borrower's execution to **FAILED**. Every following execution of every
@@ -169,7 +169,7 @@ along ("the controller re-queues the work and does not hand this member another 
 The member half (comm-sdk): a failed leave keeps the work item's own outcome, a draining member never
 registers again, is not ready, and **exits** once idle so the pool restarts it
 (`AdapterPoolMemberDrainExitService`). Tests: `Services/LeaseServiceTests/DrainedReleaseTests`, the two
-AB#5864 cases in `LeasingMetricsTests`, `MarkDraining_ReportsOnlyTheTransition`, integration
+member-drain cases in `LeasingMetricsTests`, `MarkDraining_ReportsOnlyTheTransition`, integration
 `AdapterPoolQueueTests.ARefusedLease_RequeuedWithItsOriginalQueuedAt_KeepsItsPlaceInTheQueue`.
 
 🔴 **The request is a pending permit, not an event.** A release landing while a round is still running
@@ -194,7 +194,7 @@ a work item may wait. The window applies to the **depth** signal only — the wa
 time-integrated. Samples are retained for **twice** the window: pruning at exactly the window drops
 the sample that proves the history is long enough, and the signal then never fires.
 
-### Scale-down: only while the WHOLE pool is idle (AB#5256)
+### Scale-down: only while the WHOLE pool is idle
 
 `IdleTimeoutMinutes` was dead configuration for a pool. Concept §4a and the CK model comment both said
 it drains a member above `MinReplicas`; nothing read it — the idle watchdog skips pools on purpose

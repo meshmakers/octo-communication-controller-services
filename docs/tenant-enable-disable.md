@@ -3,7 +3,7 @@ description: Disable refusal while pools or workloads are deployed, enable and d
 applies_to: **/Consumers/TenantManagementConsumer.cs, **/Services/AdapterService.cs
 ---
 
-## Disable Refuses While Pools or Workloads Are Deployed (AB#4255) — or AI Services Is Enabled (AB#4884)
+## Disable Refuses While Pools or Workloads Are Deployed — or AI Services Is Enabled
 
 `POST {tenantId}/v1/communication/disable` answers **409** with an `OperationFailedErrorDto` while any
 Pool, Adapter or Application of the tenant has a `DeploymentState` other than `Undeployed` /
@@ -11,10 +11,10 @@ Pool, Adapter or Application of the tenant has a `DeploymentState` other than `U
 see the recompute comment in `DeploymentSiteService.RecomputeAllDeploymentStatesAsync`). The body names every
 resource as `Kind 'Name' (State)` plus the undeploy verbs (`UndeployWorkload`, `UndeployPool`,
 Studio). Every other `ConfigurationException` stays a 400. The tenant delete/detach guard in the
-asset repository (AB#4255 step 1) only reads the enabled flag, so this is the check that keeps a
+asset repository (step 1 of the enable/disable design) only reads the enabled flag, so this is the check that keeps a
 deleted tenant from leaving `DeploymentSite` CRs and helm releases behind.
 
-**The AI Services flag blocks too (AB#4884).** `EnableAi` refuses while Communication is disabled
+**The AI Services flag blocks too.** `EnableAi` refuses while Communication is disabled
 (the AI service depends on System.Communication), so the reverse holds as well: the blocker hook
 additionally reads the tenant's `TenantCapabilityConfigurationKeys.AiServices` flag (from the
 tenant's own configuration store, exactly as the delete/detach guard does — missing key or `false`
@@ -54,7 +54,7 @@ a Disable the tenant API therefore stays callable. `DeploymentSiteController.Dep
 `IConfigurationService.IsEnabledAsync` themselves and answer 409 on a disabled tenant; undeploy stays
 open so remediation always works. `DeployDataFlow` / `DeployTrigger` already fail on a disabled tenant
 because the adapter cache is flushed (`AdapterServiceException.TenantNotEnabled`). Adding the
-middleware gate is a follow-up decision, not part of AB#4255.
+middleware gate is a follow-up decision, not part of the enable/disable gate.
 
 **Operator release must not resurrect a resting pool.** `UndeployPoolAsync` writes the resting state
 (`Undeployed` / Edge `Disabled`) *before* it notifies the operator; the operator then removes the CR and
@@ -71,9 +71,9 @@ Tests: `Services/PoolServiceTests/GetActiveDeploymentsAsyncTests`,
 `Services/PoolServiceTests/UnregisterPoolOperatorAsyncTests`, integration `Repository/GetWorkloadsAsyncTests`.
 
 
-## Failed tenant setup is retried without MongoDB (AB#7249)
+## Failed tenant setup is retried without MongoDB
 
-Staging-1, 2026-10-21: during a MongoDB primary election the setup of tenants `sbeg` and `eegroider` failed, the log
+Staging, 2026-10-21: during a MongoDB primary election the setup of two tenants failed, the log
 said "this tenant will be retried in the background", but this service wired no retry store, so nothing was ever
 retried and the tenants' adapters stayed offline ("Tenant not enabled") until a manual pod restart. The shared
 `TenantSetupRetryTracker` (octo-common-services, in-memory, process-wide) now queues every failed `SetupAsync` and
@@ -82,14 +82,14 @@ giving up). `DefaultConfigurationCreatorService` takes the DI instance (`tenantS
 `setupRetryTracker:` to `DefaultConfigurationCreatorServiceStandardized`. Health check `TenantSetup` on `/health` turns
 `Degraded` when a tenant fails longer than `TenantSetupRetry:DegradedAfter` (default 10 min); metrics
 `octo.tenant_setup.failed` / `octo.tenant_setup.pending_seconds` (tag `octo.tenant.id`) feed the Dash0 alert. Details,
-options and tests: octo-common-services `CLAUDE.md`, section "Tenant Setup - Failure Handling". Test here:
+options and tests: `octo-common-services/docs/tenant-setup.md`, section "Tenant Setup — Failure Handling". Test here:
 `tests/CommunicationControllerService.Tests/Services/DefaultConfigurationCreatorServiceTests/TenantSetupRetryWiringTests.cs`. Tests use one isolated `TenantSetupRetryTracker` per test and share it across the creator instances of that test when exercising a retry.
 
-## Enable and disable need TenantManagement (AB#7319)
+## Enable and disable need TenantManagement
 
 `POST {tenantId}/v1/communication/enable|disable` carry `Constants.TenantCommunicationCapabilityTogglePolicy`
 (`CommunicationCapabilityToggleAuthorization`): scope `octo_api` plus the tenant role `TenantManagement`, defined by the
 central `AddTenantRolePolicy` of octo-common-services (`AddOctoTenantRoleAuthorization()` in `Program.cs` registers the
-handler). A token without the role gets 403 with a `{"message"}` body naming the role (AB#5227 shape). All other endpoints keep
+handler). A token without the role gets 403 with a `{"message"}` body naming the role. All other endpoints keep
 their scope-only policies. Callers that need the role: octo-cli `EnableCommunication` / `DisableCommunication`, the MCP tools,
 Studio's Tenant Features panel (tenant administrators). Test: `CommunicationControllerToggleAuthorizationTests`.

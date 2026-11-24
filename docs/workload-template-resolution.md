@@ -15,8 +15,8 @@ Three placeholder families are supported:
 
 | Placeholder | Source | Example |
 |---|---|---|
-| `{{domain.NAME}}` | `CommunicationControllerOptions.Domains` (cluster config) | `{{domain.default}}` → `staging.octo-mesh.com` |
-| `{{service.NAME}}` | `CommunicationControllerOptions.ServiceUrls` (cluster config) | `{{service.authority}}` → `https://identity.staging.octo-mesh.com` |
+| `{{domain.NAME}}` | `CommunicationControllerOptions.Domains` (cluster config) | `{{domain.default}}` → `<domain>` |
+| `{{service.NAME}}` | `CommunicationControllerOptions.ServiceUrls` (cluster config) | `{{service.authority}}` → `https://<identity-host>` |
 | `{{context.tenantId}}` | `WorkloadTemplateContext` (per deploy) | `{{context.tenantId}}` → `acme` |
 
 The semantic key `authority` maps to the Identity Service public URI; other
@@ -105,7 +105,7 @@ Tests:
   suggestion list stays stable.
 
 
-## Helm repository resolution: explicit edge, else by purpose (AB#5295)
+## Helm repository resolution: explicit edge, else by purpose
 
 `DeploymentSiteService.ResolveHelmRepositoryAsync` is the one place a workload's chart repository
 is decided; every deploy/DTO/deployability path goes through it. An explicit `HelmRepository`
@@ -127,7 +127,7 @@ before 4.1.0 keep their exact previous behaviour until the blueprint bump reache
 
 **Why this exists.** An app blueprint used to have to pin a channel-specific repository rtId in its
 seed. The accounting blueprint pinned `670…003` (`meshmakers-dev`, the DEV adapter index) on Release
-tenants: on prod-1 the operator's dry-run failed (`chart … not found in octo-d808d9351847 index`) and,
+tenants: on production the operator's dry-run failed (`chart … not found in octo-d808d9351847 index`) and,
 on tenants that never had that entity, the import left a **dangling** `HelmRepository` row that the
 typed GraphQL resolver hides, the multiplicity check counts, and neither `CREATE` nor `DELETE` through
 the update mutation can remove (the mutation validates the target before touching the row). A raw
@@ -142,8 +142,8 @@ Tests: `Services/DeploymentSiteServiceTests/HelmRepositoryFallbackTests`.
 
 ## CI/CD Workload Rollout E2E
 
-Manual end-to-end validation of the Epic 3054 rollout flow on the
-`test-2` cluster lives at `docs/E2E-CICD-WORKLOAD-ROLLOUT.md`. Run after
+Manual end-to-end validation of the workload rollout flow on the
+the test cluster lives at `docs/E2E-CICD-WORKLOAD-ROLLOUT.md`. Run after
 non-trivial changes in `WorkloadController`, `ICommunicationRepository`'s
 workload methods, `octo-cli` workload commands, or the deploy-workload
 pipeline template. Companion to the operator-side smoke test

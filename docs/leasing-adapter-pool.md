@@ -3,11 +3,11 @@ description: "Leasing: AdapterPool deployment, scaling, the idle watchdog exclus
 applies_to: **/Services/AdapterPool*.cs, **/Controllers/AdapterPoolController.cs
 ---
 
-## Leasing: `AdapterPool` deployment, scaling and the watchdog exclusion (AB#4924 increment 5)
+## Leasing: `AdapterPool` deployment, scaling and the watchdog exclusion (increment 5)
 
 An `AdapterPool` is **one workload with a replica range**, not N `Adapter` entities. Nothing new
 was invented for it: it rides the existing `DeployableWorkload` path (one workload ↔ one helm
-release ↔ one `RtDeployableWorkload`) and the AB#4917 `ScaleWorkloadDto` verb. KEDA stays rejected
+release ↔ one `RtDeployableWorkload`) and the `ScaleWorkloadDto` verb. KEDA stays rejected
 for the same reasons as on the on-demand path.
 
 | Piece | Where |
@@ -53,7 +53,7 @@ The pool owns its members' lifecycle instead (concept §4a): `MinReplicas` is th
 `IdleTimeoutMinutes` and queue pressure decide what happens above it (the queue arrives in
 increment 7).
 
-🔴 **Where the pool's own `IdleTimeoutMinutes` lives, since AB#5256:**
+🔴 **Where the pool's own `IdleTimeoutMinutes` lives:**
 `LeaseSchedulerService.TryShrinkIdlePoolAsync`, on the scheduler's per-pool round — **not** here, and
 the exclusion above stays exactly as it is. The round already holds the queue depth of every borrower,
 the member list and the pool entity at one instant, which is the knowledge the watchdog structurally
@@ -83,7 +83,7 @@ What a member *does* get is the RabbitMQ command bus, the TLS trust anchor, and 
 secret in the platform namespace — none of which carries tenant authority. Tenant-scoped access
 arrives with a lease and leaves with it (increment 6).
 
-### 🔴 Sizing a member: one `ExecuteCSharp@1` run costs ~330 MiB, permanently (AB#5330)
+### 🔴 Sizing a member: one `ExecuteCSharp@1` run costs ~330 MiB, permanently
 
 Measured on the local kind cluster on 2026-09-23, read from the pod's own
 `/sys/fs/cgroup/memory.current`:

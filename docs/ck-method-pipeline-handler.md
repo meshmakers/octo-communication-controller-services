@@ -3,7 +3,7 @@ description: "CK method pipeline handler: how a System.Communication method is s
 applies_to: **/Methods/**
 ---
 
-### CK method pipeline handler (AB#6879)
+### CK method pipeline handler
 
 The controller is the handler of every CK method declared `execution.handler: pipeline` (CK language 2). A call
 arrives as a `CkMethodRequest` on the method queue (wire contract: `octo-common-services/docs/method-wire-contract.md`),
@@ -23,7 +23,7 @@ runs pipelines but knows no methods, tenants' CK models or bus handler registry;
 | `PipelineMethodCatalog` | Reads the CK caches of the communication-enabled tenants (`IAdapterCache.GetEnabledTenantIds`): methods with `handler: pipeline`, and any method by qualified id. |
 | `PipelineMethodInvoker` | One call: contract version, deadline, **caller token validation**, tenant/method checks, refusal of sensitive parameters and of a sensitive result, parameter presence, pipeline lookup (`GetPipelineByWellKnownNameAsync`, must be `Deployed`), start, poll the execution until the deadline, map. Never throws for a failing request. |
 | `PipelineMethodResultMapper` | Pure mapping execution status + `OutputData` to the envelope (see below). |
-| `PipelineMethodBusConsumer` | Bus shell: duplicate guard (possible duplicate delivery or repeated invocation id: `METHOD_OUTCOME_UNKNOWN`, not started again), never throws to the bus. The guard is the shared `CkMethodSeenInvocations.Decide` of `Meshmakers.Octo.Services.Methods` (OD-3 option A, AB#7818/AB#7822); the controller keeps no seen-invocation memory of its own. The helper clamps the deadline before adding the retention, so a foreign sender's `DeadlineUtc = DateTime.MaxValue` cannot overflow (regression test in `PipelineMethodBusConsumerTests`). |
+| `PipelineMethodBusConsumer` | Bus shell: duplicate guard (possible duplicate delivery or repeated invocation id: `METHOD_OUTCOME_UNKNOWN`, not started again), never throws to the bus. The guard is the shared `CkMethodSeenInvocations.Decide` of `Meshmakers.Octo.Services.Methods`; the controller keeps no seen-invocation memory of its own. The helper clamps the deadline before adding the retention, so a foreign sender's `DeadlineUtc = DateTime.MaxValue` cannot overflow (regression test in `PipelineMethodBusConsumerTests`). |
 | `PipelineMethodHost` | Reconcile: for each pipeline method a shared command endpoint (`CkMethodQueueNames.For`, faults suppressed), `WaitUntilReadyAsync`, then `CkMethodHandlerAnnounced`; withdraws a method whose pipeline is gone, `CkMethodHandlerWithdrawn` on shutdown. |
 | `PipelineMethodHostInitializer` (order 40) / `PipelineMethodHeartbeatService` / `PipelineMethodDiscoveryConsumer` | First reconcile after the tenants started; re-check and re-announce every `HeartbeatInterval` (15 s, TTL 45 s); announce on `CkMethodHandlerDiscoveryRequested`. |
 
@@ -68,7 +68,7 @@ request of the HTTP API. `request.Caller` is never used for any decision.
 
 The check runs first so a refused caller learns nothing about the methods of the tenant. Nothing from the token (value,
 claim, key id) or from the forged `Caller` reaches a log line or the answer; the log names method, invocation, tenant and
-the fixed reason. Callers have forwarded their token since AB#5126; jobs use client credentials. The manual execute
+the fixed reason. Callers forward their token; jobs use client credentials. The manual execute
 endpoint is unchanged (it authenticates by the bearer scheme). Tests: `Methods/PipelineMethodCallerTokenTests` (real validator over
 a fake identity service and tokens signed with a throw-away key: one test per refusal asserting that
 `StartExecutePipelineAsync` is never called, subject of the token beats the forged `Caller`, service token = `client_id`, log
@@ -76,19 +76,19 @@ capture), `Methods/PipelineMethodWiringTests`, integration `PipelineMethodHandle
 
 Concept page (marker, who sets it, lease sealing, fail-closed cases, residual risks, rollout order): `docs/concepts/pipeline-method-invocation-marker.md`.
 
-**Method-invocation marker (AB#7460, Feature AB#6884 F3.7, decision note AB#7120).** `PipelineMethodInvoker` is the only
+**Method-invocation marker (F3.7).** `PipelineMethodInvoker` is the only
 producer of `ExecutePipelineMethodInvocation` (octo-sdk, `Meshmakers.Octo.Communication.Contracts.MessageObjects`): it
 builds it from the accepted request (`MethodId` qualified, `InvocationId`, `CkTypeId`) plus the `PipelineRtId` of the
 bound pipeline (`PipelineMethodInvoker.BuildMethodInvocation`) and hands it to the new optional parameter
 `methodInvocation` (default null) of `ITriggerManagementService.StartExecutePipelineAsync`, which sets it on the
 `ExecutePipelineRequest` it publishes (the one place that builds that request). The adapter lets a type whose method
-`replacesGenericCreate` be created only in this run (AB#7120). **No public API accepts the marker**: REST
+`replacesGenericCreate` be created only in this run. **No public API accepts the marker**: REST
 `POST .../pipeline/execute` binds only the query `pipelineRtId`, `isDryRun` and the raw body as pipeline input (a body
 with a `methodInvocation` member is plain input), and cron (`LeaseTriggerConsumer`) passes nothing; both leave it null.
 No SignalR hub method and no GraphQL field takes the request or the marker. Accepted residual risk: a process with
-RabbitMQ publish rights can forge it on the bus, as it can forge `Caller`. **Leased path (AB#7461):** a run queued for a
+RabbitMQ publish rights can forge it on the bus, as it can forge `Caller`. **Leased path:** a run queued for a
 leased adapter carries the marker sealed inside the queued execution's `SealedCaller` envelope and hands it to the pool
-member in `LeaseDto.MethodInvocation` (see "Method-invocation marker on the leased path (AB#7461)" below). Tests:
+member in `LeaseDto.MethodInvocation` (see "Method-invocation marker on the leased path" below). Tests:
 `Methods/PipelineMethodInvokerTests` (all four fields), `Services/TriggerManagementServiceTests/StartExecutePipelineAsyncTests`,
 `Controllers/PipelineControllerExecuteTests` (REST, incl. a body with a `methodInvocation` member), `Consumers/LeaseTriggerConsumerTests` (cron).
 
@@ -100,12 +100,12 @@ member in `LeaseDto.MethodInvocation` (see "Method-invocation marker on the leas
 | empty, method without result | Completed | success without result |
 | `{"error": {"code": "C", "parameters": {...}}}`, C declared by the method (or `METHOD_VALIDATION_FAILED`, `METHOD_TARGET_NOT_FOUND`, `METHOD_FORBIDDEN`) | Completed | error C with the parameters (values: string, number, boolean) |
 | anything else (no JSON, no `value` for a method with result, wrong type, undeclared code) | Completed | `METHOD_HANDLER_FAILED` with `correlationId`, `field`, `reason=invalid-result` |
-| any | Failed with `FailureKind = OutcomeUnknown` (AB#8037) | `METHOD_OUTCOME_UNKNOWN` with `methodId` + `correlationId` (rule R3: a write was not acknowledged and may have taken effect); the error message is logged, never returned |
+| any | Failed with `FailureKind = OutcomeUnknown` | `METHOD_OUTCOME_UNKNOWN` with `methodId` + `correlationId` (rule R3: a write was not acknowledged and may have taken effect); the error message is logged, never returned |
 | any | Failed (other or no `FailureKind`) / Interrupted / Cancelled | `METHOD_HANDLER_FAILED` with `correlationId`; the execution's error message is logged (token masked, 500 characters), never returned |
 | not final before the deadline | Running / Queued / not yet written | `METHOD_TIMEOUT`; the pipeline may still finish (not cancelled) |
 | the pipeline cannot be started (adapter offline, caller binding refused) | none | `METHOD_HANDLER_NOT_AVAILABLE`, `reason=pipeline-start-failed` |
 
-**Unacknowledged writes in a pipeline method (AB#8037, System.Communication 4.14.0).** The pipeline runs in the adapter, so only
+**Unacknowledged writes in a pipeline method (System.Communication 4.14.0).** The pipeline runs in the adapter, so only
 the adapter sees the exception of an ApplyChanges write that MongoDB did not acknowledge (write-concern error,
 `UnknownTransactionCommitResult`). It classifies it with the engine's `UnacknowledgedWriteClassifier` (via octo-sdk
 `PipelineExecutionFailureKinds.Of`, the same classifier the CK method host of common-services uses for service handlers) and
@@ -115,12 +115,12 @@ on every completion path - `CompleteExecutionAsync`, `BatchCompleteExecutionsAsy
 release (`ApplyLeaseOutcomeAsync`) - only for `Failed` (`PipelineExecutionFailureKindMapping.ToCk`; an unknown future value is
 stored as `Failed`). `PipelineMethodResultMapper.Map` answers `METHOD_OUTCOME_UNKNOWN` + `correlationId` for `Failed` +
 `OutcomeUnknown`; everything else is unchanged. The decision reads only the structured field, never `ErrorMessage` (no free-text
-markers). An execution reported by an adapter built before AB#8037 has no kind and stays `METHOD_HANDLER_FAILED`. Tests:
+markers). An execution reported by an adapter built before the failure-kind field existed has no kind and stays `METHOD_HANDLER_FAILED`. Tests:
 `PipelineMethodResultMapperTests` (`*OutcomeUnknown*`), `PipelineMethodInvokerTests` (`*UnacknowledgedWrite*`,
 `*WithoutTheStructuredKind*`), `CompleteExecutionAsyncTests` / `BatchCompleteExecutionAsyncTests` (`*FailureKind*`),
 `LeaseOutcomeAndRequeueTests` (`*UnacknowledgedWrite*`).
 
-**Failure kind on the REST pipeline execution (AB#8156).** An operator without a method call sees the kind too: `PipelineDebugController`
+**Failure kind on the REST pipeline execution.** An operator without a method call sees the kind too: `PipelineDebugController`
 (`GET .../PipelineDebug/{pipelineRtId}` history and `.../latest`, read by octo-cli `GetPipelineExecutions` /
 `GetLatestPipelineExecution`) returns `PipelineExecutionDataDto.FailureKind` (octo-sdk, `PipelineExecutionFailureKind?`, JSON
 `"failureKind": "OutcomeUnknown" | "Failed"`). `PipelineDebugController.ToExecutionData` maps the persisted execution through

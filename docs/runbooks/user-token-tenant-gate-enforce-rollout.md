@@ -3,7 +3,7 @@ description: "Runbook: Enforce on the user-token tenant gate of asset repository
 background: true
 ---
 
-# Rollout: `Enforce` on the user-token tenant gate of asset-repo and communication-controller (AB#6728, AB#6833)
+# Rollout: `Enforce` on the user-token tenant gate of asset-repo and communication-controller
 
 Both services run `UseOctoTenantAuthorization()` (octo-common-services). It compares the `tenant_id`
 claim of a **user token** (a token with a `sub` claim) with the tenant in the route
@@ -17,7 +17,7 @@ Companion runbook for the SignalR hubs: [`hub-authorization-enforce-rollout.md`]
 
 ## 1. The value to set, per service
 
-| Service | Value (environment variable) | Chart value (octo-helm-core, AB#6834) |
+| Service | Value (environment variable) | Chart value |
 |---|---|---|
 | octo-asset-repo-services | `OCTO_TENANTAUTHORIZATION__USERTOKENENFORCEMENT=Enforce` | `services.assetRepository.userTokenEnforcement: Enforce` |
 | octo-communication-controller-services | `OCTO_TENANTAUTHORIZATION__USERTOKENENFORCEMENT=Enforce` | `services.communication.userTokenEnforcement: Enforce` |
@@ -26,31 +26,31 @@ Companion runbook for the SignalR hubs: [`hub-authorization-enforce-rollout.md`]
 - The value goes into the per-cluster values file of `octo-mesh-deployment`
   (`clusters/<cluster>/values-octo-mesh.yaml`), never into a pipeline definition. One value per service,
   so one service can be rolled back alone.
-- The chart value exists only from the octo-helm-core release of AB#6834 on. Before that release the
+- The chart value exists only from the octo-helm-core release of on. Before that release the
   chart renders no such variable and the cluster cannot be flipped; check the chart version the cluster
   runs first.
 - The equivalent configuration key is `TenantAuthorization:UserTokenEnforcement`.
 
 ## 2. Order
 
-1. **test-2**, then **staging-1**, then **prod-2**, then **prod-1**.
+1. **test**, then **staging**, then **production** (each production cluster in turn).
 2. **Each cluster only with Gerald's explicit go for that cluster, given in the session that does the
-   flip.** A go for one cluster is no go for the next. staging-1, prod-2 and prod-1 additionally wait
-   for the Studio fix AB#6731 (released), and prod inventories wait for it too.
+   flip.** A go for one cluster is no go for the next. Staging and production additionally wait
+   for the Studio fix (released), and prod inventories wait for it too.
 3. Per cluster, one service at a time: the communication-controller first (few callers), asset-repo
    after a clean look at the first one. Roll the pod once after the deployment change and count the
    observation window from that restart.
-4. Gates before the first flip on test-2 (AB#6728): chart released (AB#6834), octo-cli authenticates per
-   target tenant (AB#6836), tests of both services merged (AB#6832, AB#6833).
+4. Gates before the first flip on a test environment: chart released, octo-cli authenticates per
+   target tenant, tests of both services merged.
 
 ## 3. Known callers (what Enforce changes for them)
 
 | Caller | Today | Outcome after Enforce |
 |---|---|---|
-| octo-cli | sends the context's root-tenant token with `-tid <tenant>` to child tenants (about 90 percent of the LogOnly volume on test-2, including all hits on the communication-controller) | 403 until the per-tenant authentication of **AB#6836** is released. Operator sweeps (LibraryStatus, blueprints, clearCache, pipeline debug) stop working before that. |
-| Refinery Studio | a stale token of another tenant on a page load (guard fall-through), bug **AB#6731** | 403 on the page's calls until AB#6731 is released. No exemption. |
-| meshmakers-app | not seen on test-2 or staging-1 | none expected; the app degrades on a 403. No exemption unless its need is evidenced. |
-| energy-community-app | tokens of tenants energytest/eegroider/mrotest on the host tenant's GraphQL (asset-repo only) | open owner decision (Frigg/Sol), not a communication-controller caller. |
+| octo-cli | sends the context's root-tenant token with `-tid <tenant>` to child tenants (about 90 percent of the LogOnly volume on a test environment, including all hits on the communication-controller) | 403 until the per-tenant authentication of octo-cli is released. Operator sweeps (LibraryStatus, blueprints, clearCache, pipeline debug) stop working before that. |
+| Refinery Studio | a stale token of another tenant on a page load (guard fall-through), bug in Studio | 403 on the page's calls until the Studio fix is released. No exemption. |
+| accounting app | not seen on a test environment or staging | none expected; the app degrades on a 403. No exemption unless its need is evidenced. |
+| customer-app | tokens of three customer tenants on the host tenant's GraphQL (asset-repo only) | open owner decision, not a communication-controller caller. |
 
 No exemption mechanism exists or is built here. No endpoint of either service carries
 `IAllowParentTenantAdministration`; marking one would let a parent tenant's user token address a child's
@@ -87,7 +87,7 @@ data, so the marker is not an exemption route.
 8. Failed checks and issues of the cluster in Dash0 do not grow beyond what step 6 explains.
 
 **Record** the state of the cluster (service, value, time of the restart, counts before and after) in a
-comment on AB#6728.
+comment on the rollout work item.
 
 ## 5. Rollback
 
@@ -102,7 +102,7 @@ service back does not touch the other.
 - **SignalR hubs.** A SignalR client sends its token as `?access_token=`, not as an `Authorization`
   header, so `TenantAuthorizationMiddleware` returns early on every hub request. The tenant isolation of
   `/{tenantId}/adapterHub` is the hub authorization filter (`AdapterHubAuthorizationFilter`,
-  switch `OCTO_ADAPTERHUBAUTHORIZATION__MODE`), already `Enforce` on all clusters (AB#5977). Flipping
+  switch `OCTO_ADAPTERHUBAUTHORIZATION__MODE`), already `Enforce` on all clusters. Flipping
   this gate changes nothing for hubs. Reference tests: `TenantGateHubReferenceTests`.
 - **Tokens without a `sub` claim** (client credentials) are judged by the separate service-token switch
   `OCTO_TENANTAUTHORIZATION__SERVICETOKENENFORCEMENT`, not by this one.
@@ -114,4 +114,4 @@ service back does not touch the other.
   (real Kestrel host, real `UseOctoTenantAuthorization()` and route constraint; 403 and the action does
   not run; `Program.cs` order pinned at the source; `Enforce` wins from the key and from the
   environment variable; no endpoint carries the parent-tenant marker).
-- asset-repo: the tests of AB#6832 (REST and GraphQL).
+- asset-repo: the tests of (REST and GraphQL).

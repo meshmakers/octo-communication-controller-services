@@ -21,7 +21,7 @@ Two coupled work-streams that must ship in order:
 2. **Phases 2–5 — CI/CD Workload Rollout** (`octo-communication-controller-services`
    + `octo-cli` + `octo-mesh-deployment`).
    When a Helm chart CI build finishes (`octo-mesh-adapter`,
-   `energy-community-app`, `maco-app`, …), automatically roll the new chart
+   `customer-app`, `gamma-app`, …), automatically roll the new chart
    version to every tenant that uses the chart.
 
 Phase 1 is interesting on its own (it solves a long-standing gap in the
@@ -190,7 +190,7 @@ Below the existing client property form, a collapsible card titled
 | Tenant ID | Provisioned at | Secret version | Actions |
 |---|---|---|---|
 | acme | 2026-05-20 14:23 | 1 | [Re-sync] [Remove] |
-| voest | 2026-05-20 14:23 | 1 | [Re-sync] [Remove] |
+| beta | 2026-05-20 14:23 | 1 | [Re-sync] [Remove] |
 | energy-coop | 2026-04-12 09:01 | 0 (out of date) | [Re-sync] [Remove] |
 
 Rows out-of-date on `SecretHashVersion` get a small warning badge with the
@@ -291,14 +291,14 @@ Only when this is done do we start Phase 2.
 ## CI/CD Problem (recap)
 
 When a service CI build finishes (e.g. `octo-mesh-adapter`,
-`energy-community-app`, `maco-app`), a new Helm chart version is published
+`customer-app`, `gamma-app`), a new Helm chart version is published
 to the Helm registry. We need a CI/CD-driven way to **roll that new chart
 version out to every tenant where the chart is used**:
 
 | Workload class | Scope of rollout |
 |---|---|
 | Mesh / EDA / Modbus / Loxone adapters | All tenants that own a matching `RtAdapter` |
-| Per-customer Applications (`energy-community-app`, `voest-app`, `maco-app`, …) | All tenants that own a matching `RtApplication` |
+| Per-customer Applications (`customer-app`, `beta-app`, `gamma-app`, …) | All tenants that own a matching `RtApplication` |
 
 Additional constraints:
 
@@ -510,17 +510,17 @@ stages:
     jobs:
       - template: templates/deploy-workload.yml
         parameters:
-          cluster: staging-1
+          cluster: <staging-cluster>
           chartName: octo-mesh-adapter
-  # ... prod-1, prod-2 ...
+  # ... production clusters ...
 ```
 
 ```yaml
-# pipelines/deploy-app-energy-community.yml
+# pipelines/deploy-app-customer-app.yml
 resources:
   pipelines:
     - pipeline: appChart
-      source: 'energy-community-CI'
+      source: 'customer-app-CI'
       trigger:
         branches: { include: [main, 'refs/tags/*'] }
 
@@ -529,9 +529,9 @@ stages:
     jobs:
       - template: templates/deploy-workload.yml
         parameters:
-          cluster: staging-1
-          chartName: energy-community-app
-  # ... prod-2 with manual approval ...
+          cluster: <staging-cluster>
+          chartName: customer-app
+  # ... production clusters with manual approval ...
 ```
 
 ## End-to-end flow (mesh adapter, all tenants — assuming Phase 1 is done)
@@ -548,7 +548,7 @@ stages:
 
 5. deploy-workload.yml runs per cluster:
    a. octosystem context → LoginClientCredentials → token{tenant_id:octosystem}.
-   b. GetTenants → [acme, voest, energy-coop, ...].
+   b. GetTenants → [acme, beta, coop, ...].
    c. For each tenant T:
       - Switch to T context.
       - LoginClientCredentials (same ClientId/Secret, now issues token{tenant_id:T}
@@ -562,12 +562,12 @@ stages:
 7. Each chart-version write + deploy logged via CommunicationEventService.
 ```
 
-## End-to-end flow (per-customer app, e.g. energy-community-app)
+## End-to-end flow (per-customer app, e.g. customer-app)
 
 Same as above, but:
 
-- Triggered by `energy-community-CI` (not core).
-- `chartName=energy-community-app`. Tenants where no `RtApplication` with
+- Triggered by `customer-app-CI` (not core).
+- `chartName=customer-app`. Tenants where no `RtApplication` with
   this chart exists return `[]` from `GetWorkloadsByChart` and are silently
   skipped. No `tenantFilter` needed in the common case.
 - For a canary release on one tenant: wrapper sets `tenantFilter: acme`.
@@ -599,7 +599,7 @@ and trigger independently from their own CI.
 - New `TenantApi/v1/Controllers/WorkloadController.cs` with:
   - `GET {tenantId}/v1/workloads?chartName=…`
   - `PATCH {tenantId}/v1/workloads/{workloadRtId}/chart-version`
-- Unit + integration tests (TUnit + xUnit fixtures as in `CLAUDE.md`).
+- Unit + integration tests (TUnit + xUnit fixtures as in `AGENTS.md`).
 - Event-log entries via `ICommunicationEventService`.
 
 ### Phase 3 — octo-cli commands
@@ -621,9 +621,9 @@ and trigger independently from their own CI.
   deleted. `clusters/<cluster>/apps.json` and `tenants.json` deleted once
   both rollouts have switched over.
 
-### Phase 5 — Smoke test on `test-2`
+### Phase 5 — Smoke test on a test environment
 
-- Use `test-2`'s rolling environment (no approvals) to validate the full
+- Use a test environment's rolling deployment (no approvals) to validate the full
   flow end-to-end with one adapter chart and one app chart.
 - Verify event log shows chart-version updates + deploys.
 - Verify a deliberately broken chart version fails only the affected

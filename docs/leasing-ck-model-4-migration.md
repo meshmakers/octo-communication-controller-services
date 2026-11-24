@@ -3,7 +3,7 @@ description: "Shared adapter leasing: the System.Communication 4.0.0 major bump,
 applies_to: src/SystemCommunicationCkModel/ConstructionKit/migrations/**, **/Services/Lease*.cs
 ---
 
-## Shared Adapter Leasing — CK model 4.0.0 (Epic AB#4914; AB#4924)
+## Shared Adapter Leasing — CK model 4.0.0
 
 A parent tenant runs an adapter pool its descendants borrow: a pool member is **leased** to a
 tenant for the duration of one work item, then released. Design doc:
@@ -23,7 +23,7 @@ the pool workload, the lease protocol and the scheduler are increments 2–9 of 
 | **`Pool` → `DeploymentSite`** | `types/deploymentSite.yaml` (was `pool.yaml`) | it is a deployment *location* (`Default Cloud`, `k8sfirmianstrasse`), never a pool of anything — and the name collided head-on with the new `AdapterPool`. Ships **with** leasing so the estate takes one migration, not two (concept §8, Q16 + Q18). |
 | **`Manages`/`ManagedBy` → `Hosts`/`HostedBy`** | `associations/hosts.yaml` (was `manages.yaml`) | a deployment location does not *manage* anything — the Communication Operator does. Renamed in the **same** migration as the type, so the estate migrates once. `Deploys`/`DeployedTo` was rejected: the site does not deploy either, it is deployed *to*. |
 | `AdapterPool` | `types/adapterPool.yaml` | a pool of interchangeable adapter processes: `MinReplicas`/`MaxReplicas`, per-member sizing, queue-driven scale-up, lending scope. **One workload with a replica range**, not N `Adapter` entities. |
-| `LifecycleMode` `3 Leased` | `enums/lifecycleMode.yaml` | the **borrower's** mode and only ever that: no process of its own. `2 Auto` stays reserved (AB#4984). |
+| `LifecycleMode` `3 Leased` | `enums/lifecycleMode.yaml` | the **borrower's** mode and only ever that: no process of its own. `2 Auto` stays reserved. |
 | `PipelineExecutionStatus` `5 Queued` | `enums/pipelineExecutionStatus.yaml` | appended, never inserted — the numeric keys are persisted on every entity. |
 | `PipelineExecutionClass` (`Interactive`/`Batch`) | `enums/pipelineExecutionClass.yaml` | on `Pipeline.ExecutionClass`, resolved from the trigger node **on save** and persisted, like `OnDemandCapable`. Keys ordered so ascending == scheduling order; default `Batch`. |
 | `AdapterSharingMode`, `LendingAllowedTenantIds`, `LendingMaxConcurrentLeasesPerTenant` | `attributes/adapterLeasing.yaml` → **`AdapterPool`** | lender side. Moved off `Adapter` in the rework: lending is a property of the thing that owns processes. The allow-list **intersects** the resolved subtree and can never widen it. |
@@ -77,9 +77,9 @@ must keep saying `Pool`/`Manages` and must never be edited. 56 of the 61 hard-bl
 are open-ended (`[3.6,)`, `[3.12,)`, `[3.13,)`, all in `demo-energy-iq/data/`, which is on
 branch `main`) and **silently absorb 4.0.0** — the more dangerous half.
 
-- 🔴 **Blueprint `ckModelDependencies` floors are NOT "satisfiability floors only" under a major bump.** `[3.22.0,4.0)` *excludes* 4.0.0: the blueprint becomes unsatisfiable. Both embedded blueprints are therefore raised to `[4.0,5.0)` and bumped `1.5.0` → **`2.0.0`**, and their seed now creates a `DeploymentSite`. The same applies to the 8 other `blueprint.yaml` files and 36 seed-data files in `octo-construction-kit`, `octo-office-integration` and `meshmakers-app`.
+- 🔴 **Blueprint `ckModelDependencies` floors are NOT "satisfiability floors only" under a major bump.** `[3.22.0,4.0)` *excludes* 4.0.0: the blueprint becomes unsatisfiable. Both embedded blueprints are therefore raised to `[4.0,5.0)` and bumped `1.5.0` → **`2.0.0`**, and their seed now creates a `DeploymentSite`. The same applies to the 8 other `blueprint.yaml` files and 36 seed-data files in `octo-construction-kit`, `octo-office-integration` and the accounting app.
 - 🔴 **Both dependent CK models need MAJOR bumps, not minor ones.** `ck-semver-rules.md` classifies "dependency switched to a new major" as Major. `System.Ai-3.7.0` → **4.0.0** (which in turn breaks `System.Ai.Default`'s `System.Ai-[3.1.2,4.0)` pin); `Loxone-4.3.1` → **5.0.0** with its range widened off `[3.31,3.32)`.
-- 🔴 **Loxone must move WITH the bump.** The exact pin `[3.31,3.32)` (from `499e55d`, AB#5196) resolves to 3.31.0 and is unaffected by 3.x bumps — which is what makes it dangerous. `CkModelId` is name+version and `CkModelMigrationService` refuses to migrate across names, so a tenant holds exactly **one** version of `System.Communication`: a prod-1 tenant running Loxone cannot take 4.0.0 at all while the pin stands. Third repeat of AB#4696 / AB#4999 / AB#5196.
+- 🔴 **Loxone must move WITH the bump.** The exact pin `[3.31,3.32)` resolves to 3.31.0 and is unaffected by 3.x bumps — which is what makes it dangerous. `CkModelId` is name+version and `CkModelMigrationService` refuses to migrate across names, so a tenant holds exactly **one** version of `System.Communication`: a production tenant running Loxone cannot take 4.0.0 at all while the pin stands. Third repeat of the same pin incident.
 
 ### 🔴 Two traps specific to this bump
 
@@ -117,17 +117,17 @@ Since engine `d035715` (`CkMigrationMajorVersionGuard`) a missing entry no longe
 post-chain bridge is refused across a major, the upgrade fails, and the MigrationHistory stays at the
 3.x version until a model with the entry is deployed.
 
-**AB#5803 (2026-10-08, cutover W1): 3.41.0 → 4.6.0, and no 3.42.0 entry on purpose.** main's
-published 3.41.0 is the status-history release WITHOUT SECRET (AB#5618 `LastSuccessfulStatusAt` /
-`ConsecutiveStatusFailures`, AB#5583 `FoldedBefore`); **4.6.0** carries exactly that content into the
+**2026-10-08, cutover W1: 3.41.0 → 4.6.0, and no 3.42.0 entry on purpose.** main's
+published 3.41.0 is the status-history release WITHOUT SECRET (`LastSuccessfulStatusAt` /
+`ConsecutiveStatusFailures`, `FoldedBefore`); **4.6.0** carries exactly that content into the
 4.x line, so a 3.41.0 tenant must meet 4.6.0 or later (ChangeCkType keeps the stored values; 4.5.0
 would not declare them). **3.42.0 is deliberately NOT listed:** it was the planned 3.x cut of the
-SECRET switch (AB#5537) and was **never released** (the published 3.x line ends at 3.41.0) — the switch
-ships on the 4.x line instead, as the next free 4.x minor after 4.7.0 (4.7.0 is the AB#6312 ownership
+SECRET switch and was **never released** (the published 3.x line ends at 3.41.0) — the switch
+ships on the 4.x line instead, as the next free 4.x minor after 4.7.0 (4.7.0 is the ownership
 change), so there is no published 3.42.0 to check an entry against. A 3.42.0 that exists on a local tenant is refused by the
 major-version guard and rebuilt.
 
-**4.8.0 (AB#5537 / AB#5528, SECRET phase 3) adds no migration entry either.** The credential
+**4.8.0 (SECRET phase 3) adds no migration entry either.** The credential
 attributes (`Password`, `PrivateKey`, `PrivateKeyPassphrase`, `ClientSecret`, `ApiKey`, `BotToken`,
 `AdminPassword`) become `valueType: Secret` (String → Secret is a MINOR per `CkSemVerClassifier`), all
 slots optional, and `ValueOverride` gains the optional Secret member `SecretValue` (`recordKey: Path`).
@@ -140,7 +140,7 @@ goes through `IWorkloadEncryptionService` (`Reveal` / `RevealOrNull` / `Describe
 `as string` cast: on 4.8.0 the raw value is an `RtSecretValue`. The lane-only reader that did cast —
 `LeaseService.ResolveBorrowerCredentialAsync` — now reveals like the deploy path
 (`Services/LeaseServiceTests/LeaseBorrowerSecretRevealTests`). `CallerAccessToken` stays a String
-(`enc:v1`; since 4.12.0 it is no longer written, see "The queued invoker is sealed"). 4.8.0 keeps 4.7.0's `ownership: Secret` on `Adapter.AdapterConfiguration` (AB#6312) unchanged —
+(`enc:v1`; since 4.12.0 it is no longer written, see "The queued invoker is sealed"). 4.8.0 keeps 4.7.0's `ownership: Secret` on `Adapter.AdapterConfiguration` unchanged —
 that attribute stays a `String`. Concept: `docs/concepts/secret-attributes.md`.
 
 Tests: integration `Migrations/SystemCommunication4MigrationTests` — the published 3.40.0 and
@@ -158,5 +158,5 @@ entity is by RtId, not by name), the Helm value names `operator.{autoManageDeplo
 the REST route `{tenantId}/v1/deploymentsite`, the `octo-cli` `GetPools`/`DeployPool`/`UndeployPool`
 commands and the MCP `get_pools`/`undeploy_pool` tools. The GraphQL type
 `SystemDeploymentSite`, however, is derived from the CkTypeId and **renames itself** on
-publish — ~66 frontend files across the Studio, `octo-frontend-libraries` and `meshmakers-app`
+publish — ~66 frontend files across the Studio, `octo-frontend-libraries` and the accounting app
 break without anyone editing them, so codegen must be re-run in the same train.

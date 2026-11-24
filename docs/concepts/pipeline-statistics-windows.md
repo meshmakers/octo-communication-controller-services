@@ -3,11 +3,11 @@ description: Pipeline statistics windows, source and classification
 applies_to: **/Services/PipelineStatisticsFolder.cs
 ---
 
-# Pipeline statistics: windows, source and classification (AB#5583)
+# Pipeline statistics: windows, source and classification
 
 `RtPipelineStatistics` carries window counters (`LastHour*`, `Last12Hours*`, `Last24Hours*`,
 `Last30Days*`) and the per-hour `HourlyBuckets`. Clients (Refinery Studio sparkline, Data Flows
-list, cockpit) show both side by side, so they must agree. Before AB#5583 they did not: the Studio
+list, cockpit) show both side by side, so they must agree. Before the folded-window change they did not: the Studio
 showed `34 ok / 335 failed` in the header and `17 / 342` summed over the 24 hourly bars.
 
 ## Why they disagreed
@@ -63,7 +63,7 @@ count as neither — in the fold, the snapshot and the rolling hour alike.
 A straggler — an execution that turns terminal after its hour was folded — is not counted until
 the next fold merges it into its hour (minutes later).
 
-**Upgrade.** Statistics written before AB#5583 have no `FoldedBefore` and their newest bucket may
+**Upgrade.** Statistics written before the folded-window change have no `FoldedBefore` and their newest bucket may
 hold part of an hour whose rest is still retained. The first fold after the upgrade moves the
 boundary past that hour, i.e. it folds (and deletes) up to one hour of executions earlier than the
 retention would — once. With the default retention of 1 h that hour can lie inside the rolling

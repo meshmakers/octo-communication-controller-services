@@ -3,21 +3,21 @@ description: "Runbook: Enforce on the adapter, operator and adapter-pool hubs"
 applies_to: **/Hubs/*Authorization*.cs
 ---
 
-# Rollout: `Enforce` on the adapter, operator and adapter-pool hubs (AB#5063, AB#5059, AB#6088, AB#5528 phase 3)
+# Rollout: `Enforce` on the adapter, operator and adapter-pool hubs
 
-The controller gates both SignalR hubs with a staged check (`CLAUDE.md` § "The SignalR hubs are not
+The controller gates both SignalR hubs with a staged check ([hub authorization gates](../hub-authorization-gates.md), "The SignalR hubs are not
 covered by any of that"). Decision D2: **`Enforce` on every cluster before the communication SECRET
 switch.** `LogOnly` is the review stage and the emergency exit.
 
 | Hub | `Enforce` refuses | Who connects | Credential they need |
 |---|---|---|---|
-| `/operatorHub` (`operatorMode`) | no token, or a token without scope `octo_api` | one central operator per installation (+ the test-2 dev lane), the edge-device operators (they dial into **test-2**) | operator client (`operator.authentication.*`, AB#5062) |
-| `/{tenantId}/adapterHub` (`adapterMode`) | no token, no `octo_api`, no route tenant, no `tenant_id` claim, `tenant_id` ≠ route tenant (unless the client is in `TenantAuthorization:CrossTenantServiceClientIds`) | every adapter pod — central and edge, mesh adapter and the separately built ones (finAPI, EDA, Loxone, SAP, MQTT, …) | the adapter's own pipeline service account (AB#5027), projected at workload deploy (AB#5072) and used by `AdapterAccessTokenService` (octo-communication-sdk r3.4.113+) |
+| `/operatorHub` (`operatorMode`) | no token, or a token without scope `octo_api` | one central operator per installation (+ the test-environment dev lane), the edge-device operators (they dial into the test environment) | operator client (`operator.authentication.*`) |
+| `/{tenantId}/adapterHub` (`adapterMode`) | no token, no `octo_api`, no route tenant, no `tenant_id` claim, `tenant_id` ≠ route tenant (unless the client is in `TenantAuthorization:CrossTenantServiceClientIds`) | every adapter pod — central and edge, mesh adapter and the separately built ones (finAPI, EDA, Loxone, SAP, MQTT, …) | the adapter's own pipeline service account, projected at workload deploy and used by `AdapterAccessTokenService` (octo-communication-sdk r3.4.113+) |
 | `/adapterPoolHub` (`AdapterPoolHubAuthorization:Mode`, counter `octo_hub_name="adapterPoolHub"`) | no token, no `octo_api`, no `tenant_id` claim at connect; at pool-member registration a token tenant ≠ the declared pool tenant | adapter pool members (shared-adapter leasing) | the pool's own service account of the lending tenant |
 
 Schedule: Mon 12.10. release train (chart + operator credentials, everything still `LogOnly`) →
 12.–15.10. log review → 15.–19.10. `Enforce` per cluster, one hub at a time.
-Cluster order: **test-2 (incl. edge) → staging-1 → prod-2 → prod-1**. Per cluster: **operator hub
+Cluster order: **test environment (incl. edge) → staging → production (each production cluster in turn)**. Per cluster: **operator hub
 first** (few, known consumers), **adapter hub a day later**.
 
 The operator and adapter hubs run `Enforce` on every cluster since 2026-10-12. `/adapterPoolHub` stayed `LogOnly`
@@ -34,10 +34,10 @@ decides them, and each step waits for the one before it.
 |---|---|---|
 | Chart release with the value deployed on the cluster | first release train after 2026-11-18 | octo-mesh chart 3.5.80 or later in the cluster's last octo-mesh CD run |
 | Gate check per cluster (`LogOnly` evidence from a controller restart, at least 72 hours, up to 7 days; coverage, positive control, every known pool member seen or decided) | 72 hours after the chart is deployed (the deploy restarts the controller) | plan, section "Gate"; the hub rules cover `adapterPoolHub` (plan, P3) |
-| `Enforce` test-2 | 2026-11-23 | gate check clean, go recorded |
-| `Enforce` staging-1 | 2026-11-24 | test-2 ran 1 day without a legitimate refusal; Gerald's go |
-| `Enforce` prod-1 | 2026-11-25 | staging-1 ran 1 day clean; Gerald's go |
-| `Enforce` prod-2 | 2026-11-26 | prod-1 ran 1 day clean; Gerald's go |
+| `Enforce` test environment | 2026-11-23 | gate check clean, go recorded |
+| `Enforce` staging | 2026-11-24 | the test environment ran 1 day without a legitimate refusal; Gerald's go |
+| `Enforce` production (cluster 1) | 2026-11-25 | staging ran 1 day clean; Gerald's go |
+| `Enforce` production (cluster 2) | 2026-11-26 | production cluster 1 ran 1 day clean; Gerald's go |
 
 Gate query (Dash0, dataset = cluster, last 7 days; `would_refuse` must be 0 apart from the positive control):
 
@@ -50,11 +50,11 @@ The log query, the coverage check and the per-cluster checklist are in the plan.
 
 ## 1. Preconditions (per cluster)
 
-1. **Controller** with the decision counter (this repo, AB#5528 `octo.communication.hub.authorization.decisions`)
+1. **Controller** with the decision counter (this repo, `octo.communication.hub.authorization.decisions`)
    and the `octo-mesh` chart with `services.communication.hubAuthorization.*` deployed. The deployment
    pins both modes in `octo-mesh-deployment/clusters/<cluster>/values-octo-mesh.yaml`:
    `kubectl -n octo get deploy <controller> -o yaml | grep -A1 HUBAUTHORIZATION` shows `LogOnly` twice.
-2. **Operator client provisioned** (Gerald, per cluster — see the provisioning list in the AB#5528 work
+2. **Operator client provisioned** (Gerald, per cluster — see the provisioning list in the work
    item): confidential `client_credentials` client, scope `octo_api`, in the system tenant, secret in
    Vault `meshmakers/<cluster>/octomesh` as `operator_client_id` / `operator_client_secret`; operator
    (chart 0.12.0+, image r3.4.149+) redeployed. Operator log after start:
@@ -67,7 +67,7 @@ The log query, the coverage check and the per-cluster checklist are in the plan.
    time). Adapter log: `Adapter access token acquired for client octo-pipeline-sa-…`; a
    `No Adapter:ClientId / Adapter:IssuerUri configured` line means the pod still connects anonymously
    — redeploy the workload (`DeployWorkload`).
-4. **Edge (test-2 only)**: `edge_operator_client_*` in `meshmakers/test-2/octomesh`, each
+4. **Edge (test environment only)**: `edge_operator_client_*` in `<org>/<env>/octomesh`, each
    `deploy-communication-operator-edge-mm-octo-mesh-edge-000N` pipeline run once after that. A device
    that is offline during the switch cannot be fixed remotely and will be refused once it comes back —
    list the devices that were seen in the inventory and decide explicitly about the rest.
@@ -82,7 +82,7 @@ evaluated within minutes. Count the review window from that restart.
 
 **Metric (Dash0, dataset = cluster)** — the go / no-go signal. The counter is cumulative and restarts
 at 0 with every controller pod; the controller writes a 0 for every series right after startup (30 series;
-fixed in AB#6740 — controllers older than that build export no zero series and show `adapterPoolHub` only after
+fixed in a later build — controllers older than that build export no zero series and show `adapterPoolHub` only after
 its first real decision), so both the raw value (count since the last restart) and `increase()` work. Use the raw value since the restart from
 the step above, it covers the whole review window:
 
@@ -97,7 +97,7 @@ count by (octo_hub_name) (
 ```
 
 On a freshly restarted pod the sum of all series is 0 until the first connection decision. If `adapterPoolHub`
-is missing, the cluster still runs a controller without the AB#6740 fix and its `adapterPoolHub` numbers cannot
+is missing, the cluster still runs a controller without the fix and its `adapterPoolHub` numbers cannot
 be used for the Enforce decision.
 
 ```promql
@@ -142,7 +142,7 @@ route tenant and the time of the connect (adapter pod start / reconnect), or via
 `No Adapter:ClientId` warning.
 
 **Go criteria per hub:** `would_refuse` = 0 over the window, `allowed` > 0, every known consumer
-(central operator, dev operator on test-2, each edge device; each deployed adapter) has an `allowed`
+(central operator, dev operator on a test environment, each edge device; each deployed adapter) has an `allowed`
 connection or a token-acquired log line in the window.
 
 ## 3. Switch one hub on one cluster
@@ -156,24 +156,24 @@ connection or a token-acquired log line in the window.
          operatorMode: Enforce   # adapterMode stays LogOnly until its own switch
    ```
 
-2. Deploy the core services through the regular CD (`deploy-octo-mesh-core-services-test-2.yml`, or
+2. Deploy the core services through the regular CD (`deploy-octo-mesh-core-services-<env>.yml`, or
    `deploy-octo-mesh-core-services.yml` for staging/prod). The controller restarts, so every
    connection is re-evaluated immediately.
 3. Verify within 15 minutes:
    - the raw `octo_hub_authorization_outcome="refused"` value stays 0 since the restart (first query above
      with `refused`), and the series for the switched hub now carry `octo_hub_authorization_mode="enforce"`;
    - operator hub: every pool `CommunicationState=Online` (`octo-cli -c GetPools` per tenant, or Studio);
-     test-2: the edge pools too;
+     the test environment: the edge pools too;
    - adapter hub: adapters `Online` + `Configured`, a manual pipeline execution on one adapter per
      tenant succeeds, one `DeployWorkload` round trip works;
    - controller log has no `Refused an operator connection` / `Refused an adapter connection` lines.
-4. Note the switch (date, cluster, hub) in AB#5528 before moving to the next one.
+4. Note the switch (date, cluster, hub) in the rollout log before moving to the next one.
 
 ## 4. Refusals and rollback
 
 **First: who is refused.** Do not switch to `LogOnly` as the first step. A refusal in Enforce is either a probing
 or stale client (expected, no action) or a legitimate operator/adapter that is locked out (fix that client). The
-refusal log line (`Refused an operator|adapter|pool-member connection ...`, AB#9030) names what can be named
+refusal log line (`Refused an operator|adapter|pool-member connection ...`) names what can be named
 without secrets: the connection id, the reason code, the request path (hub), the remote address (behind the
 ingress this is the ingress pod), the whole `X-Forwarded-For` chain (client-controlled; only the right-most
 entries were added by your own proxies), the user agent and — for a token that was presented but not accepted
@@ -186,7 +186,7 @@ cluster) and decide:
   minutes), so a burst does not page.
 - `client_id 'octo-communication-operator'` (or an adapter client) or a known pod address: a legitimate client is
   locked out. Fix the cause (credentials in Vault, expired secret, image too old, wrong tenant) and check that the
-  client reconnects. Controller versions before AB#9030 log, for an unauthenticated caller, only the connection id (authenticated callers carry `client_id`, `sub` and scopes): compare the refusal time with the
+  client reconnects. Controller versions before the refusal-log change log, for an unauthenticated caller, only the connection id (authenticated callers carry `client_id`, `sub` and scopes): compare the refusal time with the
   operator/adapter logs instead.
 - Only when a legitimate fleet is locked out and the cause is not found quickly: roll back, as below.
 
@@ -203,7 +203,7 @@ deploy sets `Enforce` again.
 
 Rotate by client, not by secret: octo-cli has client secret verbs (`CreateApiSecretClient` /
 `UpdateApiSecretClient`), but whether a client can hold two valid secrets at once after the OpenIddict
-migration (AB#4989) is not verified, and a second client works regardless. Create a second client
+migration is not verified, and a second client works regardless. Create a second client
 (`AddClientCredentialsClient -id octo-communication-operator-<n>`, same shape), put its id and secret
 into Vault (`: "${SECRET:?SECRET is not set}" && printf '%s' "$SECRET" | vault kv patch secret/meshmakers/<cluster>/octomesh operator_client_id=<id> operator_client_secret=-`
 — `-` makes Vault read the secret from standard input, so it stays out of the shell history and the

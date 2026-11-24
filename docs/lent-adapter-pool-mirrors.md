@@ -3,13 +3,13 @@ description: "Lent adapter pool mirrors: the borrower's view of leasable pools, 
 applies_to: **/Services/*PoolMirror*.cs, **/Services/Lent*.cs
 ---
 
-## Lent adapter pool mirrors — the borrower's view of what it may lease (AB#5271)
+## Lent adapter pool mirrors — the borrower's view of what it may lease
 
 Concept: `docs/concepts/lent-adapter-pool-mirror.md`.
 
 A borrower could not see which adapter pools it may use: the `AdapterPool` entity lives in the
 **lender's** tenant database, GraphQL is tenant-scoped, and a CK association cannot cross that
-boundary. AB#4924 worked around it with two plain strings on the borrowing `RtAdapter`
+boundary. The leasing design worked around it with two plain strings on the borrowing `RtAdapter`
 (`LentFromTenantId` / `LentFromAdapterPoolRtId`) — no navigation, no filtering, no display name,
 nothing for backup to carry.
 
@@ -102,15 +102,15 @@ values — lender-side deployment detail that changes on every rollout and would
 reason about a release it has no say over. Pool members and the lease queue are not mirrored at all
 (concept §8).
 
-### 🔴 The re-link: the second half of the migration note (AB#5349)
+### 🔴 The re-link: the second half of the migration note
 
 `migration-meta.yaml` records why no CK migration can convert the two removed attributes into the
 association — the target is a mirror the controller provisions at **run time**, so its RtId does not
 exist while a migration runs — and ends with "the relationship is re-established by the mirror sync
-**plus a re-link of the adapter**". Until AB#5349 the second half had no implementation: the sync
+**plus a re-link of the adapter**". Until the re-link change the second half had no implementation: the sync
 provisioned the mirror, and nothing linked the adapter to it.
 
-Measured on the local kind cluster, tenant `salzburgdev`, on 2026-09-24:
+Measured on the local kind cluster, tenant `borrowerdev`, on 2026-09-24:
 
 | | |
 |---|---|
@@ -149,8 +149,7 @@ Properties, each with a test:
   re-reads the current edge inside its own transaction. A second run reports zero.
 - 🔴 **It never invents an edge.** Leftovers absent, blank, half present, or naming a pair no mirror
   carries ⇒ the adapter is left alone. A leased adapter pointing at a pool nobody lent it is worse
-  than one pointing at nothing: the latter is already a loud, named refusal at the enqueue (AB#5329,
-  `LeaseRefusalReason.BorrowerNamesNoPool`), while the former would send lease requests to a lender
+  than one pointing at nothing: the latter is already a loud, named refusal at the enqueue (`LeaseRefusalReason.BorrowerNamesNoPool`), while the former would send lease requests to a lender
   that never agreed. An adapter whose edge points at a *different* mirror is not re-pointed either —
   the sweep fills a gap, it does not re-decide a pointer somebody set deliberately.
 - 🔴 **It makes no lending decision** (concept §4). The mirrors it matches against were just decided,
@@ -232,7 +231,7 @@ refused deploy with a named reason, which is the loud failure the sample wants.
 
 Tests: `Services/AdapterPoolMirrorProvisioningServiceTests/` (borrower reconcile incl. the
 revocation and unreadable-lender rules, lender fan-out incl. the one-reconcile-per-borrower and
-failing-borrower rules, and `RelinkLeasedAdaptersTests` for every AB#5349 decision rule — edge
+failing-borrower rules, and `RelinkLeasedAdaptersTests` for every re-link decision rule — edge
 present, edge elsewhere, leftovers missing / half present / blank / matching nothing / matching a
 doomed mirror, several mirrors, non-Leased modes, the idempotent second run, the event-log line, the
 best-effort paths and the two cheapness assertions), integration
