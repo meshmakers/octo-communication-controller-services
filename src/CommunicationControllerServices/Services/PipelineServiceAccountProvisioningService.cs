@@ -1485,8 +1485,16 @@ internal class PipelineServiceAccountProvisioningService(
     internal static bool IsInstallationIssuer(string? issuerUri, string authorityUrl)
     {
         return !string.IsNullOrWhiteSpace(issuerUri) &&
-               (IssuerUriTokenPattern.IsMatch(issuerUri) ||
+               (IsIssuerUriToken(issuerUri) ||
                 issuerUri.TrimEnd('/') == authorityUrl.TrimEnd('/'));
+    }
+
+    /// <summary>
+    /// Whether <paramref name="issuerUri" /> is the <see cref="IssuerUriToken" /> in any case and spacing.
+    /// </summary>
+    internal static bool IsIssuerUriToken(string? issuerUri)
+    {
+        return issuerUri != null && IssuerUriTokenPattern.IsMatch(issuerUri);
     }
 
     /// <summary>

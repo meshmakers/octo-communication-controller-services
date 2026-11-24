@@ -180,6 +180,30 @@ internal class AdapterServiceException : Exception
             "ServiceAccountConfiguration to this pipeline through its 'Uses' association.");
 
     /// <summary>
+    /// AB#9776 (own issuer only): the pipeline's service account names an identity service other than this
+    /// installation's. The mesh adapter accepts service-account tokens only from its own issuer and refuses such a
+    /// configuration on every execution, so the deploy is refused with the repair instead.
+    /// </summary>
+    internal static AdapterServiceException PipelineServiceAccountForeignIssuer(string tenantId,
+        RtEntityId pipelineRtEntityId, string wellKnownName, string issuerUri) =>
+        new($"[{tenantId}] Cannot deploy pipeline '{pipelineRtEntityId}': its service account '{wellKnownName}' " +
+            $"names the issuer '{issuerUri}', which is not this installation's identity service. Service accounts " +
+            "are accepted only from the own issuer (AB#9776). Leave IssuerUri empty (= this installation, AB#5115) " +
+            "or set it to {{service.authority}}.");
+
+    /// <summary>
+    /// AB#9776: the pipeline's service account names a tenant other than the pipeline's. Its roles would be applied
+    /// to the pipeline's repository, so the mesh adapter refuses it; until a cross-tenant exchange exists (AB#9777)
+    /// the deploy is refused as well.
+    /// </summary>
+    internal static AdapterServiceException PipelineServiceAccountForeignTenant(string tenantId,
+        RtEntityId pipelineRtEntityId, string wellKnownName, string configuredTenantId) =>
+        new($"[{tenantId}] Cannot deploy pipeline '{pipelineRtEntityId}': its service account '{wellKnownName}' " +
+            $"names the tenant '{configuredTenantId}', but the pipeline runs in tenant '{tenantId}'. A service " +
+            "account acts only in the pipeline's own tenant (AB#9776). Leave TenantId empty (= the pipeline's " +
+            "tenant, AB#5115) or set it to the pipeline's tenant.");
+
+    /// <summary>
     /// AB#5112 hardened guard, first check: the account resolves but holds no client secret — the
     /// pipeline could never authenticate, so deploying it would only defer the failure to a place
     /// with no error message. Same exception type as the AB#5027 guard for the same Studio-surface

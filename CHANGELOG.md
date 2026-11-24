@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- AB#9776 Fix: a pipeline service account may only name this installation's identity service and the pipeline's own
+  tenant (decision "own issuer only"). The deploy guard refuses a `ServiceAccountConfiguration` whose `IssuerUri` is not
+  empty, `{{service.authority}}` or an own name (`AuthorityUrl`, the resolved `ServiceUrls` authority; compared after
+  normalisation) with `PipelineServiceAccountForeignIssuer`, and one whose `TenantId` is not empty or the pipeline's
+  tenant with `PipelineServiceAccountForeignTenant`. Service-account health reports both as violations (`issuer-foreign`,
+  `tenant-mismatch`); the former "healthy foreign pairing" is gone. The mesh adapter enforces the same rule at run time.
 - AB#9767 New: deploy-time rules for the mesh adapter's cross-tenant nodes in `PipelineElevationInspector`:
   `FindSystemCrossTenantNodes` names every node with `identity: System` and a `targetTenant`/`targetTenants` setting
   (the system identity never reaches another tenant), and the confused-deputy lint now treats

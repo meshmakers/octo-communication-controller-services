@@ -79,7 +79,15 @@ internal abstract class AdapterServiceTestsBase
     /// tests mutate <c>ServiceUrls</c> / <c>AuthorityUrl</c> on it (the resolver re-snapshots per
     /// call, so no rebuild is needed).
     /// </summary>
-    protected readonly CommunicationControllerOptions ControllerOptions = new();
+    /// <remarks>
+    /// AB#9776: <c>AuthorityUrl</c> is the issuer the default service account of
+    /// <see cref="RtEntityCreator.CreateServiceAccountConfiguration" /> names, so the deploy guard's own-issuer check
+    /// passes everywhere it is not the subject under test.
+    /// </remarks>
+    protected readonly CommunicationControllerOptions ControllerOptions = new()
+    {
+        AuthorityUrl = "https://identity.example.com"
+    };
 
     /// <summary>
     /// AB#5112: the base arranges a verifiable identity — the reader answers "Found" for any
