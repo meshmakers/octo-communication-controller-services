@@ -353,4 +353,170 @@ internal class PipelineElevationInspectorTests
         await Assert.That(refused.Count).IsEqualTo(1);
         await Assert.That(refused[0].PropertyName).IsEqualTo("targetTenants[1].tenantIdPath");
     }
+
+    // AB#9767 (review finding 1): the adapter binds `identity` with YamlDotNet's Enum.Parse(ignoreCase), which also
+    // accepts leading zeros, signs and comma-joined flag names. Only an absent value, `Caller` or `0` (trimmed, any
+    // case) is the caller; every other value counts as elevated, fail closed.
+    [Test]
+    [Arguments("'01'")]
+    [Arguments("'+2'")]
+    [Arguments("'Caller, System'")]
+    [Arguments("'Caller, ServiceAccount'")]
+    [Arguments("Admin")]
+    public async Task UnrecognisedIdentity_CountsAsElevated_FailClosed(string identity)
+    {
+        var yaml = CallerSteered(VerifiedTrigger, $"identity: {identity}");
+        var nodes = Parse(yaml);
+        var (refused, warned) = ClassifyCallerSteeredTargets(yaml);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(PipelineElevationInspector.FindElevatedNodes(nodes).Count).IsEqualTo(1);
+        await Assert.That(PipelineElevationInspector.FindUnrecognisedIdentityNodes(nodes).Count).IsEqualTo(1);
+        await Assert.That(PipelineElevationInspector.FindSystemCrossTenantNodes(nodes).Count).IsEqualTo(1);
+        await Assert.That(refused.Count).IsEqualTo(1);
+        await Assert.That(warned.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    [Arguments("Caller")]
+    [Arguments("caller")]
+    [Arguments("' CALLER '")]
+    [Arguments("0")]
+    [Arguments("' 0 '")]
+    public async Task CallerSpellings_AreTheCaller(string identity)
+    {
+        var yaml = CallerSteered(VerifiedTrigger, $"identity: {identity}");
+        var nodes = Parse(yaml);
+        var (refused, warned) = ClassifyCallerSteeredTargets(yaml);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(PipelineElevationInspector.FindElevatedNodes(nodes).Count).IsEqualTo(0);
+        await Assert.That(PipelineElevationInspector.FindUnrecognisedIdentityNodes(nodes).Count).IsEqualTo(0);
+        await Assert.That(refused.Count).IsEqualTo(0);
+        await Assert.That(warned.Count).IsEqualTo(1);
+    }
+
+    // AB#9767 (review finding 2): Switch@1 keeps its child nodes in cases[].transformations and default; every rule
+    // sees them, also in a Switch nested in a case.
+    private const string SwitchWithNestedNodes =
+        """
+        triggers:
+          - type: FromHttpRequest@2
+            method: Post
+            path: /x
+        transformations:
+          - type: Switch@1
+            path: $.body.kind
+            cases:
+              - value: a
+                transformations:
+                  - type: ApplyChanges@2
+                    identity: ServiceAccount
+                    entityUpdatesPath: $.updates
+                    targetTenant:
+                      relation: Child
+                      tenantIdPath: $.body.t
+              - value: b
+                transformations:
+                  - type: Switch@1
+                    path: $.body.sub
+                    cases: []
+                    default:
+                      - type: GetRtEntitiesById@1
+                        identity: System
+                        rtIdsPath: $.body.ids
+                        targetTenant:
+                          relation: Parent
+            default:
+              - type: ApplyChanges@2
+                entityUpdatesPath: $.updates
+                targetTenant:
+                  relation: Sibling
+                  tenantIdPath: $.query.t
+        """;
+
+    [Test]
+    public async Task SwitchCasesAndDefault_AreWalked_ByEveryRule()
+    {
+        var nodes = Parse(SwitchWithNestedNodes);
+        var (refused, warned) = ClassifyCallerSteeredTargets(SwitchWithNestedNodes);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(nodes.Count(n => n.NodeType == "ApplyChanges@2")).IsEqualTo(2);
+        await Assert.That(nodes.Count(n => n.NodeType == "Switch@1")).IsEqualTo(2);
+        await Assert.That(PipelineElevationInspector.FindElevatedNodes(nodes).Count).IsEqualTo(2);
+        await Assert.That(PipelineElevationInspector.FindSystemCrossTenantNodes(nodes).Count).IsEqualTo(1);
+        await Assert.That(PipelineElevationInspector.FindConfusedDeputyHazards(nodes)
+            .Any(f => f.PropertyName == "rtIdsPath")).IsTrue();
+        await Assert.That(refused.Count).IsEqualTo(1);
+        await Assert.That(refused[0].CallerControlledPath).IsEqualTo("$.body.t");
+        await Assert.That(warned.Count).IsEqualTo(1);
+        await Assert.That(warned[0].CallerControlledPath).IsEqualTo("$.query.t");
+    }
+
+    [Test]
+    public async Task GetNodeProperties_FindsANodeInsideASwitchCase_WithTheSameIndexAsTheWalk()
+    {
+        var nested = Parser.GetNodeProperties(SwitchWithNestedNodes, "ApplyChanges@2", 1);
+
+        await Assert.That(nested?.Properties["targetTenant"]).IsNotNull();
+        await Assert.That(nested!.Properties.ContainsKey("identity")).IsFalse();
+    }
+
+    // AB#9767 (review finding 4): caller-controlled = the request roots, every multi-match path, and what a trigger
+    // other than FromHttpRequest@2 writes (a trigger whose output is not known: every path).
+    private static string ServiceAccountTarget(string triggers, string tenantIdPath) =>
+        triggers + "\n" +
+        $"""
+         transformations:
+           - type: ApplyChanges@2
+             identity: ServiceAccount
+             entityUpdatesPath: $.updates
+             targetTenant:
+               relation: Child
+               tenantIdPath: "{tenantIdPath}"
+         """;
+
+    [Test]
+    [Arguments("$..t")]
+    [Arguments("$.*.t")]
+    [Arguments("$..body.t")]
+    [Arguments("$[?(@.t)].t")]
+    [Arguments("$['invoice','body'].t")]
+    [Arguments("$[0].t")]
+    [Arguments("$.full..t")]
+    public async Task MultiMatchTenantIdPath_IsCallerControlled(string path)
+    {
+        var (refused, _) = ClassifyCallerSteeredTargets(ServiceAccountTarget(VerifiedTrigger, path));
+
+        await Assert.That(refused.Count).IsEqualTo(1);
+    }
+
+    [Test]
+    [Arguments("triggers:\n  - type: FromTeamsBot@1\n    serverConfiguration: bot", "$.Emails[0].Subject")]
+    [Arguments("triggers:\n  - type: FromTeamsBot@1\n    serverConfiguration: bot", "$.conversation.tenant")]
+    [Arguments("triggers:\n  - type: FromTeamsBot@1\n    serverConfiguration: bot", "$.body.tenant")]
+    [Arguments("triggers:\n  - type: FromEmail@1\n    serverConfiguration: mail", "$.invoice.tenant")]
+    [Arguments("triggers:\n  - type: FromSomeOtherAdapter@3", "$.invoice.tenant")]
+    [Arguments("triggers: []", "$.invoice.tenant")]
+    public async Task TriggerOutputOtherThanVerifiedHttp_IsCallerControlled(string triggers, string path)
+    {
+        var (refused, _) = ClassifyCallerSteeredTargets(ServiceAccountTarget(triggers, path));
+
+        await Assert.That(refused.Count).IsEqualTo(1);
+    }
+
+    [Test]
+    [Arguments("triggers:\n  - type: FromTeamsBot@1\n    serverConfiguration: bot")]
+    [Arguments("triggers:\n  - type: FromPipelineTriggerEvent@1")]
+    [Arguments("triggers:\n  - type: FromWatchRtEntity@1\n    updateTypes: Update\n    ckTypeId: Basic/Contact")]
+    [Arguments("triggers:\n  - type: FromHttpRequest@2\n    method: Post\n    path: /x\n    allowAnonymous: true")]
+    public async Task PipelineControlledPath_OfATriggerWithKnownOutput_StaysAllowed(string triggers)
+    {
+        var (refused, warned) = ClassifyCallerSteeredTargets(ServiceAccountTarget(triggers, "$.invoice.tenant"));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(refused.Count).IsEqualTo(0);
+        await Assert.That(warned.Count).IsEqualTo(0);
+    }
 }

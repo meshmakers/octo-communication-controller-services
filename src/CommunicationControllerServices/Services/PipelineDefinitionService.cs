@@ -17,6 +17,8 @@ internal class PipelineDefinitionService : IPipelineDefinitionService
     private const string TypeKey = "type";
     private const string TransformationsKey = "transformations";
     private const string TriggersKey = "triggers";
+    private const string CasesKey = "cases";
+    private const string DefaultKey = "default";
 
     /// <summary>Throwaway mapping key for the plain-scalar round-trip probe.</summary>
     private const string RoundTripProbeKey = "v";
@@ -189,8 +191,7 @@ internal class PipelineDefinitionService : IPipelineDefinitionService
                 matchIndex++;
             }
 
-            // Recurse into nested transformations
-            if (node.TryGetValue(TransformationsKey, out var childObj) && childObj is List<object> children)
+            foreach (var children in ChildNodeLists(node))
             {
                 var result = FindNodeByType(children, nodeType, targetIndex, ref matchIndex);
                 if (result != null) return result;
@@ -198,6 +199,42 @@ internal class PipelineDefinitionService : IPipelineDefinitionService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The child node lists of a node, in document order: its <c>transformations</c> (ForEach, Group, …) and the
+    /// branches of <c>Switch@1</c> — <c>cases[].transformations</c> and <c>default</c>. The same shapes
+    /// <see cref="PipelineDefinitionLimits" /> measures; keys match case-insensitively, so a decoy that differs only
+    /// in case is walked as well (AB#9767: a node the walk misses escapes every deploy rule).
+    /// </summary>
+    private static IEnumerable<List<object>> ChildNodeLists(Dictionary<object, object> node)
+    {
+        foreach (var (key, value) in node)
+        {
+            var name = key.ToString();
+            if (string.Equals(name, TransformationsKey, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(name, DefaultKey, StringComparison.OrdinalIgnoreCase))
+            {
+                if (value is List<object> children)
+                {
+                    yield return children;
+                }
+            }
+            else if (string.Equals(name, CasesKey, StringComparison.OrdinalIgnoreCase) && value is List<object> cases)
+            {
+                foreach (var switchCase in cases.OfType<Dictionary<object, object>>())
+                {
+                    foreach (var (caseKey, caseValue) in switchCase)
+                    {
+                        if (string.Equals(caseKey.ToString(), TransformationsKey, StringComparison.OrdinalIgnoreCase) &&
+                            caseValue is List<object> caseChildren)
+                        {
+                            yield return caseChildren;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -222,8 +259,7 @@ internal class PipelineDefinitionService : IPipelineDefinitionService
                 typeCounters[type] = index + 1;
             }
 
-            // Recurse into nested transformations
-            if (node.TryGetValue(TransformationsKey, out var childObj) && childObj is List<object> children)
+            foreach (var children in ChildNodeLists(node))
             {
                 CollectAllNodes(children, result, typeCounters);
             }

@@ -265,6 +265,27 @@ internal class AdapterServiceException : Exception
             "proven by the identity service, or remove the target setting.");
 
     /// <summary>
+    /// AB#9767 (fail closed): the controller cannot read the definition, so none of the deploy rules can be applied
+    /// to it. The mesh adapter parses with the same YAML library and would refuse it as well.
+    /// </summary>
+    internal static AdapterServiceException PipelineDefinitionUnreadable(string tenantId,
+        RtEntityId pipelineRtEntityId) =>
+        new($"[{tenantId}] Cannot deploy pipeline '{pipelineRtEntityId}': its definition cannot be read as a YAML " +
+            "mapping, so the deploy rules for elevated and cross-tenant nodes cannot be applied to it (AB#9767). " +
+            "Fix the YAML syntax of the definition.");
+
+    /// <summary>
+    /// AB#9767 (fail closed): a node's <c>identity</c> is none of the accepted spellings. The mesh adapter's binder
+    /// also accepts spellings such as <c>'01'</c> or <c>Caller, ServiceAccount</c> and may run them elevated.
+    /// </summary>
+    internal static AdapterServiceException PipelineNodeIdentityUnrecognised(string tenantId,
+        RtEntityId pipelineRtEntityId, IReadOnlyList<string> nodes) =>
+        new($"[{tenantId}] Cannot deploy pipeline '{pipelineRtEntityId}': the node(s) " +
+            $"{string.Join(", ", nodes.Select(n => $"'{n}'"))} carry an Identity value that is none of Caller (0), " +
+            "ServiceAccount (1) or System (2) (AB#9767). Write the identity as one of these names or numbers, or " +
+            "leave it out (= Caller).");
+
+    /// <summary>
     /// AB#9767 (decision 2 of AB#8673): a node takes its target tenant from caller input and would act there with the
     /// pipeline's service account (Identity=ServiceAccount, or Caller in a pipeline that can run without a verified
     /// caller): the caller would choose the tenant a service account acts in.
@@ -273,9 +294,9 @@ internal class AdapterServiceException : Exception
         RtEntityId pipelineRtEntityId, IReadOnlyList<string> findings) =>
         new($"[{tenantId}] Cannot deploy pipeline '{pipelineRtEntityId}': {string.Join("; ", findings)}. The caller " +
             "of the pipeline would choose the tenant the pipeline's service account acts in (AB#9767). Take the " +
-            "target tenant from data the pipeline controls (not $.body, $.query, $.files or $.headers), or run the " +
-            "node as the verified caller: Identity=Caller with only FromHttpRequest@2 triggers that do not allow " +
-            "anonymous callers.");
+            "target tenant from data the pipeline controls (a single-match path outside $.body, $.query, $.files, " +
+            "$.headers and the output of triggers that carry outside input), or run the node as the verified caller: " +
+            "Identity=Caller with only FromHttpRequest@2 triggers that do not allow anonymous callers.");
 
     internal static AdapterServiceException PipelineServiceAccountClientMissing(string tenantId,
         RtEntityId pipelineRtEntityId, string wellKnownName, string? clientId, OctoObjectId adapterRtId,
@@ -291,3 +312,11 @@ internal class AdapterServiceException : Exception
             "(POST {tenantId}/v1/serviceAccount/reconcile?configurationRtId=...), or open the adapter in Studio; " +
             "the reconcile materialises the client from the declaration.");
 }
+
+/// <summary>
+/// AB#9767: the projection refused a stored pipeline (<see cref="AdapterServiceException" /> as inner exception) and
+/// put it into the Error deployment state. A push path that projects many pipelines leaves this one out and pushes the
+/// others; a path that projects only this pipeline fails with it.
+/// </summary>
+internal sealed class PipelinePushRefusedException(AdapterServiceException refusal)
+    : Exception(refusal.Message, refusal);

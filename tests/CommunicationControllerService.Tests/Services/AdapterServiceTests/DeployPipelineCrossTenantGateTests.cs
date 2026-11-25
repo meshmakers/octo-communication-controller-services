@@ -47,7 +47,8 @@ internal class DeployPipelineCrossTenantGateTests : AdapterServiceTestsBase
                tenantIdPath: {tenantIdPath}
          """;
 
-    private (RtAdapter Adapter, RtPipeline Pipeline) ArrangeDeployablePipeline(string pipelineDefinition)
+    private (RtAdapter Adapter, RtDataFlow DataFlow, RtPipeline Pipeline) ArrangeDeployablePipeline(
+        string pipelineDefinition)
     {
         var rtAdapter = RtEntityCreator.CreateAdapter();
         rtAdapter.Name = "mesh-adapter";
@@ -67,12 +68,12 @@ internal class DeployPipelineCrossTenantGateTests : AdapterServiceTestsBase
         CommunicationRepository.GetConfigurationsByPipelineAsync(TenantId, rtPipeline.RtId)
             .Returns(Task.FromResult<IEnumerable<RtConfiguration>>([]));
 
-        return (rtAdapter, rtPipeline);
+        return (rtAdapter, rtDataFlow, rtPipeline);
     }
 
     private async Task<Exception?> DeployAsync(string definition)
     {
-        var (adapter, pipeline) = ArrangeDeployablePipeline(definition);
+        var (adapter, _, pipeline) = ArrangeDeployablePipeline(definition);
         // An authorized deployer: the refusals are about the pipeline, not about who deploys it.
         SetCaller(withUserManagementRole: true);
         try
@@ -181,5 +182,174 @@ internal class DeployPipelineCrossTenantGateTests : AdapterServiceTestsBase
             .AdapterConfigurationUpdatedAsync(TenantId, Arg.Any<AdapterConfigurationDto>());
         await CommunicationEventService.DidNotReceive().StoreWarningEventAsync(TenantId,
             Arg.Is<string>(m => m.Contains("target tenant")), Arg.Any<RtEntityId>());
+    }
+
+    // Review finding 1: the adapter reads 'Caller, ServiceAccount' as ServiceAccount (YamlDotNet Enum.Parse); the
+    // controller must not read it as Caller and let the caller steer the service account's tenant.
+    [Test]
+    [Arguments("'Caller, ServiceAccount'")]
+    [Arguments("'01'")]
+    public async Task UnrecognisedIdentity_IsRefused(string identity)
+    {
+        var ex = await DeployAsync(Definition(VerifiedHttpTrigger, $"identity: {identity}", "$.body.t"));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(ex).IsTypeOf<AdapterServiceException>();
+        await Assert.That(ex!.Message).Contains("AB#9767");
+        await Assert.That(ex.Message).Contains("Identity");
+        await AssertNothingDeployed();
+    }
+
+    // Review finding 2: a node in a Switch@1 case is checked like every other node.
+    [Test]
+    public async Task ServiceAccountInASwitchCase_WithCallerControlledTenantIdPath_IsRefused()
+    {
+        var ex = await DeployAsync(VerifiedHttpTrigger + "\n" +
+                                   """
+                                   transformations:
+                                     - type: Switch@1
+                                       path: $.body.kind
+                                       cases:
+                                         - value: a
+                                           transformations:
+                                             - type: ApplyChanges@2
+                                               identity: ServiceAccount
+                                               entityUpdatesPath: $.updates
+                                               targetTenant:
+                                                 relation: Sibling
+                                                 tenantIdPath: $.body.t
+                                   """);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(ex).IsTypeOf<AdapterServiceException>();
+        await Assert.That(ex!.Message).Contains("$.body.t");
+        await AssertNothingDeployed();
+    }
+
+    // Review finding 4: the Teams sender writes $.Emails; a service account must not act in a tenant it names.
+    [Test]
+    public async Task ServiceAccountWithTeamsBotOutputAsTenantIdPath_IsRefused()
+    {
+        var ex = await DeployAsync(Definition(
+            "triggers:\n  - type: FromTeamsBot@1\n    serverConfiguration: bot",
+            "identity: ServiceAccount", "$.Emails[0].Subject"));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(ex).IsTypeOf<AdapterServiceException>();
+        await Assert.That(ex!.Message).Contains("$.Emails[0].Subject");
+        await AssertNothingDeployed();
+    }
+
+    [Test]
+    public async Task ServiceAccountWithMultiMatchTenantIdPath_IsRefused()
+    {
+        var ex = await DeployAsync(Definition(VerifiedHttpTrigger, "identity: ServiceAccount", "$..t"));
+
+        await Assert.That(ex).IsTypeOf<AdapterServiceException>();
+        await AssertNothingDeployed();
+    }
+
+    // Unconfirmed review point: a definition the controller cannot read was let through without any rule (fail open).
+    [Test]
+    public async Task UnreadableDefinition_IsRefused()
+    {
+        var ex = await DeployAsync("transformations: [ { type: ApplyChanges@2, identity: ServiceAccount");
+
+        using var _ = Assert.Multiple();
+        await Assert.That(ex).IsTypeOf<AdapterServiceException>();
+        await Assert.That(ex!.Message).Contains("cannot be read");
+        await AssertNothingDeployed();
+    }
+
+    // Review finding 5: the data-flow deploy applies the same rules.
+    [Test]
+    public async Task DeployDataFlow_ServiceAccountWithCallerControlledTenantIdPath_IsRefused()
+    {
+        var (_, dataFlow, _) =
+            ArrangeDeployablePipeline(Definition(VerifiedHttpTrigger, "identity: ServiceAccount", "$.body.t"));
+        SetCaller(withUserManagementRole: true);
+
+        var ex = await Assert.That(async () => await AdapterService.DeployDataFlowAsync(TenantId, dataFlow.RtId))
+            .Throws<AdapterServiceException>();
+
+        using var _ = Assert.Multiple();
+        await Assert.That(ex!.Message).Contains("$.body.t");
+        await AssertNothingDeployed();
+    }
+
+    // Review finding 3: every push path projects through CreatePipelineConfigurationAsync, which applies the rules to
+    // the stored definition. An offending pipeline (imported, seeded by a blueprint, edited in the asset repository)
+    // is left out of the push and put into the Error state; the other pipelines still go out.
+    private const string CleanDefinition =
+        """
+        triggers:
+          - type: FromPipelineTriggerEvent@1
+        transformations:
+          - type: ApplyChanges@2
+            entityUpdatesPath: $.updates
+        """;
+
+    private (RtAdapter Adapter, RtPipeline Offending, RtPipeline Clean) ArrangeStoredPipelines()
+    {
+        var (adapter, dataFlow, offending) =
+            ArrangeDeployablePipeline(Definition(VerifiedHttpTrigger, "identity: ServiceAccount", "$.body.t"));
+        var clean = RtEntityCreator.CreatePipeline(CleanDefinition);
+        CommunicationRepository.GetPipelinesAsync(TenantId, adapter.ToRtEntityId()).Returns([offending, clean]);
+        CommunicationRepository.GetPipelineAsync(TenantId, clean.ToRtEntityId()).Returns(clean);
+        CommunicationRepository.GetDataFlowByPipelineAsync(TenantId, clean.RtId).Returns(dataFlow);
+        CommunicationRepository.GetConfigurationsByPipelineAsync(TenantId, clean.RtId)
+            .Returns(Task.FromResult<IEnumerable<RtConfiguration>>([]));
+        return (adapter, offending, clean);
+    }
+
+    private async Task AssertSetToError(RtPipeline pipeline) =>
+        await CommunicationRepository.Received().SetPipelineDeploymentStateAsync(TenantId, pipeline.ToRtEntityId(),
+            RtDeploymentStateEnum.Error,
+            Arg.Is<string?>(m => m != null && m.Contains("AB#9767") && m.Contains("$.body.t")));
+
+    [Test]
+    public async Task UpdateConfiguration_LeavesTheOffendingPipelineOut_AndSetsItToError()
+    {
+        var (adapter, offending, clean) = ArrangeStoredPipelines();
+
+        await AdapterService.DeployAdapterConfigurationAsync(TenantId, adapter.ToRtEntityId());
+
+        using var _ = Assert.Multiple();
+        await AdapterHubCallbacks.Received(1).AdapterConfigurationUpdatedAsync(TenantId,
+            Arg.Is<AdapterConfigurationDto>(c =>
+                c.Pipelines.Count == 1 && c.Pipelines.First().PipelineRtEntityId == clean.ToRtEntityId()));
+        await AssertSetToError(offending);
+        await CommunicationRepository.DidNotReceive().SetPipelineDeploymentStateAsync(TenantId,
+            offending.ToRtEntityId(), RtDeploymentStateEnum.Pending, Arg.Any<string?>());
+    }
+
+    [Test]
+    public async Task Registration_LeavesTheOffendingPipelineOut_AndSetsItToError()
+    {
+        var (adapter, offending, clean) = ArrangeStoredPipelines();
+
+        var configuration = await AdapterService.GetAdapterConfigurationAsync(TenantId, adapter.ToRtEntityId(), true,
+            revealSecrets: true);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(configuration.Pipelines.Count).IsEqualTo(1);
+        await Assert.That(configuration.Pipelines.First().PipelineRtEntityId).IsEqualTo(clean.ToRtEntityId());
+        await AssertSetToError(offending);
+    }
+
+    [Test]
+    public async Task Lease_OfTheOffendingPipeline_IsRefused_AndSetsItToError()
+    {
+        var (adapter, offending, clean) = ArrangeStoredPipelines();
+
+        var refused = await AdapterService.GetLeasedPipelineConfigurationAsync(TenantId, adapter.ToRtEntityId(),
+            offending.RtId);
+        var leased = await AdapterService.GetLeasedPipelineConfigurationAsync(TenantId, adapter.ToRtEntityId(),
+            clean.RtId);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(refused).IsNull();
+        await Assert.That(leased).IsNotNull();
+        await AssertSetToError(offending);
     }
 }

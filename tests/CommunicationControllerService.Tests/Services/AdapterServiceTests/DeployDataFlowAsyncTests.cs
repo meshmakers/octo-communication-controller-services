@@ -112,8 +112,8 @@ internal class DeployDataFlowAsyncTests : AdapterServiceTestsBase
         // Arrange
         var rtAdapter = RtEntityCreator.CreateAdapter();
         var rtDataFlow = RtEntityCreator.CreateDataFlow();
-        var rtPipelineOld = RtEntityCreator.CreatePipeline("old definition");
-        var rtPipelineNew = RtEntityCreator.CreatePipeline("new definition");
+        var rtPipelineOld = RtEntityCreator.CreatePipeline("name: old definition");
+        var rtPipelineNew = RtEntityCreator.CreatePipeline("name: new definition");
 
         // Start with old pipeline version deployed
         AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
@@ -142,7 +142,7 @@ internal class DeployDataFlowAsyncTests : AdapterServiceTestsBase
             Arg.Is<AdapterConfigurationDto>(config =>
                 config.Pipelines.Count == 1 &&
                 config.Pipelines.First().PipelineRtEntityId == rtPipelineNew.ToRtEntityId() &&
-                config.Pipelines.First().NodeConfiguration == "new definition"));
+                config.Pipelines.First().NodeConfiguration == "name: new definition"));
     }
 
     [Test]

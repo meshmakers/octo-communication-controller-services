@@ -150,7 +150,7 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
             ]
         ));
         
-        rtPipeline.PipelineDefinition = "changedDefinition";
+        rtPipeline.PipelineDefinition = "name: changedDefinition";
         InitAdapterConfiguration(rtAdapter, rtDataFlow, [rtPipeline]);
 
         // Act
@@ -240,7 +240,7 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
             ]
         ));
         
-        rtPipeline.PipelineDefinition = "changedDefinition";
+        rtPipeline.PipelineDefinition = "name: changedDefinition";
         InitAdapterConfiguration(rtAdapter, rtDataFlow, []);
 
         // Act
@@ -278,7 +278,7 @@ internal class RegisterAdapterTests : AdapterServiceTestsBase
             ]
         ));
         
-        rtPipeline.PipelineDefinition = "changedDefinition";
+        rtPipeline.PipelineDefinition = "name: changedDefinition";
         InitAdapterConfiguration(rtAdapter, rtDataFlow, [rtPipeline, rtPipelineNew]);
 
         // Act

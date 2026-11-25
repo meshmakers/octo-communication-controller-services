@@ -107,8 +107,9 @@ internal static class PipelineElevationInspector
     };
 
     /// <summary>
-    /// Returns the elevated nodes (Identity=ServiceAccount|System) among the parsed nodes, in
-    /// document order. <c>Caller</c>, absent or unrecognised identities are not elevated.
+    /// Returns the elevated nodes among the parsed nodes, in document order: <c>ServiceAccount</c>, <c>System</c> and
+    /// every unrecognised identity value (fail closed, see <see cref="FindUnrecognisedIdentityNodes" />). Only an
+    /// absent identity, <c>Caller</c> or <c>0</c> is not elevated.
     /// </summary>
     public static IReadOnlyList<ElevatedNode> FindElevatedNodes(IReadOnlyList<PipelineNodeProperties> nodes)
     {
@@ -119,6 +120,28 @@ internal static class PipelineElevationInspector
             if (identity != null)
             {
                 result.Add(new ElevatedNode(node.NodeType, node.NodeIndex, identity));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Nodes whose <c>identity</c> is none of the accepted spellings: absent, <c>Caller</c>/<c>0</c>,
+    /// <c>ServiceAccount</c>/<c>1</c>, <c>System</c>/<c>2</c> (trimmed, any case). The mesh adapter binds the value
+    /// with YamlDotNet's <c>Enum.Parse(ignoreCase)</c>, which also accepts <c>'01'</c>, <c>'+2'</c> and comma-joined
+    /// names (<c>Caller, ServiceAccount</c> = ServiceAccount), so a spelling the controller does not know may run
+    /// elevated there. Such a pipeline is refused at deploy (AB#9767); the other rules treat the node as elevated.
+    /// </summary>
+    public static IReadOnlyList<ElevatedNode> FindUnrecognisedIdentityNodes(IReadOnlyList<PipelineNodeProperties> nodes)
+    {
+        var result = new List<ElevatedNode>();
+        foreach (var node in nodes)
+        {
+            var identity = ReadIdentity(node, out var label);
+            if (identity == NodeIdentity.Unrecognised)
+            {
+                result.Add(new ElevatedNode(node.NodeType, node.NodeIndex, label));
             }
         }
 
@@ -145,7 +168,7 @@ internal static class PipelineElevationInspector
             foreach (var kvp in node.Properties)
             {
                 if (TargetSelectingProperties.Contains(kvp.Key) &&
-                    TryGetCallerControlledPath(kvp.Value, out var path))
+                    TryGetCallerControlledPath(kvp.Value, CallerInputScope.RequestRootsOnly, out var path))
                 {
                     findings.Add(new ConfusedDeputyFinding(node.NodeType, node.NodeIndex, identity, kvp.Key, path!));
                 }
@@ -158,25 +181,27 @@ internal static class PipelineElevationInspector
             }
 
             // A data-driven target tenant is target-selecting too: it decides which tenant the node acts in.
-            CollectTargetTenantHazards(node, identity, findings);
+            CollectTargetTenantHazards(node, identity, CallerInputScope.RequestRootsOnly, findings);
         }
 
         return findings;
     }
 
     /// <summary>
-    /// Nodes that request the <c>System</c> identity <b>and</b> carry a target-tenant setting. The system context is
-    /// never accepted for another tenant (no exception), so such a pipeline is refused at deploy time. The mesh
-    /// adapter's cross-tenant guard refuses it again at run time; this rule only reports it early.
+    /// Nodes that request the <c>System</c> identity (or an unrecognised one, fail closed) <b>and</b> carry a
+    /// target-tenant setting. The system context is never accepted for another tenant (no exception), so such a
+    /// pipeline is refused at deploy time. The mesh adapter's cross-tenant guard refuses it again at run time; this
+    /// rule only reports it early.
     /// </summary>
     public static IReadOnlyList<ElevatedNode> FindSystemCrossTenantNodes(IReadOnlyList<PipelineNodeProperties> nodes)
     {
         var result = new List<ElevatedNode>();
         foreach (var node in nodes)
         {
-            if (ReadElevatedIdentity(node) == SystemIdentity && HasTargetTenantSetting(node))
+            var identity = ReadIdentity(node, out var label);
+            if ((identity is NodeIdentity.System or NodeIdentity.Unrecognised) && HasTargetTenantSetting(node))
             {
-                result.Add(new ElevatedNode(node.NodeType, node.NodeIndex, SystemIdentity));
+                result.Add(new ElevatedNode(node.NodeType, node.NodeIndex, label));
             }
         }
 
@@ -184,12 +209,14 @@ internal static class PipelineElevationInspector
     }
 
     /// <summary>
-    /// Nodes whose target tenant comes from a caller-controlled path (<c>targetTenant(s).tenantIdPath</c> into
-    /// <c>$.body</c>/<c>$.query</c>/<c>$.files</c>/<c>$.headers</c>) and that would act in that tenant with an identity
-    /// other than the caller's own: <c>identity: ServiceAccount</c>, or <c>Caller</c> (also absent) in a pipeline that can
-    /// run without a verified caller and therefore falls back to the pipeline's service account. Such a pipeline is
-    /// refused at deploy time (decision 2 of AB#8673): the caller would choose the tenant a service account acts in.
-    /// <c>System</c> nodes are left to <see cref="FindSystemCrossTenantNodes" />, which refuses every target setting.
+    /// Nodes whose target tenant comes from a caller-controlled path (<c>targetTenant(s).tenantIdPath</c>, see
+    /// <see cref="CallerInputScope" />: the request roots <c>$.body</c>/<c>$.query</c>/<c>$.files</c>/<c>$.headers</c>,
+    /// every multi-match path, and what a trigger other than <c>FromHttpRequest@2</c> writes) and that would act in that
+    /// tenant with an identity other than the caller's own: <c>identity: ServiceAccount</c> (or an unrecognised value),
+    /// or <c>Caller</c> (also absent) in a pipeline that can run without a verified caller and therefore falls back to
+    /// the pipeline's service account. Such a pipeline is refused at deploy time (decision 2 of AB#8673): the caller
+    /// would choose the tenant a service account acts in. <c>System</c> nodes are left to
+    /// <see cref="FindSystemCrossTenantNodes" />, which refuses every target setting.
     /// </summary>
     /// <param name="nodes">All nodes of the definition (triggers and transformations).</param>
     /// <param name="triggers">The nodes of the definition's <c>triggers:</c> section only.</param>
@@ -213,20 +240,22 @@ internal static class PipelineElevationInspector
         IReadOnlyList<PipelineNodeProperties> nodes, IReadOnlyList<PipelineNodeProperties> triggers, bool refused)
     {
         var callerAlwaysVerified = EveryTriggerRequiresVerifiedCaller(triggers);
+        var scope = CallerInputScope.ForTriggers(triggers);
         var findings = new List<ConfusedDeputyFinding>();
         foreach (var node in nodes)
         {
-            var elevated = ReadElevatedIdentity(node);
-            if (elevated == SystemIdentity)
+            var nodeIdentity = ReadIdentity(node, out var label);
+            if (nodeIdentity == NodeIdentity.System)
             {
                 continue;
             }
 
             string identity;
             bool isRefused;
-            if (elevated == ServiceAccountIdentity)
+            if (nodeIdentity is NodeIdentity.ServiceAccount or NodeIdentity.Unrecognised)
             {
-                identity = ServiceAccountIdentity;
+                // An unrecognised value may bind to ServiceAccount (or System, refused above it) in the adapter.
+                identity = label;
                 isRefused = true;
             }
             else if (callerAlwaysVerified)
@@ -242,7 +271,7 @@ internal static class PipelineElevationInspector
 
             if (isRefused == refused)
             {
-                CollectTargetTenantHazards(node, identity, findings);
+                CollectTargetTenantHazards(node, identity, scope, findings);
             }
         }
 
@@ -300,7 +329,7 @@ internal static class PipelineElevationInspector
         node.Properties.Keys.Any(key => TargetTenantKeys.Contains(key, StringComparer.OrdinalIgnoreCase));
 
     private static void CollectTargetTenantHazards(PipelineNodeProperties node, string identity,
-        List<ConfusedDeputyFinding> findings)
+        CallerInputScope scope, List<ConfusedDeputyFinding> findings)
     {
         foreach (var kvp in node.Properties)
         {
@@ -312,7 +341,7 @@ internal static class PipelineElevationInspector
             switch (kvp.Value)
             {
                 case Dictionary<object, object> setting:
-                    CollectTargetTenantPathHazards(node, identity, kvp.Key, setting, findings);
+                    CollectTargetTenantPathHazards(node, identity, kvp.Key, setting, scope, findings);
                     break;
                 // A set of targets written as a list of target settings: every entry is inspected.
                 case List<object> settings:
@@ -320,7 +349,8 @@ internal static class PipelineElevationInspector
                     {
                         if (settings[i] is Dictionary<object, object> entry)
                         {
-                            CollectTargetTenantPathHazards(node, identity, $"{kvp.Key}[{i}]", entry, findings);
+                            CollectTargetTenantPathHazards(node, identity, $"{kvp.Key}[{i}]", entry, scope,
+                                findings);
                         }
                     }
 
@@ -330,13 +360,13 @@ internal static class PipelineElevationInspector
     }
 
     private static void CollectTargetTenantPathHazards(PipelineNodeProperties node, string identity, string label,
-        Dictionary<object, object> setting, List<ConfusedDeputyFinding> findings)
+        Dictionary<object, object> setting, CallerInputScope scope, List<ConfusedDeputyFinding> findings)
     {
         foreach (var member in setting)
         {
             var key = member.Key.ToString();
             if (key != null && TargetTenantPathProperties.Contains(key) &&
-                TryGetCallerControlledPath(member.Value, out var path))
+                TryGetCallerControlledPath(member.Value, scope, out var path))
             {
                 findings.Add(new ConfusedDeputyFinding(node.NodeType, node.NodeIndex, identity, $"{label}.{key}",
                     path!));
@@ -363,7 +393,7 @@ internal static class PipelineElevationInspector
             {
                 var key = member.Key.ToString();
                 if (key != null && FieldFilterPathProperties.Contains(key) &&
-                    TryGetCallerControlledPath(member.Value, out var path))
+                    TryGetCallerControlledPath(member.Value, CallerInputScope.RequestRootsOnly, out var path))
                 {
                     findings.Add(new ConfusedDeputyFinding(node.NodeType, node.NodeIndex, identity,
                         $"{FieldFiltersKey}[{i}].{key}", path!));
@@ -373,36 +403,88 @@ internal static class PipelineElevationInspector
     }
 
     /// <summary>
-    /// The elevated identity string of a node, or <c>null</c> when it runs as <c>Caller</c> (the
-    /// default), has no identity property, or names an unrecognised value.
+    /// The elevated identity label of a node (<c>ServiceAccount</c>, <c>System</c> or the unrecognised value), or
+    /// <c>null</c> when it runs as the caller.
     /// </summary>
-    private static string? ReadElevatedIdentity(PipelineNodeProperties node)
+    private static string? ReadElevatedIdentity(PipelineNodeProperties node) =>
+        ReadIdentity(node, out var label) == NodeIdentity.Caller ? null : label;
+
+    /// <summary>
+    /// Reads a node's <c>identity</c>, fail closed (AB#9767). Absent, <c>null</c>, <c>Caller</c> and <c>0</c> are the
+    /// caller; <c>ServiceAccount</c>/<c>1</c> and <c>System</c>/<c>2</c> are elevated; names match trimmed and ignoring
+    /// case. Every other value is <see cref="NodeIdentity.Unrecognised" />: the adapter's binder accepts spellings
+    /// such as <c>'01'</c>, <c>'+2'</c> or <c>Caller, ServiceAccount</c> and may run them elevated.
+    /// </summary>
+    /// <param name="node">The node.</param>
+    /// <param name="label">The label used in findings: the identity name, or the unrecognised value.</param>
+    private static NodeIdentity ReadIdentity(PipelineNodeProperties node, out string label)
     {
-        if (!node.Properties.TryGetValue(IdentityKey, out var raw) || raw == null)
+        // Keys that differ only in case are all read and the most privileged wins: which one a binder takes is not
+        // the controller's to guess.
+        var identity = NodeIdentity.Caller;
+        label = CallerIdentity;
+        foreach (var property in node.Properties.Where(p =>
+                     string.Equals(p.Key, IdentityKey, StringComparison.OrdinalIgnoreCase)))
         {
-            return null;
+            var candidate = ReadIdentityValue(property.Value, out var candidateLabel);
+            if (candidate > identity)
+            {
+                identity = candidate;
+                label = candidateLabel;
+            }
         }
 
-        var value = raw.ToString()?.Trim();
+        return identity;
+    }
+
+    private static NodeIdentity ReadIdentityValue(object? raw, out string label)
+    {
+        if (raw == null)
+        {
+            label = CallerIdentity;
+            return NodeIdentity.Caller;
+        }
+
+        var value = raw is string s ? s.Trim() : null;
+        if (string.Equals(value, CallerIdentity, StringComparison.OrdinalIgnoreCase) || value == "0")
+        {
+            label = CallerIdentity;
+            return NodeIdentity.Caller;
+        }
+
         if (string.Equals(value, ServiceAccountIdentity, StringComparison.OrdinalIgnoreCase) || value == "1")
         {
-            return ServiceAccountIdentity;
+            label = ServiceAccountIdentity;
+            return NodeIdentity.ServiceAccount;
         }
 
         if (string.Equals(value, SystemIdentity, StringComparison.OrdinalIgnoreCase) || value == "2")
         {
-            return SystemIdentity;
+            label = SystemIdentity;
+            return NodeIdentity.System;
         }
 
-        return null;
+        // A list or mapping is no identity either; it never names a value, so the label says what it is.
+        label = $"unrecognised identity '{value ?? raw.GetType().Name}'";
+        return NodeIdentity.Unrecognised;
+    }
+
+    private enum NodeIdentity
+    {
+        Caller,
+        ServiceAccount,
+        System,
+        Unrecognised
     }
 
     /// <summary>
-    /// Whether <paramref name="value"/> is a JSONPath rooted in a caller-controlled root. Accepts
-    /// an optional leading <c>full.</c> segment (the ForEach-body view of the trigger data), and
-    /// both dotted (<c>$.body.x</c>) and bracketed (<c>$['body']</c>) first segments.
+    /// Whether <paramref name="value"/> is a JSONPath the caller controls within <paramref name="scope" />: a path
+    /// that can match more than one location (fail closed, it may reach a caller root), or one whose first property
+    /// segment is a caller-controlled root of the scope. Accepts an optional leading <c>full.</c> segment (the
+    /// ForEach-body view of the trigger data), and both dotted (<c>$.body.x</c>) and bracketed (<c>$['body']</c>)
+    /// first segments.
     /// </summary>
-    private static bool TryGetCallerControlledPath(object? value, out string? path)
+    private static bool TryGetCallerControlledPath(object? value, CallerInputScope scope, out string? path)
     {
         path = null;
         if (value is not string s)
@@ -416,20 +498,7 @@ internal static class PipelineElevationInspector
             return false;
         }
 
-        var root = FirstSegment(trimmed);
-        if (root == null)
-        {
-            return false;
-        }
-
-        // Tolerate the ForEach-body prefix: $.full.body -> body.
-        if (string.Equals(root, "full", StringComparison.OrdinalIgnoreCase))
-        {
-            var afterFull = trimmed[(trimmed.IndexOf("full", StringComparison.OrdinalIgnoreCase) + "full".Length)..];
-            root = FirstSegment("$" + afterFull);
-        }
-
-        if (root != null && CallerControlledRoots.Contains(root, StringComparer.OrdinalIgnoreCase))
+        if (IsCallerControlled(trimmed, scope))
         {
             path = trimmed;
             return true;
@@ -438,30 +507,144 @@ internal static class PipelineElevationInspector
         return false;
     }
 
-    /// <summary>
-    /// The first property segment of a JSONPath after the <c>$</c> root — <c>$.body.x</c> and
-    /// <c>$['body'].x</c> both yield <c>body</c>; returns <c>null</c> when there is none.
-    /// </summary>
-    private static string? FirstSegment(string jsonPath)
+    private static bool IsCallerControlled(string jsonPath, CallerInputScope scope)
     {
-        var i = 1; // skip '$'
-        while (i < jsonPath.Length && (jsonPath[i] == '.' || jsonPath[i] == '['))
+        if (scope.AllPaths || IsMultiMatch(jsonPath))
         {
-            i++;
+            return true;
         }
 
-        // Bracketed form: skip optional quote.
-        if (i < jsonPath.Length && (jsonPath[i] == '\'' || jsonPath[i] == '"'))
+        var root = RootSegment(jsonPath, out var rest);
+        // Tolerate the ForEach-body prefix: $.full.body -> body.
+        if (root != null && string.Equals(root, "full", StringComparison.OrdinalIgnoreCase))
         {
-            i++;
+            root = RootSegment("$" + rest, out _);
         }
 
-        var start = i;
-        while (i < jsonPath.Length && (char.IsLetterOrDigit(jsonPath[i]) || jsonPath[i] == '_'))
+        return root == null ? scope.UnreadableRootIsCallerControlled : scope.Roots.Contains(root);
+    }
+
+    /// <summary>
+    /// Whether a JSONPath can select more than one location: recursive descent (<c>..</c>), wildcards (<c>*</c>),
+    /// filters and script expressions (<c>?</c>, <c>@</c>, <c>(</c>), unions (<c>,</c>) and slices (<c>:</c>). Such a
+    /// path reaches every root, the caller's included; a quoted name that contains one of these characters is counted
+    /// too, fail closed.
+    /// </summary>
+    private static bool IsMultiMatch(string jsonPath) =>
+        jsonPath.Contains("..", StringComparison.Ordinal) || jsonPath.IndexOfAny(['*', '?', '@', '(', ',', ':']) >= 0;
+
+    /// <summary>
+    /// The first property name of a single-match JSONPath after the <c>$</c> root — <c>$.body.x</c> and
+    /// <c>$['body'].x</c> both yield <c>body</c> with <paramref name="rest" /> <c>.x</c>. Returns <c>null</c> when the
+    /// path does not start with a property name: <c>$</c> alone, an index (<c>$[0]</c>) or anything else.
+    /// </summary>
+    private static string? RootSegment(string jsonPath, out string rest)
+    {
+        rest = string.Empty;
+        if (jsonPath.Length < 2)
         {
-            i++;
+            return null;
         }
 
-        return i > start ? jsonPath[start..i] : null;
+        if (jsonPath[1] == '.')
+        {
+            var end = jsonPath.IndexOfAny(['.', '['], 2);
+            if (end < 0)
+            {
+                end = jsonPath.Length;
+            }
+
+            rest = jsonPath[end..];
+            return end > 2 ? jsonPath[2..end] : null;
+        }
+
+        if (jsonPath[1] == '[' && jsonPath.Length > 2 && jsonPath[2] is '\'' or '"')
+        {
+            var close = jsonPath.IndexOf(jsonPath[2], 3);
+            if (close < 0 || close + 1 >= jsonPath.Length || jsonPath[close + 1] != ']')
+            {
+                return null;
+            }
+
+            rest = jsonPath[(close + 2)..];
+            return close > 3 ? jsonPath[3..close] : null;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The data-context roots a caller writes through a pipeline's triggers (AB#9767, review finding 4). The request
+    /// roots <c>$.body</c>/<c>$.query</c>/<c>$.files</c>/<c>$.headers</c> are always in; the verified
+    /// <c>$.principal</c> of <c>FromHttpRequest@2</c> is not (it comes from the validated token).
+    /// </summary>
+    private sealed class CallerInputScope
+    {
+        private static readonly string[] TeamsBotRoots = ["Emails", "Conversation"];
+
+        /// <summary>
+        /// Triggers whose output carries no outside input: schedules, the tenant's own entity changes and notification
+        /// schedules. A path into what they write is data the pipeline controls.
+        /// </summary>
+        private static readonly HashSet<string> TriggersWithoutOutsideInput = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "FromPipelineTriggerEvent@1", "FromWatchRtEntity@1", "FromNotificationSchedule@1"
+        };
+
+        private static readonly HashSet<string> RequestTriggers = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "FromHttpRequest@1", VerifiedCallerHttpTrigger
+        };
+
+        private CallerInputScope(bool allPaths, IEnumerable<string> extraRoots, bool unreadableRootIsCallerControlled)
+        {
+            AllPaths = allPaths;
+            Roots = new HashSet<string>(CallerControlledRoots.Concat(extraRoots), StringComparer.OrdinalIgnoreCase);
+            UnreadableRootIsCallerControlled = unreadableRootIsCallerControlled;
+        }
+
+        /// <summary>Every path is caller-controlled: a trigger whose output is not known, or no trigger at all.</summary>
+        public bool AllPaths { get; }
+
+        /// <summary>The caller-controlled roots.</summary>
+        public IReadOnlySet<string> Roots { get; }
+
+        /// <summary>Whether a path whose first segment cannot be read (<c>$</c>, <c>$[0]</c>) counts as caller-controlled.</summary>
+        public bool UnreadableRootIsCallerControlled { get; }
+
+        /// <summary>
+        /// The AB#5128 confused-deputy lint (advisory, triggers not consulted): the request roots and multi-match
+        /// paths only, so whole-context paths such as <c>inputPath: $</c> stay silent.
+        /// </summary>
+        public static CallerInputScope RequestRootsOnly { get; } = new(false, [], false);
+
+        /// <summary>
+        /// The scope of the cross-tenant rules, fail closed: the request roots, the roots of the Teams bot trigger,
+        /// nothing more for triggers without outside input, and every path when any trigger's output is not known here
+        /// (other adapters' triggers, mail, Signal, Graph, pipeline events and commands) or the pipeline has no trigger.
+        /// </summary>
+        public static CallerInputScope ForTriggers(IReadOnlyList<PipelineNodeProperties> triggers)
+        {
+            if (triggers.Count == 0)
+            {
+                return new CallerInputScope(true, [], true);
+            }
+
+            var extraRoots = new List<string>();
+            foreach (var trigger in triggers)
+            {
+                var type = trigger.NodeType.Trim();
+                if (string.Equals(type, "FromTeamsBot@1", StringComparison.OrdinalIgnoreCase))
+                {
+                    extraRoots.AddRange(TeamsBotRoots);
+                }
+                else if (!RequestTriggers.Contains(type) && !TriggersWithoutOutsideInput.Contains(type))
+                {
+                    return new CallerInputScope(true, [], true);
+                }
+            }
+
+            return new CallerInputScope(false, extraRoots, true);
+        }
     }
 }

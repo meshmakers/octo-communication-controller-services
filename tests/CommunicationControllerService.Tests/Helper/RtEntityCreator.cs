@@ -63,7 +63,7 @@ internal static class RtEntityCreator
         {
             RtId = new OctoObjectId(id),
             CkTypeId = SystemCommunicationCkIds.RtCkPipelineTypeId,
-            PipelineDefinition = pipelineDefinition ?? "pipelineDefinition",
+            PipelineDefinition = pipelineDefinition ?? "name: pipelineDefinition",
             DeploymentState = RtDeploymentStateEnum.Deployed
         };
     }

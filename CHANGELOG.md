@@ -21,12 +21,29 @@
   `FindSystemCrossTenantNodes` names every node with `identity: System` and a `targetTenant`/`targetTenants` setting
   (the system identity never reaches another tenant), and the confused-deputy lint now treats
   `targetTenant(s).tenantIdPath` as target-selecting, so an elevated node whose target tenant comes from
-  `$.body`/`$.query`/`$.files`/`$.headers` is reported. The deploy refuses (on every path, whoever deploys,
-  also with `CheckElevation` off) a `System` node with a target tenant (`PipelineSystemCrossTenantAccess`) and a
+  `$.body`/`$.query`/`$.files`/`$.headers` is reported. The deploy refuses (whoever deploys, also with
+  `CheckElevation` off) a `System` node with a target tenant (`PipelineSystemCrossTenantAccess`) and a
   caller-controlled `tenantIdPath` on a `ServiceAccount` node or on a `Caller` node of a pipeline that can run without
   a verified caller, which falls back to the service account (`PipelineCallerSteeredTargetTenant`); for the pure
   verified caller (every trigger `FromHttpRequest@2` without `allowAnonymous`) it stays a deploy warning. The adapter's
   guard checks relation, identity proof and the system refusal again at run time.
+- AB#9767 Fix: the cross-tenant rules fail closed and hold on every push, not only on deploy.
+  - `identity` counts as the caller only when it is absent, `Caller` or `0` (trimmed, any case); `ServiceAccount`/`1`
+    and `System`/`2` are elevated, and every other value (`'01'`, `'+2'`, `Caller, ServiceAccount`, which the
+    adapter's YamlDotNet binder accepts) is refused (`PipelineNodeIdentityUnrecognised`) and counts as elevated in
+    every rule.
+  - The node walk (`PipelineDefinitionService`, every rule and the rights analysis) also visits the branches of
+    `Switch@1`: `cases[].transformations` and `default`.
+  - Caller-controlled is, besides the request roots, every multi-match path (`..`, `*`, filters, unions, slices,
+    indexes at the root) and the output of every trigger other than `FromHttpRequest@2`: `$.Emails`/`$.Conversation`
+    of `FromTeamsBot@1`; every path when a trigger's output is not known (mail, Signal, Graph, pipeline events and
+    commands, other adapters) or the pipeline has no trigger. `FromPipelineTriggerEvent@1`, `FromWatchRtEntity@1` and
+    `FromNotificationSchedule@1` carry no outside input.
+  - A definition the controller cannot read is refused (`PipelineDefinitionUnreadable`) instead of skipping the rules.
+  - `CreatePipelineConfigurationAsync`, the projection behind "Update Configuration", the refresh after a blueprint,
+    adapter registration, the lease and both deploys, applies the rules to the stored definition: an offending
+    pipeline is left out of the push, set to the `Error` deployment state with the refusal as message and reported as
+    an error event; the other pipelines still go out, and the refresh drops it from an adapter that still runs it.
 - AB#9325 Test: the System.Communication migration and dependents tests install their historic and published
   System models (System.Bot 3.4.0, System.Communication 3.x / 4.10.0, System.Ai 4.6.0) through the service path
   (`ImportCkModelAsync(CkModelId)` from the in-memory test catalog `TestCkModelCatalog`) instead of the caller

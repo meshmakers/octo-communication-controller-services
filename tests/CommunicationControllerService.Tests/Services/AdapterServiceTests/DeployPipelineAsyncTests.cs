@@ -187,10 +187,10 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
         var rtAdapter = RtEntityCreator.CreateAdapter();
         var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline = RtEntityCreator.CreatePipeline();
-        rtPipeline.PipelineDefinition = "original definition";
+        rtPipeline.PipelineDefinition = "name: original definition";
         rtPipeline.DeploymentState = RtDeploymentStateEnum.Deployed;
 
-        var customDefinition = "custom debug definition";
+        var customDefinition = "name: custom debug definition";
 
         AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, new AdapterConfigurationDto(
             rtAdapter.ToRtEntityId(),
@@ -234,7 +234,7 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
         var rtAdapter = RtEntityCreator.CreateAdapter();
         var rtDataFlow = RtEntityCreator.CreateDataFlow();
         var rtPipeline = RtEntityCreator.CreatePipeline();
-        rtPipeline.PipelineDefinition = "updated definition";
+        rtPipeline.PipelineDefinition = "name: updated definition";
         rtPipeline.DeploymentState = RtDeploymentStateEnum.Deployed;
         rtPipeline.IsDebuggingEnabled = true;
 
@@ -244,7 +244,7 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
             null,
             [
                 new PipelineConfigurationDto(rtDataFlow.RtId, rtPipeline.ToRtEntityId(), false,
-                    "old definition", [])
+                    "name: old definition", [])
             ]
         ));
 
@@ -270,7 +270,7 @@ internal class DeployPipelineAsyncTests : AdapterServiceTestsBase
             Arg.Is<AdapterConfigurationDto>(config =>
                 config.Pipelines.Count == 1 &&
                 config.Pipelines.First().IsDebuggingEnabled == true &&
-                config.Pipelines.First().NodeConfiguration == "updated definition"));
+                config.Pipelines.First().NodeConfiguration == "name: updated definition"));
 
         // The flag came from the entity — deploy itself must not write it
         await CommunicationRepository.DidNotReceiveWithAnyArgs()

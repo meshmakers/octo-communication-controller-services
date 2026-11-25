@@ -521,15 +521,24 @@ internal class AdapterService(
                     continue;
                 }
 
-                existingPipelineIds?.Add(rtPipeline.ToRtEntityId());
-
                 if (!onlyDeployedPipelines || rtPipeline.DeploymentState == RtDeploymentStateEnum.Pending ||
                     rtPipeline.DeploymentState == RtDeploymentStateEnum.Deployed)
                 {
-                    pipelineConfigurations.Add(
-                        await CreatePipelineConfigurationAsync(tenantId, dataFlow.RtId, adapterRtEntityId.RtId,
-                            rtPipeline, revealSecrets: revealSecrets));
+                    try
+                    {
+                        pipelineConfigurations.Add(
+                            await CreatePipelineConfigurationAsync(tenantId, dataFlow.RtId, adapterRtEntityId.RtId,
+                                rtPipeline, revealSecrets: revealSecrets));
+                    }
+                    catch (PipelinePushRefusedException)
+                    {
+                        // AB#9767: refused and set to Error by the projection; the other pipelines still go out. Not
+                        // reported as existing either, so the refresh drops it from an adapter that still runs it.
+                        continue;
+                    }
                 }
+
+                existingPipelineIds?.Add(rtPipeline.ToRtEntityId());
             }
 
             var adapterConfigurationDto = new AdapterConfigurationDto(
@@ -1677,14 +1686,15 @@ internal class AdapterService(
         // nodes included. Every deploy path refuses such a definition earlier; this keeps the guard safe on its own.
         EnsurePipelineDefinitionWithinLimits(tenantId, pipelineRtEntityId, pipelineDefinition);
 
-        // A definition that does not parse is not this guard's concern — schema validation and the
-        // AB#5113 rights analysis report it. Treat "unparsable" as "nothing to authorize".
-        if (!pipelineDefinitionService.TryGetAllNodes(pipelineDefinition, out var nodes))
+        // AB#9767: fail closed. A definition this guard cannot read is refused, not waved through: none of the rules
+        // below could be applied to it. The same rules run again on every push (CreatePipelineConfigurationAsync).
+        if (FindPipelineNodeRuleRefusal(tenantId, pipelineRtEntityId, pipelineDefinition, out var nodes,
+                out var triggers) is { } refusal)
         {
-            return;
+            throw refusal;
         }
 
-        await EnsureCrossTenantNodesAllowedAsync(tenantId, pipelineRtEntityId, pipelineDefinition, nodes);
+        await ReportCallerSteeredTargetTenantWarningsAsync(tenantId, pipelineRtEntityId, nodes, triggers);
 
         var elevatedNodes = PipelineElevationInspector.FindElevatedNodes(nodes);
         if (elevatedNodes.Count == 0)
@@ -1730,36 +1740,55 @@ internal class AdapterService(
     }
 
     /// <summary>
-    /// AB#9767 deploy-time rules for the mesh adapter's cross-tenant nodes (decisions 2 and 3 of AB#8673), independent
-    /// of <see cref="ServiceAccountGuardOptions.CheckElevation" /> and of the caller's roles: a refusal here is about the
-    /// pipeline, not about who deploys it.
+    /// AB#9767 rules for the nodes of a pipeline definition (decisions 2 and 3 of AB#8673), fail closed and independent
+    /// of <see cref="ServiceAccountGuardOptions.CheckElevation" /> and of the caller's roles: a refusal is about the
+    /// pipeline, not about who deploys it. Applied on deploy (<see cref="EnsurePipelineElevationAuthorizedAsync" />)
+    /// and on every push (<see cref="CreatePipelineConfigurationAsync" />). Returns the refusal, or <c>null</c>:
     /// <list type="bullet">
-    ///   <item>A node with <c>identity: System</c> and a target tenant is refused.</item>
+    ///   <item>a definition the controller cannot read is refused;</item>
+    ///   <item>a node whose <c>identity</c> is none of the accepted spellings is refused (the adapter's binder may run it elevated);</item>
+    ///   <item>a node with <c>identity: System</c> and a target tenant is refused;</item>
     ///   <item>
-    ///     A node whose target tenant comes from a caller-controlled path is refused when it would act there with the
+    ///     a node whose target tenant comes from a caller-controlled path is refused when it would act there with the
     ///     pipeline's service account (<c>ServiceAccount</c>, or <c>Caller</c> in a pipeline that can run without a
-    ///     verified caller); as the pure verified caller it is allowed and reported as a warning.
+    ///     verified caller); as the pure verified caller it is allowed (and reported as a warning on deploy).
     ///   </item>
     /// </list>
-    /// The adapter's cross-tenant guard enforces the same at run time; this reports it before anything is stored.
+    /// The adapter's cross-tenant guard enforces the relation, the identity proof and the system refusal again at run
+    /// time; the caller-steered service-account case is closed only here.
     /// </summary>
-    private async Task EnsureCrossTenantNodesAllowedAsync(string tenantId, RtEntityId pipelineRtEntityId,
-        string pipelineDefinition, IReadOnlyList<PipelineNodeProperties> nodes)
+    private AdapterServiceException? FindPipelineNodeRuleRefusal(string tenantId, RtEntityId pipelineRtEntityId,
+        string pipelineDefinition, out IReadOnlyList<PipelineNodeProperties> nodes,
+        out IReadOnlyList<PipelineNodeProperties> triggers)
     {
+        triggers = [];
+        if (!pipelineDefinitionService.TryGetAllNodes(pipelineDefinition, out nodes) ||
+            !pipelineDefinitionService.TryGetTriggerNodes(pipelineDefinition, out triggers))
+        {
+            Logger.Warn(
+                "[{TenantId}] Refusing pipeline '{PipelineRtEntityId}': its definition cannot be read (AB#9767)",
+                tenantId, pipelineRtEntityId);
+            return AdapterServiceException.PipelineDefinitionUnreadable(tenantId, pipelineRtEntityId);
+        }
+
+        var unrecognised = PipelineElevationInspector.FindUnrecognisedIdentityNodes(nodes);
+        if (unrecognised.Count > 0)
+        {
+            Logger.Warn(
+                "[{TenantId}] Refusing pipeline '{PipelineRtEntityId}': node(s) {Nodes} carry an unrecognised identity (AB#9767)",
+                tenantId, pipelineRtEntityId, string.Join(", ", unrecognised.Select(n => n.Label)));
+            return AdapterServiceException.PipelineNodeIdentityUnrecognised(tenantId, pipelineRtEntityId,
+                unrecognised.Select(n => n.Label).ToList());
+        }
+
         var systemNodes = PipelineElevationInspector.FindSystemCrossTenantNodes(nodes);
         if (systemNodes.Count > 0)
         {
             Logger.Warn(
-                "[{TenantId}] Refusing to deploy pipeline '{PipelineRtEntityId}': node(s) {Nodes} run as the system context with a target tenant (AB#9767)",
+                "[{TenantId}] Refusing pipeline '{PipelineRtEntityId}': node(s) {Nodes} run as the system context with a target tenant (AB#9767)",
                 tenantId, pipelineRtEntityId, string.Join(", ", systemNodes.Select(n => n.Label)));
-            throw AdapterServiceException.PipelineSystemCrossTenantAccess(tenantId, pipelineRtEntityId,
+            return AdapterServiceException.PipelineSystemCrossTenantAccess(tenantId, pipelineRtEntityId,
                 systemNodes.Select(n => n.Label).ToList());
-        }
-
-        // Fail closed: without a readable trigger section no trigger is known to require a verified caller.
-        if (!pipelineDefinitionService.TryGetTriggerNodes(pipelineDefinition, out var triggers))
-        {
-            triggers = [];
         }
 
         var refused = PipelineElevationInspector.FindRefusedCallerSteeredTargetTenants(nodes, triggers);
@@ -1769,12 +1798,22 @@ internal class AdapterService(
                 $"node '{f.NodeLabel}' takes its target tenant from the caller-controlled path " +
                 $"'{f.CallerControlledPath}' (property '{f.PropertyName}')").ToList();
             Logger.Warn(
-                "[{TenantId}] Refusing to deploy pipeline '{PipelineRtEntityId}': caller-steered target tenant in {Findings} (AB#9767)",
+                "[{TenantId}] Refusing pipeline '{PipelineRtEntityId}': caller-steered target tenant in {Findings} (AB#9767)",
                 tenantId, pipelineRtEntityId, string.Join("; ", descriptions));
-            throw AdapterServiceException.PipelineCallerSteeredTargetTenant(tenantId, pipelineRtEntityId,
+            return AdapterServiceException.PipelineCallerSteeredTargetTenant(tenantId, pipelineRtEntityId,
                 descriptions);
         }
 
+        return null;
+    }
+
+    /// <summary>
+    /// AB#9767: reports a target tenant the pure verified caller steers as a deploy warning (allowed: the mesh adapter
+    /// proves the caller's own right in the target before it reads or writes). Advisory, never fails the deploy.
+    /// </summary>
+    private async Task ReportCallerSteeredTargetTenantWarningsAsync(string tenantId, RtEntityId pipelineRtEntityId,
+        IReadOnlyList<PipelineNodeProperties> nodes, IReadOnlyList<PipelineNodeProperties> triggers)
+    {
         try
         {
             foreach (var finding in PipelineElevationInspector.FindCallerSteeredTargetTenantWarnings(nodes, triggers))
@@ -2239,6 +2278,8 @@ internal class AdapterService(
         OctoObjectId dataFlowRtId, OctoObjectId adapterRtId, RtPipeline rtPipeline,
         bool revealSecrets, string? pipelineDefinition = null)
     {
+        await EnsurePipelineIsPushableAsync(tenantId, rtPipeline, pipelineDefinition ?? rtPipeline.PipelineDefinition);
+
         var pipelineConfigurations = (await communicationRepository
             .GetConfigurationsByPipelineAsync(tenantId, rtPipeline.RtId)).ToList();
 
@@ -2302,6 +2343,36 @@ internal class AdapterService(
             rtPipeline.IsDebuggingEnabled ?? false,
             pipelineDefinition ?? rtPipeline.PipelineDefinition,
             configurationsDto);
+    }
+
+    /// <summary>
+    /// AB#9767 (review finding 3): the node rules of <see cref="FindPipelineNodeRuleRefusal" /> on every push, not
+    /// only on deploy. A definition can reach the repository without a deploy (import, blueprint seed, an edit through
+    /// the asset repository), and "Update Configuration", the refresh after a blueprint, adapter registration and the
+    /// lease all project the stored definition through this method. An offending pipeline is put into the Error
+    /// deployment state with the refusal as message and <see cref="PipelinePushRefusedException" /> is thrown; a path
+    /// that projects several pipelines leaves it out and pushes the others.
+    /// </summary>
+    private async Task EnsurePipelineIsPushableAsync(string tenantId, RtPipeline rtPipeline,
+        string? pipelineDefinition)
+    {
+        if (string.IsNullOrWhiteSpace(pipelineDefinition))
+        {
+            return;
+        }
+
+        var pipelineRtEntityId = rtPipeline.ToRtEntityId();
+        if (FindPipelineNodeRuleRefusal(tenantId, pipelineRtEntityId, pipelineDefinition, out _, out _) is not
+            { } refusal)
+        {
+            return;
+        }
+
+        await communicationRepository.SetPipelineDeploymentStateAsync(tenantId, pipelineRtEntityId,
+            RtDeploymentStateEnum.Error, refusal.Message);
+        await eventService.StoreErrorEventAsync(tenantId,
+            $"Pipeline '{pipelineRtEntityId}' is not pushed to its adapter: {refusal.Message}", pipelineRtEntityId);
+        throw new PipelinePushRefusedException(refusal);
     }
 
     /// <summary>
