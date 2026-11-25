@@ -1,6 +1,7 @@
 using Meshmakers.Octo.Backend.CommunicationControllerServices.Repository;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
+using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Runtime.Contracts;
 using NLog;
 
@@ -72,18 +73,30 @@ internal class PipelineServiceAccountResolver(ICommunicationRepository communica
     }
 
     /// <summary>
-    /// The per-pipeline override: a <see cref="RtServiceAccountConfiguration" /> among the
-    /// configurations the pipeline links through the generic <c>Uses</c> role. No model change
+    ///     A service-account configuration regardless of how it was materialised: the typed instance the
+    ///     resolver/provisioning builds, or the base-typed <see cref="RtConfiguration" /> the generic <c>Uses</c>
+    ///     load returns (the Mongo discriminator is the generic one, so a type test never matches a loaded
+    ///     override — found live on AB#5111, missed by the resolver until AB#9776). Detect by CkTypeId.
+    /// </summary>
+    internal static bool IsServiceAccountConfiguration(RtConfiguration configuration)
+    {
+        return configuration is RtServiceAccountConfiguration ||
+               SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId.Equals(configuration.CkTypeId);
+    }
+
+    /// <summary>
+    /// The per-pipeline override: a service-account configuration (<see cref="IsServiceAccountConfiguration" />)
+    /// among the configurations the pipeline links through the generic <c>Uses</c> role. No model change
     /// was needed for this — Pipeline→Configuration already exists, and the configuration list
     /// is exactly what the adapter receives.
     /// </summary>
-    private async Task<RtServiceAccountConfiguration?> GetPipelineOverrideAsync(string tenantId,
+    private async Task<RtConfiguration?> GetPipelineOverrideAsync(string tenantId,
         OctoObjectId pipelineRtId)
     {
         var configurations = await communicationRepository.GetConfigurationsByPipelineAsync(tenantId, pipelineRtId);
 
         var serviceAccounts = configurations
-            .OfType<RtServiceAccountConfiguration>()
+            .Where(IsServiceAccountConfiguration)
             // Deterministic pick. The model does not (and cannot) cap the generic Uses role at
             // one service account, so a hand-linked pipeline may carry several; picking by rtId
             // keeps every controller pod and every redeploy on the same answer.

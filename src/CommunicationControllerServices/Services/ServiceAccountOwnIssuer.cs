@@ -18,6 +18,23 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 internal static class ServiceAccountOwnIssuer
 {
     /// <summary>
+    ///     The concrete names of this installation's identity service: the controller's <c>AuthorityUrl</c> and
+    ///     what <c>{{service.authority}}</c> resolves to for the tenant (the value the projection hands the adapter).
+    ///     The one definition deploy guard, health and reconcile share, so they never disagree about a value.
+    /// </summary>
+    internal static IEnumerable<string?> OwnNames(string? authorityUrl, IWorkloadTemplateResolver? templateResolver,
+        string tenantId)
+    {
+        yield return authorityUrl;
+        if (templateResolver != null &&
+            templateResolver.TryResolve(PipelineServiceAccountProvisioningService.IssuerUriToken,
+                new WorkloadTemplateContext(tenantId), out var resolved, out _))
+        {
+            yield return resolved;
+        }
+    }
+
+    /// <summary>
     ///     Whether <paramref name="configuredIssuerUri" /> names this installation.
     /// </summary>
     internal static bool IsOwnIssuer(string? configuredIssuerUri, IEnumerable<string?> ownNames)

@@ -17,10 +17,10 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
 /// <c>AllowDelegation</c>, the <c>TenantId</c> and <c>IssuerUri</c> (AB#5115: empty is the
 /// installation default and healthy; the <c>{{service.authority}}</c> token and this
 /// installation's authority stay healthy as legacy spellings — the same rule the convergence
-/// sweep applies, shared via
-/// <see cref="PipelineServiceAccountProvisioningService.IsInstallationIssuer" /> — and any other
-/// concrete value is a deliberate foreign target), and the AB#5114 <c>impersonation</c> view of a
-/// secretless account.
+/// sweep and the deploy guard apply, shared via <see cref="ServiceAccountOwnIssuer" /> — and,
+/// AB#9776 (own issuer only), any other issuer or a tenant other than the pipeline's is a
+/// violation: the mesh adapter refuses it and the deploy guard does not deploy a pipeline with
+/// it), and the AB#5114 <c>impersonation</c> view of a secretless account.
 /// </para>
 ///
 /// <para>

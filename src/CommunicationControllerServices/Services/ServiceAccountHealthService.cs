@@ -500,13 +500,7 @@ internal class ServiceAccountHealthService(
     /// </summary>
     private IEnumerable<string?> OwnIssuerNames(string tenantId)
     {
-        yield return options.Value.AuthorityUrl;
-        if (templateResolver != null &&
-            templateResolver.TryResolve(PipelineServiceAccountProvisioningService.IssuerUriToken,
-                new WorkloadTemplateContext(tenantId), out var resolved, out _))
-        {
-            yield return resolved;
-        }
+        return ServiceAccountOwnIssuer.OwnNames(options.Value.AuthorityUrl, templateResolver, tenantId);
     }
 
     /// <summary>
