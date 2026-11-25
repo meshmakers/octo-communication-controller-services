@@ -30,6 +30,21 @@ public record ConfusedDeputyFinding(string NodeType, int NodeIndex, string Ident
 }
 
 /// <summary>
+/// One node that takes its target tenant from data instead of naming it statically (AB#9767): a member such as
+/// <c>targetTenant.tenantIdPath</c>, or a target setting the controller cannot read as static.
+/// </summary>
+/// <param name="NodeType">The node's qualified type.</param>
+/// <param name="NodeIndex">Zero-based occurrence index of that type.</param>
+/// <param name="Identity">The node's identity label (<c>Caller</c>, <c>ServiceAccount</c>, <c>System</c> or the unrecognised value).</param>
+/// <param name="PropertyName">The data-driven member, e.g. <c>targetTenant.tenantIdPath</c>.</param>
+/// <param name="Value">Its value (the path), or the type name of a value that is no text.</param>
+public record TargetTenantFinding(string NodeType, int NodeIndex, string Identity, string PropertyName, string Value)
+{
+    /// <summary>Human-readable label of the node the finding belongs to.</summary>
+    public string NodeLabel => $"{NodeType}[{NodeIndex}] ({Identity})";
+}
+
+/// <summary>
 /// Pure, dependency-free analysis of parsed pipeline nodes for the AB#5128 deploy-time elevation
 /// gate and the confused-deputy lint. Deliberately keeps the AB#5113 parser's philosophy of not
 /// depending on the Sdk.Common type system: it reads the node's <c>identity</c> property as a
@@ -46,13 +61,8 @@ internal static class PipelineElevationInspector
     private const string ServiceAccountIdentity = "ServiceAccount";
     private const string SystemIdentity = "System";
 
-    // Labels of the non-elevated identity in cross-tenant findings (decision 2 of AB#8673).
+    // Label of the non-elevated identity in findings.
     private const string CallerIdentity = "Caller";
-    private const string CallerWithServiceAccountFallback = "Caller, service-account fallback";
-
-    // The only trigger that admits a verified caller only (unless allowAnonymous is set).
-    private const string VerifiedCallerHttpTrigger = "FromHttpRequest@2";
-    private const string AllowAnonymousKey = "allowAnonymous";
 
     /// <summary>
     /// The caller-controlled DataContext roots the <c>FromHttpRequest@2</c> trigger writes
@@ -90,13 +100,10 @@ internal static class PipelineElevationInspector
     private static readonly string[] TargetTenantKeys = ["targetTenant", "targetTenants"];
 
     /// <summary>
-    /// Members of a target-tenant setting that select the target from the data context. A caller-controlled path
-    /// there lets the caller steer which tenant an elevated node acts in.
+    /// Suffix of the members of a target-tenant setting that read the target from the data context
+    /// (<c>tenantIdPath</c>, and any later path variant). Matched ignoring case, fail closed.
     /// </summary>
-    private static readonly HashSet<string> TargetTenantPathProperties = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "tenantIdPath", "tenantIdsPath"
-    };
+    private const string PathMemberSuffix = "Path";
 
     // Field-filter item properties whose value is a caller-supplied JSONPath steering which
     // entities match (and thus which the elevated op touches). "fieldFilters" is the array key.
@@ -168,7 +175,7 @@ internal static class PipelineElevationInspector
             foreach (var kvp in node.Properties)
             {
                 if (TargetSelectingProperties.Contains(kvp.Key) &&
-                    TryGetCallerControlledPath(kvp.Value, CallerInputScope.RequestRootsOnly, out var path))
+                    TryGetCallerControlledPath(kvp.Value, out var path))
                 {
                     findings.Add(new ConfusedDeputyFinding(node.NodeType, node.NodeIndex, identity, kvp.Key, path!));
                 }
@@ -179,9 +186,6 @@ internal static class PipelineElevationInspector
             {
                 CollectFieldFilterHazards(node, identity, filtersValue, findings);
             }
-
-            // A data-driven target tenant is target-selecting too: it decides which tenant the node acts in.
-            CollectTargetTenantHazards(node, identity, CallerInputScope.RequestRootsOnly, findings);
         }
 
         return findings;
@@ -209,116 +213,37 @@ internal static class PipelineElevationInspector
     }
 
     /// <summary>
-    /// Nodes whose target tenant comes from a caller-controlled path (<c>targetTenant(s).tenantIdPath</c>, see
-    /// <see cref="CallerInputScope" />: the request roots <c>$.body</c>/<c>$.query</c>/<c>$.files</c>/<c>$.headers</c>,
-    /// every multi-match path, and what a trigger other than <c>FromHttpRequest@2</c> writes) and that would act in that
-    /// tenant with an identity other than the caller's own: <c>identity: ServiceAccount</c> (or an unrecognised value),
-    /// or <c>Caller</c> (also absent) in a pipeline that can run without a verified caller and therefore falls back to
-    /// the pipeline's service account. Such a pipeline is refused at deploy time (decision 2 of AB#8673): the caller
-    /// would choose the tenant a service account acts in. <c>System</c> nodes are left to
-    /// <see cref="FindSystemCrossTenantNodes" />, which refuses every target setting.
+    /// Nodes that take their target tenant from data instead of naming it statically, split by identity (AB#9767):
+    /// with <paramref name="elevated" /> the nodes that run as <c>ServiceAccount</c>, <c>System</c> or an unrecognised
+    /// identity, which are refused at deploy and on every push (an elevated node may name its target tenant only
+    /// statically, <c>tenantId</c>/<c>tenantIds</c>); without it the <c>Caller</c> nodes (also absent identity), which
+    /// deploy with a warning — the mesh adapter refuses a data-driven target at run time unless the caller is verified.
+    /// No path is classified: every data-driven target counts, whatever it reads.
     /// </summary>
-    /// <param name="nodes">All nodes of the definition (triggers and transformations).</param>
-    /// <param name="triggers">The nodes of the definition's <c>triggers:</c> section only.</param>
-    public static IReadOnlyList<ConfusedDeputyFinding> FindRefusedCallerSteeredTargetTenants(
-        IReadOnlyList<PipelineNodeProperties> nodes, IReadOnlyList<PipelineNodeProperties> triggers) =>
-        FindCallerSteeredTargetTenants(nodes, triggers, refused: true);
-
-    /// <summary>
-    /// Nodes that run as the pure caller (<c>identity: Caller</c> or absent, in a pipeline whose every trigger requires
-    /// a verified caller) and take their target tenant from a caller-controlled path. Allowed, but reported as a
-    /// deploy warning: the caller steers the tenant, and the mesh adapter's guard proves the caller's own right there
-    /// (token exchange) before anything is read or written, so the caller gains no right it does not hold.
-    /// </summary>
-    /// <param name="nodes">All nodes of the definition (triggers and transformations).</param>
-    /// <param name="triggers">The nodes of the definition's <c>triggers:</c> section only.</param>
-    public static IReadOnlyList<ConfusedDeputyFinding> FindCallerSteeredTargetTenantWarnings(
-        IReadOnlyList<PipelineNodeProperties> nodes, IReadOnlyList<PipelineNodeProperties> triggers) =>
-        FindCallerSteeredTargetTenants(nodes, triggers, refused: false);
-
-    private static List<ConfusedDeputyFinding> FindCallerSteeredTargetTenants(
-        IReadOnlyList<PipelineNodeProperties> nodes, IReadOnlyList<PipelineNodeProperties> triggers, bool refused)
+    /// <param name="nodes">All nodes of the definition, nested ones included.</param>
+    /// <param name="elevated">Whether to return the elevated nodes (refused) or the caller nodes (warned).</param>
+    public static IReadOnlyList<TargetTenantFinding> FindDataDrivenTargetTenants(
+        IReadOnlyList<PipelineNodeProperties> nodes, bool elevated)
     {
-        var callerAlwaysVerified = EveryTriggerRequiresVerifiedCaller(triggers);
-        var scope = CallerInputScope.ForTriggers(triggers);
-        var findings = new List<ConfusedDeputyFinding>();
+        var findings = new List<TargetTenantFinding>();
         foreach (var node in nodes)
         {
-            var nodeIdentity = ReadIdentity(node, out var label);
-            if (nodeIdentity == NodeIdentity.System)
+            var isElevated = ReadIdentity(node, out var label) != NodeIdentity.Caller;
+            if (isElevated != elevated)
             {
                 continue;
             }
 
-            string identity;
-            bool isRefused;
-            if (nodeIdentity is NodeIdentity.ServiceAccount or NodeIdentity.Unrecognised)
+            foreach (var kvp in node.Properties)
             {
-                // An unrecognised value may bind to ServiceAccount (or System, refused above it) in the adapter.
-                identity = label;
-                isRefused = true;
-            }
-            else if (callerAlwaysVerified)
-            {
-                identity = CallerIdentity;
-                isRefused = false;
-            }
-            else
-            {
-                identity = CallerWithServiceAccountFallback;
-                isRefused = true;
-            }
-
-            if (isRefused == refused)
-            {
-                CollectTargetTenantHazards(node, identity, scope, findings);
+                if (TargetTenantKeys.Contains(kvp.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    CollectDataDrivenTargets(node, label, kvp.Key, kvp.Value, findings);
+                }
             }
         }
 
         return findings;
-    }
-
-    /// <summary>
-    /// Whether every trigger of the pipeline admits only a verified caller, so that a <c>Caller</c> node never falls
-    /// back to the pipeline's service account. True only when there is at least one trigger and every trigger is
-    /// <c>FromHttpRequest@2</c> without <c>allowAnonymous: true</c>. Every other trigger fails closed: schedules,
-    /// watches and events run without a caller, <c>FromHttpRequest@1</c> and <c>FromTeamsBot@1</c> publish anonymous
-    /// routes, and an unreadable <c>allowAnonymous</c> value counts as anonymous.
-    /// </summary>
-    private static bool EveryTriggerRequiresVerifiedCaller(IReadOnlyList<PipelineNodeProperties> triggers)
-    {
-        if (triggers.Count == 0)
-        {
-            return false;
-        }
-
-        foreach (var trigger in triggers)
-        {
-            if (!string.Equals(trigger.NodeType.Trim(), VerifiedCallerHttpTrigger, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            var anonymous = trigger.Properties
-                .FirstOrDefault(p => string.Equals(p.Key, AllowAnonymousKey, StringComparison.OrdinalIgnoreCase));
-            if (anonymous.Key == null || anonymous.Value == null)
-            {
-                continue;
-            }
-
-            var isFalse = anonymous.Value switch
-            {
-                bool b => !b,
-                string s => string.Equals(s.Trim(), "false", StringComparison.OrdinalIgnoreCase),
-                _ => false
-            };
-            if (!isFalse)
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     /// <summary>
@@ -328,51 +253,45 @@ internal static class PipelineElevationInspector
     private static bool HasTargetTenantSetting(PipelineNodeProperties node) =>
         node.Properties.Keys.Any(key => TargetTenantKeys.Contains(key, StringComparer.OrdinalIgnoreCase));
 
-    private static void CollectTargetTenantHazards(PipelineNodeProperties node, string identity,
-        CallerInputScope scope, List<ConfusedDeputyFinding> findings)
+    /// <summary>
+    /// Collects the data-driven parts of one target-tenant setting, fail closed: a mapping member whose name ends in
+    /// <c>Path</c>, and every value that is no mapping (a scalar, or a list entry that is no mapping), because the
+    /// controller cannot show that such a value names the tenant statically.
+    /// </summary>
+    private static void CollectDataDrivenTargets(PipelineNodeProperties node, string identity, string label,
+        object? value, List<TargetTenantFinding> findings)
     {
-        foreach (var kvp in node.Properties)
+        switch (value)
         {
-            if (!TargetTenantKeys.Contains(kvp.Key, StringComparer.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            switch (kvp.Value)
-            {
-                case Dictionary<object, object> setting:
-                    CollectTargetTenantPathHazards(node, identity, kvp.Key, setting, scope, findings);
-                    break;
-                // A set of targets written as a list of target settings: every entry is inspected.
-                case List<object> settings:
-                    for (var i = 0; i < settings.Count; i++)
+            case null:
+                return;
+            case Dictionary<object, object> setting:
+                foreach (var member in setting)
+                {
+                    var key = member.Key.ToString();
+                    if (key != null && member.Value != null &&
+                        key.Trim().EndsWith(PathMemberSuffix, StringComparison.OrdinalIgnoreCase))
                     {
-                        if (settings[i] is Dictionary<object, object> entry)
-                        {
-                            CollectTargetTenantPathHazards(node, identity, $"{kvp.Key}[{i}]", entry, scope,
-                                findings);
-                        }
+                        findings.Add(new TargetTenantFinding(node.NodeType, node.NodeIndex, identity, $"{label}.{key}",
+                            Describe(member.Value)));
                     }
+                }
 
-                    break;
-            }
+                return;
+            case List<object> entries:
+                for (var i = 0; i < entries.Count; i++)
+                {
+                    CollectDataDrivenTargets(node, identity, $"{label}[{i}]", entries[i], findings);
+                }
+
+                return;
+            default:
+                findings.Add(new TargetTenantFinding(node.NodeType, node.NodeIndex, identity, label, Describe(value)));
+                return;
         }
     }
 
-    private static void CollectTargetTenantPathHazards(PipelineNodeProperties node, string identity, string label,
-        Dictionary<object, object> setting, CallerInputScope scope, List<ConfusedDeputyFinding> findings)
-    {
-        foreach (var member in setting)
-        {
-            var key = member.Key.ToString();
-            if (key != null && TargetTenantPathProperties.Contains(key) &&
-                TryGetCallerControlledPath(member.Value, scope, out var path))
-            {
-                findings.Add(new ConfusedDeputyFinding(node.NodeType, node.NodeIndex, identity, $"{label}.{key}",
-                    path!));
-            }
-        }
-    }
+    private static string Describe(object value) => value as string ?? value.GetType().Name;
 
     private static void CollectFieldFilterHazards(PipelineNodeProperties node, string identity, object? filtersValue,
         List<ConfusedDeputyFinding> findings)
@@ -393,7 +312,7 @@ internal static class PipelineElevationInspector
             {
                 var key = member.Key.ToString();
                 if (key != null && FieldFilterPathProperties.Contains(key) &&
-                    TryGetCallerControlledPath(member.Value, CallerInputScope.RequestRootsOnly, out var path))
+                    TryGetCallerControlledPath(member.Value, out var path))
                 {
                     findings.Add(new ConfusedDeputyFinding(node.NodeType, node.NodeIndex, identity,
                         $"{FieldFiltersKey}[{i}].{key}", path!));
@@ -478,13 +397,11 @@ internal static class PipelineElevationInspector
     }
 
     /// <summary>
-    /// Whether <paramref name="value"/> is a JSONPath the caller controls within <paramref name="scope" />: a path
-    /// that can match more than one location (fail closed, it may reach a caller root), or one whose first property
-    /// segment is a caller-controlled root of the scope. Accepts an optional leading <c>full.</c> segment (the
-    /// ForEach-body view of the trigger data), and both dotted (<c>$.body.x</c>) and bracketed (<c>$['body']</c>)
-    /// first segments.
+    /// Whether <paramref name="value"/> is a JSONPath rooted in a caller-controlled root. Accepts
+    /// an optional leading <c>full.</c> segment (the ForEach-body view of the trigger data), and
+    /// both dotted (<c>$.body.x</c>) and bracketed (<c>$['body']</c>) first segments.
     /// </summary>
-    private static bool TryGetCallerControlledPath(object? value, CallerInputScope scope, out string? path)
+    private static bool TryGetCallerControlledPath(object? value, out string? path)
     {
         path = null;
         if (value is not string s)
@@ -498,7 +415,20 @@ internal static class PipelineElevationInspector
             return false;
         }
 
-        if (IsCallerControlled(trimmed, scope))
+        var root = FirstSegment(trimmed);
+        if (root == null)
+        {
+            return false;
+        }
+
+        // Tolerate the ForEach-body prefix: $.full.body -> body.
+        if (string.Equals(root, "full", StringComparison.OrdinalIgnoreCase))
+        {
+            var afterFull = trimmed[(trimmed.IndexOf("full", StringComparison.OrdinalIgnoreCase) + "full".Length)..];
+            root = FirstSegment("$" + afterFull);
+        }
+
+        if (root != null && CallerControlledRoots.Contains(root, StringComparer.OrdinalIgnoreCase))
         {
             path = trimmed;
             return true;
@@ -507,144 +437,30 @@ internal static class PipelineElevationInspector
         return false;
     }
 
-    private static bool IsCallerControlled(string jsonPath, CallerInputScope scope)
-    {
-        if (scope.AllPaths || IsMultiMatch(jsonPath))
-        {
-            return true;
-        }
-
-        var root = RootSegment(jsonPath, out var rest);
-        // Tolerate the ForEach-body prefix: $.full.body -> body.
-        if (root != null && string.Equals(root, "full", StringComparison.OrdinalIgnoreCase))
-        {
-            root = RootSegment("$" + rest, out _);
-        }
-
-        return root == null ? scope.UnreadableRootIsCallerControlled : scope.Roots.Contains(root);
-    }
-
     /// <summary>
-    /// Whether a JSONPath can select more than one location: recursive descent (<c>..</c>), wildcards (<c>*</c>),
-    /// filters and script expressions (<c>?</c>, <c>@</c>, <c>(</c>), unions (<c>,</c>) and slices (<c>:</c>). Such a
-    /// path reaches every root, the caller's included; a quoted name that contains one of these characters is counted
-    /// too, fail closed.
+    /// The first property segment of a JSONPath after the <c>$</c> root — <c>$.body.x</c> and
+    /// <c>$['body'].x</c> both yield <c>body</c>; returns <c>null</c> when there is none.
     /// </summary>
-    private static bool IsMultiMatch(string jsonPath) =>
-        jsonPath.Contains("..", StringComparison.Ordinal) || jsonPath.IndexOfAny(['*', '?', '@', '(', ',', ':']) >= 0;
-
-    /// <summary>
-    /// The first property name of a single-match JSONPath after the <c>$</c> root — <c>$.body.x</c> and
-    /// <c>$['body'].x</c> both yield <c>body</c> with <paramref name="rest" /> <c>.x</c>. Returns <c>null</c> when the
-    /// path does not start with a property name: <c>$</c> alone, an index (<c>$[0]</c>) or anything else.
-    /// </summary>
-    private static string? RootSegment(string jsonPath, out string rest)
+    private static string? FirstSegment(string jsonPath)
     {
-        rest = string.Empty;
-        if (jsonPath.Length < 2)
+        var i = 1; // skip '$'
+        while (i < jsonPath.Length && (jsonPath[i] == '.' || jsonPath[i] == '['))
         {
-            return null;
+            i++;
         }
 
-        if (jsonPath[1] == '.')
+        // Bracketed form: skip optional quote.
+        if (i < jsonPath.Length && (jsonPath[i] == '\'' || jsonPath[i] == '"'))
         {
-            var end = jsonPath.IndexOfAny(['.', '['], 2);
-            if (end < 0)
-            {
-                end = jsonPath.Length;
-            }
-
-            rest = jsonPath[end..];
-            return end > 2 ? jsonPath[2..end] : null;
+            i++;
         }
 
-        if (jsonPath[1] == '[' && jsonPath.Length > 2 && jsonPath[2] is '\'' or '"')
+        var start = i;
+        while (i < jsonPath.Length && (char.IsLetterOrDigit(jsonPath[i]) || jsonPath[i] == '_'))
         {
-            var close = jsonPath.IndexOf(jsonPath[2], 3);
-            if (close < 0 || close + 1 >= jsonPath.Length || jsonPath[close + 1] != ']')
-            {
-                return null;
-            }
-
-            rest = jsonPath[(close + 2)..];
-            return close > 3 ? jsonPath[3..close] : null;
+            i++;
         }
 
-        return null;
-    }
-
-    /// <summary>
-    /// The data-context roots a caller writes through a pipeline's triggers (AB#9767, review finding 4). The request
-    /// roots <c>$.body</c>/<c>$.query</c>/<c>$.files</c>/<c>$.headers</c> are always in; the verified
-    /// <c>$.principal</c> of <c>FromHttpRequest@2</c> is not (it comes from the validated token).
-    /// </summary>
-    private sealed class CallerInputScope
-    {
-        private static readonly string[] TeamsBotRoots = ["Emails", "Conversation"];
-
-        /// <summary>
-        /// Triggers whose output carries no outside input: schedules, the tenant's own entity changes and notification
-        /// schedules. A path into what they write is data the pipeline controls.
-        /// </summary>
-        private static readonly HashSet<string> TriggersWithoutOutsideInput = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "FromPipelineTriggerEvent@1", "FromWatchRtEntity@1", "FromNotificationSchedule@1"
-        };
-
-        private static readonly HashSet<string> RequestTriggers = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "FromHttpRequest@1", VerifiedCallerHttpTrigger
-        };
-
-        private CallerInputScope(bool allPaths, IEnumerable<string> extraRoots, bool unreadableRootIsCallerControlled)
-        {
-            AllPaths = allPaths;
-            Roots = new HashSet<string>(CallerControlledRoots.Concat(extraRoots), StringComparer.OrdinalIgnoreCase);
-            UnreadableRootIsCallerControlled = unreadableRootIsCallerControlled;
-        }
-
-        /// <summary>Every path is caller-controlled: a trigger whose output is not known, or no trigger at all.</summary>
-        public bool AllPaths { get; }
-
-        /// <summary>The caller-controlled roots.</summary>
-        public IReadOnlySet<string> Roots { get; }
-
-        /// <summary>Whether a path whose first segment cannot be read (<c>$</c>, <c>$[0]</c>) counts as caller-controlled.</summary>
-        public bool UnreadableRootIsCallerControlled { get; }
-
-        /// <summary>
-        /// The AB#5128 confused-deputy lint (advisory, triggers not consulted): the request roots and multi-match
-        /// paths only, so whole-context paths such as <c>inputPath: $</c> stay silent.
-        /// </summary>
-        public static CallerInputScope RequestRootsOnly { get; } = new(false, [], false);
-
-        /// <summary>
-        /// The scope of the cross-tenant rules, fail closed: the request roots, the roots of the Teams bot trigger,
-        /// nothing more for triggers without outside input, and every path when any trigger's output is not known here
-        /// (other adapters' triggers, mail, Signal, Graph, pipeline events and commands) or the pipeline has no trigger.
-        /// </summary>
-        public static CallerInputScope ForTriggers(IReadOnlyList<PipelineNodeProperties> triggers)
-        {
-            if (triggers.Count == 0)
-            {
-                return new CallerInputScope(true, [], true);
-            }
-
-            var extraRoots = new List<string>();
-            foreach (var trigger in triggers)
-            {
-                var type = trigger.NodeType.Trim();
-                if (string.Equals(type, "FromTeamsBot@1", StringComparison.OrdinalIgnoreCase))
-                {
-                    extraRoots.AddRange(TeamsBotRoots);
-                }
-                else if (!RequestTriggers.Contains(type) && !TriggersWithoutOutsideInput.Contains(type))
-                {
-                    return new CallerInputScope(true, [], true);
-                }
-            }
-
-            return new CallerInputScope(false, extraRoots, true);
-        }
+        return i > start ? jsonPath[start..i] : null;
     }
 }

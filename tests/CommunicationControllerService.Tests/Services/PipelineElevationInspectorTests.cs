@@ -183,66 +183,17 @@ internal class PipelineElevationInspectorTests
         await Assert.That(found.Count).IsEqualTo(0);
     }
 
-    // Abuse case 3 (deploy-time half): an elevated node whose target tenant comes from caller input.
-    [Test]
-    public async Task FindConfusedDeputyHazards_FlagsCallerControlledTargetTenantIdPath()
-    {
-        var nodes = Parse(
-            """
-            transformations:
-              - type: ApplyChanges@2
-                identity: ServiceAccount
-                entityUpdatesPath: $.updates
-                targetTenant:
-                  relation: Sibling
-                  tenantIdPath: $.body.recipientTenantId
-            """);
-
-        var findings = PipelineElevationInspector.FindConfusedDeputyHazards(nodes);
-
-        using var _ = Assert.Multiple();
-        await Assert.That(findings.Count).IsEqualTo(1);
-        await Assert.That(findings[0].PropertyName).IsEqualTo("targetTenant.tenantIdPath");
-        await Assert.That(findings[0].CallerControlledPath).IsEqualTo("$.body.recipientTenantId");
-    }
-
-    [Test]
-    public async Task FindConfusedDeputyHazards_PipelineControlledTargetTenantIdPath_IsNotFlagged()
-    {
-        var nodes = Parse(
-            """
-            transformations:
-              - type: ApplyChanges@2
-                identity: ServiceAccount
-                entityUpdatesPath: $.updates
-                targetTenant:
-                  relation: Sibling
-                  tenantIdPath: $.invoice.recipientTenantId
-              - type: ApplyChanges@2
-                entityUpdatesPath: $.updates
-                targetTenant:
-                  relation: Sibling
-                  tenantIdPath: $.body.recipientTenantId
-            """);
-
-        var findings = PipelineElevationInspector.FindConfusedDeputyHazards(nodes);
-
-        // A path the pipeline computed is not caller-steered; a Caller node is not elevated, so this lint skips it (the
-        // cross-tenant rules below judge a caller-steered target tenant of a Caller node).
-        await Assert.That(findings.Count).IsEqualTo(0);
-    }
-
-    // AB#9767 decision 2: which identity acts in a caller-steered target tenant decides between refusal and warning.
-    private static (IReadOnlyList<ConfusedDeputyFinding> Refused, IReadOnlyList<ConfusedDeputyFinding> Warned)
-        ClassifyCallerSteeredTargets(string yaml)
+    // AB#9767 decision 2 (Odin, 2026-11-25): a service-account or system node may name its target tenant only
+    // statically (tenantId/tenantIds), never from data; no path is classified as caller- or pipeline-controlled.
+    private static (IReadOnlyList<TargetTenantFinding> Refused, IReadOnlyList<TargetTenantFinding> Warned)
+        FindDataDrivenTargets(string yaml)
     {
         Parser.TryGetAllNodes(yaml, out var nodes);
-        Parser.TryGetTriggerNodes(yaml, out var triggers);
-        return (PipelineElevationInspector.FindRefusedCallerSteeredTargetTenants(nodes, triggers),
-            PipelineElevationInspector.FindCallerSteeredTargetTenantWarnings(nodes, triggers));
+        return (PipelineElevationInspector.FindDataDrivenTargetTenants(nodes, elevated: true),
+            PipelineElevationInspector.FindDataDrivenTargetTenants(nodes, elevated: false));
     }
 
-    private static string CallerSteered(string triggers, string identityLine) =>
+    private static string DataDrivenTarget(string identityLine, string tenantIdPath, string triggers = VerifiedTrigger) =>
         triggers + "\n" +
         $"""
          transformations:
@@ -251,7 +202,7 @@ internal class PipelineElevationInspectorTests
              entityUpdatesPath: $.updates
              targetTenant:
                relation: Child
-               tenantIdPath: $.body.tenant
+               tenantIdPath: "{tenantIdPath}"
          """;
 
     private const string VerifiedTrigger =
@@ -263,95 +214,169 @@ internal class PipelineElevationInspectorTests
             allowAnonymous: false
         """;
 
+    private const string CronTrigger =
+        """
+        triggers:
+          - type: FromPipelineTriggerEvent@1
+        """;
+
     [Test]
-    public async Task CallerSteeredTargetTenant_ServiceAccount_IsRefused()
+    [Arguments("$.body.t")]
+    [Arguments("$.formData.t")]
+    [Arguments("body.t")]
+    [Arguments("$.invoice.tenant")]
+    [Arguments("$..t")]
+    public async Task ServiceAccountNode_WithTenantIdPath_IsRefused_WhateverThePathReads(string path)
     {
-        var (refused, warned) = ClassifyCallerSteeredTargets(CallerSteered(VerifiedTrigger, "identity: ServiceAccount"));
+        var (refused, warned) = FindDataDrivenTargets(DataDrivenTarget("identity: ServiceAccount", path));
 
         using var _ = Assert.Multiple();
         await Assert.That(refused.Count).IsEqualTo(1);
         await Assert.That(refused[0].Identity).IsEqualTo("ServiceAccount");
         await Assert.That(refused[0].PropertyName).IsEqualTo("targetTenant.tenantIdPath");
+        await Assert.That(refused[0].Value).IsEqualTo(path);
         await Assert.That(warned.Count).IsEqualTo(0);
     }
 
     [Test]
-    public async Task CallerSteeredTargetTenant_PureCaller_IsOnlyWarned_AlsoWithoutIdentityProperty()
+    public async Task ServiceAccountNode_WithTenantIdPath_OnACronPipeline_IsRefused()
     {
-        var (refused, warned) = ClassifyCallerSteeredTargets(CallerSteered(VerifiedTrigger, "identity: Caller") + "\n" +
-            """
-              - type: ApplyChanges@2
-                entityUpdatesPath: $.updates
-                targetTenant:
-                  relation: Sibling
-                  tenantIdPath: $.headers.x-tenant
-            """);
+        var (refused, _) = FindDataDrivenTargets(DataDrivenTarget("identity: ServiceAccount", "$.t", CronTrigger));
 
-        using var _ = Assert.Multiple();
-        await Assert.That(refused.Count).IsEqualTo(0);
-        await Assert.That(warned.Count).IsEqualTo(2);
-        await Assert.That(warned[0].Identity).IsEqualTo("Caller");
+        await Assert.That(refused.Count).IsEqualTo(1);
     }
 
-    // Every trigger that can run without a verified caller makes a Caller node fall back to the service account.
     [Test]
-    [Arguments("triggers:\n  - type: FromHttpRequest@2\n    method: Post\n    path: /x\n    allowAnonymous: true")]
-    [Arguments("triggers:\n  - type: FromHttpRequest@2\n    method: Post\n    path: /x\n    allowAnonymous: yes-please")]
-    [Arguments("triggers:\n  - type: FromHttpRequest@1\n    method: Post\n    path: /x")]
-    [Arguments("triggers:\n  - type: FromHttpRequest@2\n    method: Post\n    path: /x\n  - type: FromPipelineTriggerEvent@1")]
-    [Arguments("triggers: []")]
-    public async Task CallerSteeredTargetTenant_CallerWithServiceAccountFallback_IsRefused(string triggers)
+    public async Task ServiceAccountNode_WithTenantIdPath_InsideForEach_IsRefused()
     {
-        var (refused, warned) = ClassifyCallerSteeredTargets(CallerSteered(triggers, "identity: Caller"));
+        var (refused, _) = FindDataDrivenTargets(CronTrigger + "\n" +
+            """
+            transformations:
+              - type: ForEach@1
+                iterationPath: $.items
+                transformations:
+                  - type: ApplyChanges@2
+                    identity: ServiceAccount
+                    entityUpdatesPath: $.updates
+                    targetTenant:
+                      relation: Child
+                      tenantIdPath: $.item.tenant
+            """);
 
         using var _ = Assert.Multiple();
         await Assert.That(refused.Count).IsEqualTo(1);
-        await Assert.That(refused[0].Identity).IsEqualTo("Caller, service-account fallback");
-        await Assert.That(warned.Count).IsEqualTo(0);
+        await Assert.That(refused[0].Value).IsEqualTo("$.item.tenant");
     }
 
     [Test]
-    public async Task CallerSteeredTargetTenant_SystemAndPipelineControlledPaths_AreNeitherRefusedNorWarnedHere()
+    public async Task ServiceAccountNode_WithStaticTarget_IsNotRefused()
     {
-        var (refused, warned) = ClassifyCallerSteeredTargets(VerifiedTrigger + "\n" +
+        var (refused, warned) = FindDataDrivenTargets(CronTrigger + "\n" +
             """
             transformations:
               - type: GetRtEntitiesByType@1
-                identity: System
+                identity: ServiceAccount
+                ckTypeId: Basic/Contact
                 targetTenant:
-                  relation: Child
-                  tenantIdPath: $.body.tenant
+                  relation: Sibling
+                  tenantId: companyb
+              - type: GetRtEntitiesByType@1
+                identity: ServiceAccount
+                ckTypeId: Basic/Contact
+                targetTenant:
+                  relation: Parent
               - type: ApplyChanges@2
                 identity: ServiceAccount
-                targetTenant:
+                entityUpdatesPath: $.updates
+                targetTenants:
                   relation: Child
-                  tenantIdPath: $.invoice.tenant
+                  tenantIds:
+                    - child-a
+                    - child-b
             """);
 
-        // System is refused by FindSystemCrossTenantNodes; a pipeline-controlled path is checked by the guard at run time.
         using var _ = Assert.Multiple();
         await Assert.That(refused.Count).IsEqualTo(0);
         await Assert.That(warned.Count).IsEqualTo(0);
     }
 
+    // Fail closed: a target setting the controller cannot read as static counts as data-driven, and any member named
+    // like a path does, also a later variant such as tenantIdsPath and a key that differs only in case.
     [Test]
-    public async Task CallerSteeredTargetTenant_ListOfTargets_EveryEntryIsInspected()
+    public async Task ServiceAccountNode_WithAnyNonStaticTargetSetting_IsRefused()
     {
-        var (refused, _) = ClassifyCallerSteeredTargets(VerifiedTrigger + "\n" +
+        var (refused, _) = FindDataDrivenTargets(CronTrigger + "\n" +
             """
             transformations:
+              - type: ApplyChanges@2
+                identity: ServiceAccount
+                targetTenants:
+                  relation: Child
+                  tenantIdsPath: $.tenants
+              - type: ApplyChanges@2
+                identity: ServiceAccount
+                TargetTenant:
+                  relation: Child
+                  TenantIdPATH: $.t
+              - type: ApplyChanges@2
+                identity: ServiceAccount
+                targetTenant: $.t
               - type: ApplyChanges@2
                 identity: ServiceAccount
                 targetTenants:
                   - relation: Child
                     tenantId: child-a
                   - relation: Child
-                    tenantIdPath: $.full.query.tenant
+                    tenantIdPath: $.full.t
             """);
 
         using var _ = Assert.Multiple();
+        await Assert.That(refused.Count).IsEqualTo(4);
+        await Assert.That(refused[0].PropertyName).IsEqualTo("targetTenants.tenantIdsPath");
+        await Assert.That(refused[1].PropertyName).IsEqualTo("TargetTenant.TenantIdPATH");
+        await Assert.That(refused[2].PropertyName).IsEqualTo("targetTenant");
+        await Assert.That(refused[3].PropertyName).IsEqualTo("targetTenants[1].tenantIdPath");
+    }
+
+    [Test]
+    public async Task CallerNode_WithTenantIdPath_IsOnlyWarned_AlsoWithoutIdentityProperty_AndOnACronPipeline()
+    {
+        var (refused, warned) = FindDataDrivenTargets(DataDrivenTarget("identity: Caller", "$.body.t", CronTrigger) +
+            "\n" +
+            """
+              - type: ApplyChanges@2
+                entityUpdatesPath: $.updates
+                targetTenant:
+                  relation: Sibling
+                  tenantIdPath: $.formData.t
+            """);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(refused.Count).IsEqualTo(0);
+        await Assert.That(warned.Count).IsEqualTo(2);
+        await Assert.That(warned[0].Identity).IsEqualTo("Caller");
+        await Assert.That(warned[1].Value).IsEqualTo("$.formData.t");
+    }
+
+    [Test]
+    public async Task SystemNode_WithAnyTarget_IsElevatedForBothRules()
+    {
+        var nodes = Parse(DataDrivenTarget("identity: System", "$.invoice.tenant"));
+        var (refused, warned) = FindDataDrivenTargets(DataDrivenTarget("identity: System", "$.invoice.tenant"));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(PipelineElevationInspector.FindSystemCrossTenantNodes(nodes).Count).IsEqualTo(1);
         await Assert.That(refused.Count).IsEqualTo(1);
-        await Assert.That(refused[0].PropertyName).IsEqualTo("targetTenants[1].tenantIdPath");
+        await Assert.That(warned.Count).IsEqualTo(0);
+    }
+
+    // The AB#5128 confused-deputy lint stays about entity selectors; a target tenant is judged by the rule above.
+    [Test]
+    public async Task FindConfusedDeputyHazards_DoesNotReportTargetTenantPaths()
+    {
+        var nodes = Parse(DataDrivenTarget("identity: ServiceAccount", "$.body.t"));
+
+        await Assert.That(PipelineElevationInspector.FindConfusedDeputyHazards(nodes).Count).IsEqualTo(0);
     }
 
     // AB#9767 (review finding 1): the adapter binds `identity` with YamlDotNet's Enum.Parse(ignoreCase), which also
@@ -365,9 +390,9 @@ internal class PipelineElevationInspectorTests
     [Arguments("Admin")]
     public async Task UnrecognisedIdentity_CountsAsElevated_FailClosed(string identity)
     {
-        var yaml = CallerSteered(VerifiedTrigger, $"identity: {identity}");
+        var yaml = DataDrivenTarget($"identity: {identity}", "$.body.tenant");
         var nodes = Parse(yaml);
-        var (refused, warned) = ClassifyCallerSteeredTargets(yaml);
+        var (refused, warned) = FindDataDrivenTargets(yaml);
 
         using var _ = Assert.Multiple();
         await Assert.That(PipelineElevationInspector.FindElevatedNodes(nodes).Count).IsEqualTo(1);
@@ -385,9 +410,9 @@ internal class PipelineElevationInspectorTests
     [Arguments("' 0 '")]
     public async Task CallerSpellings_AreTheCaller(string identity)
     {
-        var yaml = CallerSteered(VerifiedTrigger, $"identity: {identity}");
+        var yaml = DataDrivenTarget($"identity: {identity}", "$.body.tenant");
         var nodes = Parse(yaml);
-        var (refused, warned) = ClassifyCallerSteeredTargets(yaml);
+        var (refused, warned) = FindDataDrivenTargets(yaml);
 
         using var _ = Assert.Multiple();
         await Assert.That(PipelineElevationInspector.FindElevatedNodes(nodes).Count).IsEqualTo(0);
@@ -439,7 +464,7 @@ internal class PipelineElevationInspectorTests
     public async Task SwitchCasesAndDefault_AreWalked_ByEveryRule()
     {
         var nodes = Parse(SwitchWithNestedNodes);
-        var (refused, warned) = ClassifyCallerSteeredTargets(SwitchWithNestedNodes);
+        var (refused, warned) = FindDataDrivenTargets(SwitchWithNestedNodes);
 
         using var _ = Assert.Multiple();
         await Assert.That(nodes.Count(n => n.NodeType == "ApplyChanges@2")).IsEqualTo(2);
@@ -449,9 +474,9 @@ internal class PipelineElevationInspectorTests
         await Assert.That(PipelineElevationInspector.FindConfusedDeputyHazards(nodes)
             .Any(f => f.PropertyName == "rtIdsPath")).IsTrue();
         await Assert.That(refused.Count).IsEqualTo(1);
-        await Assert.That(refused[0].CallerControlledPath).IsEqualTo("$.body.t");
+        await Assert.That(refused[0].Value).IsEqualTo("$.body.t");
         await Assert.That(warned.Count).IsEqualTo(1);
-        await Assert.That(warned[0].CallerControlledPath).IsEqualTo("$.query.t");
+        await Assert.That(warned[0].Value).IsEqualTo("$.query.t");
     }
 
     [Test]
@@ -461,62 +486,5 @@ internal class PipelineElevationInspectorTests
 
         await Assert.That(nested?.Properties["targetTenant"]).IsNotNull();
         await Assert.That(nested!.Properties.ContainsKey("identity")).IsFalse();
-    }
-
-    // AB#9767 (review finding 4): caller-controlled = the request roots, every multi-match path, and what a trigger
-    // other than FromHttpRequest@2 writes (a trigger whose output is not known: every path).
-    private static string ServiceAccountTarget(string triggers, string tenantIdPath) =>
-        triggers + "\n" +
-        $"""
-         transformations:
-           - type: ApplyChanges@2
-             identity: ServiceAccount
-             entityUpdatesPath: $.updates
-             targetTenant:
-               relation: Child
-               tenantIdPath: "{tenantIdPath}"
-         """;
-
-    [Test]
-    [Arguments("$..t")]
-    [Arguments("$.*.t")]
-    [Arguments("$..body.t")]
-    [Arguments("$[?(@.t)].t")]
-    [Arguments("$['invoice','body'].t")]
-    [Arguments("$[0].t")]
-    [Arguments("$.full..t")]
-    public async Task MultiMatchTenantIdPath_IsCallerControlled(string path)
-    {
-        var (refused, _) = ClassifyCallerSteeredTargets(ServiceAccountTarget(VerifiedTrigger, path));
-
-        await Assert.That(refused.Count).IsEqualTo(1);
-    }
-
-    [Test]
-    [Arguments("triggers:\n  - type: FromTeamsBot@1\n    serverConfiguration: bot", "$.Emails[0].Subject")]
-    [Arguments("triggers:\n  - type: FromTeamsBot@1\n    serverConfiguration: bot", "$.conversation.tenant")]
-    [Arguments("triggers:\n  - type: FromTeamsBot@1\n    serverConfiguration: bot", "$.body.tenant")]
-    [Arguments("triggers:\n  - type: FromEmail@1\n    serverConfiguration: mail", "$.invoice.tenant")]
-    [Arguments("triggers:\n  - type: FromSomeOtherAdapter@3", "$.invoice.tenant")]
-    [Arguments("triggers: []", "$.invoice.tenant")]
-    public async Task TriggerOutputOtherThanVerifiedHttp_IsCallerControlled(string triggers, string path)
-    {
-        var (refused, _) = ClassifyCallerSteeredTargets(ServiceAccountTarget(triggers, path));
-
-        await Assert.That(refused.Count).IsEqualTo(1);
-    }
-
-    [Test]
-    [Arguments("triggers:\n  - type: FromTeamsBot@1\n    serverConfiguration: bot")]
-    [Arguments("triggers:\n  - type: FromPipelineTriggerEvent@1")]
-    [Arguments("triggers:\n  - type: FromWatchRtEntity@1\n    updateTypes: Update\n    ckTypeId: Basic/Contact")]
-    [Arguments("triggers:\n  - type: FromHttpRequest@2\n    method: Post\n    path: /x\n    allowAnonymous: true")]
-    public async Task PipelineControlledPath_OfATriggerWithKnownOutput_StaysAllowed(string triggers)
-    {
-        var (refused, warned) = ClassifyCallerSteeredTargets(ServiceAccountTarget(triggers, "$.invoice.tenant"));
-
-        using var _ = Assert.Multiple();
-        await Assert.That(refused.Count).IsEqualTo(0);
-        await Assert.That(warned.Count).IsEqualTo(0);
     }
 }

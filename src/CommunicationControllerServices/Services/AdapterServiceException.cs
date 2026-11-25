@@ -286,17 +286,14 @@ internal class AdapterServiceException : Exception
             "leave it out (= Caller).");
 
     /// <summary>
-    /// AB#9767 (decision 2 of AB#8673): a node takes its target tenant from caller input and would act there with the
-    /// pipeline's service account (Identity=ServiceAccount, or Caller in a pipeline that can run without a verified
-    /// caller): the caller would choose the tenant a service account acts in.
+    /// AB#9767 (decision 2 of AB#8673): a node runs as the pipeline's service account (or the system context) and takes
+    /// its target tenant from data. Data never chooses the tenant an elevated node acts in, whatever the path reads.
     /// </summary>
-    internal static AdapterServiceException PipelineCallerSteeredTargetTenant(string tenantId,
+    internal static AdapterServiceException PipelineElevatedDataDrivenTargetTenant(string tenantId,
         RtEntityId pipelineRtEntityId, IReadOnlyList<string> findings) =>
-        new($"[{tenantId}] Cannot deploy pipeline '{pipelineRtEntityId}': {string.Join("; ", findings)}. The caller " +
-            "of the pipeline would choose the tenant the pipeline's service account acts in (AB#9767). Take the " +
-            "target tenant from data the pipeline controls (a single-match path outside $.body, $.query, $.files, " +
-            "$.headers and the output of triggers that carry outside input), or run the node as the verified caller: " +
-            "Identity=Caller with only FromHttpRequest@2 triggers that do not allow anonymous callers.");
+        new($"[{tenantId}] Cannot deploy pipeline '{pipelineRtEntityId}': {string.Join("; ", findings)}. A " +
+            "service-account or system node may name its target tenant only statically (tenantId/tenantIds), not " +
+            "from data (AB#9767). Name the target tenant with tenantId, or run the node as Identity=Caller.");
 
     internal static AdapterServiceException PipelineServiceAccountClientMissing(string tenantId,
         RtEntityId pipelineRtEntityId, string wellKnownName, string? clientId, OctoObjectId adapterRtId,

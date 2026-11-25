@@ -17,16 +17,16 @@
   connected adapter through the adapter configuration read without a new deploy check; the adapter refuses it at run
   time and health reports it.
 
-- AB#9767 New: deploy-time rules for the mesh adapter's cross-tenant nodes in `PipelineElevationInspector`:
-  `FindSystemCrossTenantNodes` names every node with `identity: System` and a `targetTenant`/`targetTenants` setting
-  (the system identity never reaches another tenant), and the confused-deputy lint now treats
-  `targetTenant(s).tenantIdPath` as target-selecting, so an elevated node whose target tenant comes from
-  `$.body`/`$.query`/`$.files`/`$.headers` is reported. The deploy refuses (whoever deploys, also with
-  `CheckElevation` off) a `System` node with a target tenant (`PipelineSystemCrossTenantAccess`) and a
-  caller-controlled `tenantIdPath` on a `ServiceAccount` node or on a `Caller` node of a pipeline that can run without
-  a verified caller, which falls back to the service account (`PipelineCallerSteeredTargetTenant`); for the pure
-  verified caller (every trigger `FromHttpRequest@2` without `allowAnonymous`) it stays a deploy warning. The adapter's
-  guard checks relation, identity proof and the system refusal again at run time.
+- AB#9767 New: deploy-time rules for the mesh adapter's cross-tenant nodes in `PipelineElevationInspector`. The deploy
+  refuses (whoever deploys, also with `CheckElevation` off) a node with `identity: System` and any
+  `targetTenant`/`targetTenants` setting (`PipelineSystemCrossTenantAccess`: the system identity never reaches another
+  tenant), and a node with `identity: ServiceAccount` that takes its target tenant from data
+  (`PipelineElevatedDataDrivenTargetTenant`): a service-account or system node may name its target tenant only
+  statically (`tenantId`/`tenantIds`), not from data. Every `targetTenant.tenantIdPath` counts, whatever the path
+  reads and whichever trigger starts the pipeline, and so does any other member named `...Path` or a target setting
+  that is no mapping (fail closed); no path is classified as caller- or pipeline-controlled. A `Caller` node (also
+  without `identity`) with a `tenantIdPath` deploys with a warning; the mesh adapter refuses a data-driven target at
+  run time unless the caller is verified, and its guard checks relation, identity proof and the system refusal again.
 - AB#9767 Fix: the cross-tenant rules fail closed and hold on every push, not only on deploy.
   - `identity` counts as the caller only when it is absent, `Caller` or `0` (trimmed, any case); `ServiceAccount`/`1`
     and `System`/`2` are elevated, and every other value (`'01'`, `'+2'`, `Caller, ServiceAccount`, which the
@@ -34,11 +34,6 @@
     every rule.
   - The node walk (`PipelineDefinitionService`, every rule and the rights analysis) also visits the branches of
     `Switch@1`: `cases[].transformations` and `default`.
-  - Caller-controlled is, besides the request roots, every multi-match path (`..`, `*`, filters, unions, slices,
-    indexes at the root) and the output of every trigger other than `FromHttpRequest@2`: `$.Emails`/`$.Conversation`
-    of `FromTeamsBot@1`; every path when a trigger's output is not known (mail, Signal, Graph, pipeline events and
-    commands, other adapters) or the pipeline has no trigger. `FromPipelineTriggerEvent@1`, `FromWatchRtEntity@1` and
-    `FromNotificationSchedule@1` carry no outside input.
   - A definition the controller cannot read is refused (`PipelineDefinitionUnreadable`) instead of skipping the rules.
   - `CreatePipelineConfigurationAsync`, the projection behind "Update Configuration", the refresh after a blueprint,
     adapter registration, the lease and both deploys, applies the rules to the stored definition: an offending

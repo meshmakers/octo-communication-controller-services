@@ -1688,13 +1688,13 @@ internal class AdapterService(
 
         // AB#9767: fail closed. A definition this guard cannot read is refused, not waved through: none of the rules
         // below could be applied to it. The same rules run again on every push (CreatePipelineConfigurationAsync).
-        if (FindPipelineNodeRuleRefusal(tenantId, pipelineRtEntityId, pipelineDefinition, out var nodes,
-                out var triggers) is { } refusal)
+        if (FindPipelineNodeRuleRefusal(tenantId, pipelineRtEntityId, pipelineDefinition, out var nodes) is
+            { } refusal)
         {
             throw refusal;
         }
 
-        await ReportCallerSteeredTargetTenantWarningsAsync(tenantId, pipelineRtEntityId, nodes, triggers);
+        await ReportCallerDataDrivenTargetTenantWarningsAsync(tenantId, pipelineRtEntityId, nodes);
 
         var elevatedNodes = PipelineElevationInspector.FindElevatedNodes(nodes);
         if (elevatedNodes.Count == 0)
@@ -1749,21 +1749,23 @@ internal class AdapterService(
     ///   <item>a node whose <c>identity</c> is none of the accepted spellings is refused (the adapter's binder may run it elevated);</item>
     ///   <item>a node with <c>identity: System</c> and a target tenant is refused;</item>
     ///   <item>
-    ///     a node whose target tenant comes from a caller-controlled path is refused when it would act there with the
-    ///     pipeline's service account (<c>ServiceAccount</c>, or <c>Caller</c> in a pipeline that can run without a
-    ///     verified caller); as the pure verified caller it is allowed (and reported as a warning on deploy).
+    ///     a node with <c>identity: ServiceAccount</c> (or <c>System</c>) that takes its target tenant from data
+    ///     (<c>targetTenant.tenantIdPath</c>, or any target setting that is not static) is refused, whatever the path
+    ///     reads: such a node may name its target tenant only statically (<c>tenantId</c>/<c>tenantIds</c>). A
+    ///     <c>Caller</c> node with a data-driven target deploys with a warning; the mesh adapter refuses that target at
+    ///     run time unless the caller is verified.
     ///   </item>
     /// </list>
     /// The adapter's cross-tenant guard enforces the relation, the identity proof and the system refusal again at run
-    /// time; the caller-steered service-account case is closed only here.
+    /// time.
     /// </summary>
     private AdapterServiceException? FindPipelineNodeRuleRefusal(string tenantId, RtEntityId pipelineRtEntityId,
-        string pipelineDefinition, out IReadOnlyList<PipelineNodeProperties> nodes,
-        out IReadOnlyList<PipelineNodeProperties> triggers)
+        string pipelineDefinition, out IReadOnlyList<PipelineNodeProperties> nodes)
     {
-        triggers = [];
+        // The trigger read is kept as a readability check only: a definition whose triggers cannot be read is
+        // refused like any other unreadable definition.
         if (!pipelineDefinitionService.TryGetAllNodes(pipelineDefinition, out nodes) ||
-            !pipelineDefinitionService.TryGetTriggerNodes(pipelineDefinition, out triggers))
+            !pipelineDefinitionService.TryGetTriggerNodes(pipelineDefinition, out _))
         {
             Logger.Warn(
                 "[{TenantId}] Refusing pipeline '{PipelineRtEntityId}': its definition cannot be read (AB#9767)",
@@ -1791,16 +1793,15 @@ internal class AdapterService(
                 systemNodes.Select(n => n.Label).ToList());
         }
 
-        var refused = PipelineElevationInspector.FindRefusedCallerSteeredTargetTenants(nodes, triggers);
-        if (refused.Count > 0)
+        var dataDriven = PipelineElevationInspector.FindDataDrivenTargetTenants(nodes, elevated: true);
+        if (dataDriven.Count > 0)
         {
-            var descriptions = refused.Select(f =>
-                $"node '{f.NodeLabel}' takes its target tenant from the caller-controlled path " +
-                $"'{f.CallerControlledPath}' (property '{f.PropertyName}')").ToList();
+            var descriptions = dataDriven.Select(f =>
+                $"node '{f.NodeLabel}' takes its target tenant from data ('{f.PropertyName}': '{f.Value}')").ToList();
             Logger.Warn(
-                "[{TenantId}] Refusing pipeline '{PipelineRtEntityId}': caller-steered target tenant in {Findings} (AB#9767)",
+                "[{TenantId}] Refusing pipeline '{PipelineRtEntityId}': data-driven target tenant of a service-account or system node in {Findings} (AB#9767)",
                 tenantId, pipelineRtEntityId, string.Join("; ", descriptions));
-            return AdapterServiceException.PipelineCallerSteeredTargetTenant(tenantId, pipelineRtEntityId,
+            return AdapterServiceException.PipelineElevatedDataDrivenTargetTenant(tenantId, pipelineRtEntityId,
                 descriptions);
         }
 
@@ -1808,24 +1809,25 @@ internal class AdapterService(
     }
 
     /// <summary>
-    /// AB#9767: reports a target tenant the pure verified caller steers as a deploy warning (allowed: the mesh adapter
-    /// proves the caller's own right in the target before it reads or writes). Advisory, never fails the deploy.
+    /// AB#9767: reports a <c>Caller</c> node that takes its target tenant from data as a deploy warning. Allowed: the
+    /// mesh adapter refuses a data-driven target at run time unless the caller is verified, and proves the caller's own
+    /// right in the target before it reads or writes. Advisory, never fails the deploy.
     /// </summary>
-    private async Task ReportCallerSteeredTargetTenantWarningsAsync(string tenantId, RtEntityId pipelineRtEntityId,
-        IReadOnlyList<PipelineNodeProperties> nodes, IReadOnlyList<PipelineNodeProperties> triggers)
+    private async Task ReportCallerDataDrivenTargetTenantWarningsAsync(string tenantId, RtEntityId pipelineRtEntityId,
+        IReadOnlyList<PipelineNodeProperties> nodes)
     {
         try
         {
-            foreach (var finding in PipelineElevationInspector.FindCallerSteeredTargetTenantWarnings(nodes, triggers))
+            foreach (var finding in PipelineElevationInspector.FindDataDrivenTargetTenants(nodes, elevated: false))
             {
                 var message =
-                    $"Node '{finding.NodeLabel}' takes its target tenant from the caller-controlled path " +
-                    $"'{finding.CallerControlledPath}' (property '{finding.PropertyName}'). The caller chooses the " +
-                    "tenant; the mesh adapter proves the caller's own right there before it reads or writes. If this " +
-                    "is intentional, ignore this warning; otherwise take the target tenant from data the pipeline controls.";
+                    $"Node '{finding.NodeLabel}' takes its target tenant from data ('{finding.PropertyName}': " +
+                    $"'{finding.Value}'). It runs only for a verified caller, whose own right in the target tenant the " +
+                    "mesh adapter proves before it reads or writes. If this is intentional, ignore this warning; " +
+                    "otherwise name the target tenant statically (tenantId).";
                 Logger.Warn(
-                    "[{TenantId}] Pipeline '{PipelineRtEntityId}' node '{NodeLabel}' takes its target tenant from caller-controlled path '{Path}' (AB#9767)",
-                    tenantId, pipelineRtEntityId, finding.NodeLabel, finding.CallerControlledPath);
+                    "[{TenantId}] Pipeline '{PipelineRtEntityId}' node '{NodeLabel}' takes its target tenant from data '{Property}' (AB#9767)",
+                    tenantId, pipelineRtEntityId, finding.NodeLabel, finding.PropertyName);
                 await eventService.StoreWarningEventAsync(tenantId, message, pipelineRtEntityId);
             }
         }
@@ -1833,7 +1835,7 @@ internal class AdapterService(
         {
             // Advisory, like the confused-deputy lint: a failure to store the warning never fails the deploy.
             Logger.Warn(e,
-                "[{TenantId}] Failed to report caller-steered target tenants for pipeline '{PipelineRtEntityId}'",
+                "[{TenantId}] Failed to report data-driven target tenants for pipeline '{PipelineRtEntityId}'",
                 tenantId, pipelineRtEntityId);
         }
     }
@@ -2362,7 +2364,7 @@ internal class AdapterService(
         }
 
         var pipelineRtEntityId = rtPipeline.ToRtEntityId();
-        if (FindPipelineNodeRuleRefusal(tenantId, pipelineRtEntityId, pipelineDefinition, out _, out _) is not
+        if (FindPipelineNodeRuleRefusal(tenantId, pipelineRtEntityId, pipelineDefinition, out _) is not
             { } refusal)
         {
             return;

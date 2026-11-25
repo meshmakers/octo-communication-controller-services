@@ -11,10 +11,10 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerService.Tests.Services.
 
 /// <summary>
 /// AB#9767 (Feature AB#8673): the deploy gate for the mesh adapter's cross-tenant nodes. Decision 3: a node with
-/// Identity=System and a target tenant is refused. Decision 2: a target tenant taken from caller input is refused when
-/// the node would act there with the pipeline's service account (Identity=ServiceAccount, or Caller in a pipeline that
-/// can run without a verified caller), and only reported as a warning for the pure verified caller. Both rules hold
-/// for an authorized deployer and with the elevation check switched off.
+/// Identity=System and a target tenant is refused. Decision 2: a node with Identity=ServiceAccount names its target
+/// tenant only statically (tenantId/tenantIds); a target tenant taken from data (tenantIdPath) is refused, whatever the
+/// path reads. A Caller node with a data-driven target deploys with a warning. The rules hold for an authorized
+/// deployer and with the elevation check switched off.
 /// </summary>
 internal class DeployPipelineCrossTenantGateTests : AdapterServiceTestsBase
 {
@@ -125,56 +125,81 @@ internal class DeployPipelineCrossTenantGateTests : AdapterServiceTestsBase
         await AssertNothingDeployed();
     }
 
-    // Decision 2, case ServiceAccount: the caller would choose the tenant the service account writes in.
+    private const string CronTrigger =
+        """
+        triggers:
+          - type: FromPipelineTriggerEvent@1
+        """;
+
+    // Decision 2 (fail closed, no path classification): a service-account node takes no target tenant from data,
+    // whatever the path reads and whichever trigger starts the pipeline.
     [Test]
-    public async Task ServiceAccountWithCallerControlledTenantIdPath_IsRefused()
+    [Arguments("$.body.recipientTenantId")]
+    [Arguments("$.formData.t")]
+    [Arguments("body.t")]
+    [Arguments("$..t")]
+    public async Task ServiceAccountWithTenantIdPath_IsRefused(string path)
     {
-        var ex = await DeployAsync(Definition(VerifiedHttpTrigger, "identity: ServiceAccount",
-            "$.body.recipientTenantId"));
+        var ex = await DeployAsync(Definition(VerifiedHttpTrigger, "identity: ServiceAccount", path));
 
         using var _ = Assert.Multiple();
         await Assert.That(ex).IsTypeOf<AdapterServiceException>();
         await Assert.That(ex!.Message).Contains("AB#9767");
-        await Assert.That(ex.Message).Contains("$.body.recipientTenantId");
+        await Assert.That(ex.Message).Contains("only statically");
+        await Assert.That(ex.Message).Contains(path);
         await Assert.That(ex.Message).Contains("ApplyChanges@2[0] (ServiceAccount)");
         await AssertNothingDeployed();
     }
 
-    // Decision 2, case Caller with service-account fallback: an anonymous request has no verified caller, so the node
-    // runs as the service account in a tenant the anonymous caller chose.
     [Test]
-    public async Task CallerWithServiceAccountFallback_AndCallerControlledTenantIdPath_IsRefused()
+    public async Task ServiceAccountWithTenantIdPath_OnACronPipeline_IsRefused_AlsoWithTheElevationCheckOff()
     {
-        var ex = await DeployAsync(Definition(AnonymousHttpTrigger, "identity: Caller", "$.query.tenant"));
+        GuardOptions.CheckElevation = false;
+
+        var ex = await DeployAsync(Definition(CronTrigger, "identity: ServiceAccount", "$.t"));
 
         using var _ = Assert.Multiple();
         await Assert.That(ex).IsTypeOf<AdapterServiceException>();
-        await Assert.That(ex!.Message).Contains("service-account fallback");
-        await Assert.That(ex.Message).Contains("$.query.tenant");
+        await Assert.That(ex!.Message).Contains("only statically");
         await AssertNothingDeployed();
     }
 
-    // Decision 2, case pure Caller: allowed (the adapter proves the caller's own right in the target), but reported.
     [Test]
-    public async Task PureCallerWithCallerControlledTenantIdPath_Deploys_WithAWarning()
+    public async Task ServiceAccountWithTenantIdPath_InsideForEach_IsRefused()
     {
-        var ex = await DeployAsync(Definition(VerifiedHttpTrigger, "identity: Caller", "$.body.recipientTenantId"));
+        var ex = await DeployAsync(CronTrigger + "\n" +
+                                   """
+                                   transformations:
+                                     - type: ForEach@1
+                                       iterationPath: $.items
+                                       transformations:
+                                         - type: ApplyChanges@2
+                                           identity: ServiceAccount
+                                           entityUpdatesPath: $.updates
+                                           targetTenant:
+                                             relation: Sibling
+                                             tenantIdPath: $.item.tenant
+                                   """);
 
         using var _ = Assert.Multiple();
-        await Assert.That(ex).IsNull();
-        await AdapterHubCallbacks.Received(1)
-            .AdapterConfigurationUpdatedAsync(TenantId, Arg.Any<AdapterConfigurationDto>());
-        await CommunicationEventService.Received(1).StoreWarningEventAsync(TenantId,
-            Arg.Is<string>(m => m.Contains("$.body.recipientTenantId") && m.Contains("target tenant")),
-            Arg.Any<RtEntityId>());
+        await Assert.That(ex).IsTypeOf<AdapterServiceException>();
+        await Assert.That(ex!.Message).Contains("$.item.tenant");
+        await AssertNothingDeployed();
     }
 
-    // Decision 2, data-driven target the pipeline controls: allowed without warning, the guard checks it at run time.
     [Test]
-    public async Task ServiceAccountWithPipelineControlledTenantIdPath_Deploys_WithoutWarning()
+    public async Task ServiceAccountWithStaticTenantId_Deploys_WithoutWarning()
     {
-        var ex = await DeployAsync(Definition(AnonymousHttpTrigger, "identity: ServiceAccount",
-            "$.invoice.recipientTenantId"));
+        var ex = await DeployAsync(CronTrigger + "\n" +
+                                   """
+                                   transformations:
+                                     - type: ApplyChanges@2
+                                       identity: ServiceAccount
+                                       entityUpdatesPath: $.updates
+                                       targetTenant:
+                                         relation: Sibling
+                                         tenantId: companyb
+                                   """);
 
         using var _ = Assert.Multiple();
         await Assert.That(ex).IsNull();
@@ -184,8 +209,26 @@ internal class DeployPipelineCrossTenantGateTests : AdapterServiceTestsBase
             Arg.Is<string>(m => m.Contains("target tenant")), Arg.Any<RtEntityId>());
     }
 
+    // Decision 2, Caller: deploys, also with an anonymous trigger; the mesh adapter refuses a data-driven target at run
+    // time unless the caller is verified, and proves the caller's own right in the target. Reported as a warning.
+    [Test]
+    [Arguments("identity: Caller", "$.body.recipientTenantId")]
+    [Arguments("", "$.query.tenant")]
+    public async Task CallerWithTenantIdPath_Deploys_WithAWarning(string identity, string path)
+    {
+        var ex = await DeployAsync(Definition(AnonymousHttpTrigger, identity, path));
+
+        using var _ = Assert.Multiple();
+        await Assert.That(ex).IsNull();
+        await AdapterHubCallbacks.Received(1)
+            .AdapterConfigurationUpdatedAsync(TenantId, Arg.Any<AdapterConfigurationDto>());
+        await CommunicationEventService.Received(1).StoreWarningEventAsync(TenantId,
+            Arg.Is<string>(m => m.Contains(path) && m.Contains("target tenant")),
+            Arg.Any<RtEntityId>());
+    }
+
     // Review finding 1: the adapter reads 'Caller, ServiceAccount' as ServiceAccount (YamlDotNet Enum.Parse); the
-    // controller must not read it as Caller and let the caller steer the service account's tenant.
+    // controller must not read it as Caller.
     [Test]
     [Arguments("'Caller, ServiceAccount'")]
     [Arguments("'01'")]
@@ -202,7 +245,7 @@ internal class DeployPipelineCrossTenantGateTests : AdapterServiceTestsBase
 
     // Review finding 2: a node in a Switch@1 case is checked like every other node.
     [Test]
-    public async Task ServiceAccountInASwitchCase_WithCallerControlledTenantIdPath_IsRefused()
+    public async Task ServiceAccountInASwitchCase_WithTenantIdPath_IsRefused()
     {
         var ex = await DeployAsync(VerifiedHttpTrigger + "\n" +
                                    """
@@ -226,29 +269,6 @@ internal class DeployPipelineCrossTenantGateTests : AdapterServiceTestsBase
         await AssertNothingDeployed();
     }
 
-    // Review finding 4: the Teams sender writes $.Emails; a service account must not act in a tenant it names.
-    [Test]
-    public async Task ServiceAccountWithTeamsBotOutputAsTenantIdPath_IsRefused()
-    {
-        var ex = await DeployAsync(Definition(
-            "triggers:\n  - type: FromTeamsBot@1\n    serverConfiguration: bot",
-            "identity: ServiceAccount", "$.Emails[0].Subject"));
-
-        using var _ = Assert.Multiple();
-        await Assert.That(ex).IsTypeOf<AdapterServiceException>();
-        await Assert.That(ex!.Message).Contains("$.Emails[0].Subject");
-        await AssertNothingDeployed();
-    }
-
-    [Test]
-    public async Task ServiceAccountWithMultiMatchTenantIdPath_IsRefused()
-    {
-        var ex = await DeployAsync(Definition(VerifiedHttpTrigger, "identity: ServiceAccount", "$..t"));
-
-        await Assert.That(ex).IsTypeOf<AdapterServiceException>();
-        await AssertNothingDeployed();
-    }
-
     // Unconfirmed review point: a definition the controller cannot read was let through without any rule (fail open).
     [Test]
     public async Task UnreadableDefinition_IsRefused()
@@ -263,7 +283,7 @@ internal class DeployPipelineCrossTenantGateTests : AdapterServiceTestsBase
 
     // Review finding 5: the data-flow deploy applies the same rules.
     [Test]
-    public async Task DeployDataFlow_ServiceAccountWithCallerControlledTenantIdPath_IsRefused()
+    public async Task DeployDataFlow_ServiceAccountWithTenantIdPath_IsRefused()
     {
         var (_, dataFlow, _) =
             ArrangeDeployablePipeline(Definition(VerifiedHttpTrigger, "identity: ServiceAccount", "$.body.t"));
