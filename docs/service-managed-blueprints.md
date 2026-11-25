@@ -45,7 +45,7 @@ The `System.` name prefix tells Refinery Studio (`BlueprintIdExtensions.IsServic
 
 > **Migration note**: tenants previously seeded with `System.Communication-1.0.2` keep that installation row as an orphan after the split — the new blueprints overwrite the Pool/Adapter entities by shared rtId (functional behaviour preserved), but the old install row still shows up in Studio. A one-time `mutation { blueprints { uninstall(blueprintName: "System.Communication", cascade: false) { success entitiesDeleted } } }` removes it per tenant.
 
-The optional `HelloCommunication-1.0.0` demo blueprint lives in `samples/Blueprints/` (not embedded). It's admin-installable: drop the folder into a `LocalFileSystemBlueprintCatalog` root or publish it via a GitHub catalog. Its `blueprintDependencies` reference `System.Communication-[1.0,2.0)` so it can be applied on top of the service-managed baseline.
+The optional `HelloCommunication-1.0.0` demo blueprint lives in `samples/Blueprints/` (not embedded). It's admin-installable: drop the folder into a `LocalFileSystemBlueprintCatalog` root or publish it via a GitHub catalog. Its `blueprintDependencies` still reference `System.Communication-[1.0,2.0)`, which no catalog satisfies: the service-managed blueprints are embedded resources, only `System.Communication.Release` and `System.Communication.MainLatest` exist, and the dependency resolver never reads them. The demo therefore does **not** install on the service-managed baseline (`MissingDependency`) until its declaration is replaced; do not describe that range as a working dependency.
 
 `samples/Blueprints/SecretDefaultDemo/` is the secret-default sample: two blueprints (`SecretDefaultDemo` with
 the Application, whose `SecretDefaults` entry the operator adds after the install, `SecretDefaultDemoCaptcha` with a tenant override and a `VerifyCaptcha@1`
@@ -249,5 +249,7 @@ When adding a new attribute on `Adapter` / `Pool` / similar entities,
 decide at creation time: is the value driven by the blueprint author
 (configuration → leave `isRuntimeState` unset), or by services /
 operators / users at runtime (status / counters / error history →
-mark `isRuntimeState: true`). Once shipped, downgrading from `true` to
-`false` is a behaviour-breaking change.
+mark `isRuntimeState: true`). A setting a tenant changes at runtime **and** that must
+survive a tenant export is neither: mark it `ownership: TenantOwned`, so it is preserved on
+re-apply and still exported (see the `TenantOwned` paragraph above). Once shipped, downgrading
+from `true` to `false` is a behaviour-breaking change.

@@ -1,6 +1,6 @@
 ---
 description: "Leasing: the sealed queued invoker and the method-invocation marker on the leased path"
-applies_to: "**/Methods/PipelineMethodInvoker.cs, **/Services/PipelineExecutionService.cs"
+applies_to: "**/Methods/PipelineMethodInvoker.cs, **/Services/PipelineExecutionService.cs, **/Services/LeaseService.cs, **/Repository/Queued*.cs"
 ---
 
 ### The queued invoker is sealed (System.Communication 4.12.0)

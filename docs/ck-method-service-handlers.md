@@ -98,8 +98,7 @@ Code: `src/CommunicationControllerServices/Methods/Service/`. User guide: `octo-
   A level of If, ForEach or Group adds two JSON levels, a level of Switch four (`cases`, case, `transformations`, node),
   so about 16 nested Switch nodes get the JSON-depth finding before the node-list one; both refuse.
   🔴 **The limits do not depend on `EnablePipelineSchemaValidation` or on an adapter schema**: the flag defaults to false and no deployment sets it, and the gates after the schema
-  validation parse the
-  same definition with YamlDotNet, which binds an alias to the shared instance, and walk its nodes recursively (a small
+  validation parse the same definition with YamlDotNet, which binds an alias to the shared instance, and walk its nodes recursively (a small
   document of nested aliases means an exponential walk). So `PipelineDefinitionLimits.CheckDefinition` (length,
   converter budget, node checks; malformed YAML is left to the caller) runs unconditionally: first in
   `AdapterService.ValidatePipelineDefinition` (finding as `PipelineSchemaValidationFailed`), on the stored definition

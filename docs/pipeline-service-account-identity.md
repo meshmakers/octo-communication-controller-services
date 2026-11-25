@@ -98,13 +98,13 @@ regardless of status. The message names cause, work item, pipeline, adapter and 
 ways out (link the account on the adapter, or set a per-pipeline override).
 
 **Not guarded in `DeploymentSiteService.DeployWorkloadAsync`** (documented in place next to the lifecycle validation): that method also validates `Application`s, which execute no
-pipelines; the helm deploy of the adapter pod is the step that must succeed *before* a
-service account can be provisioned onto it, so gating it would be circular and would make
-every existing tenant's adapter undeployable ahead of the provisioning phase; and an
+pipelines; gating it would be circular, because the account is created on this very path, and
+would make every existing tenant's adapter undeployable ahead of the provisioning phase; and an
 adapter with no pipelines is harmless. Enforcement stays tight either way — no pipeline
 reaches an adapter without a resolvable identity. Phase 2 does the *opposite* on that path:
-`DeployWorkloadAsync` **provisions** the adapter's account (best effort, after the deploy
-notification) instead of gating on it — see below.
+`DeployWorkloadAsync` **provisions** the adapter's account (best effort, **before** the deploy
+notification is built, because the notification carries the credentials) instead of gating on it — see below
+and `docs/pipeline-service-account-reconcile.md`.
 
 Phase 1 tests: `Services/PipelineServiceAccountResolverTests` (override wins, adapter default,
 nothing linked, no adapter query when an override exists, deterministic multi-link pick,
@@ -182,7 +182,7 @@ later would mean touching every already-provisioned tenant.
 | Trigger | Where | Covers |
 |---|---|---|
 | Tenant-wide sweep | `DefaultConfigurationCreatorService.StartTenantAsync` → `EnsurePipelineServiceAccountsAsync`, right after `ApplyServiceManagedBlueprintsAsync` | The **backfill** for existing tenants (service start, Enable, and `PosUpdateTenant` — i.e. the documented `clearCache` recovery lever), and the blueprint-seeded default Adapter on a fresh tenant. |
-| Per adapter | `DeploymentSiteService.DeployWorkloadAsync`, after the deploy notification, for `RtAdapter` only | An adapter an operator adds between two tenant loads. There is no adapter-*create* path in this service (adapters are RtEntities written through the asset repository), and nothing runs pipelines before its workload is deployed, so this is the earliest point that matters. |
+| Per adapter | `DeploymentSiteService.DeployWorkloadAsync`, before the deploy notification is built, for `RtAdapter` only | An adapter an operator adds between two tenant loads. There is no adapter-*create* path in this service (adapters are RtEntities written through the asset repository), and nothing runs pipelines before its workload is deployed, so this is the earliest point that matters. |
 
 **Fault tolerance is the point of the backfill.** `EnsureAdapterProvisionedAsync` never throws: it
 logs an Error **and writes a persistent Error event into the tenant's event log**, so the refusal an

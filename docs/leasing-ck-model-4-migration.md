@@ -1,6 +1,6 @@
 ---
 description: "Shared adapter leasing: the System.Communication 4.0.0 major bump, migration, bump cascade and traps"
-applies_to: src/SystemCommunicationCkModel/ConstructionKit/migrations/**, **/Services/Lease*.cs
+applies_to: src/SystemCommunicationCkModel/ConstructionKit/migrations/**
 ---
 
 ## Shared Adapter Leasing — CK model 4.0.0
@@ -20,7 +20,7 @@ the pool workload, the lease protocol and the scheduler are increments 2–9 of 
 
 | Element | Where | Meaning |
 |---|---|---|
-| **`Pool` → `DeploymentSite`** | `types/deploymentSite.yaml` (was `pool.yaml`) | it is a deployment *location* (`Default Cloud`, `k8sfirmianstrasse`), never a pool of anything — and the name collided head-on with the new `AdapterPool`. Ships **with** leasing so the estate takes one migration, not two (concept §8, Q16 + Q18). |
+| **`Pool` → `DeploymentSite`** | `types/deploymentSite.yaml` (was `pool.yaml`) | it is a deployment *location* (`Default Cloud`, `edge-site-1`), never a pool of anything — and the name collided head-on with the new `AdapterPool`. Ships **with** leasing so the estate takes one migration, not two (concept §8, Q16 + Q18). |
 | **`Manages`/`ManagedBy` → `Hosts`/`HostedBy`** | `associations/hosts.yaml` (was `manages.yaml`) | a deployment location does not *manage* anything — the Communication Operator does. Renamed in the **same** migration as the type, so the estate migrates once. `Deploys`/`DeployedTo` was rejected: the site does not deploy either, it is deployed *to*. |
 | `AdapterPool` | `types/adapterPool.yaml` | a pool of interchangeable adapter processes: `MinReplicas`/`MaxReplicas`, per-member sizing, queue-driven scale-up, lending scope. **One workload with a replica range**, not N `Adapter` entities. |
 | `LifecycleMode` `3 Leased` | `enums/lifecycleMode.yaml` | the **borrower's** mode and only ever that: no process of its own. `2 Auto` stays reserved. |
@@ -62,9 +62,12 @@ so until it is published the model fails with
 (`ChangeCkType` already rewrites `originCkTypeId`/`targetCkTypeId` on edges, so the *type* half
 of the migration needed nothing new — verified in `TenantRepository`, not assumed.)
 
-🔴 **`rtWellKnownName: CommunicationPool` stays** on the seeded entity. It is identity, not
-display text: the service-managed blueprints re-apply against it, and renaming it would create
-a *second* deployment site on every provisioned tenant.
+🔴 **`rtWellKnownName` is renamed from `CommunicationPool` to `DeploymentSite` (step 3).** It is
+identity, not display text: the service-managed blueprints re-apply against it. Renaming it in the
+seed alone would create a *second* deployment site on every provisioned tenant, so the seed change
+and the stored-data change ship together in this migration. The step selects the type and the old
+name, so it renames only the seeded site (not sites an operator created by hand) and a second run
+matches nothing.
 
 ### Bump cascade — measured 2026-09-14, not estimated
 
@@ -147,14 +150,14 @@ Tests: integration `Migrations/SystemCommunication4MigrationTests` — the publi
 3.41.0 models (embedded resources; other versions are the 3.40.0 re-labelled) plus the blueprint's 3.x seed, upgraded through the real
 `ImportCkModelAsync` for every listed version: path contains the script, a dry run fails the
 `no-legacy-pools` post-validation on the 3.x data, the real upgrade leaves no `Pool`, keeps the
-rtIds, renames the seeded well-known name only, resolves both adapters' sites over `Hosts`, and the
+rtIds, renames the seeded well-known name (`CommunicationPool` -> `DeploymentSite`) only, resolves both adapters' sites over `Hosts`, and the
 post-validation then passes. A version above the last entry (3.99.0) is refused and stays on 3.x
 across a second start. With the pre-G3 meta, exactly the eight cases 3.37.0 … 3.42.0 fail.
 
 ### Out of scope of the rename, deliberately
 
-The REST route `{tenantId}/v1/deploymentsite` (from `DeploymentSiteController`) and `rtWellKnownName: CommunicationPool`
-are not renamed. (The operator CRD, the operator code, the Helm value names
+The REST route `{tenantId}/v1/deploymentsite` (from `DeploymentSiteController`) is not renamed.
+(The seeded entity's `rtWellKnownName` **was** renamed, see step 3 above. The operator CRD, the operator code, the Helm value names
 `operator.{autoManageDeploymentSites,deploymentSiteNamespace,defaultDeploymentSiteName}` and the SignalR wire **were**
 renamed together with the model: kind `CommunicationPool` -> `DeploymentSite`, deleted and reinstalled, so the operator
 and the controller ship together.) Also unchanged: the `octo-cli` `GetPools`/`DeployPool`/`UndeployPool`

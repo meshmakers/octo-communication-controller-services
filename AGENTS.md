@@ -40,11 +40,11 @@ Caches, the repository layer, the Construction Kit model, the project layout and
 | `**/Services/Workload*.cs`, `**/Hubs/OperatorHub*.cs`, `**/Controllers/WorkloadController.cs`, `**/DeploymentSite*.cs` | `docs/helm-workload-deploy.md` |
 | `**/Hubs/**`, `**/Options/*HubAuthorizationOptions.cs` | `docs/hub-authorization-gates.md` |
 | `**/Services/AdapterPool*.cs`, `**/Controllers/AdapterPoolController.cs` | `docs/leasing-adapter-pool.md` |
-| `src/SystemCommunicationCkModel/ConstructionKit/migrations/**`, `**/Services/Lease*.cs` | `docs/leasing-ck-model-4-migration.md` |
+| `src/SystemCommunicationCkModel/ConstructionKit/migrations/**` | `docs/leasing-ck-model-4-migration.md` |
 | `**/Services/AdapterLeasingMetrics.cs` | `docs/leasing-metrics-and-operability.md` |
 | `**/Services/LeaseScheduler*.cs`, `**/BackgroundServices/LeaseScheduler*.cs` | `docs/leasing-pool-queue-and-scheduler.md` |
 | `**/Services/LeaseService.cs`, `**/Repository/Queued*.cs`, `**/Repository/ExecutionLeaseClaimStore.cs`, `**/Consumers/LeaseTriggerConsumer.cs` | `docs/leasing-queued-executions.md` |
-| `**/Methods/PipelineMethodInvoker.cs`, `**/Services/PipelineExecutionService.cs` | `docs/leasing-queued-invoker.md` |
+| `**/Methods/PipelineMethodInvoker.cs`, `**/Services/PipelineExecutionService.cs`, `**/Services/LeaseService.cs`, `**/Repository/Queued*.cs` | `docs/leasing-queued-invoker.md` |
 | `**/Services/TenantLendingScopeResolver.cs`, `**/Services/PipelineExecutionClassService.cs`, `**/Services/AdapterNodeCapabilityService.cs` | `docs/leasing-scope-and-capabilities.md` |
 | `**/Services/*PoolMirror*.cs`, `**/Services/Lent*.cs` | `docs/lent-adapter-pool-mirrors.md` |
 | `**/Notification*.cs` | `docs/notification-subscriptions.md` |
@@ -124,8 +124,8 @@ These rules bind new and changed code. Known exceptions in existing code are nam
   `LentAdapterPool` mirror (`LentFromReference.FromMirror`).
   `docs/adapter-pool-hub-gate-and-leases.md`; tests in `Services/LeaseServiceTests/` (`GrantLeaseAsyncTests`).
 - **A pipeline deploy path calls `EnsurePipelineHasServiceAccountAsync` before its first state write.** Exception:
-  `DeploymentSiteService.DeployWorkloadAsync` provisions the account instead of gating (the pod must exist first).
-  `docs/pipeline-service-account-identity.md`; test `DeployPipelineServiceAccountGateTests`.
+  `DeploymentSiteService.DeployWorkloadAsync` provisions the account instead of gating (before it builds the deploy
+  notification). `docs/pipeline-service-account-identity.md`; test `DeployPipelineServiceAccountGateTests`.
 - **A workload deploy or undeploy notification for a deployment site without an operator is queued in memory and
   replayed on registration, never dropped while the controller runs; a progress report writes `Pending` only.**
   `docs/helm-workload-deploy.md`; tests `OperatorConnectionManagerTests`, `ReportWorkloadDeploymentProgressAsyncTests`.
