@@ -1,3 +1,8 @@
+---
+description: Developer guide for integrating with or extending the Communication Controller Services
+background: true
+---
+
 # Octo Communication Controller Services - Developer Guide
 
 This document provides comprehensive technical documentation for developers integrating with or extending the Octo Communication Controller Services.

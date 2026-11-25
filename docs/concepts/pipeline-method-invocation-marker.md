@@ -1,10 +1,15 @@
+---
+description: "Concept: method-invocation marker that replaces generic create in pipeline runs"
+applies_to: "**/Methods/**"
+---
+
 # Method-Invocation Marker: Replaced Generic Create in Pipeline Runs
 
 A CK method with `replacesGenericCreate: true` replaces the generic create of its type (CK language 2,
 `octo-documentation` -> `technologyGuide/constructionKits/ckLanguage2/methods.md#replaces-generic-create`). The asset
 repository refuses the generic create over GraphQL; the nodes `ApplyChanges@1`, `ApplyChanges@2` and `ImportFromExcel`
 of the mesh adapter refuse the equivalent **insert** in a pipeline. The one run that must be allowed to insert is the
-pipeline that implements the method (`execution.handler: pipeline`, see "CK method pipeline handler" in `CLAUDE.md`).
+pipeline that implements the method (`execution.handler: pipeline`, see [CK method pipeline handler](../ck-method-pipeline-handler.md)).
 This page describes how the controller tells the adapter that a run is that run, and why a caller cannot fake it.
 
 ## 1. The marker
@@ -61,7 +66,7 @@ member that no public interface can set.
     and its `PipelineRtId` equals the queued pipeline). The lease carries it in `LeaseDto.MethodInvocation`.
   - *Requeue*: a retry re-seals the marker for the new execution; the ciphertext is never copied.
 
-Details and tests: `CLAUDE.md`, sections "The queued invoker is sealed", "Method-invocation marker on the leased path",
+Details and tests: [queued invoker](../leasing-queued-invoker.md) and [queued executions](../leasing-queued-executions.md), sections "The queued invoker is sealed", "Method-invocation marker on the leased path",
 "Only executions the controller queued are leased" and "A sealed execution is leased at most once"; the operational
 view is in [Shared Adapter Leasing](shared-adapter-leasing.md) (borrower caller identity).
 
@@ -100,7 +105,7 @@ method call fails:
    queued leased executions drain or cancel them, let in-flight leases of the old pods finish (the stuck-execution reaper
    fails them after about 30 minutes), roll **all** instances, leasing back on. The controller needs the key ring and its
    admin database credential (`OctoSystemConfiguration.AdminUser` / `AdminUserPassword`). The sequence and its reasons
-   are in [Shared Adapter Leasing](shared-adapter-leasing.md) (the notes under "Borrower caller identity") and in the `CLAUDE.md` rollout notes; they are not repeated here.
+   are in [Shared Adapter Leasing](shared-adapter-leasing.md) (the notes under "Borrower caller identity") and in the rollout notes of the [queued invoker](../leasing-queued-invoker.md); they are not repeated here.
 3. Mesh adapter right after.
 
 There is **no compatibility switch**: a switch could only fail open. A new controller with an old adapter leaves the

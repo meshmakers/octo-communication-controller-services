@@ -1,10 +1,15 @@
+---
+description: "Runbook: switching the adapter pool hub gate to Enforce per cluster"
+applies_to: "**/Hubs/AdapterPoolHub*.cs"
+---
+
 # Switching the `/adapterPoolHub` gate to `Enforce` per cluster
 
 This is the operator plan for the last hub gate of the communication controller that still runs `LogOnly`: the adapter
 pool hub (`AdapterPoolHubAuthorization:Mode`, environment variable `OCTO_ADAPTERPOOLHUBAUTHORIZATION__MODE`). The two
 sibling hubs `/operatorHub` and `/{tenantId}/adapterHub` already run `Enforce`; their rollout, the decision counter and
 the refusal triage are in [hub-authorization-enforce-rollout.md](hub-authorization-enforce-rollout.md). This plan only adds
-what is different for the pool hub. The gate itself is described in `CLAUDE.md`, section "The adapter pool hub".
+what is different for the pool hub. The gate itself is described in [adapter pool hub gate](../adapter-pool-hub-gate-and-leases.md), section "The adapter pool hub".
 
 | Mode | A pool-member connection without a token, without scope `octo_api` or without a `tenant_id` claim | A registration into a pool of another tenant than the token's |
 |---|---|---|
@@ -12,8 +17,8 @@ what is different for the pool hub. The gate itself is described in `CLAUDE.md`,
 | `Enforce` | refused with `HubException` "Adapter pool connection refused: …"; warning line, counter outcome `refused` | refused with `HubException` "Pool member registration refused: …"; error event in the pool's tenant; counter `refused` / `tenant_mismatch` |
 
 Nothing in this document changes an environment. Every switch, test client and rollback is an environment write that the
-ops agent executes per cluster. Who gives the go: on **test-2** the approval of the security work item that owns the switch
-(the developer who runs the agent confirms it in the session); on **staging-1, prod-1 and prod-2** Gerald, in his own words,
+ops agent executes per cluster. Who gives the go: on **test** the approval of the security work item that owns the switch
+(the developer who runs the agent confirms it in the session); on **staging and production** Gerald, in his own words,
 for that cluster and that step, a rollback included.
 
 ## What the gate protects, and what it does not
@@ -39,7 +44,7 @@ It does **not** cover, by design:
 
 ## Order
 
-`test-2` → `staging-1` → `prod-1` → `prod-2`, one cluster at a time. A cluster is switched only after the previous one has
+Test environment → staging → production (each production cluster in turn), one cluster at a time. A cluster is switched only after the previous one has
 run `Enforce` for **1 day** (the observation window) without a refusal of a legitimate pool member (step 6 below). The
 approval of one cluster does not carry over to the next. The dated schedule is in
 [hub-authorization-enforce-rollout.md](hub-authorization-enforce-rollout.md#schedule-for-adapterpoolhub).
@@ -242,8 +247,8 @@ next CD run undoes it). The CD rolls the controller pods, so every pool member r
    every caller found with token tenant, client id and reason, and for each the fix or the reason it is not legitimate,
    the controller restart time, and the member inventory with each member seen or its written decision (accepted or
    excluded, with the reason).
-2. **Go** for this cluster: on test-2 the approval of the security work item, confirmed by the developer who runs the
-   agent; on staging-1, prod-1 and prod-2 Gerald's go, in his own words.
+2. **Go** for this cluster: on a test environment the approval of the security work item, confirmed by the developer who runs the
+   agent; on staging and production Gerald's go, in his own words.
 3. **Change** (ops): PR in `octo-mesh-deployment` that sets the value with the comment above, plus the pre-write impact
    list: the rendered diff of the octo-mesh release changes only `OCTO_ADAPTERPOOLHUBAUTHORIZATION__MODE` on the
    communication controller deployment.
@@ -266,7 +271,7 @@ next CD run undoes it). The CD rolls the controller pods, so every pool member r
    Remove the test client and its credentials afterwards. Write the evidence into a comment on the security work item.
 6. **1-day watch**: the `Enforce` lines (the post-switch log query, which also covers refused late releases) and
    `OctoMeshHubAuthorizationRefused` name no legitimate pool member. A legitimate
-   refusal means: fix the member's credentials or roll back (on staging-1, prod-1 and prod-2 a rollback only with Gerald's
+   refusal means: fix the member's credentials or roll back (on staging and production a rollback only with Gerald's
    go), and record it. Then the next cluster may start.
 
 ## Rollback
@@ -290,7 +295,7 @@ Dates are decided by Gerald; the empty cells are filled at the gate check and th
 
 | Cluster | P1 chart deployed | P3 rules cover the pool hub | Gate check comment (7 days, coverage, positive control, member inventory) | Go (who, date) | `Enforce` set (values commit) | Smoke test comment | 1-day watch recorded |
 |---|---|---|---|---|---|---|---|
-| test-2 | | | | security work item approval, confirmed by the developer running the agent | | | |
-| staging-1 | | | | Gerald, own words | | | |
-| prod-1 | | | | Gerald, own words | | | |
-| prod-2 | | | | Gerald, own words | | | |
+| test environment | | | | security work item approval, confirmed by the developer running the agent | | | |
+| staging | | | | Gerald, own words | | | |
+| production (cluster 1) | | | | Gerald, own words | | | |
+| production (cluster 2) | | | | Gerald, own words | | | |

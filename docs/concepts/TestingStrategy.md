@@ -1,3 +1,8 @@
+---
+description: "Testing strategy: unit tests, integration tests with MongoDB Testcontainers, HTTP API tests"
+applies_to: tests/CommunicationControllerServices.IntegrationTests/Fixtures/**
+---
+
 # Testing Strategy - Communication Controller Services
 
 This document describes the testing strategy for the Communication Controller Services, including unit tests, integration tests with MongoDB Testcontainers, and HTTP API tests.
@@ -209,14 +214,17 @@ Integration tests use real MongoDB instances via Testcontainers for accurate dat
 
 #### appsettings.test.json
 
+The two passwords are placeholders: the real throw-away values for the Testcontainers MongoDB are in
+`tests/CommunicationControllerServices.IntegrationTests/appsettings.test.json`.
+
 ```json
 {
   "integrationTest": {
     "tenantId": "test-tenant",
     "mongoDbImage": "mongo:8.0.15",
     "adminUser": "octo-system-admin",
-    "adminUserPassword": "OctoAdmin1",
-    "databaseUserPassword": "OctoUser1",
+    "adminUserPassword": "<mongo-admin-password>",
+    "databaseUserPassword": "<mongo-user-password>",
     "useDirectConnection": true
   }
 }

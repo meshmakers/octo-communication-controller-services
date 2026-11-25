@@ -1,37 +1,42 @@
+---
+description: Design of shared adapter leasing (parent-tenant adapter pool)
+background: true
+---
+
 # Shared Adapter Leasing (Parent-Tenant Adapter Pool)
 
-**Epic:** AB#4914 (On-Demand Adapter Lifecycle) · **Supersedes the approach sketched in** AB#4924 · **Status:** Design draft 1.0 (2026-09-13)
+**Parent:** On-Demand Adapter Lifecycle · **Status:** Design draft 1.0 (2026-09-13)
 
 A parent tenant runs adapters that its descendants borrow. Instead of one adapter
 process per tenant, a pool of processes is **leased** to a tenant for the duration
 of one work item, then released. Adapters that serve continuous data keep a
 dedicated process.
 
-This refines AB#4924, which assumed multiplexing (N hub registrations in one
+This refines the earlier leasing sketch, which assumed multiplexing (N hub registrations in one
 process, per-tenant caches side by side). Leasing was chosen instead because it
 keeps tenant isolation a property of *time* rather than of code: the process
 serves exactly one tenant at any instant.
 
-## 1. Motivation (measured, prod-1, 2026-09-13)
+## 1. Motivation (measured, production, 2026-09-13)
 
 Ten mesh adapters, 3.70 GiB actually used against 6.5 GiB reserved:
 
 | Tenant | Memory | Pipeline executions / h |
 |---|---|---|
 | meshmakers | 848 Mi | 17 |
-| gastroacker | 580 Mi | 16 |
-| tecob | 408 Mi | 16 |
-| **energyiq** | 407 Mi | **4089** |
-| salzburgdev | 360 Mi | 17 |
-| bierok | 322 Mi | 16 |
-| pureescape | 304 Mi | 16 |
-| landing | 200 Mi | **0** |
-| wwc26 | 185 Mi | **0** |
-| familyos | 171 Mi | **0** |
+| tenant-1 | 580 Mi | 16 |
+| tenant-2 | 408 Mi | 16 |
+| **tenant-3** | 407 Mi | **4089** |
+| borrowerdev | 360 Mi | 17 |
+| tenant-5 | 322 Mi | 16 |
+| tenant-6 | 304 Mi | 16 |
+| tenant-7 | 200 Mi | **0** |
+| tenant B | 185 Mi | **0** |
+| tenant-8 | 171 Mi | **0** |
 
 Two facts drive the design. Three tenants execute **nothing** and still hold
 170–200 Mi each — pure .NET runtime baseline, the cost of a process existing. And
-one tenant produces 99 % of the load. Across staging-1, prod-1 and prod-2 there
+one tenant produces 99 % of the load. Across staging and production there
 are 30 adapter pods; roughly 5 GiB is baseline that exists only because the
 processes are separate.
 
@@ -44,7 +49,7 @@ not derived — `OnDemandCapable` (§5 of the on-demand concept) remains the
 | Mode | For | Trigger profile |
 |---|---|---|
 | `AlwaysOn` | continuous data | process-bound triggers: `FromPolling`, `FromWatchRtEntity`, MQTT/EDA/Loxone consumers |
-| `OnDemand` | rare work, own process | wake-capable triggers, existing behaviour (AB#4914) |
+| `OnDemand` | rare work, own process | wake-capable triggers, existing behaviour |
 | `Leased` *(new)* | periodic work, shared process | triggers whose work **reaches the controller** — cron `PipelineTrigger` and explicit `ExecutePipeline` — **and** no tenant-pinned runtime state (§2c) |
 
 Two kinds of adapter therefore coexist, and the distinction is worth naming because it
@@ -58,13 +63,13 @@ shapes everything below:
 `Leased` requires `OnDemandCapable == true`; setting it on a non-capable adapter is
 rejected with the blocking reasons, exactly like `OnDemand` today. The reverse
 direction — deploying a process-bound pipeline to a `Leased` adapter — is rejected
-too. Explicit beats silent, same rule as AB#4914.
+too. Explicit beats silent, same rule as the on-demand lifecycle.
 
 Deriving the mode automatically was considered and rejected: a mode that flips
 itself when someone deploys a pipeline is the kind of silent automation that is
 hard to reason about during an incident.
 
-## 2c. How work reaches a `Leased` adapter (AB#5278)
+## 2c. How work reaches a `Leased` adapter
 
 A lease is created in exactly one place — `TriggerManagementService.StartExecutePipelineAsync`, which
 turns the work into a `Queued` execution instead of sending an execute command. Every way of starting
@@ -74,9 +79,9 @@ trigger's classification says on a dedicated adapter:
 | Trigger | Dedicated adapter | Leased adapter |
 |---|---|---|
 | explicit `ExecutePipeline` (Studio, REST, CLI) | execute command | **queued lease** — the original path |
-| cron `PipelineTrigger` → `FromPipelineTriggerEvent@1` | per-pipeline durable broker queue, consumed by the adapter; co-wake when `OnDemand` | **queued lease**: the controller registers the recurring send onto its own durable queue (`octo::com-controller::lease-trigger`, `LeaseTriggerMessage`) instead of the adapter's; `LeaseTriggerConsumer` calls the execute path per tick. No adapter-side schedule at all — a pool member that happens to hold a lease when the cron fires must not consume one, because a run started that way bypasses the lease bookkeeping (runbook §11.6) — enforced since AB#5863/AB#5828: a member's pipeline registry starts **no trigger nodes** (`IsPoolMember`), so it neither binds the borrower's trigger queue nor hangs on its stop. A tick whose previous run is still `Queued` is coalesced; the queued execution is recorded `Scheduled` (AB#5863), not `Manual`. |
-| `FromHttpRequest@1/@2` | ingress → adapter (activator wakes an `OnDemand` workload) | **refused at deploy** until the pool has an ingress and the activator can wake a *member* (AB#5258) |
-| `FromPipelineDataEvent@1` | adapter → broker → adapter | **refused at deploy** until the event is routed through the controller or the queue is durable and waked (AB#5231) |
+| cron `PipelineTrigger` → `FromPipelineTriggerEvent@1` | per-pipeline durable broker queue, consumed by the adapter; co-wake when `OnDemand` | **queued lease**: the controller registers the recurring send onto its own durable queue (`octo::com-controller::lease-trigger`, `LeaseTriggerMessage`) instead of the adapter's; `LeaseTriggerConsumer` calls the execute path per tick. No adapter-side schedule at all — a pool member that happens to hold a lease when the cron fires must not consume one, because a run started that way bypasses the lease bookkeeping (runbook §11.6) — enforced: a member's pipeline registry starts **no trigger nodes** (`IsPoolMember`), so it neither binds the borrower's trigger queue nor hangs on its stop. A tick whose previous run is still `Queued` is coalesced; the queued execution is recorded `Scheduled`, not `Manual`. |
+| `FromHttpRequest@1/@2` | ingress → adapter (activator wakes an `OnDemand` workload) | **refused at deploy** until the pool has an ingress and the activator can wake a *member* |
+| `FromPipelineDataEvent@1` | adapter → broker → adapter | **refused at deploy** until the event is routed through the controller or the queue is durable and waked |
 
 The refusal is the `Leased` evaluation (`IWorkloadOnDemandCapabilityService.EvaluateForLeaseAsync`):
 the `OnDemand` classifier plus the two adapter-bound triggers above, applied both when a workload is
@@ -94,9 +99,7 @@ adapter's *current* mode.
 step and skips only the push. Refusing the deploy, and letting the lease carry whatever definition
 happened to be saved, was considered and rejected.
 
-The deploy verb is where four gates live — schema validation, the process-bound-trigger gate
-(AB#4984), the mandatory service account (AB#5027) and the **authorization of privilege elevation**
-(AB#5128). A leased pipeline that never passed through the verb passes none of them, and is then
+The deploy verb is where four gates live — schema validation, the process-bound-trigger gate, the mandatory service account and the **authorization of privilege elevation**. A leased pipeline that never passed through the verb passes none of them, and is then
 executed by a *borrowed* process that never checked whether its service account resolves or whether
 the caller was entitled to the elevation it asks for. One verb, one set of guards, whether the
 executor is dedicated or borrowed.
@@ -139,7 +142,7 @@ instead of two. The cascade it triggers, measured 2026-09-14:
 | Dependent CK models with their own pin | 2 | `SystemAiCkModel`, `AdapterEdgeLoxone.CkModel` |
 
 `AdapterEdgeLoxone.CkModel` is pinned **exactly** `[3.31,3.32)` — the frozen-pin trap that has
-already cost three incidents (AB#4696, AB#4999, AB#5196 on prod-1). It resolves to 3.31.0 today
+already cost three incidents (a pin incident in a production cluster). It resolves to 3.31.0 today
 and is therefore unaffected by 3.36.0, but a rename it never adopts leaves it permanently behind
 a type that no longer exists. It has to move with the bump, not after it.
 
@@ -151,7 +154,7 @@ unaffected in content — only their version label and the migration change.
 ## 3. Lending scope
 
 Lending follows the tenant tree, resolved through the existing
-`GET /tenants/descendants` (AB#5151) — a BFS walk that already handles indirect
+`GET /tenants/descendants` — a BFS walk that already handles indirect
 children and guards against registry cycles.
 
 ```mermaid
@@ -169,7 +172,7 @@ graph TD
 - A parent lends to **any** descendant, direct or indirect.
 - **Siblings may lend to each other** when they share a parent.
 - A descendant never lends **upwards**. The trust direction matches the
-  parent-tenant boundary (AB#5060) and the `xt_` shadow-user chain.
+  parent-tenant boundary and the `xt_` shadow-user chain.
 
 ## 4. Lease protocol
 
@@ -195,15 +198,14 @@ sequenceDiagram
 
 ### Borrower identity — the lease carries the credential
 
-The concept's first draft said "token exchange to the target tenant (AB#4338, RFC 8693)".
+The concept's first draft said "token exchange to the target tenant (RFC 8693)".
 **That mechanism does not cover this case.** RFC 8693 exchange is live, but
 `TenantExchangeProcessor` rejects a `subject_token` without `sub` and `tenant_id` — and a
 client-credentials token deliberately carries none (`OctoAccessTokenShapeHandler` strips it).
 It also mints an `xt_{A}_{user}` shadow user, which is not what a service identity wants.
 
-Instead the controller sends the **borrower's own `PipelineServiceAccount` credential**
-(AB#5027) with the lease. The pool member then logs in and acts exactly as the borrower's own
-adapter would — no new standing grants anywhere, and the whole AB#5027 identity chain is reused
+Instead the controller sends the **borrower's own `PipelineServiceAccount` credential** with the lease. The pool member then logs in and acts exactly as the borrower's own
+adapter would — no new standing grants anywhere, and the whole pipeline-service-account identity chain is reused
 unchanged.
 
 Two properties make this acceptable rather than a new exposure class: the controller already
@@ -215,15 +217,15 @@ The alternative — mirroring the pool's account into every borrower — was rej
 the pool a standing credential in every borrower tenant even when no lease is active, which is
 the opposite of what leasing is for.
 
-### Borrower caller identity — the lease carries the invoker too (AB#5279)
+### Borrower caller identity — the lease carries the invoker too
 
 The two credentials above answer *as which service* the member works. They do not answer *for
 whom*. On a dedicated adapter the invoker of `POST {tenant}/v1/pipeline/execute` rides the execute
-command (AB#5126: token-free principal on `Caller`, raw token beside it) and the
+command (token-free principal on `Caller`, raw token beside it) and the
 `FromExecutePipelineCommand` trigger enforces its `CallerBinding` rule against it. The lease path
 used to drop both — the work item was enqueued without them, `LeaseDto` had no field for them, and
 the run then completed and reported success under an identity other than the one the caller
-established. Silent, and exactly the shape AB#5136's channel binding was built to prevent.
+established. Silent, and exactly the shape the channel binding was built to prevent.
 
 The fix follows the input's route: the invoker is persisted **on the queued `PipelineExecution`**
 (`CallerSubjectId`, `CallerTenantId`, `CallerEmail`, `CallerName`, `CallerRoles`,
@@ -235,13 +237,13 @@ token and drops it when its `exp` has passed (a dead token would not fail the ru
 would fail every delegated call inside it), and hands `LeaseDto.Caller` / `CallerAccessToken` to
 the member. A retry after an interrupted lease copies both from the interrupted attempt.
 
-> **Since System.Communication 4.12.0 (AB#7472)** the invoker is no longer stored in the seven plain
+> **Since System.Communication 4.12.0** the invoker is no longer stored in the seven plain
 > `Caller*` attributes (they stay in the model, deprecated, neither written nor read). Principal, trust
 > level and token are written as one sealed envelope in `PipelineExecution.SealedCaller`, bound to the
-> tenant and the execution; the lease grant opens it and carries only what verifies. See the controller
-> `CLAUDE.md`, section "The queued invoker is sealed".
+> tenant and the execution; the lease grant opens it and carries only what verifies. See
+> [The queued invoker is sealed](../leasing-queued-invoker.md).
 >
-> **Since AB#7473** the same envelope is the provenance of a queued work item: the controller seals every
+> **Queued work items:** the same envelope is the provenance of a queued work item: the controller seals every
 > execution it queues, also without an invoker, and the lease grant never leases an execution whose envelope
 > does not open. It is failed instead, with a reason. Items that were queued before the upgrade fail the same
 > way. Roll out with the leasing kill switch off (it holds the queue), let queued leased items drain or cancel
@@ -249,14 +251,14 @@ the member. A retry after an interrupted lease copies both from the interrupted 
 > way. See "Only executions the controller
 > queued are leased".
 >
-> **Since AB#7461** a run started by the invocation of a CK method (`PipelineMethodInvoker`) also carries the
+> **Method invocations:** a run started by the invocation of a CK method (`PipelineMethodInvoker`) also carries the
 > method-invocation marker through the queue: it is one more member of the same sealed envelope (no new attribute,
 > System.Communication stays 4.12.0), opened at lease grant, projected into `LeaseDto.MethodInvocation` and sealed
 > again for the retry's execution on requeue. A marker that does not verify is dropped and the adapter-side guard
-> (AB#7462; an adapter without it ignores `LeaseDto.MethodInvocation`) refuses (fail closed). REST and cron runs carry none. Same rollout as AB#7473. See the controller `CLAUDE.md`,
-> section "Method-invocation marker on the leased path".
+> (an adapter without it ignores `LeaseDto.MethodInvocation`) refuses (fail closed). REST and cron runs carry none. Same rollout as the queued-provenance envelope. See
+> [Method-invocation marker on the leased path](../leasing-queued-invoker.md).
 
-> **Since AB#7476** a sealed queued execution is leased **at most once**. Status and lease timestamps of a
+> **Single lease:** a sealed queued execution is leased **at most once**. Status and lease timestamps of a
 > `PipelineExecution` are writable through the generic runtime surfaces, so a finished execution can be set back to
 > `Queued` and would otherwise be leased again as its original caller (and, for a method run, with its original
 > marker). The sealed payload therefore carries a random single-use identity (`ClaimId`) and its issue time; the
@@ -270,11 +272,11 @@ the member. A retry after an interrupted lease copies both from the interrupted 
 > on the MongoDB server clock. Claim records are deleted by a TTL index after `QueuedSealMaxAgeDays` (default 30) plus one day; a seal
 > older than `QueuedSealMaxAgeDays` is refused, so deleting a record never revives an old seal. Items queued before the
 > upgrade carry no identity and are failed (no migration). A requeue is bound to the execution whose seal is re-sealed
-> and happens once (reaper and release racing for one lease yield one retry). Rollout: same sequence as AB#7473 (leasing
+> and happens once (reaper and release racing for one lease yield one retry). Rollout: same sequence as the queued-provenance envelope (leasing
 > kill switch off, drain or cancel queued leased items **and in-flight leases granted by old controller pods - they have
 > no claim record, are not requeued after the roll and are failed by the stuck-execution reaper after about 30 minutes**,
 > roll **all** controller instances, leasing back on); no setting is required.
-> See the controller `CLAUDE.md`, section "A sealed execution is leased at most once".
+> See [A sealed execution is leased at most once](../leasing-queued-executions.md).
 
 The member applies them through `LeaseCallerCarryThrough`, the lease twin of
 `ExecuteCommandCallerCarryThrough`: same mapping onto `ExecutePipelineOptions`, same three-state
@@ -285,7 +287,7 @@ runs as the service account, as its dedicated twin would.
 
 ### Borrower data access — the lease carries the database credential too
 
-**AB#4924.** Identity was only half of "become the borrower". A mesh adapter opens MongoDB
+Identity was only half of "become the borrower". A mesh adapter opens MongoDB
 directly (`AddMongoDbRuntimeRepository()` in its DI), and the Communication Operator deliberately
 refuses an adapter pool the cluster's shared data-store credentials — one Mongo user, one CrateDB
 user, every tenant's data behind them — on the ground that *tenant-scoped data access arrives with
@@ -305,7 +307,7 @@ configuration:
   and knows no naming rule. It applies what it is given. Today the *authorisation* is already per
   tenant — `TenantContext` creates `octo-system-ds-user-{database}` and grants it `readWrite` on
   that one database — while the *secret* behind every such user is one installation-wide value.
-  **AB#5255** gives each database its own password and changes only where the password comes from:
+  **The per-database-password follow-up** gives each database its own password and changes only where the password comes from:
   one line in `TenantDatabaseCredentialResolver`, never the wire and never the member.
 - **Installed for one database, not for the process.** A member opens more than the borrower's
   database — the installation's tenant registry above all — and the borrower's datasource user is
@@ -332,7 +334,7 @@ would be time-scoped but not tenant-scoped — the shape of the mechanism above 
 way this work item removed for Mongo. A pool member is given no stream-data password, so **a leased
 pipeline that writes an archive fails to connect rather than reaching another tenant's schema**,
 which is the correct direction for that failure. The prerequisite is a per-tenant CrateDB user —
-the stream-data sibling of AB#5255 — and until it exists, archive-writing pipelines stay on
+the stream-data sibling of the per-database-password follow-up — and until it exists, archive-writing pipelines stay on
 dedicated adapters.
 
 **One thing this does not yet give a pool member: access to the tenant *registry*.** Resolving
@@ -340,7 +342,7 @@ dedicated adapters.
 credential the lease carries is by construction not authorised there. A member therefore still
 needs an installation-scoped credential for the system database alone — which today is the same
 shared secret, so the residue is real and named rather than papered over. It is the second thing
-AB#5255 makes separable, and it is why the lease carries the database *name*: the member cannot
+the per-database-password follow-up makes separable, and it is why the lease carries the database *name*: the member cannot
 look it up without already holding the credential it is trying to install.
 
 ### Hub authorization
@@ -348,7 +350,7 @@ look it up without already holding the credential it is trying to install.
 The management connection terminates on a new `/adapterPoolHub`, not on
 `/{tenantId}/adapterHub` — that route binds the connection to a tenant by construction
 (`SignalRClient.BuildServiceUri()` throws on a blank tenant, and `AdapterHubAuthorizationFilter`
-from AB#5063 enforces it — 🔴 the method is called `BuildServiceUri`, not `GetHubUri`; corrected
+from the adapter-hub gate enforces it — 🔴 the method is called `BuildServiceUri`, not `GetHubUri`; corrected
 2026-09-14 during increment 6).
 
 The pool hub evaluates the **lending tenant's** read-write policy plus a filter binding the
@@ -366,11 +368,11 @@ Concretely:
 - `FindTenantRepositoryAsync` caches per process today. That cache must become
   lease-scoped or be dropped on release. (§12.4 of the plan: it does not cache the
   *repository* — but the engine does cache one **repository client**, and its
-  authenticated connection pool, per database. AB#4924 evicts that on both edges of
+  authenticated connection pool, per database. Leasing evicts that on both edges of
   the lease.)
 - The borrower's **database credential** is tenant-scoped state in the most literal
   sense and is held for one lease, for one database, and dropped on release.
-- The CK-model cache warmed eagerly at startup (AB#4920) is per tenant — it
+- The CK-model cache warmed eagerly at startup is per tenant — it
   cannot simply be kept warm across leases.
 - `AdapterOptions.TenantId` must be **removed**, not merely ignored. As long as a
   process-wide tenant value exists, some node can read it instead of
@@ -385,7 +387,7 @@ the hub registration.
 ### Warm-up cost is why both modes exist
 
 Every lease switch costs a token exchange, a tenant repository and the pipeline
-definitions. At ~16 executions/h that is irrelevant. At energyiq's 4089/h it would
+definitions. At ~16 executions/h that is irrelevant. At tenant-3's 4089/h it would
 be pure overhead — which is exactly why continuous-data adapters stay dedicated.
 
 ## 4a. Adapter pools
@@ -408,8 +410,7 @@ workloads with `LifecycleMode = Leased`", which contradicts §2: `Leased` means 
 and a member **is** the process. Both cannot carry the same mode. Members are **replicas of the pool workload
 itself**, which is a `DeployableWorkload` in its own right; they need no entity, no author configuration and no
 lifecycle of their own. `Leased` stays unambiguously the **borrower's** mode, set on `Adapter`. See the
-implementation plan §13.2. The pool — not the
-AB#4918 idle watchdog — owns their lifecycle: the watchdog drains a workload from *its own*
+implementation plan §13.2. The pool — not the idle watchdog — owns their lifecycle: the watchdog drains a workload from *its own*
 pipelines' `LastExecutionAt`, and a pool member has no pipelines of its own. This resolves the
 contradiction the on-demand concept would otherwise run into.
 
@@ -420,11 +421,11 @@ child tenant's blueprint declares that it borrows. Both halves are author config
 lease, so CPU utilisation says nothing about whether work is piling up. The signal is queue
 depth and queue wait time (§5).
 
-### `IdleTimeoutMinutes` shrinks the pool — implemented 2026-09-28 (AB#5256)
+### `IdleTimeoutMinutes` shrinks the pool — implemented 2026-09-28
 
 🔴 **This paragraph described something that did not exist.** The line above and the CK model comment
 both said `IdleTimeoutMinutes` is what drains a member above `MinReplicas`, and nothing read the
-attribute for a pool at all: the AB#4918 idle watchdog skips `RtAdapterPool` on purpose (a pool has no
+attribute for a pool at all: the idle watchdog skips `RtAdapterPool` on purpose (a pool has no
 pipelines of its own, so it would read as idle since forever and drain to zero, taking every
 borrower's work with it), and nothing took its place. So a pool **only ever grew**. Measured on the
 local kind cluster: a queue-driven scale-up to two members on 2026-09-23 was still two members days
@@ -545,7 +546,7 @@ Three timestamps make the lease lifecycle readable end to end:
 | `LeaseReleasedAt` | the member is handed back | how long did it hold the process |
 
 `StartedAt` is relaxed from mandatory to optional in the same CK bump: a queued execution has
-no start time, and stamping it at enqueue is not an option because the AB#4280 reaper and the
+no start time, and stamping it at enqueue is not an option because the reaper and the
 orphan resolver both key off it — a long queue wait would be reaped as a stuck execution.
 
 `LeaseGrantedAt` and `LeaseReleasedAt` are deliberately separate from `StartedAt`/`FinishedAt`:
@@ -583,7 +584,7 @@ Two classes only, not a numeric priority. A number needs someone to assign it, a
 interactive job runs before your batch jobs, and tenants take turns.*
 
 **Where the class comes from.** The trigger node declares it, exactly as it already declares
-`RequiresRunningProcess` for on-demand capability (AB#4914 §5). The descriptor contract gains a
+`RequiresRunningProcess` for on-demand capability (on-demand lifecycle concept §5). The descriptor contract gains a
 second capability — the execution class the trigger implies — set by the SDK trigger-node
 implementations and picked up automatically by the reflection-based descriptor scan, so future
 and third-party nodes self-describe without a controller-side list.
@@ -615,24 +616,24 @@ the queue path.
 |---|---|
 | Lease holder crashes mid-execution | Lease has a TTL; controller re-queues the execution and marks the previous attempt `Interrupted` (existing status). At-least-once, so pipelines must stay idempotent — same contract as today. 🔴 **Clarified during increment 7:** the re-queue is a **new** `PipelineExecution`, not the old one moved back to `Queued`. One entity cannot be `Interrupted` and `Queued` at once, and reusing it would erase both the interrupted record this row asks for and the lease span that prices it (§4b). Each *attempt* is one entity; the history reads attempt 1 `Interrupted`, attempt 2 `Queued → Running`. |
 | Release never arrives | TTL expiry releases the lease server-side; the process is drained and restarted rather than re-used, because its post-lease cleanliness is unproven. |
-| Member drains itself (a lease participant failed to leave) | ✅ **AB#5864, 2026-10-07.** The member releases with `Drained` and keeps the work item's own outcome; the controller marks it draining in its registry (no further grant), a lease it refused without running the work is re-queued at its original queue position (at most three refusals in a row, then failed), and the member exits once idle so the pool workload restarts it as a fresh process. Before the fix the controller kept granting to it and failed every refused execution — the pool was dead until the pod was deleted. |
-| Pool idle above `MinReplicas` | ✅ **AB#5256, 2026-09-28.** The scheduler drains one member and asks the pool to run one fewer, but only while the *whole* pool is idle — empty queue for every borrower, no member holding a lease, nothing granted for `IdleTimeoutMinutes` (§4a). Not a failure, but it shares the drain mechanism: the two are told apart on `octo.lease.member_drained.count` by `octo.lease.drain_reason` (`ttl_expiry` vs `pool_idle`), because a member that lost a borrower's work and a pool doing what it declares must not be one series. Queued work brings the member back through the normal scale-up. |
+| Member drains itself (a lease participant failed to leave) | ✅ **Done 2026-10-07.** The member releases with `Drained` and keeps the work item's own outcome; the controller marks it draining in its registry (no further grant), a lease it refused without running the work is re-queued at its original queue position (at most three refusals in a row, then failed), and the member exits once idle so the pool workload restarts it as a fresh process. Before the fix the controller kept granting to it and failed every refused execution — the pool was dead until the pod was deleted. |
+| Pool idle above `MinReplicas` | ✅ **Done 2026-09-28.** The scheduler drains one member and asks the pool to run one fewer, but only while the *whole* pool is idle — empty queue for every borrower, no member holding a lease, nothing granted for `IdleTimeoutMinutes` (§4a). Not a failure, but it shares the drain mechanism: the two are told apart on `octo.lease.member_drained.count` by `octo.lease.drain_reason` (`ttl_expiry` vs `pool_idle`), because a member that lost a borrower's work and a pool doing what it declares must not be one series. Queued work brings the member back through the normal scale-up. |
 | A borrowed tenant floods the queue | Round-robin bounds its share; a per-tenant concurrency cap bounds it further. |
 | Pool exhausted | Queue grows, visible in Studio. Scale the pool, or move the tenant to a dedicated adapter. |
 | Parent tenant deleted while lending | Borrowers fall back to `Deployed=false` and surface a blocking reason. Never silently stop executing. |
 
 ## 7. Relationship to existing work
 
-- **AB#4914 / on-demand-adapter-lifecycle.md** — leasing sits beside `OnDemand`, not instead of it. A pool member may itself be `OnDemand`.
-- **AB#4924** — this supersedes its multiplexing assumption; the cost/latency comparison it asks for stays valid as input.
-- **AB#5027 `PipelineServiceAccount`** — the execution identity is already decoupled from the tenant; leasing needs the token exchange on top.
-- **AB#4338 RFC 8693 token exchange** — 🔴 **corrected 2026-09-14, during increment 6.** This bullet used
+- **on-demand-adapter-lifecycle.md** — leasing sits beside `OnDemand`, not instead of it. A pool member may itself be `OnDemand`.
+- **Earlier leasing sketch** — this supersedes its multiplexing assumption; the cost/latency comparison it asks for stays valid as input.
+- **`PipelineServiceAccount`** — the execution identity is already decoupled from the tenant; leasing needs the token exchange on top.
+- **RFC 8693 token exchange** — 🔴 **corrected 2026-09-14, during increment 6.** This bullet used
   to call the exchange "the mechanism for acquiring the target-tenant token", which contradicted §4 and Q6
   two pages earlier. It is **not** the mechanism and cannot be: the exchange is user-only — it rejects a
   `subject_token` without `sub`/`tenant_id`, which is exactly the shape of a client-credentials token, and it
   mints an `xt_` shadow user, which is not what a service identity wants. The lease carries the borrower's own
   `PipelineServiceAccount` credential instead (Q6). See the implementation plan §13.5.
-- **AB#5151 `GET /tenants/descendants`** — the lending scope resolver.
+- **`GET /tenants/descendants`** — the lending scope resolver.
 
 ## 8. Decisions and open questions
 
@@ -657,7 +658,7 @@ the queue path.
 | Q18 | Rename sequencing | Ships **together** with leasing — one major bump, one migration |
 | Q14 | Scale-up trigger | Queue depth **or** wait time crossing a threshold; averaging window measured during implementation and kept configurable — ✅ implemented as a controller option whose default *derives* the window from the pool's own `ScaleUpQueueWaitSeconds` rather than inventing a constant; see the implementation plan, D3 |
 | Q19 | How a leased member learns what to run | The **lease carries the work**: pipeline rtId, input, and the pipeline configuration the controller already projects for a dedicated adapter. One execution entity from enqueue to release — the member runs *against* the queued execution and reports no execution start (implementation plan §9.9 / D4) |
-| Q20 | When the per-tenant kill switch ships | **With the scheduler, not after it.** `LeasingEnabled` on the existing AB#4914 `communicationLifecycle` record, default off, enforced at both the enqueue and the grant. Work already queued is **held**, never drained and never cancelled (implementation plan §14.1 / D5) |
+| Q20 | When the per-tenant kill switch ships | **With the scheduler, not after it.** `LeasingEnabled` on the existing `communicationLifecycle` record, default off, enforced at both the enqueue and the grant. Work already queued is **held**, never drained and never cancelled (implementation plan §14.1 / D5) |
 
 ### Still open
 

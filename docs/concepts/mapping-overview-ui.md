@@ -1,3 +1,8 @@
+---
+description: "Concept: Data Mapping overview UI"
+background: true
+---
+
 # Data Mapping Overview - UI Concept
 
 ## Problem
@@ -36,15 +41,15 @@ A dedicated page in Refinery Studio under **Communication → Data Mappings** th
 │  │  ◉ │ Source                │ →  │ Target              │ Attribute  │ │
 │  │ ───┼───────────────────────┼────┼─────────────────────┼──────────  │ │
 │  │  ✓ │ Temperatur Wohnber.   │ →  │ Space "Wohnbereich" │ Temperature│ │
-│  │    │ InfoOnlyAnalog        │    │ EnergyIQ/Space      │            │ │
+│  │    │ InfoOnlyAnalog        │    │ Facility/Space      │            │ │
 │  │    │ Room: Wohnbereich     │    │                     │            │ │
 │  │ ───┼───────────────────────┼────┼─────────────────────┼──────────  │ │
 │  │  ✓ │ Feuchte Wohnbereich   │ →  │ Space "Wohnbereich" │ Humidity   │ │
-│  │    │ InfoOnlyAnalog        │    │ EnergyIQ/Space      │            │ │
+│  │    │ InfoOnlyAnalog        │    │ Facility/Space      │            │ │
 │  │    │ Room: Wohnbereich     │    │                     │            │ │
 │  │ ───┼───────────────────────┼────┼─────────────────────┼──────────  │ │
 │  │  ⚠ │ Dimmer Deckenlampe    │ →  │ Space "Wohnbereich" │ LightingLvl│
-│  │    │ Dimmer                │    │ EnergyIQ/Space      │ value / 100│ │
+│  │    │ Dimmer                │    │ Facility/Space      │ value / 100│ │
 │  │    │ Room: Wohnbereich     │    │                     │            │ │
 │  │ ───┼───────────────────────┼────┼─────────────────────┼──────────  │ │
 │  │  ✗ │ Temp Aussen           │ →  │ (no target)         │ —          │ │
@@ -60,14 +65,14 @@ A dedicated page in Refinery Studio under **Communication → Data Mappings** th
 │  │  Source          Loxone/Control "Temperatur Wohnbereich"    [🔗]    │ │
 │  │  Source Attr.    CurrentValue                                       │ │
 │  │  Expression      (none)                                             │ │
-│  │  Target          EnergyIQ/Space "Wohnbereich"               [🔗]   │ │
+│  │  Target          Facility/Space "Wohnbereich"               [🔗]   │ │
 │  │  Target Attr.    Temperature                                        │ │
 │  │  Enabled         ✓                                                  │ │
 │  │                                                                    │ │
 │  │  Validation                                                         │ │
 │  │  ✓ Source entity exists                                             │ │
 │  │  ✓ Target entity exists                                             │ │
-│  │  ✓ Target attribute "Temperature" exists on EnergyIQ/Space          │ │
+│  │  ✓ Target attribute "Temperature" exists on Facility/Space          │ │
 │  │  ✓ Value type compatible (String → Double)                          │ │
 │  │  ✓ No duplicate mapping (same source+state → same target+attr)      │ │
 │  │                                                                    │ │

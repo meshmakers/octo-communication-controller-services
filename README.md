@@ -158,7 +158,7 @@ octo-communication-controller-services/
 │
 ├── devops-build/                             # CI/CD Pipelines
 ├── Directory.Build.props                      # Build Configuration
-├── CLAUDE.md                                  # AI Assistant Guidelines
+├── AGENTS.md                                  # AI assistant guidelines (CLAUDE.md is a shim)
 └── Octo.CommunicationController.sln          # Solution File
 ```
 
@@ -359,18 +359,18 @@ Base route: `{tenantId}/v{version}/`
 
 ### CK Methods (GraphQL)
 
-Since System.Communication 4.17.0 (AB#8595) the adapter, workload and adapter pool operations above are also CK methods
+Since System.Communication 4.17.0 the adapter, workload and adapter pool operations above are also CK methods
 handled by this service (`Adapter.DeployUpdate`, `Adapter.ReconcileServiceAccount`, `Adapter.RotateServiceAccountSecret`,
 `DeployableWorkload.Wake`, `AdapterPool.RefreshMirrors`, `AdapterPool.PublishMirrors`, `AdapterPool.GrantLease`,
 `AdapterPool.CancelQueuedExecution`), callable as typed GraphQL mutations through the asset repository with the role
-`CommunicationManagement`. Since 4.18.0 (AB#8596) the pipeline, data flow and workload chart-version operations follow
+`CommunicationManagement`. Since 4.18.0 the pipeline, data flow and workload chart-version operations follow
 (`Pipeline.Deploy`, `Pipeline.Execute`, `Pipeline.SetDebugging`, `Pipeline.MoveToAdapter`, `DataFlow.Deploy`,
-`DataFlow.Undeploy`, `DeployableWorkload.SetChartVersion`), since 4.19.0 (AB#9050) the deployment operations
+`DataFlow.Undeploy`, `DeployableWorkload.SetChartVersion`), since 4.19.0 the deployment operations
 (`DeploymentSite.Deploy`, `DeploymentSite.Undeploy`, `DeployableWorkload.Deploy`, `DeployableWorkload.Undeploy`,
 `AdapterPool.Scale`, static `PipelineTrigger.DeployAll` / `UndeployAll`). The tenant-level endpoints of
-`CommunicationController` stay REST. Since AB#9048 / AB#9049 (AB#9050 for the deployment endpoints) these REST endpoints are facades of the methods: same routes, bodies and status codes, one
+`CommunicationController` stay REST. These REST endpoints are facades of the methods: same routes, bodies and status codes, one
 Method audit event per call; a caller without `CommunicationManagement` keeps the previous REST behaviour (logged with
-`Reason=role-missing`). Details: `docs/rest-method-facades.md` (parity table) and `CLAUDE.md`, "CK method service handlers".
+`Reason=role-missing`). Details: `docs/rest-method-facades.md` (parity table) and [CK method service handlers](docs/ck-method-service-handlers.md).
 
 ## Configuration
 

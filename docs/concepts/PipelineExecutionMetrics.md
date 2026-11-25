@@ -1,3 +1,8 @@
+---
+description: "Concept: pipeline execution metrics, requirements and design (German)"
+background: true
+---
+
 # Konzept: Pipeline Execution Metrics
 
 ## Zusammenfassung der Anforderungen
@@ -713,7 +718,7 @@ public record ExecutionAggregateResult(
 
 ### 7.3 Statistik-Berechnung
 
-> Überholt — aktuelle Fenster-Semantik (AB#4370, AB#5583): siehe [pipeline-statistics-windows.md](pipeline-statistics-windows.md).
+> Überholt — aktuelle Fenster-Semantik: siehe [pipeline-statistics-windows.md](pipeline-statistics-windows.md).
 
 ```
 1. Background Service triggert alle 5 Minuten

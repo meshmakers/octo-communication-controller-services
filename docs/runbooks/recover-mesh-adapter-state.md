@@ -1,3 +1,8 @@
+---
+description: "Runbook: recover MeshAdapter DeploymentState after the blueprint re-apply regression"
+background: true
+---
+
 # Runbook — Recover MeshAdapter `DeploymentState` after blueprint re-apply regression
 
 ## When to run
@@ -118,7 +123,7 @@ again.
    ```bash
    kubectl exec -n mongodb octo-mongodb-0 -c mongod -- mongosh "$CONN" --quiet \
      --eval '
-       ["sbeg","maco","meshtest","voest"].forEach(t => {
+       ["tenantA","tenantB","tenantC","tenantD"].forEach(t => {
          const e = db.getSiblingDB(t)
            .RtEntity_SystemCommunicationDeployableEntity
            .findOne({_id: ObjectId("670000000000000000000002")});
