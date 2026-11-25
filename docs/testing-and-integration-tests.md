@@ -106,6 +106,13 @@ this service embeds (the guard keeps it, the import would only be skipped with a
 need no change: the `System.Communication` `IServiceManagedCkModelDescriptor` and the blueprint floors
 (`System.Communication-[3.0,4.0)`) are guarded / range-based in the engine.
 
+**Historic System models come from the test catalog.** The engine refuses every caller import
+(`ImportCkModelAsync(CkCompiledModelRoot)`) of a `System` / `System.*` model with `CK_SERVICE_MANAGED_MODEL`. A test that
+needs a tenant on a historic or published System model (System.Bot 3.4.0, System.Communication 3.x / 4.10.0, System.Ai
+4.6.0) installs it with `fixture.TestCkModelCatalog.ImportThroughServicePathAsync(tenant, model)`
+(`Fixtures/TestCkModelCatalog.cs`): the model is put into an in-memory catalog that is asked first, imported by id through
+the downgrade-guarded service path, and removed again. Non-System models keep the caller import.
+
 ### Running Integration Tests
 
 ```bash
