@@ -1,5 +1,6 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Communication.Generated.System.Communication.v4;
+using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Runtime.Contracts;
 
 namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Services;
@@ -28,10 +29,14 @@ public enum PipelineServiceAccountSource
 /// <summary>
 /// Outcome of a pipeline service-account resolution (AB#5027).
 /// </summary>
-/// <param name="ServiceAccount">The effective service account, or <c>null</c> when none is reachable.</param>
+/// <param name="ServiceAccount">
+///     The effective service account, or <c>null</c> when none is reachable. Base-typed on purpose (AB#9776): a
+///     <c>Uses</c>-linked override is loaded as <see cref="RtConfiguration" /> with the ServiceAccountConfiguration
+///     CkTypeId, never as the typed class — read its attributes with <c>GetAttributeValueOrDefault</c>.
+/// </param>
 /// <param name="Source">Which of the two link kinds produced the result.</param>
 public record PipelineServiceAccountResolution(
-    RtServiceAccountConfiguration? ServiceAccount,
+    RtConfiguration? ServiceAccount,
     PipelineServiceAccountSource Source)
 {
     /// <summary>The "nothing linked" result. Deploys of such a pipeline are refused by the guard.</summary>

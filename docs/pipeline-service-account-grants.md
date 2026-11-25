@@ -20,9 +20,11 @@ Any **other** concrete issuer/tenant is left alone by the reconcile (this *inver
 rule) — but since **AB#9776 (own issuer only, Reimar 2026-11-24)** it is no longer a supported
 target: the mesh adapter sends service-account grants only to its own identity service and refuses
 a foreign issuer or a tenant other than the pipeline's on every execution, the deploy guard refuses
-such a pipeline and health reports it as a violation (below). Shared helpers on `PipelineServiceAccountProvisioningService`:
-`IsInstallationIssuer` (replaces `IsIssuerUriHealthy`), `ConvergeIssuerUri`, `ConvergeTenantId`,
-`IsSecretUsable` (byte-for-byte the adapter's rule: empty or leading `<` = no secret). The
+such a pipeline and health reports it as a violation (below). One rule decides "own" for reconcile, health and
+deploy alike: `ServiceAccountOwnIssuer` (`OwnNames`, `IsOwnIssuer`, `IsOwnTenant` - the token in any spelling, the
+own `AuthorityUrl` and the resolved `ServiceUrls` authority with case, default-port and trailing-slash variants, the
+tenant without case and blanks). Helpers on `PipelineServiceAccountProvisioningService`: `ConvergeIssuerUri`,
+`ConvergeTenantId` (both built on that rule), `IsSecretUsable` (byte-for-byte the adapter's rule: empty or leading `<` = no secret). The
 projection passes an empty `IssuerUri` through EMPTY; token resolution remains only for legacy
 entities that still carry it. The secret transition stays dual-path: the reconcile still issues a
 secret where none exists — an impersonation-only account is authored, never generated.

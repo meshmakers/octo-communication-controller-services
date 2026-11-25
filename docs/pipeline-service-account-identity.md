@@ -135,8 +135,9 @@ mirroring only copies. So without phase 2 the deploy guard refuses **every** pip
    lost edge). The rtId, not the name, is the key: names are editable.
 2. Decide the secret. An existing configuration with a **usable** secret (or one that impersonation stands in for)
    **and** a client id and a well-known name is complete and contributes its own plaintext. Empty issuer and tenant
-   id are the canonical defaults and do not make it incomplete; a concrete foreign value is a deliberate target and
-   is preserved. Otherwise a fresh 384-bit URL-safe secret is generated with `RandomNumberGenerator` - except that an
+   id are the canonical defaults and do not make it incomplete. A foreign issuer or tenant is never rewritten
+   silently, but it is not usable either (AB#9776, own issuer only): the mesh adapter refuses it, the deploy guard does
+   not deploy a pipeline with it, health reports it and the automatic reconcile creates no client for it. Otherwise a fresh 384-bit URL-safe secret is generated with `RandomNumberGenerator` - except that an
    automatic pass sends none for an account that already declares a `ClientId` (identity keeps its current secret;
    a fresh one comes only from the manual reconcile or the rotate endpoint).
 3. Send `CreateIdentityDataCommandRequest` with that one client — **every pass**, not only the first.

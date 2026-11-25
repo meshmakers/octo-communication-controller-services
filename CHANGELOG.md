@@ -8,6 +8,14 @@
   normalisation) with `PipelineServiceAccountForeignIssuer`, and one whose `TenantId` is not empty or the pipeline's
   tenant with `PipelineServiceAccountForeignTenant`. Service-account health reports both as violations (`issuer-foreign`,
   `tenant-mismatch`); the former "healthy foreign pairing" is gone. The mesh adapter enforces the same rule at run time.
+  The guard checks every service account the configuration projection ships (all `Uses`-linked ones, detected by
+  CkTypeId, or the adapter default), and the resolver now detects a `Uses`-linked override by CkTypeId too (it is
+  loaded base-typed, so the override was never seen before; this also feeds the AB#5112 health and secret checks).
+  Reconcile and rotation decide "own" with the same rule as deploy and health (case, default-port and trailing-slash
+  variants, the resolved `ServiceUrls` authority, tenant without case and blanks), and the projection resolves the
+  `{{service.authority}}` fallback in any spelling. Known limitation: an account edited after the deploy reaches a
+  connected adapter through the adapter configuration read without a new deploy check; the adapter refuses it at run
+  time and health reports it.
 - AB#9325 Test: the System.Communication migration and dependents tests install their historic and published
   System models (System.Bot 3.4.0, System.Communication 3.x / 4.10.0, System.Ai 4.6.0) through the service path
   (`ImportCkModelAsync(CkModelId)` from the in-memory test catalog `TestCkModelCatalog`) instead of the caller

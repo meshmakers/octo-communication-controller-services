@@ -113,6 +113,24 @@ internal class PipelineServiceAccountRotationTests
     // ------------------------------------------------------------------ both sides renewed
 
     [Test]
+    public async Task Rotate_OwnIssuerAndTenantInAnotherSpelling_ConvergeToEmpty()
+    {
+        // AB#9776: rotation decides "own" with the deploy guard's rule (case, default port, tenant case).
+        var adapter = RtEntityCreator.CreateAdapter();
+        var existing = ArrangeProvisionedAdapter(adapter);
+        existing.IssuerUri = "https://IDENTITY.example.com:443/";
+        existing.TenantId = "TENANTID";
+
+        await _sut.RotateAdapterSecretAsync(TenantId, adapter);
+
+        var saved = SavedConfigurations().Single();
+        using var _ = Assert.Multiple();
+        await Assert.That(SentSecrets().Single()).IsNotEqualTo(ExistingSecret);
+        await Assert.That(saved.IssuerUri).IsNull();
+        await Assert.That(saved.TenantId).IsNull();
+    }
+
+    [Test]
     public async Task Rotate_RenewsBothSidesWithTheSameNewSecret()
     {
         var adapter = RtEntityCreator.CreateAdapter();

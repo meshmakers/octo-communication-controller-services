@@ -1565,22 +1565,10 @@ internal class AdapterService(
             nameof(RtServiceAccountConfiguration.ClientId)) as string;
 
         // AB#9776 (own issuer only): checked before the credential checks — a foreign target is refused whatever
-        // credentials the entity holds, because the adapter refuses it on every execution.
-        var issuerUri = serviceAccount.GetAttributeValueOrDefault(
-            nameof(RtServiceAccountConfiguration.IssuerUri)) as string;
-        if (!ServiceAccountOwnIssuer.IsOwnIssuer(issuerUri, OwnIssuerNames(tenantId)))
-        {
-            throw AdapterServiceException.PipelineServiceAccountForeignIssuer(tenantId, pipelineRtEntityId,
-                wellKnownName, issuerUri!);
-        }
-
-        var configuredTenantId = serviceAccount.GetAttributeValueOrDefault(
-            nameof(RtServiceAccountConfiguration.TenantId)) as string;
-        if (!ServiceAccountOwnIssuer.IsOwnTenant(configuredTenantId, tenantId))
-        {
-            throw AdapterServiceException.PipelineServiceAccountForeignTenant(tenantId, pipelineRtEntityId,
-                wellKnownName, configuredTenantId!);
-        }
+        // credentials the entity holds, because the adapter refuses it on every execution. Checked on EVERY
+        // service account the projection ships (CreatePipelineConfigurationAsync), not only the resolved one: a
+        // pipeline may link several via Uses, and each reaches the adapter's GlobalConfiguration.
+        await EnsureShippedServiceAccountsAreOwnAsync(tenantId, pipelineRtEntityId, serviceAccount);
 
         // AB#5114 credential-aware refusal: a configuration without a usable secret (empty, a legacy
         // clear-text seed placeholder, or unreadable here) is refused ONLY when impersonation cannot stand in — the
@@ -2362,21 +2350,45 @@ internal class AdapterService(
     /// </summary>
     private static bool IsServiceAccountConfiguration(RtConfiguration configuration)
     {
-        return configuration is RtServiceAccountConfiguration ||
-               SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId.Equals(configuration.CkTypeId);
+        return PipelineServiceAccountResolver.IsServiceAccountConfiguration(configuration);
     }
 
     /// <summary>
-    /// AB#9776: the concrete names of this installation's identity service — this instance's <c>AuthorityUrl</c> and
-    /// what <c>{{service.authority}}</c> resolves to for the tenant (the value the projection hands the adapter).
+    /// AB#9776: refuses the deploy when any service account the projection would ship names a foreign issuer or a
+    /// foreign tenant. The set is the one <see cref="CreatePipelineConfigurationAsync" /> builds: every
+    /// service-account configuration the pipeline links via <c>Uses</c> (detected by CkTypeId — the load returns
+    /// them base-typed), or, when it links none, the resolved adapter default.
     /// </summary>
-    private IEnumerable<string?> OwnIssuerNames(string tenantId)
+    private async Task EnsureShippedServiceAccountsAreOwnAsync(string tenantId, RtEntityId pipelineRtEntityId,
+        RtConfiguration resolvedServiceAccount)
     {
-        yield return communicationControllerOptions.Value.AuthorityUrl;
-        if (templateResolver.TryResolve(PipelineServiceAccountProvisioningService.IssuerUriToken,
-                new WorkloadTemplateContext(tenantId), out var resolved, out _))
+        var linked = (await communicationRepository.GetConfigurationsByPipelineAsync(tenantId,
+                pipelineRtEntityId.RtId))
+            .Where(IsServiceAccountConfiguration)
+            .OrderBy(c => c.RtId.ToString(), StringComparer.Ordinal)
+            .ToList();
+        var shipped = linked.Count > 0 ? linked : [resolvedServiceAccount];
+
+        var ownNames = ServiceAccountOwnIssuer.OwnNames(communicationControllerOptions.Value.AuthorityUrl,
+            templateResolver, tenantId).ToList();
+        foreach (var account in shipped)
         {
-            yield return resolved;
+            var wellKnownName = account.RtWellKnownName ?? account.RtId.ToString();
+            var issuerUri = account.GetAttributeValueOrDefault(
+                nameof(RtServiceAccountConfiguration.IssuerUri)) as string;
+            if (!ServiceAccountOwnIssuer.IsOwnIssuer(issuerUri, ownNames))
+            {
+                throw AdapterServiceException.PipelineServiceAccountForeignIssuer(tenantId, pipelineRtEntityId,
+                    wellKnownName, issuerUri!);
+            }
+
+            var configuredTenantId = account.GetAttributeValueOrDefault(
+                nameof(RtServiceAccountConfiguration.TenantId)) as string;
+            if (!ServiceAccountOwnIssuer.IsOwnTenant(configuredTenantId, tenantId))
+            {
+                throw AdapterServiceException.PipelineServiceAccountForeignTenant(tenantId, pipelineRtEntityId,
+                    wellKnownName, configuredTenantId!);
+            }
         }
     }
 
@@ -2401,7 +2413,7 @@ internal class AdapterService(
         }
 
         if (string.Equals(unknownPlaceholder, "service.authority", StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(issuerUri.Trim(), "{{service.authority}}", StringComparison.OrdinalIgnoreCase))
+            PipelineServiceAccountProvisioningService.IsIssuerUriToken(issuerUri))
         {
             // No configured authority URL — fall back to the one this instance authenticates
             // against itself, which is exactly what the provisioning wrote before AB#5111. Only for
