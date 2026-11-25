@@ -121,19 +121,25 @@ internal class PipelineServiceAccountProjectionTests : AdapterServiceTestsBase
     }
 
     [Test]
-    public async Task IssuerUriToken_WithoutConfiguredAuthority_FallsBackToTheAuthorityUrl()
+    [Arguments("{{service.authority}}")]
+    // AB#9776: the fallback accepts every spelling the deploy guard accepts as the own issuer.
+    [Arguments("{{ service.authority }}")]
+    [Arguments(" {{SERVICE.Authority}} ")]
+    public async Task IssuerUriToken_WithoutConfiguredAuthority_FallsBackToTheAuthorityUrl(string token)
     {
         // Local dev / clusters whose chart predates the ServiceUrls map: the token must never
         // resolve to less than the pre-AB#5111 behaviour, which wrote AuthorityUrl verbatim.
         ControllerOptions.AuthorityUrl = "https://identity.fallback.example.com";
-        DefaultAdapterServiceAccount.IssuerUri = "{{service.authority}}";
+        DefaultAdapterServiceAccount.IssuerUri = token;
         var (adapter, pipeline) = ArrangeDeployablePipeline();
 
         var pipelineConfig = await DeployAndCaptureAsync(adapter, pipeline);
 
         var projected = pipelineConfig.Configurations
             .Single(c => c.ConfigurationRtId == DefaultAdapterServiceAccount.RtId);
+        using var _ = Assert.Multiple();
         await Assert.That(projected.ConfigurationValue).Contains("https://identity.fallback.example.com");
+        await Assert.That(projected.ConfigurationValue.Contains("{{", StringComparison.Ordinal)).IsFalse();
     }
 
     [Test]

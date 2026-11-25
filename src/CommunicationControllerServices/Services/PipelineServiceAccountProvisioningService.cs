@@ -33,7 +33,8 @@ internal class PipelineServiceAccountProvisioningService(
     ICommunicationEventService eventService,
     IOptions<CommunicationControllerOptions> options,
     IWorkloadEncryptionService encryptionService,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    IWorkloadTemplateResolver? templateResolver = null)
     : IPipelineServiceAccountProvisioningService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
@@ -163,16 +164,26 @@ internal class PipelineServiceAccountProvisioningService(
         _linkedReconcileGuards = new();
 
     /// <summary>
-    /// AB#8982: whether a standalone account deliberately targets another installation or tenant — the
-    /// AB#5115 rule (<see cref="ConvergeIssuerUri" />, <see cref="ConvergeTenantId" />): a value they
-    /// return verbatim is foreign.
+    /// AB#8982: whether a standalone account names another installation or tenant (<see cref="ConvergeIssuerUri" />,
+    /// <see cref="ConvergeTenantId" />: a value they return verbatim is foreign). AB#9776 (own issuer only): such an
+    /// account is not usable — the mesh adapter refuses it, the deploy guard does not deploy a pipeline with it and
+    /// the health reports it — so the automatic reconcile leaves it alone rather than creating a client for it.
     /// </summary>
     private bool TargetsForeignIdentity(string tenantId, RtServiceAccountConfiguration configuration)
     {
         var issuerUri = ReadAttribute(configuration, nameof(RtServiceAccountConfiguration.IssuerUri));
         var targetTenantId = ReadAttribute(configuration, nameof(RtServiceAccountConfiguration.TenantId));
-        return ConvergeIssuerUri(issuerUri, options.Value.AuthorityUrl) != null ||
+        return ConvergeIssuerUri(issuerUri, OwnIssuerNames(tenantId)) != null ||
                ConvergeTenantId(targetTenantId, tenantId) != null;
+    }
+
+    /// <summary>
+    /// AB#9776: this installation's identity service names — the same set the deploy guard and the health use
+    /// (<see cref="ServiceAccountOwnIssuer.OwnNames" />).
+    /// </summary>
+    private List<string?> OwnIssuerNames(string tenantId)
+    {
+        return ServiceAccountOwnIssuer.OwnNames(options.Value.AuthorityUrl, templateResolver, tenantId).ToList();
     }
 
     /// <summary>
@@ -383,8 +394,8 @@ internal class PipelineServiceAccountProvisioningService(
 
                 if (TargetsForeignIdentity(tenantId, configuration))
                 {
-                    // A deliberate foreign target (AB#5115) authenticates against another installation
-                    // or tenant; its client is not ours to create. The manual endpoint stays available.
+                    // A foreign issuer or tenant is refused at run time, deploy and health (AB#9776); its
+                    // client is not ours to create. The health reports it, the manual endpoint stays available.
                     Logger.Info(
                         "[{TenantId}] Uses-linked service account '{WellKnownName}' targets a foreign identity (IssuerUri/TenantId); not reconciled automatically",
                         tenantId, name);
@@ -701,7 +712,7 @@ internal class PipelineServiceAccountProvisioningService(
         // ConvergeX returns either null ("empty" — converged or already empty) or the existing
         // value verbatim (foreign target, preserved), so "this pass must write" is exactly "the
         // result is null while the entity still carries a value".
-        var issuerUriToPersist = ConvergeIssuerUri(existingIssuerUri, options.Value.AuthorityUrl);
+        var issuerUriToPersist = ConvergeIssuerUri(existingIssuerUri, OwnIssuerNames(tenantId));
         var tenantIdToPersist = ConvergeTenantId(existingTenantId, tenantId);
         var needsConvergence =
             (issuerUriToPersist == null && !string.IsNullOrWhiteSpace(existingIssuerUri)) ||
@@ -924,9 +935,10 @@ internal class PipelineServiceAccountProvisioningService(
         {
             await saveAsync(BuildServiceAccount(existing?.RtId, wellKnownName, clientId, secret,
                 // AB#5115: same convergence as the reconcile — the installation spellings become
-                // empty, a deliberate foreign issuer/tenant survives the rotation verbatim.
+                // empty; a foreign issuer/tenant is never rewritten silently (it stays as entered and is
+                // refused by deploy and health, AB#9776).
                 ConvergeIssuerUri(ReadAttribute(existing, nameof(RtServiceAccountConfiguration.IssuerUri)),
-                    options.Value.AuthorityUrl),
+                    OwnIssuerNames(tenantId)),
                 ConvergeTenantId(ReadAttribute(existing, nameof(RtServiceAccountConfiguration.TenantId)), tenantId),
                 existing?.AssignedRoleNames, existing?.AllowDelegation), isNewEntity);
         }
@@ -1065,7 +1077,7 @@ internal class PipelineServiceAccountProvisioningService(
             await communicationRepository.UpdateServiceAccountAsync(tenantId,
                 BuildServiceAccount(configuration.RtId, wellKnownName, clientId!, secret: null,
                     ConvergeIssuerUri(ReadAttribute(configuration, nameof(RtServiceAccountConfiguration.IssuerUri)),
-                        options.Value.AuthorityUrl),
+                        OwnIssuerNames(tenantId)),
                     ConvergeTenantId(ReadAttribute(configuration, nameof(RtServiceAccountConfiguration.TenantId)),
                         tenantId),
                     configuration.AssignedRoleNames, configuration.AllowDelegation));
@@ -1277,13 +1289,16 @@ internal class PipelineServiceAccountProvisioningService(
     /// <param name="issuerUri">
     ///     AB#5115: <c>null</c> keeps the attribute absent — the canonical "this adapter's own
     ///     installation", which the adapter resolves against its own authority configuration. A
-    ///     value is only ever the preserved deliberate foreign target (see
-    ///     <see cref="ConvergeIssuerUri" />); nothing writes the <see cref="IssuerUriToken" /> or a
-    ///     concrete own-installation URL any more.
+    ///     value is only ever a foreign issuer someone entered, kept as entered so the health can name it
+    ///     (see <see cref="ConvergeIssuerUri" />) — it is not usable: deploy and the mesh adapter accept only
+    ///     the own issuer (AB#9776). Nothing writes the <see cref="IssuerUriToken" /> or a concrete
+    ///     own-installation URL any more.
     /// </param>
     /// <param name="tenantId">
     ///     AB#5115: <c>null</c> keeps the attribute absent — "the tenant the adapter runs for".
-    ///     A value is only ever a preserved foreign target (see <see cref="ConvergeTenantId" />).
+    ///     A value is only ever a foreign tenant someone entered, kept as entered so the health can name it
+    ///     (see <see cref="ConvergeTenantId" />) — it is not usable: a service account acts only in the
+    ///     pipeline's own tenant (AB#9776).
     /// </param>
     /// <param name="assignedRoleNames">
     ///     The declaration to persist, or <c>null</c> to keep the entity in legacy mode (no
@@ -1474,30 +1489,24 @@ internal class PipelineServiceAccountProvisioningService(
     }
 
     /// <summary>
-    /// The one shared definition of "this IssuerUri means this installation" — the AB#5111 token
-    /// (which the projection still resolves for legacy entities) or the concrete authority URL
-    /// this instance serves (every entity provisioned before AB#5111). Trailing-slash-insensitive:
-    /// 'https://localhost:5003/' and 'https://localhost:5003' are the same authority, and both
-    /// spellings occur in the wild (seeds write the slash, options usually don't). Shared with the
-    /// AB#5112 health aggregate (<see cref="ServiceAccountHealthService" />) so the convergence
-    /// sweep and the health endpoint can never disagree about the same value.
+    /// Whether <paramref name="issuerUri" /> is the <see cref="IssuerUriToken" /> in any case and spacing.
     /// </summary>
-    internal static bool IsInstallationIssuer(string? issuerUri, string authorityUrl)
+    internal static bool IsIssuerUriToken(string? issuerUri)
     {
-        return !string.IsNullOrWhiteSpace(issuerUri) &&
-               (IssuerUriTokenPattern.IsMatch(issuerUri) ||
-                issuerUri.TrimEnd('/') == authorityUrl.TrimEnd('/'));
+        return issuerUri != null && IssuerUriTokenPattern.IsMatch(issuerUri);
     }
 
     /// <summary>
-    /// AB#5115 convergence of <c>IssuerUri</c>: <c>null</c> (keep/leave the attribute absent) when
-    /// the value is already empty or one of the installation spellings
-    /// (<see cref="IsInstallationIssuer" />); any other concrete value — a deliberate foreign
-    /// identity target — comes back verbatim and is preserved.
+    /// AB#5115 convergence of <c>IssuerUri</c>: <c>null</c> (keep/leave the attribute absent) when the value is
+    /// empty or names this installation (<see cref="ServiceAccountOwnIssuer.IsOwnIssuer" /> over
+    /// <paramref name="ownNames" /> — the token in any spelling, the own authority with case, default-port and
+    /// trailing-slash variants, the resolved <c>ServiceUrls</c> authority). Any other value is foreign and comes
+    /// back verbatim: it is never rewritten silently, and since AB#9776 (own issuer only) it is not usable —
+    /// the mesh adapter refuses it, the deploy guard does not deploy a pipeline with it and the health reports it.
     /// </summary>
-    internal static string? ConvergeIssuerUri(string? issuerUri, string authorityUrl)
+    internal static string? ConvergeIssuerUri(string? issuerUri, IEnumerable<string?> ownNames)
     {
-        if (string.IsNullOrWhiteSpace(issuerUri) || IsInstallationIssuer(issuerUri, authorityUrl))
+        if (ServiceAccountOwnIssuer.IsOwnIssuer(issuerUri, ownNames))
         {
             return null;
         }
@@ -1506,15 +1515,15 @@ internal class PipelineServiceAccountProvisioningService(
     }
 
     /// <summary>
-    /// AB#5115 convergence of <c>TenantId</c>: <c>null</c> when the value is already empty or names
-    /// the tenant the entity lives in ("the tenant the adapter runs for" — the installation
-    /// default); a different value is a deliberate foreign target (paired with a foreign
-    /// <c>IssuerUri</c>) and comes back verbatim. This replaces the AB#5111 "always rewrite the
-    /// current tenant id" behaviour.
+    /// AB#5115 convergence of <c>TenantId</c>: <c>null</c> when the value is empty or names the tenant the entity
+    /// lives in (<see cref="ServiceAccountOwnIssuer.IsOwnTenant" />: case and surrounding blanks ignored). Any other
+    /// value is foreign and comes back verbatim — never rewritten silently, and since AB#9776 not usable (a service
+    /// account acts only in the pipeline's own tenant). This replaces the AB#5111 "always rewrite the current
+    /// tenant id" behaviour.
     /// </summary>
     internal static string? ConvergeTenantId(string? existingTenantId, string currentTenantId)
     {
-        if (string.IsNullOrWhiteSpace(existingTenantId) || existingTenantId == currentTenantId)
+        if (ServiceAccountOwnIssuer.IsOwnTenant(existingTenantId, currentTenantId))
         {
             return null;
         }

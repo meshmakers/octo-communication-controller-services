@@ -30,7 +30,8 @@ internal class ServiceAccountHealthService(
     IPipelineServiceAccountResolver serviceAccountResolver,
     IIdentityClientReader identityClientReader,
     IOptions<CommunicationControllerOptions> options,
-    IWorkloadEncryptionService encryptionService)
+    IWorkloadEncryptionService encryptionService,
+    IWorkloadTemplateResolver? templateResolver = null)
     : IServiceAccountHealthService
 {
     private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
@@ -445,36 +446,30 @@ internal class ServiceAccountHealthService(
         }
 
         // AB#5115: empty issuer/tenant is the canonical installation default; the historic
-        // installation spellings stay healthy (the next reconcile converges them to empty); any
-        // other concrete value is a deliberate foreign target, not drift.
-        var issuerIsInstallation = string.IsNullOrWhiteSpace(issuerUri) ||
-                                   PipelineServiceAccountProvisioningService.IsInstallationIssuer(issuerUri,
-                                       options.Value.AuthorityUrl);
+        // installation spellings stay healthy (the next reconcile converges them to empty).
+        // AB#9776 (own issuer only): any other issuer, and any tenant other than the current one, is a
+        // violation — the mesh adapter refuses such a configuration on every execution and the deploy guard
+        // refuses to deploy a pipeline with it. There is no healthy foreign pairing any more.
+        var issuerIsInstallation = ServiceAccountOwnIssuer.IsOwnIssuer(issuerUri, OwnIssuerNames(tenantId));
 
         if (string.IsNullOrWhiteSpace(configuredTenantId))
         {
             checks.Add(Healthy(TenantCheck,
                 "installation default — an empty TenantId means the tenant the adapter runs for (AB#5115)."));
         }
-        else if (configuredTenantId == tenantId)
+        else if (ServiceAccountOwnIssuer.IsOwnTenant(configuredTenantId, tenantId))
         {
             checks.Add(Healthy(TenantCheck,
                 "The configuration names the current tenant explicitly — the pre-AB#5115 spelling of the " +
                 "installation default; the next reconcile converges it to empty."));
         }
-        else if (!issuerIsInstallation)
-        {
-            checks.Add(Healthy(TenantCheck,
-                $"The configuration points at tenant '{configuredTenantId}' of the foreign identity target " +
-                $"'{issuerUri}' — a deliberate foreign pairing the reconcile leaves alone (AB#5115)."));
-        }
         else
         {
             checks.Add(Violation(TenantCheck, "tenant-mismatch",
-                $"The configuration points at tenant '{configuredTenantId}' instead of '{tenantId}' while its " +
-                "IssuerUri resolves to this installation — typically an entity imported from another tenant. " +
-                "Clear the TenantId (empty = the adapter's tenant, AB#5115) or pair it with the foreign IssuerUri " +
-                "it belongs to."));
+                $"The configuration points at tenant '{configuredTenantId}' instead of '{tenantId}'. A service " +
+                "account acts only in the pipeline's own tenant (AB#9776): the mesh adapter refuses this " +
+                "configuration and pipelines using it are not deployed. Clear the TenantId (empty = the adapter's " +
+                "tenant, AB#5115)."));
         }
 
         if (string.IsNullOrWhiteSpace(issuerUri))
@@ -491,10 +486,21 @@ internal class ServiceAccountHealthService(
         }
         else
         {
-            checks.Add(Healthy(IssuerUriCheck,
-                $"IssuerUri '{issuerUri}' is a deliberate foreign identity target; the reconcile leaves it " +
-                "alone (AB#5115)."));
+            checks.Add(Violation(IssuerUriCheck, "issuer-foreign",
+                $"IssuerUri '{issuerUri}' is not this installation's identity service. Service accounts are " +
+                "accepted only from the own issuer (AB#9776): the mesh adapter refuses this configuration and " +
+                "pipelines using it are not deployed. Clear the IssuerUri (empty = this installation, AB#5115)."));
         }
+    }
+
+    /// <summary>
+    /// AB#9776: the concrete names of this installation's identity service — <c>AuthorityUrl</c> and, when a
+    /// template resolver is available, what <c>{{service.authority}}</c> resolves to for the tenant (the same set
+    /// the deploy guard in <see cref="AdapterService" /> uses).
+    /// </summary>
+    private IEnumerable<string?> OwnIssuerNames(string tenantId)
+    {
+        return ServiceAccountOwnIssuer.OwnNames(options.Value.AuthorityUrl, templateResolver, tenantId);
     }
 
     /// <summary>

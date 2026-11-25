@@ -104,6 +104,33 @@ internal class PipelineServiceAccountResolverTests
     }
 
     [Test]
+    public async Task Resolve_BaseTypedOverride_IsRecognisedByCkTypeId()
+    {
+        // AB#9776: production materialises Uses targets as the base RtConfiguration (AB#5111), so a type test
+        // never sees the override; the resolver detects it by CkTypeId.
+        var pipeline = RtEntityCreator.CreatePipeline();
+        var adapter = RtEntityCreator.CreateAdapter();
+        var overrideAccount = new RtConfiguration
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            CkTypeId = SystemCommunicationCkIds.RtCkServiceAccountConfigurationTypeId,
+            RtWellKnownName = "pipeline-override"
+        };
+        ArrangePipelineConfigurations(pipeline.RtId, overrideAccount);
+        _communicationRepository.GetServiceAccountForAdapterAsync(TenantId, adapter.RtId)
+            .Returns(RtEntityCreator.CreateServiceAccountConfiguration("adapter-default"));
+
+        var forAdapter = await _resolver.ResolveAsync(TenantId, pipeline.RtId, adapter.RtId);
+        var forPipeline = await _resolver.ResolveForPipelineAsync(TenantId, pipeline.ToRtEntityId());
+
+        using var _ = Assert.Multiple();
+        await Assert.That(forAdapter.Source).IsEqualTo(PipelineServiceAccountSource.PipelineOverride);
+        await Assert.That(forAdapter.ServiceAccount!.RtId).IsEqualTo(overrideAccount.RtId);
+        await Assert.That(forPipeline.Source).IsEqualTo(PipelineServiceAccountSource.PipelineOverride);
+        await Assert.That(forPipeline.ServiceAccount!.RtId).IsEqualTo(overrideAccount.RtId);
+    }
+
+    [Test]
     public async Task Resolve_MultipleOverrides_PicksDeterministically()
     {
         var pipeline = RtEntityCreator.CreatePipeline();

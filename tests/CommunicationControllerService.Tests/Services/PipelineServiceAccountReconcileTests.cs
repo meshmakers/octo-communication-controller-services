@@ -49,18 +49,25 @@ internal class PipelineServiceAccountReconcileTests
         var services = new ServiceCollection();
         services.AddSingleton(_commandClient);
 
+        var controllerOptions = new CommunicationControllerOptions
+        {
+            AuthorityUrl = AuthorityUrl,
+            PublicUrl = PublicUrl,
+            // AB#9776: the public name {{service.authority}} resolves to is this installation as well.
+            ServiceUrls = { ["authority"] = "https://connect.public.example.com" }
+        };
+        var optionsMonitor = Substitute.For<IOptionsMonitor<CommunicationControllerOptions>>();
+        optionsMonitor.CurrentValue.Returns(controllerOptions);
+
         _sut = new PipelineServiceAccountProvisioningService(
             _communicationRepository,
             new PipelineServiceAccountResolver(_communicationRepository),
             services.BuildServiceProvider(),
             _eventService,
-            Options.Create(new CommunicationControllerOptions
-            {
-                AuthorityUrl = AuthorityUrl,
-                PublicUrl = PublicUrl
-            }),
+            Options.Create(controllerOptions),
             // AB#5537: the real reveal point over a generated key ring.
-            TestSecretEncryption.Create().EncryptionService);
+            TestSecretEncryption.Create().EncryptionService,
+            templateResolver: new WorkloadTemplateResolver(optionsMonitor));
     }
 
     private void ArrangeIdentityResponse(CreateIdentityDataResult result)
@@ -415,6 +422,10 @@ internal class PipelineServiceAccountReconcileTests
     [Arguments("{{service.AUTHORITY}}", null)] // case-insensitive like the resolver itself
     [Arguments("https://identity.example.com", null)] // this installation, concrete (pre-AB#5111)
     [Arguments("https://identity.example.com/", null)] // trailing-slash spelling of the same
+    // AB#9776: the same own-issuer rule as deploy guard and health — case, default port, token spacing.
+    [Arguments("https://IDENTITY.example.com:443", null)]
+    [Arguments("{{ service.authority }}", null)]
+    [Arguments("https://connect.public.example.com/", null)] // what {{service.authority}} resolves to
     public async Task Reconcile_InstallationSpelledIssuer_ConvergesToEmpty(string issuerUri,
         string? expectedPersisted)
     {
@@ -440,6 +451,28 @@ internal class PipelineServiceAccountReconcileTests
     {
         var adapter = RtEntityCreator.CreateAdapter();
         ArrangeDeclaredAdapter(adapter, sa => sa.TenantId = TenantId);
+
+        var result = await _sut.ReconcileAdapterAsync(TenantId, adapter,
+            ServiceAccountReconcileContext.System);
+
+        var saved = (RtServiceAccountConfiguration)_communicationRepository.ReceivedCalls()
+            .Single(c => c.GetMethodInfo().Name ==
+                         nameof(ICommunicationRepository.SavePipelineServiceAccountAsync))
+            .GetArguments()[2]!;
+
+        using var _ = Assert.Multiple();
+        await Assert.That(result.Outcome).IsEqualTo(PipelineServiceAccountProvisioningOutcome.Repaired);
+        await Assert.That(saved.TenantId).IsNull();
+    }
+
+    [Test]
+    [Arguments("TENANTID")]
+    [Arguments(" tenantId ")]
+    public async Task Reconcile_CurrentTenantInAnotherSpelling_ConvergesToEmpty(string spelling)
+    {
+        // AB#9776: the tenant comparison of deploy guard and health (case and surrounding blanks ignored).
+        var adapter = RtEntityCreator.CreateAdapter();
+        ArrangeDeclaredAdapter(adapter, sa => sa.TenantId = spelling);
 
         var result = await _sut.ReconcileAdapterAsync(TenantId, adapter,
             ServiceAccountReconcileContext.System);

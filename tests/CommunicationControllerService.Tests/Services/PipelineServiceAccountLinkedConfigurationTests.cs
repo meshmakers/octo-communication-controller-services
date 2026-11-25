@@ -201,6 +201,24 @@ internal class PipelineServiceAccountLinkedConfigurationTests
     }
 
     [Test]
+    [Arguments("https://IDENTITY.example.com:443/", "TENANTID")]
+    [Arguments("{{ service.authority }}", " tenantId ")]
+    public async Task EnsureLinkedConfigurations_OwnIssuerAndTenantInAnotherSpelling_IsProvisioned(string issuerUri,
+        string tenantId)
+    {
+        // AB#9776: the reconcile decides "own" with the deploy guard's rule; such an account is not foreign.
+        var own = _fixture.AddStandalone("own-spelled-account", ["AccountingRead"], clientId: "own-client");
+        own.ClientSecret = SecretTestValues.Stored("own-secret");
+        own.IssuerUri = issuerUri;
+        own.TenantId = tenantId;
+        var sut = _fixture.CreateProvisioningService();
+
+        await sut.EnsureLinkedConfigurationsProvisionedAsync(TenantId);
+
+        await Assert.That(_fixture.SentClients().Any(c => c.ClientId == "own-client")).IsTrue();
+    }
+
+    [Test]
     public async Task EnsureLinkedConfigurations_ReconcilesTheCurrentEntity_NotTheListedSnapshot()
     {
         // Another pass saved a secret after the list was read: the re-read entity wins, so no second

@@ -18,7 +18,8 @@ namespace Meshmakers.Octo.Backend.CommunicationControllerServices.Models;
 /// <param name="Code">
 ///     Machine-readable violation code (<c>association-missing</c>, <c>configuration-missing</c>,
 ///     <c>client-missing</c>, <c>secret-missing</c>, <c>secret-key-missing</c>, <c>roles-drift</c>, <c>delegation-drift</c>,
-///     <c>tenant-mismatch</c>, <c>issuer-uri-drift</c>, <c>linked-configuration-unhealthy</c>); <c>null</c> unless Status is
+///     <c>tenant-mismatch</c>, <c>issuer-foreign</c> (AB#9776), <c>linked-configuration-unhealthy</c>; <c>issuer-uri-drift</c>
+///     is retired); <c>null</c> unless Status is
 ///     <c>Violation</c>.
 /// </param>
 /// <param name="Message">Human-readable finding; always set except for a healthy check.</param>
