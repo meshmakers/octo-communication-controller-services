@@ -151,7 +151,7 @@ rather than `TenantOwned` because the JSON holds a password and must not travel 
 for a `String` attribute `Secret` ownership changes exactly two things — preserve on upsert and
 exclude from export — so the read path (`GetAdapterAsync`, `AdapterService`, the SignalR push to the
 adapter) and the Studio edit path (`systemCommunicationAdapters.update` with `item.configuration`)
-are untouched. It is **not** the `valueType: Secret` of (no encryption, no is-set read
+are untouched. It is **not** the `valueType: Secret` attribute type (no encryption, no is-set read
 state). Consequences: a fresh adapter still gets the seed value; a blueprint can no longer *change*
 the configuration of an existing adapter (use a CK migration step or a documented manual step); an
 exported adapter re-imported elsewhere starts without its configuration. Regression test:
@@ -168,8 +168,7 @@ The long-term replacement is a dedicated configuration type with real `Secret` f
 overrides a typed setting) and was added now so the Feature needs one CK Minor only. Runtime state, unlike
 `PoolMemberCpuRequest` … `PoolMemberMemoryLimit` (`isRuntimeState: false`, the pool author's declaration):
 operators set the sizing on live tenants, so a blueprint re-apply must keep it — also against a seed that
-ships its own non-empty default (omitted / empty seed values are already guarded for seed-owned attributes
-in the meantime, a *different non-empty* one is not). Additive Minor (ck-semver rule T1), no migration entry,
+ships its own non-empty default (omitted / empty seed values are already guarded for seed-owned attributes; a *different non-empty* one is not). Additive Minor (ck-semver rule T1), no migration entry,
 existing workloads have all five empty. The attributes reach the Helm release (see
 "Typed sizing reaches Helm" below); a workload that sets none of them renders exactly what it rendered on 4.9.0.
 Tests: unit `DeploymentSiteServiceTests/DeployWorkloadResourceAttributesTests` (schema on all three kinds,

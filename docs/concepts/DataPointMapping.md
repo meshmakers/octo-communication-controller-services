@@ -25,7 +25,7 @@ A configuration entity that defines a single mapping from a source data point to
 
 **Associations:**
 - `MapsFrom` (outbound) → Source entity (e.g. `Loxone/Control`, `MQTT/Topic`)
-- `MapsTo` (outbound) → Target entity (e.g. `EnergyIQ/BatteryStorage`, `EnergyIQ/Space`)
+- `MapsTo` (outbound) → Target entity (e.g. `Facility/BatteryStorage`, `Facility/Space`)
 
 ### Record: `System.Communication/DataPoint`
 

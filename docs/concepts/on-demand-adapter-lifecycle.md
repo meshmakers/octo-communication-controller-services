@@ -100,7 +100,7 @@ Activation is **runtime configuration, not a deployment switch** — no helm/env
 
 The idle watchdog and the wake gates read the tenant config through a short-TTL cache (the watchdog's 5-min loop may read directly; the per-request wake gates should not hit the tenant DB every call). An **emergency stop** is therefore an octo-cli one-liner per tenant (set `ScaleToZeroEnabled=false` → watchdog stops hibernating; already-hibernated workloads are woken on next demand as usual or explicitly via the wake API). Optionally a system-tenant-scoped record of the same key can act as a cluster-wide default/override — decide in the lifecycle-mode design whether that is needed for wave 1 or YAGNI.
 
-Test rollout: set the config record on selected staging tenants (e.g. a test tenant), `OnDemand` on their adapters, observe; production wave 1 = finAPI adapters, wave 2 = accounting mesh adapters after the trigger migration. `energyiq` stays `AlwaysOn` (and its tenant simply never gets the config record).
+Test rollout: set the config record on selected staging tenants (e.g. a test tenant), `OnDemand` on their adapters, observe; production wave 1 = finAPI adapters, wave 2 = accounting mesh adapters after the trigger migration. `tenant-3` stays `AlwaysOn` (and its tenant simply never gets the config record).
 
 ## 5. On-demand eligibility (trigger classification)
 

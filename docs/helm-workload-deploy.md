@@ -1,6 +1,6 @@
 ---
 description: "Helm workload deploy: chart versions, cloud pool deploy tracking, pending-workload reconcile, operator reverse-sync, chart management"
-applies_to: "**/Services/Workload*.cs, **/Hubs/OperatorHub*.cs, **/Controllers/WorkloadController.cs, **/Services/DeploymentSiteService.cs"
+applies_to: "**/Services/Workload*.cs, **/Hubs/OperatorHub*.cs, **/Controllers/WorkloadController.cs, **/DeploymentSite*.cs"
 ---
 
 ### Empty ChartVersion ("use latest")
@@ -71,7 +71,9 @@ provides AES-256-GCM encryption with a single instance-wide
 `Decrypt` is a no-op when no sentinel is present, so a single CK
 attribute can carry either a plaintext or an encrypted value. This same
 service is also used for `HelmRepositoryConfiguration.Password` and any
-future at-rest-encrypted attribute.
+future at-rest-encrypted attribute. This is the legacy `enc:v1` form: current `Secret` attributes are stored as
+key-ring envelopes (`enc:v2`) and need the key-ring configuration; without a key ring such a value is shipped as
+`null` (`docs/concepts/secret-attributes.md`).
 
 **`DeploymentSiteService.DeployPoolAsync`** (Cloud pools) now:
 1. Sets `DeploymentState = Deployed` on the pool.

@@ -105,7 +105,7 @@ text, forged JSON, `enc:v1`, other execution / tenant / key / purpose, flipped b
 A separate `MethodInvocation` attribute (first design draft) would have needed System.Communication
 4.13.0, a second `Seal`/`Open`/`Reseal` pair and a second place that can drift. The envelope already provides what the
 marker needs: AES-GCM with the instance key ring (`enc:v2`), binding to purpose, tenant and execution RtId in the
-associated data (and in the content), no plain-text acceptance, re-seal on requeue, and the provenance gate of (pipeline,
+associated data (and in the content), no plain-text acceptance, re-seal on requeue, and the provenance gate of the queued-execution envelope (pipeline,
 adapter, input). System.Communication therefore stays **4.12.0**; the old-instance behaviour is also the safe one (an
 older controller ignores the unknown payload member, so it drops the marker: fail closed).
 

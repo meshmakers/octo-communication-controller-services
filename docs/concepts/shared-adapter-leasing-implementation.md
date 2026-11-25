@@ -174,7 +174,7 @@ riding in 4.0.0 because the rename is what forces the major.
 `LeaseGrantedAt`..`LeaseReleasedAt` and `StartedAt`..`CompletedAt` are deliberately different
 spans. The difference between them is exactly the per-lease warm-up — token, tenant
 repository, pipeline definitions — that the pool exists to amortise. Concept §4's central
-claim ("irrelevant at ~16 executions/h, prohibitive at energyiq's 4089/h") rests on that
+claim ("irrelevant at ~16 executions/h, prohibitive at tenant-3's 4089/h") rests on that
 overhead, and keeping both pairs is what makes the claim measurable instead of asserted.
 
 `LeaseReleasedAt` is also a **billing input**, not only a diagnostic: §4b prices a borrower's
@@ -585,7 +585,7 @@ readability and leaves `roleId: …/Manages` in the data as a hidden alias.
   What genuinely stays: `AdapterPool` and everything about pool members — that is the real pool — and the `octo-cli` verbs `GetPools` / `DeployPool` / `UndeployPool`, which are user-facing.
 - **`rtWellKnownName: CommunicationPool` on the seeded entity stays.** It is identity, not display text: the service-managed blueprint re-applies against it, and renaming it would create a *second* deployment site on every provisioned tenant and orphan the adapters attached to the first.
 - **Documentation follows separately.** 66 genuine markdown files in `octo-documentation` (45 EN + 28 DE, ~15 of them generated from the CK model or CLI metadata), including the doc folder `docs/technologyGuide/communication/pools/` whose URL would need a redirect.
-- **The public REST route `{tenantId}/v1/pool`** comes from `[controller]` on `PoolController`. If the C# class is ever renamed, pin `[Route("pool")]` explicitly or accept a breaking API change. The same applies to the `octo-cli` commands `GetPools` / `DeployPool` / `UndeployPool` and the MCP tools `get_pools` / `undeploy_pool`, all user-facing.
+- **The public REST route `{tenantId}/v1/deploymentsite`** comes from `[controller]` on `DeploymentSiteController` (there is no `PoolController` any more). If the C# class is ever renamed, pin `[Route("deploymentsite")]` explicitly or accept a breaking API change. The same applies to the `octo-cli` commands `GetPools` / `DeployPool` / `UndeployPool` and the MCP tools `get_pools` / `undeploy_pool`, all user-facing.
 - **The GraphQL type renames itself.** `SystemDeploymentSite` is derived from the CkTypeId, so publishing 4.0.0 breaks ~66 frontend files across `octo-frontend-refinery-studio` (59), `octo-frontend-libraries` (5) and the accounting app (2) **without anyone editing the frontend**. Codegen must be re-run in the same train. This is the largest downstream surface in the whole rename and it is invisible from this repo.
   🔴 **Correction after doing it (§11a.2a):** "codegen must be re-run" understates the coupling.
   `octo-frontend-libraries` is not a parallel item, it is a **prerequisite** — the Studio's codegen
@@ -2173,7 +2173,7 @@ measurement possible; here is what the campaign looks like, so it is not reinven
 5. **What would falsify D3.** If the best window is uncorrelated with `ScaleUpQueueWaitSeconds` across
    pools, the derivation is wrong and the option should get a real constant default instead.
 
-`energyiq` never participates, for the reason §14 already gives.
+`tenant-3` never participates, for the reason §14 already gives.
 
 ### 11.8 What was actually built
 
@@ -2830,5 +2830,5 @@ two "leaves the other flag untouched" tests), **M-L2** (the empty command line w
 5. A two-tenant lease on a test environment.
 6. One low-traffic production tenant pair.
 
-`energyiq` never participates: 4089 executions/h is exactly the load the dedicated mode exists
+`tenant-3` never participates: 4089 executions/h is exactly the load the dedicated mode exists
 for.

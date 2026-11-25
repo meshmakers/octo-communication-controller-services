@@ -1,6 +1,6 @@
 ---
 description: "Leasing: only controller-queued executions are leased, a sealed execution is leased at most once, the lease carries the work"
-applies_to: "**/Services/LeaseService.cs, **/Repository/Queued*.cs, **/Consumers/LeaseTriggerConsumer.cs"
+applies_to: "**/Services/LeaseService.cs, **/Repository/Queued*.cs, **/Repository/ExecutionLeaseClaimStore.cs, **/Consumers/LeaseTriggerConsumer.cs"
 ---
 
 ### Only executions the controller queued are leased
@@ -9,7 +9,7 @@ The lease queue used to trust any entity with `Status = Queued` and the pipeline
 it; the generic runtime write path (GraphQL create, MCP) can create one. Now the controller leases only what it
 sealed itself.
 
-**Design (no new attribute, no CK bump).** The `SealedCaller` envelope of is also the provenance of the work
+**Design (no new attribute, no CK bump).** The `SealedCaller` envelope of the queued invoker is also the provenance of the work
 item. `QueuedCaller.Apply(execution, tenantId, pipelineRtId, adapterRtId, caller, token, envelope)` is called for
 **every** execution the controller queues (`TriggerManagementService`: REST execute, method invoker, cron via
 `LeaseTriggerConsumer`; `LeaseService.InterruptAndEnqueueAsync`: retry) and seals it even when there is no caller

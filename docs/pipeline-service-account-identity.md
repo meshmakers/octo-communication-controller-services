@@ -38,8 +38,9 @@ role with multiplicity `One` is Major). No migration script is needed — the en
 no-migrations bridge synthesises a schema-only no-op step for purely additive bumps, so
 `migration-meta.yaml` stays at 3.1.1.
 
-**No blueprint bump.** `System.Communication.{Release,MainLatest}` keep `1.5.0` and their
-`ckModelDependencies` floor `[3.22.0,4.0)`: their seed creates neither a
+**No blueprint bump (at that CK version).** `System.Communication.{Release,MainLatest}` kept `1.5.0` and their
+`ckModelDependencies` floor `[3.22.0,4.0)` then (the blueprints have since moved on: `2.0.0` with `[4.0,5.0)` for the
+model 4.0.0 migration, now `2.1.0` with `System.Communication-[4.5,5.0)`): their seed creates neither a
 `ServiceAccountConfiguration` nor the new edge, and the floor is a satisfiability floor
 only — the install target is the embedded `IServiceManagedCkModelDescriptor` version.
 The CK bump alone is what carries the change to tenants.
@@ -132,9 +133,12 @@ mirroring only copies. So without phase 2 the deploy guard refuses **every** pip
    well-known name** `pipeline-service-account-{adapterRtId}` — that is what makes a second run
    adopt its own earlier work instead of creating a second credential entity (and what repairs a
    lost edge). The rtId, not the name, is the key: names are editable.
-2. Decide the secret. A **complete** existing configuration (issuer + client id + secret + tenant id
-   all present) contributes its own plaintext; otherwise a fresh 384-bit URL-safe secret is generated
-   with `RandomNumberGenerator`.
+2. Decide the secret. An existing configuration with a **usable** secret (or one that impersonation stands in for)
+   **and** a client id and a well-known name is complete and contributes its own plaintext. Empty issuer and tenant
+   id are the canonical defaults and do not make it incomplete; a concrete foreign value is a deliberate target and
+   is preserved. Otherwise a fresh 384-bit URL-safe secret is generated with `RandomNumberGenerator` - except that an
+   automatic pass sends none for an account that already declares a `ClientId` (identity keeps its current secret;
+   a fresh one comes only from the manual reconcile or the rotate endpoint).
 3. Send `CreateIdentityDataCommandRequest` with that one client — **every pass**, not only the first.
    Re-sending the *same* plaintext hashes to the same value identity-side, so nothing rotates, while
    grants / scope / roles converge for a client created before this code, and a client someone

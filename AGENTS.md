@@ -6,9 +6,7 @@ code it covers.
 ## What this repo is
 
 This is the **Octo Communication Controller Services** - an ASP.NET Core web service that manages communication
-adapters and pools for data ingress and egress in an Octo Mesh instance. The service acts as a central hub for
-coordinating communication between external adapters (data pipeline executors) and pools (device groups) in a
-multi-tenant environment.
+adapters and pools for data ingress and egress in a multi-tenant Octo Mesh instance.
 
 ### Core Components
 
@@ -39,13 +37,13 @@ Caches, the repository layer, the Construction Kit model, the project layout and
 | `**/Methods/**` | `docs/ck-method-pipeline-handler.md` |
 | `**/Methods/Service/**`, `**/TenantApi/v1/Controllers/**`, `**/Services/PipelineDefinition*.cs` | `docs/ck-method-service-handlers.md` |
 | `src/SystemCommunicationCkModel/ConstructionKit/**` | `docs/ck-model-build.md` |
-| `**/Services/Workload*.cs`, `**/Hubs/OperatorHub*.cs`, `**/Controllers/WorkloadController.cs`, `**/Services/DeploymentSiteService.cs` | `docs/helm-workload-deploy.md` |
+| `**/Services/Workload*.cs`, `**/Hubs/OperatorHub*.cs`, `**/Controllers/WorkloadController.cs`, `**/DeploymentSite*.cs` | `docs/helm-workload-deploy.md` |
 | `**/Hubs/**`, `**/Options/*HubAuthorizationOptions.cs` | `docs/hub-authorization-gates.md` |
 | `**/Services/AdapterPool*.cs`, `**/Controllers/AdapterPoolController.cs` | `docs/leasing-adapter-pool.md` |
 | `src/SystemCommunicationCkModel/ConstructionKit/migrations/**`, `**/Services/Lease*.cs` | `docs/leasing-ck-model-4-migration.md` |
 | `**/Services/AdapterLeasingMetrics.cs` | `docs/leasing-metrics-and-operability.md` |
-| `**/Services/LeaseScheduler*.cs`, `**/BackgroundServices/LeaseScheduler*.cs`, `**/Repository/ExecutionLeaseClaimStore.cs` | `docs/leasing-pool-queue-and-scheduler.md` |
-| `**/Services/LeaseService.cs`, `**/Repository/Queued*.cs`, `**/Consumers/LeaseTriggerConsumer.cs` | `docs/leasing-queued-executions.md` |
+| `**/Services/LeaseScheduler*.cs`, `**/BackgroundServices/LeaseScheduler*.cs` | `docs/leasing-pool-queue-and-scheduler.md` |
+| `**/Services/LeaseService.cs`, `**/Repository/Queued*.cs`, `**/Repository/ExecutionLeaseClaimStore.cs`, `**/Consumers/LeaseTriggerConsumer.cs` | `docs/leasing-queued-executions.md` |
 | `**/Methods/PipelineMethodInvoker.cs`, `**/Services/PipelineExecutionService.cs` | `docs/leasing-queued-invoker.md` |
 | `**/Services/TenantLendingScopeResolver.cs`, `**/Services/PipelineExecutionClassService.cs`, `**/Services/AdapterNodeCapabilityService.cs` | `docs/leasing-scope-and-capabilities.md` |
 | `**/Services/*PoolMirror*.cs`, `**/Services/Lent*.cs` | `docs/lent-adapter-pool-mirrors.md` |
@@ -103,7 +101,7 @@ These rules bind new and changed code. Known exceptions in existing code are nam
 - **A SignalR hub gets its own staged `IHubFilter` gate** with its own options section and `Mode` defaulting to
   `LogOnly`; `Enforce` is switched by configuration, never in code, and REST policies never cover a hub.
   `docs/hub-authorization-gates.md`; tests `AdapterHubAuthorizationFilterTests`,
-  `AdapterHubAuthorizationWiringTests` (likewise `OperatorHub*`, `AdapterPoolHub*`).
+  `AdapterHubAuthorizationWiringTests`, `AdapterPoolHubWiringTests` (likewise `OperatorHub*`).
 - **One configurator owns the JWT scheme** (`AddJwtBearer()` without a delegate). A new caller read uses
   `PrincipalClaimExtensions` (roles: `PrincipalRoleExtensions.HasRole`; hubs: `HubConnectionPrincipal`). A tenant route
   keeps `{tenantId:tenantId}` and gets no `IAllowParentTenantAdministration`. User-token enforcement stays `LogOnly` in
@@ -122,7 +120,8 @@ These rules bind new and changed code. Known exceptions in existing code are nam
   value and the adapter's pipeline configuration. `docs/adapter-pool-hub-gate-and-leases.md`; tests
   `LeaseSecretLogTargetTests`, `RotateServiceAccountSecretMethodRedactionTests`.
 - **A lease takes the borrower's credential from the lease alone, read after both lending checks:** the pool's
-  `SharingMode` and allow-list (`ITenantLendingScopeResolver`) and the adapter's own `LentFromTenantId`.
+  `SharingMode` and allow-list (`ITenantLendingScopeResolver`) and the adapter's own `LentFrom` edge to its
+  `LentAdapterPool` mirror (`LentFromReference.FromMirror`).
   `docs/adapter-pool-hub-gate-and-leases.md`; tests in `Services/LeaseServiceTests/` (`GrantLeaseAsyncTests`).
 - **A pipeline deploy path calls `EnsurePipelineHasServiceAccountAsync` before its first state write.** Exception:
   `DeploymentSiteService.DeployWorkloadAsync` provisions the account instead of gating (the pod must exist first).

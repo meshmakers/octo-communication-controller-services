@@ -26,7 +26,7 @@ Companion runbook for the SignalR hubs: [`hub-authorization-enforce-rollout.md`]
 - The value goes into the per-cluster values file of `octo-mesh-deployment`
   (`clusters/<cluster>/values-octo-mesh.yaml`), never into a pipeline definition. One value per service,
   so one service can be rolled back alone.
-- The chart value exists only from the octo-helm-core release of on. Before that release the
+- The chart value exists only from the octo-helm-core release that adds the `userTokenEnforcement` chart values of the table above. Before that release the
   chart renders no such variable and the cluster cannot be flipped; check the chart version the cluster
   runs first.
 - The equivalent configuration key is `TenantAuthorization:UserTokenEnforcement`.
@@ -114,4 +114,4 @@ service back does not touch the other.
   (real Kestrel host, real `UseOctoTenantAuthorization()` and route constraint; 403 and the action does
   not run; `Program.cs` order pinned at the source; `Enforce` wins from the key and from the
   environment variable; no endpoint carries the parent-tenant marker).
-- asset-repo: the tests of (REST and GraphQL).
+- asset-repo: the tests of the tenant gate (REST and GraphQL).

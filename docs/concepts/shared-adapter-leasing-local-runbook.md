@@ -5,7 +5,7 @@ background: true
 
 # Shared adapter leasing — trying it locally
 
-A hand-run of against `Start-Octo`, end to end: one lending tenant with a pool, one
+A hand-run of the leasing design against `Start-Octo`, end to end: one lending tenant with a pool, one
 borrowing tenant with a `Leased` adapter, one member process, one pipeline execution that gets
 queued, leased, run and released.
 
@@ -125,15 +125,16 @@ Lending never flows upwards and never sideways between roots (concept §3): a bo
 (`TenantLendingScopeResolver.WalkAsync`) does **not** read `octosystem`'s tenant list. It opens the
 **lender's own** tenant context and calls `GetDirectChildTenantsAsync`, i.e. it reads
 `RtEntity_SystemTenant` inside the *lender's* database. Both of these must agree, and only the
-second one is what lending actually uses:
+second one is what lending actually uses (`<mongo-admin-password>` is the local MongoDB admin password, see the
+local configuration section below):
 
 ```bash
-mongosh "mongodb://octo-system-admin:OctoAdmin1@localhost:27017/admin" --quiet --eval '
+mongosh "mongodb://octo-system-admin:<mongo-admin-password>@localhost:27017/admin" --quiet --eval '
   db.getSiblingDB("octosystem").RtEntity_SystemTenant.find({},{attributes:1})
     .forEach(x => print(JSON.stringify(x.attributes)));'
 # -> {"tenantId":"borrowerdev","parentTenantId":"accounting","databaseName":"borrowerdev"}
 
-mongosh "mongodb://octo-system-admin:OctoAdmin1@localhost:27017/admin" --quiet --eval '
+mongosh "mongodb://octo-system-admin:<mongo-admin-password>@localhost:27017/admin" --quiet --eval '
   db.getSiblingDB("accounting").RtEntity_SystemTenant.find({},{attributes:1})
     .forEach(x => print(JSON.stringify(x.attributes)));'
 # -> must list the borrower; this is the list the lending walk reads
@@ -163,8 +164,8 @@ octo-cli -c AddContext -n lease_borrower \
 : "${SECRET:?SECRET is not set}" && printf '%s' "$SECRET" | octo-cli --context lease_borrower -c LogInClientCredentials -id claude-agent --secret-stdin
 # ... or export OCTO_CLI_CLIENT_SECRET and leave --secret-stdin out (it reads only standard input):
 # octo-cli --context lease_borrower -c LogInClientCredentials -id claude-agent
-# ... and afterwards
-octo-cli -c RemoveContext -n lease_borrower
+# ... and, once the whole walk is done (the context is used again in the steps below), remove it:
+#   octo-cli -c RemoveContext -n lease_borrower
 ```
 
 The token it issues carries `tenant_id: borrowerdev` and `scope: octo_api`, which is all the
@@ -443,13 +444,15 @@ instead of declining.
   was configured. Set the variable anyway and it is dropped with that warning; the walk below no
   longer exports it.
 
-Working configuration, as run:
+Working configuration, as run (replace `<mongo-admin-password>` and `<mongo-user-password>` with the values of your
+local MongoDB: the defaults are configured in the local infrastructure of `octo-tools`, `Install-OctoInfrastructure` /
+`Install-OctoKubernetes`):
 
 ```bash
 export ASPNETCORE_ENVIRONMENT=Development
 export OCTO_SYSTEM__SYSTEMDATABASENAME=OctoSystem
-export OCTO_SYSTEM__ADMINUSERPASSWORD=OctoAdmin1
-export OCTO_SYSTEM__DATABASEUSERPASSWORD=OctoUser1
+export OCTO_SYSTEM__ADMINUSERPASSWORD=<mongo-admin-password>
+export OCTO_SYSTEM__DATABASEUSERPASSWORD=<mongo-user-password>
 export OCTO_SYSTEM__USEDIRECTCONNECTION=true
 
 # 🔴 The property name repeats the section, and the short spelling binds NOTHING — it was the

@@ -38,7 +38,8 @@ That is what keeps a pool member from being a standing cross-tenant credential.
 
 `Services/LeaseService` grants and releases. **Lending is consensual in both directions**: the pool's
 `SharingMode` + allow-list say who *may* borrow (via `ITenantLendingScopeResolver`), and the borrowing
-adapter's own `LentFromTenantId` / `LentFromPoolRtId` say from whom it *does*. Either half alone is not
+adapter's own `LentFrom` edge to its borrower-local `LentAdapterPool` mirror (read as `LentFromReference`) says
+from whom it *does*. Either half alone is not
 enough — without the borrower half a lender could push executions into any descendant that never asked
 for them, under an identity that descendant never intended to hand out. The borrower's credential is
 read **after** both checks, so a request naming an adapter it has no business naming never reaches the

@@ -46,7 +46,7 @@ Code: `src/CommunicationControllerServices/Methods/Service/`. User guide: `octo-
   and its contract (role, timeout, idempotency) is listed; extend its `Expected` table and the integration test
   `Methods/CommunicationMethodHostTests` (REST vs. method on the same substitutes).
 - **Deployment methods.** `DeploymentSite.Deploy`, `DeployableWorkload.Deploy` and `AdapterPool.Scale` run the
-  Communication-enabled gate of (`CommunicationEnabledGate`, shared with the REST code) and answer
+  Communication-enabled gate (`CommunicationEnabledGate`, shared with the REST code) and answer
   `COMMUNICATION_DISABLED` (REST 409) while Communication is disabled; the undeploys and the trigger methods stay open. Only
   the service's own refusal (`DeploymentSiteServiceException`) becomes the declared error with the REST text; any other
   exception is `METHOD_HANDLER_FAILED` (REST 500 as before). The undeploys are declared not idempotent (a repeated call
@@ -66,7 +66,8 @@ Code: `src/CommunicationControllerServices/Methods/Service/`. User guide: `octo-
 - **Timeouts and async candidates.** All methods are synchronous; no method sets `execution.mode` (omitted =
   sync, the key alone would raise `minEngineVersion`). `Pipeline.Deploy` / `MoveToAdapter` budget one wake (60 s) plus one
   push (120 s). `DataFlow.Deploy` / `Undeploy` and `Pipeline.SetDebugging` (it re-pushes the data flow) wake and push
-  adapter after adapter and use the maximum 300 s; they are the candidates for `execution.mode: async` once F3.6 is available - a Major per method (`Deploy-2`, row M19).
+  adapter after adapter and use the maximum 300 s; they are the candidates for `execution.mode: async` once F3.6 is
+  available - a Major per method (`Deploy-2`, row M19).
 - **Sensitive parameters.** `Pipeline.Deploy.pipelineDefinition` (a definition can carry credentials) and
   `Pipeline.Execute.input` are `sensitive`: the host keeps them out of logs, audit and traces. The handlers never log them
   and pass every failure message through `CommunicationMethodSupport.Redact` (the value as a whole and each line of 8+
@@ -96,7 +97,8 @@ Code: `src/CommunicationControllerServices/Methods/Service/`. User guide: `octo-
   schema findings are returned plus a "... and n more" line. The messages name the limit and never quote the definition.
   A level of If, ForEach or Group adds two JSON levels, a level of Switch four (`cases`, case, `transformations`, node),
   so about 16 nested Switch nodes get the JSON-depth finding before the node-list one; both refuse.
-  🔴 **The limits do not depend on `EnablePipelineSchemaValidation` or on an adapter schema** : the flag defaults to false and no deployment sets it, and the gates after the schema validation parse the
+  🔴 **The limits do not depend on `EnablePipelineSchemaValidation` or on an adapter schema**: the flag defaults to false and no deployment sets it, and the gates after the schema
+  validation parse the
   same definition with YamlDotNet, which binds an alias to the shared instance, and walk its nodes recursively (a small
   document of nested aliases means an exponential walk). So `PipelineDefinitionLimits.CheckDefinition` (length,
   converter budget, node checks; malformed YAML is left to the caller) runs unconditionally: first in

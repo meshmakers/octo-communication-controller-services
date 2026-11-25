@@ -153,9 +153,11 @@ across a second start. With the pre-G3 meta, exactly the eight cases 3.37.0 … 
 
 ### Out of scope of the rename, deliberately
 
-The operator's `DeploymentSite` **CRD** (its Kind is a hardcoded literal; the link to the CK
-entity is by RtId, not by name), the Helm value names `operator.{autoManageDeploymentSites,deploymentSiteNamespace,defaultDeploymentSiteName}`,
-the REST route `{tenantId}/v1/deploymentsite`, the `octo-cli` `GetPools`/`DeployPool`/`UndeployPool`
+The REST route `{tenantId}/v1/deploymentsite` (from `DeploymentSiteController`) and `rtWellKnownName: CommunicationPool`
+are not renamed. (The operator CRD, the operator code, the Helm value names
+`operator.{autoManageDeploymentSites,deploymentSiteNamespace,defaultDeploymentSiteName}` and the SignalR wire **were**
+renamed together with the model: kind `CommunicationPool` -> `DeploymentSite`, deleted and reinstalled, so the operator
+and the controller ship together.) Also unchanged: the `octo-cli` `GetPools`/`DeployPool`/`UndeployPool`
 commands and the MCP `get_pools`/`undeploy_pool` tools. The GraphQL type
 `SystemDeploymentSite`, however, is derived from the CkTypeId and **renames itself** on
 publish — ~66 frontend files across the Studio, `octo-frontend-libraries` and the accounting app

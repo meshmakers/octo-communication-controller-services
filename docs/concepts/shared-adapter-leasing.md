@@ -24,15 +24,15 @@ Ten mesh adapters, 3.70 GiB actually used against 6.5 GiB reserved:
 | Tenant | Memory | Pipeline executions / h |
 |---|---|---|
 | meshmakers | 848 Mi | 17 |
-| gastroacker | 580 Mi | 16 |
-| tecob | 408 Mi | 16 |
-| **energyiq** | 407 Mi | **4089** |
+| tenant-1 | 580 Mi | 16 |
+| tenant-2 | 408 Mi | 16 |
+| **tenant-3** | 407 Mi | **4089** |
 | borrowerdev | 360 Mi | 17 |
-| bierok | 322 Mi | 16 |
-| pureescape | 304 Mi | 16 |
-| landing | 200 Mi | **0** |
+| tenant-5 | 322 Mi | 16 |
+| tenant-6 | 304 Mi | 16 |
+| tenant-7 | 200 Mi | **0** |
 | tenant B | 185 Mi | **0** |
-| familyos | 171 Mi | **0** |
+| tenant-8 | 171 Mi | **0** |
 
 Two facts drive the design. Three tenants execute **nothing** and still hold
 170–200 Mi each — pure .NET runtime baseline, the cost of a process existing. And
@@ -368,7 +368,7 @@ Concretely:
 - `FindTenantRepositoryAsync` caches per process today. That cache must become
   lease-scoped or be dropped on release. (§12.4 of the plan: it does not cache the
   *repository* — but the engine does cache one **repository client**, and its
-  authenticated connection pool, per database. leasing evicts that on both edges of
+  authenticated connection pool, per database. Leasing evicts that on both edges of
   the lease.)
 - The borrower's **database credential** is tenant-scoped state in the most literal
   sense and is held for one lease, for one database, and dropped on release.
@@ -387,7 +387,7 @@ the hub registration.
 ### Warm-up cost is why both modes exist
 
 Every lease switch costs a token exchange, a tenant repository and the pipeline
-definitions. At ~16 executions/h that is irrelevant. At energyiq's 4089/h it would
+definitions. At ~16 executions/h that is irrelevant. At tenant-3's 4089/h it would
 be pure overhead — which is exactly why continuous-data adapters stay dedicated.
 
 ## 4a. Adapter pools

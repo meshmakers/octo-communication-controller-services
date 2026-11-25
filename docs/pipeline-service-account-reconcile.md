@@ -134,8 +134,11 @@ exactly the `octo_api` scope family the controller's own policies require. No am
 request, 401/403/5xx, timeout → `IdentityClientLookupStatus.Unavailable`, which every consumer
 treats as "unknown", never as "missing". Named `HttpClient` with a 10 s timeout (Program.cs).
 
-**Hardened deploy guard** (`EnsurePipelineHasServiceAccountAsync`, both deploy paths): after the resolution check, (a) an account without a **client secret** is refused unconditionally —
-a local fact, `AdapterServiceException.PipelineServiceAccountSecretMissing`; (b) the **identity
+**Hardened deploy guard** (`EnsurePipelineHasServiceAccountAsync`, both deploy paths): after the resolution check, (a) an account without a usable **client secret** is refused —
+a local fact, `AdapterServiceException.PipelineServiceAccountSecretMissing` — **unless** impersonation stands in: an
+unset secret passes when a capable impersonation actor exists (the adapter's own client with a usable secret, a
+different client than the account); a secret that is stored but unreadable here (unknown key id, corrupt) is always
+refused (`docs/pipeline-service-account-grants.md`); (b) the **identity
 client's existence** is verified through the reader —
 `AdapterServiceException.PipelineServiceAccountClientMissing` on an authoritative NotFound (or a
 configuration naming no `ClientId` at all). Both messages name the reconcile endpoints and Studio
