@@ -96,7 +96,9 @@ public interface IAdapterService
     /// <param name="revealSecrets">
     /// AB#5537: <c>true</c> only for the configuration an adapter receives over its SignalR
     /// connection — Secret attributes are revealed (plaintext). <c>false</c> (default) for every
-    /// other consumer, e.g. the REST API: Secret attributes stay the <c>{"isSet":…}</c> marker.
+    /// other consumer, e.g. the REST API: Secret attributes stay the <c>{"isSet":…}</c> marker. Only <c>true</c>
+    /// (a push) sets a pipeline the cross-tenant node rules refuse to <c>Error</c> and stores an error event;
+    /// <c>false</c> is a read and leaves such a pipeline out without writing anything.
     /// </param>
     /// <returns></returns>
     Task<AdapterConfigurationDto> GetAdapterConfigurationAsync(string tenantId, RtEntityId adapterRtEntityId,

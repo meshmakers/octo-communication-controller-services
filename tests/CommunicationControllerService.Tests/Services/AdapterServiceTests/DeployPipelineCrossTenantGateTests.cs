@@ -269,6 +269,56 @@ internal class DeployPipelineCrossTenantGateTests : AdapterServiceTestsBase
         await AssertNothingDeployed();
     }
 
+    // A Switch@1 inside a Switch@1 (in a case and in the default branch): the rules walk every level.
+    [Test]
+    [Arguments("cases")]
+    [Arguments("default")]
+    public async Task ServiceAccountInASwitchNestedInASwitch_WithTenantIdPath_IsRefused(string branch)
+    {
+        var inner = branch == "cases"
+            ? """
+                          cases:
+                            - value: x
+                              transformations:
+                                - type: ApplyChanges@2
+                                  identity: ServiceAccount
+                                  entityUpdatesPath: $.updates
+                                  targetTenant:
+                                    relation: Sibling
+                                    tenantIdPath: $.body.nested
+              """
+            : """
+                          cases:
+                            - value: x
+                              transformations: []
+                          default:
+                            - type: ApplyChanges@2
+                              identity: ServiceAccount
+                              entityUpdatesPath: $.updates
+                              targetTenant:
+                                relation: Sibling
+                                tenantIdPath: $.body.nested
+              """;
+        var ex = await DeployAsync(VerifiedHttpTrigger + "\n" +
+                                   """
+                                   transformations:
+                                     - type: Switch@1
+                                       path: $.body.kind
+                                       cases:
+                                         - value: a
+                                           transformations:
+                                             - type: Switch@1
+                                               path: $.body.sub
+
+                                   """ + inner);
+
+        using var _ = Assert.Multiple();
+        await Assert.That(ex).IsTypeOf<AdapterServiceException>();
+        await Assert.That(ex!.Message).Contains("$.body.nested");
+        await Assert.That(ex.Message).Contains("only statically");
+        await AssertNothingDeployed();
+    }
+
     // Unconfirmed review point: a definition the controller cannot read was let through without any rule (fail open).
     [Test]
     public async Task UnreadableDefinition_IsRefused()
@@ -355,6 +405,30 @@ internal class DeployPipelineCrossTenantGateTests : AdapterServiceTestsBase
         await Assert.That(configuration.Pipelines.Count).IsEqualTo(1);
         await Assert.That(configuration.Pipelines.First().PipelineRtEntityId).IsEqualTo(clean.ToRtEntityId());
         await AssertSetToError(offending);
+    }
+
+    // The REST read of an adapter (GET adapter/{id}) projects without revealing secrets: it is a read, so it leaves the
+    // offending pipeline out like a push but writes no deployment state and no event, however often it is called.
+    [Test]
+    public async Task RestRead_LeavesTheOffendingPipelineOut_AndWritesNothing()
+    {
+        var (adapter, _, clean) = ArrangeStoredPipelines();
+
+        var first = await AdapterService.GetAdapterConfigurationAsync(TenantId, adapter.ToRtEntityId(), false);
+        var second = await AdapterService.GetAdapterConfigurationAsync(TenantId, adapter.ToRtEntityId(), false);
+
+        using var _ = Assert.Multiple();
+        foreach (var configuration in new[] { first, second })
+        {
+            await Assert.That(configuration.Pipelines.Select(p => p.PipelineRtEntityId))
+                .IsEquivalentTo([clean.ToRtEntityId()]);
+        }
+
+        await CommunicationRepository.DidNotReceiveWithAnyArgs()
+            .SetPipelineDeploymentStateAsync(default!, default!, default, default);
+        await CommunicationEventService.DidNotReceiveWithAnyArgs()
+            .StoreErrorEventAsync(default!, default!, default!);
+        await AssertNothingDeployed();
     }
 
     [Test]
