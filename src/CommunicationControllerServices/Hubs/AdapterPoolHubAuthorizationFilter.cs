@@ -95,6 +95,7 @@ internal class AdapterPoolHubAuthorizationFilter : IHubFilter
         var metrics = HubAuthorizationMetrics.TryResolve(context.ServiceProvider);
 
         var user = await HubConnectionPrincipal.ResolveAsync(context);
+        HubConnectionPrincipal.RefuseAgentToken(context, user, "/adapterPoolHub");
         var tokenTenantId = user?.FindFirst(HubConnectionPrincipal.TenantIdClaimType)?.Value;
         if (!string.IsNullOrEmpty(tokenTenantId))
         {

@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Meshmakers.Octo.Services.Infrastructure;
+using Meshmakers.Octo.Services.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http;
@@ -42,6 +43,28 @@ internal static class HubConnectionPrincipal
     public const string TenantIdClaimType = "tenant_id";
 
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+
+    /// <summary>
+    ///     AB#6054: refuses an agent token (scope <c>octo_agent</c>) on every hub, in every mode of the hub's gate
+    ///     (<c>LogOnly</c> included): an agent acts only through its MCP mandate. The HTTP pipeline already refuses the
+    ///     negotiate and connect requests (<c>UseOctoTenantAuthorization()</c>); this is the same rule at the hub, on the
+    ///     principal the gate itself resolved.
+    /// </summary>
+    /// <param name="context">The hub lifetime context.</param>
+    /// <param name="user">The principal of <see cref="ResolveAsync" />.</param>
+    /// <param name="hub">The hub path for the log line, e.g. <c>/operatorHub</c>.</param>
+    /// <exception cref="HubException">The principal carries the agent scope.</exception>
+    public static void RefuseAgentToken(HubLifetimeContext context, ClaimsPrincipal? user, string hub)
+    {
+        if (!AgentTokens.IsAgentToken(user))
+        {
+            return;
+        }
+
+        Logger.Warn("Refused an agent token on {Hub}: {ErrorCode}: {Caller}", hub, AgentTokens.NotAcceptedErrorCode,
+            Describe(user, context.Context.ConnectionId));
+        throw new HubException($"{AgentTokens.NotAcceptedErrorCode}: {AgentTokens.NotAcceptedMessage}");
+    }
 
     /// <summary>
     ///     The connection's principal.

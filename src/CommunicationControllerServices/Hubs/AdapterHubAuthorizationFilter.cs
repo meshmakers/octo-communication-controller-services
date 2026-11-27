@@ -74,6 +74,7 @@ internal class AdapterHubAuthorizationFilter : IHubFilter
         var metrics = HubAuthorizationMetrics.TryResolve(context.ServiceProvider);
 
         var user = await HubConnectionPrincipal.ResolveAsync(context);
+        HubConnectionPrincipal.RefuseAgentToken(context, user, "/{tenantId}/adapterHub");
         var routeTenantId = context.Context.GetHttpContext()?.GetTenantId();
 
         var verdict = await EvaluateAsync(context, user, routeTenantId);

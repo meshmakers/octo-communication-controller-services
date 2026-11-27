@@ -55,6 +55,7 @@ internal class OperatorHubAuthorizationFilter : IHubFilter
         var metrics = HubAuthorizationMetrics.TryResolve(context.ServiceProvider);
 
         var user = await HubConnectionPrincipal.ResolveAsync(context);
+        HubConnectionPrincipal.RefuseAgentToken(context, user, "/operatorHub");
         var authenticated = user?.Identity is { IsAuthenticated: true };
         var authorized = user != null &&
                          (await authorizationService.AuthorizeAsync(user, null,
