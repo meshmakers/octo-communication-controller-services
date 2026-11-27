@@ -20,7 +20,8 @@ internal class TriggerManagementService(
     IWorkloadLifecycleService workloadLifecycleService,
     ILifecycleConfigurationService lifecycleConfigurationService,
     ILeaseSchedulerWakeSignal leaseSchedulerWakeSignal,
-    IExecutionEnvelope executionEnvelope)
+    IExecutionEnvelope executionEnvelope,
+    IPipelineDefinitionService pipelineDefinitionService)
     : ITriggerManagementService
 {
     public async Task<PipelineExecutionDataDto> StartExecutePipelineAsync(string tenantId,
@@ -46,6 +47,10 @@ internal class TriggerManagementService(
             return queued;
         }
 
+        // AB#10015: an HTTP-only pipeline has no consumer on the execute address. Refuse a real execute up front and send
+        // a dry run to the address its FromHttpRequest@2 trigger consumes - before the wake gate, so a refusal wakes nothing.
+        var route = await ResolveExecuteCommandRouteAsync(tenantId, pipelineRtId, isDryRun);
+
         // AB#4918 wake gate — MUST complete before the send below: the execute-pipeline queue is
         // non-durable/auto-delete, so publishing while the adapter is scaled to 0 silently drops
         // the message. No-op unless the tenant has scale-to-zero on and the adapter is OnDemand.
@@ -60,6 +65,10 @@ internal class TriggerManagementService(
             // endpoint.) Must stay in sync with FromExecutePipelineCommandNode.StartAsync.
             var address =
                 $"{PipelineQueueNames.ExecutePipelineCommand.ToLower()}-{tenantId.ToLower()}-pipeline-{pipelineRtId.ToString().ToLower()}";
+            if (route == ExecuteCommandRoute.HttpDryRun)
+            {
+                address += HttpTriggerDryRunRouting.AddressSuffix;
+            }
 
             r = await executeMeshPipelineCommandClient.GetResponse<ExecutePipelineResponse>(address,
                 // AB#5126: carry the invoker through so a FromExecutePipelineCommand pipeline can run
@@ -116,6 +125,34 @@ internal class TriggerManagementService(
         logger.LogError("[{TenantId}] Execution of pipeline '{PipelineRtId}' failed: {ErrorMessage}"
             , tenantId, pipelineRtId, r.ErrorMessage);
         throw TriggerManagementServiceException.ExecutePipelineFailed(tenantId, pipelineRtId, r.ErrorMessage);
+    }
+
+    /// <summary>
+    ///     The route of the execute command from the trigger section of the stored definition (AB#10015); throws the
+    ///     refusal. An unreadable pipeline or definition keeps the execute address, as before.
+    /// </summary>
+    private async Task<ExecuteCommandRoute> ResolveExecuteCommandRouteAsync(string tenantId, OctoObjectId pipelineRtId,
+        bool isDryRun)
+    {
+        IReadOnlyCollection<string>? triggerNodeTypes = null;
+        var pipeline = await communicationRepository.GetPipelineAsync(tenantId,
+            new RtEntityId(SystemCommunicationCkIds.RtCkPipelineTypeId, pipelineRtId));
+        if (!string.IsNullOrWhiteSpace(pipeline?.PipelineDefinition) &&
+            pipelineDefinitionService.TryGetTriggerNodes(pipeline.PipelineDefinition, out var triggers))
+        {
+            triggerNodeTypes = triggers.Select(t => t.NodeType).ToArray();
+        }
+
+        var (route, refusal) = HttpTriggerDryRunRouting.Decide(triggerNodeTypes, isDryRun, pipelineRtId);
+        if (refusal != null)
+        {
+            logger.LogInformation("[{TenantId}] Execute of pipeline '{PipelineRtId}' refused: {Reason}", tenantId,
+                pipelineRtId, refusal);
+            await eventService.StoreWarningEventAsync(tenantId, refusal);
+            throw TriggerManagementServiceException.ExecuteCommandNotAccepted(refusal);
+        }
+
+        return route;
     }
 
     /// <summary>The name (else the id) of the pipeline's adapter, or "unknown" when it cannot be read (AB#8716).</summary>

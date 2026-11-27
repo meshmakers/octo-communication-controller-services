@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- AB#10015 Fix: `dry_run_pipeline` / `Pipeline.Execute(isDryRun: true)` of a pipeline triggered only by
+  `FromHttpRequest@2` no longer times out with "adapter did not answer": the dry run goes to
+  `…-pipeline-{rtId}-http-dry-run`, which the HTTP trigger consumes (octo-mesh-adapter with AB#10015). A real execute of
+  such a pipeline, and any execute of a `FromHttpRequest@1`-only pipeline, is refused at once with the reason; pipelines
+  with an execute trigger or without an HTTP trigger are unchanged (`docs/pipeline-endpoints.md`).
 - AB#6054 New: `adapterHub`, `operatorHub` and `adapterPoolHub` refuse an agent token (scope `octo_agent`) in every
   mode of their gates, `LogOnly` included (`HubException` `AgentTokenNotAccepted`); the HTTP pipeline refuses the
   negotiate and connect requests already (octo-common-services `UseOctoTenantAuthorization()`).
