@@ -119,6 +119,29 @@ internal class AdapterHubAuthorizationFilterTests
         return connected;
     }
 
+    /// <summary>
+    ///     AB#6054: an agent token (scope <c>octo_agent</c>) is refused in every mode of the gate, LogOnly included, also
+    ///     when it carries <c>octo_api</c> beside the agent scope; an agent acts only through its MCP mandate.
+    /// </summary>
+    [Test]
+    [Arguments("octo_agent")]
+    [Arguments("octo_agent octo_api")]
+    public async Task AgentToken_IsRefused_InEveryMode(string scope)
+    {
+        foreach (var mode in new[] { AdapterHubAuthorizationMode.LogOnly, AdapterHubAuthorizationMode.Enforce })
+        {
+            await using var serviceProvider = BuildServiceProvider(mode);
+            var context = CreateContext(serviceProvider, Principal(
+                new Claim(InfrastructureCommon.ClaimScope, scope),
+                new Claim("client_id", "agent-builder"),
+                new Claim("tenant_id", RouteTenantId)));
+
+            var exception = await Assert.That(async () => await ConnectAsync(context)).Throws<HubException>();
+
+            await Assert.That(exception!.Message).Contains("AgentTokenNotAccepted");
+        }
+    }
+
     [Test]
     public async Task ScopedAdapterOfTheRouteTenant_IsConnected_InEveryMode()
     {

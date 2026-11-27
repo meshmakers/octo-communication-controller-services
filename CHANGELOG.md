@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- AB#6054 New: `adapterHub`, `operatorHub` and `adapterPoolHub` refuse an agent token (scope `octo_agent`) in every
+  mode of their gates, `LogOnly` included (`HubException` `AgentTokenNotAccepted`); the HTTP pipeline refuses the
+  negotiate and connect requests already (octo-common-services `UseOctoTenantAuthorization()`).
 - AB#9854 Fix: the REST read of an adapter (`GET adapter/{id}`) no longer writes. It runs the same projection as a push
   and still leaves a pipeline the cross-tenant node rules refuse out of the answer, but only a push (Update
   Configuration, refresh, registration, lease, deploys) sets that pipeline to `Error` and stores the error event; before,

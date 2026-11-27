@@ -69,6 +69,38 @@ internal class OperatorHubAuthorizationFilterTests
         return new ClaimsPrincipal(new ClaimsIdentity());
     }
 
+    /// <summary>
+    ///     AB#6054: an agent token (scope <c>octo_agent</c>) is refused in every mode of the gate, LogOnly included, also
+    ///     when it carries <c>octo_api</c> beside the agent scope; an agent acts only through its MCP mandate.
+    /// </summary>
+    [Test]
+    [Arguments("octo_agent")]
+    [Arguments("octo_agent octo_api")]
+    public async Task AgentToken_IsRefused_InEveryMode(string scope)
+    {
+        foreach (var mode in new[]
+                 {
+                     OperatorHubAuthorizationMode.LogOnly, OperatorHubAuthorizationMode.Enforce
+                 })
+        {
+            await using var serviceProvider = BuildServiceProvider(mode);
+            var context = CreateContext(serviceProvider,
+                Principal(new Claim(InfrastructureCommon.ClaimScope, scope), new Claim("client_id", "agent-builder")));
+
+            var connected = false;
+            var exception = await Assert.That(async () => await new OperatorHubAuthorizationFilter()
+                    .OnConnectedAsync(context, _ =>
+                    {
+                        connected = true;
+                        return Task.CompletedTask;
+                    }))
+                .Throws<HubException>();
+
+            await Assert.That(exception!.Message).Contains("AgentTokenNotAccepted");
+            await Assert.That(connected).IsFalse();
+        }
+    }
+
     [Test]
     public async Task ScopedOperator_IsConnected_InEveryMode()
     {
