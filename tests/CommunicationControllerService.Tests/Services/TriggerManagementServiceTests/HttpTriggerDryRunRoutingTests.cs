@@ -105,6 +105,29 @@ internal class HttpTriggerDryRunRoutingTests : TriggerManagementServiceTestsBase
     }
 
     [Test]
+    public async Task RealExecute_OfAPipelineWithAnExecuteTrigger_KeepsTheExecuteAddress()
+    {
+        ArrangePipeline(HttpAndExecute);
+
+        await TriggerManagementService.StartExecutePipelineAsync(TenantId, _pipelineRtId, "{}");
+
+        await Assert.That(_sentAddress).IsEqualTo(ExecuteAddress);
+    }
+
+    [Test]
+    public async Task RealExecute_OfAFromHttpRequestV1Pipeline_IsRefused()
+    {
+        ArrangePipeline(HttpV1Only);
+
+        var exception = await Assert.That(async () =>
+                await TriggerManagementService.StartExecutePipelineAsync(TenantId, _pipelineRtId, "{}"))
+            .Throws<TriggerManagementServiceException>();
+
+        await Assert.That(exception!.Message).Contains("FromHttpRequest@1");
+        await Assert.That(_sentAddress).IsNull();
+    }
+
+    [Test]
     public async Task DryRun_OfAFromHttpRequestV1Pipeline_IsRefused()
     {
         ArrangePipeline(HttpV1Only);

@@ -133,7 +133,12 @@ wake gate) and:
 - sends a **dry run** of a `FromHttpRequest@2` pipeline to `…-pipeline-{pipelineRtId}-http-dry-run`, which only that
   trigger consumes (octo-mesh-adapter `HttpTriggerDryRun`, same suffix); the adapter applies the route's caller rules to
   the carried caller again and runs the input as request body;
-- refuses execute and dry run of a pipeline triggered only by `FromHttpRequest@1`.
+- refuses execute and dry run of a pipeline without an execute trigger whose HTTP trigger is `FromHttpRequest@1`
+  (other triggers beside it, e.g. a cron, do not change that: none of them consumes the execute address).
+
+Agent tokens (scope `octo_agent`) never reach this path: the HTTP API refuses them
+(`UseOctoTenantAuthorization`, AB#6054) and so does the CK method token check, so a dry run always carries the
+caller of a user or service token, like the route.
 
 Tests: `TriggerManagementServiceTests/HttpTriggerDryRunRoutingTests`. A dry run still lets nodes outside the adapter's
 dry-run-honouring load nodes reach the outside (AB#10016).

@@ -61,8 +61,8 @@ internal static class HttpTriggerDryRunRouting
         if (!httpTriggers.Contains(HttpTriggerV2, StringComparer.OrdinalIgnoreCase))
         {
             return (ExecuteCommandRoute.ExecuteCommand,
-                $"Pipeline {pipelineRtId} is triggered only by {string.Join(", ", httpTriggers)} and has no " +
-                "FromExecutePipelineCommand trigger: it can neither be executed nor dry-run through the execute " +
+                $"Pipeline {pipelineRtId} has no FromExecutePipelineCommand trigger and its HTTP trigger is " +
+                $"{string.Join(", ", httpTriggers)}: it can neither be executed nor dry-run through the execute " +
                 "command. Call its route, or move it to FromHttpRequest@2, which supports a dry run.");
         }
 
