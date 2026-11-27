@@ -119,6 +119,30 @@ with competing consumers would round-robin the message. Keying by pipeline rtId 
 scope. Regression guard: `MeshAdapter.Sdk.Tests` →
 `FromExecutePipelineCommandNodeTests.StartAsync_KeysEndpointByPipelineRtId_NotDataFlowRtId`.
 
+### HTTP-triggered pipelines (AB#10015)
+
+A pipeline triggered only by `FromHttpRequest@2` has no consumer on the execute address, so every execute and dry run
+used to wait for the 30 s timeout and fail with "adapter did not answer". `StartExecutePipelineAsync` now reads the
+trigger section of the stored definition (`HttpTriggerDryRunRouting.Decide`, after the leased branch and before the
+wake gate) and:
+
+- keeps the execute address when the pipeline has a `FromExecutePipelineCommand` trigger, has no HTTP trigger, or the
+  definition is missing or does not parse (unchanged behaviour);
+- 🔴 refuses a **real** execute of an HTTP-only pipeline up front (`ExecuteCommandNotAccepted`, warning event, nothing
+  sent): it runs for real only through its route;
+- sends a **dry run** of a `FromHttpRequest@2` pipeline to `…-pipeline-{pipelineRtId}-http-dry-run`, which only that
+  trigger consumes (octo-mesh-adapter `HttpTriggerDryRun`, same suffix); the adapter applies the route's caller rules to
+  the carried caller again and runs the input as request body;
+- refuses execute and dry run of a pipeline without an execute trigger whose HTTP trigger is `FromHttpRequest@1`
+  (other triggers beside it, e.g. a cron, do not change that: none of them consumes the execute address).
+
+Agent tokens (scope `octo_agent`) never reach this path: the HTTP API refuses them
+(`UseOctoTenantAuthorization`, AB#6054) and so does the CK method token check, so a dry run always carries the
+caller of a user or service token, like the route.
+
+Tests: `TriggerManagementServiceTests/HttpTriggerDryRunRoutingTests`. A dry run still lets nodes outside the adapter's
+dry-run-honouring load nodes reach the outside (AB#10016).
+
 > Wire-contract note: controller + mesh-adapter + SDK must ship together (release train).
 > Sibling `FromSendNotificationNode` still uses DataFlow-scoped keying and has the same latent
 > collision if a DataFlow holds two `FromSendNotification@1` pipelines — tracked separately.

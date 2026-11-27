@@ -80,5 +80,6 @@ internal abstract class TriggerManagementServiceTestsBase
         WorkloadLifecycleService,
         LifecycleConfigurationService,
         WakeSignal,
-        Envelope);
+        Envelope,
+        new PipelineDefinitionService());
 }

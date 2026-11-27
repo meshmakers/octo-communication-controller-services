@@ -82,7 +82,8 @@ public class PipelineMethodHandlerTests(CommunicationControllerFixture fixture)
             Substitute.For<IWorkloadLifecycleService>(),
             Substitute.For<ILifecycleConfigurationService>(),
             Substitute.For<ILeaseSchedulerWakeSignal>(),
-            fixture.GetService<IExecutionEnvelope>());
+            fixture.GetService<IExecutionEnvelope>(),
+            new PipelineDefinitionService());
         var services = new ServiceCollection().AddSingleton<ITriggerManagementService>(trigger).BuildServiceProvider();
         return new PipelineMethodInvoker(catalog, fixture.GetService<ICommunicationRepository>(),
             services, new PipelineMethodHandlerInstance(options, TimeProvider.System), options,

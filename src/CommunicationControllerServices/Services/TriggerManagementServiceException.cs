@@ -52,6 +52,16 @@ public class TriggerManagementServiceException : Exception
             "probably offline or has not deployed the pipeline. The outcome of the execution is unknown.", exception);
     }
 
+    /// <summary>
+    ///     AB#10015: the execute command cannot reach the pipeline - it has no <c>FromExecutePipelineCommand</c> trigger
+    ///     and is triggered by an HTTP route (a real execute of a <c>FromHttpRequest@2</c> pipeline, or any execute of a
+    ///     <c>FromHttpRequest@1</c> one). Refused before anything is sent, instead of the 30 s "did not answer".
+    /// </summary>
+    internal static Exception ExecuteCommandNotAccepted(string reason)
+    {
+        return new TriggerManagementServiceException(reason);
+    }
+
     internal static Exception ExecutePipelineExecutionIdNull(string tenantId, OctoObjectId dataFlowRtId)
     {
         return new TriggerManagementServiceException($"Pipeline execution id is null for data flow {dataFlowRtId} for tenant {tenantId}, but the adapter indicate that the execution start was successful");
