@@ -31,10 +31,12 @@ internal class BlueprintAppliedConsumerTests
 
     private readonly IBlueprintCapabilityReconciler _capabilities = Substitute.For<IBlueprintCapabilityReconciler>();
 
+    private readonly IStarterDeploymentService _starter = Substitute.For<IStarterDeploymentService>();
+
     private BlueprintAppliedConsumer CreateSut()
     {
         return new BlueprintAppliedConsumer(NullLogger<BlueprintAppliedConsumer>.Instance, _provisioning,
-            _adapterService, _capabilities, Substitute.For<IHostApplicationLifetime>());
+            _adapterService, _capabilities, _starter, Substitute.For<IHostApplicationLifetime>());
     }
 
     private static IDistributedContext<BlueprintUpdated> UpdatedContext(int added, int updated, int deleted = 0)
@@ -134,7 +136,7 @@ internal class BlueprintAppliedConsumerTests
         _provisioning.EnsureTenantProvisionedAsync(TenantId)
             .Returns(new PipelineServiceAccountProvisioningReport(0, 0, 0, []));
         var logger = new FakeLogger<BlueprintAppliedConsumer>();
-        var sut = new BlueprintAppliedConsumer(logger, _provisioning, _adapterService, _capabilities, lifetime);
+        var sut = new BlueprintAppliedConsumer(logger, _provisioning, _adapterService, _capabilities, _starter, lifetime);
 
         await Assert.That(async () => await sut.ConsumeAsync(Context(added: 1, updated: 0))).ThrowsNothing();
 
@@ -264,7 +266,8 @@ internal class BlueprintAppliedConsumerTests
     {
         return new BlueprintAppliedConsumer(NullLogger<BlueprintAppliedConsumer>.Instance,
             fixture.CreateProvisioningService(), Substitute.For<IAdapterService>(),
-            Substitute.For<IBlueprintCapabilityReconciler>(), Substitute.For<IHostApplicationLifetime>());
+            Substitute.For<IBlueprintCapabilityReconciler>(), Substitute.For<IStarterDeploymentService>(),
+            Substitute.For<IHostApplicationLifetime>());
     }
 
     private static IDistributedContext<T> ContextFor<T>(T message) where T : class
@@ -307,5 +310,93 @@ internal class BlueprintAppliedConsumerTests
         var sent = fixture.SentClients().Single(c => c.ClientId == "octo-pipeline-sa-reader");
         await Assert.That(sent.AssignedRoleNames)
             .IsEquivalentTo(new[] { "AccountingRead", "AccountingWrite", CommonConstants.StreamDataReaderRole });
+    }
+
+    // ---- AB#8452: default site and adapter of a fresh starter tenant ---------------------------------
+
+    private static IDistributedContext<BlueprintApplied> StarterContext(params string[] dependencies)
+    {
+        var context = Substitute.For<IDistributedContext<BlueprintApplied>>();
+        context.Message.Returns(new BlueprintApplied(TenantId, "System.Ai.Starter-1.2.0", "Initial", 3, 0, 0,
+            Guid.NewGuid(), DateTime.UtcNow) { CkModelDependencies = dependencies });
+        return context;
+    }
+
+    private void CommunicationOutcome(BlueprintCapabilityOutcome outcome)
+    {
+        _capabilities.ReconcileAsync(Arg.Any<BlueprintCapabilityRequest>(), BlueprintCapability.Communication,
+                Arg.Any<CancellationToken>())
+            .Returns(outcome);
+        _provisioning.EnsureTenantProvisionedAsync(TenantId)
+            .Returns(new PipelineServiceAccountProvisioningReport(0, 0, 0, []));
+    }
+
+    [Test]
+    public async Task Starter_CommunicationJustEnabled_AndBlueprintNeedsAi_DeploysTheDefaults_AfterTheSweep()
+    {
+        CommunicationOutcome(BlueprintCapabilityOutcome.Enabled);
+
+        await CreateSut().ConsumeAsync(StarterContext("System.Ai", "System.Communication"));
+
+        Received.InOrder(() =>
+        {
+            _provisioning.EnsureTenantProvisionedAsync(TenantId);
+            _starter.DeployDefaultsAsync(TenantId, "System.Ai.Starter-1.2.0", Arg.Any<Guid>());
+        });
+        await _starter.Received(1).DeployDefaultsAsync(Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<Guid>());
+    }
+
+    [Test]
+    [Arguments(BlueprintCapabilityOutcome.AlreadyEnabled)]
+    [Arguments(BlueprintCapabilityOutcome.NotRequired)]
+    [Arguments(BlueprintCapabilityOutcome.Refused)]
+    [Arguments(BlueprintCapabilityOutcome.NoDependencyInformation)]
+    [Arguments(BlueprintCapabilityOutcome.PrerequisiteMissing)]
+    [Arguments(BlueprintCapabilityOutcome.Failed)]
+    public async Task Starter_CommunicationNotEnabledByThisEvent_DeploysNothing(BlueprintCapabilityOutcome outcome)
+    {
+        // Abuse case: a tenant that already had Communication (its sites may be undeployed on purpose) is never touched.
+        CommunicationOutcome(outcome);
+
+        await CreateSut().ConsumeAsync(StarterContext("System.Ai", "System.Communication"));
+
+        await _starter.DidNotReceiveWithAnyArgs().DeployDefaultsAsync(default!, default, default);
+    }
+
+    [Test]
+    public async Task Starter_BlueprintNeedsOnlyCommunication_DeploysNothing()
+    {
+        CommunicationOutcome(BlueprintCapabilityOutcome.Enabled);
+
+        await CreateSut().ConsumeAsync(StarterContext("System.Communication"));
+
+        await _starter.DidNotReceiveWithAnyArgs().DeployDefaultsAsync(default!, default, default);
+    }
+
+    [Test]
+    public async Task Starter_BlueprintUpdate_NeverDeploys_EvenWhenItEnabledCommunication()
+    {
+        // Only an install creates a fresh tenant; an update (or a re-enable after a manual disable through an update)
+        // must not roll out an adapter pod.
+        CommunicationOutcome(BlueprintCapabilityOutcome.Enabled);
+        var context = Substitute.For<IDistributedContext<BlueprintUpdated>>();
+        context.Message.Returns(new BlueprintUpdated(TenantId, "System.Ai.Starter-1.2.0", "System.Ai.Starter-1.1.0",
+            "Merge", 1, 1, 0, Guid.NewGuid(), DateTime.UtcNow) { CkModelDependencies = ["System.Ai"] });
+
+        await CreateSut().ConsumeAsync(context);
+
+        await _starter.DidNotReceiveWithAnyArgs().DeployDefaultsAsync(default!, default, default);
+    }
+
+    [Test]
+    public async Task Starter_DeployServiceThrows_DoesNotFaultTheBus()
+    {
+        CommunicationOutcome(BlueprintCapabilityOutcome.Enabled);
+        _starter.DeployDefaultsAsync(Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<Guid>())
+            .ThrowsAsync(new InvalidOperationException("boom"));
+
+        await CreateSut().ConsumeAsync(StarterContext("System.Ai"));
+
+        await _starter.Received(1).DeployDefaultsAsync(TenantId, "System.Ai.Starter-1.2.0", Arg.Any<Guid>());
     }
 }

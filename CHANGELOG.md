@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- AB#8452 New: a tenant created with a blueprint that needs System.Ai (e.g. `System.Ai.Starter`) gets its default
+  Cloud deployment site and its Mesh Adapter deployed by the platform, so pipeline validation and deploys work without
+  a manual `DeployDeploymentSite` / `DeployWorkload`. `BlueprintAppliedConsumer` calls the new
+  `StarterDeploymentService` only for a blueprint install (`BlueprintApplied`, never an update), only when this event
+  made the platform enable Communication (the tenant had it off, AB#9578), and only for a tenant with exactly one Cloud
+  site hosting exactly one adapter. It deploys only what is `Undeployed`, never undeploys, and writes each auto-deploy
+  to the tenant's event log and the service log. A tenant that already had Communication is never touched. Cost: one
+  adapter pod per starter tenant on the central cluster.
 - AB#10015 Fix: `dry_run_pipeline` / `Pipeline.Execute(isDryRun: true)` of a pipeline triggered only by
   `FromHttpRequest@2` no longer times out with "adapter did not answer": the dry run goes to
   `…-pipeline-{rtId}-http-dry-run`, which the HTTP trigger consumes (octo-mesh-adapter with AB#10015). A real execute of
