@@ -532,8 +532,9 @@ internal class AdapterService(
                     }
                     catch (PipelinePushRefusedException)
                     {
-                        // AB#9767: refused and set to Error by the projection; the other pipelines still go out. Not
-                        // reported as existing either, so the refresh drops it from an adapter that still runs it.
+                        // Refused by the cross-tenant node rules (and set to Error when this is a push); the
+                        // other pipelines still go out. Not reported as existing either, so the refresh drops it from
+                        // an adapter that still runs it.
                         continue;
                     }
                 }
@@ -2280,7 +2281,11 @@ internal class AdapterService(
         OctoObjectId dataFlowRtId, OctoObjectId adapterRtId, RtPipeline rtPipeline,
         bool revealSecrets, string? pipelineDefinition = null)
     {
-        await EnsurePipelineIsPushableAsync(tenantId, rtPipeline, pipelineDefinition ?? rtPipeline.PipelineDefinition);
+        // revealSecrets is true exactly for the configuration an adapter receives (IAdapterService contract): only a
+        // push records a refusal. Every other projection (the REST read of an adapter) leaves the pipeline out and
+        // writes nothing.
+        await EnsurePipelineIsPushableAsync(tenantId, rtPipeline, pipelineDefinition ?? rtPipeline.PipelineDefinition,
+            recordRefusal: revealSecrets);
 
         var pipelineConfigurations = (await communicationRepository
             .GetConfigurationsByPipelineAsync(tenantId, rtPipeline.RtId)).ToList();
@@ -2351,12 +2356,13 @@ internal class AdapterService(
     /// AB#9767 (review finding 3): the node rules of <see cref="FindPipelineNodeRuleRefusal" /> on every push, not
     /// only on deploy. A definition can reach the repository without a deploy (import, blueprint seed, an edit through
     /// the asset repository), and "Update Configuration", the refresh after a blueprint, adapter registration and the
-    /// lease all project the stored definition through this method. An offending pipeline is put into the Error
-    /// deployment state with the refusal as message and <see cref="PipelinePushRefusedException" /> is thrown; a path
-    /// that projects several pipelines leaves it out and pushes the others.
+    /// lease all project the stored definition through this method. <see cref="PipelinePushRefusedException" /> is
+    /// thrown for an offending pipeline; a path that projects several pipelines leaves it out and pushes the others.
+    /// With <paramref name="recordRefusal" /> (a push) the pipeline is also put into the Error deployment state with
+    /// the refusal as message and an error event is stored; a read (the REST GET of an adapter) writes nothing.
     /// </summary>
     private async Task EnsurePipelineIsPushableAsync(string tenantId, RtPipeline rtPipeline,
-        string? pipelineDefinition)
+        string? pipelineDefinition, bool recordRefusal)
     {
         if (string.IsNullOrWhiteSpace(pipelineDefinition))
         {
@@ -2370,10 +2376,14 @@ internal class AdapterService(
             return;
         }
 
-        await communicationRepository.SetPipelineDeploymentStateAsync(tenantId, pipelineRtEntityId,
-            RtDeploymentStateEnum.Error, refusal.Message);
-        await eventService.StoreErrorEventAsync(tenantId,
-            $"Pipeline '{pipelineRtEntityId}' is not pushed to its adapter: {refusal.Message}", pipelineRtEntityId);
+        if (recordRefusal)
+        {
+            await communicationRepository.SetPipelineDeploymentStateAsync(tenantId, pipelineRtEntityId,
+                RtDeploymentStateEnum.Error, refusal.Message);
+            await eventService.StoreErrorEventAsync(tenantId,
+                $"Pipeline '{pipelineRtEntityId}' is not pushed to its adapter: {refusal.Message}", pipelineRtEntityId);
+        }
+
         throw new PipelinePushRefusedException(refusal);
     }
 

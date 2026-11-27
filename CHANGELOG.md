@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- AB#9854 Fix: the REST read of an adapter (`GET adapter/{id}`) no longer writes. It runs the same projection as a push
+  and still leaves a pipeline the cross-tenant node rules refuse out of the answer, but only a push (Update
+  Configuration, refresh, registration, lease, deploys) sets that pipeline to `Error` and stores the error event; before,
+  every read wrote both again. New tests: the refresh drops a running pipeline whose stored definition became refused,
+  and the node rules reach a `Switch@1` nested in a `Switch@1` (in a case and in `default`).
+
 - AB#9776 Fix: a pipeline service account may only name this installation's identity service and the pipeline's own
   tenant (decision "own issuer only"). The deploy guard refuses a `ServiceAccountConfiguration` whose `IssuerUri` is not
   empty, `{{service.authority}}` or an own name (`AuthorityUrl`, the resolved `ServiceUrls` authority; compared after

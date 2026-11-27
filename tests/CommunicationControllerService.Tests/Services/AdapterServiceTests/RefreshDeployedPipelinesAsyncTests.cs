@@ -228,6 +228,49 @@ internal class RefreshDeployedPipelinesAsyncTests : AdapterServiceTestsBase
         await AdapterHubCallbacks.DidNotReceiveWithAnyArgs().AdapterConfigurationUpdatedAsync(default!, default!);
     }
 
+    [Test]
+    [SuppressMessage("Non-substitutable member", "NS1004:Argument matcher used with a non-virtual member of a class.")]
+    public async Task PipelineRewrittenToARefusedDefinition_IsDroppedFromTheAdapter_AndSetToError()
+    {
+        // A blueprint update (or an edit in the asset repository) rewrites a running pipeline into one the node rules
+        // refuse: a service-account node that takes its target tenant from data. The refresh must not push it, and
+        // the adapter must stop running the old definition.
+        const string refusedDefinition =
+            """
+            triggers:
+              - type: FromPipelineTriggerEvent@1
+            transformations:
+              - type: ApplyChanges@2
+                identity: ServiceAccount
+                entityUpdatesPath: $.updates
+                targetTenant:
+                  relation: Sibling
+                  tenantIdPath: $.target
+            """;
+        var rtDataFlow = RtEntityCreator.CreateDataFlow();
+        var kept = RtEntityCreator.CreatePipeline(OldDefinition);
+        var rewritten = RtEntityCreator.CreatePipeline(OldDefinition);
+        var rtAdapter = RtEntityCreator.CreateAdapter();
+        rtAdapter.Configuration = "adapter-json";
+        InitAdapterConfiguration(rtAdapter, rtDataFlow, [kept, rewritten]);
+        var pushed = await AdapterService.GetAdapterConfigurationAsync(TenantId, rtAdapter.ToRtEntityId(), true, true);
+        AdapterTenant.AddAdapter(rtAdapter.ToRtEntityId(), ConnectionId, pushed);
+        InitAdapterConfiguration(rtAdapter, rtDataFlow,
+            [RtEntityCreator.CreatePipelineFrom(kept), RtEntityCreator.CreatePipelineFrom(rewritten, refusedDefinition)]);
+
+        var refreshed = await AdapterService.RefreshDeployedPipelinesAsync(TenantId);
+
+        await Assert.That(refreshed).IsEqualTo(1);
+        await AdapterHubCallbacks.Received(1).AdapterConfigurationUpdatedAsync(TenantId,
+            Arg.Is<AdapterConfigurationDto>(c =>
+                c.Pipelines.Count == 1 && c.Pipelines.Single().PipelineRtEntityId == kept.ToRtEntityId()));
+        await Assert.That(AdapterTenant.AdapterById[rtAdapter.ToRtEntityId()].Configuration.Pipelines
+            .Select(p => p.PipelineRtEntityId)).IsEquivalentTo([kept.ToRtEntityId()]);
+        await CommunicationRepository.Received(1).SetPipelineDeploymentStateAsync(TenantId,
+            rewritten.ToRtEntityId(), RtDeploymentStateEnum.Error,
+            Arg.Is<string?>(m => m != null && m.Contains("$.target")));
+    }
+
     private static RtPipeline ToState(RtPipeline source, RtDeploymentStateEnum state)
     {
         var copy = RtEntityCreator.CreatePipelineFrom(source);
