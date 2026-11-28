@@ -154,6 +154,8 @@ try
     builder.Services.AddSingleton<IPipelineDefinitionService, PipelineDefinitionService>();
     builder.Services.AddSingleton<IAdapterService, AdapterService>();
     builder.Services.AddSingleton<IDeploymentSiteService, DeploymentSiteService>();
+    // AB#8452: deploys the default site and adapter of a fresh tenant whose starter blueprint needs AI.
+    builder.Services.AddSingleton<IStarterDeploymentService, StarterDeploymentService>();
     builder.Services.AddSingleton<IPipelineDebugService, PipelineDebugService>();
     // AB#5583: the statistics windows are clock-hour aligned; AB#5618: status reports are stamped
     // with the controller clock. Injectable for tests.

@@ -1,6 +1,6 @@
 ---
 description: Disable refusal while pools or workloads are deployed, enable and disable authorization, retry of failed tenant setup
-applies_to: "**/Consumers/TenantManagementConsumer.cs, **/Services/AdapterService.cs, **/Methods/Service/DeploymentMethodHandlers.cs"
+applies_to: "**/Consumers/TenantManagementConsumer.cs, **/Consumers/BlueprintAppliedConsumer.cs, **/Services/StarterDeploymentService.cs, **/Services/AdapterService.cs, **/Methods/Service/DeploymentMethodHandlers.cs"
 ---
 
 ## Disable Refuses While Pools or Workloads Are Deployed — or AI Services Is Enabled
@@ -93,3 +93,25 @@ central `AddTenantRolePolicy` of octo-common-services (`AddOctoTenantRoleAuthori
 handler). A token without the role gets 403 with a `{"message"}` body naming the role. All other endpoints keep
 their scope-only policies. Callers that need the role: octo-cli `EnableCommunication` / `DisableCommunication`, the MCP tools,
 Studio's Tenant Features panel (tenant administrators). Test: `CommunicationControllerToggleAuthorizationTests`.
+
+## A starter tenant gets its default site and adapter deployed (AB#8452)
+
+When a blueprint install makes the platform enable Communication for a tenant (AB#9578, `BlueprintAppliedConsumer`) and
+the blueprint needs System.Ai (its CK model dependencies contain `System.Ai`, e.g. `System.Ai.Starter`), the consumer
+asks `StarterDeploymentService` to deploy the tenant's default Cloud deployment site and then its Mesh Adapter, so a
+new tenant can validate and run pipelines without a manual `DeployDeploymentSite` / `DeployWorkload`.
+
+Invariant (one test per case in `BlueprintAppliedConsumerTests` and `StarterDeploymentServiceTests`):
+
+- only on `BlueprintApplied` (an install), never on `BlueprintUpdated`;
+- only when the reconciler's outcome is `Enabled` (Communication was off, so the tenant had no deployed site); a tenant
+  that already had Communication (outcome `AlreadyEnabled`) is never touched, whatever its sites look like;
+- only for the shape of a fresh tenant: exactly one Cloud deployment site hosting exactly one adapter; anything else is
+  logged and left alone;
+- only what is `Undeployed` is deployed (a `Disabled`, `Pending`, `Error` or `Deployed` site or adapter is left as it
+  is), nothing is ever undeployed, and a failure never fails or rolls back the blueprint install;
+- every auto-deploy is written to the tenant's event log and the service log (Information).
+
+The adapter deploy may run before the operator registered the site; the controller queues the notification until it
+does (`OperatorConnectionManager`). A re-enable after a manual disable through a new install looks like a fresh tenant
+(Communication was off) and deploys the defaults again. Cost: one adapter pod per starter tenant on the central cluster.

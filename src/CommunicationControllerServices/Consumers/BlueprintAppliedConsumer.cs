@@ -63,15 +63,18 @@ internal class BlueprintAppliedConsumer(
     IPipelineServiceAccountProvisioningService serviceAccountProvisioningService,
     IAdapterService adapterService,
     IBlueprintCapabilityReconciler capabilityReconciler,
+    IStarterDeploymentService starterDeploymentService,
     IHostApplicationLifetime lifetime)
     : IDistributedConsumer<BlueprintApplied>, IDistributedConsumer<BlueprintUpdated>
 {
     public async Task ConsumeAsync(IDistributedContext<BlueprintApplied> context)
     {
         var message = context.Message;
-        await EnableCommunicationIfNeededAsync(BlueprintCapabilityRequest.From(message));
+        var request = BlueprintCapabilityRequest.From(message);
+        var outcome = await EnableCommunicationIfNeededAsync(request);
         await ReconcileAsync(message.TenantId, message.BlueprintId, message.EntitiesAdded,
             message.EntitiesUpdated, message.EntitiesDeleted);
+        await DeployStarterDefaultsIfNeededAsync(request, outcome);
     }
 
     public async Task ConsumeAsync(IDistributedContext<BlueprintUpdated> context)
@@ -82,11 +85,11 @@ internal class BlueprintAppliedConsumer(
             message.EntitiesUpdated, message.EntitiesDeleted);
     }
 
-    private async Task EnableCommunicationIfNeededAsync(BlueprintCapabilityRequest request)
+    private async Task<BlueprintCapabilityOutcome?> EnableCommunicationIfNeededAsync(BlueprintCapabilityRequest request)
     {
         try
         {
-            await capabilityReconciler.ReconcileAsync(request, BlueprintCapability.Communication,
+            return await capabilityReconciler.ReconcileAsync(request, BlueprintCapability.Communication,
                 lifetime.ApplicationStopping);
         }
         catch (OperationCanceledException) when (lifetime.ApplicationStopping.IsCancellationRequested)
@@ -96,12 +99,47 @@ internal class BlueprintAppliedConsumer(
             logger.LogWarning(
                 "Enabling Communication after blueprint '{BlueprintId}' on tenant '{TenantId}' was stopped by the host shutdown; Communication stays off for the tenant until the blueprint is applied again or EnableCommunication is run",
                 request.BlueprintId, request.TenantId);
+            return null;
         }
         catch (Exception e)
         {
             // The reconciler does not throw; a broadcast consumer must never fault the bus over one tenant anyway.
             logger.LogError(e,
                 "Enabling Communication after blueprint '{BlueprintId}' on tenant '{TenantId}' failed",
+                request.BlueprintId, request.TenantId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    ///     AB#8452 — deploys the default site and Mesh Adapter of a fresh tenant, so a tenant created with a starter
+    ///     blueprint can validate and run pipelines at once. Only for a blueprint install (<c>BlueprintApplied</c>, never
+    ///     an update), only when THIS event made the platform enable Communication (outcome
+    ///     <see cref="BlueprintCapabilityOutcome.Enabled" />: Communication was off, so the tenant had no deployed site),
+    ///     and only when the blueprint needs System.Ai. A tenant that had Communication already is never touched, and
+    ///     nothing is ever undeployed. Runs after the service-account reconcile so the adapter deploys with its
+    ///     credentials.
+    /// </summary>
+    private async Task DeployStarterDefaultsIfNeededAsync(BlueprintCapabilityRequest request,
+        BlueprintCapabilityOutcome? communicationOutcome)
+    {
+        if (communicationOutcome != BlueprintCapabilityOutcome.Enabled ||
+            string.IsNullOrWhiteSpace(request.TenantId) ||
+            !BlueprintCapabilityRequirements.IsRequired(BlueprintCapability.Ai, request.CkModelDependencies))
+        {
+            return;
+        }
+
+        try
+        {
+            await starterDeploymentService.DeployDefaultsAsync(request.TenantId, request.BlueprintId,
+                request.CorrelationId);
+        }
+        catch (Exception e)
+        {
+            // The service does not throw; a broadcast consumer must never fault the bus over one tenant anyway.
+            logger.LogError(e,
+                "Deploying the default site and adapter after blueprint '{BlueprintId}' on tenant '{TenantId}' failed",
                 request.BlueprintId, request.TenantId);
         }
     }
